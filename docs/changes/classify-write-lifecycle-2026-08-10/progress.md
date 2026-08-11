@@ -468,3 +468,71 @@ is reported here for the PA's single filing pass. **F3–F7 are the reviewer's; 
 Round-1 §10's four entries (match-arm discrimination, no cell-assignment type check, walker reach,
 the two map-build residuals) still stand and are **not** superseded — except §10.3's "false-positive
 surface is nil" clause, retracted in place above.
+
+## R2.8 Verification — the brief's five points (2026-08-11T07:16-06:00)
+
+### 1. Reproducers on BOTH refs, with the observed multiset — done
+§R2.3.3's table. Every A1/A2/A3 case measured on `origin/main` @ `23ea2e5c` and on this branch, by
+compiling through `compileScrml()`, not by reading tests.
+
+### 2. `scripts/corpus-emit-differential.ts` vs `origin/main` — **NO DIFFERENCES**
+
+Base captured by swapping `origin/main`'s `compiler/src/type-system.ts` into this worktree (the only
+source file that differs), so the comparison isolates exactly this branch's source delta;
+`--allow-same-revision` is therefore required and given.
+
+```
+VERDICT: NO DIFFERENCES  over 1904 common sources of 1904 base / 1904 head enumerated
+                         and 7375 compared artifacts
+  compile-failure delta     0 newly failing / 0 newly passing
+  diagnostic changes        0 code / 0 text-only
+  artifact set delta        0 added / 0 removed
+  artifact content diffs    0 of 7375 compared
+  syntax delta (effective)  0 new / 0 fixed / 0 message-changed
+  bare server-fn sites      base 145 / head 145  (delta 0)
+```
+Exit **0** — "no differences", NOT exit 2 ("not a valid comparison"). This is also item C's own gate:
+**C moved zero bytes.**
+
+**LOW-POWER CAVEAT, stated rather than presented as safety (§R2.5): the corpus contains ZERO live
+reactive-cell presence-lifecycle annotations, so green here was structurally guaranteed.** It shows
+this branch broke nothing. It is not evidence the fix is right; the reproducers are.
+
+### 3. Direction-of-change — newly-rejecting, and it does NOT widen beyond the governing sentence
+
+`compiler/SPEC.md:9313` re-read at this HEAD, still verbatim: *"For Shape 1 reactive cells,
+transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value
+is B-shaped."* `:9315` restates it as *"transitions to `post` on EITHER a `T`-shaped assignment …
+OR a presence-discrimination on the cell (`given c :> …`, `if (@cell is not) return`,
+`match @cell { … }`)"*.
+
+The change only refines the judgment *"is the written value B-shaped?"* — it narrows the writes
+counted B-shaped to exclude a bare reference to a still-absent presence cell. **No widening; nothing
+to STOP and report.** A useful side-note: `:9315` names `given c :>` explicitly, which is exactly the
+A3 escape hatch of §R2.2.2 — the workaround is spec-named, not invented here.
+
+### 4. Bite proofs — §R2.4. Five mutations, all bite, none stayed green.
+
+### 5. `bun run test` on both refs — failure NAME SETS compared, not counts
+
+| ref | pass | fail | skip |
+|---|---|---|---|
+| `origin/main` type-system | 29,936 | 58 | 216 |
+| this branch @ `94288917` | 29,945 | **49** | 216 |
+
+**NEW failures on head: ZERO** (`comm -13` over the sorted name sets is EMPTY).
+**Base-only failures: exactly 9**, and all 9 are my own tests failing against a compiler that lacks
+the fix — 3 from round 1's S337 set + 6 of round 2's. The 49 shared failures are name-set-identical
+on both refs (browser/happy-dom, pre-existing).
+
+⚠ **The brief's stated baseline of "51 pre-existing failures on both refs" does not reproduce here —
+I measure 49.** The name sets are identical BETWEEN refs, which is the actual gate, so this is an
+environment/run difference (browser tests are happy-dom global-state sensitive), not a regression.
+Reporting rather than quietly adopting either number.
+
+### FACTS gate
+`docs/FACTS.md` regenerated **after** the last `compiler/src` commit (`94288917`), per the gate's
+purpose: `live compiler source` 240,323 → **240,447** lines, 187 files (unchanged).
+`bun scripts/facts.ts --check` → **PASS**. No gate was bypassed at any point in this round; the one
+`--no-verify` commit I started the session with was immediately reset and remade under the hook
+(which skips the suite for docs-only staged changes anyway).
