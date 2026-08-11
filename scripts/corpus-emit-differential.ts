@@ -481,6 +481,11 @@ function req(flags: Record<string, string>, name: string): string {
  */
 function num(raw: string | undefined, name: string, fallback: number, min: number): number {
   if (raw === undefined) return fallback;
+  // `Number("")` and `Number("  ")` are BOTH 0, so an empty value sailed through the very helper
+  // written to stop a value from disarming a guard — `--reverify-limit ""` became 0, which is the
+  // documented "no cap" sentinel, silently removing the all-or-nothing bound. The defect class this
+  // function exists to close, reproduced inside it.
+  if (raw.trim() === "") die(`--${name} requires a value (got an empty string)`);
   const n = Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < min) {
     die(`--${name} must be an integer >= ${min} (got "${raw}")`);
@@ -880,18 +885,32 @@ async function measureCorpusCleanliness(compilerRoot: string, roots: string[], e
   // never names the `.scrml` files inside it, but the walk does not consult gitignore, so those files
   // ARE enumerated and ARE non-reproducible. `traditional` names them individually. The pathspec
   // bounds the cost to the selected roots.
-  const st = await run(["status", "--porcelain", "-uall", "--ignored=traditional", "--", ...roots], true);
+  // `-z` IS REQUIRED, NOT A STYLE CHOICE. Without it git C-QUOTES any path containing a non-ASCII
+  // or special byte — `benchmarks/café.scrml` arrives as `"benchmarks/caf\303\251.scrml"` — and the
+  // previous `.replace(/^"|"$/g, "")` stripped the quotes while leaving `\303\251` as six literal
+  // characters. That path then failed the enumerated-set intersection and was SILENTLY DROPPED, so
+  // HARD REQ 11 did not fire on a genuinely non-reproducible corpus. `-z` emits raw bytes with NUL
+  // terminators and no quoting at all, which removes the failure mode rather than parsing around it.
+  const statusArgs = ["status", "--porcelain", "-z", "-uall", "--ignored=traditional", "--", ...roots];
+  const st = await run(statusArgs, true);
   if (st.code !== 0) {
-    return { isOwnGitCheckout: false, method: `<git status failed in ${compilerRoot}>`, untracked: [], modified: [] };
+    return { isOwnGitCheckout: false, method: `<git ${statusArgs.join(" ")} failed in ${compilerRoot}>`, untracked: [], modified: [] };
   }
   const enumeratedSet = new Set(enumerated);
   const untracked: string[] = [];
   const modified: string[] = [];
-  for (const line of st.out.split("\n")) {
-    if (!line.trim()) continue;
-    // Porcelain v1: two status chars, a space, then the path (rename shows "old -> new").
-    const code = line.slice(0, 2);
-    const path = toPosix(line.slice(3).replace(/^"|"$/g, "").split(" -> ").pop()!);
+  // With `-z` every record is NUL-terminated, so the final split element is an empty tail.
+  const fields = st.out.split("\0");
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i];
+    if (entry.length < 4) continue;
+    // Porcelain v1: two status columns, a space, then the path. The leading column may be a space
+    // (a WORKTREE-modified entry is " M path"), which is why the buffer is never trimmed.
+    const code = entry.slice(0, 2);
+    const path = toPosix(entry.slice(3));
+    // A rename/copy emits the DESTINATION in this record and the ORIGIN as the NEXT NUL-separated
+    // field. Consume it so the origin is never mistaken for a status record of its own.
+    if (code[0] === "R" || code[0] === "C") i++;
     // Only sources this capture actually ENUMERATED matter. An untracked `.md` beside the corpus
     // changes nothing about what was measured, and flagging it would be the cry-wolf shape.
     if (!enumeratedSet.has(path)) continue;
@@ -900,7 +919,11 @@ async function measureCorpusCleanliness(compilerRoot: string, roots: string[], e
   }
   return {
     isOwnGitCheckout: true,
-    method: `git status --porcelain -uall --ignored=matching -- ${roots.join(" ")} (in ${compilerRoot}), intersected with the ${enumerated.length} enumerated sources`,
+    // Rendered from the ARGV that actually ran. A hand-written copy of this string said
+    // `--ignored=matching` while the code ran `--ignored=traditional`, and it persisted into every
+    // manifest and printed at capture — a false provenance string, in the instrument whose thesis is
+    // that provenance strings must be true. Never hand-write a command you also execute.
+    method: `git ${statusArgs.join(" ")} (in ${compilerRoot}), intersected with the ${enumerated.length} enumerated sources`,
     untracked: untracked.sort(),
     modified: modified.sort(),
   };
@@ -1692,6 +1715,44 @@ async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>
  * identical under both compilers when compiled alone. A re-compilation that ERRORS is likewise not
  * a flake; it keeps its findings and is reported separately.
  */
+/**
+ * ═══ FLAKE_DEMOTION_RULE — READ THIS BEFORE CHANGING ANYTHING IN `reverifyDelta` ═══
+ *
+ * **A difference that does not reproduce is an `errored`, NOT a flake. Discarding one requires an
+ * AFFIRMATIVE POSITIVE SIGNAL.**
+ *
+ * This is the single most important line in the file and it was learned the hard way. The first
+ * three versions of this machinery all read
+ *
+ *     did not reproduce  ⇒  harness flake  ⇒  discard the finding  ⇒  exit 0
+ *
+ * and **every defect found in this instrument across three review rounds rode that one
+ * implication.** Four independent routes reached `NO DIFFERENCES` / exit 0 over real, recorded,
+ * reproduced-on-disk differences — with the roots distinct, the revisions matching and the canary
+ * green. They were not four bugs in the guards; they were one bug in the DEFAULT, which is why
+ * point-fixing them individually never converged.
+ *
+ * A non-reproduction is the ABSENCE of evidence. It is consistent with "the capture was a phantom"
+ * and equally consistent with "the re-verification could not measure" — and the second is far more
+ * likely, because the re-verification runs later, on a machine whose state has moved, using roots
+ * that may have moved with it.
+ *
+ * So the burden of proof is inverted. To demote a finding to a flake the harness must NAME THE
+ * CORRUPT CAPTURE: exactly one side's recorded outcome must be contradicted by re-compiling that
+ * side, while the other side's is reproduced exactly. Anything else — both reproduce, neither
+ * reproduces, a killed re-compile, a determinism run, a dirty oracle — is `errored`, the finding
+ * STANDS, and the run exits 1.
+ *
+ * The instrument is now allowed to fail in exactly one direction: **false RED.** A flake that is
+ * reported as a finding costs a human five minutes. A finding that is discarded as a flake is a
+ * silent miscompile shipped under a clean bill of health, which is the entire class this file
+ * exists to detect.
+ *
+ * ⚠ If you are here to make this quieter, you are about to re-open the class. The cost of the
+ * inversion is real — a genuinely flaky host produces `errored` entries and exit 1 — and it is the
+ * price of the property. `--no-reverify` disables the whole mechanism and is the correct answer for
+ * a host that cannot support it.
+ */
 interface ReverifyReport {
   ran: boolean;
   /** Why it ran, or the exact reason it did not. Printed either way. */
@@ -1700,9 +1761,16 @@ interface ReverifyReport {
   implicated: Array<{ path: string; classes: string[] }>;
   /** Sources whose difference REPRODUCED under serial re-compilation, with what reproduced. */
   reproduced: Array<{ path: string; differences: string[] }>;
-  /** Sources that showed NO difference at all on serial re-compilation — HARNESS FLAKES. */
-  flaked: Array<{ path: string; classes: string[] }>;
-  /** Sources whose re-compilation could not be performed. NOT flakes; their findings stand. */
+  /**
+   * Sources DEMOTED to harness flakes — and only on the affirmative signal above. `corruptSide`
+   * names which capture was contradicted by its own compiler, because a demotion that cannot say
+   * which measurement was wrong is not a demotion, it is a guess.
+   */
+  flaked: Array<{ path: string; classes: string[]; corruptSide: "base" | "head" }>;
+  /**
+   * Sources whose difference could not be AFFIRMATIVELY shown to be the harness — including every
+   * non-reproduction that names no corrupt capture. Their findings STAND and are counted.
+   */
   errored: Array<{ path: string; message: string }>;
 }
 
@@ -1762,10 +1830,16 @@ async function reverifyDelta(
   base: Manifest,
   head: Manifest,
   implicated: Array<{ path: string; classes: string[] }>,
-  /** Common sources with NO difference — the only valid canaries. See HARD REQ 9.1. */
-  controls: string[],
+  baseBy: Map<string, SourceRecord>,
+  headBy: Map<string, SourceRecord>,
   limit: number,
   enabled: boolean,
+  /**
+   * When true, NOTHING may be demoted to a flake — every non-reproduction is `errored`. Set for a
+   * determinism run, where a non-reproducing difference IS the finding being looked for.
+   */
+  noDemotion: boolean,
+  noDemotionReason: string,
 ): Promise<ReverifyReport> {
   const empty = (ran: boolean, reason: string): ReverifyReport => ({ ran, reason, implicated, reproduced: [], flaked: [], errored: [] });
 
@@ -1839,47 +1913,35 @@ async function reverifyDelta(
   // recorded outcome. A root that cannot reproduce its own manifest cannot be used to judge anyone's
   // findings.
   //
-  // ⚠ THE CANARY MUST BE A SOURCE THAT AGREED, NEVER AN IMPLICATED ONE. A first cut used
-  // `implicated[0]`, which is precisely backwards: a genuine phantom IS a source whose manifest
-  // disagrees with a re-compile, so the canary would have fired on exactly the events it exists to
-  // let us catch, and re-verification would have disarmed itself whenever it was about to be
-  // useful. A source both sides agreed on is the one that must reproduce.
-  {
-    const canarySrc = controls[0];
-    if (canarySrc === undefined) {
+  // A DIRTY CAPTURE MAY NOT SERVE AS A RE-VERIFICATION ORACLE, and `--allow-dirty-corpus` does not
+  // license it. That flag says "compare these two manifests anyway"; it says nothing about
+  // re-compiling from a tree whose sources are not the ones that were measured. The manifest already
+  // records exactly which sources those were, and nothing used to read it: a capture with modified
+  // sources, reverted before the diff, re-compiled DIFFERENT source text than it recorded, agreed
+  // with the other side, and discarded three real differences.
+  for (const [side, m] of [["base", base], ["head", head]] as const) {
+    const c = m.corpusCleanliness;
+    const dirty = c.untracked.length + c.modified.length;
+    if (dirty > 0) {
       return empty(
         false,
-        `IMPOSSIBLE HERE — every common source carries a difference, so there is no agreed-on source to\n` +
-          `      validate the two compiler roots against. Without that control a re-compilation cannot be\n` +
-          `      distinguished from a drifted checkout. The ${implicated.length} difference-bearing source(s) below are\n` +
-          `      reported UNVERIFIED, exactly as measured.`,
+        `IMPOSSIBLE HERE — the ${side} capture recorded a DIRTY corpus (${c.untracked.length} untracked, ${c.modified.length} modified),\n` +
+          `      so the source text it measured is not necessarily the source text on disk now. Re-compiling\n` +
+          `      from it would compare different inputs and call the difference a flake.\n` +
+          [...c.untracked.map((p) => `        ?? ${p}`), ...c.modified.map((p) => `        M  ${p}`)].join("\n") + `\n` +
+          `      --allow-dirty-corpus permits the COMPARISON; it does not make a dirty tree an oracle. The\n` +
+          `      ${implicated.length} difference-bearing source(s) below are reported UNVERIFIED, exactly as measured.`,
       );
     }
-    const dir = mkdtempSync(join(tmpdir(), "corpus-reverify-canary-"));
-    try {
-      for (const [side, m] of [["base", base], ["head", head]] as const) {
-        const recorded = m.sources.find((s) => s.path === canarySrc);
-        if (!recorded) continue;
-        const work = join(dir, side);
-        const rerun = await compileOne(canarySrc, m.compilerRoot, work);
-        const arts = hashOutputDir(join(work, sourceSlug(canarySrc)));
-        const drift = sourceDifferences(recorded, manifestArtifactShas(recorded), rerun, arts.arts);
-        if (drift.length > 0) {
-          return empty(
-            false,
-            `IMPOSSIBLE HERE — the ${side} compiler root does not reproduce its OWN manifest. Re-compiling\n` +
-              `      ${canarySrc} there disagrees with what that capture recorded:\n` +
-              drift.map((d) => `        ${d}`).join("\n") + `\n` +
-              `      The root has changed since capture (an uncommitted edit leaves the revision intact), so a\n` +
-              `      re-compilation cannot judge anything. The ${implicated.length} difference-bearing source(s) below are\n` +
-              `      reported UNVERIFIED, exactly as measured.`,
-          );
-        }
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   }
+  //
+  // NOTE ON THE RETIRED GLOBAL CANARY. Round 2 validated the two roots by re-compiling ONE source
+  // drawn from `controls` — "common sources with no difference". That population is selected for the
+  // property of being INSENSITIVE to the two compilers disagreeing, so a single sample from it is
+  // anti-correlated with detection power, which is not the same thing as correct. It is gone, and
+  // nothing weaker replaced it: the per-source affirmative rule below re-compiles BOTH sides of
+  // EVERY implicated source and checks each against its OWN recorded outcome, which is the same
+  // check with maximal relevance and full coverage instead of one insensitive sample.
   if (limit > 0 && implicated.length > limit) {
     return empty(
       false,
@@ -1913,9 +1975,75 @@ async function reverifyDelta(
           report.errored.push({ path: item.path, message: `${bArts.error ?? ""} ${hArts.error ?? ""}`.trim() });
           continue;
         }
+
+        // ---- THE INVERSION. Read `FLAKE_DEMOTION_RULE` before touching any of this. ----------
+
+        // (a) An externally-killed RE-COMPILE is not a re-measurement. Two killed re-compiles are
+        //     byte-identical to each other — `ok:false`, 137, empty streams, no artifacts — so the
+        //     old rule read "0 differences" and DISCARDED the finding. That fires under exactly the
+        //     memory pressure DEFECT 2 was pinned to, which is to say: the re-verification's most
+        //     likely failure mode was silently converting real findings into flakes.
+        const killed = [
+          bRec.compile.signal && EXTERNAL_KILL_SIGNALS.has(bRec.compile.signal) ? `base ${bRec.compile.signal}` : "",
+          hRec.compile.signal && EXTERNAL_KILL_SIGNALS.has(hRec.compile.signal) ? `head ${hRec.compile.signal}` : "",
+        ].filter(Boolean);
+        if (killed.length > 0) {
+          report.errored.push({
+            path: item.path,
+            message: `re-compilation was KILLED BY THE ENVIRONMENT (${killed.join(", ")}) — no verdict was produced, so this finding STANDS`,
+          });
+          continue;
+        }
+
         const diffs = sourceDifferences(bRec, bArts.arts, hRec, hArts.arts);
-        if (diffs.length === 0) report.flaked.push({ path: item.path, classes: item.classes });
-        else report.reproduced.push({ path: item.path, differences: diffs });
+        if (diffs.length > 0) {
+          report.reproduced.push({ path: item.path, differences: diffs });
+          continue;
+        }
+
+        // (b) The difference did not reproduce. That is NOT evidence of a flake — it is the ABSENCE
+        //     of evidence, and every defect in this arc rode the implication that absence means
+        //     discard. Demotion now requires an AFFIRMATIVE positive signal: we must be able to
+        //     NAME which capture was wrong.
+        //
+        //     A genuine phantom has a signature. One side's recorded outcome is garbage and the
+        //     other side's is real, so on re-compilation the real side REPRODUCES ITS OWN MANIFEST
+        //     and the garbage side does not. If instead BOTH sides reproduce their manifests the
+        //     difference cannot have vanished (a contradiction, so it cannot occur); and if NEITHER
+        //     reproduces, the apparatus — not the capture — is what changed, and nothing here may be
+        //     discarded.
+        const bRecorded = baseBy.get(item.path);
+        const hRecorded = headBy.get(item.path);
+        if (!bRecorded || !hRecorded) {
+          report.errored.push({ path: item.path, message: `no recorded outcome on one side — cannot establish which capture was wrong` });
+          continue;
+        }
+        const bReproduces = sourceDifferences(bRecorded, manifestArtifactShas(bRecorded), bRec, bArts.arts).length === 0;
+        const hReproduces = sourceDifferences(hRecorded, manifestArtifactShas(hRecorded), hRec, hArts.arts).length === 0;
+
+        if (noDemotion) {
+          report.errored.push({
+            path: item.path,
+            message:
+              `did not reproduce, and flake demotion is DISABLED on this run (${noDemotionReason}). ` +
+              `A non-reproducing difference is the FINDING here, not noise. This finding STANDS`,
+          });
+        } else if (bReproduces !== hReproduces) {
+          // Exactly one capture is contradicted by its own compiler. That is the affirmative signal.
+          report.flaked.push({
+            path: item.path,
+            classes: item.classes,
+            corruptSide: bReproduces ? "head" : "base",
+          });
+        } else {
+          report.errored.push({
+            path: item.path,
+            message:
+              `did not reproduce, but NEITHER capture could be shown wrong ` +
+              `(base reproduces its manifest: ${bReproduces}, head: ${hReproduces}). ` +
+              `Without naming a corrupt capture there is no evidence this was the harness. This finding STANDS`,
+          });
+        }
       } catch (e: any) {
         // An error is NOT a flake. The finding stands.
         report.errored.push({ path: item.path, message: String(e?.message ?? e) });
@@ -2227,12 +2355,22 @@ async function diff(
   for (const d of contentDiffs) implicate(d.source, "artifact CONTENT difference");
   const implicated = [...implicatedMap.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([path, classes]) => ({ path, classes }));
 
-  // Controls: common sources with no difference at all, and with artifacts on both sides so the
-  // comparison has something to say. Ordered as `common` is, so the choice is deterministic.
-  const controls = common.filter(
-    (p) => !implicatedMap.has(p) && baseBy.get(p)!.artifacts.length > 0 && headBy.get(p)!.artifacts.length > 0,
+  // A DETERMINISM RUN MAY NOT DEMOTE ANYTHING. A self-diff exists to detect harness
+  // nondeterminism, and harness nondeterminism is definitionally a "did not reproduce" event — so
+  // the flake filter was subtracting exactly the signal the run was commissioned to find. The one
+  // run whose entire purpose is detecting harness noise must not filter harness noise.
+  const isDeterminismRun = base.revision === head.revision;
+  const reverify = await reverifyDelta(
+    base,
+    head,
+    implicated,
+    baseBy,
+    headBy,
+    reverifyLimit,
+    reverifyEnabled,
+    isDeterminismRun,
+    "both sides are the SAME revision, so this is a DETERMINISM control and a non-reproducing difference is the finding",
   );
-  const reverify = await reverifyDelta(base, head, implicated, controls, reverifyLimit, reverifyEnabled);
   const flakedSources = new Set(reverify.flaked.map((f) => f.path));
   if (flakedSources.size > 0) {
     newlyFailing = newlyFailing.filter((p) => !flakedSources.has(p));
@@ -2330,11 +2468,21 @@ async function diff(
   console.log(`   difference-bearing sources: ${reverify.implicated.length}   (the source SET delta is excluded — a one-sided source cannot be compiled on both)`);
   if (reverify.ran) {
     console.log(`   REPRODUCED : ${reverify.reproduced.length} of ${reverify.implicated.length} — real differences, reported above`);
-    console.log(`   HARNESS FLAKES (did NOT reproduce; EXCLUDED from the findings total): ${reverify.flaked.length} (full list, no cap):`);
-    for (const f of reverify.flaked) console.log(`     ~ FLAKE: ${f.path}\n         discarded finding(s): ${f.classes.join(", ")}`);
-    if (!reverify.flaked.length) console.log(`     (empty — every reported difference reproduced under serial re-compilation)`);
+    console.log(
+      `   HARNESS FLAKES (DEMOTED on an affirmative signal — one capture contradicted by its own\n` +
+        `   compiler while the other reproduced exactly; EXCLUDED from the findings total): ${reverify.flaked.length} (full list, no cap):`,
+    );
+    for (const f of reverify.flaked) {
+      console.log(`     ~ FLAKE: ${f.path}   (the ${f.corruptSide.toUpperCase()} capture is the corrupt one)\n         discarded finding(s): ${f.classes.join(", ")}`);
+    }
+    if (!reverify.flaked.length) console.log(`     (empty — nothing met the burden of proof for demotion)`);
     if (reverify.errored.length) {
-      console.error(`   RE-COMPILATION ERRORED (NOT flakes — their findings STAND): ${reverify.errored.length} (full list, no cap):`);
+      // Deliberately the loudest block in the section. These are findings the harness could not
+      // clear, and under FLAKE_DEMOTION_RULE that means they are REPORTED, not discarded.
+      console.error(
+        `   NOT CLEARED — could not be affirmatively shown to be the harness. THEIR FINDINGS STAND AND ARE\n` +
+          `   COUNTED: ${reverify.errored.length} (full list, no cap):`,
+      );
       for (const e of reverify.errored) console.error(`     ! ${e.path}: ${e.message}`);
     }
   } else if (reverify.implicated.length > 0) {
@@ -2425,8 +2573,12 @@ async function diff(
 
   // ---- client server-fn call sites (the auto-await trend metric) -------------------------------
   console.log(`\n-- CLIENT SERVER-FN CALL SITES (_scrml_fetch_*) ---------------------------------------------`);
-  const bFx = serverFnCallSiteTotals(base.sources, true);
-  const hFx = serverFnCallSiteTotals(head.sources, true);
+  // Flake-filtered on BOTH sides. This is the file's own "auto-await trend metric" and it was being
+  // computed over sources the run had already discarded as harness artifacts — a demoted flake
+  // (artifacts dropped from one side) drove the headline `BARE delta` to -7, i.e. the number an
+  // auto-await arc reads to decide whether its change moved anything was a phantom's shadow.
+  const bFx = serverFnCallSiteTotals(base.sources.filter((s) => !flakedSources.has(s.path)), true);
+  const hFx = serverFnCallSiteTotals(head.sources.filter((s) => !flakedSources.has(s.path)), true);
   console.log(`   in CLEANLY-COMPILING sources only:`);
   console.log(`     base: ${bFx.total} total in ${bFx.sources} sources — ${bFx.awaited} awaited, ${bFx.bare} BARE`);
   console.log(`     head: ${hFx.total} total in ${hFx.sources} sources — ${hFx.awaited} awaited, ${hFx.bare} BARE`);
@@ -2439,6 +2591,7 @@ async function diff(
   );
   const fxSourceDelta: string[] = [];
   for (const p of common) {
+    if (flakedSources.has(p)) continue;
     const b = serverFnCallSiteTotals([baseBy.get(p)!], true);
     const hh = serverFnCallSiteTotals([headBy.get(p)!], true);
     if (b.bare !== hh.bare || b.awaited !== hh.awaited) {
@@ -2456,22 +2609,29 @@ async function diff(
   const headChecks = effective.headMap;
 
   // ---- verdict --------------------------------------------------------------------------------
-  // `loadContextChanged` was PRINTED as a finding and never COUNTED as one — on this branch and on
-  // `origin/main` both. An artifact that moves between script and module goggles has changed how it
-  // is LOADED, which this file's own comment calls a behaviour change even at identical bytes; a run
-  // whose only difference was that could report NO DIFFERENCES and exit 0.
+  // NEITHER `loadContextChanged` NOR `fxSourceDelta` is counted, and they are the SAME argument.
   //
-  // `fxSourceDelta` is deliberately still NOT counted, and that is not the same oversight: the
-  // awaited/bare split is derived from artifact TEXT, so a source whose split moved necessarily has
-  // an artifact content difference already in the total. Counting it would double-count one change.
+  // A round-2 change counted `loadContextChanged` on the reasoning that a goggle move is a behaviour
+  // change even at identical bytes. That reasoning was wrong and it contradicted the rationale
+  // sitting three lines below it. `loadedAs` is DERIVED, by `deriveLoadContexts`, from the bytes of
+  // the emitted HTML in the same output dir. For it to change, either the HTML bytes changed (a
+  // content difference, counted), the set of HTML files changed, or the artifact's own path changed
+  // (either way an artifact-set difference, counted). There is no reachable state in which a load
+  // context moves and nothing else about that source differs — so counting it can only ever
+  // DOUBLE-COUNT one underlying change. Reverted.
+  //
+  // `fxSourceDelta` is uncounted for the identical reason: the awaited/bare split is derived from
+  // artifact TEXT, so a source whose split moved already carries a content difference.
+  //
+  // Both remain PRINTED. A derived view of a counted finding is worth reading; it is just not a
+  // second finding.
   const findings =
     srcDelta.onlyA.length + srcDelta.onlyB.length +
     newlyFailing.length + newlyPassing.length +
     diagChanged.length + streamChanged.length +
     artifactAdded.length + artifactRemoved.length +
     contentDiffs.length +
-    checkDelta.onlyA.length + checkDelta.onlyB.length + messageChanged.length +
-    loadContextChanged.length;
+    checkDelta.onlyA.length + checkDelta.onlyB.length + messageChanged.length;
 
   // The banner NEVER says "NO DIFFERENCES" on a run that was not a valid comparison.
   //
@@ -2486,15 +2646,15 @@ async function diff(
   // HARD REQ 9 annotations. NOT a fourth verdict — the three outcomes are unchanged and so is the
   // exit code. These say what the number was arrived at THROUGH, because a run that had to discard
   // flakes is not a clean run, and a run whose delta went unchecked is not a verified one.
-  const reverifyNote = reverify.flaked.length > 0
-    ? `   [${reverify.flaked.length} HARNESS FLAKE(S) DISCARDED — the harness, not the compiler]`
-    : reverify.ran
-      ? reverify.errored.length > 0
-        ? `   [delta re-verified serially; ${reverify.errored.length} source(s) could not be re-compiled and their findings STAND]`
-        : `   [delta re-verified serially: all ${reverify.reproduced.length} reproduced]`
-      : reverify.implicated.length > 0
-        ? `   [DELTA NOT RE-VERIFIED — ${reverify.implicated.length} difference-bearing source(s) unchecked]`
-        : ``;
+  const reverifyNote = !reverify.ran
+    ? reverify.implicated.length > 0
+      ? `   [DELTA NOT RE-VERIFIED — ${reverify.implicated.length} difference-bearing source(s) unchecked]`
+      : ``
+    : [
+        reverify.flaked.length > 0 ? `${reverify.flaked.length} DEMOTED to harness flake(s)` : ``,
+        reverify.errored.length > 0 ? `${reverify.errored.length} NOT CLEARED — findings STAND` : ``,
+        reverify.flaked.length === 0 && reverify.errored.length === 0 ? `all ${reverify.reproduced.length} reproduced` : ``,
+      ].filter(Boolean).join(", ").replace(/^/, "   [delta re-verified serially: ").concat("]");
   const banner =
     `VERDICT: ${verdictWord}` +
     `   over ${common.length} common sources of ${base.enumeration.total} base / ${head.enumeration.total} head enumerated` +
@@ -2520,7 +2680,7 @@ async function diff(
       `                            head ${describeCleanliness(head.corpusCleanliness)}\n` +
       `  delta re-verification     ${
         reverify.ran
-          ? `RAN over ${reverify.implicated.length} source(s) — ${reverify.reproduced.length} reproduced, ${reverify.flaked.length} FLAKE(S) discarded, ${reverify.errored.length} errored`
+          ? `RAN over ${reverify.implicated.length} source(s) — ${reverify.reproduced.length} reproduced, ${reverify.flaked.length} DEMOTED to flake, ${reverify.errored.length} NOT CLEARED (findings stand)`
           : reverify.implicated.length > 0
             ? `DID NOT RUN — ${reverify.implicated.length} difference-bearing source(s) UNVERIFIED`
             : `not needed — no per-source difference`
