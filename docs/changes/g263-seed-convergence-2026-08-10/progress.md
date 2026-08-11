@@ -559,3 +559,97 @@ Main changed `emit-each.ts`, `emit-server.ts`, `emit-ssr-render.ts`, `emit-tool.
 and hand-off docs — all disjoint from my eight code/test files, so a file-delta of those eight is
 safe. `docs/known-gaps.md` is contended on BOTH sides now (main moved it too): cherry-pick the two
 entry blocks, never checkout the file.
+
+---
+
+# ROUND 7 (S338, after the delta-review DO-NOT-LAND) — append-only
+
+## R7 — what was fixed
+
+| item | status | evidence |
+|---|---|---|
+| F2 regex fallback re-opened the round-4 defect | FIXED | PARSE -> LEX -> UNANSWERED; 18/18 on the scrml-operator family, 0 unanswerable; 4 bites (8·2·2·10) |
+| F2 in-source rationale was FALSE as written | FIXED | the comment now describes what the code does; neither the initializer text nor the node's raw is ever regexed |
+| F6 over-correction ("wherever it appears") | FIXED + made EXECUTABLE | `§9` asserts the 9-row FORM×POSITION table |
+
+### R7 — why not a blanket fail-closed on unparseable raw
+
+Rejected on measurement. Failing closed on every raw acorn's PARSER rejects would drop every
+block-bodied callback containing a scrml operator — `() => { return "a" is not "zzz" }` and its
+whole family — which `origin/main` DECLARES. That is a real under-emit, not a theoretical one.
+
+A regex cannot see a string literal; a LEXER can. acorn's tokenizer emits a string as ONE token, so
+`"import.meta"` is never the token triple `import` `.` `meta`, and a real meta-property always is.
+The `[@#]` -> `_` pre-lex mapping exists only to let the lexer run on scrml sigils; neither
+character can occur inside `import`, `.` or `meta`, so it cannot create or destroy a match. What is
+left genuinely unanswerable (a raw that does not even LEX) fails CLOSED, and that branch is pinned
+by a row rather than described — `() => { return 0x }`, which reaches the fence as
+`{kind:"escape-hatch", nativeKind:"ParseError"}`.
+
+### R7 — the F6 table, measured
+
+| form | position | `match-arm-inline` |
+|---|---|---|
+| STATEMENT | logic top level / `function` body / `fn` body | **2** |
+| STATEMENT | `on mount { … }` | 0 — `match-expr` + `rawArms` |
+| STATEMENT | `when @v changes { … }` | 0 — same |
+| STATEMENT | MULTI-statement `on mount` | 0 — no match node at all |
+| EXPRESSION | any position | 0 |
+
+Round 5 said POSITION and was narrow; round 6 said FORM and was wrong; it is BOTH. `§9` executes
+the table, and its bite covers the methodological error too: mis-calling
+`splitBlocks(source, filePath)` — the mis-call that produced round 6's discarded false measurement
+— turns 9 rows RED via the guard-the-guard.
+
+## R7 — REPORTED, NOT FIXED
+
+**The F2 FALSE-NEGATIVE surface — 9 nested / getter / method / async shapes.** Spot-checked three
+directly, and the root cause is sharper than "the fence misses them": the mapper records
+**`raw: ""`** for these hatches, so the interior is DROPPED before any fence can look at it.
+
+```
+() => () => { return import.meta.url }     -> lambda > escape-hatch  raw: ""
+({ get u() { return import.meta.url } })   -> object > escape-hatch  raw: ""
+({ m()     { return import.meta.url } })   -> object > escape-hatch  raw: ""
+```
+
+No work inside `exprNodeReadsImportMeta` can reach these; it is an EMITTER gap in what the escape
+hatch records. **Precise provenance: introduced at ROUND 5** (the structural-only walk), i.e. a
+regression against round 4's whole-initializer regex, which did catch them — and NOT a round-6 or
+round-7 regression. Still open at this tip.
+
+**"All 21 rows pass" is a claim about the chosen rows, not about the surface.** §3b covers what it
+enumerates. The nine shapes above are outside it by construction, and no row count implies
+otherwise.
+
+## R7 — METHODOLOGY, worth carrying beyond this arc
+
+**A differential that reads only `result.errors` is blind to an entire diagnostic class.**
+`E-DG-002` carries severity `warning` and lands in `result.warnings`, so a harness capturing only
+`errors` reports a 0 diagnostic delta over a corpus where the delta is real. The reviewer's first
+pass hit exactly this. The 3 `E-DG-002` false-positive removals recorded in round 5 ARE confirmed;
+the point is about the instrument, and it applies to every probe in this arc that filtered
+`result.errors` by severity.
+
+**`head` ↔ `prior` differential is 0/0/0/0, and that is a LIMIT ON THE EVIDENCE, not a pass.**
+Rounds 6 and 7 move nothing in the 1904-source corpus, which means the corpus is SILENT on the
+`when-message` prune and on the `import.meta` fence — in BOTH directions. Neither the leak they
+close nor a regression they might introduce would show up there. The evidence for those two is the
+targeted conformance matrices and their bites, and nothing else.
+
+## R7 — LANDING PLAN: MY ROUND-6 NOTE WAS WRONG. CORRECTED HERE.
+
+Round 6 computed the intersection against `8ad13b84`, **which is a commit ON THIS BRANCH, not an
+ancestor of `origin/main`** — so the file set it produced was the round-5+6 delta, not the branch's.
+Verified now:
+
+- real merge-base: **`34d211ab`** (`git merge-base origin/main HEAD`)
+- the branch touches **16 files**, not 8
+- intersection with main's post-merge-base work is **TWO** files, not one:
+  **`docs/known-gaps.md` AND `docs/FACTS.md`** — both editing the same generated counts rows
+
+Executing the round-6 note would have silently dropped rounds 1–4's changes to
+`codegen/context.ts`, `codegen/index.ts`, `codegen/rewrite.ts`, `dependency-graph.ts`,
+`compiler/tests/unit/cross-file-module-export-const-client.test.js`, `BRIEF-round5.md` and
+`FACTS.md`. **Land from `34d211ab..HEAD`, and cherry-pick — never checkout — the two contended
+docs.** The full 16-file list is `git diff --name-only 34d211ab..HEAD`.
