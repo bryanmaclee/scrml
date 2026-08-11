@@ -1,0 +1,13 @@
+{
+  "id": "ssr-i-ssr-each-client-rendered-subset-pos",
+  "description": "§52.8 — a PUBLIC server-authority <each> (seeded, so a genuine SSR prerender candidate) whose per-item template carries a non-field-read interpolation (`${a.name.toUpperCase()}`, a method call) FALLS BACK to client-only first-paint render. The compiler fires I-SSR-EACH-CLIENT-RENDERED (info) naming the reason, so the otherwise-silent SSR loss is loud. NO E-* — the each compiles and client-renders normally; only the SSR first-paint acceleration is declined.",
+  "language-version": "1.0",
+  "spec": "§52.8",
+  "source-test": "compiler/tests/integration/ssr-a-terminus.test.js",
+  "rationale": "§52.8: the SSR row renderer covers only field-read interpolations of the iteration item (`@.field`, `alias.field`); a call/ternary/method/@cell read cannot be evaluated server-side, so the each conservatively falls back (empty mount, client renders — never wrong markup). Before this lint the fallback was SILENT — an adopter got no signal their list lost SSR first paint. The lint SURFACES existing conservative behaviour (it does not widen what compiles); the accept/decline widening of the subset is the ruling-gated g-ssr-each-row-template-subset-blocks-all-prerender / g-ssr-each-multi-root-client-only-fallback.",
+  "expect": {
+    "codes": ["I-SSR-EACH-CLIENT-RENDERED"],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-EACH-CLIENT-RENDERED": "info" }
+  }
+}
