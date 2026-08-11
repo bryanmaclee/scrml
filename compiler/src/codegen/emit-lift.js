@@ -1,4 +1,4 @@
-import { emitExprField } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, _iterDestructureBindNames } from "./emit-logic.js";
@@ -316,6 +316,42 @@ function liftExprCtx(extra) {
   const base = { mode: "client" };
   if (requestIds) base.requestIds = requestIds;
   return extra ? { ...base, ...extra } : base;
+}
+
+/**
+ * g-request-is-some-in-for-lift-attr-misroute — recover the structured node for
+ * a lift ATTRIBUTE-value expression that LEADS with a `<#id>` request ref.
+ *
+ * Such an attr value (`class=${<#profile>.data is some ? …}`) reaches codegen as
+ * an ESCAPE-HATCH node: `ast-builder.shouldSkipExprParse` skips any `<`-leading
+ * expr (its HTML-fragment guard), so the attribute parser never built a real
+ * node. Handing that escape-hatch to `emitExprField` takes the string fallback,
+ * which BOTH mis-routes the ref to the §36 `_scrml_input_state_registry` AND
+ * mangles an `is some` LHS (→ `.get("profile").(data !== null && …)`) →
+ * E-CODEGEN-INVALID-LOGIC. The lift `${…}`-interp / text paths never hit this
+ * (they lower `${…}` bodies whose nodes ARE parsed), so ONLY the attr-value
+ * sites need the reparse — the same treatment the top-level / <each> value-,
+ * bool-, and class-attr siblings already got (emit-html.ts / emit-event-wiring.ts
+ * / emit-bindings.ts, all via `reparseRequestRefEscapeHatch(…, gate=true)`).
+ *
+ * GATED to registered `<request>` ids only (`gateToRegisteredRequests=true`), so
+ * a non-request `<#id>` (input-state ref / typo) stays on its pre-fix path and
+ * EVERY non-request lift attr emits byte-identically. Threading `requestIds`
+ * into the ctx (already done via `liftExprCtx`) then routes the reparsed
+ * `<#id>` node to the reactive `_scrml_request_<id>` object (§6.7.7).
+ *
+ * @param {object|null|undefined} exprNode — the attr value's (escape-hatch) node.
+ * @param {string|undefined} raw — the attr value's raw expression text.
+ * @returns the reparsed structured node, or `exprNode` unchanged.
+ */
+function reparseLiftAttrRequestRef(exprNode, raw) {
+  return reparseRequestRefEscapeHatch(
+    exprNode,
+    raw,
+    "<lift-attr-request-ref>",
+    currentLiftRequestIds() ?? undefined,
+    /* gateToRegisteredRequests */ true,
+  );
 }
 
 /**
@@ -1409,7 +1445,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       const raw = val.kind === "variable-ref"
         ? (val.name || "").replace(/^@/, "")
         : (val.raw || "");
-      const exprJS = emitExprField(val.exprNode, raw, liftExprCtx());
+      const exprJS = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
       const rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
       // g-lift-tier0-if-reactive-structural (SPEC §17.1) — Tier-0 for-lift sibling
       // of the Tier-1 <each> fix. A per-item `if=` on the SOLE reconciled item
@@ -1491,7 +1527,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         condExpr = emitExprField(val.exprNode, rawRef, liftExprCtx());
       } else if (val.kind === "expr") {
         const raw = val.raw ?? "";
-        condExpr = emitExprField(val.exprNode, raw, liftExprCtx());
+        condExpr = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
       } else {
         const rawArgs = val.argExprNodes
           ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
@@ -1674,7 +1710,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} });`);
         }
       } else {
-        const rewritten = emitExprField(val.exprNode, raw, liftExprCtx());
+        const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
         pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);
       }
     } else if (val && val.kind) {

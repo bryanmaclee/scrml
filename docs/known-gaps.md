@@ -68,18 +68,28 @@ A `<#request>`-ref `is some`/`is not` predicate inside a MIXED-TEXT attribute te
 
 Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), sharing the escape-hatch substrate. NOT fixed in that arc: unlike the single-expression attribute callsites (which recover a real ExprNode via `reparseRequestRefEscapeHatch`), this path routes every `${…}` interpolation through the shared raw-string rewriter used by EVERY `style=`/`title=`/… template attribute. Fixing it means threading each interpolation through the expression parser inside that shared rewriter — larger and riskier than the surgical per-callsite reparse, so it is deferred rather than widened blindly. Workaround: use the single-expression form `title=${<#userReq>.data is some ? "…" : "…"}` (already routed to `_scrml_request_<id>`).
 
-### g-request-is-some-in-for-lift-attr-misroute — a `<#request>` is-some inside a `${for…lift}` body attribute mis-routes to the §36 input-state registry (LOUD: E-CODEGEN-INVALID-LOGIC) — `NEW S340-peter (S239 adversarial angle-1 on the each-attr fix); MED; open`
-<!-- @gap id=g-request-is-some-in-for-lift-attr-misroute sev=MED status=open locus=compiler/src/codegen/emit-each.ts prov=rationale:the-Tier-0-for-lift-path-reaches-the-template-walk-without-emitEachBodyRenderForFile-so-_eachRequestIds-is-unset-and-lowerEachExprs-request-gate-is-skipped -->
-The same-class sibling of the (resolved S340) `g-request-is-some-in-each-loop-attr-misroute`. A `<#request>`-ref
-inside a `${ for (…) { lift <li …> } }` body attribute (`<li class=${<#profile>.data is some ? …}>`) reaches the
-per-item template walk via the Tier-0 `${for…lift}` path, which does NOT go through `emitEachBodyRenderForFile` —
-so `_eachRequestIds` is UNSET (null) and `lowerEachExpr`'s request-routing gate is skipped. The ref mis-routes to
-`_scrml_input_state_registry.get("profile").(data !== null && …)` → both a §36 misroute AND malformed JS (`.(`) →
-**E-CODEGEN-INVALID-LOGIC** (loud, no client written), unlike the `<each>` form which was silent. **Same construct,
-different authoring form:** `<li class=${<#profile>.data is some ? …}>` compiles correctly under `<each>` but fails
-under `${for…lift}`. Byte-identical to pre-fix on main (openly disclosed in the each-fix comment) — NOT a regression,
-a tracked follow-up. Fix: thread `_eachRequestIds` (or an equivalent request-id set) into the Tier-0 lift template
-walk, gated identically on `rawReferencesRegisteredRequest`. In-lane codegen (form already accepted).
+### g-request-is-some-in-for-lift-attr-misroute — a `<#request>` is-some inside a `${for…lift}` body attribute mis-routes to the §36 input-state registry (LOUD: E-CODEGEN-INVALID-LOGIC) — `NEW S340-peter (S239 adversarial angle-1 on the each-attr fix); MED; resolved S340-peter`
+<!-- @gap id=g-request-is-some-in-for-lift-attr-misroute sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js prov=rationale:a-for-lift-attr-value-leading-with-hash-ref-arrives-as-an-escape-hatch-node-shouldSkipExprParse-skips-leading-angle-and-emit-lift-handed-it-to-emitExprField-without-reparseRequestRefEscapeHatch -->
+> **RESOLVED S340-peter (`fix/request-ref-for-lift-attr-misroute`). ⚠ THE ORIGINALLY-FILED FIX DIRECTION WAS
+> WRONG — corrected on re-derivation** ([[feedback-gap-report-fix-direction-can-be-wrong]]). This gap was filed
+> claiming the root was `_eachRequestIds` being unset on the Tier-0 path. That is FALSE: instrumenting the emit
+> showed the lift path ALREADY threads the request-id set (`currentLiftRequestIds()`). The REAL root: a for-lift
+> attr value that LEADS with `<#` arrives at codegen as an **escape-hatch node** (`ast-builder.shouldSkipExprParse`
+> skips any `<`-leading expr — its HTML-fragment guard), and `emit-lift.js` handed that escape-hatch straight to
+> `emitExprField` → the string fallback mis-routed to `_scrml_input_state_registry.get("profile")` AND mangled the
+> `is some` LHS (`.get("profile").(data !== null && …)`) → E-CODEGEN-INVALID-LOGIC. The `<each>` path never hit
+> this (`lowerEachExpr` re-parses raw text itself). Fix: the SAME `reparseRequestRefEscapeHatch(…, gate=true)` the
+> top-level/`<each>` value-bool-class siblings got, applied at emit-lift.js's three attr-value `emitExprField`
+> sites (`if=`, `class:NAME=`, generic `${…}` value). Verified: repro compiles clean → `_scrml_request_profile.data`;
+> non-request lift attrs byte-identical; lift+each+request 775/0 + conformance 883/883. Pin:
+> `compiler/tests/unit/request-ref-is-some-for-lift-attr-misroute.test.js`.
+> **Residual (out of scope — belongs to [[g-request-is-some-in-mixed-text-attr-template-misroute]]):** the
+> QUOTED string-literal interpolation form `class="pre-${<#profile>.data is some ? …}-post"` still fails
+> E-CODEGEN — but via the null-exprNode string-fallback path (NOT the `<`-leading escape-hatch), and it fails
+> IDENTICALLY at top-level (non-lift), so it is the deferred B-class (naive `rewriteTemplateAttrValue`
+> substrate), not a for-lift gap. Verified S340: both `qlift` and `qtop` repros error identically.
+> Deliberately NOT chased with a 4th lift site — fixing only the lift half would leave top-level inconsistent
+> ([[feedback-repeated-review-same-class-means-converge-not-enumerate]]).
 
 ### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; open`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
