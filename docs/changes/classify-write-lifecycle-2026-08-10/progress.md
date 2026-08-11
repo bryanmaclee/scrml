@@ -297,3 +297,96 @@ deferred arc is about. It would be a text-free but still evidence-free shortcut.
 CLEAN on both. So a *walker-visible* write does register for the cell it targets, but the
 second-statement copy in a multi-statement block does not clear the destination. Pre-existing,
 unrelated to this brief's three items, and NOT chased here. Filed for PA in §R2.7.
+
+## R2.3 The fix — commit `2a9380c4` (2026-08-11T06:38-06:00)
+
+**The structural route the brief demanded is available and I took it.** `state-decl` nodes carry
+`initExpr`, the parsed RHS (`safeParseExprToNode`, ast-builder.js). Verified by dumping the node
+(`scratchpad/cwfix-r2/probe-ast.mjs`) before writing a line of the fix:
+
+| written RHS | `init` (text) | `initExpr` (tree) |
+|---|---|---|
+| `@v` | `"@v"` | `{ kind: "ident", name: "@v" }` |
+| `(@v)` | `"( @v )"` | `{ kind: "ident", name: "@v" }` |
+| `((@v))` | `"( ( @v ) )"` | `{ kind: "ident", name: "@v" }` |
+| `@v.name` | `"@v . name"` | `{ kind: "member", object: {ident @v}, property: "name" }` |
+| `not` | `"not"` | `{ kind: "lit", litType: "not" }` |
+
+**The parser emits NO node for grouping parens** — there is no `paren`/`group` expression kind in
+ast-builder.js — so all three spellings of the same expression are one node. That is why asking the
+tree is depth-proof and why paren-stripping could never be: any fixed strip count is beaten by one
+more paren. I did **not** need to argue the brief's rejection back; it was right.
+
+### R2.3.1 What changed
+
+- `bareBindingReferenceOf(trimmedText)` → **`bareCellReferenceOf(initExpr)`**. Structural
+  `kind === "ident"`, and the `@` sigil is now **required** (closes F8/A2 — in V5-strict a bare `v`
+  is a LOCAL identifier, PRIMER §3, and the old `@?` let it resolve against the CELL map).
+- **NEW `writeExprIsAbsenceLiteral(initExpr)`** — structural `kind === "lit" && litType === "not"`.
+- `classifyWriteAgainstSpec` takes `(initText, initExpr, spec, localStates)`; the call site threads
+  `stmt.initExpr`.
+- **Dead code DELETED, not documented.** The `localStates?` optional and its `?? "pre"` fallback
+  could never execute: the single call site always passes the map, the walker seeds `states` for
+  every key in `bindings` (`type-system.ts:25975-25979`), and the lookup only runs after
+  `bindings.get(rhsName)` already hit. The brief was right that the doc comment described an
+  unexecutable branch.
+- `writeTextIsAbsenceLiteral` is **kept** — it is still the leaf for the two map-build sites, and it
+  remains the fallback at the write site for a RHS the expression parser could not build a node for
+  (`safeParseExprToNode` returns null on parse failure). It is never what DECIDES a refinement, so a
+  missing node degrades to the pre-S337 answer rather than to a wrong one.
+
+### R2.3.2 A FOURTH defect, found while fixing F1 — and it is the worst of them
+
+**The paren hole ran in BOTH directions.** The absence test was textual too, so a §6.8
+revert-to-absent spelled `@u = (not)` missed `trimmed === "not"` and classified as a **transition**:
+
+```
+declare `= not` → write a User → `@u = (not)` → `@u.name`
+```
+compiled **CLEAN** and read a `not` at runtime. `((not))` likewise
+(`scratchpad/cwfix-r2/repro-notparen.mjs`).
+
+This **fails OPEN** — a silent wrong answer — where F1 merely fails to fire. Measured identically on
+`origin/main` @ `23ea2e5c`, so **PRE-EXISTING**, not round-1's doing. It is closed here for free by
+the same structural consult, because `not`, `(not)` and `((not))` are one `lit` node. One structural
+consult retired two text shortcuts on the two branches of the same `if`.
+
+### R2.3.3 Measured, both refs (`scratchpad/cwfix-r2/repro.mjs`, whole-file diagnostic multiset)
+
+| case | `origin/main` `23ea2e5c` | round 1 `b1154b81` | **round 2 `2a9380c4`** |
+|---|---|---|---|
+| `@u = @v` explicit | `[]` | `[E-TYPE-001]` | `[E-TYPE-001]` |
+| **`@u = (@v)` explicit** | `[]` | **`[]`** ✗ | **`[E-TYPE-001]`** ✅ |
+| **`@u = ((@v))` explicit** | `[]` | **`[]`** ✗ | **`[E-TYPE-001]`** ✅ |
+| `@u = @v` Shape-4 | `[]` | `[E-TYPE-001]` | `[E-TYPE-001]` |
+| **`@u = (@v)` Shape-4** | `[]` | **`[]`** ✗ | **`[E-TYPE-001]`** ✅ |
+| **`@u = ((@v))` Shape-4** | `[]` | **`[]`** ✗ | **`[E-TYPE-001]`** ✅ |
+| **`@u = v` (un-sigiled)** | `[E-SCOPE-001, W:E-DG-002]` | **`+[E-TYPE-001]`** ✗ | **matches main** ✅ |
+| **`@u = (not)` revert** | `CLEAN` ✗ | `CLEAN` ✗ | **`[E-TYPE-001]`** ✅ |
+| A3 fn-body write | `[]` | `[E-TYPE-001]` | `[E-TYPE-001]` (pinned, §R2.2) |
+| B1 variant RHS | `[]` | `[]` | `[]` (unchanged — restriction held) |
+| every G-guard row | — | — | **byte-identical to round 1** |
+
+### R2.3.4 F3 is NOT fixed, and the commit body says so
+
+The brief keeps F3 out of scope and I honoured that. But the commit subject —
+*"classify the write from the PARSED RHS, not its spelling"* — is true of **half** the function: the
+VARIANT branch twelve lines below still matches an unanchored pattern against raw source text. I put
+a ⚠ block at the locus and named F3 in the commit body, because a subject claiming "not its
+spelling" over a body that still reads spelling is precisely what stops the next reader looking.
+
+## R2.4 Bite proofs — B4, both directions (`scratchpad/cwfix-r2/biteproof.sh`)
+
+Baseline 24 pass / 0 fail. Each mutation applied in isolation, suite run, file restored from HEAD.
+
+| mutation | tests that died | verdict |
+|---|---|---|
+| **A** drop the sigil requirement | the un-sigiled test, alone | ✅ bites |
+| **B** relax `kind === "presence"` → `if (rhsSpec)` | the variant-RHS test, alone | ✅ bites — **this is the restriction that had ZERO coverage in round 1** |
+| **C** restore the round-1 TEXT regex | 3 paren tests + the un-sigiled one | ✅ bites (the old regex carried `@?`, so it re-opens F8 too) |
+| **D** restore the TEXT absence test | both paren-revert tests, alone | ✅ bites |
+| **E** remove the refinement entirely | 7, incl. round 1's core three | ✅ bites |
+
+Restored → **24 pass / 0 fail**, tree clean. **No test stayed green under a corruption it claims to
+catch.** The brief's M3 (presence-restriction) and M5 (sigil) gaps are both closed; M6 needed no
+proof because the dead code it named is deleted rather than described.
