@@ -1,0 +1,13 @@
+{
+  "id": "derived-e-derived-server-only-reach-lambda-hop",
+  "description": "§6.6.19 transitive limb — the hop's inner call sits inside a LAMBDA. Identical to the `-transitive` case in every respect except the call's POSITION, and that difference alone defeated the first implementation: its hop graph came from route inference's callee list, which returns at `case \"lambda\"` without descending, so `wrap` had no callees and the program compiled at exit 0 with an empty diagnostic set while binding an `async` fetch stub into the derived recompute.",
+  "language-version": "1.0",
+  "spec": "§6.6.19",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "§6.6.19 requires that 'reaches' mean a REFERENCE at any depth, including inside a lambda body, AT EVERY HOP — not merely inside the derived RHS. A hop graph and a reach check that disagree about what 'reaches' means are evadable exactly where they disagree, which is the S299 adversarial-review finding applied one level up. This case is the counter-gate for re-narrowing the hop graph to a call list: it pairs with `-transitive` so the two differ only in the inner call's position, making the regression unambiguous rather than a general 'transitivity broke'.",
+  "expect": {
+    "codes": ["E-DERIVED-SERVER-ONLY-REACH"],
+    "notCodes": ["E-ROUTE-005", "E-ROUTE-002"],
+    "severity": { "E-DERIVED-SERVER-ONLY-REACH": "error" }
+  }
+}
