@@ -103,13 +103,17 @@ const RAW_CONTENT_ELEMENT_NAMES = new Set(["pre", "code"]);
 // `${name}` reference would dangle on: the each-body factory silently drops the decl,
 // so the reference throws at render (the whole list renders empty, no diagnostic).
 // Fail closed on ALL of them, at ANY body position (bryan #508 review F2+F3, S340-peter).
-// EXCLUDED by construction: `type-decl` (compile-time-only — no runtime binding to
-// dangle) and `tilde-decl`/`~` (already fails loud via E-CODEGEN-INVALID-LOGIC).
+// `tilde-decl` covers BOTH `~name` and the `var name = …` keyword (both parse to
+// tilde-decl): at a NON-first position `var nm = 1` is SILENT — the belief that `~`/`var`
+// "fail loud" held only for the first-position case the old `body[0]` guard happened to
+// inspect (bryan delta-log [1437], PA-verified on main post-#515). Only `type-decl` stays
+// EXCLUDED (compile-time-only — no runtime binding to dangle).
 const EACH_BODY_UNSUPPORTED_DECL_KINDS = new Set([
-  "let-decl", "const-decl", "function-decl", "lin-decl",
+  "let-decl", "const-decl", "function-decl", "lin-decl", "tilde-decl",
 ]);
 const EACH_BODY_DECL_KEYWORD: Record<string, string> = {
-  "let-decl": "let", "const-decl": "const", "function-decl": "function", "lin-decl": "lin",
+  "let-decl": "let", "const-decl": "const", "function-decl": "function",
+  "lin-decl": "lin", "tilde-decl": "var/~",
 };
 
 // ---------------------------------------------------------------------------

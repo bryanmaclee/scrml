@@ -70,6 +70,18 @@ describe("g-each-body-let-alias — decl rejected at ANY position + full name-bi
     expect(codes(r)).toContain("E-EACH-BODY-DECL-UNSUPPORTED");
   });
 
+  // F3b (S340, bryan [1437] follow-up) — `var`/`~` parse to tilde-decl; at a non-first
+  // position `var nm = 1` was SILENT (the "fails loud" belief held only for body[0]).
+  test("F3b: `var` decl at body[1] is rejected (was SILENT — parses to tilde-decl)", () => {
+    const r = compileSource(`${HEAD}\${ @.id\nvar nm = 1 }${TAIL}`);
+    expect(codes(r)).toContain("E-EACH-BODY-DECL-UNSUPPORTED");
+  });
+
+  test("F3b: `~` reactive decl at body[1] reports the clearer E-EACH-BODY-DECL-UNSUPPORTED (was E-CODEGEN-INVALID-LOGIC)", () => {
+    const r = compileSource(`${HEAD}\${ @.id\n~nm = @.name }${TAIL}`);
+    expect(codes(r)).toContain("E-EACH-BODY-DECL-UNSUPPORTED");
+  });
+
   // §GATE — excluded kinds must NOT be newly rejected.
   test("GATE: `type` alias in an each body stays CLEAN (compile-time-only, no runtime binding)", () => {
     const r = compileSource(`${HEAD}\${ @.id\ntype T = number }${TAIL}`);
