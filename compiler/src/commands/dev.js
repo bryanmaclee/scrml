@@ -174,6 +174,46 @@ let registeredRoutes = [];
 /** @type {{ open: Function, message: Function, close: Function } | null} */
 let registeredWsHandlers = null;
 
+// ---------------------------------------------------------------------------
+// Compile-failure state (adopter-#517)
+//
+// When a recompile fails, `scrml dev` used to leave the last-good IN-MEMORY
+// routes registered (never reloaded on failure) while a PARTIAL bundle was
+// written to disk — so a route call ran either a partial handler (helper
+// dropped → `X is not defined`) or a silently-stale last-good handler. Either
+// way the adopter saw a MISLEADING runtime error instead of the real compile
+// error. We now record the last compile's diagnostics and, while it is
+// failing, short-circuit every non-infra request in the fetch handler to serve
+// the REAL compile error at the request (issue #517 ask (b)). The last-good
+// output on disk is never served while broken, so the partial write is inert.
+//
+// `null` means the last compile succeeded (normal serving). A non-null value
+// carries the fatal errors (and warnings) to render at the request.
+/** @type {{ errors: object[], warnings: object[] } | null} */
+let compileFailure = null;
+
+/**
+ * Record the outcome of a compilation pass. `errors` non-empty ⇒ the build is
+ * failing and the fetch handler serves the compile error at every request;
+ * empty ⇒ clear the failure state and resume normal serving.
+ *
+ * Exported so the unit tests can drive the fetch handler through both states
+ * without starting a real compile.
+ *
+ * @param {{ errors?: object[], warnings?: object[] }} result
+ */
+export function noteCompileResult(result) {
+  const errors = (result && result.errors) || [];
+  compileFailure = errors.length > 0
+    ? { errors, warnings: (result && result.warnings) || [] }
+    : null;
+}
+
+/** Test/introspection accessor for the current compile-failure state. */
+export function getCompileFailure() {
+  return compileFailure;
+}
+
 /**
  * Scan `outputDir` for `*.server.js` files, dynamically import each, and
  * collect every export that looks like a route object or WebSocket handlers.
@@ -335,6 +375,12 @@ function runOnce(opts, gatheredOut) {
     }
   }
 
+  // adopter-#517 — record this pass's outcome so the fetch handler serves the
+  // real compile error at the request while the build is failing (and resumes
+  // normal serving on success). Set BEFORE the early return below so both the
+  // initial compile and every recompile update it.
+  noteCompileResult(result);
+
   if (result.errors.length > 0) {
     console.error(`[dev] Compilation errors: ${result.errors.length}`);
     for (const e of result.errors) {
@@ -453,6 +499,88 @@ export function injectHotReloadScript(html) {
 }
 
 /**
+ * Format one compile diagnostic the way the terminal formatter does
+ * (dev.js runOnce): `[STAGE] file:line:col CODE: message`. Reads the two
+ * diagnostic shapes api.js emits — a flat `{filePath,line,column}` and a
+ * BS-stage `{span:{file,line,col}}`.
+ *
+ * @param {object} e
+ * @returns {{ stage: string, code: string, message: string, file: string, line: number|undefined, column: number|undefined, text: string }}
+ */
+function formatDiagnostic(e) {
+  const file = e.filePath || e.file || e.span?.file || "";
+  const line = e.line ?? e.span?.line;
+  const col = e.column ?? e.col ?? e.span?.col;
+  const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
+  const stage = e.stage || "CG";
+  const code = e.code || "";
+  const message = e.message || "";
+  return {
+    stage, code, message, file, line, column: col,
+    text: `[${stage}] ${file}${loc} ${code}${code ? ":" : ""} ${message}`.replace(/\s+/g, " ").trim(),
+  };
+}
+
+/**
+ * adopter-#517 — build the response served at EVERY non-infra request while
+ * the last compile is failing, so the adopter sees the REAL compile error at
+ * the request instead of a misleading `X is not defined` from a partial or
+ * stale bundle.
+ *
+ * Page navigations (Accept: text/html) get a self-contained HTML overlay that
+ * lists the diagnostics and carries the hot-reload script, so it auto-refreshes
+ * into the working app the moment the compile succeeds again. Everything else
+ * (server-fn route calls, fetch/XHR) gets a JSON body carrying the structured
+ * diagnostics. Both respond 500 — the project does not currently compile.
+ *
+ * @param {Request} req
+ * @param {{ errors: object[], warnings: object[] }} failure
+ * @returns {Response}
+ */
+export function buildCompileErrorResponse(req, failure) {
+  const diags = (failure.errors || []).map(formatDiagnostic);
+  const accept = (req.headers && req.headers.get && req.headers.get("accept")) || "";
+  const wantsHtml = accept.includes("text/html");
+
+  if (wantsHtml) {
+    const rows = diags.map((d) => {
+      const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const locBits = [d.file, d.line ? `:${d.line}` : "", d.column ? `:${d.column}` : ""].join("");
+      return `<li><span class="code">${esc(d.code)}</span> <span class="loc">${esc(locBits)}</span><div class="msg">${esc(d.message)}</div></li>`;
+    }).join("");
+    const body = `<!doctype html><html><head><meta charset="utf-8"><title>scrml — compile failing</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; padding: 2rem; background: #1e1e1e; color: #eee; }
+  h1 { font-size: 1rem; color: #ff6b6b; margin: 0 0 1rem; }
+  p.hint { color: #aaa; margin: 0 0 1.5rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { background: #2a2a2a; border-left: 3px solid #ff6b6b; padding: .75rem 1rem; margin: 0 0 .75rem; border-radius: 0 4px 4px 0; }
+  .code { color: #ffb86c; font-weight: 600; }
+  .loc { color: #8be9fd; }
+  .msg { margin-top: .35rem; white-space: pre-wrap; }
+</style></head><body>
+<h1>scrml compile failed — ${diags.length} error${diags.length !== 1 ? "s" : ""}</h1>
+<p class="hint">The last edit did not compile. This page is served in place of the app so a partial or stale bundle can't mask the real error. Fix the error below and the page reloads automatically.</p>
+<ul>${rows}</ul>
+</body></html>`;
+    return new Response(injectHotReloadScript(body), {
+      status: 500,
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+    });
+  }
+
+  return new Response(
+    JSON.stringify({
+      error: "scrml compile failed",
+      detail: "The last compile did not succeed; scrml dev is not serving a partial/stale bundle. See errors.",
+      errors: diags.map((d) => ({ stage: d.stage, code: d.code, message: d.message, file: d.file, line: d.line, column: d.column })),
+    }, null, 2),
+    { status: 500, headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" } },
+  );
+}
+
+/**
  * Derive the bounded set of source files to watch for hot-reload.
  *
  * BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): the previous
@@ -533,7 +661,7 @@ export function resolveRootEntryCandidate(opts, serveDir) {
  * @param {string} serveDir
  * @returns {object} Bun.serve() config
  */
-function buildServeConfig(opts, serveDir) {
+export function buildServeConfig(opts, serveDir) {
   const config = {
     port: opts.port,
     // S221 (g-dev-server-idletimeout-default-10s, flogence S15 Finding B): Bun's
@@ -576,6 +704,19 @@ function buildServeConfig(opts, serveDir) {
           status: 204,
           headers: { "Access-Control-Allow-Origin": "*" },
         });
+      }
+
+      // ------------------------------------------------------------------
+      // adopter-#517 — compile-failure short-circuit. While the last compile
+      // is failing, serve the REAL compile error at every request rather than
+      // dispatching to a partial (helper-dropped → `X is not defined`) or
+      // silently-stale route handler, or serving a partial static bundle. The
+      // two dev-infra endpoints above (`/_scrml/live-reload`, `/_scrml/log`)
+      // returned earlier and stay live so the browser can reconnect + reload
+      // the instant the compile succeeds again.
+      // ------------------------------------------------------------------
+      if (compileFailure) {
+        return buildCompileErrorResponse(req, compileFailure);
       }
 
       // ------------------------------------------------------------------
