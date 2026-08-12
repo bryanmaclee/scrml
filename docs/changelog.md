@@ -6013,6 +6013,15 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-11 — S340 (peter): five fixes, a bug class closed, and three verify-the-class catches
+
+An adopter-lane MED-sweep session that landed five codegen fixes (four PRs + a wrap-time follow-up), ran a dPA scope deliberation, and owned bryan's cross-lane #508 review dispatch — including a HIGH live on `main`. Method thread of the session: **verify-the-class caught three incomplete or mis-directed fixes**, each by reproducing on HEAD before trusting gap prose, a satellite's attribution, or my own prior belief. Ran off S338/S341-bryan's live surface throughout (adopter codegen vs his grammar/review-floor lane); left his live hand-off untouched.
+
+- **#510 — tick-tag body no longer runs at module init** (§6.7.5/§6.7.6/§6.7.8). A `<timer>`/`<poll>`/`<timeout>` `${}` body was collected as a top-level statement and emitted at load, before any tick. Converged into `DEFERRED_LIFECYCLE_BODY_TAGS`; `<poll>` gained its §6.7.6 immediate first tick (same tick path, running-gated); `<channel>` correctly excluded via a dPA deep-dive that proved it single-run. Companion: fixed a false E-MARKUP-001 on `<timeout>`.
+- **#511 — request-ref in a `<each>` attr routes correctly** (§6.7.7). A silent miscompile (`<#req>.data` mis-routed to the §36 input-state registry → runtime TypeError) fixed by threading the registered-request set into the per-item lowering; non-request each-attrs byte-identical.
+- **#512 — request-ref in a `${for…lift}` attr routes correctly.** The loud (E-CODEGEN) sibling; closes the request-ref-in-loop-attr class. The originally-filed fix direction was wrong (re-derivation found the real root: a missing escape-hatch reparse in `emit-lift.js`).
+- **#515 — tool import prune keeps `$`-prefixed locals (HIGH) + each-body decl guard hardened.** Owned bryan's #508 review dispatch. F1: a `\b` liveness regex judged a `$`-prefixed import local dead and dropped the whole import → runtime ReferenceError (green compile); fixed by reusing the correct server predicate (Rule 7). F2/F3: the each-body decl guard now scans every position and the full name-binding set. A wrap-time follow-up added `tilde-decl` after verifying `var` at a non-first position compiled silent — the hole bryan's delta-log flagged. Corpus migration measured zero throughout.
+
 ### 2026-08-10 — S337 (bryan): eight PRs, four instances of one class, and a leak that lives on main
 
 Eight PRs merged (#495 #496 #497 #498 #499 #500 #502). Review floor drained to **0 owed** with three
