@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S341 — 2026-08-12 (peter · P-Windows) — `scrml dev` stops masking compile errors; a codegen miscompile found by sweeping a "fixed" gap's class
+
+**3 PRs merged** (#518 #519-filed #520) · dev-server / adopter-DX lane, declared off bryan's LIVE S341 compiler surface · delta-log `[1449]`-`[1455]`. **Two verify-first saves** (a stale gap and one that was bryan's authorized arc) before either wasted a fix.
+
+⭐ **`scrml dev` no longer serves a partial/stale bundle on compile failure (#518, adopter #517).** A source edit that failed to compile still wrote a partial bundle to disk (the compiler gates writes only under `--validate-emit`), and the dev server dispatched to it with no compile-state awareness — so a route call threw a misleading `X is not defined` that masked the real error and cost the reporter a multi-hour hunt. Now, while the last compile is failing, `scrml dev` serves the **real compile error at the request** — a self-contained HTML overlay (auto-reloading on the next green compile) for page loads, structured JSON for server-fn/route calls — and keeps the last-good in-memory routes untouched. The two dev-infra endpoints stay live so the browser reconnects. Dev-scoped by design (no change to shared compile-write semantics). Gated by 13 new unit tests; CI green with no flake.
+
+⭐ **A pre-existing codegen miscompile, surfaced by verifying a *class* rather than a reported instance.** The census-script Windows gap (`g-s34-census-…`) turned out already fixed (#473) — but sweeping the `new URL(import.meta.url).pathname` pattern it named found two live copies in `module-resolver.scrml`, and compiling either emits garbage: **codegen replaces `import.meta.url` inside a top-level `const` initializer with the entire initializer expression** (self-referential duplication), so the compiled resolver's `STDLIB_ROOT` is broken on every OS. Minimal repro built and **routed to bryan's `import.meta` lane (#520)** — his live g-263 arc — rather than fixed across lanes.
+
+⭐ **#519 filed** — the emit-parse gate (`E-CODEGEN-INVALID-LOGIC`) reports the emitted-JS line, not the `.scrml` source span; the location half of #517, deferred as a source-map enhancement.
+
 ## S338 — 2026-08-10/11 (bryan · ASUS-Vivobook) — one substitution found in five files by five authors; six arcs built, six DO-NOT-LANDs, zero merged
 
 **4 PRs merged** (#503 #505 #506 #507) · review floor **0 owed** at merge · `pa-base` **v2.14 → v2.15**, overlay **v2.2 → v2.3** · delta-log `[1350]`-`[1439]`. S340-peter went LIVE mid-session.
