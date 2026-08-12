@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 26 |
-| MED | 121 |
-| LOW | 59 |
+| MED | 119 |
+| LOW | 60 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -91,8 +91,18 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 > Deliberately NOT chased with a 4th lift site — fixing only the lift half would leave top-level inconsistent
 > ([[feedback-repeated-review-same-class-means-converge-not-enumerate]]).
 
-### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; open`
+### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; resolved by #473 (the fileURLToPath swap) — prose lagged the already-resolved marker; PA-reverified clean on Windows both modes S341-peter`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
+
+### g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname — both `module-resolver.scrml` copies compute `STDLIB_ROOT` from `new URL(import.meta.url).pathname` (the Windows `/C:/…` fragile form the census gap fixed one file over), BUT the source-level `fileURLToPath` fix is BLOCKED — `NEW S341-peter (sweeping the g-s34-census CLASS after it turned out already-fixed); LOW; open (blocked-on the codegen miscompile below — see #520)`
+<!-- @gap id=g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname sev=LOW status=open locus=compiler/self-host/module-resolver.scrml:48,stdlib/compiler/module-resolver.scrml:48 prov=rationale:same-new-URL-import-meta-url-pathname-windows-fragile-pattern-as-the-resolved-census-gap-but-the-compiled-STDLIB_ROOT-is-already-garbage-all-OS-via-a-codegen-miscompile-so-the-source-swap-is-moot-until-that-lands -->
+
+Two blockers on the obvious `fileURLToPath` source swap, both PA-verified S341-peter: (1) the mirror
+fix regresses `self-host-smoke.test.js`'s eval-extraction (the test evals the extracted logic block, not
+the compiled output); (2) it is **moot** — the compiled `STDLIB_ROOT` is already garbage on EVERY OS
+because codegen replaces the `import.meta.url` inside the `const` initializer with the whole initializer
+expression (self-referential duplication). That codegen miscompile is the real blocker, routed to bryan's
+`import.meta` (g-263) lane via **#520** (`handOffs/incoming/…S341-peter-to-S341-bryan-import-meta-const-init-mangling.md`, merged). Unblock this LOW once the codegen fix lands.
 
 **RESOLVED S335-peter** — re-verified on THIS Windows box vs HEAD `cdf19c01`: `scripts/s34-census.ts` now resolves its own path via `fileURLToPath(import.meta.url)` (commit `0beddacc`, with a Windows-rationale comment) and runs to completion (full 807-row census). The `new URL(...).pathname` leading-slash-drive break is gone.
 
