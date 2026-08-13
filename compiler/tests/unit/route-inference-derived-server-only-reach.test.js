@@ -1315,6 +1315,283 @@ const <computed> = pick(@pw)
   });
 });
 
+// ---------------------------------------------------------------------------
+// §11i — THE S343 BLOCKER: limb (b) refused on a NAME COINCIDENCE.
+//
+// Shipped in round 2 and caught by review before landing. The transitive limb
+// handed its name set to the shared scanner's RAW-TEXT branch, and that name set
+// is not ~4 imported stdlib members — it is EVERY server-reaching function name
+// in the file. `status`, `total`, `format`, `label`. Ordinary vocabulary. So:
+//
+//   function status(p) { return hashPassword(p) }              // server-reaching
+//   const <labels> = @nums.map(v => { return "status " + v })  // REFUSED. string literal.
+//   const <sts>    = @rows.map(r => { return r.status })       // REFUSED. member property.
+//
+// Both measured at exit 0 on `main` and exit 1 on the arc — an INTRODUCED
+// regression, and one that violates two sentences §6.6.19 states normatively: a
+// name inside a string literal "SHALL NOT fire", and the limbs "SHALL be the same
+// rules … applied to a different name set".
+//
+// WHY THE ARC'S OWN EVIDENCE COULD NOT SEE IT. Migration was measured ZERO over
+// 2362 sources with 7401/7401 artifacts byte-identical. That measurement is
+// structurally blind to this: the trigger is a name COINCIDENCE, which no corpus
+// file happens to contain. A clean differential is not an answer to a question it
+// cannot express.
+//
+// THE MECHANISM, AND WHY IT IS NOT AN EDGE CASE. A BLOCK-BODIED ARROW — the most
+// ordinary derived-RHS shape in the language — is an `escape-hatch` carrying only
+// raw text, while the SAME arrow with an expression body lowers structurally.
+// Hence `@rows.map(r => r.status)` was already clean and
+// `@rows.map(r => { return r.status })` refused: whether a property counted as a
+// reference depended on whether the RHS happened to parse.
+//
+// THE FIX. Limb (b) PARSES the raw text and matches identifier POSITIONS
+// (`RawSubtreeMode: "structural"`); where it does not parse, it DECLINES. The
+// direct limb keeps the text scan — a miss there ships a secret.
+//
+// EVERY ACCEPT BELOW IS PAIRED WITH A REFUSE ON THE SAME SHAPE. An "it compiles"
+// test passes trivially against a check that stopped firing altogether, which is
+// the exact way this fix could go wrong.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11i — a name COINCIDENCE is not a reach (S343 blocker)`, () => {
+  /** `status` is server-reaching; the derived RHS only *looks* like it names it. */
+  const withStatusFn = (rhs) => `<program>
+\${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+<nums> = [1, 2]
+<rows> = []
+
+\${ function status(p) { return hashPassword(p) } }
+
+const <computed> = ${rhs}
+
+<div>\${@computed}</div>
+
+</program>`;
+
+  test("PA REPRODUCER 1 — the name appears only in a STRING LITERAL: clean", () => {
+    const { out } = runRIOn(withStatusFn('@nums.map(v => { return "status " + v })'));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("PA REPRODUCER 2 — the name is a MEMBER PROPERTY: clean", () => {
+    const { out } = runRIOn(withStatusFn("@rows.map(r => { return r.status })"));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("a non-computed OBJECT KEY of the same name: clean", () => {
+    const { out } = runRIOn(withStatusFn("@rows.map(r => { return { status: 1 } })"));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("TEMPLATE-LITERAL TEXT naming the fn: clean", () => {
+    const { out } = runRIOn(withStatusFn("@nums.map(v => { return `status is ok` })"));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  /**
+   * THE BITE PROOFS. Each is the paired shape with a REAL reference in the same
+   * position, through the same block-bodied arrow, on the same structural route.
+   * Without these, every ACCEPT above would also pass against a limb (b) that had
+   * simply stopped looking inside a block body at all — which is precisely the
+   * over-correction this fix must not be.
+   */
+  test("BITE — a real CALL in the same block body still refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(v => { return doHash(v) })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — a COMPUTED member access naming the fn still refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(r => { return r[doHash] })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — a template-literal INTERPOLATION (not text) still refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(v => { return `x${doHash(v)}` })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — an object-literal VALUE hop (not a key) still refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(v => { return { run: doHash } })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — an ALIAS bound inside the block body still refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(v => { const f = doHash; return f(v) })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — a DEAD nested reference still refuses (reference, not call)", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(v => { if (false) { doHash(v) } return v })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — TWO-LEVEL block-body lambda nesting still refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(v => { return [v].map(w => { return doHash(w) }) })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11j — the SECOND raw-scan site: the hop EDGE SET had the identical defect.
+//
+// `computeServerReachingFns` builds the caller relation with the same scanner
+// over each FUNCTION BODY, with `live` = every same-file function name. So a
+// function whose body merely CONTAINS the string `"status "` became a caller of
+// `status`, and any derived cell reading it was refused — with a hop chain
+// (`const <labels> -> label -> status`) naming an edge that does not exist in the
+// source. Measured at S343: exit 0 on `main`, exit 1 on the arc.
+//
+// `serverReach` is consumed by limb (b) and by nothing else, so this site takes
+// the same `"structural"` rule. Fixing one without the other would have left the
+// blocker half open behind a green §11i.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11j — the hop EDGE SET does not resolve on a text coincidence`, () => {
+  test("a string literal in a hop fn's block body is not an edge: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      `function status(p) { return hashPassword(p) }
+function label(v) { return [v].map(x => { return "status " + x })[0] }`,
+      "label(1)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("a member property in a hop fn's block body is not an edge: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      `function status(p) { return hashPassword(p) }
+function label(rs) { return rs.map(r => { return r.status })[0] }`,
+      "label([])",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  /**
+   * BITE — the F1 REGRESSION PIN's shape with a BLOCK body. §11a pins the
+   * expression-bodied `[x].map(v => doHash(v))`, which lowers structurally and so
+   * never touched the raw branch at all. The block-bodied form is the one this
+   * fix rerouted, so it is the one that proves the edge set still closes.
+   */
+  test("BITE — a real call inside a hop fn's block body IS an edge", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x) { return [x].map(v => { return doHash(v) })[0] }`,
+      "wrap(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
+  test("BITE — a BARE REFERENCE inside a hop fn's block body IS an edge", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x) { return [x].map(v => { return [v].map(doHash) })[0] }`,
+      "wrap(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — mutual recursion reached through a block body still terminates and refuses", () => {
+    const { out } = runRIOn(programWithFns(
+      `function ping(p) { return [p].map(x => { return pong(x) })[0] }
+function pong(p) { return ping(hashPassword(p)) }`,
+      "ping(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11k — the two limbs now differ on ONE axis, deliberately. Pin BOTH sides.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11k — the DIRECT limb keeps the text scan`, () => {
+  /**
+   * NOT AN ASPIRATION — these pin CURRENT, INTENDED behaviour, and the asymmetry
+   * is the point. On limb (a) a miss ships a server-only implementation into a
+   * browser bundle, so matching text the parser could not reach is the deliberate
+   * fail-closed choice (§12.2's disposition for ambiguity on this boundary). On
+   * limb (b) a miss renders a Promise — loud, local, fixable, and already slated
+   * to be relaxed when dpa-023's `pending` lands — while a false refusal breaks
+   * correct code at build time. Opposite costs, opposite safe directions.
+   *
+   * Narrowing limb (a) to the structural route would make a CONFIDENTIALITY rule
+   * newly-ACCEPTING and overturn a deliberate S331 choice. That is a ruling, not a
+   * cleanup. If it is ever taken, these two tests are the ones that must be
+   * rewritten — deliberately, with the ruling cited — rather than quietly deleted.
+   */
+  test("a string literal naming the IMPORT in a block body still fires (over-fire, kept)", () => {
+    const { out } = runRIOn(programDeriving(
+      "scrml:auth", "hashPassword", '[1].map(v => { return "hashPassword " + v })',
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("a member property named after the IMPORT in a block body still fires", () => {
+    const { out } = runRIOn(programDeriving(
+      "scrml:auth", "hashPassword", "[1].map(v => { return v.hashPassword })",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  /**
+   * THE COST OF THE FIX, PINNED SO IT CANNOT BE FORGOTTEN.
+   *
+   * An RHS that does not parse at all (`if @pw { … } else { … }` lowers to an
+   * `escape-hatch` with `nativeKind: "ParseError"`) is where limb (b) DECLINES.
+   * A genuine hop hidden there is now MISSED, and the cell renders a Promise with
+   * nothing on stderr — the very defect §6.6.19 exists to refuse.
+   *
+   * That is the accepted trade and not an oversight: guessing from text is what
+   * refused two correct programs above, and on a correctness refusal a miss is
+   * recoverable while a false refusal is not. §2's companion test shows the DIRECT
+   * limb still catches the identical shape, so the confidentiality boundary is
+   * unaffected — only the Promise-rendering diagnostic has a hole.
+   *
+   * The right closure is a derived RHS that PARSES, not a better text scan. If the
+   * `if`-expression ever lowers to real expr nodes, this test should flip to 1 and
+   * the residual disappears with no change to the rule.
+   */
+  test("RESIDUAL — limb (b) DECLINES on an unparseable RHS (documented miss)", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      'if @pw { doHash(@pw) } else { "x" }',
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("...while the DIRECT limb still catches the identical unparseable shape", () => {
+    const { out } = runRIOn(programDeriving(
+      "scrml:auth", "hashPassword", 'if @pw { hashPassword(@pw) } else { "x" }',
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+});
+
 describe(`${CODE} §11h — §64 tool carve-out`, () => {
   test("`kind=\"tool\"` carves out BOTH limbs", () => {
     const source = `<program kind="tool">
