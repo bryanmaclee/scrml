@@ -3520,6 +3520,16 @@ type RawSubtreeMode = "text-scan" | "structural";
  *
  * Returns EMPTY when neither parse succeeds. That is the decline: on a
  * correctness refusal, guessing from text is what produced the defect above.
+ *
+ * A PARTIAL EXPRESSION PARSE IS NOT A PARSE. `parseExpression` wraps
+ * `parseExpressionAt`, which parses exactly ONE expression and reports the rest
+ * as `trailingContent` — measured, `"doHash ( 1 )\nother ( 2 )"` returns a
+ * non-null AST covering only `doHash ( 1 )`. Taking that AST would make every
+ * reference after the first statement invisible: a SILENT, ARBITRARY miss, and a
+ * worse one than the honest decline below because nothing distinguishes it from a
+ * clean scan. So a trailing-content result is re-parsed as STATEMENTS, which
+ * covers the whole text; the partial expression AST is used only if the statement
+ * parse also fails, since a partial structural answer still beats a text guess.
  */
 function collectRawReferenceNames(
   raw: string,
@@ -3528,7 +3538,9 @@ function collectRawReferenceNames(
   const found = new Map<string, string>();
   if (!raw || live.size === 0) return found;
 
-  const ast = parseExpression(raw).ast ?? parseStatements(raw).ast;
+  const expr = parseExpression(raw);
+  const whole = expr.ast && !expr.trailingContent ? expr.ast : null;
+  const ast = whole ?? parseStatements(raw).ast ?? expr.ast;
   if (!ast) return found;
 
   walkEsTree(ast, (n, parent) => {
