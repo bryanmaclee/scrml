@@ -72,7 +72,14 @@ import type {
 } from "./types/ast.ts";
 
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
-import { exprNodeCollectCallees, emitStringFromTree, forEachIdentInExprNode } from "./expression-parser.ts";
+import {
+  exprNodeCollectCallees,
+  emitStringFromTree,
+  forEachIdentInExprNode,
+  parseExpression,
+  parseStatements,
+  walk as walkEsTree,
+} from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, fnParamNameSet } from "./indirect-callee-resolver.ts";
 // Type-only import — `monotonicity-analyzer.ts` imports `CPSSplit` from this
@@ -3433,6 +3440,117 @@ function collectServerOnlyBindingModules(
 }
 
 /**
+ * How `scanForServerOnlyBindingRefs` treats an `escape-hatch` — a subtree the
+ * scrml expression-parser kept as RAW SOURCE TEXT rather than lowering to expr
+ * nodes. The two limbs of §6.6.19 answer this differently ON PURPOSE, and the
+ * asymmetry is the whole reason the parameter exists rather than one rule for
+ * both.
+ *
+ * `"text-scan"` — LIMB (a), the DIRECT/confidentiality limb, and the per-function
+ *   §12.2 Trigger 3 check. Word-boundary match against the raw text. Over-fires
+ *   on a name inside a string literal; that is accepted, because a MISS here
+ *   ships a server-only implementation to a browser.
+ *
+ * `"structural"` — LIMB (b), the TRANSITIVE/correctness limb. Parse the raw text
+ *   and match identifier POSITIONS. Where it does not parse, DECLINE.
+ *
+ * WHY LIMB (b) MUST NOT TEXT-SCAN — this is the S343 blocker, not a preference.
+ * Limb (b)'s name set is not ~4 imported stdlib members; it is EVERY
+ * server-reaching function name in the file — `status`, `total`, `format`,
+ * `label`. Ordinary vocabulary. Pointed at raw text, that refused two correct
+ * programs on a pure name COINCIDENCE, both measured at exit 0 on `main` and
+ * exit 1 on this arc:
+ *
+ *     function status(p) { return hashPassword(p) }          // server-reaching
+ *     const <labels> = @nums.map(v => { return "status " + v })   // string literal
+ *     const <sts>    = @rows.map(r => { return r.status })        // member property
+ *
+ * Both violate sentences §6.6.19 states normatively — "a name appearing only
+ * inside a string literal is not a reference and SHALL NOT fire", and that the
+ * limbs share the RULES and differ only in the NAME SET.
+ *
+ * AND THE FAIL-CLOSED ARGUMENT THAT LICENSES `"text-scan"` DOES NOT TRANSFER.
+ * Limb (b) is a CORRECTNESS refusal: a miss renders a Promise — loud, local,
+ * fixable, and already destined to be relaxed when dpa-023's `pending` lands. A
+ * false refusal breaks correct code at build time with no workaround but renaming
+ * an unrelated local. On this limb the safe direction is the opposite one.
+ *
+ * NOT A RARE FALLBACK. Measured on real parses: a BLOCK-BODIED ARROW — the most
+ * ordinary derived-RHS shape there is — becomes an `escape-hatch`
+ * (`nativeKind: "ArrowFunctionExpression"`), while the same arrow with an
+ * EXPRESSION body lowers structurally. So `@rows.map(r => r.status)` was already
+ * clean and `@rows.map(r => { return r.status })` refused: whether a property
+ * counted as a reference depended on whether the RHS happened to parse.
+ */
+type RawSubtreeMode = "text-scan" | "structural";
+
+/**
+ * Identifier names from `raw` that stand in a REFERENCE position, restricted to
+ * the `live` name set. The structural half of `RawSubtreeMode`.
+ *
+ * ONE PREDICATE, TWO REPRESENTATIONS. This mirrors `scanForServerOnlyBindingRefs`'
+ * own walk exactly, because it is the same question asked of the same subtree in
+ * a different representation — and the two must not drift:
+ *
+ *   scrml expr node                ESTree                       counts?
+ *   ---------------------------    -------------------------    -------
+ *   `kind: "ident"`                Identifier                   YES
+ *   `kind: "lit"` (returns early)  Literal / TemplateLiteral     no (no Identifier exists)
+ *   `member.property` is a STRING  MemberExpression.property     no, when !computed
+ *   `prop.key` is a STRING         Property.key                  no, when !computed
+ *   `prop.key` is an `ident` node  Property.key, computed        YES
+ *
+ * Verified against real parses, not assumed: `{ status: 1 }` lowers to
+ * `key: "status"` (a string, invisible to the walk) and `{ [status]: 1 }` to
+ * `key: {kind:"ident"}` (visible) — so the `computed` tests above are parity, not
+ * new policy.
+ *
+ * DECLARED NAMES ARE DELIBERATELY NOT REMOVED. `extractIdentifiersFromAST` — the
+ * neighbouring general-purpose extractor — subtracts params and locals. Doing that
+ * here would make a lambda parameter shadow inside a block-bodied arrow while the
+ * identical parameter does NOT shadow in an expression-bodied one, i.e. it would
+ * answer half of the unruled lambda-parameter-shadow question (§6.6.19's Gap 5) as
+ * a side effect of a bug fix. The walk this mirrors does no shadowing either, so
+ * not subtracting is what keeps the two representations answering alike.
+ *
+ * PARSING, NOT RE-IMPLEMENTING. `parseExpression`/`parseStatements` are the
+ * compiler's own front end — the `@`-sigil tokenizer plugin, the `?{}` SQL
+ * placeholder, `<#id>` input refs. A second hand-rolled reader of scrml
+ * expression text is the drift this file has been bitten by before.
+ *
+ * Returns EMPTY when neither parse succeeds. That is the decline: on a
+ * correctness refusal, guessing from text is what produced the defect above.
+ */
+function collectRawReferenceNames(
+  raw: string,
+  live: Map<string, string>,
+): Map<string, string> {
+  const found = new Map<string, string>();
+  if (!raw || live.size === 0) return found;
+
+  const ast = parseExpression(raw).ast ?? parseStatements(raw).ast;
+  if (!ast) return found;
+
+  walkEsTree(ast, (n, parent) => {
+    if (n.type !== "Identifier" || typeof n.name !== "string") return;
+    if (
+      parent?.type === "MemberExpression" &&
+      (parent as { property?: unknown }).property === n &&
+      !(parent as { computed?: boolean }).computed
+    ) return;
+    if (
+      parent?.type === "Property" &&
+      (parent as { key?: unknown }).key === n &&
+      !(parent as { computed?: boolean }).computed
+    ) return;
+    const mod = live.get(n.name);
+    if (mod !== undefined) found.set(n.name, mod);
+  });
+
+  return found;
+}
+
+/**
  * The shared reference-scanner behind BOTH escalation-server-only reach checks —
  * the per-function one (`collectServerOnlyBindingModules`, §12.2 Trigger 3) and
  * the derived-cell-RHS one (`collectDerivedRhsServerOnlyRefs`, §6.6.20).
@@ -3451,6 +3569,7 @@ function collectServerOnlyBindingModules(
 function scanForServerOnlyBindingRefs(
   root: unknown,
   live: Map<string, string>,
+  rawMode: RawSubtreeMode = "text-scan",
 ): Map<string, string> {
   const found = new Map<string, string>();
   if (live.size === 0) return found;
@@ -3460,12 +3579,30 @@ function scanForServerOnlyBindingRefs(
   // parses to an `escape-hatch` too). May match inside a string literal in that
   // raw text; that is an over-fire, never a leak, and is the correct direction to
   // err on this boundary.
+  //
+  // CONFIDENTIALITY LIMB ONLY — see `RawSubtreeMode`. A REGEX OVER SOURCE TEXT IN
+  // A POST-AST STAGE IS `pa-scrml-overlay` RULE 7, and it is kept here for exactly
+  // one reason, stated so the next reader does not have to guess: on the direct
+  // limb a miss ships a server-only implementation into a browser bundle, so
+  // matching text the parser could not reach is the deliberate fail-closed choice
+  // (§12.2's disposition for ambiguity on this boundary). It is NOT kept because
+  // it is the right way to answer "is this name referenced" — `scanStructuredRaw`
+  // below is. Narrowing this branch to the structural route on the direct limb
+  // makes a confidentiality rule newly-ACCEPTING and overturns a deliberate S331
+  // choice: that is a ruling, not a cleanup, and it is not taken here.
   const scanRaw = (raw: string): void => {
     for (const [local, mod] of live) {
       if (found.has(local)) continue;
       const re = new RegExp(`\\b${local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
       if (re.test(raw)) found.set(local, mod);
     }
+  };
+
+  // The STRUCTURAL route for the same raw text: parse it and look at identifier
+  // POSITIONS, exactly as the walk below does for a lowered scrml subtree.
+  // Declines (contributes nothing) when the text does not parse.
+  const scanStructuredRaw = (raw: string): void => {
+    for (const [name, mod] of collectRawReferenceNames(raw, live)) found.set(name, mod);
   };
 
   const seen = new Set<unknown>();
@@ -3492,7 +3629,8 @@ function scanForServerOnlyBindingRefs(
     }
 
     if (kind === "escape-hatch" && typeof n.raw === "string") {
-      scanRaw(n.raw);
+      if (rawMode === "structural") scanStructuredRaw(n.raw);
+      else scanRaw(n.raw);
       // fall through — an escape-hatch may still carry structured children
     }
 
@@ -3612,10 +3750,16 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  * shapes that are correct today); the derived position gets its own visit, and
  * the visit REFUSES rather than escalates — see §6.6.19 for why escalation is not
  * the available answer here.
+ *
+ * `rawMode` is the caller's LIMB, not a tuning knob — see `RawSubtreeMode`. Limb
+ * (a) passes the default; limb (b) passes `"structural"` because its name set is
+ * ordinary file-local vocabulary rather than ~4 stdlib member names, so matching
+ * raw text refuses correct programs on a name coincidence (S343).
  */
 function collectDerivedRhsServerOnlyRefs(
   declNode: Record<string, unknown>,
   bindings: Map<string, string>,
+  rawMode: RawSubtreeMode = "text-scan",
 ): Map<string, string> {
   if (bindings.size === 0) return new Map();
 
@@ -3629,15 +3773,17 @@ function collectDerivedRhsServerOnlyRefs(
   const roots = stateDeclRhsRoots(declNode);
 
   // Fail-closed backstop: a derived cell with RHS source text but NO structured
-  // RHS node at all would otherwise be invisible to the walk. Scan its raw text.
+  // RHS node at all would otherwise be invisible to the walk. Scan its raw text —
+  // by the caller's limb rule, so limb (b) parses it and limb (a) text-matches it.
   if (roots.length === 0 && typeof declNode.init === "string" && declNode.init.length > 0) {
     return scanForServerOnlyBindingRefs(
       { kind: "escape-hatch", raw: declNode.init },
       live,
+      rawMode,
     );
   }
 
-  return scanForServerOnlyBindingRefs(roots, live);
+  return scanForServerOnlyBindingRefs(roots, live, rawMode);
 }
 
 /**
@@ -3887,7 +4033,13 @@ function computeServerReachingFns(
     }
     if (live.size === 0) continue;
 
-    for (const reachedName of scanForServerOnlyBindingRefs(body, live).keys()) {
+    // `"structural"` — this edge set is limb (b)'s and nothing else's
+    // (`computeServerReachingFns` has exactly one call site), and its `live` set
+    // is EVERY function name in the file, so a raw-text match makes a function
+    // that merely CONTAINS the string `"status "` a caller of `status`. Measured
+    // at S343: exit 0 on `main`, exit 1 here, for a program with no edge at all
+    // between the two. Same blocker as the derived-RHS scan, one level up.
+    for (const reachedName of scanForServerOnlyBindingRefs(body, live, "structural").keys()) {
       const globalIds = fnNameToNodeIds.get(reachedName);
       if (!globalIds || globalIds.length === 0) continue;
       for (const calleeId of globalIds) {
@@ -5607,10 +5759,21 @@ export function runRI(input: RIInput): RIOutput {
       //
       // The SAME reference scanner the direct limb uses, handed a different name
       // set. Reusing it is what keeps "what counts as a reach" — depth, lambda
-      // bodies, unparsed raw RHS text, string-literals-are-not-references, the
-      // RHS-local shadow set — one rule instead of two that drift.
+      // bodies, string-literals-are-not-references, the RHS-local shadow set —
+      // one rule instead of two that drift.
+      //
+      // `"structural"` IS THE ONE DELIBERATE DIFFERENCE, and §6.6.19 already
+      // requires it: the limbs "SHALL be the same rules … applied to a different
+      // name set", and a name inside a string literal "SHALL NOT fire". A
+      // word-boundary text scan cannot honour either sentence once the name set
+      // is ordinary file-local vocabulary. See `RawSubtreeMode` for the measured
+      // reproducers and for why the direct limb keeps the text scan.
       if (serverReachingNamesHere.size === 0) continue;
-      const hopRefs = collectDerivedRhsServerOnlyRefs(declNode, serverReachingNamesHere);
+      const hopRefs = collectDerivedRhsServerOnlyRefs(
+        declNode,
+        serverReachingNamesHere,
+        "structural",
+      );
       if (hopRefs.size === 0) continue;
 
       const hops = [...hopRefs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
