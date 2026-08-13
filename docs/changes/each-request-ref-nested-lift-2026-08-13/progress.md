@@ -15,3 +15,31 @@ Append-only. Newest entries at the bottom.
   (a field-listed walk is fail-open; "add the missing name" IS the defect class).
 - Archived BRIEF.md verbatim.
 - NEXT: reproduce the bug from the PA's on-disk reproducer; then trace the locus hypothesis.
+
+## 2026-08-13 — reproduced + measured a 21-position matrix
+
+Reproduced the PA's case verbatim (`q-each-in-forlift-tr.scrml`): compile exits 0, the emitted
+`.client.js` carries `_scrml_input_state_registry.get("profile").data`, and the emitted
+`scrml-runtime.*.js` contains that symbol ZERO times → dangling reference → whole-bundle
+`ReferenceError` at mount. Control (`a-each-attr.scrml`, top-level `<each>`) emits
+`_scrml_request_profile.data`. Both confirmed.
+
+Then built a 21-case POSITION MATRIX (generator + classifying probe in the scratchpad) rather than
+trusting the brief's "12 adjacent positions confirmed correct". **The blast radius is far wider than
+the one reported position.** Measured at base `3ebaa01e`:
+
+| class | count | cases |
+|---|---|---|
+| REQUEST (correct) | 5 | p01 top-level each attr · p02 for-lift attr direct · p16 top-level each attr NO-predicate · p18 each-in-each · p19 each-in-match |
+| REGISTRY + DANGLING (silent, whole-bundle ReferenceError) | 13 | p03 each-in-for-lift attr · p04 each-in-if-lift · p05 each-in-while-lift · p06 each-in-do-while-lift · p09 `if=` · p10 `show=` · p11 `style=` · p12 `class:x=` · p13 `title=` · p14 TEXT interp · p17 `<each of=N>` · p20 each-in-each-in-for-lift · **p21 while-lift TEXT (no `<each>` at all)** |
+| E-CODEGEN-INVALID-LOGIC (loud, no bundle) | 3 | p07 while-lift attr · p08 do-while-lift attr · p15 each-in-for-lift attr NO-predicate |
+
+Two findings that correct the brief:
+1. The "12 adjacent positions confirmed correct" were verified at the TOP-LEVEL `<each>` / DIRECT
+   for-lift positions. **Every one of those same attribute kinds is broken once the `<each>` is
+   nested inside a lift body** (p09-p14, p17, p20).
+2. The `while`/`do…while` sibling is NOT confined to attributes and is not MED — **p21 is a plain
+   TEXT interpolation with no `<each>` anywhere and it produces the identical DANGLING
+   whole-bundle ReferenceError.**
+
+- NEXT: implement the root fix (single per-file request-id carrier), then re-run the matrix.
