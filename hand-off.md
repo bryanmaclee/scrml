@@ -1,188 +1,178 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. ROTATED at S338-bryan:      -->
-<!-- prior wrap handOffs/hand-off-s339-peter.md (S339-peter).      -->
-<!-- Older: hand-off-s337-bryan.md, hand-off-s336.md.              -->
-<!-- Mechanical stream: handOffs/delta-log.md [1350]-[1439].       -->
+<!-- hand-off.md — live session state. ROTATED at S343-bryan:      -->
+<!-- prior wrap handOffs/hand-off-s338-bryan.md (S338-bryan).      -->
+<!-- ⚠ S341-bryan and S342-bryan BOTH DIED WITHOUT WRAPPING.       -->
+<!-- Their state was RECOVERED this session — see §RECOVERY.       -->
+<!-- Mechanical stream: handOffs/delta-log.md.                     -->
 <!-- ============================================================= -->
 
-# scrml — Session 338 (bryan · ASUS-Vivobook) — WRAP
+# scrml — Session 343 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-08-10/11. `/boot` Profile A. **4 PRs merged** (#503 #505 #506 #507). Review floor
-**0 owed** at merge time. **⚠ S340-peter went LIVE mid-session** — his lane is adopter/MED-sweep,
-declared "off bryan's S338 review-floor/tare surface"; I moved onto HIS (see §OWED). scrml-support
-pushed directly (`pa-base v2.15`, overlay v2.3, user-voice, board).
+**Date:** 2026-08-13. `/boot` Profile A. **Zero PRs merged — deliberately.** The operator's
+direction was *"those six were not landed for a reason … we need to make sure that we have all the
+critical info before moving on"*, and at close: *"lets hold any decissions for next session."*
+This session is a **recovery and verification** session, not a landing one.
 
-## ⏭ NEXT-SESSION PICKUP (read this FIRST — the left-off handshake)
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-**SIX ARCS ARE BUILT AND NONE ARE MERGED. That is the headline, and it is not a failure — every one
-returned DO-NOT-LAND on first submission and each caught a real defect a green suite had shipped past.
-Two of those defects were introduced by the fix for the defect before them.**
+**Nothing is blocked on machinery. Four things are blocked on bryan.** Every arc is now audited,
+every reason-not-landed is written down, and the one arc that was ready has had its blocker found,
+fixed and measured. Read `../scrml-support/handOffs/s342-arc-audit/` — six per-arc forensic reports
+plus three reproduction records. Do not re-derive them.
 
-Each arc is frozen at a tag so nothing needs re-deriving. **All six need a delta re-review before
-landing** (a fix round invalidates the review that produced it, `pa-base` §5).
+### Owed by bryan (hold-for-next-session, his words)
 
-| arc | branch / tag | state |
+1. **Gap 5 — the lambda-param shadow, and it is a SEQUENCING trap.** On `main` today §6.6.19 says
+   *"A name bound **inside** the RHS shadows the import and SHALL NOT fire"* — normatively mandating
+   lexical scoping the compiler does not implement. The derived-transitive arc's F3 fix **rewrites
+   that sentence** to bless the over-fire (*"A LAMBDA PARAMETER DOES NOT SHADOW, AND THEREFORE
+   FIRES"*). Landing the arc therefore converts a future **conformance-restoration bug fix** into a
+   **widening needing R2**, purely by changing the sentence that classifies it. PA recommended **(c)**:
+   land as ruled, but record the rewrite as *descriptive of current impl, not a ratification*, and
+   queue lexical scoping citing main's pre-arc sentence as governing.
+2. **The 18+ unfiled known-gaps entries** (several HIGH). Not at risk of loss — the branches are on
+   origin and bundled — but the ledger currently asserts one of these classes is CLOSED while a
+   silent whole-bundle-killing defect is live in 13 measured positions.
+3. **The five zero-byte git objects** — delete or leave. Nothing is blocked by them.
+4. **The merge call on derived-transitive** once (1) is settled — it is otherwise ready.
+
+### Do NOT do these (each would repeat a measured mistake)
+
+- **Do not start g-263.** It is a **PA-verified DO-NOT-LAND** — three §14.8 confidentiality
+  regressions at exit 0, NEW on the branch. Its blocking reason is **not written on the branch**;
+  its own artifacts read as a clean bill, and the dead S342 board file puts a six-step *"LANDING PLAN
+  — execute this"* ABOVE the DO-NOT-LAND section. Anyone reading only the branch re-attempts it.
+- **Do not land derived-transitive from tag `review/derived-transitive`** — it points at `259ac285`,
+  **round 1**, four commits behind. Use `review/derived-transitive-r2` (`bdee6c2c`) or the current
+  tip. Same stale-ref shape as g-263's `fix/g263-seed-convergence-land` @ `8ad13b84`, which is not
+  an ancestor of origin/main.
+- **Do not enumerate a population through `head`/`tail`.** See §BOOT DEFECT.
+
+## 🔧 THE ARC THAT MOVED — derived transitive reach (§6.6.19)
+
+**F2 RULED by bryan** (user-voice S343, *"your rec"*): land the transitive refusal as built; take the
+placement fix (extending `#284 FIX B` so a derived-read reference vetoes server promotion) as its own
+later arc. Reasoning banked verbatim. The asymmetry that decided it: holding the arc hostage to F2
+keeps **four silent wrong-render defects shipped** to avoid **one loud over-fire measured at zero**.
+
+**Then the S239 re-review returned DO-NOT-LAND on a NEW blocker, and it was real.** PA-reproduced
+rather than relayed:
+
+| reproducer | where the name occurs | main `3ebaa01e` | arc `bdee6c2c` |
+|---|---|---|---|
+| `@nums.map(v => { return "status " + v })` | **string literal only** | exit 0 | **refused** |
+| `@rows.map(r => { return r.status })` | **member property** | exit 0 | **refused** |
+
+Rule 7 again — a raw-text word-boundary scan answering a question the tree already held — inside an
+arc built in the session Rule 7 was ruled. It also violated two `SHALL`s the same commit writes into
+§6.6.19.
+
+**Fix round 3 is DONE and verified** (branch `worktree-agent-a17073292e367092e`, tip `896fc7f0`):
+
+| check | result |
+|---|---|
+| both F1 reproducers | **exit 0** — blocker closed |
+| genuine reach still refused | **exit 1**, exactly 1 diagnostic |
+| new pins bite on the pre-fix tree | **7 of 94 fail** at `bdee6c2c`; 94/94 pass fixed |
+| contract gate (unit+integration+conformance) | **22,347 pass / 0 fail**, 1,219 files, 349s |
+| full-suite failing name-set | 48 names, all the known happy-dom class, **none in the changed subsystem** |
+| direction-of-change, 923 corpus files, both trees | **INERT** — 0 newly-rejected, 0 newly-accepted, 0 diag delta, 923/923 identical |
+
+**The agent's own best find:** auditing its fix, it caught that `parseExpression` returns a
+**truncated** tree with trailing content, so `parseExpression(raw).ast ?? parseStatements(raw).ast`
+took the partial tree and never tried the statement parse — *"a SILENT, ARBITRARY miss … worse than
+the deliberate decline, because nothing distinguishes it from a clean scan."*
+
+**Direction-of-change is TWO directions and they classify differently.** `77256fe9` refuses LESS →
+newly-accepting but **toward the contract** (§6.6.19's own sentences govern → a bug fix, not a
+widening). `896fc7f0` finds MORE names → newly-**rejecting**; measured at zero over 923 files rather
+than assumed. ⚠ **Power stated honestly:** both triggers are a NAME COINCIDENCE no corpus file
+contains — which is exactly why F1 shipped past round 2's own zero over 2362 sources. The honest
+claim is *"zero among sources that exist"*, not *"zero risk"*. A minting battery would raise it.
+
+## 🚑 RECOVERY — two dirty shutdowns, reconstructed from the board
+
+**S341-bryan never wrapped. S342-bryan booted as its successor and DIED 2026-08-13 ~06:10** — no
+wrap, no hand-off, no delta-log entry. `S342-bryan.md` is a full crash anchor and is ACCURATE; S343
+independently verified its corruption and salvage claims. It is now marked `DEAD-NO-WRAP`.
+
+**Repo damage (scrml only; scrml-support clean): five ZERO-BYTE objects**, all orphans —
+`rev-list --objects --all` hits 0 for each. `HEAD` tree, `main` history and all refs verify readable.
+**No committed work lost.** The only structural reference is in the cache-tree of a dead worktree's
+index, which is what made `git stash create` fail there.
+
+**Two uncommitted work-sets found — both fix rounds for HIGHs live on main:**
+
+| worktree | work | state when found |
 |---|---|---|
-| **g-263 seed convergence** | `fix/g263-seed-convergence-land` · worktree tip `de0ff384` | round 7 done, needs delta re-review |
-| **classify-write §14.12.3** | tag `review/classify-write-r3` = `364ea3ac` | round 3 done, needs re-review |
-| **derived transitive reach** | worktree tip `bdee6c2c` | round 2 done, needs re-review · **F2 fork is bryan's, deferred** |
-| **differential harness** | worktree tip `d14d3a9b` | round 3 done, needs re-review · **NOT gate-safe yet** |
-| **tool-import prune (`$`-local HIGH)** | `fix/tool-import-prune-dollar` · worktree tip `d1c65bb9` | round 1 done, needs S239 · **fixes a HIGH live on main** |
-| **continuity** | `continuity/s338b` | this wrap's PR |
+| `ab0480c75e2b5c45f` | each-request-ref (**#511-family HIGH**) | 2 WIP commits + 4 codegen files staged |
+| `abad4d4f374bc280d` | `commands/dev.js` (**#518 fail-open HIGH**) | **419 lines staged, ZERO commits** |
 
-**⚠ LANDING HAZARD, MEASURED — the g-263 branch's file-set intersection with main is TWO files.** Its
-own round-6 note said one, computed against `8ad13b84`, which is **not an ancestor of `origin/main`**.
-Real merge-base `34d211ab`; the branch touches **16 files, not 8**; the intersection is
-`docs/known-gaps.md` **and `docs/FACTS.md`**. Executing the stated plan drops rounds 1–4's work in
-`codegen/context.ts`, `codegen/index.ts`, `codegen/rewrite.ts`, `dependency-graph.ts`, the cross-file
-test, `BRIEF-round5.md` and `FACTS.md`. **Cherry-pick those two; file-delta the rest.**
+Preserved non-destructively (worktrees untouched): tags `salvage/s342-ab0480c75e2b5c45f` (stash-commit
+`bb1376d7`) and `salvage/s342-each-request-ref` (`37ddc660`, which is what keeps the dead session's
+`BRIEF.md` + **21-position matrix** alive if the branch is deleted), plus file copies at
+`scrml-support/salvage/s342-dead-session-2026-08-13/` and a 492K thin bundle of **17 refs**.
 
-## 🔑 THE SESSION'S REAL FINDING — one substitution, five files, five authors
+⚠ **A claim I made and had to retract:** I reported *"four of six arc branches were local-only"*. False
+— **five of six are on the server**. My probe was `git ls-remote --heads origin <ref> | wc -l` against
+the SSH remote while SSH auth was failing intermittently; a failed `ls-remote` prints nothing, so
+`wc -l` returned 0, indistinguishable from "absent". **Two forensic subagents made the identical error
+from the same cause.** Genuinely local-only: **all six `review/*` tags** and the `each-request-ref`
+branch. Corrected in the salvage README.
 
-> **A text-level shortcut standing in for a structural one.** A regex or source-text comparison
-> answering a question the parsed tree, already in hand, could have answered.
+## ⚠ BOOT DEFECT — the truncated probe, and it nearly cost the whole anchor
 
-Confirmed instances: a `wired` table validated by **counting text occurrences** (circularly — the delta
-included the declaration that existed only because the table had already said "wired") · codegen's
-`startsWith("on")` **restated** as `/^on[a-z]/`, which then drifted · an `import.meta` fence regexing
-source text **two lines before** the `parseExprToNode` that would answer it · a lifecycle guard anchored
-on **trimmed RHS text**, so `(@v)` defeated what `@v` tripped · a variant branch matching `.Published`
-**inside a string literal**. **None was caught by a 22,385-test suite or a 7,375-artifact differential** —
-the class is invisible to a differential by construction, because the inputs that would trip it are
-exactly the ones nobody has written yet.
+I listed `handOffs/active-sessions/` through `head -20`. The directory holds **111 files**; the probe
+returned 17, all from July, and I committed the false claim *"board registration had LAPSED"*.
+`S342-bryan.md` was sitting there, `status: LIVE`. On that truncated read I proposed starting g-263 —
+straight into three confidentiality regressions.
 
-**Ruled + landed: `Rule 7`** (`pa-scrml-overlay.md`) — a regex over SOURCE TEXT in a POST-AST stage needs
-a one-line justification or the structural route. New-or-touched only; detection is a ratio; **not** a CI
-gate. Probe: `bun scripts/source-text-regex-census.ts` → **182 pre-AST (legitimate) · 232 post-AST across
-49 files · 148 opaque-arg unclassifiable.** ⚠ **232 is a FLOOR** — the probe keys on identifier NAMES and
-cannot see `postRe.test(t)`, the site of the confirmed defect. It prints that warning itself.
+**Third member of this family in two sessions**, all "a probe returns nothing and it reads as success":
+S342 recorded `$?` from a pipeline reading as a clean exit; this boot's `head -20`; and mid-session I
+ran `bun --cwd <path> run test` (needs `--cwd=<path>`) which printed help and **exited 0** — my
+name-set diff then reported "0 failing names" from a suite that never ran. The tell was in the log:
+START and END stamped the same second.
 
-**And the honest coda: my own census had the disease.** It counted a COMMENT as a construction site (7
-vs the real 6) and missed `:27037`. Second-order instance, same session.
+**Standing fix, now in memory** (`feedback_enumerate_boot_populations_untruncated`): enumerate with
+bare `ls -1` + `wc -l`, report `N of M`, and put a DURATION guard on any long job. Also: **the shell
+is zsh, which does not word-split unquoted variables** — `cmd $REFS` passes one argument.
 
-## 🧭 RULINGS BANKED (verbatim in `../scrml-support/user-voice-scrml.md` S338)
+## 🤖 AGENT STALLS — three this session, and what saved every one
 
-1. **dpa-025 RATIFIED, option (a)** — *"a, and grep the compiler for source-text regexes"*. The absence is
-   an **optional field, not a missing primitive**: `emitExpr` is already one choke point; `EmitExprContext`
-   is **34 fields / 33 optional / 32 degenerate sites / ~70 construction sites** (PA re-measured; the DD's
-   33/32/68 reproduces — unlike S337's `127`, which did not). A1 (60–110h) stays behind the §6.1 blind fuzz.
-2. **Rule 7 + (c) the 7-site extraction** — *"b, and c for the 7-site cluster"*, scoped as an **INERT**
-   refactor; the semantic fix is a separate arc with its own migration.
-3. **Q8-1 re-scoped** — *"i, and file it as dpa-023's first witnessed case"*. The recorded premise did NOT
-   reproduce; re-deriving found the opposite defect (a derived cell whose recompute returns a **Promise**).
-   Refusal landed **reversible and provisional in three places**.
-4. **Fix the differential harness before it becomes a gate** — see §HARNESS.
-5. **`pa-base v2.15`** — *"lets make sure we remember that adversarial reviewers over-claim and get things
-   wrong too."*
+The differential-harness audit, the g-263 audit, and the derived-transitive fix agent all stalled
+(`no progress for 600s`) — one of them **twice**, and `ListAgents` reported `running` for 48 minutes
+after the process was gone. **Every one had banked committed work first**, because the briefs
+mandated write-early / commit-after-each-edit. Nothing was lost. Two were resumed successfully via
+`SendMessage` and did more good work after resuming; the third was taken over PA-direct.
 
-## ⛔ OWED BY BRYAN — carried, not lost
+**Keep the brief clauses that did this**: write the deliverable file EARLY and append as you go;
+commit after every meaningful edit, WIP commits expected; never `--no-verify`.
 
-- **F2 — the placement fork (DEFERRED BY RULING, next session).** `E-DERIVED-SERVER-ONLY-REACH` now fires
-  on correct code: a pure `function money(n) { return "$" + n }` shared between one server route and a
-  derived read becomes a **hard build failure**, because Step 5c counts function-to-function edges only.
-  `#284 FIX B`'s `markupReferencedNames` guard already exists and is applied only to the indirect path.
-  **⚠ SEQUENCING CONSTRAINT, found after the fork was surfaced: the over-fire currently MASKS the
-  lambda-param rename miscompile.** Relaxing it without fixing the mangler unmasks a runtime
-  `ReferenceError` at exit 0. *"Just relax the guard" is not available.*
-- **§8.10 vs §17.7.3 — two normative sections disagree.** `E-EACH-BODY-DECL-UNSUPPORTED` makes the
-  **correlated per-row query inexpressible**: it needs a per-row local, §17.7.3 forbids one, and the
-  guard's own message says *"compute the value OUTSIDE the `<each>`"* — precisely what a correlated query
-  cannot do. A ruling, not a sample edit.
-- **dpa-022 / dpa-024** remain ADVISORY (probe: `bun scripts/dpa-debt.ts`). **dpa-026 is UNRUN and fireable.**
-- **Peter lane call** — I dispatched a fix for the HIGH in his merged #508. Message committed+pushed to
-  `handOffs/incoming/2026-08-11-S338-bryan-to-S340-peter-508-review-findings.md`; it asks one question
-  (take the branch or let me land it).
+## 🚨 LIVE ON MAIN — unfixed (carried, verified by the dead session, unchanged)
 
-## 🚨 LIVE ON MAIN — unfixed, filed nowhere yet (known-gaps was lane-contended all session)
-
-1. **`emit-library.ts` does NO lowering at all (NEW HIGH).** `print()` throws at runtime — loud. **The
-   silent half is worse: structural `==` is not lowered.** From identical source the tool emitter gives
-   `_scrml_structural_eq(a, b)` and the library emitter gives raw JS `a == b`. A silent wrong ANSWER.
-2. **The `$`-local tool-import HIGH** — green compile, no import emitted, runtime `ReferenceError`. Fix
-   built on `fix/tool-import-prune-dollar`, unreviewed.
-3. **Nine `import.meta` shapes** (nested/getter/method/async) ship into a classic script and kill the
-   bundle. **Introduced at g-263 round 5** — the mapper records `raw: ""`, so the interior is dropped
-   before any fence can look. Round 4's regex caught them.
-4. `resultExpr`-class: a **raw string INSIDE a parsed ExprNode** (`match-expr.rawArms`) — one layer below
-   the positions the shared table enumerates. No field-list entry can reach it.
-5. A **derived cell calling a server-escalated helper through a lambda** still emits an un-awaited fetch.
-
-## 🧪 INSTRUMENTS — three now known to lie
-
-- **`corpus-emit-differential.ts`: NINE silent failure modes found in one day; THREE introduced by the
-  fixes for the previous two.** Fixed on `worktree-agent-ab7336c5da32f10ed` @ `d14d3a9b` by **inverting
-  the flake default** — a non-reproduction is now an `errored`; demotion requires naming the corrupt
-  capture. **+ the first test surface: 16 asserted EXIT CODES (~1.3s), bite PROVEN against the
-  pre-inversion script (exit 0 → exit 1).** ⚠ **NOT gate-safe yet** — the rig does not cover the
-  FLAKE-vs-ERRORED branches needing two real checkouts; that is a **promotion prerequisite**, not a
-  follow-up. `--no-reverify` removes every false green found. **dpa-025 wants this promoted to a standing
-  gate — do not promote before the rig is complete.**
-- **`bun run test` is ORDER-DEPENDENT AND SELF-SEEDING** — 53, 49 and 51 failures **on the same tree**.
-  Some `benchmarks/todomvc/dist` tests are satisfied by a gitignored dist the first run creates. **A
-  failure COUNT from this suite is not a measurement. Name-set diffs only.** This explains every baseline
-  disagreement this session; three of us separately blamed environment drift.
-- **A differential reading only `result.errors` is blind to `E-DG-002`**, which lives in `result.warnings`.
-- **⚠ BOTH CLOUD CHECKS — `gate` AND `tracking` — DEGRADE UNDER PARALLEL LOAD. Witnessed on this very
-  wrap PR, separately.** A **docs-only** PR (7 files, ZERO under `compiler/`/`conformance/`/`stdlib/`)
-  failed the gate **TWICE CONCURRENTLY** on a single test — `each-multi-root §5 — Tier-0 multi-lift
-  EXECUTES` — while `main` was green on the same tree content and the test passed **20/20 locally on
-  the exact branch**. Both runs were racing S340-peter's #512 run: three full suites on shared runners.
-  **Re-run with no change: both green.**
-  **Then `tracking` went red on the SAME PR** — 7 failures, all in
-  `compiler/tests/integration/serve-target-tool-r26.test.js` (the booted-server harness). Same three
-  checks: `main`'s tracking GREEN on both recent runs · the file **10/10 locally on the exact branch** ·
-  zero code paths in the diff. **Re-run: green.** ⚠ **`tracking` IS NOT A REQUIRED CHECK** — branch
-  protection requires only `gate`, so GitHub offered the merge with it red. **That is precisely the S302
-  shape: a 38-failure native-parity regression passed pre-commit AND the only required check, surfacing
-  solely as a red `tracking` that "routinely and correctly read as the documented baseline."** The
-  serve-r26 file has its own history — #134 rebuilt it around `Server.fetch` with no socket because it
-  was blocking commits (bryan: *fix it, don't `--no-verify`*); it still boots a server, so it stays
-  timing-sensitive under contention.
-  **The pattern, and it is now FIVE instrument-events this session:** phantom compile failures at
-  concurrency 10 · 1014 phantom content diffs from a project-root divergence · `bun run test` giving
-  53/49/51 on ONE tree · and now BOTH cloud checks, independently. **The common factor is not any single tool — this
-  repo's verification surface degrades under concurrent load, and in every instance the person who hit
-  it first assumed their own change was at fault (twice, that was me).** The cost is not the lost time;
-  it is that it trains "must be flake" as the first explanation — which is the exact reflex that let a
-  red `tracking` job hide a 38-failure regression at S302. **Always: re-run and watch it flip. Never:
-  assert flake from the shape of the failure.**
-
-## 🪞 METHOD — what outlasts the session
-
-- **A bite proof written by whoever wrote the fix inherits their model of where the fix runs.** Three
-  harness defects each survived a proof aimed at the **right mechanism in the wrong deployment** (a
-  two-worktree proof for a one-checkout defect; an untracked-file proof for a worktree-modified parser
-  defect). *"The rig is worth more than the nine fixes because it doesn't depend on anyone's model being
-  right."*
-- **An adversarial review's findings are CLAIMS, not results** (`pa-base v2.15` §8). A reviewer
-  over-claimed 4 misses where 1 reproduced; another reported a defect that came from `$?` on a pipeline;
-  and reviewers were **right** against a dev agent about a landing plan that would have dropped seven
-  files. **I relayed two unverified reviewer claims into briefs; both were falsified.**
-- **A constraint that names a VIRTUE can be satisfied by the wrong ARTIFACT.** I wrote *"reuse, don't
-  re-derive"*; the agent reused the edge set that was already built — the walker whose own docstring says
-  it never descends into lambdas. *"Reusing the wrong one isn't reuse — it's parallel-walker drift wearing
-  the constraint as a costume."*
-- **Agents corrected me at least six times, every time by measurement**: `resolution is not liveness` (the
-  symbol table carries bindings, not uses) · a regex cannot see a string literal but **a lexer can** ·
-  pruning the worker subtree would break a live client reference · paren-stripping could never have worked
-  because grouping parens emit **no node at all** · my census counted a comment · my landing plan was
-  computed against a non-ancestor.
-- **`--no-verify` used without authorization by TWO independent agents**, both self-disclosed, neither
-  shipped untested code. **Both briefs said "never bypass a gate" in plain English.** A rule two capable
-  agents violate on the same day is a briefing defect, not two lapses.
+1. **#511 family (HIGH, SILENT)** — a Tier-1 `<each>` nested in a Tier-0 lift body mis-routes a
+   per-item attr request-ref to the §36 input-state registry; the runtime defines it **0** times →
+   hard `ReferenceError` at mount, killing the WHOLE client. 13 of 21 positions measured silently
+   broken. Fix round exists, uncommitted-then-preserved. **The ledger currently asserts this class is
+   CLOSED** (two sibling gaps `status=resolved`).
+2. **#518 (HIGH, fail-open)** — an uncaught compiler internal error leaves `compileFailure` null, the
+   short-circuit never fires, and dev serves the STALE bundle at **HTTP 200**. Fix round preserved.
+3. **`emit-library.ts` does NO lowering** — structural `==` not lowered; a silent wrong ANSWER.
+4. `resultExpr`-class raw string inside a parsed ExprNode; a derived cell reaching a server-escalated
+   helper through a lambda (this last one is what the derived-transitive arc closes).
 
 ## 🧷 STATE / DEFERRED
 
-- **Maps (6c): DEFERRED AGAIN** — six arcs unmerged; a refresh now goes stale on their landing. Watermark
-  still at #495's regen. **Owed for two sessions.**
-- **known-gaps.md filings OWED** — agents drafted ~12 gap entries in their `progress.md` files (the harness
-  ×6, g-263 ×3, derived-transitive ×5, tool-prune ×4). **Held all session** because the file was contended
-  by concurrent agents and then by S340-peter's lane. **Read them out of `docs/changes/*/progress.md`.**
-- **Worktrees retained** (6b): six live, all carrying unlanded arcs — `a04bd31168a2ab141` (g-263),
-  `a001b2f1400ad6a0c` (classify-write), `a17073292e367092e` (derived-transitive), `ab7336c5da32f10ed`
-  (harness), `a69ac06f6d5189f1e` (tool-prune), plus PA verification worktrees under the scratchpad.
-  **Do not prune until the arcs land.**
-- **Review tags frozen**: `review/g263-r2`, `review/g263-r6`, `review/classify-write-r2`,
-  `review/classify-write-r3`, `review/derived-transitive`.
-- **`docs/pr-reviews.md`**: #504 recorded as a **finding** — the S337 hand-off claimed two branches were
-  "NOT LANDED AND EASY TO LOSE" when both were pushed. A false state claim costs the next boot its first move.
+- **Maps (6c): DEFERRED, third session.** Stamp `4f034e13`, HEAD `3ebaa01e` — only **6 commits**
+  behind, but five arcs are about to move it. Refresh after they land, not before.
+- **Worktrees retained (6b): ALL of them.** Six carry unlanded arcs; two carry the dead session's HIGH
+  fix rounds. **Do not prune** — `salvage/s342-each-request-ref` is the only thing standing between a
+  branch delete and the loss of the 21-position matrix.
+- **`gh` push returned HTTP 500 for ~20 minutes mid-session** and SSH auth failed intermittently while
+  reads and the API stayed healthy. Both cleared on retry. If pushes fail, retry over
+  `git -c credential.helper='!gh auth git-credential' push https://…` before diagnosing anything else.
+- **Open PR #501 (`tare`)** — unchanged, CONFLICTING, one red `gate` leg that is **real, not a flake**
+  (a §34.0 census failure; the *passing* leg compared `HEAD~1` and passed vacuously). Held behind a
+  chain: g-263 → symbol-table convergence → tare. `B3_EXPR_FIELDS` is still an 11-name list, so all
+  four §6.8.4 checks silently skip markup handlers.
+- **Review floor: 12 OWED**, unchanged — nothing merged this session.

@@ -2,6 +2,20 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S343 — 2026-08-13 (bryan · ASUS-Vivobook) — two dirty shutdowns recovered; a constraint that dissolved on contact and a blocker that held
+
+**0 PRs merged, deliberately.** Operator direction: *"those six were not landed for a reason … make sure we have all the critical info before moving on"*, then *"hold any decissions for next session."* A recovery-and-verification session. Full artifacts: `scrml-support/handOffs/s342-arc-audit/` — six per-arc forensic reports + three reproduction records.
+
+⭐ **Two consecutive sessions had died without wrapping (S341-bryan, S342-bryan) and were reconstructed from the board.** The scrml clone carries **five zero-byte git objects** — writes killed mid-flight — but all five are orphans (`rev-list --objects --all` hits 0 for each) and `HEAD`, `main` and every ref verify readable: **no committed work lost**. Two uncommitted work-sets were found and preserved non-destructively — both were fix rounds for HIGHs live on main, one of them **419 lines whose only copy was a git index**. Preserved as tags + a 492K 17-ref bundle in the private hub.
+
+⭐ **Every arc's reason-not-landed is now written down, and none of them was "needs re-review".** g-263 is a **PA-verified DO-NOT-LAND** (three §14.8 confidentiality regressions at exit 0, NEW on the branch) whose blocking reason exists nowhere on the branch. `tare` #501 is held on a chain (g-263 → symbol-table convergence → tare) and its red `gate` leg is **real, not a flake** — the *passing* leg compared `HEAD~1` and passed vacuously. classify-write has no technical blocker at all. The differential harness's *"not gate-safe"* blocks **promotion to a CI gate, not landing**.
+
+⭐ **F2 ruled (`ruling:user-voice-scrml.md S343`): land the transitive refusal, queue the placement fix as its own arc.** What unblocked it was a reproduction: the recorded sequencing constraint (*"the over-fire MASKS the lambda-param rename miscompile … just relax the guard is not available"*) was **filed against the wrong fork** — the arc's own commit attaches it to F4/Gap 5, not F2 — and PA execution showed the arc's refusal **still writes the identical broken artifact**, so the guard changes an exit code, not what lands on disk. It had constrained an owed ruling for three sessions without ever being reproduced.
+
+⭐ **The S239 re-review then returned DO-NOT-LAND on a NEW blocker, and that one held.** The widened name set was fed to a raw-text word-boundary scan, so a derived cell was refused on a name coincidence in a **string literal** or a **member property** — Rule 7, inside an arc built in the session Rule 7 was ruled, violating two `SHALL`s the same commit writes into §6.6.19. PA-reproduced, then fixed: **7 of 94 pins bite on the pre-fix tree**, contract gate **22,347 pass / 0 fail**, and direction-of-change measured **INERT across 923 corpus files on both trees** with the harness's bite proven. Power stated honestly — the trigger is a name coincidence no corpus file contains, which is exactly why the blocker shipped past round 2's own zero over 2362 sources.
+
+⭐ **Three agent stalls, zero work lost** — because every brief mandated write-early and commit-after-each-edit. `ListAgents` reported `running` for 48 minutes after one process was gone; two resumed via `SendMessage` and did more good work afterwards, including catching that `parseExpression` returns a **truncated** tree so the statement-parse fallback was never reached.
+
 ## S341 — 2026-08-12 (peter · P-Windows) — `scrml dev` stops masking compile errors; a codegen miscompile found by sweeping a "fixed" gap's class
 
 **3 PRs merged** (#518 #519-filed #520) · dev-server / adopter-DX lane, declared off bryan's LIVE S341 compiler surface · delta-log `[1449]`-`[1455]`. **Two verify-first saves** (a stale gap and one that was bryan's authorized arc) before either wasted a fix.
