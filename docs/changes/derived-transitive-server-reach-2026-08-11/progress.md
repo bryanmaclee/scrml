@@ -545,3 +545,78 @@ the diagnostic, never placement.
 
 Full pre-commit gate at final HEAD: **28705 pass / 0 fail / 86 skip.** The gate ran green on every
 landed round-2 commit. No `--no-verify` in round 2.
+
+---
+
+# ROUND 3 — the F1 blocker: limb (b) refuses on a NAME COINCIDENCE
+
+Dispatched S343 after the PA independently reproduced the reviewer's DO-NOT-LAND finding on
+`bdee6c2c`. One blocker, contained fix. Scope: limb (b)'s name-set delivery path only. Explicitly
+out of scope and NOT touched: the F2 placement over-fire (operator-RULED to ship as-is), the Gap 5
+lambda-parameter shadow fork, and §6.6.19's normative text.
+
+## Startup
+
+Worktree `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a17073292e367092e`, branch
+`worktree-agent-a17073292e367092e`, HEAD `bdee6c2c`, tree clean, `bun install` no-op (217 installs
+already present). All four gates green before any edit.
+
+## Reproduced, then LOCATED — the hypothesis held but needed refining
+
+Both PA reproducers fire on this tree and are clean on `main` (`3ebaa01e`):
+
+| reproducer | ARC `bdee6c2c` | MAIN `3ebaa01e` |
+|---|---|---|
+| `@nums.map(v => { return "status " + v })` | EXIT 1, `E-DERIVED-SERVER-ONLY-REACH` | EXIT 0 |
+| `@rows.map(r => { return r.status })`      | EXIT 1, `E-DERIVED-SERVER-ONLY-REACH` | EXIT 0 |
+
+The brief named `scanRaw` + the limb-(b) call site around Step 5c-ter. Traced by dumping the real
+parsed `state-decl` for each reproducer. **The locus HELD, with two refinements that change the fix.**
+
+### Refinement 1 — the raw branch is not a rare fallback, it is the COMMON path
+
+The brief's premise (echoed by the scanner's own docblock) is that `.raw` covers "escape-hatch
+bodies … an `if`-expression in a derived RHS". Measured: a **block-bodied arrow** — the single most
+ordinary derived-cell RHS shape in scrml — is ALSO an `escape-hatch`:
+
+```
+RHS "[@pw].map((s) => doHash(s))"            escapeHatches=0   <- expression body: STRUCTURAL
+RHS "[@pw].map(s => { return doHash(s) })"   escapeHatches=1   <- ArrowFunctionExpression, raw text
+RHS "@rows.map(r => r.status)"               escapeHatches=0   <- clean on both compilers
+RHS "@rows.map(r => { return r.status })"    escapeHatches=1   <- FIRES on the arc
+RHS "if @pw { doHash(@pw) } else { \"x\" }"  escapeHatches=1   <- ParseError: genuinely unparseable
+```
+
+So `nativeKind` splits the escape-hatches into two classes the code was treating as one:
+`ArrowFunctionExpression` (**the native parse SUCCEEDED**; the scrml expression-parser simply did not
+lower a block body to scrml expr nodes) versus `ParseError` (**the native parse FAILED**). Only the
+second is "the RHS does not parse". The reviewer's confirming evidence — that the identical member
+access is clean in a parseable RHS — is exactly this split.
+
+### Refinement 2 — there are TWO raw-scan sites in limb (b), not one, and BOTH are defective
+
+`computeServerReachingFns` builds the hop EDGE SET with the same scanner, over each function body,
+with `live` = every same-file function name. Same coincidence, one level up. Reproduced (both EXIT 0
+on `main`, both EXIT 1 on the arc):
+
+```
+function status(p) { return hashPassword(p) }
+function label(v)  { return [v].map(x => { return "status " + x })[0] }   // string literal only
+const <labels> = label(1)
+   -> ARC: "reaches `label` … const <labels> -> label -> status"
+
+function label(rows) { return rows.map(r => { return r.status })[0] }     // member property
+const <sts> = label(@rows)
+   -> ARC: same refusal
+```
+
+`serverReach` is consumed ONLY by limb (b) (`computeServerReachingFns` has exactly one call site), so
+this site is inside the brief's scope and fixing one without the other would leave the blocker half
+open.
+
+## Pre-change full-suite baseline (NAME-set, not a count)
+
+`bun run test` at `bdee6c2c`: **29959 pass / 49 fail / 216 skip / 1 todo**, 30225 tests, 1350 files.
+All 49 are the known order-dependent happy-dom/browser class (transition directives, region-swap
+rehydration, engine-gated `<each>`, `bind:value`, navigate-wave1c). Zero touch route inference.
+Name-set saved for the post-change diff.
