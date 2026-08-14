@@ -31,10 +31,16 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 26 |
-| MED | 119 |
+| MED | 121 |
 | LOW | 60 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-request-ref-in-lift-event-handler-attr-misroute — a `<#request>`-leading event-handler attr (e.g. `onclick=${<#profile>.reload()}`) inside a `${for…lift}` (and at top-level) mis-routes to the §36 input-state registry instead of `_scrml_request_<id>` → `undefined.data` at click, SILENT at exit 0 — `NEW S344-peter (S239 review-floor #511/#512; the one attr-value site left unpatched after the value/bool/class/if/show family was fixed); MED; PRE-EXISTING (reproduces at the #511/#512 parents and at top-level — not a #511/#512 regression); sibling of [[g-request-is-some-in-each-loop-attr-misroute]]`
+<!-- @gap id=g-request-ref-in-lift-event-handler-attr-misroute sev=MED status=open locus=compiler/src/codegen/emit-lift.js:1684 prov=rationale:the-event-handler-onevent-addEventListener-attr-value-path-emits-via-emitExprField-or-rewriteExprArrowBody-WITHOUT-the-reparseLiftAttrRequestRef-applied-at-the-if-1448-classNAME-1530-and-setAttribute-1713-sites-so-a-request-ref-leading-handler-routes-to-_scrml_input_state_registry-which-a-request-never-populates-reproduces-at-top-level-too-whole-compiler-not-loop-specific -->
+
+### g-source-text-regex-census-crossos-separator-misclassifies-preast — `scripts/source-text-regex-census.ts` PRE_AST_MARKERS are written with `/` but matched against OS-separator paths, so on a Windows checkout `commands\migrate` (27 hits) + `commands\promote` (2) misclassify POST-AST — the instrument's headline is OS-dependent (261/51 on Windows vs 232/49 on the authority host, ~12.5% inflation) and misdirects a Windows reader toward "fixing" regexes the rule declares correct; full absolute Windows paths also leak into the default output — `NEW S344-peter (S239 review-floor #507); MED; fix = normalize rel.split(sep).join("/") before marker-match + strip; @route:bryan (his instrument, review floor is detection not fixing)`
+<!-- @gap id=g-source-text-regex-census-crossos-separator-misclassifies-preast sev=MED status=open locus=scripts/source-text-regex-census.ts:65 prov=rationale:PRE_AST_MARKERS-use-forward-slash-commands-migrate-commands-promote-native-parser-matched-via-rel-includes-against-join-built-OS-sep-paths-and-the-rel-strip-line99-hardcodes-slash-so-on-windows-rel-stays-the-full-backslash-abs-path-markers-never-match-migrate-27-plus-promote-2-move-into-postAst-headline-261-51-windows-vs-232-49-linux-authority-host -->
 
 ### g-request-is-some-in-each-loop-attr-misroute — a `<#request>` is-some inside a per-item `<each>`/`<for>` body attribute mis-routes to the §36 input-state registry (SILENT MISCOMPILE → runtime crash) — `NEW S333-peter (S239 round-3 review; sibling of g-request-is-some-in-value-bool-class-attr surfaced while narrowing that fix); MED; resolved S340-peter`
 <!-- @gap id=g-request-is-some-in-each-loop-attr-misroute sev=MED status=resolved locus=compiler/src/codegen/emit-each.ts:1893 prov=rationale:the-per-item-renderTemplateAttrToJs-lowering-lowerEachExpr-rewriteIterValueExpr-does-not-thread-requestIds-so-a-request-ref-in-an-each-body-attribute-routes-to-_scrml_input_state_registry-which-a-request-never-populates -->

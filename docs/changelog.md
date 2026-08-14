@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S344 — 2026-08-13 (peter · P-Tech1 Windows) — the 13-deep review floor drained to zero; the floor retroactively caught two HIGHs its own landing review missed
+
+**Review-floor session, orthogonal to bryan's held work.** Ran the S239 adversarial floor over the 13 owed merged PRs (#507–#522): 8 code-bearing PRs got independent worktree-isolated adversarial reviews (every finding PA-groundtruthed by recompiling / executing emitted output); 5 were file-set-verified carve-outs. Landed as PR #523 (gate green). `review-debt`: **128 in scope / 128 recorded / 0 OWED.** Docs-only; gap counts MED 119→121. Bryan's four owed items and the g-263 DO-NOT-LAND were left untouched (disjoint lane).
+
+⭐ **The floor justified itself on #508.** PR #508-as-merged shipped **two HIGH silent-miscompiles its own landing review shipped past** — a `body[0]`-only each-body-decl guard (a decl at `body[1]`, or `var`/`~`, emitted a dangling `String(nm)` at exit 0 with zero diagnostics → the list renders empty) and a `\b`-word-boundary tool-import prune that dropped any `$`-prefixed import local (runtime `ReferenceError`). Both were already remediated on HEAD by the #515/#516 follow-ups — the floor confirmed the S329 lesson retroactively.
+
+- **#507 (finding)** — bryan's `scripts/source-text-regex-census.ts` has a cross-OS separator bug: `PRE_AST_MARKERS` are written with `/` but matched against OS-separator paths, so on a Windows checkout `commands\migrate`(27)+`promote`(2) misclassify POST-AST and the headline is OS-dependent (261/51 vs the authority host's 232/49). Filed `g-source-text-regex-census-crossos-separator-misclassifies-preast` (MED); one-line fix routed to bryan's inbox (his instrument — the floor is detection, not fixing).
+- **#508 (finding)** — the two HIGHs above; both already fixed on HEAD.
+- **#512 (finding)** — the shipped for-lift request-ref fix is correct, but the PR body's "event-handler all correct / completes the class" claim is falsified: a `<#req>`-leading event-handler in a lift misroutes to the §36 registry (`emit-lift.js:1684`, the one attr-value site the reparse patch missed). Filed `g-request-ref-in-lift-event-handler-attr-misroute` (MED, pre-existing, whole-compiler).
+- **#510 / #511 / #515 / #516 / #518** — clean (falsified across compile-diffs, executed emitted tools, and full silent-hole enumeration).
+- **#513 / #514 / #520 / #521 / #522** — carve-out (file-sets verified; #522's checkable state-claim held; #514's maps are project-mapper-generated).
+
 ## S343 — 2026-08-13 (bryan · ASUS-Vivobook) — two dirty shutdowns recovered; a constraint that dissolved on contact and a blocker that held
 
 **0 PRs merged, deliberately.** Operator direction: *"those six were not landed for a reason … make sure we have all the critical info before moving on"*, then *"hold any decissions for next session."* A recovery-and-verification session. Full artifacts: `scrml-support/handOffs/s342-arc-audit/` — six per-arc forensic reports + three reproduction records.

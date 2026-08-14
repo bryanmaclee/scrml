@@ -15,6 +15,15 @@ This session is a **recovery and verification** session, not a landing one.
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
+**S344-peter UPDATE (2026-08-13) — the review floor is DRAINED; bryan's four owed items below are UNTOUCHED and still stand.** S344 was an orthogonal review-floor session: the 13-deep floor (#507–#522) is now at **0 OWED** (PR #523, gate green → merged; docs-only). It touched no compiler code and none of bryan's held arcs. Three findings, all pre-existing, filed as gaps — **two of them are open MED and are the only new actionable items this session added:**
+- `g-source-text-regex-census-crossos-separator-misclassifies-preast` (MED, `scripts/source-text-regex-census.ts:65`) — bryan's census instrument reports an OS-dependent number on Windows; **one-line fix, routed to bryan's inbox** (`handOffs/incoming/`), his instrument.
+- `g-request-ref-in-lift-event-handler-attr-misroute` (MED, `emit-lift.js:1684`) — the one attr-value site the #511/#512 reparse patch missed; whole-compiler, reproduces at top-level.
+- #508 was found to have shipped two HIGH silent-miscompiles its landing review missed — **already remediated by #515/#516**, no action needed.
+
+Everything below is bryan's S343 handshake, carried forward verbatim — **still the substantive next-session agenda.**
+
+---
+
 **Nothing is blocked on machinery. Four things are blocked on bryan.** Every arc is now audited,
 every reason-not-landed is written down, and the one arc that was ready has had its blocker found,
 fixed and measured. Read `../scrml-support/handOffs/s342-arc-audit/` — six per-arc forensic reports
