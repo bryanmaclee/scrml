@@ -2254,12 +2254,18 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // Close `function _scrml_boot()` + the boot dispatch + the IIFE (navigate-wave1c
   // — see the opening comment). An injected route chunk (`_scrml_chunk_loading`)
   // boots now; an initial load defers to DOMContentLoaded (unchanged).
+  //
+  // `{ once: true }` (S345 gate-boot-listener-fix): DOMContentLoaded fires exactly
+  // once per real document, so `once` is production-identical — it exists to
+  // auto-remove the listener so a document that outlives the chunk (soft-nav'd
+  // page, shared test document) cannot re-fire a stale boot whose selectors
+  // resolve onto a LATER chunk's nodes (the S345 cross-file gate red).
   lines.push("}");
   lines.push('if (typeof document === "undefined") { return; }');
   lines.push('if (typeof _scrml_chunk_loading !== "undefined" && _scrml_chunk_loading) {');
   lines.push("  _scrml_boot();");
   lines.push("} else {");
-  lines.push('  document.addEventListener("DOMContentLoaded", _scrml_boot);');
+  lines.push('  document.addEventListener("DOMContentLoaded", _scrml_boot, { once: true });');
   lines.push("}");
   lines.push("})();");
 

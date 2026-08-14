@@ -670,13 +670,16 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
     expect(errors).toEqual([]);
     // The initial dispatch fires on DOM-ready. navigate-wave1c reshaped this into
     // a flag-gated boot (`var _fire = ...; if (_scrml_chunk_loading) _fire(); else
-    // addEventListener("DOMContentLoaded", _fire)`) so an INJECTED route chunk still
-    // dispatches while an initial load defers to DOMContentLoaded (unchanged).
+    // addEventListener("DOMContentLoaded", _fire, { once: true })`) so an INJECTED
+    // route chunk still dispatches while an initial load defers to DOMContentLoaded
+    // (unchanged). `{ once: true }` (S345): production-identical (DOMContentLoaded
+    // fires once per document) — auto-removes the listener so it can never re-fire
+    // stale against a longer-lived document.
     expect(clientJs).toMatch(
       /var _fire = function\(\) { __scrml_engine_phase_dispatch\(_scrml_reactive_get\("phase"\)\); };/,
     );
     expect(clientJs).toMatch(/_scrml_chunk_loading/);
-    expect(clientJs).toMatch(/document\.addEventListener\("DOMContentLoaded", _fire\)/);
+    expect(clientJs).toMatch(/document\.addEventListener\("DOMContentLoaded", _fire, \{ once: true \}\)/);
   });
 
   test("arm-tagged logic-bindings are FILTERED OUT of global reactive-wiring block", () => {
