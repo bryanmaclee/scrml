@@ -30,7 +30,12 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { createRequire } from "module";
 import { resolve } from "path";
+
+// ZZDEBUG (throwaway branch debug/gate-each-multiroot-image-20260810 only):
+// CI-image divergence localization for the §5 lift-run failure. Never merges.
+const zzrequire = createRequire(import.meta.url);
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -485,8 +490,7 @@ describe("each-multi-root §4 — of= / <empty> / nested", () => {
 // ---------------------------------------------------------------------------
 
 describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
-  test("two `lift`s per iteration render both roots per item (SPEC §10.8)", () => {
-    const src = `<div class="wrap">\${
+  const LIFT_SRC = `<div class="wrap">\${
   <rows> = ${ROWS}
 
   for (let r of @rows) {
@@ -499,8 +503,78 @@ describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
   }
 }</>
 `;
-    const api = compileAndLoad(src, "lift-run");
+
+  test("two `lift`s per iteration render both roots per item (SPEC §10.8)", () => {
+    const api = compileAndLoad(LIFT_SRC, "lift-run");
     expect(api.count(".lhdr")).toBe(4);
     expect(api.count(".lrow")).toBe(4);
+  });
+
+  // ZZDEBUG round 1 — diagnostics only, always passes. Repeats the §5 steps
+  // with a full dump at every stage so the cloud log localizes the divergence:
+  // compile-side (errors / artifact bytes) vs eval-side (throw) vs DOM-side
+  // (render ran but document shows nothing).
+  test("ZZDEBUG round 1 — environment + emitted-artifact + execution dump", () => {
+    const P = "ZZDEBUG:";
+    const log = (...a) => console.log(P, ...a);
+    try {
+      // (e) environment
+      log("platform", process.platform, process.arch, "versions", JSON.stringify(process.versions));
+      try { log("os.release", zzrequire("os").release()); } catch (e) { log("os.release failed", String(e)); }
+      log("env", JSON.stringify({
+        LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, TZ: process.env.TZ,
+        ImageOS: process.env.ImageOS, ImageVersion: process.env.ImageVersion,
+        RUNNER_OS: process.env.RUNNER_OS, CI: process.env.CI,
+      }));
+      try { log("happy-dom version", zzrequire("happy-dom/package.json").version); } catch (e) { log("happy-dom version lookup failed", String(e)); }
+      try { log("global-registrator version", zzrequire("@happy-dom/global-registrator/package.json").version); } catch (e) { log("gr version lookup failed", String(e)); }
+      log("readyState(before)", document.readyState, "bodyChildren(before)", document.body.children.length);
+
+      // (a)+(b) compile-side
+      const { errors, clientJs, html } = compileToOutputs(LIFT_SRC, "lift-run-zzdebug");
+      log("compile errors:", JSON.stringify(errors));
+      log("html.length", html.length, "clientJs.length", clientJs.length);
+      log("html:", JSON.stringify(html));
+      log("clientJs contains lhdr:", clientJs.includes("lhdr"));
+      log("clientJs FULL BEGIN");
+      clientJs.split("\n").forEach((line, i) => console.log(P, "CJ", String(i + 1).padStart(3, " "), line));
+      log("clientJs FULL END");
+
+      // harness steps, replicated
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+      const bodyHtml = bodyMatch ? bodyMatch[1] : html;
+      document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+      log("body BEFORE eval:", JSON.stringify(document.body.innerHTML));
+      log("logic span found BEFORE eval:", !!document.querySelector("[data-scrml-logic]"));
+
+      // (d) eval wrapped
+      const code =
+        `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+        `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
+      log("code.length", code.length);
+      let evalErr = null;
+      try {
+        // eslint-disable-next-line no-eval
+        eval(code);
+      } catch (e) {
+        evalErr = e;
+      }
+      log("eval error:", evalErr ? String((evalErr && evalErr.stack) || evalErr) : "none");
+      document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+
+      // (c) DOM-side
+      const bodyAfter = document.body.innerHTML;
+      log("body AFTER eval (", bodyAfter.length, "chars):", JSON.stringify(bodyAfter.slice(0, 3000)));
+      log("counts: lhdr", document.querySelectorAll(".lhdr").length,
+          "lrow", document.querySelectorAll(".lrow").length,
+          "div", document.querySelectorAll("div").length,
+          "logic-span", document.querySelectorAll("[data-scrml-logic]").length);
+      log("typeof window._scrml_reactive_get:", typeof window._scrml_reactive_get);
+      try { log("rows via captured get:", JSON.stringify(window._scrml_reactive_get("rows"))); } catch (e) { log("rows get failed", String(e)); }
+      log("readyState(after)", document.readyState);
+    } catch (outer) {
+      console.log(P, "OUTER ERROR", String((outer && outer.stack) || outer));
+    }
+    expect(true).toBe(true);
   });
 });

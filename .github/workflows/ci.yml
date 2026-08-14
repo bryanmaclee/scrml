@@ -91,6 +91,18 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
+      # ZZDEBUG (throwaway branch debug/gate-each-multiroot-image-20260810 only — never merges):
+      # pre-gate diagnostics for the new-runner-image §5 lift-run failure.
+      - name: ZZDEBUG env dump
+        run: |
+          echo "ZZDEBUG-ENV: ImageOS=$ImageOS ImageVersion=$ImageVersion"
+          echo "ZZDEBUG-ENV: uname: $(uname -a)"
+          echo "ZZDEBUG-ENV: bun: $(bun --version)"
+          (ldd --version | head -1 | sed 's/^/ZZDEBUG-ENV: ldd: /') || true
+          (locale | sed 's/^/ZZDEBUG-ENV: locale: /') || true
+          (df -h /tmp | sed 's/^/ZZDEBUG-ENV: df-tmp: /') || true
+      - name: ZZDEBUG single-file run (suite-context discriminator)
+        run: bun test compiler/tests/unit/each-multi-root.test.js || true
       - name: Gate suite (unit + conformance — reproducibly green from source)
         run: bun test compiler/tests/unit compiler/tests/conformance
       # S302: the 14 ROOT-LEVEL test files (parser-conformance-*, native-*) were run by
