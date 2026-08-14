@@ -362,6 +362,146 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §5 a hop through a local function 
   });
 });
 
+// ---------------------------------------------------------------------------
+// §6 — ROUND-4 SHADOW SEMANTICS, VERIFIED BY EXECUTED ARTIFACTS (S345).
+//
+// The round-4 review proved the RI-only oracle blind: unit pins asserted "clean"
+// while the exit-0 bundle bound an `async` fetch stub into the synchronous
+// derived recompute (a rendered Promise). These tests re-execute every shadow
+// shape END-TO-END and assert the round-4 contract directly:
+//
+//   for every shadow shape, the compile either REFUSES (E-DERIVED-SERVER-ONLY-
+//   REACH) or the emitted client contains NO async stub bound into a derived
+//   recompute — and parses (`node --check`).
+//
+// Under the final semantics every transitive-limb shadow shape takes the first
+// disjunct (RI fires on every reference, matching codegen's scope-blind
+// renaming), and the accepted control takes the second. The §1/§5 gap pins
+// still apply: a REFUSED compile still writes artifacts to disk, so the refusal
+// (exit disposition), not artifact absence, is the contract — consumers key on
+// the exit code, never on artifact presence.
+// ---------------------------------------------------------------------------
+
+import { spawnSync } from "child_process";
+
+/**
+ * The round-4 disjunction, executed. If the compile did NOT refuse with the
+ * code, the client bundle must contain no fetch stub at all (the shapes here
+ * have exactly one candidate server fn, so any `_scrml_fetch_` in a client
+ * artifact would be a stub reachable from the derived recompute) and every
+ * client-loaded artifact must parse under `node --check`.
+ */
+function assertRefusedOrStubFree(c) {
+  if (c.errorCodes.includes(CODE)) return "refused";
+  expect(c.clientLoadedText).not.toContain("_scrml_fetch_");
+  for (const f of c.clientLoaded) {
+    const r = spawnSync("node", ["--check", f], { encoding: "utf8" });
+    expect(`${f}: ${r.stderr ?? ""}`.trim()).toBe(`${f}:`);
+    expect(r.status).toBe(0);
+  }
+  return "clean";
+}
+
+const SHADOW_PRELUDE = `<program>
+${OPEN}
+    type Phase:enum = { Idle, Busy }
+    import { hashPassword } from 'scrml:auth'
+    <phase>: Phase = .Idle
+${CLOSE}
+<pw> = "secret"
+
+${OPEN} function doHash(p) { return hashPassword(p) } ${CLOSE}
+`;
+
+const SHADOW_SHAPES = {
+  // finding-00: branch-local const in a hop caller, genuine SIBLING-branch ref.
+  "if-sibling": `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(x) { if (x) { const doHash = (v) => v; return doHash(x) } return doHash(x) } ${CLOSE}
+const <computed> = wrap(@pw)
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+  // while-body shadow, genuine reference after the loop.
+  "while-shadow": `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(x) { let acc = x; while (false) { const doHash = (v) => v; acc = doHash(acc) } return doHash(acc) } ${CLOSE}
+const <computed> = wrap(@pw)
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+  // finding-01: match-arm const shadow, genuine SIBLING-arm reference.
+  "match-arm-sibling": `${SHADOW_PRELUDE}
+const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("local") } .Busy :> doHash(@pw) }
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+  // finding-06 (HIGH): the SPEC-blessed RHS-local shadow — RI used to suppress
+  // while codegen renamed the shadowed call to the stub anyway.
+  "rhs-local-const": `${SHADOW_PRELUDE}
+const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("local") } .Busy :> "busy" }
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+  // the `~` (bare-assignment) binder variant of the same shape.
+  "rhs-local-tilde": `${SHADOW_PRELUDE}
+const <computed> = match @phase { .Idle :> { doHash = (x) => x; doHash("local") } .Busy :> "busy" }
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+};
+
+// The accepted side of the disjunction: same shadow SHAPE, no server reach
+// anywhere — must compile clean, with a synchronous recompute and a parseable
+// bundle (this is what proves the assertion machinery is not vacuous).
+const SHADOW_CLIENT_CONTROL = `<program>
+${OPEN}
+    type Phase:enum = { Idle, Busy }
+    <phase>: Phase = .Idle
+${CLOSE}
+<pw> = "secret"
+${OPEN} function fmt(p) { return p.trim() } ${CLOSE}
+const <computed> = match @phase { .Idle :> { const fmt = (x) => x; fmt("local") } .Busy :> fmt(@pw) }
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`;
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §6 round-4 shadow shapes, executed end-to-end", () => {
+  for (const [name, source] of Object.entries(SHADOW_SHAPES)) {
+    test(`${name}: refused at compile time (no stub can reach a derived recompute)`, () => {
+      const c = compileToDisk(`r4-shadow-${name}`, source);
+      try {
+        // The disjunction contract…
+        const disposition = assertRefusedOrStubFree(c);
+        // …AND the specific expected disposition: under the final semantics
+        // every transitive shadow shape REFUSES. If one starts compiling clean,
+        // that is either the lexical-scoping restoration arc landing (flip this
+        // deliberately, citing it — codegen's renamer must be scoped in the SAME
+        // change) or a silent regression of the round-4 fix.
+        expect(disposition).toBe("refused");
+        expect(c.errorCodes).toContain(CODE);
+      } finally {
+        teardown(`r4-shadow-${name}`);
+      }
+    });
+  }
+
+  test("CONTROL — same shadow shape, purely client: clean, sync recompute, parses", () => {
+    const c = compileToDisk("r4-shadow-control", SHADOW_CLIENT_CONTROL);
+    try {
+      expect(c.errorCodes).toEqual([]);
+      expect(assertRefusedOrStubFree(c)).toBe("clean");
+      expect(c.clientLoadedText).toMatch(/_scrml_cs_derived_declare\(\s*"computed"/);
+    } finally {
+      teardown("r4-shadow-control");
+    }
+  });
+});
+
 describe("CONF-DERIVED-SERVER-ONLY-REACH — §5b a purely-client hop in the same shape compiles", () => {
   const NAME = "transitive-client-safe";
   let c;
