@@ -670,13 +670,16 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
     expect(errors).toEqual([]);
     // The initial dispatch fires on DOM-ready. navigate-wave1c reshaped this into
     // a flag-gated boot (`var _fire = ...; if (_scrml_chunk_loading) _fire(); else
-    // addEventListener("DOMContentLoaded", _fire)`) so an INJECTED route chunk still
-    // dispatches while an initial load defers to DOMContentLoaded (unchanged).
+    // addEventListener("DOMContentLoaded", _fire, { once: true })`) so an INJECTED
+    // route chunk still dispatches while an initial load defers to DOMContentLoaded
+    // (unchanged). `{ once: true }` (S345): production-identical (DOMContentLoaded
+    // fires once per document) — auto-removes the listener so it can never re-fire
+    // stale against a longer-lived document.
     expect(clientJs).toMatch(
       /var _fire = function\(\) { __scrml_engine_phase_dispatch\(_scrml_reactive_get\("phase"\)\); };/,
     );
     expect(clientJs).toMatch(/_scrml_chunk_loading/);
-    expect(clientJs).toMatch(/document\.addEventListener\("DOMContentLoaded", _fire\)/);
+    expect(clientJs).toMatch(/document\.addEventListener\("DOMContentLoaded", _fire, \{ once: true \}\)/);
   });
 
   test("arm-tagged logic-bindings are FILTERED OUT of global reactive-wiring block", () => {
@@ -801,7 +804,16 @@ if (!globalThis.document) GlobalRegistrator.register();
 // Compile + load helper — writes a temp .scrml, compiles, reads HTML +
 // client.js, loads them into happy-dom, fires DOMContentLoaded, and
 // returns reactive-set/get handles.
-function compileAndLoad(source, suffix) {
+async function compileAndLoad(source, suffix) {
+  // Hermeticity (S345 gate-boot-listener-fix): register a FRESH happy-dom
+  // window per load (same pattern as conformance/adapters/impl1-ts.ts run()).
+  // This file's evaled chunks were the proven WRITER in the S345 cloud-gate
+  // red: their DOMContentLoaded boot listeners persisted on the shared
+  // process-global document and re-fired when a LATER file (victim decided by
+  // bun's readdir file order) dispatched DOMContentLoaded, overwriting that
+  // file's render through the un-namespaced `[data-scrml-logic]` selector.
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  GlobalRegistrator.register();
   const { errors, clientJs, html } = compileToOutputs(source, suffix);
   if (errors.length > 0) {
     throw new Error(
@@ -842,7 +854,7 @@ describe("Phase A10 re-wire §13 — DOM integration via happy-dom", () => {
   // possible. See compiler/tests/browser/browser-reactive-arrays.test.js
   // for prior documentation of the quirk.
 
-  test("initial-arm reactive interp responds to cell change", () => {
+  test("initial-arm reactive interp responds to cell change", async () => {
     const src = `\${
   type Phase:enum = { Idle, Showing }
   <count> = 5
@@ -852,7 +864,7 @@ describe("Phase A10 re-wire §13 — DOM integration via happy-dom", () => {
   <Showing>Count: \${@count}</>
 </>
 `;
-    const api = compileAndLoad(src, "dom-initial");
+    const api = await compileAndLoad(src, "dom-initial");
     // Initial render: the Showing arm body is in the static HTML inside
     // the mount slot. The DOMContentLoaded initial-fire calls the
     // dispatcher with `phase = "Showing"`, which dispatches to wire_Showing
@@ -870,7 +882,7 @@ describe("Phase A10 re-wire §13 — DOM integration via happy-dom", () => {
     expect(span.textContent).toBe("7");
   });
 
-  test("post-variant-change reactive interp updates on cell change (v1 limitation closed)", () => {
+  test("post-variant-change reactive interp updates on cell change (v1 limitation closed)", async () => {
     const src = `\${
   type Phase:enum = { Idle, Showing }
   <count> = 5
@@ -880,7 +892,7 @@ describe("Phase A10 re-wire §13 — DOM integration via happy-dom", () => {
   <Showing>Count: \${@count}</>
 </>
 `;
-    const api = compileAndLoad(src, "dom-postchange");
+    const api = await compileAndLoad(src, "dom-postchange");
     // Initial: phase = Idle, mount innerHTML is empty (Idle has empty body).
     const mount = document.querySelector('[data-scrml-engine-mount="phase"]');
     expect(mount).not.toBeNull();
@@ -899,7 +911,7 @@ describe("Phase A10 re-wire §13 — DOM integration via happy-dom", () => {
     expect(span.textContent).toBe("42");
   });
 
-  test("idempotency: re-rendering same variant doesn't double-bind or leak", () => {
+  test("idempotency: re-rendering same variant doesn't double-bind or leak", async () => {
     const src = `\${
   type Phase:enum = { Idle, Showing }
   <count> = 5
@@ -909,7 +921,7 @@ describe("Phase A10 re-wire §13 — DOM integration via happy-dom", () => {
   <Showing>Count: \${@count}</>
 </>
 `;
-    const api = compileAndLoad(src, "dom-idem");
+    const api = await compileAndLoad(src, "dom-idem");
     const mount = document.querySelector('[data-scrml-engine-mount="phase"]');
     const span0 = mount.querySelector("[data-scrml-logic]");
     expect(span0).not.toBeNull();

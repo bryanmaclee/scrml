@@ -1338,7 +1338,10 @@ export function emitVariantGuardedRender(
     dispatcherLines.push(`  var _fire = function() { ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)})${subPath}); };`);
     dispatcherLines.push(`  var _eager = typeof _scrml_chunk_loading !== "undefined" && _scrml_chunk_loading;`);
     dispatcherLines.push(`  if (_eager) { _fire(); }`);
-    dispatcherLines.push(`  if (!_eager && typeof document !== "undefined") { document.addEventListener("DOMContentLoaded", _fire); }`);
+    // `{ once: true }` (S345 gate-boot-listener-fix): production-identical
+    // (DOMContentLoaded fires once per document); auto-removes the init-fire
+    // listener so it can never re-fire stale against a longer-lived document.
+    dispatcherLines.push(`  if (!_eager && typeof document !== "undefined") { document.addEventListener("DOMContentLoaded", _fire, { once: true }); }`);
     dispatcherLines.push(`})();`);
   }
 

@@ -2703,7 +2703,9 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("// --- §20.8.3 link-boost: delegated <a href> soft-nav click interception (i27) ---");
     lines.push("// Registered LAST (after the author onclick delegation) so an author");
     lines.push("// event.preventDefault() is visible to link-boost's defaultPrevented guard.");
-    lines.push("document.addEventListener('DOMContentLoaded', function() { _scrml_link_ensure_click(); });");
+    lines.push("// { once: true }: DOMContentLoaded fires once per document — auto-remove so");
+    lines.push("// the registration can never re-fire stale on a longer-lived document.");
+    lines.push("document.addEventListener('DOMContentLoaded', function() { _scrml_link_ensure_click(); }, { once: true });");
   }
 
   // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. Emitted

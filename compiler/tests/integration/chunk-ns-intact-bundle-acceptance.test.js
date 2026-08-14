@@ -25,7 +25,16 @@ import { mkdtempSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-beforeAll(() => { if (!globalThis.document) GlobalRegistrator.register(); });
+// Hermeticity (S345 gate-boot-listener-fix): a FRESH happy-dom window for this
+// file (per-file variant of the conformance/adapters/impl1-ts.ts run() pattern) —
+// the old `if (!globalThis.document)` guard reused the shared process-global
+// document, inheriting stale DOMContentLoaded boot listeners from prior eval
+// files (and leaking this file's own to later ones) — the S345 cloud-gate
+// stale-listener class.
+beforeAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  GlobalRegistrator.register();
+});
 
 function compileOne(src, name) {
   const dir = mkdtempSync(join(tmpdir(), "intact-"));
