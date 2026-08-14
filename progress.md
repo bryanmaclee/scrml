@@ -29,5 +29,10 @@
 ## 2026-08-14 ~15:40Z — ROUND 3 dispatched
 - Added zzListenerCount() logging per compileAndLoad (pre-eval/post-eval/post-dispatch) + listener ENUMERATION with source hints (engine tokens/cs keys/selectors) at ZZDEBUG test start; instrumented engine-body-render §13 harness with post-eval listener counts. Expect cloud: counts > 0 at each-multi-root with engine-token hints.
 
+## 2026-08-14 ~16:20Z — ROUND 3 results (run 31812533811) — CHAIN CLOSED, DIAGNOSIS COMPLETE
+- Cloud gate suite: engine §13 evals accumulate listeners 2→3→5 (IDENTICAL to local — registration is env-independent; only file order differs). each-multi-root §5: `listeners pre-eval 5/0` — five stale engine listeners live at dispatch. Enumeration: 3x engine `_fire` (`__scrml_engine_phase_dispatch(...)`) + 2x `_scrml_boot` containing `querySelector('[data-scrml-logic="_scrml_logic_1"]')`.
+- Same-run single-file step: 0/0 everywhere (engine runs after each-multi-root there).
+- FINDINGS.md finalized at docs/changes/gate-each-multiroot-image-debug/FINDINGS.md (committed on the debug branch). 3 CI rounds used of 6.
+
 ## Side observation (NOT the CI mechanism — count-only assertions unaffected)
 - The Tier-0 lift path emits `document.createTextNode("H${r.label}")` — a LITERAL uninterpolated string (text interp dropped on lift-element children under for-lift). §5 only counts nodes so it passes anyway. Matches the known tracking-lane bug g-emit-lift-markup-text-interp referenced in ci.yml comments. Not in scope here.

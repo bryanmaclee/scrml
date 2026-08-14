@@ -161,13 +161,21 @@ cells/engine names/each-match ids — logic ids were left out.
   (the rewire registers a fresh effect against the current span each re-fire).
 - Same-run single-file step: PHASE A clean (`""` → `""`) — no prior files, no stale listeners.
 
-### Round 3 (listener census — run id in progress.md addendum)
-- Local measurements: engine §13 evals accumulate document DOMContentLoaded listeners
-  2 → 3 → 5 (per-eval engine `_fire` + `_scrml_boot`); happy-dom standalone probe: listeners
-  survive dispatch/innerHTML/time (no auto-clear; `readyState` starts `interactive`,
-  `complete` after a tick).
-- Cloud: see ZZDEBUG `CAL`/`R3-listeners` lines in the round-3 gate log (listener count at
-  each-multi-root pre-dispatch + enumerated listener sources with engine-token hints).
+### Round 3 (run 31812533811 — listener census, in-cloud, CLOSES the chain)
+- Gate suite, engine-body-render §13 evals: document DOMContentLoaded listeners accumulate
+  `2 → 3 → 5` in cloud — IDENTICAL to local measurement (registration behavior is the same
+  everywhere; only file ORDER differs).
+- Gate suite, each-multi-root §5 (`CAL lift-run`): `listeners pre-eval: 5/0` — the five stale
+  engine listeners are live when §5 runs; still `5/0` post-dispatch (not once-registered).
+- Enumerated listener sources (with hints):
+  - 3 × engine dispatcher `_fire`:
+    `function() { __scrml_engine_phase_dispatch(_scrml_reactive_get("phase")); }`
+  - 2 × `_scrml_boot` (757 chars) whose body contains
+    `querySelector('[data-scrml-logic="_scrml_logic_1"]')` — the generic-id writers.
+- Same-run single-file step: `0/0` at every checkpoint; engine §13 runs after each-multi-root
+  there, counts 2 → 3 → 5 only afterwards.
+- Supporting local probes: happy-dom listeners survive dispatch / innerHTML / time (no
+  auto-clear; `readyState` starts `interactive`, `complete` after a tick).
 
 ### Side observation (out of scope, pre-existing)
 The Tier-0 lift path emits `document.createTextNode("H${r.label}")` — a LITERAL, uninterpolated
