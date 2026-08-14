@@ -49,10 +49,11 @@
  *   bun scripts/source-text-regex-census.ts            summary + the full post-AST population
  *   bun scripts/source-text-regex-census.ts --summary  totals only
  *   bun scripts/source-text-regex-census.ts --json     machine-readable
+ *   bun scripts/source-text-regex-census.ts --selftest cross-OS separator check (no census run)
  */
 import { readdirSync, readFileSync, statSync } from "fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "path";
+import { dirname, join, sep } from "path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "compiler", "src");
 
@@ -64,6 +65,17 @@ const PRE_AST_MARKERS = [
   "runtime-template", "meta-eval", "attr",
 ];
 const isPreAst = (rel: string) => PRE_AST_MARKERS.some((p) => rel.includes(p));
+
+/**
+ * Forward-slash-normalize `absPath` and strip the `root` prefix, so both the marker match
+ * and the reported paths are OS-independent (`commands\migrate.js` must classify identically
+ * to `commands/migrate.js`). Pure + separator-parameterized so the Windows shape is testable
+ * on a POSIX host (`--selftest`).
+ */
+function toRel(absPath: string, root: string, sepChar: string): string {
+  const fwd = (p: string) => p.split(sepChar).join("/");
+  return fwd(absPath).replace(fwd(root) + "/", "");
+}
 
 const SRC_ARG_STRONG =
   /\b\w*(raw|rawtext|sourcetext|srctext|bodyraw|rulesraw|inittrim|exprtext|opener|argstr|stmttext|codetext)\w*\b/i;
@@ -91,12 +103,31 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+// --selftest: cross-OS separator check without a Windows host. A backslash-separated
+// absolute path must strip to a forward-slash relative path and classify identically.
+if (process.argv.includes("--selftest")) {
+  const winRoot = "C:\\Users\\x\\scrml\\compiler\\src";
+  const winSep = "\\";
+  const relMigrate = toRel(winRoot + "\\commands\\migrate.js", winRoot, winSep);
+  const relPromote = toRel(winRoot + "\\commands\\promote.js", winRoot, winSep);
+  const relCodegen = toRel(winRoot + "\\codegen\\js-emitter.ts", winRoot, winSep);
+  const checks: [string, boolean][] = [
+    ["windows migrate.js rel is relative + forward-slash", relMigrate === "commands/migrate.js"],
+    ["windows migrate.js classifies PRE-AST", isPreAst(relMigrate)],
+    ["windows promote.js classifies PRE-AST", isPreAst(relPromote)],
+    ["windows codegen file stays POST-AST", !isPreAst(relCodegen)],
+    ["posix path unchanged", toRel("/r/compiler/src/codegen/js.ts", "/r/compiler/src", "/") === "codegen/js.ts"],
+  ];
+  for (const [name, ok] of checks) console.log(`  ${ok ? "ok " : "FAIL"}  ${name}`);
+  process.exit(checks.every(([, ok]) => ok) ? 0 : 1);
+}
+
 const files = walk(ROOT);
 const preAst: Hit[] = [], postAst: Hit[] = [], opaque: Hit[] = [];
 let lines = 0, calls = 0;
 
 for (const f of files) {
-  const rel = f.replace(ROOT + "/", "");
+  const rel = toRel(f, ROOT, sep);
   const src = readFileSync(f, "utf8").split("\n");
   lines += src.length;
   src.forEach((ln, i) => {
