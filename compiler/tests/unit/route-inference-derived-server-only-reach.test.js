@@ -324,7 +324,8 @@ describe(`${CODE} §7 — RHS-local shadowing (DIRECT limb only, since round 4)`
   // NOT rename server-only IMPORT references, so the emitted JS honours this
   // local shadow and RI's suppression agrees with what actually runs. The
   // suppression being RHS-WIDE (not lexically scoped) leaves limb (a)'s known
-  // cross-arm hazard open — pre-existing, filed separately, NOT changed here.
+  // cross-arm hazard open — pre-existing, flagged in the round-4 review and
+  // routed for filing, NOT changed here.
   test("a `const` local shadowing the imported name does NOT fire", () => {
     const source = `<program>
 
