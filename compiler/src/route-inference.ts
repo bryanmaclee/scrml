@@ -3582,6 +3582,7 @@ function scanForServerOnlyBindingRefs(
   root: unknown,
   live: Map<string, string>,
   rawMode: RawSubtreeMode = "text-scan",
+  lambdaParamsFire = false,
 ): Map<string, string> {
   const found = new Map<string, string>();
   if (live.size === 0) return found;
@@ -3638,6 +3639,42 @@ function scanForServerOnlyBindingRefs(
       const mod = live.get(n.name);
       if (mod !== undefined) found.set(n.name, mod);
       return;
+    }
+
+    // §6.6.19 round 4 (S345) — BODY-STYLE UNIFICATION for lambda parameters.
+    //
+    // The two representations of "one predicate" had drifted at PARAMETER
+    // position: `collectRawReferenceNames` counts an ESTree Identifier in param
+    // position (a block-bodied arrow is an escape-hatch, so `(total) => { return 1 }`
+    // FIRED), while this walk stored lambda params as plain strings and never
+    // matched them (the expression-bodied `(total) => 1` compiled CLEAN). Whether a
+    // correct program was refused depended on which body style the author wrote —
+    // measured in the round-4 work order. Unify in the FIRING direction: §6.6.19's
+    // descriptive sentence is "A LAMBDA PARAMETER DOES NOT SHADOW, AND THEREFORE
+    // FIRES", the over-fire is loud and fixable, and the accepting direction is the
+    // queued lexical-scoping restoration arc (ruled S345), not a side effect here.
+    //
+    // Gated by `lambdaParamsFire` because this scanner also feeds §12.2 Trigger 3's
+    // per-function PLACEMENT scan (`collectServerOnlyBindingModules`), and firing on
+    // a param there would newly ESCALATE a function — a placement movement, which is
+    // a ruling. Only the §6.6.19 diagnostic call sites pass `true`.
+    if (
+      lambdaParamsFire &&
+      (kind === "lambda" || kind === "function-decl") &&
+      Array.isArray(n.params)
+    ) {
+      for (const p of n.params as unknown[]) {
+        const nm = typeof p === "string"
+          ? p
+          : (p && typeof p === "object" && typeof (p as any).name === "string"
+            ? (p as any).name
+            : null);
+        if (nm !== null) {
+          const mod = live.get(nm);
+          if (mod !== undefined) found.set(nm, mod);
+        }
+      }
+      // fall through — the body is walked by the generic recursion below
     }
 
     if (kind === "escape-hatch" && typeof n.raw === "string") {
@@ -3699,15 +3736,23 @@ function stateDeclRhsRoots(declNode: Record<string, unknown>): unknown[] {
 }
 
 /**
- * Names bound INSIDE a derived cell's RHS, which therefore cannot refer to a
- * file-scoped import.
+ * Names bound INSIDE a derived cell's RHS. LIMB (a) ONLY, since round 4 (S345):
+ * limb (b) passes `shadow: "none"` and never consults this set — see
+ * `collectDerivedRhsServerOnlyRefs` for why the limbs differ.
  *
- * Scope discipline mirrors `collectLocalNames` (the function-level shadow set)
- * exactly: a name bound inside a nested `lambda` or `function-decl` has its OWN
- * scope and does NOT shadow the import for the rest of the RHS, so the walk stops
- * at those boundaries. Erring narrow here is the fail-closed direction — a
- * too-WIDE shadow set produces a MISS (a leak), a too-narrow one produces an
- * over-fire (a rejection the author can see and fix).
+ * For limb (a)'s ~4 imported stdlib member names, an RHS-local binder of the same
+ * name genuinely is not the import, and codegen honours the shadow in the emitted
+ * JS (import references are not renamed), so suppressing is sound there. The set
+ * is RHS-WIDE, not lexically scoped — a binder in one `match` arm suppresses a
+ * sibling arm's reference too. On limb (a) that scope-blindness is a pre-existing
+ * filed residual (cross-arm import shadow), deliberately NOT widened or narrowed
+ * by round 4; on limb (b) the identical scope-blindness was the round-4 blocker
+ * (a silent Promise-render miss), which is why limb (b) stopped using this set.
+ *
+ * The walk stops at a nested `lambda` / `function-decl` binder (own scope), so a
+ * lambda parameter never enters this set — the S331/S338 over-fire that §6.6.19
+ * records descriptively, with real lexical scoping queued as its own
+ * conformance-restoration arc (ruled S345).
  */
 function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<string> {
   const names = new Set<string>();
@@ -3767,15 +3812,43 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  * (a) passes the default; limb (b) passes `"structural"` because its name set is
  * ordinary file-local vocabulary rather than ~4 stdlib member names, so matching
  * raw text refuses correct programs on a name coincidence (S343).
+ *
+ * `shadow` is ALSO the caller's limb, and the limbs differ here ON PURPOSE
+ * (round 4, S345):
+ *
+ * `"rhs-locals"` — LIMB (a). An RHS-local `const`/`let`/`~`/`lin` binder
+ *   suppresses the import name for the whole RHS. Codegen does NOT rename
+ *   references to a server-only IMPORT (the client keeps the stdlib binding
+ *   names), so the emitted JS honours the local shadow and RI's suppression
+ *   agrees with what actually runs. (The suppression is RHS-wide rather than
+ *   lexically scoped — the pre-existing cross-arm hazard on this limb is a
+ *   filed residual, not changed here.)
+ *
+ * `"none"` — LIMB (b). NO name-based suppression at all: any reference to a
+ *   server-reaching function name fires. This is the round-4 blocker fix, and it
+ *   is the only semantics under which RI and codegen AGREE on this limb: codegen
+ *   renames EVERY reference to a server-placed function to its fetch stub —
+ *   including one under a same-named RHS-local binder — so an RI suppression
+ *   here is precisely the shape that compiled at exit 0 while the client bound
+ *   an async stub into the synchronous derived recompute (measured: if-sibling,
+ *   while-body, match-arm-sibling, and the SPEC-blessed RHS-local shadow itself).
+ *   The GOVERNING DESIGN INTENT remains real lexical scoping in scanner and
+ *   codegen together (pre-S338 §6.6.19 sentence; restoration arc queued S345);
+ *   until that lands, firing on every reference is the loud, fail-closed
+ *   interim, per the arc's own rule that a too-wide shadow set is a silent leak
+ *   while a too-narrow one is a fixable over-fire.
  */
 function collectDerivedRhsServerOnlyRefs(
   declNode: Record<string, unknown>,
   bindings: Map<string, string>,
   rawMode: RawSubtreeMode = "text-scan",
+  shadow: "rhs-locals" | "none" = "rhs-locals",
 ): Map<string, string> {
   if (bindings.size === 0) return new Map();
 
-  const shadowed = collectDerivedRhsLocalNames(declNode);
+  const shadowed = shadow === "rhs-locals"
+    ? collectDerivedRhsLocalNames(declNode)
+    : new Set<string>();
   const live = new Map<string, string>();
   for (const [local, mod] of bindings) {
     if (!shadowed.has(local)) live.set(local, mod);
@@ -3792,10 +3865,11 @@ function collectDerivedRhsServerOnlyRefs(
       { kind: "escape-hatch", raw: declNode.init },
       live,
       rawMode,
+      /* lambdaParamsFire */ true,
     );
   }
 
-  return scanForServerOnlyBindingRefs(roots, live, rawMode);
+  return scanForServerOnlyBindingRefs(roots, live, rawMode, /* lambdaParamsFire */ true);
 }
 
 /**
@@ -4001,17 +4075,31 @@ function computeServerReachingFns(
   // built with THAT scanner, not with a second notion of "reaches".
   //
   // REFERENCE, NOT CALL — matching the scanner's contract and §6.6.19's own reach
-  // rule. This adds no over-fire in practice: a function that REFERENCES a
-  // server-placed fn without calling it is already promoted server-side by Step
-  // 5b capture taint, so it is already a SEED of this closure. Measured at S338 —
-  // `let f = doHash`, `let api = { run: doHash }` and `let g = (p) => doHash(p)`
-  // were all ALREADY refused before this change, via 5b, and the reviewer's claim
-  // that all four shapes were missed held for exactly one of them.
+  // rule. (An earlier revision of this comment claimed the function-VALUED binding
+  // shapes — `let f = doHash`, `let api = { run: doHash }`, `let g = (p) =>
+  // doHash(p)` at FILE level — "were all ALREADY refused via 5b". That claim was
+  // FALSE, measured in the round-4 review at N=3 on both main and the arc tip:
+  // all three compile at exit 0 and bind the async stub through the alias into
+  // the derived recompute. The hop-node population here is `function-decl`s only
+  // (`analysisMap` / `fnNameToNodeIds`), so a file-level variable binding can be
+  // neither a 5b seed nor a hop node nor a matched name. The function-valued-
+  // binding hop class is a DOCUMENTED RESIDUAL — recorded in §6.6.19's residual
+  // list and pinned in §11m of the unit test — whose closure needs its own
+  // mechanism (an alias-aware hop population), not this closure.)
   //
-  // Shadow discipline is `collectServerOnlyBindingModules`' (params normalized for
-  // the `string[]`-typed-but-actually-objects shape, plus body-level locals), for
-  // the same reason: a local named like a file-scoped function is not that
-  // function.
+  // Shadow discipline (round 4, S345): the caller's OWN PARAMETERS only. A
+  // function's params provably scope over its entire body, so a param named like
+  // a file-scoped function genuinely never refers to it — the one cheap,
+  // provably-scope-correct suppression. BODY-LOCAL binders no longer suppress:
+  // the previous `collectLocalNames(body)` subtraction was scope-blind (a
+  // `const doHash = …` inside ONE if/while/match branch deleted the name from
+  // `live` for the WHOLE body), so a genuine sibling-branch reference to the
+  // file-level server-reaching function produced no edge and the program
+  // compiled at exit 0 with an async stub bound into the derived recompute — a
+  // silent miss, the forbidden direction. A body-local binder now yields at
+  // worst a loud over-fire inside its own scope, which is the accepted interim
+  // until the queued lexical-scoping restoration arc gives scanner and codegen
+  // real scoping together.
   const callersOf = new Map<string, Set<string>>();
   const fnNamesByFile = new Map<string, Set<string>>();
   for (const [, rec] of analysisMap) {
@@ -4028,6 +4116,9 @@ function computeServerReachingFns(
       ? callerRecord.fnNode.body
       : [];
 
+    // Params only — see the shadow-discipline comment above. Body-local binders
+    // deliberately do NOT suppress (round 4: the scope-blind body-locals
+    // subtraction was the silent-miss blocker).
     const shadowed = new Set<string>();
     for (const p of (callerRecord.fnNode.params ?? []) as unknown[]) {
       if (typeof p === "string") shadowed.add(p);
@@ -4035,7 +4126,6 @@ function computeServerReachingFns(
         shadowed.add((p as any).name);
       }
     }
-    for (const n of collectLocalNames(body)) shadowed.add(n);
 
     const live = new Map<string, string>();
     for (const name of candidates) {
@@ -4051,7 +4141,7 @@ function computeServerReachingFns(
     // that merely CONTAINS the string `"status "` a caller of `status`. Measured
     // at S343: exit 0 on `main`, exit 1 here, for a program with no edge at all
     // between the two. Same blocker as the derived-RHS scan, one level up.
-    for (const reachedName of scanForServerOnlyBindingRefs(body, live, "structural").keys()) {
+    for (const reachedName of scanForServerOnlyBindingRefs(body, live, "structural", true).keys()) {
       const globalIds = fnNameToNodeIds.get(reachedName);
       if (!globalIds || globalIds.length === 0) continue;
       for (const calleeId of globalIds) {
@@ -5661,9 +5751,16 @@ export function runRI(input: RIInput): RIOutput {
     const real = reasons.filter((r) => r !== propagated);
     if (real.length > 0) return `it reaches ${describeServerTrigger(real)} (§12.2)`;
     if (propagated && propagated.kind === "server-only-resource") {
+      // "every function DECLARATION" — not "every function". 5c's caller edges
+      // count only declared-function callers; a markup event-handler call site
+      // is not a §12.2 caller. A program whose client `onclick` visibly calls
+      // the fn would make the unqualified universal a false statement about the
+      // author's own source (round-4 review, security lens).
       return propagated.resourceType === "caller-context-propagation"
-        ? "every function that calls it is server-side, so §12.2 caller-context " +
-          "propagation placed it there — it has no server-only work of its own"
+        ? "every function declaration that calls it is server-side (markup " +
+          "event-handler call sites do not count as callers here), so §12.2 " +
+          "caller-context propagation placed it there — it has no server-only " +
+          "work of its own"
         : "it closes over the server-side symbol " +
           `\`${propagated.resourceType.slice("closure-capture:".length)}\` (§12.2)`;
     }
@@ -5685,33 +5782,33 @@ export function runRI(input: RIInput): RIOutput {
     // declaration that is NOT server-reaching is omitted (the 5c-bis ambiguity
     // rule — on doubt, do not fire).
     //
-    // !! KNOWN OVER-FIRE, ROUTED FOR A RULING, NOT SETTLED HERE (S338 review F4).
+    // !! KNOWN OVER-FIRE — DESCRIPTIVE OF CURRENT BEHAVIOUR, NOT A DESIGN
+    // POSITION. RULED S345: restoration QUEUED, direction decided.
     //
     //   function total(p) { return hashPassword(p) }      // server-reaching
     //   const <doubled> = @nums.map(total => total * 2)   // FIRES — and should not
     //
-    // `collectDerivedRhsLocalNames` stops at a nested `lambda`, so a lambda
-    // PARAMETER never enters the RHS shadow set and collides with the function
-    // name here. The direct limb has the identical behaviour and §7 pins it as
-    // intended, on the stated ground that "a too-WIDE shadow set produces a MISS
-    // (a leak), a too-narrow one produces an over-fire (a rejection the author can
-    // see and fix)".
+    // On this limb ANY reference to a server-reaching function name fires —
+    // lambda parameters included, and (since round 4) with NO name-based
+    // suppression for RHS-local binders either. The over-fire ground the direct
+    // limb states ("a too-WIDE shadow set produces a MISS") reads differently
+    // here — this limb is a CORRECTNESS refusal, a miss renders a Promise rather
+    // than shipping a secret — but round 4 measured the miss to be SILENT (exit
+    // 0, async stub bound into the synchronous recompute, Promise rendered),
+    // and the arc's recorded rule is that a silent leak-shaped miss is
+    // forbidden while a loud over-fire is fixable. Firing on every reference is
+    // therefore the interim on both axes.
     //
-    // THAT GROUND DOES NOT TRANSFER TO THIS LIMB, and saying so is the point of
-    // this comment. This limb is a CORRECTNESS refusal, not a confidentiality one
-    // — a miss renders a Promise, it does not ship a secret — so the fail-closed
-    // asymmetry that licenses over-fire on the direct limb is absent, while the
-    // name set grew from ~4 imported stdlib members to EVERY server-reaching
-    // function name in the file. Same rule, an order of magnitude more surface,
-    // and a weaker justification.
-    //
-    // The fix is proper lexical scoping in `scanForServerOnlyBindingRefs` (a
-    // lambda's params shadow WITHIN that lambda's body), which would also make
-    // §6.6.19's "a name bound inside the RHS shadows the import and SHALL NOT
-    // fire" TRUE — it is false today in both limbs. That change makes the DIRECT
-    // limb newly-ACCEPTING on a confidentiality rule and overturns a deliberate
-    // S331 choice, so it is a ruling, not a cleanup, and it is not taken here.
-    // Until it is taken, the message says "reaches", never "calls" — asserting a
+    // The GOVERNING DESIGN INTENT (per the S345 ruling, citing the pre-S338
+    // §6.6.19 sentence) remains: "A name bound inside the RHS shadows the import
+    // and SHALL NOT fire" — i.e. proper lexical scoping, a binder shadowing
+    // within its own scope only, in `scanForServerOnlyBindingRefs` AND in
+    // codegen's reference-renaming together (they must move together: today
+    // codegen renames even a lexically-shadowed call site to the fetch stub, so
+    // an RI-side-only scoping fix would reopen the silent miscompile). That
+    // restoration is QUEUED as its own conformance-restoration arc; it is a
+    // conformance bug fix against the standing intent, not an open question.
+    // Until it lands, the message says "reaches", never "calls" — asserting a
     // call that is not in the source would be a false statement in a diagnostic.
     const serverReachingNamesHere = new Map<string, string>();
     for (const [name, ids] of fnNameToNodeIds) {
@@ -5781,10 +5878,16 @@ export function runRI(input: RIInput): RIOutput {
       // is ordinary file-local vocabulary. See `RawSubtreeMode` for the measured
       // reproducers and for why the direct limb keeps the text scan.
       if (serverReachingNamesHere.size === 0) continue;
+      // `shadow: "none"` (round 4, S345) — no name-based suppression on this limb.
+      // Codegen renames EVERY reference to a server-placed function to its fetch
+      // stub, including one under a same-named RHS-local binder, so any name-set
+      // suppression here is exactly the shape that miscompiles at exit 0. See
+      // `collectDerivedRhsServerOnlyRefs` for the full story.
       const hopRefs = collectDerivedRhsServerOnlyRefs(
         declNode,
         serverReachingNamesHere,
         "structural",
+        "none",
       );
       if (hopRefs.size === 0) continue;
 

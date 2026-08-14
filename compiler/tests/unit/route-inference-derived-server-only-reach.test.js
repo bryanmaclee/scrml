@@ -316,7 +316,15 @@ const <label> = "call hashPassword on the server"
 // §7 — SHADOW: an RHS-local binding of the same name is not the import
 // ---------------------------------------------------------------------------
 
-describe(`${CODE} §7 — RHS-local shadowing`, () => {
+describe(`${CODE} §7 — RHS-local shadowing (DIRECT limb only, since round 4)`, () => {
+  // ROUND 4 (S345): this suppression is now LIMB (a)'s alone. The transitive
+  // limb passes `shadow: "none"` and fires on every reference (§11l), because
+  // codegen renames server-FN references scope-blind — an RI suppression there
+  // silently miscompiled. Limb (a) keeps the suppression because codegen does
+  // NOT rename server-only IMPORT references, so the emitted JS honours this
+  // local shadow and RI's suppression agrees with what actually runs. The
+  // suppression being RHS-WIDE (not lexically scoped) leaves limb (a)'s known
+  // cross-arm hazard open — pre-existing, filed separately, NOT changed here.
   test("a `const` local shadowing the imported name does NOT fire", () => {
     const source = `<program>
 
@@ -1045,7 +1053,11 @@ const <computed> = label(@pw)
 
 </program>`;
     const m = errorsWithCode(runRIOn(source).out, CODE)[0]?.message ?? "";
-    expect(m).toContain("every function that calls it is server-side");
+    // Round 4: "every function DECLARATION". The unqualified "every function that
+    // calls it" was a false universal whenever a client markup handler visibly
+    // called the fn — 5c's caller edges count declared-function callers only.
+    expect(m).toContain("every function declaration that calls it is server-side");
+    expect(m).toContain("markup event-handler call sites do not count as callers");
     expect(m).not.toContain("caller-context-propagation");
   });
 });
@@ -1110,43 +1122,69 @@ function shout(s) { return s.toUpperCase() }`,
     expect(errorsWithCode(out, CODE).length).toBe(0);
   });
 
-  test("an RHS-local `const` shadowing a server-reaching fn: clean", () => {
-    // The shadow rule is the direct limb's (`collectDerivedRhsLocalNames`),
-    // inherited wholesale by reusing its scanner rather than restated.
-    const source = `<program>
-\${
-    type Phase:enum = { Idle, Busy }
-    import { hashPassword } from 'scrml:auth'
-    <phase>: Phase = .Idle
-}
-<pw> = "secret"
-
-\${ function doHash(p) { return hashPassword(p) } }
-
-const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("local") } .Busy :> "busy" }
-
-<div>\${@computed}</div>
-</program>`;
-    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
-  });
+  // NOTE (round 4, S345): the "RHS-local `const` shadowing a server-reaching fn:
+  // clean" pin that used to close this block MOVED to §11l and FLIPPED to a
+  // refusal. It was never a sound bite proof: RI suppressed the diagnostic while
+  // codegen renamed the shadowed call to the async fetch stub anyway, so the
+  // "clean" compile was a silent miscompile (a Promise bound into the derived
+  // recompute), not an over-fire guard. §11l pins the final shadow semantics.
 });
 
-describe(`${CODE} §11f — the transitive limb INHERITS the direct limb's scope rules`, () => {
-  // Not restated in the transitive limb — inherited, because both limbs call the
-  // same `collectDerivedRhsServerOnlyRefs` / `scanForServerOnlyBindingRefs` pair
-  // with different name sets. These pin the inheritance: if someone hand-rolls a
-  // second scanner for the transitive limb, these are what catch the drift.
+describe(`${CODE} §11f — the transitive limb shares the direct limb's REFERENCE rules`, () => {
+  // Both limbs call the same `collectDerivedRhsServerOnlyRefs` /
+  // `scanForServerOnlyBindingRefs` pair with different name sets, so what counts
+  // as a REFERENCE (depth, lambda bodies, string-literals-are-not-references) is
+  // one rule. Since round 4 (S345) the limbs deliberately DIFFER on two axes —
+  // raw-text handling (`RawSubtreeMode`, §11k) and SHADOWING (limb (a) suppresses
+  // RHS-local binder names; limb (b) suppresses nothing — §11l). These pin what
+  // is still shared: if someone hand-rolls a second scanner for the transitive
+  // limb, these are what catch the drift.
 
-  test("a LAMBDA-PARAM shadow FIRES, exactly as it does for the direct limb (§7)", () => {
-    // Deliberate and documented: `collectDerivedRhsLocalNames` stops at a nested
-    // lambda, because a too-WIDE shadow set is a MISS and a too-narrow one is a
-    // loud, fixable over-fire. §7 pins this for the direct limb; it must hold
-    // identically here or the two limbs have drifted apart.
+  test("a LAMBDA-PARAM collision FIRES, exactly as it does for the direct limb (§7)", () => {
+    // DESCRIPTIVE OF CURRENT BEHAVIOUR, NOT A RATIFICATION (S345 ruling): a
+    // lambda parameter does not shadow, so a param name colliding with a
+    // server-reaching fn fires. The governing design intent remains the pre-S338
+    // sentence ("a name bound inside the RHS shadows … and SHALL NOT fire"),
+    // with real lexical scoping queued as its own conformance-restoration arc.
+    // When that arc lands, THIS pin flips to 0 — deliberately, citing the arc.
     const { out } = runRIOn(programWithFns(
       "function doHash(p) { return hashPassword(p) }",
       "((doHash) => doHash(@pw))((s) => s)",
     ));
     expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("round 4: the lambda-param fire does NOT depend on arrow body style", () => {
+    // The round-4 body-style unification (work-order finding: an UNUSED param
+    // colliding with a server-reaching name fired only when the arrow was
+    // block-bodied, because the escape-hatch ESTree walk counted param-position
+    // identifiers while the scrml expr-node walk stored params as strings).
+    // Same program, both body styles, identical disposition — the §6.6.19
+    // sentence "A LAMBDA PARAMETER DOES NOT SHADOW, AND THEREFORE FIRES" is now
+    // true of BOTH representations instead of one.
+    const exprBody = runRIOn(programWithFns(
+      "function total(p) { return hashPassword(p) }",
+      "[1, 2].map((total) => 1)",
+    ));
+    const blockBody = runRIOn(programWithFns(
+      "function total(p) { return hashPassword(p) }",
+      "[1, 2].map((total) => { return 1 })",
+    ));
+    expect(errorsWithCode(exprBody.out, CODE).length).toBe(1);
+    expect(errorsWithCode(blockBody.out, CODE).length).toBe(1);
+  });
+
+  test("round 4 CONTROL: a non-colliding param stays clean in both body styles", () => {
+    const exprBody = runRIOn(programWithFns(
+      "function total(p) { return hashPassword(p) }",
+      "[1, 2].map((v) => 1)",
+    ));
+    const blockBody = runRIOn(programWithFns(
+      "function total(p) { return hashPassword(p) }",
+      "[1, 2].map((v) => { return 1 })",
+    ));
+    expect(errorsWithCode(exprBody.out, CODE).length).toBe(0);
+    expect(errorsWithCode(blockBody.out, CODE).length).toBe(0);
   });
 
   test("a name only inside a STRING LITERAL is not a reference: clean", () => {
@@ -1563,14 +1601,21 @@ describe(`${CODE} §11k — the DIRECT limb keeps the text scan`, () => {
    *
    * An RHS that does not parse at all (`if @pw { … } else { … }` lowers to an
    * `escape-hatch` with `nativeKind: "ParseError"`) is where limb (b) DECLINES.
-   * A genuine hop hidden there is now MISSED, and the cell renders a Promise with
-   * nothing on stderr — the very defect §6.6.19 exists to refuse.
+   * A genuine hop hidden there gets no E-DERIVED-SERVER-ONLY-REACH.
+   *
+   * END-TO-END the shape does NOT ship silently (measured, round 4): codegen's
+   * emit parse gate refuses it at exit 1 with a generic `E-CODEGEN-INVALID-LOGIC`
+   * ("could not lower this construct… This is a compiler defect. Please report
+   * it.") and writes no artifacts. So today's cost is not a rendered Promise —
+   * it is a ROOT-CAUSE-FREE diagnostic where §6.6.19's chain-naming message is
+   * specified, one that actively invites a false compiler-bug report. Recorded
+   * as a SPEC residual in §6.6.19 (round 4), not only here.
    *
    * That is the accepted trade and not an oversight: guessing from text is what
    * refused two correct programs above, and on a correctness refusal a miss is
    * recoverable while a false refusal is not. §2's companion test shows the DIRECT
    * limb still catches the identical shape, so the confidentiality boundary is
-   * unaffected — only the Promise-rendering diagnostic has a hole.
+   * unaffected — only the root-cause-naming diagnostic has a hole.
    *
    * The right closure is a derived RHS that PARSES, not a better text scan. If the
    * `if`-expression ever lowers to real expr nodes, this test should flip to 1 and
@@ -1604,5 +1649,203 @@ const <computed> = doHash("seed")
 
 </program>`;
     expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11l — ROUND-4 SHADOW SEMANTICS (S345): on the TRANSITIVE limb, a same-file
+// name shadow does NOT suppress the refusal — any reference fires.
+//
+// WHY. Round 4's review executed four shapes where a name-based suppression
+// produced a SILENT miss at exit 0 with an async fetch stub bound into the
+// synchronous derived recompute (a rendered Promise): a branch-local `const`
+// suppressing a genuine SIBLING-branch reference in a hop caller (if / while),
+// a match-arm `const` suppressing a genuine SIBLING-arm reference in the RHS,
+// and the SPEC-blessed RHS-local shadow itself — where RI suppressed while
+// codegen renamed the shadowed call to the fetch stub anyway, so the "clean"
+// compile called the server and rendered a Promise, with the local binder dead.
+//
+// RI and codegen must AGREE. Codegen's reference-renaming on this limb is
+// scope-blind in the FIRING direction (every reference to a server-placed fn
+// becomes the stub), so RI is now scope-blind in the FIRING direction too: every
+// shape codegen would rewrite is refused at compile time. The ONE suppression
+// kept is a hop-caller's own PARAMETERS — a function's params provably scope
+// over its entire body, so that shadow is exactly scope-correct.
+//
+// DESCRIPTIVE, NOT RATIFIED (S345): the governing design intent remains the
+// pre-S338 sentence — a binder shadows within its own scope and SHALL NOT fire.
+// Real lexical scoping, in the scanner AND codegen's renamer together, is the
+// queued conformance-restoration arc. When it lands, the refusals below flip to
+// clean deliberately, citing that arc — and the §11l bite controls keep the
+// flip honest.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11l — same-file shadows do not suppress the transitive limb (round 4)`, () => {
+  test("if-SIBLING shadow miss (the round-4 blocker shape): FIRES", () => {
+    // A branch-local `const doHash` used to delete the name from the hop
+    // caller's live set for the WHOLE body, so the genuine sibling-branch
+    // reference produced no edge and the program compiled at exit 0.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x) { if (x) { const doHash = (v) => v; return doHash(x) } return doHash(x) }`,
+      "wrap(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
+  test("while-body shadow with the genuine reference AFTER the loop: FIRES", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x) { let acc = x; while (false) { const doHash = (v) => v; acc = doHash(acc) } return doHash(acc) }`,
+      "wrap(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("match-arm shadow with a genuine SIBLING-arm reference: FIRES", () => {
+    const source = `<program>
+\${
+    type Phase:enum = { Idle, Busy }
+    import { hashPassword } from 'scrml:auth'
+    <phase>: Phase = .Idle
+}
+<pw> = "secret"
+
+\${ function doHash(p) { return hashPassword(p) } }
+
+const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("local") } .Busy :> doHash(@pw) }
+
+<div>\${@computed}</div>
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(1);
+  });
+
+  test("an RHS-local `const` shadow with NO other reference: FIRES (was §11d's clean pin)", () => {
+    // The former pin asserted 0 on the strength of the SPEC shadow sentence.
+    // Executed round 4: the exit-0 bundle contained
+    //   `const doHash = ( x ) => x; return _scrml_fetch_doHash_3 ( "local" );`
+    // — codegen renamed the shadowed CALL to the async stub, the local was dead,
+    // and the derived cell's value was the pending Promise. Firing here is what
+    // makes RI agree with what codegen actually emits, until the lexical-scoping
+    // arc fixes both together.
+    const source = `<program>
+\${
+    type Phase:enum = { Idle, Busy }
+    import { hashPassword } from 'scrml:auth'
+    <phase>: Phase = .Idle
+}
+<pw> = "secret"
+
+\${ function doHash(p) { return hashPassword(p) } }
+
+const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("local") } .Busy :> "busy" }
+
+<div>\${@computed}</div>
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(1);
+  });
+
+  test("`let` and `~` (bare-assignment) RHS-local shadows: FIRE identically", () => {
+    const mk = (binder) => `<program>
+\${
+    type Phase:enum = { Idle, Busy }
+    import { hashPassword } from 'scrml:auth'
+    <phase>: Phase = .Idle
+}
+<pw> = "secret"
+
+\${ function doHash(p) { return hashPassword(p) } }
+
+const <computed> = match @phase { .Idle :> { ${binder}; doHash("local") } .Busy :> "busy" }
+
+<div>\${@computed}</div>
+</program>`;
+    expect(errorsWithCode(runRIOn(mk("let doHash = (x) => x")).out, CODE).length).toBe(1);
+    expect(errorsWithCode(runRIOn(mk("doHash = (x) => x")).out, CODE).length).toBe(1);
+  });
+
+  test("BITE — a DIFFERENT-named local binder does not fire (the name set, not the shape)", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x) { if (x) { const other = (v) => v; return other(x) } return "y" }`,
+      "wrap(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("BITE — a hop caller's own PARAM still suppresses (provably whole-body scope)", () => {
+    // `wrap`'s `doHash` is its parameter, which scopes over the entire body —
+    // the one suppression that is provably scope-correct and therefore kept.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(doHash) { return doHash("x") }`,
+      "wrap((v) => v)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11m — RESIDUAL: FILE-LEVEL FUNCTION-VALUED BINDINGS ARE NOT HOP NODES.
+//
+// The round-4 review falsified an in-code claim that these three shapes "were
+// all ALREADY refused via 5b" — measured at N=3 on both main and the arc tip,
+// NONE is refused by anything: the hop population is `function-decl`s only
+// (`analysisMap` / `fnNameToNodeIds`), so a file-level `let`/`const` binding
+// over a server-reaching function is neither a 5b seed nor a hop node nor a
+// matched name, and the emitted client binds the async stub through the alias
+// into the derived recompute at exit 0 (e.g. `let f = _scrml_fetch_doHash_3;
+// _scrml_cs_derived_declare("computed", () => f(…))`).
+//
+// These pins record the MISS as a documented residual (§6.6.19's residual
+// list), exactly like §11k's unparseable-RHS decline: closing it needs an
+// alias-aware hop population — its own mechanism with its own
+// direction-of-change measurement, not a side effect of round 4's shadow fix.
+// If any of these starts firing, that closure has landed and the SPEC residual
+// must be retired in the same change.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11m — RESIDUAL: function-valued bindings are missed (documented)`, () => {
+  test("RESIDUAL — `let f = doHash` aliasing a server-reaching fn: NOT caught", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+let f = doHash`,
+      "f(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("RESIDUAL — `let api = { run: doHash }` object-valued alias: NOT caught", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+let api = { run: doHash }`,
+      "api.run(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("RESIDUAL — `const g = (p) => doHash(p)` lambda-valued hop: NOT caught", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+const g = (p) => doHash(p)`,
+      "g(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("BITE — the same middle hop as a `function` declaration IS caught", () => {
+    // Differential control: only the binding FORM differs from the residual
+    // above, and the function-decl form refuses with the full chain. This is
+    // what pins the miss to the hop population rather than to the reach rules.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function g(p) { return doHash(p) }`,
+      "g(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> g -> doHash");
   });
 });
