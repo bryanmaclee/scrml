@@ -47,6 +47,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
+import { readdirSync } from "fs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_PATH = join(REPO_ROOT, "compiler/tests/browser/FAILURE-BASELINE.json");
@@ -118,7 +119,20 @@ function runTier(): {
   parsed: number;
   parseOk: boolean;
 } {
-  const res = spawnSync("bun", ["test", TIER], {
+  // S345: hand bun an explicitly SORTED file list, never the bare directory.
+  // `bun test <dir>` enumerates in FILESYSTEM order, which is a property of the
+  // machine and — in CI — of the runner image and even of how the checkout was
+  // written (a `push` build and a `pull_request` build lay the tree down
+  // differently). The browser tier shares ONE happy-dom document across files, so
+  // tier order decides which file gets a clean document and which inherits a
+  // predecessor's, and this gate asserts an exact failure NAME SET. Order-sensitive
+  // input under an order-intolerant gate is the shape that produced the S345
+  // outage; sorting pins tier order to a repo property in every environment.
+  const tierFiles = readdirSync(join(REPO_ROOT, TIER))
+    .filter((f) => f.endsWith(".test.js"))
+    .sort()
+    .map((f) => `${TIER}/${f}`);
+  const res = spawnSync("bun", ["test", ...tierFiles], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
