@@ -512,8 +512,15 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     expect(falseDgProjected).toBeUndefined();
   });
 
-  test("happy-dom: writing @order updates ${@ui} text content", () => {
-    if (!globalThis.document) GlobalRegistrator.register();
+  test("happy-dom: writing @order updates ${@ui} text content", async () => {
+    // Hermeticity (S345 gate-boot-listener-fix): register a FRESH happy-dom
+    // window (same pattern as conformance/adapters/impl1-ts.ts run()) — the
+    // old `if (!globalThis.document)` guard reused the shared process-global
+    // document, so stale DOMContentLoaded boot listeners from prior eval files
+    // re-fired on this test's dispatch (and this test's own listeners leaked
+    // to later files) — the S345 cloud-gate stale-listener class.
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    GlobalRegistrator.register();
 
     const source = [
       "${",

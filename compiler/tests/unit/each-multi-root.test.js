@@ -62,7 +62,17 @@ function compileToOutputs(source, suffix = "eachmulti") {
 }
 
 /** Compile, load the emitted HTML + client JS into happy-dom, and RUN it. */
-function compileAndLoad(source, suffix) {
+async function compileAndLoad(source, suffix) {
+  // Hermeticity (S345 gate-boot-listener-fix): register a FRESH happy-dom
+  // window per load — the exact immune pattern from
+  // conformance/adapters/impl1-ts.ts run(). The old shape evaled + dispatched
+  // DOMContentLoaded against the process-global document, so stale boot
+  // listeners left by EVERY prior shared-document eval file (victim/writer
+  // pairing decided by bun's readdir file order, i.e. by runner image) re-fired
+  // here and overwrote this file's correctly-rendered output (the S345
+  // deterministic cloud-gate red on image 20260810.271.1).
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  GlobalRegistrator.register();
   const { errors, clientJs, html } = compileToOutputs(source, suffix);
   if (errors.length > 0) {
     throw new Error(`compile errors: ${errors.map((e) => e.code + ": " + e.message).join(", ")}`);
@@ -183,7 +193,7 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
     expect(clientJs.split("return _itemFrag;").length - 1).toBe(1);
   });
 
-  test("SHADOWING: a multi-root OUTER each holding a single-root nested each keeps both forms straight", () => {
+  test("SHADOWING: a multi-root OUTER each holding a single-root nested each keeps both forms straight", async () => {
     const src = `\${
   <groups> = [ { id: 1, name: "g", items: [ { id: 11, t: "x" } ] } ]
 }
@@ -203,13 +213,13 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
     // outer = 2 roots (fragment); inner = 1 root (firstChild).
     expect(clientJs.split("return _itemFrag;").length - 1).toBe(1);
     expect(clientJs.split("return _itemFrag.firstChild;").length - 1).toBe(1);
-    const api = compileAndLoad(src, "shadow-guard-2-run");
+    const api = await compileAndLoad(src, "shadow-guard-2-run");
     expect(api.count(".ghdr")).toBe(1);
     expect(api.count(".grp")).toBe(1);
     expect(api.count(".ia")).toBe(1);
   });
 
-  test("PRESERVED: a conditional (`if=`) root counts toward N and stays a CREATE-TIME decision", () => {
+  test("PRESERVED: a conditional (`if=`) root counts toward N and stays a CREATE-TIME decision", async () => {
     // emit-each.ts ~:860 gates the append on the predicate at CREATE time only.
     // A reused group does not gain or lose roots on later reconciles — that
     // limitation predates #141 and is deliberately NOT changed here. The
@@ -231,7 +241,7 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
     expect(clientJs).toContain("return _itemFrag;");
     // The conditional append is still gated, and still emitted at create time.
     expect(clientJs).toMatch(/if \(r\.flag\) _itemFrag\.appendChild\(/);
-    const api = compileAndLoad(src, "if-root-run");
+    const api = await compileAndLoad(src, "if-root-run");
     expect(api.count(".always")).toBe(2);
     expect(api.count(".maybe")).toBe(1);
   });
@@ -287,27 +297,27 @@ describe("each-multi-root §2 — issue #141 repro executes and renders every ro
 </div>
 `;
 
-  test("keyed 2-root: 4 .hdr AND 4 .row (was 4 and 0)", () => {
-    const api = compileAndLoad(src, "i141-keyed");
+  test("keyed 2-root: 4 .hdr AND 4 .row (was 4 and 0)", async () => {
+    const api = await compileAndLoad(src, "i141-keyed");
     expect(api.count(".hdr")).toBe(4);
     expect(api.count(".row")).toBe(4);
   });
 
-  test("unkeyed 2-root: 4 .uhdr AND 4 .urow (was 4 and 0)", () => {
-    const api = compileAndLoad(src, "i141-unkeyed");
+  test("unkeyed 2-root: 4 .uhdr AND 4 .urow (was 4 and 0)", async () => {
+    const api = await compileAndLoad(src, "i141-unkeyed");
     expect(api.count(".uhdr")).toBe(4);
     expect(api.count(".urow")).toBe(4);
   });
 
-  test("3-root: 4 each of .t1/.t2/.t3 (was 4 / 0 / 0)", () => {
-    const api = compileAndLoad(src, "i141-triple");
+  test("3-root: 4 each of .t1/.t2/.t3 (was 4 / 0 / 0)", async () => {
+    const api = await compileAndLoad(src, "i141-triple");
     expect(api.count(".t1")).toBe(4);
     expect(api.count(".t2")).toBe(4);
     expect(api.count(".t3")).toBe(4);
   });
 
-  test("roots interleave per item — group order is hdr,row,hdr,row,… not all-hdr-then-all-row", () => {
-    compileAndLoad(src, "i141-order");
+  test("roots interleave per item — group order is hdr,row,hdr,row,… not all-hdr-then-all-row", async () => {
+    await compileAndLoad(src, "i141-order");
     expect(orderOf(".keyed")).toEqual([
       "hdr:Ha", "row:Ra",
       "hdr:Hb", "row:Rb",
@@ -333,8 +343,8 @@ describe("each-multi-root §3 — reconcile keeps groups intact", () => {
 </div>
 `;
 
-  test("reorder (reverse) moves each item's two roots together, in order", () => {
-    const api = compileAndLoad(src, "reorder");
+  test("reorder (reverse) moves each item's two roots together, in order", async () => {
+    const api = await compileAndLoad(src, "reorder");
     expect(orderOf(".keyed").length).toBe(8);
     api.set("rows", [
       { id: 4, label: "d" },
@@ -350,8 +360,8 @@ describe("each-multi-root §3 — reconcile keeps groups intact", () => {
     ]);
   });
 
-  test("insert in the middle places the new group between the neighbours", () => {
-    const api = compileAndLoad(src, "insert");
+  test("insert in the middle places the new group between the neighbours", async () => {
+    const api = await compileAndLoad(src, "insert");
     api.set("rows", [
       { id: 1, label: "a" },
       { id: 2, label: "b" },
@@ -370,8 +380,8 @@ describe("each-multi-root §3 — reconcile keeps groups intact", () => {
     ]);
   });
 
-  test("remove drops ALL roots of the removed item — no orphan second root", () => {
-    const api = compileAndLoad(src, "remove");
+  test("remove drops ALL roots of the removed item — no orphan second root", async () => {
+    const api = await compileAndLoad(src, "remove");
     api.set("rows", [
       { id: 1, label: "a" },
       { id: 4, label: "d" },
@@ -381,14 +391,14 @@ describe("each-multi-root §3 — reconcile keeps groups intact", () => {
     expect(orderOf(".keyed")).toEqual(["hdr:Ha", "row:Ra", "hdr:Hd", "row:Rd"]);
   });
 
-  test("clear to empty removes every root", () => {
-    const api = compileAndLoad(src, "clear");
+  test("clear to empty removes every root", async () => {
+    const api = await compileAndLoad(src, "clear");
     api.set("rows", []);
     expect(api.count(".hdr")).toBe(0);
     expect(api.count(".row")).toBe(0);
   });
 
-  test("single-root each still reorders correctly (regression)", () => {
+  test("single-root each still reorders correctly (regression)", async () => {
     const one = `\${
   <rows> = ${ROWS}
 }
@@ -398,7 +408,7 @@ describe("each-multi-root §3 — reconcile keeps groups intact", () => {
   </each>
 </div>
 `;
-    const api = compileAndLoad(one, "one-reorder");
+    const api = await compileAndLoad(one, "one-reorder");
     expect(api.count(".only")).toBe(4);
     api.set("rows", [
       { id: 3, label: "c" },
@@ -415,7 +425,7 @@ describe("each-multi-root §3 — reconcile keeps groups intact", () => {
 // ---------------------------------------------------------------------------
 
 describe("each-multi-root §4 — of= / <empty> / nested", () => {
-  test("<each of=3> with 2 roots renders 3 groups = 6 nodes", () => {
+  test("<each of=3> with 2 roots renders 3 groups = 6 nodes", async () => {
     const src = `<div class="ofn">
   <each of=3 as i>
     <div class="oa">A\${i}</div>
@@ -423,13 +433,13 @@ describe("each-multi-root §4 — of= / <empty> / nested", () => {
   </each>
 </div>
 `;
-    const api = compileAndLoad(src, "of-multi");
+    const api = await compileAndLoad(src, "of-multi");
     expect(api.count(".oa")).toBe(3);
     expect(api.count(".ob")).toBe(3);
     expect(orderOf(".ofn").length).toBe(6);
   });
 
-  test("<empty> + multi-root: empty state renders the fallback, then the empty→non-empty edge renders every root", () => {
+  test("<empty> + multi-root: empty state renders the fallback, then the empty→non-empty edge renders every root", async () => {
     const src = `\${
   <rows> = []
 }
@@ -441,7 +451,7 @@ describe("each-multi-root §4 — of= / <empty> / nested", () => {
   </each>
 </div>
 `;
-    const api = compileAndLoad(src, "empty-multi");
+    const api = await compileAndLoad(src, "empty-multi");
     expect(api.count(".none")).toBe(1);
     expect(api.count(".hdr")).toBe(0);
     api.set("rows", [
@@ -455,7 +465,7 @@ describe("each-multi-root §4 — of= / <empty> / nested", () => {
     expect(orderOf(".withempty")).toEqual(["hdr:Ha", "row:Ra", "hdr:Hb", "row:Rb"]);
   });
 
-  test("nested <each> with a multi-root inner body renders every inner root", () => {
+  test("nested <each> with a multi-root inner body renders every inner root", async () => {
     const src = `\${
   <groups> = [
     { id: 1, name: "g1", items: [ { id: 11, t: "x" }, { id: 12, t: "y" } ] },
@@ -473,7 +483,7 @@ describe("each-multi-root §4 — of= / <empty> / nested", () => {
   </each>
 </div>
 `;
-    const api = compileAndLoad(src, "nested-multi");
+    const api = await compileAndLoad(src, "nested-multi");
     expect(api.count(".grp")).toBe(2);
     expect(api.count(".ia")).toBe(3);
     expect(api.count(".ib")).toBe(3);
@@ -485,7 +495,7 @@ describe("each-multi-root §4 — of= / <empty> / nested", () => {
 // ---------------------------------------------------------------------------
 
 describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
-  test("two `lift`s per iteration render both roots per item (SPEC §10.8)", () => {
+  test("two `lift`s per iteration render both roots per item (SPEC §10.8)", async () => {
     const src = `<div class="wrap">\${
   <rows> = ${ROWS}
 
@@ -499,7 +509,7 @@ describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
   }
 }</>
 `;
-    const api = compileAndLoad(src, "lift-run");
+    const api = await compileAndLoad(src, "lift-run");
     expect(api.count(".lhdr")).toBe(4);
     expect(api.count(".lrow")).toBe(4);
   });
