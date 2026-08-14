@@ -53,8 +53,16 @@ function artifacts() {
   // `const { X } = _scrml_modules["<file>.client.js"]`, so the harness has to load
   // those modules first — the same thing the browser does via <script> order.
   const inputs = [];
+  // SORTED walk (S345): `readdirSync` returns filesystem order, which is a property
+  // of the IMAGE the runner was built from, not of this repo. Handing an unsorted
+  // list to `compileScrml` made the whole-app compile order environment-dependent,
+  // and with it the emitted `driver/hos.html` this file asserts on — the same
+  // readdir-order class that made `each-multi-root` fail only in cloud. Sorting at
+  // every level makes the input list identical everywhere.
   const walk = (dir) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
       const q = resolve(dir, e.name);
       if (e.isDirectory()) walk(q);
       else if (e.name.endsWith(".scrml")) inputs.push(q);
