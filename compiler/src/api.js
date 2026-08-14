@@ -139,7 +139,12 @@ export function scanDirectory(dirPath) {
   function walk(dir) {
     let entries;
     try {
-      entries = readdirSync(dir);
+      // SORTED (S345): readdirSync returns FILESYSTEM order, a property of the machine
+      // (and, in CI, of the runner image) rather than of the project. Feeding that order
+      // into the compile made emitted output environment-dependent — witnessed when a
+      // runner-image rebuild changed the emitted HTML of a multi-file app. Sorting makes
+      // `scrml compile <dir>` deterministic across machines.
+      entries = readdirSync(dir).sort();
     } catch {
       return;
     }
@@ -232,7 +237,12 @@ export function findOutputFiles(dirPath, suffix) {
   function walk(dir) {
     let entries;
     try {
-      entries = readdirSync(dir);
+      // SORTED (S345): readdirSync returns FILESYSTEM order, a property of the machine
+      // (and, in CI, of the runner image) rather than of the project. Feeding that order
+      // into the compile made emitted output environment-dependent — witnessed when a
+      // runner-image rebuild changed the emitted HTML of a multi-file app. Sorting makes
+      // `scrml compile <dir>` deterministic across machines.
+      entries = readdirSync(dir).sort();
     } catch {
       return;
     }
@@ -355,7 +365,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
   }
   function copyTree(srcDir, dstDir) {
     mkdirSync(dstDir, { recursive: true });
-    for (const entry of readdirSync(srcDir)) {
+    for (const entry of readdirSync(srcDir).sort()) {
       const s = join(srcDir, entry);
       const d = join(dstDir, entry);
       const stat = statSync(s);
