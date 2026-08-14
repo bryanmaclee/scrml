@@ -510,48 +510,83 @@ describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
     expect(api.count(".lrow")).toBe(4);
   });
 
-  // ZZDEBUG round 1 — diagnostics only, always passes. Repeats the §5 steps
-  // with a full dump at every stage so the cloud log localizes the divergence:
-  // compile-side (errors / artifact bytes) vs eval-side (throw) vs DOM-side
-  // (render ran but document shows nothing).
-  test("ZZDEBUG round 1 — environment + emitted-artifact + execution dump", () => {
+  // ZZDEBUG round 2 — diagnostics only, always passes.
+  // Round 1 found: compile CORRECT, eval CLEAN, store CORRECT, but the logic
+  // span ends up containing the literal text "99" and zero .lhdr — something
+  // OTHER than this chunk wrote into `[data-scrml-logic="_scrml_logic_1"]`
+  // (a GENERIC id shared by every compiled chunk). Round 2 catches the writer:
+  //   PHASE A (probe) — mount the static HTML, arm mutation spies on body /
+  //     .wrap / span, dispatch a bare DOMContentLoaded WITHOUT evaling this
+  //     chunk. Any write proves a STALE listener from a prior eval targets the
+  //     generic span id. The spy logs a stack trace naming the writer.
+  //   PHASE B — remount fresh, re-arm spies, eval this chunk, dump counts
+  //     BEFORE dispatch (did our own render attach?), dispatch, dump again
+  //     (did the dispatch wipe it?).
+  test("ZZDEBUG round 2 — span mutation spies + probe dispatch + pre/post-dispatch counts", () => {
     const P = "ZZDEBUG:";
     const log = (...a) => console.log(P, ...a);
+    const shortStack = (e) => String(e.stack || "").split("\n").slice(1, 12).join(" | ");
+    // Instance-level spy: shadow the mutating prototype members with own
+    // properties that log a stack, then delegate. Reads are untouched.
+    const spy = (el, label) => {
+      if (!el) { log("spy target missing:", label); return; }
+      for (const m of ["appendChild", "insertBefore", "removeChild", "replaceChild", "replaceChildren", "append", "prepend", "remove"]) {
+        const orig = el[m];
+        if (typeof orig !== "function") continue;
+        Object.defineProperty(el, m, {
+          configurable: true,
+          value: function (...args) {
+            log("SPY", label, m, "args:", args.map((a) => String(a && a.nodeName || a).slice(0, 40)).join(","), "stack:", shortStack(new Error()));
+            return orig.apply(this, args);
+          },
+        });
+      }
+      for (const prop of ["textContent", "innerHTML", "innerText"]) {
+        // Walk the prototype chain for the accessor.
+        let proto = Object.getPrototypeOf(el);
+        let desc = null;
+        while (proto && !desc) { desc = Object.getOwnPropertyDescriptor(proto, prop); if (!desc) proto = Object.getPrototypeOf(proto); }
+        if (!desc || !desc.set) continue;
+        Object.defineProperty(el, prop, {
+          configurable: true,
+          get() { return desc.get.call(this); },
+          set(v) {
+            log("SPY", label, "set", prop, "=", JSON.stringify(String(v).slice(0, 80)), "stack:", shortStack(new Error()));
+            return desc.set.call(this, v);
+          },
+        });
+      }
+    };
+
     try {
-      // (e) environment
-      log("platform", process.platform, process.arch, "versions", JSON.stringify(process.versions));
-      try { log("os.release", zzrequire("os").release()); } catch (e) { log("os.release failed", String(e)); }
-      log("env", JSON.stringify({
-        LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, TZ: process.env.TZ,
-        ImageOS: process.env.ImageOS, ImageVersion: process.env.ImageVersion,
-        RUNNER_OS: process.env.RUNNER_OS, CI: process.env.CI,
-      }));
-      try { log("happy-dom version", zzrequire("happy-dom/package.json").version); } catch (e) { log("happy-dom version lookup failed", String(e)); }
-      try { log("global-registrator version", zzrequire("@happy-dom/global-registrator/package.json").version); } catch (e) { log("gr version lookup failed", String(e)); }
-      log("readyState(before)", document.readyState, "bodyChildren(before)", document.body.children.length);
-
-      // (a)+(b) compile-side
+      log("R2 env ImageVersion=", process.env.ImageVersion, "readyState", document.readyState);
       const { errors, clientJs, html } = compileToOutputs(LIFT_SRC, "lift-run-zzdebug");
-      log("compile errors:", JSON.stringify(errors));
-      log("html.length", html.length, "clientJs.length", clientJs.length);
-      log("html:", JSON.stringify(html));
-      log("clientJs contains lhdr:", clientJs.includes("lhdr"));
-      log("clientJs FULL BEGIN");
-      clientJs.split("\n").forEach((line, i) => console.log(P, "CJ", String(i + 1).padStart(3, " "), line));
-      log("clientJs FULL END");
-
-      // harness steps, replicated
+      log("R2 compile errors:", JSON.stringify(errors), "clientJs.length", clientJs.length);
       const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-      const bodyHtml = bodyMatch ? bodyMatch[1] : html;
-      document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
-      log("body BEFORE eval:", JSON.stringify(document.body.innerHTML));
-      log("logic span found BEFORE eval:", !!document.querySelector("[data-scrml-logic]"));
+      const bodyHtml = (bodyMatch ? bodyMatch[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
 
-      // (d) eval wrapped
+      // ---- PHASE A: probe dispatch, NO eval of our chunk ----
+      document.body.innerHTML = bodyHtml;
+      let span = document.querySelector('[data-scrml-logic="_scrml_logic_1"]');
+      let wrap = document.querySelector(".wrap");
+      spy(document.body, "A-body");
+      spy(wrap, "A-wrap");
+      spy(span, "A-span");
+      log("A: span before probe:", JSON.stringify(span ? span.innerHTML : null));
+      document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+      log("A: span AFTER probe dispatch:", JSON.stringify(span ? span.innerHTML : null),
+          "body:", JSON.stringify(document.body.innerHTML.slice(0, 500)));
+
+      // ---- PHASE B: fresh mount, eval, count pre-dispatch, dispatch, count ----
+      document.body.innerHTML = bodyHtml;
+      span = document.querySelector('[data-scrml-logic="_scrml_logic_1"]');
+      wrap = document.querySelector(".wrap");
+      spy(document.body, "B-body");
+      spy(wrap, "B-wrap");
+      spy(span, "B-span");
       const code =
         `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
         `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
-      log("code.length", code.length);
       let evalErr = null;
       try {
         // eslint-disable-next-line no-eval
@@ -559,19 +594,15 @@ describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
       } catch (e) {
         evalErr = e;
       }
-      log("eval error:", evalErr ? String((evalErr && evalErr.stack) || evalErr) : "none");
-      document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
-
-      // (c) DOM-side
-      const bodyAfter = document.body.innerHTML;
-      log("body AFTER eval (", bodyAfter.length, "chars):", JSON.stringify(bodyAfter.slice(0, 3000)));
-      log("counts: lhdr", document.querySelectorAll(".lhdr").length,
+      log("B: eval error:", evalErr ? String((evalErr && evalErr.stack) || evalErr) : "none");
+      log("B: counts PRE-dispatch: lhdr", document.querySelectorAll(".lhdr").length,
           "lrow", document.querySelectorAll(".lrow").length,
-          "div", document.querySelectorAll("div").length,
-          "logic-span", document.querySelectorAll("[data-scrml-logic]").length);
-      log("typeof window._scrml_reactive_get:", typeof window._scrml_reactive_get);
-      try { log("rows via captured get:", JSON.stringify(window._scrml_reactive_get("rows"))); } catch (e) { log("rows get failed", String(e)); }
-      log("readyState(after)", document.readyState);
+          "span content:", JSON.stringify(span ? span.innerHTML.slice(0, 300) : null));
+      document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+      log("B: counts POST-dispatch: lhdr", document.querySelectorAll(".lhdr").length,
+          "lrow", document.querySelectorAll(".lrow").length,
+          "span content:", JSON.stringify(span ? span.innerHTML.slice(0, 300) : null));
+      log("B: body POST:", JSON.stringify(document.body.innerHTML.slice(0, 800)));
     } catch (outer) {
       console.log(P, "OUTER ERROR", String((outer && outer.stack) || outer));
     }
