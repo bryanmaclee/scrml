@@ -3745,9 +3745,10 @@ function stateDeclRhsRoots(declNode: Record<string, unknown>): unknown[] {
  * JS (import references are not renamed), so suppressing is sound there. The set
  * is RHS-WIDE, not lexically scoped — a binder in one `match` arm suppresses a
  * sibling arm's reference too. On limb (a) that scope-blindness is a pre-existing
- * filed residual (cross-arm import shadow), deliberately NOT widened or narrowed
- * by round 4; on limb (b) the identical scope-blindness was the round-4 blocker
- * (a silent Promise-render miss), which is why limb (b) stopped using this set.
+ * hazard (cross-arm import shadow), flagged in the round-4 review and routed for
+ * filing — deliberately NOT widened or narrowed by round 4; on limb (b) the
+ * identical scope-blindness was the round-4 blocker (a silent Promise-render
+ * miss), which is why limb (b) stopped using this set.
  *
  * The walk stops at a nested `lambda` / `function-decl` binder (own scope), so a
  * lambda parameter never enters this set — the S331/S338 over-fire that §6.6.19
@@ -3821,8 +3822,8 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  *   references to a server-only IMPORT (the client keeps the stdlib binding
  *   names), so the emitted JS honours the local shadow and RI's suppression
  *   agrees with what actually runs. (The suppression is RHS-wide rather than
- *   lexically scoped — the pre-existing cross-arm hazard on this limb is a
- *   filed residual, not changed here.)
+ *   lexically scoped — the pre-existing cross-arm hazard on this limb is
+ *   flagged and routed for filing, not changed here.)
  *
  * `"none"` — LIMB (b). NO name-based suppression at all: any reference to a
  *   server-reaching function name fires. This is the round-4 blocker fix, and it
