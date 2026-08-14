@@ -36,6 +36,21 @@ import { resolve } from "path";
 // ZZDEBUG (throwaway branch debug/gate-each-multiroot-image-20260810 only):
 // CI-image divergence localization for the §5 lift-run failure. Never merges.
 const zzrequire = createRequire(import.meta.url);
+
+// R3: count the shared document's accumulated DOMContentLoaded listeners via
+// happy-dom internals. Logged per compileAndLoad call to localize WHERE the
+// count diverges between the green and red environments.
+function zzListenerCount() {
+  try {
+    const PropertySymbol = zzrequire("happy-dom/lib/PropertySymbol.js");
+    const store = document[PropertySymbol.listeners];
+    const b = store && store.bubbling && store.bubbling.get("DOMContentLoaded");
+    const c = store && store.capturing && store.capturing.get("DOMContentLoaded");
+    return `${b ? b.length : 0}/${c ? c.length : 0}`;
+  } catch (e) {
+    return "enum-failed:" + String(e).slice(0, 60);
+  }
+}
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -75,12 +90,15 @@ function compileAndLoad(source, suffix) {
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   const bodyHtml = bodyMatch ? bodyMatch[1] : html;
   document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+  console.log("ZZDEBUG: CAL", suffix, "listeners pre-eval:", zzListenerCount());
   const code =
     `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
     `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
   // eslint-disable-next-line no-eval
   eval(code);
+  console.log("ZZDEBUG: CAL", suffix, "listeners post-eval:", zzListenerCount());
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  console.log("ZZDEBUG: CAL", suffix, "listeners post-dispatch:", zzListenerCount());
   return {
     clientJs,
     get: (n) => window._scrml_reactive_get(n),
@@ -558,8 +576,39 @@ describe("each-multi-root §5 — Tier-0 multi-`lift` executes", () => {
       }
     };
 
+    // R3: enumerate the shared document's accumulated DOMContentLoaded
+    // listeners via happy-dom internals — count + a source slice per listener
+    // so the producing chunk is identifiable (cs tokens / engine names /
+    // selectors appear in the function source).
+    const enumerateListeners = (tag) => {
+      try {
+        const PropertySymbol = zzrequire("happy-dom/lib/PropertySymbol.js");
+        const store = document[PropertySymbol.listeners];
+        for (const phase of ["bubbling", "capturing"]) {
+          const arr = store && store[phase] && store[phase].get("DOMContentLoaded");
+          log(tag, phase, "DOMContentLoaded listener count:", arr ? arr.length : 0);
+          if (arr) {
+            arr.forEach((entry, i) => {
+              const fn = (entry && (entry.callback || entry.listener)) || entry;
+              const src = String(typeof fn === "function" ? fn : (fn && fn.handleEvent) || fn).replace(/\s+/g, " ");
+              // Distinctive bits: engine tokens, cs tokens, selectors, literals.
+              const hints = [];
+              for (const re of [/__scrml_engine_[0-9a-z_]+/g, /_scrml_cs_key[^;]{0,60}/g, /data-scrml-[a-z-]+="[^"]*"/g, /_scrml_logic_\d+/g]) {
+                const m = src.match(re);
+                if (m) hints.push(...m.slice(0, 3));
+              }
+              log(tag, "listener", i, "len", src.length, "hints:", JSON.stringify([...new Set(hints)].slice(0, 8)), "head:", JSON.stringify(src.slice(0, 220)));
+            });
+          }
+        }
+      } catch (e) {
+        log(tag, "listener enumeration failed:", String(e));
+      }
+    };
+
     try {
       log("R2 env ImageVersion=", process.env.ImageVersion, "readyState", document.readyState);
+      enumerateListeners("R3-listeners(at test start)");
       const { errors, clientJs, html } = compileToOutputs(LIFT_SRC, "lift-run-zzdebug");
       log("R2 compile errors:", JSON.stringify(errors), "clientJs.length", clientJs.length);
       const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);

@@ -793,6 +793,9 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { createRequire as zzCreateRequireEBR } from "module";
+// ZZDEBUG (throwaway debug branch) — listener enumeration helper.
+const zzRequireEBR = zzCreateRequireEBR(import.meta.url);
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 import { foldChunkNamespacing, unNamespaceEngineNames, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
@@ -826,6 +829,16 @@ function compileAndLoad(source, suffix) {
     `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` + `\n})();`;
   // eslint-disable-next-line no-eval
   eval(code);
+
+  // ZZDEBUG (throwaway debug branch): count accumulated DOMContentLoaded
+  // listeners on the shared document around this harness's dispatch.
+  try {
+    const zzPS = zzRequireEBR("happy-dom/lib/PropertySymbol.js");
+    const zzArr = document[zzPS.listeners]?.bubbling?.get("DOMContentLoaded");
+    console.log("ZZDEBUG: EBR", suffix, "listeners post-eval:", zzArr ? zzArr.length : 0);
+  } catch (zzE) {
+    console.log("ZZDEBUG: EBR enum failed:", String(zzE).slice(0, 80));
+  }
 
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
