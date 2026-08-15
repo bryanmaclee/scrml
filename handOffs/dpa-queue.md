@@ -41,6 +41,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-024 | **COMPLETE (ADVISORY) dPA 2026-08-10 — Q4 ACTED ON, rest awaiting bryan.** ⚑ *Sat BANKED-UNRUN from S331 to S337 because the PA filed its Q4 under "OWED BY BRYAN" — a question only the DD could answer — while bryan waited on the agreed "say when it's ready" signal. No boot probe reads this file; that is the real reason it was invisible.* **Q4's banked premise was FACTUALLY WRONG and the DD caught it:** self-host-v2 is NOT chartered as a parity target — parity framing was DROPPED S222 (`compiler-reimagining-derisk-2026-06-26/RULING.md:11`, PA-verified verbatim), replaced by D3 conformance-as-oracle S230, and firewalled. **Do not change the charter.** **The real risk is one layer down:** `self-host-v2/progress.md` carries **53** `byte-identical`/`impl#1` mentions as success conditions — the sanctioned tier-2 scaffold became the de-facto definition of done, and nothing said when it stops. Activates the day the parser wave opens (lexer 337/337 done; parser NOT started), because impl#1's `FileAST` carries the **127 in-place decoration fields** skeleton-RULING:13 forbids. **RULED + LANDED S337** (bryan: *"go, take the tier-2 retirement rule"*) → `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md`: 3 clauses (scaffold never an exit criterion · AST-parity FORBIDDEN as an oracle from the parser wave · divergence = freedom exercised not debt owed) + **conformance fork 2 RESOLVED** to the mixed-pipeline bootstrap (FORK RULE rows 1-4 unanimous). No code, no charter change, no rework. **Rival hypothesis SURVIVES, restated:** a canonical AST EXISTS (`types/ast.ts`, day one) but is NOT load-bearing — 16 modules shadow it as `Record<string,unknown>`, which is what lets 127 `_`-prefixed decoration fields typecheck; 24% of open gaps but **39-42% of open HIGHs** (~1.7x severity enrichment); passes the detection-window falsifier (spans S297-S331, static + grep-visible). Subsumes the S331 refuted hypothesis's surviving claim. **Q5 null: MET for impl#1** (off the V1 critical path, terminal, ~76% of gaps outside the class → keep patching; no impl#1 re-architecture proposed), **NOT met for impl#2**. **⚑ THE CORRECTIVE, against the intuition that opened the question:** the never-ending bug loop is mostly NOT architectural — conformance pins ~18 of ~60 surfaces, so ~42 are unpinned and each pass finds genuinely NEW defects. **The loop ends when the CONTRACT is complete, not when the architecture changes.** **R3 NOT recommended** (zero rival architectures survived; only one was ever on the table and it is ratified). → `scrml-support/docs/deep-dives/compiler-architecture-for-this-language-dpa-024-2026-08-10.md` | bryan S331 *"bank the deep-dive"* → **S337 FIRED + Q4 RULED**; §§1-3/Q5 advisory, awaiting ratify/reject |
 | dpa-025 | **RATIFIED S338 2026-08-11 (bryan: "a, and grep the compiler for source-text regexes") — option (a): ratify the finding, take the no-regret moves now, run the §6.1 blind fuzz BEFORE committing to A1. PA re-measured the headline before surfacing and it REPRODUCES (34 fields / 33 optional / 32 degenerate exact / ~70 sites) — unlike the S337 `127`. bryan added a SECOND instruction that reprioritises the measurement: **census the compiler for source-text regexes** — cheaper than the fuzz and it measures the PROBLEM not the fix. First result: **232 post-AST source-text gates across 49 files** (vs 182 legitimate pre-AST), and **232 is a FLOOR** — the probe keys on identifier names and cannot see `postRe.test(t)`, with 81 opaque-arg sites unclassifiable. Prior state:**  ⚑ **VERDICT: the answer is an OPTIONAL FIELD, not a missing primitive.** `emitExpr` is ALREADY one choke point; `EmitExprContext` = **33 fields / 32 OPTIONAL / 68 construction sites / 32 degenerate `{mode:"client"}` populating zero** — so a feature works only where someone remembered to thread it. That is the mechanism behind the field-list/parallel-walker class S337 hit four times: not an ABSENT capability, an OPTIONAL one. **★★ Live hazard found en route: `emit-logic.ts:1628` DEFAULTS A MISSING SERVER BOUNDARY TO CLIENT EMIT**, warned only under `SCRML_DEBUG` so silent by default — while `PIPELINE.md` 0.5.1 makes "client JS MUST NOT contain server-context constructs" an explicit CG output invariant (`E-CG-006`) and the source ships `SCRML_STRICT_BOUNDARY=1` **off**. Third fail-open-by-default in this area. **★ The ledger cannot measure itself and it corrupted this DD's own numbers** — 50 of 209 heading-extracted "open" rows are marked resolved in the body; 48 `status=open` entries are absent from a heading extraction entirely (the open gap `g-known-gaps-heading-and-marker-status-can-disagree-silently`). Gap counts quoted anywhere are SOFT until that is fixed. **A dPA pole proposed a retroactive §34 emitter gate that §34.0 had ALREADY declined** verbatim — caught as re-litigation. → `scrml-support/docs/deep-dives/population-first-missing-primitive-2026-08-10.md` | bryan S337 fired · **RUN-not-RATIFY, awaiting ratify/reject** |
 | dpa-026 | **BANKED — UNRUN** (S337, 2026-08-10). **Is `tare` one keyword doing TWO jobs — thunk at module-init, CAPTURE at runtime — or an argument for two?** bryan: *"a, and bank c as its own question."* **The motivating metaphor is the case that does not work.** You tare a scale at RUNTIME, in a handler, after a reading — and thunk semantics structurally cannot express that (PA-verified: a deferred write registers no init thunk, so the bare form promotes module-init's; and `tare(@x, @x)` re-reads at reset time, giving the current value not the calibrated one). Thunk serves CONFIG; it cannot serve CALIBRATION. ⚠ The S337 "thunk, keep the family coherent" ruling was made BEFORE this was known — this reopens it on NEW INFORMATION, not by re-litigation. | bryan S337 · *"bank c as its own question"* |
+| dpa-027 | **BANKED — UNRUN** (S346, 2026-08-15). **Presence-match arm vocabulary — §18.8.2 says `.Some(v)`/`.None`, the compiler implements `not :>`/`given x :>` (measured S346: `.Some/.None` → E-MATCH-012 + E-TYPE-006; `not/given` compiles).** NARROW R1→R2; PA lean (a) strike the §18.8.2 `.Some/.None` prose + cross-ref §42.2.3 (limit wins) — R2 iff `git log -S`/user-voice finds a ruling behind the `.Some/.None` text. Split from S345 owed filing (d); the other half is a BUG (`g-lifecycle-return-match-fires-e-type-024`). | S346 bank |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -997,6 +998,62 @@ A verdict on subsume-vs-complement with worked adopter code for **each** of the 
 
 
 
+## dpa-027 — Presence-match arm vocabulary: §18.8.2 says `.Some(v)`/`.None`, the compiler implements `not :>`/`given x :>` — which is canonical? (NARROW; R1→R2)
+
+```
+id:        dpa-027
+status:    banked
+rung:      R1 (PA lean recorded) — R2 if the DD finds the .Some/.None text has a ruling behind it
+requested: bryan, S345 (owed filing (d), banked S346 after the PA split it — the other half is a BUG, `g-lifecycle-return-match-fires-e-type-024`)
+routes-to: scrml PA
+```
+
+### The question
+
+Two normative sections give two different arm vocabularies for discriminating a `T | not` value in a
+`match`, and the compiler implements exactly one of them:
+
+- **§18.8.2** ("Match over Union Types (`A | B | not`)"), verbatim: *"Optional match: For a value of
+  type `T | not`: `.Some(value)` matches the present case and binds the unwrapped value as `value` with
+  type `T`. `.None` matches the `not` case."* — with a worked example `match val { .Some(s) :> … .None :> … }`.
+- **§14.12.6.1** (form 3) + **§42.2.3**: `match u { not :> handleAbsence()  given u :> { … u.name … } }`.
+
+**Executed S346 at `f6883b26`** (reproducers in the S346 scratchpad `dpa027/`; shapes below are enough
+to re-derive): over a PLAIN union `let u: User | not` (and `fn -> User | not`):
+- `not :>` / `given u :>` arms → **compiles clean**.
+- `.Some(v)` / `.None` arms → **`E-MATCH-012`** ("lacks a `not` arm") **+ `E-TYPE-006`** ("missing
+  members: struct") — the `.Some`/`.None` spelling is not recognised at all.
+So the §18.8.2 optional-match prose describes a form the compiler has never accepted; the live form is
+§42's `not`/`given`.
+
+### What is already established — do NOT re-derive
+- `not` is scrml's SOLE absence value (S89 ruling, §42.1); `null`/`undefined` do not exist; there are
+  no generics (`Option<T>` is not a scrml type). `Some`/`None` are not declared anywhere as scrml enum
+  variants — `.Some(value)` is an Option-type idiom borrowed from elsewhere.
+- `given x :>` is the ratified narrow-to-present form (§42.2.3, S135 cluster N).
+- The compiler's `E-MATCH-012` message itself prescribes the `not => …` arm — the implementation and its
+  own diagnostic agree on the `not`/`given` vocabulary.
+
+### PA lean (FORK RULE row 1, LIMIT wins — recorded, not ruled)
+(a) **Strike the `.Some(value)`/`.None` prose + example from §18.8.2 and cross-reference §42.2.3 /
+§14.12.6.1 form 3 as THE optional-match form.** One vocabulary, the native one; nothing an adopter can
+write today stops working (the struck form never compiled — measured); the compiler already agrees.
+Rule 4b: the provenance of the §18.8.2 sentence being changed is UNKNOWN to the PA — the DD's first job
+is `git log -S '.Some(value)' -- compiler/SPEC.md` + a user-voice sweep for `Some`/`None`/`Option`;
+if a ruling put it there, this becomes R2 and bryan rules.
+(b) implement `.Some/.None` as aliases — a WIDENING that adds a second spelling of the same
+discrimination and a foreign idiom; disfavoured under limit-primitives-not-godify.
+(c) something else.
+
+### Anti-goals
+Do NOT touch the lifecycle-return `E-TYPE-024` defect here (it is a bug with its own gap entry).
+Do NOT ratify — RUN-not-RATIFY.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA.
+
+
 ## dpa-026 — Is `tare` one keyword doing two jobs? (thunk vs capture, by position)
 
 ```
@@ -1062,7 +1119,7 @@ Routes to scrml PA.
 
 ```
 id:        dpa-025
-status:    banked
+status:    ratified   # S338 (bryan: "a, and grep the compiler for source-text regexes"); reconciled S346 — table is the authority
 rung:      R2 minimum; escalate to R3 if two or more candidate primitives survive and compete
 requested: bryan, S337 (2026-08-10) — "add that to dpa-025 so i can run it"
 routes-to: scrml PA

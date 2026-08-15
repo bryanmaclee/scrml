@@ -1,6 +1,6 @@
 # BRIEF — gate-each-multiroot-image-debug (S345-bryan dispatch)
 
-DONE-PROBE: `test -f docs/changes/gate-each-multiroot-image-debug/FINDINGS.md`
+DONE-PROBE: test -f docs/changes/gate-each-multiroot-image-debug/FINDINGS.md
 
 ## Context (PA-established facts — do not re-derive)
 The cloud CI `gate` is deterministically RED on main: `compiler/tests/unit/each-multi-root.test.js:503`

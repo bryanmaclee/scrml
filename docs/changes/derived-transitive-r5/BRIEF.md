@@ -1,6 +1,6 @@
 # BRIEF — derived-transitive fix round 5 (S345-bryan dispatch)
 
-DONE-PROBE: `git rev-parse --verify refs/heads/dtr-r5 >/dev/null 2>&1 && echo ok`
+DONE-PROBE: git rev-parse --verify --quiet refs/remotes/origin/dtr-r5 >/dev/null 2>&1
 
 ## Context
 The S239 review of round 4 (frozen `review/derived-transitive-r4` = `4b3f36f0`) returned

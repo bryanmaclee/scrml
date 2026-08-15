@@ -1,6 +1,6 @@
 # BRIEF — gate-boot-listener-fix (S345-bryan dispatch) — THE REPO-WIDE GATE UNBLOCKER
 
-DONE-PROBE: `grep -c 'once: true' compiler/src/codegen/emit-event-wiring.ts compiler/src/codegen/emit-variant-guard.ts compiler/src/codegen/emit-client.ts | awk -F: '{s+=$2} END {exit (s>=3)?0:1}' && echo ok`
+DONE-PROBE: grep -c 'once: true' compiler/src/codegen/emit-event-wiring.ts compiler/src/codegen/emit-variant-guard.ts compiler/src/codegen/emit-client.ts | awk -F: '{s+=$2} END {exit (s>=3)?0:1}'
 
 ## Context (diagnosis is COMPLETE — do not re-derive)
 Read FIRST: `git show debug/gate-each-multiroot-image-20260810:docs/changes/gate-each-multiroot-image-debug/FINDINGS.md`

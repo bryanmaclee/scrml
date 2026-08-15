@@ -1,6 +1,6 @@
 # BRIEF — census-crossos-separator-fix (S345-bryan dispatch)
 
-DONE-PROBE: `bun scripts/source-text-regex-census.ts --summary` exits 0 AND `grep -c 'split(sep)\|sep,\|from "path"' scripts/source-text-regex-census.ts` finds separator normalization present (win32-shaped unit check in the test or script self-check passes)
+DONE-PROBE: grep -q 'toRel' scripts/source-text-regex-census.ts && bun scripts/source-text-regex-census.ts --summary >/dev/null 2>&1
 
 ## Task
 Fix the cross-OS separator bug in `scripts/source-text-regex-census.ts` reported by S344-peter
