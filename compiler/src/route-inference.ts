@@ -3400,6 +3400,30 @@ function buildPerFileEscalationServerOnlyBindings(
  * import relocated its function and JSON-serialized a callback argument. Residual,
  * accepted and named: a name shadowed ONLY inside a nested lambda still fires
  * (over-fire, never a leak).
+ *
+ * PARAMETER DEFAULTS ARE THE FUNCTION USING THE BINDING (round 6, B7). The scan
+ * root was `fnNode.body`; `fnNode.params` is a sibling of it and a `function`
+ * declaration's `defaultValue` is raw source text, so
+ *
+ *     function f(h = hashPassword(@pw)) { return h }
+ *
+ * did not escalate `f` — measured on the frozen round-5 tree AND identically at
+ * the pre-arc base (pre-existing, not a round-5 regression): NO `.server.js`
+ * hosting the call, `const { hashPassword } = _scrml_stdlib.auth;` in the
+ * client, 4x `Bun.password` + the argon2id body in the runtime the HTML loads.
+ * (The compile was NOT exit 0 there — codegen's E-ASYNC-STDLIB-IN-SYNC-CALLBACK
+ * backstop refuses the async CALL in a default — but the leaking artifact set was
+ * written beside the error, and a bare-reference default `h = hashPassword` has
+ * no backstop at all.) The scan root is now `[body, ...fnDeclParamDefaultRoots]`,
+ * in this limb's own raw-subtree mode — text-scan, the direct limb's deliberate
+ * fail-closed choice, so a name inside a string literal in a DEFAULT does fire
+ * (the same accepted over-fire as escape-hatch raw text, same direction: a
+ * relocation, never a leak). §12.2 Trigger 3's rule is "a server-only stdlib
+ * import escalates the function that uses it", and a default IS the function
+ * using it. This is a placement change for that shape (the call now runs
+ * server-side); its direction of change is measured separately from B1's.
+ * Nested declarations' defaults are reached by the scanner's own
+ * `function-decl` branch (shared with the hop edge set — one predicate).
  */
 function collectServerOnlyBindingModules(
   fnNode: FunctionDeclNode,
@@ -3435,7 +3459,11 @@ function collectServerOnlyBindingModules(
   }
   if (live.size === 0) return found;
 
-  for (const mod of scanForServerOnlyBindingRefs(body, live).values()) found.add(mod);
+  // The function's own parameter DEFAULTS are scanned with its body (round 6, B7
+  // — see the doc comment); nested declarations' defaults are reached by the
+  // scanner's own `function-decl` branch.
+  const trigger3ScanRoot: unknown[] = [body, ...fnDeclParamDefaultRoots(fnNode)];
+  for (const mod of scanForServerOnlyBindingRefs(trigger3ScanRoot, live).values()) found.add(mod);
   return found;
 }
 

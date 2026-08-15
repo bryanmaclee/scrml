@@ -711,3 +711,100 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §7 a hop caller's PARAMETER DEFAUL
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// §8 — §12.2 TRIGGER 3: a PARAMETER DEFAULT escalates the function (round 6, B7).
+//
+// PRE-EXISTING, not a round-5 regression — refuters measured it IDENTICAL at the
+// pre-arc base `23ea2e5c`. Same two root causes as §7 (params are a sibling of
+// the body scan root; a `function` declaration's `defaultValue` is a raw source
+// string), on the OTHER consumer of the shared scanner: the per-function
+// `collectServerOnlyBindingModules`. No derived cell anywhere in these programs;
+// this is placement, not the derived refusal.
+//
+// Measured on the frozen round-5 tree (`bf99a93a`) before the fix, executing
+// these sources: `function f(h = hashPassword(@pw))` -> `f` NOT escalated, the
+// call left client-side, `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` fired by codegen's
+// backstop, and the artifact set still leaked — `const { hashPassword } =
+// _scrml_stdlib.auth;` in the client and 4x `Bun.password` + the argon2id body
+// in the `scrml-runtime.*.js` the HTML loads. After the fix `f` escalates:
+// clean compile, a `.server.js` hosts the call, and no server-only symbol
+// reaches anything the HTML loads — Trigger 3's own contract ("a server-only
+// stdlib import escalates the function that USES it"; a default IS the function
+// using it).
+// ---------------------------------------------------------------------------
+
+const TRIGGER3_DEFAULT_CALL = `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <pw> = "secret"
+  <out> = ""
+  function f(h = hashPassword(@pw)) { return h }
+${CLOSE}
+<button onclick={ @out = f() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+const TRIGGER3_DEFAULT_BARE_REF = `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <out> = ""
+  function f(h = hashPassword) { return h("k") }
+${CLOSE}
+<button onclick={ @out = f() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+// CONTROL: the same default position with a CLIENT-SAFE stdlib member. Must
+// compile with zero errors, stay client-side (no .server.js at all), and load
+// no server-only symbol — proving §8 keys on the module's server-only-ness,
+// not on the presence of a default.
+const TRIGGER3_DEFAULT_CLIENT_SAFE = `<program>
+${OPEN}
+  import { round } from 'scrml:math'
+  <out> = ""
+  function f(h = round(1.5)) { return h }
+${CLOSE}
+<button onclick={ @out = f() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §8 a §12.2 Trigger 3 reach in a parameter default escalates (round 6)", () => {
+  for (const [name, source] of [
+    ["t3-default-call", TRIGGER3_DEFAULT_CALL],
+    ["t3-default-bare-ref", TRIGGER3_DEFAULT_BARE_REF],
+  ]) {
+    test(`${name}: clean compile, the call is server-hosted, nothing server-only is client-loaded`, () => {
+      const c = compileToDisk(name, source);
+      try {
+        expect(c.errorCodes).toEqual([]);
+        // The function escalated: a .server.js exists and hosts the reach.
+        expect(c.serverJsFiles.length).toBeGreaterThan(0);
+        const serverText = c.serverJsFiles.map((f) => readFileSync(f, "utf8")).join("\n");
+        expect(serverText).toContain("hashPassword");
+        // And nothing the HTML loads carries the implementation or the binding.
+        expect(c.clientLoadedText).not.toContain("Bun.password");
+        expect(c.clientLoadedText).not.toContain("argon2id");
+        expect(c.clientLoadedText).not.toContain("_scrml_stdlib.auth");
+        // The client calls it through the fetch stub.
+        expect(c.clientLoadedText).toMatch(/async function _scrml_fetch_f_\d+/);
+      } finally {
+        teardown(name);
+      }
+    });
+  }
+
+  test("CONTROL — a client-safe member in the same default position: zero errors, stays client-side", () => {
+    const c = compileToDisk("t3-default-client-safe", TRIGGER3_DEFAULT_CLIENT_SAFE);
+    try {
+      expect(c.errorCodes).toEqual([]);
+      expect(c.serverJsFiles.length).toBe(0);
+      expect(c.clientLoadedText).not.toContain("_scrml_fetch_f_");
+    } finally {
+      teardown("t3-default-client-safe");
+    }
+  });
+});

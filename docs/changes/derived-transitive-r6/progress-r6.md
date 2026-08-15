@@ -63,3 +63,55 @@
   round-6 sentence in the transitive "Reaches" bullet). S345 sweep in src/tests: session-tag
   citations on shadow-semantics sites ("round 4 (S345)") rewritten to "round 4"; the surviving
   S345 citations are all Q1(c) (descriptive-not-ratified / lexical scoping queued).
+
+## Entry 3 — B7 (separate commit) + both differentials RUN (2026-08-15)
+
+- **B7 fix** (this commit): `collectServerOnlyBindingModules` scans
+  `[body, ...fnDeclParamDefaultRoots(fnNode)]` — the same routing B1 gave the hop edge set, in
+  this limb's own raw-subtree mode (text-scan, the direct limb's fail-closed choice). Nested
+  declarations' defaults were already reached by the B1 scanner branch (shared predicate — this
+  is stated in both commits: the scanner-level `function-decl` branch is shared by BOTH limbs,
+  so B1's commit already made a nested decl's default visible to Trigger 3; B7's own delta is
+  the function's OWN defaults). STOP-IF-BIGGER not tripped: the fix is exactly the one-line
+  scan-root routing the work order predicted.
+- **B7 status: PRE-EXISTING confirmed by the review at 23ea2e5c; on bf99a93a the exact work-order
+  shape (`h = hashPassword(@pw)`) is NOT exit 0** — codegen's E-ASYNC-STDLIB-IN-SYNC-CALLBACK
+  backstop fires on an async CALL in a default — but the leak IS real: no `.server.js` hosting
+  the call, `_scrml_stdlib.auth` in the client, 4x `Bun.password` + argon2id in the runtime the
+  HTML loads, WRITTEN BESIDE THE ERROR; and the bare-REFERENCE default (`h = hashPassword`) has
+  no backstop and is a full exit-0 silent leak. Post-fix both compile CLEAN with the call
+  server-hosted and nothing server-only client-loaded (executed: repro/b7 variants).
+- **Accepted over-fire, same class as escape-hatch raw text (direction: relocation, never a
+  leak):** a server-only member name inside a STRING LITERAL in a default now escalates the
+  function on the direct limb's text-scan (probe b7s). Measured side effect on that probe:
+  the relocation moves the literal server-side, which PRUNES the runtime chunk the direct-limb
+  textual-prune residual used to keep — the pre-fix b7s leaked 4x Bun.password at exit 0, the
+  post-fix b7s is clean. Not a new predicate; the existing rawMode rule applied to one more
+  raw position.
+- Pins: conf §8 — 2 executed-artifact escalation pins (call + bare-ref: `errorCodes`
+  toEqual([]), `.server.js` hosts `hashPassword`, client-loaded text has no
+  Bun.password/argon2id/_scrml_stdlib.auth, fetch stub present) + a client-safe `scrml:math`
+  CONTROL (toEqual([]), zero `.server.js`). Both escalation pins FAIL on the bf99a93a archive;
+  the control passes on both trees.
+- **Differential counts (instrument: scratchpad diff-run.mjs — per-file sorted error-code
+  multiset + artifact-KIND set (serverJs/clientJs/html/libraryJs/testJs from `outputs`), the
+  round-5 instrument plus the placement axis it recorded as a blind spot; corpus = all 2366
+  git-tracked .scrml):**
+  - **B1** (base = full co-rooted 8af92706 archive; head = B1 tree): 2366 compared,
+    **0 newly-rejecting, 0 newly-accepting**, 1 code-multiset change = this arc's own
+    `repro/b1-hop-param-default.scrml` gaining `E-DERIVED-SERVER-ONLY-REACH` beside the
+    pre-existing backstop code; 0 artifact-kind changes; hit set 5 -> 6 (the +1 is the repro).
+  - **B7** (base = B1 tree; head = B7 tree): 2366 compared, **0 newly-rejecting,
+    1 newly-accepting = this arc's own `repro/b7-trigger3-param-default.scrml`** (the backstop
+    stops firing because the call now runs server-side where await is legal), and the SAME file
+    is the only artifact-kind change (+serverJs — the intended placement change); no other file
+    moved on either axis.
+  - Instrument note: a FIRST diff run used a STRIPPED bf99a93a archive (compiler+stdlib only)
+    as base and showed stdlib-file code-multiset noise + main-side E-EACH deltas; that was a
+    base-selection artifact (wrong tree/root), discarded in favour of the co-rooted full
+    archive of the REBASED pre-B1 commit 8af92706. Reported for honesty; the clean runs above
+    are the counts of record.
+- Both differential zero/one counts are REPORTED, not self-ratified: the B7 newly-accepting +1
+  and artifact-kind +1 are the fix's own reproducer behaving exactly as the work order's
+  direction-of-change note predicts ("semantics-changed for any program with that shape — now
+  emits .server.js").
