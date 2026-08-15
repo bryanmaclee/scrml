@@ -62,17 +62,22 @@ const distExists = existsSync(resolve(DIST, "app.html")) &&
 function loadTodoMVC() {
   const htmlFile = resolve(DIST, "app.html");
   const jsFile = resolve(DIST, "app.client.js");
-  // v0.3.x SPA tree-shake Phase B 3.3 — the shared runtime is emitted
-  // with a content hash (`scrml-runtime.<hash>.js`). Find the actual
-  // file by scanning the dist directory for the prefix; fall back to
-  // the legacy literal for compatibility with older dist snapshots.
-  const dirEntries = existsSync(DIST) ? readdirSync(DIST) : [];
-  const runtimeName = dirEntries.find(
-    f => f.startsWith("scrml-runtime") && f.endsWith(".js")
-  );
+  // S345: read the runtime the PAGE actually references, never "whatever readdir
+  // returns first". `dist/` is persistent and gitignored, so it accumulates one
+  // content-hashed runtime per distinct version — 15 on the machine where this was
+  // found — and the old `.find()` picked `scrml-runtime.00uvf86m.js` while app.html
+  // referenced `scrml-runtime.01oke9vo.js`: every DOM assertion below was running
+  // against a 30KB-older runtime with a different `_scrml_reconcile_list` surface.
+  // The `<script src>` in the emitted HTML is the compile's own answer, so the
+  // choice is now a property of the artifact instead of the filesystem.
+  const htmlContent = readFileSync(htmlFile, "utf-8");
+  const referenced = /scrml-runtime\.[A-Za-z0-9]+\.js/.exec(htmlContent);
+  const runtimeName = referenced
+    ? referenced[0]
+    : (existsSync(DIST) ? readdirSync(DIST).sort() : [])
+        .find(f => f.startsWith("scrml-runtime") && f.endsWith(".js"));
   const runtimeFile = resolve(DIST, runtimeName ?? "scrml-runtime.js");
 
-  const htmlContent = readFileSync(htmlFile, "utf-8");
   const clientJs = readFileSync(jsFile, "utf-8");
 
   let runtimeJs;
