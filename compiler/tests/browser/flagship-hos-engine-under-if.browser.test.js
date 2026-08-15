@@ -34,13 +34,20 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
-import { readFileSync, existsSync, rmSync, mkdirSync, readdirSync } from "fs";
+import { readFileSync, existsSync, rmSync, mkdirSync, readdirSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const REPO = resolve(import.meta.dir, "../../..");
 const APP = resolve(REPO, "examples/23-trucking-dispatch");
-const OUT = resolve("/tmp", "scrml-flagship-hos");
+// S345: a UNIQUE output dir per run. The fixed `/tmp/scrml-flagship-hos` was
+// rmSync'd and recreated on every call, so any concurrent reader of the same
+// path (a parallel worker, a retry, a second checkout on the same box) could
+// observe the tree mid-delete and compile into a half-empty directory —
+// which surfaces here as an empty `html` and a bare assertion failure that
+// names nothing. mkdtemp removes the shared name entirely.
+const OUT = mkdtempSync(resolve(tmpdir(), "scrml-flagship-hos-"));
 
 let art = null;
 function artifacts() {
@@ -70,6 +77,14 @@ function artifacts() {
   };
   walk(APP);
   const r = compileScrml({ inputFiles: inputs, write: true, outputDir: OUT, log: () => {} });
+  // S345: fail LOUD and specific. Previously a failed/partial compile surfaced only
+  // as a downstream `expect(tpls.some(...)).toBe(true)` reading false — an assertion
+  // that names neither the compile error nor the missing file, which is why this
+  // test's intermittent cloud reds took three sessions to attribute.
+  const _errs = (r.errors ?? []).map((e) => e.code ?? String(e));
+  if (_errs.length) {
+    throw new Error(`[flagship-hos] compile FAILED with ${_errs.length} error(s): ${_errs.join(", ")} (outputDir=${OUT})`);
+  }
   const read = (q) => (existsSync(q) ? readFileSync(q, "utf8") : "");
   const clientJs = read(resolve(OUT, "driver/hos.client.js"));
   // Resolve the module graph the page actually references, transitively.
