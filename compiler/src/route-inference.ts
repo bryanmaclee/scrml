@@ -4123,13 +4123,15 @@ function computeServerReachingFns(
   // raw-text alternation pass with a `(?=\s*[(;,}\]\n)]|$)` lookahead and NO
   // notion of parameter scope, so it renames the PARAMETER BINDING ITSELF to the
   // fetch stub and colours the caller `async`. Measured round 5 on the round-4
-  // BITE-test shape:
+  // BITE-test shape plus a reactive dep (so the cell takes the
+  // `_scrml_cs_derived_declare` route rather than W-DERIVED-001's bare-`const`
+  // lowering — both routes show the defect):
   //
   //   function doHash(p) { return hashPassword(p) }
   //   function wrap(doHash, extra) { return doHash("x") + extra }
   //   const <computed> = wrap((v) => v, @pw)
   //
-  //   -> exit 0, zero diagnostics, and the emitted client:
+  //   -> exit 0, zero errors, and the emitted client:
   //        async function _scrml_wrap_4(_scrml_fetch_doHash_3, extra) {
   //          return await _scrml_fetch_doHash_3("x") + extra;
   //        }

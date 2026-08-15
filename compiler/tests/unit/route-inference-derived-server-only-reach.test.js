@@ -1806,16 +1806,19 @@ function wrap(x) { if (x) { const other = (v) => v; return other(x) } return "y"
     // is a raw-text alternation pass whose lookahead `(?=\s*[(;,}\]\n)]|$)`
     // matches a parameter in a parameter LIST, so it renames the PARAMETER
     // BINDING to the fetch stub and colours the caller `async`. Measured round 5
-    // on this exact source, compiled end to end:
+    // on the pre-round-5 tree, compiling THIS EXACT SOURCE end to end — exit 0,
+    // zero errors, and:
     //
-    //   async function _scrml_wrap_4(_scrml_fetch_doHash_3, extra) {
-    //     return await _scrml_fetch_doHash_3("x") + extra;
-    //   }
-    //   _scrml_cs_derived_declare("computed", () => _scrml_wrap_4(…));
+    //   async function _scrml_wrap_4(_scrml_fetch_doHash_3) { … }
+    //   /* W-DERIVED-001 … */ const computed = _scrml_wrap_4((v) => v);
     //
-    // — exit 0 with an async hop bound into a synchronous derived recompute, the
-    // silent Promise-render this limb exists to refuse. Firing is the loud,
-    // fixable direction; the executed-artifact twin is conf §6 `hop-param`.
+    // (this shape has no reactive dependency, so W-DERIVED-001 lowers it to a
+    // bare `const` — the SECOND emission route; the `_scrml_cs_derived_declare`
+    // route shows the same defect when a reactive dep is added, which is the
+    // conf §6 `hop-param` fixture). Either way an `async` call result lands in a
+    // value the markup renders synchronously: the silent Promise-render this
+    // limb exists to refuse. Firing is the loud, fixable direction; the
+    // executed-artifact twin is conf §6 `hop-param`.
     const { out } = runRIOn(programWithFns(
       `function doHash(p) { return hashPassword(p) }
 function wrap(doHash) { return doHash("x") }`,
