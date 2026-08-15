@@ -26,3 +26,40 @@
   backend, and every replayed commit had already passed it on `dtr-r5`.
 - `docs/changes/derived-transitive-r6/` was NOT in CUT's tree (it lives on `brief/s346-briefs` at
   `f6883b26`); restored with `git checkout f6883b26 -- docs/changes/derived-transitive-r6/`.
+
+## Entry 2 — B1 executed, and the review's B1 reproducer claim re-measured (2026-08-15)
+
+- Maps read first: `primary.map.md` (Task-Shape Routing; invariants 43 + 55), `domain.map.md`
+  (§12.2 Trigger 3 + §6.6.19 sections), `test.map.md` (arc test rows + the corpus-emit-differential
+  gate row). Load-bearing finding: invariant 55 (regex over source text in a post-AST stage) —
+  the fix deliberately hands each raw `defaultValue` string to the scanner's EXISTING raw-subtree
+  rule (`RawSubtreeMode`: parsed on limb (b) via the compiler's own `parseExpression`/
+  `parseStatements`; text-matched on limb (a), the already-justified fail-closed exception) rather
+  than adding any new text predicate; invariant 43 (no sixth lookaround on the fn-name mangler) —
+  honoured, `emit-client.ts` untouched. domain.map's "ONE scanner backs both halves and it must
+  stay one" row is why the nested-decl default handling lives in `scanForServerOnlyBindingRefs`
+  and not in either caller.
+- **Review-located locus check.** B1's loci (`computeServerReachingFns` body-only root at
+  route-inference.ts:4164-4186 as of bf99a93a; `ast-builder.js:10785/10806` raw `defaultValue`)
+  are CORRECT. B1's REPRO CLAIM is partly wrong: the work order's exact shape
+  (`function wrap(x = doHash(@pw)) { return x }`) is NOT exit 0 on `bf99a93a` — executed with the
+  API against a `git archive` of bf99a93a, it fails with `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`
+  (codegen's async-call-in-non-awaitable-position backstop, `emit-library-shared.ts`
+  builder / `emit-expr.ts` sinks), `_scrml_wrap_4` is NOT coloured async, and the emitted default
+  is `x = _scrml_fetch_doHash_3( @pw)` (the `@pw` left RAW — see entry 5). The SILENT miss is
+  real for the REFERENCE forms, which no backstop sees: `x = doHash` -> exit 0, zero diagnostics,
+  `function _scrml_wrap_4(x = _scrml_fetch_doHash_3)`; `x = [1].map(doHash)` -> exit 0,
+  `x = [1]. map( _scrml_fetch_doHash_3)`. Route inference had no edge for ANY of the three, so the
+  containment ("every shape codegen would rewrite is refused") was violated at the default
+  position either way. Behaviour is decided in `computeServerReachingFns` (limb b) and, for
+  nested decls, in the shared scanner's walk.
+- Fix landed (`ffe50e89`): `fnDeclParamDefaultRoots` + scanner `function-decl` branch + hop-edge
+  root `[body, ...defaults]`. Pins: unit §11n (7 firing + 3 `toEqual([])` controls + 1 guard),
+  conf §7 (4 executed-artifact refusals + a differential control asserting `toEqual([])`). All
+  firing pins were run against the bf99a93a archive and FAIL there; the controls pass on both.
+- Same commit: B2 (code + test sites -> containment), B4 (`hop-param` control `toEqual([])`),
+  B5 (`hop-param` comment scoped to the round-4 SHADOW discipline). Pushed as `dtr-r6`.
+- SPEC edits in progress (B2 SPEC:3742 + §34 row, B3 :3304 + S345 sweep, B6 :3698/:3729,
+  round-6 sentence in the transitive "Reaches" bullet). S345 sweep in src/tests: session-tag
+  citations on shadow-semantics sites ("round 4 (S345)") rewritten to "round 4"; the surviving
+  S345 citations are all Q1(c) (descriptive-not-ratified / lexical scoping queued).

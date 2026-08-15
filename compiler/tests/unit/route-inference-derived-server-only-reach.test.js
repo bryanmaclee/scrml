@@ -1141,7 +1141,7 @@ function shout(s) { return s.toUpperCase() }`,
     expect(errorsWithCode(out, CODE).length).toBe(0);
   });
 
-  // NOTE (round 4, S345): the "RHS-local `const` shadowing a server-reaching fn:
+  // NOTE (round 4): the "RHS-local `const` shadowing a server-reaching fn:
   // clean" pin that used to close this block MOVED to §11l and FLIPPED to a
   // refusal. It was never a sound bite proof: RI suppressed the diagnostic while
   // codegen renamed the shadowed call to the async fetch stub anyway, so the
@@ -1153,7 +1153,7 @@ describe(`${CODE} §11f — the transitive limb shares the direct limb's REFEREN
   // Both limbs call the same `collectDerivedRhsServerOnlyRefs` /
   // `scanForServerOnlyBindingRefs` pair with different name sets, so what counts
   // as a REFERENCE (depth, lambda bodies, string-literals-are-not-references) is
-  // one rule. Since round 4 (S345) the limbs deliberately DIFFER on two axes —
+  // one rule. Since round 4 the limbs deliberately DIFFER on two axes —
   // raw-text handling (`RawSubtreeMode`, §11k) and SHADOWING (limb (a) suppresses
   // RHS-local binder names; limb (b) suppresses nothing — §11l). These pin what
   // is still shared: if someone hand-rolls a second scanner for the transitive
@@ -1672,7 +1672,7 @@ const <computed> = doHash("seed")
 });
 
 // ---------------------------------------------------------------------------
-// §11l — ROUND-4 SHADOW SEMANTICS (S345): on the TRANSITIVE limb, a same-file
+// §11l — ROUND-4 SHADOW SEMANTICS (round 4 — a PA review constraint, no operator ruling): on the TRANSITIVE limb, a same-file
 // name shadow does NOT suppress the refusal — any reference fires.
 //
 // WHY. Round 4's review executed four shapes where a name-based suppression

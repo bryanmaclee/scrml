@@ -363,7 +363,8 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §5 a hop through a local function 
 });
 
 // ---------------------------------------------------------------------------
-// §6 — ROUND-4 SHADOW SEMANTICS, VERIFIED BY EXECUTED ARTIFACTS (S345).
+// §6 — ROUND-4 SHADOW SEMANTICS, VERIFIED BY EXECUTED ARTIFACTS (round 4 — a PA-authored
+// review constraint with NO operator ruling; see §6.6.19's transitive-limb Provenance).
 //
 // The round-4 review proved the RI-only oracle blind: unit pins asserted "clean"
 // while the exit-0 bundle bound an `async` fetch stub into the synchronous

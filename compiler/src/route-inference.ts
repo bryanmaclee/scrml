@@ -3658,7 +3658,7 @@ function scanForServerOnlyBindingRefs(
       return;
     }
 
-    // §6.6.19 round 4 (S345) — BODY-STYLE UNIFICATION for lambda parameters.
+    // §6.6.19 round 4 — BODY-STYLE UNIFICATION for lambda parameters.
     //
     // The two representations of "one predicate" had drifted at PARAMETER
     // position: `collectRawReferenceNames` counts an ESTree Identifier in param
@@ -3802,7 +3802,7 @@ function stateDeclRhsRoots(declNode: Record<string, unknown>): unknown[] {
 }
 
 /**
- * Names bound INSIDE a derived cell's RHS. LIMB (a) ONLY, since round 4 (S345):
+ * Names bound INSIDE a derived cell's RHS. LIMB (a) ONLY, since round 4:
  * limb (b) passes `shadow: "none"` and never consults this set — see
  * `collectDerivedRhsServerOnlyRefs` for why the limbs differ.
  *
@@ -6004,7 +6004,7 @@ export function runRI(input: RIInput): RIOutput {
       // is ordinary file-local vocabulary. See `RawSubtreeMode` for the measured
       // reproducers and for why the direct limb keeps the text scan.
       if (serverReachingNamesHere.size === 0) continue;
-      // `shadow: "none"` (round 4, S345) — no name-based suppression on this limb.
+      // `shadow: "none"` (round 4) — no name-based suppression on this limb.
       // Codegen's rename to the fetch stub reaches a reference under a
       // same-named RHS-local binder (measured), so a name-set suppression here
       // is exactly the shape that miscompiles at exit 0. Firing on every
