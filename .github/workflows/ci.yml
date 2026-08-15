@@ -123,6 +123,9 @@ jobs:
       #
       # NOT added to pre-push: local environments vary far more than CI, and it was exactly a local
       # environment difference that made the first recorded baseline wrong.
+      - name: ZZDIAG — run flagship-hos directly (diag branch only; output NOT captured)
+        run: bun test compiler/tests/browser/flagship-hos-engine-under-if.browser.test.js || true
+
       - name: Browser tier failure NAME-SET gate (S313 — a regression here now blocks)
         run: bun scripts/browser-baseline.ts --check
       - name: Snippet gate (every public-cited .scrml still compiles)
