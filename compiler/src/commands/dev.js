@@ -899,7 +899,10 @@ export async function runDev(args) {
   // server.reload() since reload() returns the same server instance.
   globalThis._scrml_active_server = server;
 
-  console.log(`[dev] Serving ${serveDir} at http://localhost:${opts.port}`);
+  // Log the port Bun actually BOUND (`server.port`), not the requested one:
+  // `--port 0` asks the OS for an ephemeral port, and `opts.port` would print
+  // `localhost:0`. Harnesses (and humans) read the real port back from here.
+  console.log(`[dev] Serving ${serveDir} at http://localhost:${server.port}`);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
 
   // BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): watch the
