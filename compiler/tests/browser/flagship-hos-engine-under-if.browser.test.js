@@ -86,7 +86,36 @@ function artifacts() {
     throw new Error(`[flagship-hos] compile FAILED with ${_errs.length} error(s): ${_errs.join(", ")} (outputDir=${OUT})`);
   }
   const read = (q) => (existsSync(q) ? readFileSync(q, "utf8") : "");
-  const clientJs = read(resolve(OUT, "driver/hos.client.js"));
+  // S345: LOCATE the emitted artifacts; do not assume `driver/hos.*`.
+  // `computeOutputBaseDir` (api.js:203) derives the output layout from the COMMON
+  // ANCESTOR of the input list, so the relative path of every emitted file shifts if
+  // the walked set changes — one stray `.scrml` anywhere under the app dir is enough.
+  // The old code read a hardcoded `driver/hos.html`, and `read()` returns "" for a
+  // missing path, so a shifted layout surfaced as EMPTY html and a bare
+  // `expect(tpls.some(...)).toBe(true)` reading false — naming nothing. That is the
+  // signature of this test's long-running intermittent cloud failure.
+  const findEmitted = (suffix) => {
+    const hits = [];
+    const walkOut = (dir) => {
+      for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        const q = resolve(dir, e.name);
+        if (e.isDirectory()) walkOut(q);
+        else if (e.name.endsWith(suffix)) hits.push(q);
+      }
+    };
+    if (existsSync(OUT)) walkOut(OUT);
+    return hits;
+  };
+  const htmlHits = findEmitted("hos.html");
+  const clientHits = findEmitted("hos.client.js");
+  if (htmlHits.length !== 1 || clientHits.length !== 1) {
+    const all = findEmitted("");
+    throw new Error(
+      `[flagship-hos] expected exactly one emitted hos.html and one hos.client.js under ${OUT}; ` +
+      `found ${htmlHits.length} html and ${clientHits.length} client. Emitted tree (${all.length} files): ` +
+      all.map((q) => q.slice(OUT.length + 1)).join(", "));
+  }
+  const clientJs = read(clientHits[0]);
   // Resolve the module graph the page actually references, transitively.
   const deps = [];
   const seen = new Set();
@@ -102,7 +131,7 @@ function artifacts() {
   collect(clientJs);
   art = {
     errors: (r.errors ?? []).map((e) => e.code ?? String(e)),
-    html: read(resolve(OUT, "driver/hos.html")),
+    html: read(htmlHits[0]),
     clientJs,
     depsJs: deps.join("\n"),
     runtimeJs: read(resolve(OUT, r.runtimeFilename ?? "scrml-runtime.js")),
