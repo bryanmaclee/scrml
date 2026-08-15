@@ -16,8 +16,11 @@
  *      unpulled-stale read is LOUD) — the anti-short-boot floor. Both user-voice
  *      ledgers + the per-user profile are in the set BY CONSTRUCTION (the S335 miss).
  *   3. RUNS the mandatory probes by DELEGATING to the authoritative scripts
- *      (review-debt.ts · threads.ts) and gh (issues · pr · run) — never a
- *      reimplementation, so a probe can't drift from its source of truth.
+ *      (review-debt.ts · threads.ts · dpa-debt.ts · issue-debt.ts) and gh
+ *      (issues · pr · run) — never a reimplementation, so a probe can't drift
+ *      from its source of truth. issue-debt.ts (S346) is the one that ASSERTS
+ *      the obligation the raw `gh issue list` only READS: every open adopter
+ *      issue has a home (known-gaps entry or dpa-queue item) or it is OWED.
  *   4. EXTRACTS + PRINTS the `## ⏭ NEXT-SESSION PICKUP` block from hand-off.md as
  *      the FIRST thing in the digest — orientation leads with the handshake, not a menu.
  *
@@ -289,6 +292,11 @@ function allProbes(): Probe[] {
     // and dpa-022/023 read UNRUN for a day AFTER running. pa-base §10: a channel the probe does
     // not read does not exist to the PA.
     runProbe("dpa", "Deliberation queue (unrun / unratified)", "bun", ["scripts/dpa-debt.ts"]),
+    // S346: the `issues` probe below READS the channel; this one ASSERTS the obligation. Three open
+    // issues (#519 #509 #471) were NAMED at four consecutive boots and homed by nobody — zero
+    // comments, no known-gaps entry, no dpa-queue item. pa-base §10: an obligation and its probe
+    // must resolve to the same artifact — issue-debt.ts reads the two HOME artifacts and says OWED.
+    runProbe("issue-debt", "Adopter issues (owed a home)", "bun", ["scripts/issue-debt.ts"]),
     runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "bryanmaclee/scrml", "--state", "open"], 45_000),
     runProbe("prs", "Open PRs", "gh", ["pr", "list"], 45_000),
     runProbe("runs", "CI runs (main, last 3)", "gh", ["run", "list", "--branch", "main", "--limit", "3"], 45_000),
