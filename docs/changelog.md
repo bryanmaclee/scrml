@@ -6049,6 +6049,77 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-14/15 — S345 (bryan): four rulings executed, and a repo-wide gate outage that was never a flake
+
+Booted on S343's four held items and closed all four. The session was then taken over by an
+unplanned arc: **the cloud `gate` was deterministically red repo-wide**, and root-causing it
+exposed **five defects in one causal chain**, each invisible until the previous one stopped
+masking it — one of them adopter-facing. Nine PRs merged. Every red encountered was a real
+defect and none was in the code under review; re-running or re-recording the browser baseline
+would have buried four of them.
+
+**The four rulings** (banked verbatim in `scrml-support/user-voice-scrml.md` S345):
+
+- **Q1 — Gap 5, ruled (c).** The F3 §6.6.19 rewrite lands as **descriptive of current
+  implementation, NOT a ratification**; main's pre-arc sentence remains the governing design
+  intent and lexical scoping is queued as its own conformance-restoration arc. Landing it
+  unqualified would have converted a future conformance-restoration *bug fix* into a *widening*
+  needing R2 — purely by changing the sentence that classifies it. The build then surfaced a
+  refinement: the queued arc must move the reference scanner **and codegen's renamer together**,
+  or it reopens the miscompile.
+- **Q2 — file the 40, hold the 12** (PR #525). The hand-off's "18+ unfiled" was undercounted: the
+  extraction found **40** fileable-as-fact entries (it had omitted whole arcs) with 5 explicit
+  HIGH, plus **12 claims quarantined** as unverified, retracted, or contradicted between artifacts.
+  The headline entry carries the 13-position matrix so the ledger stops asserting the request-ref
+  class CLOSED while a silent whole-bundle-killing defect is live. Counts HIGH 26→35 · MED
+  120→146 · LOW 60→65 — the ledger becoming truthful, not the compiler regressing.
+- **Q3 — delete the five zero-byte objects.** Dry-run listing, a per-target safety gate
+  (each re-verified size 0 *and* reachable from zero refs), file-copy backup, then deletion.
+  `git fsck` errors **7 → 1**; HEAD and `origin/main^{tree}` verify; 3,992 commits reachable;
+  the S342 salvage verified intact. The residual error is a dead worktree's rebuildable
+  cache-tree, left deliberately.
+- **Q4 — the derived-transitive merge stays blocked.** Rounds 4 and 5 both returned DO-NOT-LAND
+  under adversarial review; round 6 is scoped and deferred to next session by the operator.
+
+**The gate-outage chain:**
+
+- **#526** — stale cross-file `DOMContentLoaded` boot listeners on the shared happy-dom document.
+  The new runner image only reshuffled bun's readdir-derived file order so the writer file now
+  precedes the victim; **the mixed-runner-pool rollout is the entire S338–S343 "flake" era.**
+  Fixed with `{once:true}` on the emitted boots — production-identical, and bite-proven *on* the
+  failing image.
+- **#527** — the flagship test's own unsorted app walk.
+- **#528** — ⭐ **the compiler's own directory walks.** `scrml compile <dir>` emitted
+  order-dependent output: reversing the input list changed **79 emitted files, including generated
+  server route URLs**. Two machines compiling identical sources could produce a client and a
+  server that disagree about where to fetch, and content-addressed names churn for reasons no
+  source change caused — breaking properties §47 and §58 state. Inert on this machine; it fixes
+  *which* order is used.
+- **#531** — the flagship test's fixed `/tmp` output path (any concurrent reader could observe it
+  mid-delete) plus a failure mode that named nothing.
+- **#530** — todomvc picked its runtime by first-readdir match from a directory holding 15
+  accumulated content-hashed runtimes. The adversarial verifier correctly narrowed this from
+  "wrong results" to **illusory coverage** — 36 tests passed either way, but against code they
+  weren't claiming to test.
+
+**Also landed:** #524 (census cross-OS separator, Peter's routed finding) and #532 (CI: `push`
+scoped to `main` — every PR had been running the gate twice under one required check name,
+doubling exposure to any intermittent; bite-proven by producing one run instead of two).
+
+**Held deliberately:** #529 (sorting the browser tier is correct, but its determinism currently
+resolves RED — landing it would convert an intermittent into a permanent main-red).
+
+**Instruments + durable lessons.** A review workflow SHALL derive its verdict from
+**completed-agent count**, never findings count — this session's own dtr-r4 review returned
+"CLEAN-TO-LAND" from **zero completed agents** after a rate limit killed all six lenses, the
+hollow-gate shape self-inflicted in a gate written the same session. An order-dependency sweep
+(141 sites, 131 inert, 10 hazards, 5 confirmed) named three still-unfixed instances. And three
+rounds of the derived-transitive arc have now shipped the same defect class — a **universal**
+claim about codegen generalized from a **measured subset**; the standing constraint for round 6
+is to write only the one-directional containment claim, since route inference is a strict
+superset of codegen's rewrite set, never equal to it.
+
+
 ### 2026-08-11 — S340 (peter): five fixes, a bug class closed, and three verify-the-class catches
 
 An adopter-lane MED-sweep session that landed five codegen fixes (four PRs + a wrap-time follow-up), ran a dPA scope deliberation, and owned bryan's cross-lane #508 review dispatch — including a HIGH live on `main`. Method thread of the session: **verify-the-class caught three incomplete or mis-directed fixes**, each by reproducing on HEAD before trusting gap prose, a satellite's attribution, or my own prior belief. Ran off S338/S341-bryan's live surface throughout (adopter codegen vs his grammar/review-floor lane); left his live hand-off untouched.
