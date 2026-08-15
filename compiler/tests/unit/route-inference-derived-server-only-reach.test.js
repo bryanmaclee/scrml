@@ -317,15 +317,31 @@ const <label> = "call hashPassword on the server"
 // ---------------------------------------------------------------------------
 
 describe(`${CODE} §7 — RHS-local shadowing (DIRECT limb only, since round 4)`, () => {
-  // ROUND 4 (S345): this suppression is now LIMB (a)'s alone. The transitive
-  // limb passes `shadow: "none"` and fires on every reference (§11l), because
-  // codegen renames server-FN references scope-blind — an RI suppression there
-  // silently miscompiled. Limb (a) keeps the suppression because codegen does
-  // NOT rename server-only IMPORT references, so the emitted JS honours this
-  // local shadow and RI's suppression agrees with what actually runs. The
-  // suppression being RHS-WIDE (not lexically scoped) leaves limb (a)'s known
-  // cross-arm hazard open — pre-existing, flagged in the round-4 review and
-  // routed for filing, NOT changed here.
+  // ROUND 4: this suppression is now LIMB (a)'s alone. The transitive limb
+  // passes `shadow: "none"` and fires on every reference (§11l), because codegen
+  // renames server-FN references scope-blind — an RI suppression there silently
+  // miscompiled. Limb (a) keeps the suppression: codegen does NOT rename
+  // server-only IMPORT references, so the emitted CALL does resolve to the local
+  // binder.
+  //
+  // !! THIS PIN ASSERTS THE DIAGNOSTIC, AND NOTHING ABOUT THE ARTIFACTS. !!
+  //
+  // Round 4 additionally claimed here that "RI's suppression agrees with what
+  // actually runs". ROUND 5 STRUCK THAT: measured on THIS FILE'S OWN SOURCE,
+  // compiled end to end, the exit-0 build emits NO `.server.js`, writes
+  // `const { hashPassword } = _scrml_stdlib.auth;` into the client bundle, and
+  // ships the argon2id implementation in the `scrml-runtime.*.js` the emitted
+  // HTML loads (4x `Bun.password`). The chunk survives because codegen's
+  // `prune-server-only-stdlib-chunks` keeps it on any TEXTUAL occurrence of the
+  // bound name (emit-client.ts:2898-2945) — route inference is never consulted —
+  // and the SPEC-ratified string-literal suppression (§6 above) leaks the same
+  // way with no shadow anywhere. The suppression is also RHS-WIDE, not lexically
+  // scoped, so a binder in one arm silences a GENUINE sibling-arm reference that
+  // codegen emits as a live client-side call.
+  //
+  // Both are PRE-EXISTING (codegen is untouched by this arc) and are recorded as
+  // §6.6.19's DIRECT-limb residual; closure is its own arc. Do NOT read a green
+  // §7 as an artifact-safety claim.
   test("a `const` local shadowing the imported name does NOT fire", () => {
     const source = `<program>
 

@@ -3741,13 +3741,30 @@ function stateDeclRhsRoots(declNode: Record<string, unknown>): unknown[] {
  * `collectDerivedRhsServerOnlyRefs` for why the limbs differ.
  *
  * For limb (a)'s ~4 imported stdlib member names, an RHS-local binder of the same
- * name genuinely is not the import, and codegen honours the shadow in the emitted
- * JS (import references are not renamed), so suppressing is sound there. The set
- * is RHS-WIDE, not lexically scoped — a binder in one `match` arm suppresses a
- * sibling arm's reference too. On limb (a) that scope-blindness is a pre-existing
- * hazard (cross-arm import shadow), flagged in the round-4 review and routed for
- * filing — deliberately NOT widened or narrowed by round 4; on limb (b) the
- * identical scope-blindness was the round-4 blocker (a silent Promise-render
+ * name genuinely is not the import, and codegen does not rename references to a
+ * server-only import — the emitted CALL resolves to the local binder.
+ *
+ * ROUND 4 DREW A FALSE CONCLUSION FROM THAT, AND ROUND 5 STRUCK IT. The comment
+ * here said suppressing was "sound" because RI and the emitted program agree.
+ * They do not agree on the thing this limb exists for. Two measured defects:
+ *
+ *   1. Whether the server-only stdlib module ships is decided in codegen by
+ *      `prune-server-only-stdlib-chunks` (emit-client.ts:2898-2945), a
+ *      word-boundary text predicate over the emitted client body. Any textual
+ *      occurrence keeps the chunk, and a shadowed binder is one. §6.6.19's own
+ *      §7 fixture therefore compiles at exit 0 with NO `.server.js`,
+ *      `const { hashPassword } = _scrml_stdlib.auth;` in the client, and the
+ *      argon2id body in the runtime the HTML loads (4x `Bun.password`). The
+ *      SPEC's ratified string-literal suppression leaks identically with no
+ *      shadow anywhere, so the cause is textual presence, not shadowing.
+ *   2. The set is RHS-WIDE, not lexically scoped — a binder in one `match` arm
+ *      suppresses a sibling arm's GENUINE reference, which codegen block-scopes
+ *      correctly and emits as a live client-side call to the real import.
+ *
+ * Both are PRE-EXISTING (codegen is untouched by this arc) and are recorded as
+ * §6.6.19's DIRECT-limb residual, with closure routed to its own arc. Nothing
+ * here may be read as "suppression is artifact-safe on limb (a)". On limb (b)
+ * the same scope-blindness was the round-4 blocker (a silent Promise-render
  * miss), which is why limb (b) stopped using this set.
  *
  * The walk stops at a nested `lambda` / `function-decl` binder (own scope), so a
@@ -3815,15 +3832,18 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  * raw text refuses correct programs on a name coincidence (S343).
  *
  * `shadow` is ALSO the caller's limb, and the limbs differ here ON PURPOSE
- * (round 4, S345):
+ * (round 4; the justification corrected round 5):
  *
  * `"rhs-locals"` — LIMB (a). An RHS-local `const`/`let`/`~`/`lin` binder
- *   suppresses the import name for the whole RHS. Codegen does NOT rename
- *   references to a server-only IMPORT (the client keeps the stdlib binding
- *   names), so the emitted JS honours the local shadow and RI's suppression
- *   agrees with what actually runs. (The suppression is RHS-wide rather than
- *   lexically scoped — the pre-existing cross-arm hazard on this limb is
- *   flagged and routed for filing, not changed here.)
+ *   suppresses the import name for the whole RHS. This is the behaviour §6.6.19
+ *   states for this limb, and it is UNCHANGED — but round 4's justification for
+ *   it ("the emitted JS honours the local shadow, so RI's suppression agrees
+ *   with what actually runs") is STRUCK as false: it is true of the emitted
+ *   CALL and false of the emitted ARTIFACT SET. The suppression governs the
+ *   diagnostic only; the module still ships, and an RHS-wide suppression also
+ *   silences a genuine sibling-arm reference. See `collectDerivedRhsLocalNames`
+ *   above for the two measured defects and §6.6.19's DIRECT-limb residual for
+ *   the record. Both pre-date this arc; neither is closed here.
  *
  * `"none"` — LIMB (b). NO name-based suppression at all: any reference to a
  *   server-reaching function name fires. This is the round-4 blocker fix, and it
@@ -3832,7 +3852,8 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  *   including one under a same-named RHS-local binder — so an RI suppression
  *   here is precisely the shape that compiled at exit 0 while the client bound
  *   an async stub into the synchronous derived recompute (measured: if-sibling,
- *   while-body, match-arm-sibling, and the SPEC-blessed RHS-local shadow itself).
+ *   while-body, match-arm-sibling, the SPEC-blessed RHS-local shadow itself, and
+ *   — round 5, in `computeServerReachingFns` — a hop caller's own parameter).
  *   The GOVERNING DESIGN INTENT remains real lexical scoping in scanner and
  *   codegen together (pre-S338 §6.6.19 sentence; restoration arc queued S345);
  *   until that lands, firing on every reference is the loud, fail-closed
