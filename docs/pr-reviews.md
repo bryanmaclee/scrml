@@ -15,6 +15,9 @@ was invisible to the session that incurred it and to every session after. Same s
 **Marker form** — append one line per PR, newest at the top of the log section:
 
 ```
+<!-- @review pr=532 verdict=carve-out by=S346-bryan date=2026-08-15 probe=file-set-verified-single-path-.github-workflows-ci-yml-no-compiler-code-path-plus-coverage-removal-count-what-it-stops-running-branch-pushes-without-a-PR-now-run-NO-gate-the-PR-gate-remains-the-required-check-and-workflow_dispatch-covers-ad-hoc-branch-runs-bite-proven-S345-its-own-PR-produced-ONE-gate-run-not-two note=ci-trigger-scope-only -->
+<!-- @review pr=533 verdict=carve-out by=S346-bryan date=2026-08-15 probe=file-set-verified-via-gh-pr-view-json-files-eight-paths-changelog-four-BRIEFs-hand-off-delta-log-rotated-hand-off-zero-code-paths-the-S345-wrap-PR note=wrap-continuity-docs-only -->
+<!-- @review pr=525 verdict=carve-out by=S346-bryan date=2026-08-15 probe=file-set-verified-via-gh-pr-view-json-files-single-path-docs-known-gaps-md-the-S345-Q2-filing-batch-40-entries-plus-2-recharacterisations-zero-code-paths note=gap-ledger-filing-only -->
 <!-- @review pr=<n> verdict=clean|finding|carve-out by=S<N>-<who> date=<YYYY-MM-DD> probe=<what-was-probed> [note=<slug>] -->
 ```
 
