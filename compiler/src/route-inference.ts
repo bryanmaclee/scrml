@@ -4088,19 +4088,44 @@ function computeServerReachingFns(
   // list and pinned in §11m of the unit test — whose closure needs its own
   // mechanism (an alias-aware hop population), not this closure.)
   //
-  // Shadow discipline (round 4, S345): the caller's OWN PARAMETERS only. A
-  // function's params provably scope over its entire body, so a param named like
-  // a file-scoped function genuinely never refers to it — the one cheap,
-  // provably-scope-correct suppression. BODY-LOCAL binders no longer suppress:
-  // the previous `collectLocalNames(body)` subtraction was scope-blind (a
+  // Shadow discipline (round 5): NO name-based suppression at all — not
+  // body-local binders, and NOT the caller's own parameters either.
+  //
+  // Round 4 dropped the scope-blind `collectLocalNames(body)` subtraction (a
   // `const doHash = …` inside ONE if/while/match branch deleted the name from
-  // `live` for the WHOLE body), so a genuine sibling-branch reference to the
-  // file-level server-reaching function produced no edge and the program
-  // compiled at exit 0 with an async stub bound into the derived recompute — a
-  // silent miss, the forbidden direction. A body-local binder now yields at
-  // worst a loud over-fire inside its own scope, which is the accepted interim
-  // until the queued lexical-scoping restoration arc gives scanner and codegen
-  // real scoping together.
+  // `live` for the WHOLE body, so a genuine sibling-branch reference produced no
+  // edge and the program compiled at exit 0 with an async stub bound into the
+  // derived recompute — a silent miss, the forbidden direction) but KEPT the
+  // caller's parameters, on the ground that params provably scope over the whole
+  // body. The lexical premise is true; the operative one is not. Codegen's
+  // server-fn rename (`post-fn-name-mangle`, emit-client.ts:2955-2998) is a
+  // raw-text alternation pass with a `(?=\s*[(;,}\]\n)]|$)` lookahead and NO
+  // notion of parameter scope, so it renames the PARAMETER BINDING ITSELF to the
+  // fetch stub and colours the caller `async`. Measured round 5 on the round-4
+  // BITE-test shape:
+  //
+  //   function doHash(p) { return hashPassword(p) }
+  //   function wrap(doHash, extra) { return doHash("x") + extra }
+  //   const <computed> = wrap((v) => v, @pw)
+  //
+  //   -> exit 0, zero diagnostics, and the emitted client:
+  //        async function _scrml_wrap_4(_scrml_fetch_doHash_3, extra) {
+  //          return await _scrml_fetch_doHash_3("x") + extra;
+  //        }
+  //        _scrml_cs_derived_declare("computed", () => _scrml_wrap_4(…));
+  //
+  // — an async hop bound into a synchronous derived recompute, i.e. exactly the
+  // silent Promise-render this limb exists to refuse, reached through the one
+  // suppression round 4 kept. Renaming the parameter (only) makes it clean, so
+  // the collision is the whole cause.
+  //
+  // Per this arc's own rule — a too-WIDE shadow set is a SILENT MISS and is
+  // forbidden, a too-NARROW one is a LOUD, fixable over-fire — the limb now
+  // suppresses on nothing. That over-fires on a hop caller whose parameter
+  // happens to collide with a server-reaching function name; §6.6.19 records
+  // that cost explicitly. The closure is real lexical scoping in the scanner AND
+  // in codegen's renamer TOGETHER (queued S345 as its own conformance-restoration
+  // arc); a scanner-only scoping fix reopens the miscompile.
   const callersOf = new Map<string, Set<string>>();
   const fnNamesByFile = new Map<string, Set<string>>();
   for (const [, rec] of analysisMap) {
@@ -4117,21 +4142,14 @@ function computeServerReachingFns(
       ? callerRecord.fnNode.body
       : [];
 
-    // Params only — see the shadow-discipline comment above. Body-local binders
-    // deliberately do NOT suppress (round 4: the scope-blind body-locals
-    // subtraction was the silent-miss blocker).
-    const shadowed = new Set<string>();
-    for (const p of (callerRecord.fnNode.params ?? []) as unknown[]) {
-      if (typeof p === "string") shadowed.add(p);
-      else if (p && typeof p === "object" && typeof (p as any).name === "string") {
-        shadowed.add((p as any).name);
-      }
-    }
-
+    // NO suppression — see the shadow-discipline comment above. Neither
+    // body-local binders (round 4) nor the caller's own parameters (round 5)
+    // subtract from `live`: both were measured as silent misses, because
+    // codegen renames the reference — and, for a parameter, the BINDING — to
+    // the async fetch stub regardless of the shadow.
     const live = new Map<string, string>();
     for (const name of candidates) {
       if (name === callerRecord.fnNode.name) continue; // self-recursion adds no reach
-      if (shadowed.has(name)) continue;
       live.set(name, name);
     }
     if (live.size === 0) continue;

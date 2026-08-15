@@ -1669,9 +1669,14 @@ const <computed> = doHash("seed")
 // RI and codegen must AGREE. Codegen's reference-renaming on this limb is
 // scope-blind in the FIRING direction (every reference to a server-placed fn
 // becomes the stub), so RI is now scope-blind in the FIRING direction too: every
-// shape codegen would rewrite is refused at compile time. The ONE suppression
-// kept is a hop-caller's own PARAMETERS — a function's params provably scope
-// over its entire body, so that shadow is exactly scope-correct.
+// shape codegen would rewrite is refused at compile time.
+//
+// ROUND 5 removed the LAST suppression — a hop caller's own PARAMETERS. Round 4
+// kept it as "provably scope-correct", which is true of the scanner and false of
+// the outcome: codegen's raw-text `post-fn-name-mangle` renames the parameter
+// BINDING to the fetch stub and colours the caller `async`, so that carve-out
+// was the same silent Promise-render miss round 4 removed everywhere else. The
+// limb now suppresses on NOTHING.
 //
 // DESCRIPTIVE, NOT RATIFIED (S345): the governing design intent remains the
 // pre-S338 sentence — a binder shadows within its own scope and SHALL NOT fire.
@@ -1776,12 +1781,42 @@ function wrap(x) { if (x) { const other = (v) => v; return other(x) } return "y"
     expect(errorsWithCode(out, CODE).length).toBe(0);
   });
 
-  test("BITE — a hop caller's own PARAM still suppresses (provably whole-body scope)", () => {
-    // `wrap`'s `doHash` is its parameter, which scopes over the entire body —
-    // the one suppression that is provably scope-correct and therefore kept.
+  test("a hop caller's own PARAM does not suppress either (round 5): FIRES", () => {
+    // ROUND 4 PINNED THIS AT 0, AND THE PIN RATIFIED A MISCOMPILE.
+    //
+    // The lexical premise ("a param scopes over the whole body, so it is the one
+    // provably-scope-correct suppression") is true of the SCANNER and irrelevant
+    // to the OUTCOME: codegen's `post-fn-name-mangle` (emit-client.ts:2955-2998)
+    // is a raw-text alternation pass whose lookahead `(?=\s*[(;,}\]\n)]|$)`
+    // matches a parameter in a parameter LIST, so it renames the PARAMETER
+    // BINDING to the fetch stub and colours the caller `async`. Measured round 5
+    // on this exact source, compiled end to end:
+    //
+    //   async function _scrml_wrap_4(_scrml_fetch_doHash_3, extra) {
+    //     return await _scrml_fetch_doHash_3("x") + extra;
+    //   }
+    //   _scrml_cs_derived_declare("computed", () => _scrml_wrap_4(…));
+    //
+    // — exit 0 with an async hop bound into a synchronous derived recompute, the
+    // silent Promise-render this limb exists to refuse. Firing is the loud,
+    // fixable direction; the executed-artifact twin is conf §6 `hop-param`.
     const { out } = runRIOn(programWithFns(
       `function doHash(p) { return hashPassword(p) }
 function wrap(doHash) { return doHash("x") }`,
+      "wrap((v) => v)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
+  test("BITE — a hop caller with a NON-colliding param does not fire (the name set, not the shape)", () => {
+    // The differential control for the pin above: same file, same hop shape,
+    // parameter renamed. Only the collision distinguishes them, so the refusal
+    // above is attributable to the name and to nothing structural.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(fn) { return fn("x") }`,
       "wrap((v) => v)",
     ));
     expect(errorsWithCode(out, CODE).length).toBe(0);
