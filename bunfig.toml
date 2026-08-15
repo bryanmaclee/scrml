@@ -1,3 +1,18 @@
 [test]
 root = "compiler/tests/"
-timeout = 10000
+# NO `timeout` KEY HERE — DELIBERATELY (S346, flagship-hos-hermetic).
+#
+# This file carried `timeout = 10000` from the initial split until S346, and bun does not
+# read it: `[test].timeout` is not a bunfig key (bun 1.3.14 verified — a 6 s synchronous
+# test under this file reports `timed out after 5000ms`; the `root` key above IS honoured,
+# so the file loads). The per-test budget is bun's DEFAULT 5000 ms everywhere, locally and
+# in CI. Several test comments say "the bunfig default 10s per-test timeout" — that number
+# was never in force. The only per-run knob is the CLI flag `bun test --timeout <ms>`.
+#
+# The repo's rule stays what its explicit-budget precedents already do: a test or hook that
+# performs a legitimately multi-second operation (a whole-app compile, a self-host bootstrap)
+# declares its own budget at the site — `test(name, fn, { timeout })` /
+# `beforeAll(fn, { timeout })` — with a comment saying why. Do NOT re-add a key here to
+# widen the default silently: `scripts/browser-baseline.ts` gates on the browser tier's
+# failure NAME SET, and a timed-out test produces the same `(fail) <name>` marker as a
+# failed assertion.

@@ -31,7 +31,7 @@
  * that the defect is gone.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { readFileSync, existsSync, rmSync, mkdirSync, readdirSync, mkdtempSync } from "fs";
@@ -149,6 +149,35 @@ const badgeText = () => {
 };
 
 describe("flagship driver/hos — <engine> under an if=", () => {
+  // S346 — the whole-app compile gets an EXPLICIT budget, and it runs here, once,
+  // BEFORE any test body and before happy-dom is registered.
+  //
+  // WHY. `artifacts()` compiles the 36-file trucking-dispatch app synchronously
+  // (~3 s on a fast box, cold). It used to run lazily inside whichever test called
+  // it first, under bun's DEFAULT per-test timeout of 5000 ms — `bunfig.toml`'s
+  // `[test] timeout` key is not one bun reads, so the 10 s the repo believed it
+  // had was never in force. A synchronous test that overruns still runs to
+  // completion (its assertion PASSED every time), but bun then reports it as
+  // `(fail) <name>` + `^ this test timed out after 5000ms.` — the SAME marker an
+  // assertion failure produces, which is how this test's name joined the browser
+  // gate's failure set intermittently in cloud for three sessions and was read as
+  // "the emitted html lacks the template". It never did.
+  //
+  // What made the compile slow enough to cross 5 s only SOMETIMES: the tier runs
+  // 79 in-process compiles in one bun process in filesystem order, and a
+  // `lint-ghost-patterns.js` hot path (`skipPastRanges`, per-character linear
+  // rescan) ran ~17× slower for the rest of the process once its first hot
+  // compile had carried an empty range list — i.e. after ANY fixture with no
+  // string literal and no comment compiled first (measured: 343 ms → 5.9 s of
+  // this compile). That path is fixed in the compiler (forward-only cursor,
+  // `lint-ghost-patterns-skip-cursor.test.js`); this budget is the harness half —
+  // a whole-app compile is a legitimate multi-second operation and its test must
+  // say so, exactly as `integration/w3-splitter-trucking-characterization.test.js`
+  // does for the same app. The assertions below are unchanged.
+  beforeAll(() => {
+    artifacts();
+  }, { timeout: 60_000 });
+
   beforeEach(async () => {
     try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
     // A real origin: the page fetches its driver on mount, and happy-dom refuses a
