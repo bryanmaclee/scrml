@@ -318,11 +318,13 @@ const <label> = "call hashPassword on the server"
 
 describe(`${CODE} §7 — RHS-local shadowing (DIRECT limb only, since round 4)`, () => {
   // ROUND 4: this suppression is now LIMB (a)'s alone. The transitive limb
-  // passes `shadow: "none"` and fires on every reference (§11l), because codegen
-  // renames server-FN references scope-blind — an RI suppression there silently
-  // miscompiled. Limb (a) keeps the suppression: codegen does NOT rename
-  // server-only IMPORT references, so the emitted CALL does resolve to the local
-  // binder.
+  // passes `shadow: "none"` and fires on every reference (§11l): codegen's
+  // server-fn rename has no notion of scope and reaches a reference under a
+  // same-named binder, so an RI suppression there silently miscompiled. Firing
+  // on every reference is what keeps every shape codegen would rewrite inside
+  // RI's refusal set (containment, not equality — see §11n). Limb (a) keeps the
+  // suppression: codegen does NOT rename server-only IMPORT references, so the
+  // emitted CALL does resolve to the local binder.
   //
   // !! THIS PIN ASSERTS THE DIAGNOSTIC, AND NOTHING ABOUT THE ARTIFACTS. !!
   //
@@ -1682,10 +1684,13 @@ const <computed> = doHash("seed")
 // codegen renamed the shadowed call to the fetch stub anyway, so the "clean"
 // compile called the server and rendered a Promise, with the local binder dead.
 //
-// RI and codegen must AGREE. Codegen's reference-renaming on this limb is
-// scope-blind in the FIRING direction (every reference to a server-placed fn
-// becomes the stub), so RI is now scope-blind in the FIRING direction too: every
-// shape codegen would rewrite is refused at compile time.
+// THE CONTRACT IS CONTAINMENT, ONE-DIRECTIONAL: every shape codegen would
+// rewrite to the fetch stub is refused at compile time. Codegen's
+// reference-renaming on this limb has no notion of scope (a reference under a
+// same-named binder is renamed), so RI suppresses on no name either — and RI's
+// refusal set is a strict SUPERSET of codegen's rewrite set (an operator-position
+// name, `doHash + 1`, is refused here and rewritten nowhere). Nothing in this
+// file asserts, or may assert, that the two sets are equal.
 //
 // ROUND 5 removed the LAST suppression — a hop caller's own PARAMETERS. Round 4
 // kept it as "provably scope-correct", which is true of the scanner and false of
@@ -1749,9 +1754,9 @@ const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("lo
     // Executed round 4: the exit-0 bundle contained
     //   `const doHash = ( x ) => x; return _scrml_fetch_doHash_3 ( "local" );`
     // — codegen renamed the shadowed CALL to the async stub, the local was dead,
-    // and the derived cell's value was the pending Promise. Firing here is what
-    // makes RI agree with what codegen actually emits, until the lexical-scoping
-    // arc fixes both together.
+    // and the derived cell's value was the pending Promise. Firing here keeps
+    // this shape — one codegen rewrites — inside RI's refusal set, until the
+    // lexical-scoping arc fixes scanner and renamer together.
     const source = `<program>
 \${
     type Phase:enum = { Idle, Busy }
@@ -1902,5 +1907,154 @@ function g(p) { return doHash(p) }`,
     const hits = errorsWithCode(out, CODE);
     expect(hits.length).toBe(1);
     expect(hits[0].message).toContain("const <computed> -> g -> doHash");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11n — PARAMETER DEFAULTS (round 6): a hop caller's own defaults are in the
+// scan root, and a nested `function-decl`'s string defaults are visible to the
+// walk.
+//
+// TWO independent reasons produced ONE silent miss (round-5 review, B1):
+//   (1) the hop edge set scanned `fnNode.body`; `fnNode.params` is a SIBLING of
+//       `body`, so the caller's own defaults were never a scan root;
+//   (2) `ast-builder.js`'s `parseParamList` stores `params[i].defaultValue` as
+//       a RAW SOURCE STRING (a lambda's default is an `ExprNode`), so even a
+//       nested `function-decl` the walk DID reach had defaults the structural
+//       walk could not see into.
+// Re-measured on the frozen round-5 tree (`bf99a93a`) before fixing:
+//   `function wrap(x = doHash) { return x("k") }` under a derived cell -> exit
+//   0, ZERO diagnostics, `function _scrml_wrap_4(x = _scrml_fetch_doHash_3)` in
+//   the client: the async fetch stub bound as the default, a Promise rendered.
+//   The CALL form `x = doHash("k")` was already refused on that tree — by
+//   CODEGEN's `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` backstop, not by route
+//   inference; the bare-reference and callback-reference forms had no refusal
+//   from anywhere. Codegen renames the name in the default position either way.
+//
+// The containment this limb owes: every shape codegen would rewrite is refused
+// at compile time. RI's refusal set CONTAINS codegen's rewrite set (a name in
+// operator position — `doHash + 1` — is refused here and rewritten nowhere, so
+// the two are not equal and no test in this file says they are). The default
+// position was outside the containment; these pins put it inside and keep it
+// there. Executed-artifact twins: conf §7.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11n — a hop caller's PARAMETER DEFAULT is a reach (round 6)`, () => {
+  test("bare REFERENCE default `x = doHash`: FIRES with the chain through the caller", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x = doHash) { return x("k") }`,
+      "wrap()",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
+  test("CALL default `x = doHash(@pw)` (the review's shape, verbatim): FIRES", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x = doHash(@pw)) { return x }`,
+      "wrap()",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
+  test("callback-REFERENCE default `x = [1].map(doHash)`: FIRES", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x = [1].map(doHash)) { return x }`,
+      "wrap()",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("a default on the SECOND param, first param plain: FIRES (every default is scanned)", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(a, x = doHash) { return x(a) }`,
+      "wrap(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("the default is TWO hops up (`wrap -> mid` by body, `mid -> doHash` by default): FIRES with the full chain", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function mid(y = doHash) { return y }
+function wrap(x) { return mid()(x) }`,
+      "wrap(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> mid -> doHash");
+  });
+
+  test("a NESTED function-decl's default inside the hop caller's body (reason 2 alone): FIRES", () => {
+    // The nested decl IS reachable from the body root, so this isolates reason
+    // (2): the walk must look inside the raw `defaultValue` string.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(v) { function inner(x = doHash) { return x } return inner()(v) }`,
+      "wrap(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
+  test("a default that is a BLOCK-BODIED arrow reaching doHash (escape-hatch text inside the default): FIRES", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x = (() => { return doHash("k") })()) { return x }`,
+      "wrap()",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("BITE — the same default with a PURE local fn (`x = pure`): 0 diagnostics", () => {
+    // Differential control: identical shape, the default's callee has no server
+    // reach. The refusal above is attributable to the reach, not to the
+    // presence of a default.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function pure(p) { return p + "!" }
+function wrap(x = pure) { return x("k") }`,
+      "wrap()",
+    ));
+    expect((out.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+  });
+
+  test("BITE — a default naming doHash only inside a STRING LITERAL: 0 diagnostics (limb (b) parses, it does not text-match)", () => {
+    // Limb (b)'s raw-subtree rule is `"structural"`: the default is parsed and
+    // only an identifier in REFERENCE position counts, exactly as for an
+    // escape-hatch body (§11i/§11j). A string literal is not a reference.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x = "doHash") { return x }`,
+      "wrap()",
+    ));
+    expect((out.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+  });
+
+  test("BITE — a default reading a MEMBER named doHash (`x = cfg.doHash`): 0 diagnostics", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(cfg, x = cfg.doHash) { return x }`,
+      "wrap({})",
+    ));
+    expect((out.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+  });
+
+  test("GUARD — the DIRECT limb is unchanged: a plain function's default reaching the import does not fire THIS code on a derived cell that never touches it", () => {
+    // `f` (a function) has a default reaching `hashPassword`; the derived cell
+    // reads a plain cell. §12.2 Trigger 3 owns `f` (conf §8); §6.6.19 stays out.
+    const { out } = runRIOn(programWithFns(
+      `function f(h = hashPassword("k")) { return h }`,
+      "@pw + \"!\"",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
   });
 });

@@ -1,0 +1,10 @@
+<program>
+${
+  import { hashPassword } from 'scrml:auth'
+  <pw> = "secret"
+  function doHash(p) { return hashPassword(p) }
+  function wrap(x = doHash(@pw)) { return x }
+  const <computed> = wrap()
+}
+<div id="out">${@computed}</div>
+</program>

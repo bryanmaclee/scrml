@@ -1,0 +1,10 @@
+<program>
+${
+  import { hashPassword } from 'scrml:auth'
+  <pw> = "secret"
+  <out> = ""
+  function f(h = hashPassword(@pw)) { return h }
+}
+<button onclick={ @out = f() }>go</button>
+<div id="out">${@out}</div>
+</program>

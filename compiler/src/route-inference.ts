@@ -3577,6 +3577,23 @@ function collectRawReferenceNames(
  * modules: the derived-cell diagnostic is required to name the offending member
  * (§34 `E-DERIVED-SERVER-ONLY-REACH`), and reconstructing it from a module name
  * afterwards is not possible once the walk has thrown the name away.
+ *
+ * PARAMETER DEFAULTS (round 6). A `function-decl`'s `params[i].defaultValue` is
+ * RAW SOURCE TEXT — `ast-builder.js`'s `parseParamList` buffers the tokens after
+ * the `=` and stores the string, unlike a lambda's `LambdaParam.defaultValue`,
+ * which the expression parser lowers to an `ExprNode` the generic descent below
+ * already reaches. So a default such as `x = doHash` or `h = hashPassword(@pw)`
+ * was invisible to this walk at every depth: the walk descended into the param
+ * object, found a string, and returned. Measured in the round-5 review, and
+ * re-measured on the frozen round-5 tree: `function wrap(x = doHash) { return
+ * x("k") }` under a derived cell compiled at exit 0 with `function
+ * _scrml_wrap_4(x = _scrml_fetch_doHash_3)` in the client — the async fetch stub
+ * bound as the default and a Promise rendered. Each string default is now handed
+ * to the same raw-subtree rule an `escape-hatch` gets (`rawMode`): limb (b)
+ * parses it, limb (a) text-scans it. That is the ONE predicate applied to one
+ * more representation, not a second reader — see `fnDeclParamDefaultRoots` for
+ * the top-level twin the callers use, since the scan root is a function's BODY
+ * and its own params are a sibling of that root.
  */
 function scanForServerOnlyBindingRefs(
   root: unknown,
@@ -3683,6 +3700,18 @@ function scanForServerOnlyBindingRefs(
       // fall through — an escape-hatch may still carry structured children
     }
 
+    // A nested `function-decl`'s parameter DEFAULTS are raw source strings (see
+    // the doc comment above) — apply the same raw-subtree rule to each one. The
+    // generic descent below still walks the param objects for anything
+    // structured they carry (a destructure-pattern `name`).
+    if (kind === "function-decl") {
+      for (const r of fnDeclParamDefaultRoots(n)) {
+        if (rawMode === "structural") scanStructuredRaw(r.raw);
+        else scanRaw(r.raw);
+      }
+      // fall through — the body and params are walked by the generic recursion
+    }
+
     for (const key of Object.keys(n)) {
       if (key === "span" || key === "_scope" || key === "_record") continue;
       walk(n[key]);
@@ -3691,6 +3720,43 @@ function scanForServerOnlyBindingRefs(
 
   walk(root);
   return found;
+}
+
+/**
+ * The parameter defaults of a `function-decl`, as scan roots.
+ *
+ * `params[i].defaultValue` is a RAW SOURCE STRING (`ast-builder.js`
+ * `parseParamList` — codegen emits it verbatim as JS default-parameter syntax),
+ * so it is returned in the ONE shape `scanForServerOnlyBindingRefs` already has
+ * a rule for: an `escape-hatch` whose `.raw` is scanned by the caller's
+ * `RawSubtreeMode` — parsed on limb (b), text-matched on limb (a). Nothing new
+ * is invented for the position; a default is one more raw subtree of the
+ * function it belongs to.
+ *
+ * WHY THE CALLERS NEED THIS AS WELL AS THE WALK'S OWN `function-decl` branch:
+ * both per-function scans (`collectServerOnlyBindingModules` for §12.2
+ * Trigger 3, `computeServerReachingFns` for the §6.6.19 hop edge set) hand the
+ * scanner `fnNode.body` — and `fnNode.params` is a SIBLING of `body`, never a
+ * descendant, so the walk cannot reach the function's OWN defaults from that
+ * root however deep it descends. A caller that scans a body therefore scans
+ * `[body, ...fnDeclParamDefaultRoots(fnNode)]`. Nested declarations inside the
+ * body are reached by the walk's branch; the top level is reached by this.
+ *
+ * Only string defaults are returned: a lambda's `LambdaParam.defaultValue` is
+ * an `ExprNode` the walk descends generically, and a param with no default has
+ * nothing to scan.
+ */
+function fnDeclParamDefaultRoots(
+  fnNode: { params?: unknown },
+): Array<{ kind: "escape-hatch"; raw: string }> {
+  const roots: Array<{ kind: "escape-hatch"; raw: string }> = [];
+  const params = Array.isArray(fnNode.params) ? (fnNode.params as unknown[]) : [];
+  for (const p of params) {
+    if (!p || typeof p !== "object") continue;
+    const dv = (p as { defaultValue?: unknown }).defaultValue;
+    if (typeof dv === "string" && dv.length > 0) roots.push({ kind: "escape-hatch", raw: dv });
+  }
+  return roots;
 }
 
 /**
@@ -3846,19 +3912,26 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  *   the record. Both pre-date this arc; neither is closed here.
  *
  * `"none"` — LIMB (b). NO name-based suppression at all: any reference to a
- *   server-reaching function name fires. This is the round-4 blocker fix, and it
- *   is the only semantics under which RI and codegen AGREE on this limb: codegen
- *   renames EVERY reference to a server-placed function to its fetch stub —
- *   including one under a same-named RHS-local binder — so an RI suppression
- *   here is precisely the shape that compiled at exit 0 while the client bound
- *   an async stub into the synchronous derived recompute (measured: if-sibling,
- *   while-body, match-arm-sibling, the SPEC-blessed RHS-local shadow itself, and
- *   — round 5, in `computeServerReachingFns` — a hop caller's own parameter).
- *   The GOVERNING DESIGN INTENT remains real lexical scoping in scanner and
- *   codegen together (pre-S338 §6.6.19 sentence; restoration arc queued S345);
- *   until that lands, firing on every reference is the loud, fail-closed
- *   interim, per the arc's own rule that a too-wide shadow set is a silent leak
- *   while a too-narrow one is a fixable over-fire.
+ *   server-reaching function name fires. This is the round-4 blocker fix. The
+ *   property it buys is ONE-DIRECTIONAL CONTAINMENT, and only that: every shape
+ *   codegen would rewrite to the async fetch stub is refused at compile time.
+ *   RI's refusal set is a strict SUPERSET of codegen's rewrite set — codegen's
+ *   `post-fn-name-mangle` (emit-client.ts) renames a name only where its
+ *   lookahead admits it (a name in OPERATOR position, `doHash + 1`, is renamed
+ *   nowhere and refused here), and its rename does reach a reference under a
+ *   same-named RHS-local binder — so an RI suppression on a name-set basis is
+ *   precisely the shape that compiled at exit 0 while the client bound an
+ *   async stub into the synchronous derived recompute (measured: if-sibling,
+ *   while-body, match-arm-sibling, the SPEC-blessed RHS-local shadow itself,
+ *   — round 5, in `computeServerReachingFns` — a hop caller's own parameter,
+ *   and — round 6 — a hop caller's parameter DEFAULT). Do not write the two
+ *   sets as equal, agreeing, or "the same" anywhere: three review rounds each
+ *   refused an arc for re-minting that claim. The GOVERNING DESIGN INTENT
+ *   remains real lexical scoping in scanner and codegen together (pre-S338
+ *   §6.6.19 sentence; restoration arc queued S345); until that lands, firing on
+ *   every reference is the loud, fail-closed interim, per the arc's own rule
+ *   that a too-wide shadow set is a silent leak while a too-narrow one is a
+ *   fixable over-fire.
  */
 function collectDerivedRhsServerOnlyRefs(
   declNode: Record<string, unknown>,
@@ -4183,7 +4256,18 @@ function computeServerReachingFns(
     // that merely CONTAINS the string `"status "` a caller of `status`. Measured
     // at S343: exit 0 on `main`, exit 1 here, for a program with no edge at all
     // between the two. Same blocker as the derived-RHS scan, one level up.
-    for (const reachedName of scanForServerOnlyBindingRefs(body, live, "structural", true).keys()) {
+    //
+    // THE SCAN ROOT IS THE BODY PLUS THE CALLER'S OWN PARAMETER DEFAULTS
+    // (round 6). `fnNode.params` is a sibling of `fnNode.body`, and a
+    // `function-decl` default is a raw source string, so `function wrap(x =
+    // doHash) { return x("k") }` had NO edge to `doHash` at all — measured on the
+    // frozen round-5 tree: exit 0, zero diagnostics, and the client bound the
+    // async fetch stub as the default (`_scrml_wrap_4(x = _scrml_fetch_doHash_3)`)
+    // under a derived recompute. Codegen's rename reaches the default position;
+    // the containment this limb owes — every shape codegen would rewrite is
+    // refused at compile time — did not hold there. See `fnDeclParamDefaultRoots`.
+    const scanRoot: unknown[] = [body, ...fnDeclParamDefaultRoots(callerRecord.fnNode)];
+    for (const reachedName of scanForServerOnlyBindingRefs(scanRoot, live, "structural", true).keys()) {
       const globalIds = fnNameToNodeIds.get(reachedName);
       if (!globalIds || globalIds.length === 0) continue;
       for (const calleeId of globalIds) {
@@ -5921,9 +6005,12 @@ export function runRI(input: RIInput): RIOutput {
       // reproducers and for why the direct limb keeps the text scan.
       if (serverReachingNamesHere.size === 0) continue;
       // `shadow: "none"` (round 4, S345) — no name-based suppression on this limb.
-      // Codegen renames EVERY reference to a server-placed function to its fetch
-      // stub, including one under a same-named RHS-local binder, so any name-set
-      // suppression here is exactly the shape that miscompiles at exit 0. See
+      // Codegen's rename to the fetch stub reaches a reference under a
+      // same-named RHS-local binder (measured), so a name-set suppression here
+      // is exactly the shape that miscompiles at exit 0. Firing on every
+      // reference keeps the containment — every shape codegen would rewrite is
+      // refused — without claiming the two sets are equal (they are not: an
+      // operator-position name is refused here and rewritten nowhere). See
       // `collectDerivedRhsServerOnlyRefs` for the full story.
       const hopRefs = collectDerivedRhsServerOnlyRefs(
         declNode,

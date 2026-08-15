@@ -375,8 +375,9 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §5 a hop through a local function 
 //   recompute — and parses (`node --check`).
 //
 // Under the final semantics every transitive-limb shadow shape takes the first
-// disjunct (RI fires on every reference, matching codegen's scope-blind
-// renaming), and the accepted control takes the second. The §1/§5 gap pins
+// disjunct (RI fires on every reference — a refusal set that CONTAINS every
+// shape codegen's scope-blind renaming would rewrite; containment, not
+// equality), and the accepted control takes the second. The §1/§5 gap pins
 // still apply: a REFUSED compile still writes artifacts to disk, so the refusal
 // (exit disposition), not artifact absence, is the contract — consumers key on
 // the exit code, never on artifact presence.
@@ -461,7 +462,9 @@ const <computed> = match @phase { .Idle :> { doHash = (x) => x; doHash("local") 
   //   _scrml_cs_derived_declare("computed", () => _scrml_wrap_4(…));
   // — codegen renamed the PARAMETER BINDING itself, because its rename pass is
   // raw text with no notion of parameter scope. The exemption was the one place
-  // the round-4 semantics still disagreed with emission.
+  // the round-4 SHADOW discipline still suppressed a name on this limb; round 5
+  // removed it (round 6 then found the parameter DEFAULT position outside the
+  // scan root altogether — §7 below).
   "hop-param": `<program>
 ${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
 <pw> = "secret"
@@ -530,7 +533,13 @@ const <computed> = wrap((v) => v, @pw)
   test("CONTROL — `hop-param` with the parameter renamed: clean, and the hop is NOT async", () => {
     const c = compileToDisk("r4-shadow-hop-param-control", HOP_PARAM_CONTROL);
     try {
-      expect(c.errorCodes).not.toContain(CODE);
+      // CLEAN means ZERO error-severity codes — not merely "not THIS code". A
+      // refused compile still writes the full artifact set (§1/§5), so the three
+      // artifact regexes below stay green through a refusal by some OTHER code;
+      // `not.toContain(CODE)` alone let this control pass while its own subject
+      // program was refused (round-5 review, B4 — verified with two source
+      // mutations). `toEqual([])`, like every sibling control in this file.
+      expect(c.errorCodes).toEqual([]);
       // The hop is emitted as a plain function — no `async`, no `await`, and no
       // fetch stub bound into the recompute.
       expect(c.clientLoadedText).toMatch(/\bfunction _scrml_wrap_\d+\(fn, extra\)/);
@@ -574,5 +583,130 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §5b a purely-client hop in the sam
     expect(c.serverJsFiles.length).toBe(0);
     expect(c.clientLoadedText).toMatch(/_scrml_cs_derived_declare\(\s*"loud"/);
     expect(c.clientLoadedText).not.toContain("_scrml_fetch_shout");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 — A HOP CALLER'S PARAMETER DEFAULT, EXECUTED END-TO-END (round 6, B1).
+//
+// The round-5 review found the transitive limb's scan root was `fnNode.body`
+// alone — `fnNode.params` is a SIBLING, and a `function-decl` default is a raw
+// source string — so a default reaching a server-placed function produced no
+// hop edge at all. Re-measured on the frozen round-5 tree (`bf99a93a`) with
+// THESE sources before the fix:
+//
+//   `function wrap(x = doHash) { return x("k") }`  ->  exit 0, ZERO errors,
+//     `function _scrml_wrap_4(x = _scrml_fetch_doHash_3)` in the client: the
+//     async fetch stub bound as the default; `wrap()` returns a Promise; the
+//     derived cell renders it.
+//   `function wrap(x = doHash(@pw)) { return x }` (the review's shape) -> the
+//     CALL form was already refused on that tree, but by CODEGEN's
+//     `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` backstop (emit-expr / emit-library-
+//     shared), not by route inference; RI itself had no edge for it either.
+//
+// Both now refuse with `E-DERIVED-SERVER-ONLY-REACH`. The CONTROL is the same
+// default position with a purely-client callee, and it asserts `toEqual([])`
+// (not `not.toContain`) — a refused compile still writes artifacts (§1/§5), so
+// only a zero-error assertion proves the control's subject program is accepted.
+// ---------------------------------------------------------------------------
+
+const HOP_PARAM_DEFAULT_SHAPES = {
+  // bare REFERENCE default — silent on the pre-fix tree (no codegen backstop
+  // sees a non-call).
+  "default-bare-ref": `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(x = doHash) { return x("k") } ${CLOSE}
+const <computed> = wrap()
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+  // callback REFERENCE default — likewise silent pre-fix.
+  "default-callback-ref": `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(x = [1].map(doHash)) { return x } ${CLOSE}
+const <computed> = wrap()
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+  // the review's shape verbatim — a CALL in the default with a `@cell` argument.
+  "default-call-review-shape": `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <pw> = "secret"
+  function doHash(p) { return hashPassword(p) }
+  function wrap(x = doHash(@pw)) { return x }
+  const <computed> = wrap()
+${CLOSE}
+<div id="out">${OPEN}@computed${CLOSE}</div>
+</program>
+`,
+  // a NESTED function-decl's default inside the hop caller (reason 2 alone).
+  "default-nested-decl": `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(v) { function inner(x = doHash) { return x } return inner()(v) } ${CLOSE}
+const <computed> = wrap(@pw)
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
+};
+
+// THE DIFFERENTIAL CONTROL: byte-identical to `default-bare-ref` except the
+// default's callee is the purely-client `pure` (the server-placed `doHash` is
+// still declared in the file, so its fetch stub legitimately exists in the
+// client). Must compile with ZERO errors, bind the default to the plain client
+// function, and leave the caller un-coloured. Only the default's callee differs,
+// so the refusal above is attributable to the REACH and not to the presence of
+// a default.
+const HOP_PARAM_DEFAULT_CONTROL = `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function pure(p) { return p + "!" }
+function wrap(x = pure) { return x("k") } ${CLOSE}
+const <computed> = wrap() + @pw
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`;
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §7 a hop caller's PARAMETER DEFAULT is refused (round 6)", () => {
+  for (const [name, source] of Object.entries(HOP_PARAM_DEFAULT_SHAPES)) {
+    test(`${name}: refused with the code, and the chain names the hop`, () => {
+      const c = compileToDisk(`r6-param-default-${name}`, source);
+      try {
+        expect(c.errorCodes).toContain(CODE);
+        // The disjunction contract of §6 holds here too: refused, so no stub
+        // may be trusted to be absent — the artifact set is still written (§1).
+        expect(assertRefusedOrStubFree(c)).toBe("refused");
+      } finally {
+        teardown(`r6-param-default-${name}`);
+      }
+    });
+  }
+
+  test("CONTROL — the same default position with a purely-client callee: ZERO errors, synchronous default, no stub in the default", () => {
+    const c = compileToDisk("r6-param-default-control", HOP_PARAM_DEFAULT_CONTROL);
+    try {
+      expect(c.errorCodes).toEqual([]);
+      // The default is bound to the plain client function — not to any fetch
+      // stub — and the caller is not coloured async.
+      expect(c.clientLoadedText).toMatch(/\bfunction _scrml_wrap_\d+\(x = _scrml_pure_\d+\)/);
+      expect(c.clientLoadedText).not.toMatch(/_scrml_wrap_\d+\(x = _scrml_fetch_/);
+      expect(c.clientLoadedText).not.toMatch(/async function _scrml_wrap_\d+/);
+      expect(c.clientLoadedText).toMatch(/_scrml_cs_derived_declare\(\s*"computed"/);
+      // And every client-loaded artifact parses.
+      for (const f of c.clientLoaded) {
+        const r = spawnSync("node", ["--check", f], { encoding: "utf8" });
+        expect(`${f}: ${r.stderr ?? ""}`.trim()).toBe(`${f}:`);
+        expect(r.status).toBe(0);
+      }
+    } finally {
+      teardown("r6-param-default-control");
+    }
   });
 });
