@@ -42,6 +42,8 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-025 | **RATIFIED S338 2026-08-11 (bryan: "a, and grep the compiler for source-text regexes") — option (a): ratify the finding, take the no-regret moves now, run the §6.1 blind fuzz BEFORE committing to A1. PA re-measured the headline before surfacing and it REPRODUCES (34 fields / 33 optional / 32 degenerate exact / ~70 sites) — unlike the S337 `127`. bryan added a SECOND instruction that reprioritises the measurement: **census the compiler for source-text regexes** — cheaper than the fuzz and it measures the PROBLEM not the fix. First result: **232 post-AST source-text gates across 49 files** (vs 182 legitimate pre-AST), and **232 is a FLOOR** — the probe keys on identifier names and cannot see `postRe.test(t)`, with 81 opaque-arg sites unclassifiable. Prior state:**  ⚑ **VERDICT: the answer is an OPTIONAL FIELD, not a missing primitive.** `emitExpr` is ALREADY one choke point; `EmitExprContext` = **33 fields / 32 OPTIONAL / 68 construction sites / 32 degenerate `{mode:"client"}` populating zero** — so a feature works only where someone remembered to thread it. That is the mechanism behind the field-list/parallel-walker class S337 hit four times: not an ABSENT capability, an OPTIONAL one. **★★ Live hazard found en route: `emit-logic.ts:1628` DEFAULTS A MISSING SERVER BOUNDARY TO CLIENT EMIT**, warned only under `SCRML_DEBUG` so silent by default — while `PIPELINE.md` 0.5.1 makes "client JS MUST NOT contain server-context constructs" an explicit CG output invariant (`E-CG-006`) and the source ships `SCRML_STRICT_BOUNDARY=1` **off**. Third fail-open-by-default in this area. **★ The ledger cannot measure itself and it corrupted this DD's own numbers** — 50 of 209 heading-extracted "open" rows are marked resolved in the body; 48 `status=open` entries are absent from a heading extraction entirely (the open gap `g-known-gaps-heading-and-marker-status-can-disagree-silently`). Gap counts quoted anywhere are SOFT until that is fixed. **A dPA pole proposed a retroactive §34 emitter gate that §34.0 had ALREADY declined** verbatim — caught as re-litigation. → `scrml-support/docs/deep-dives/population-first-missing-primitive-2026-08-10.md` | bryan S337 fired · **RUN-not-RATIFY, awaiting ratify/reject** |
 | dpa-026 | **BANKED — UNRUN** (S337, 2026-08-10). **Is `tare` one keyword doing TWO jobs — thunk at module-init, CAPTURE at runtime — or an argument for two?** bryan: *"a, and bank c as its own question."* **The motivating metaphor is the case that does not work.** You tare a scale at RUNTIME, in a handler, after a reading — and thunk semantics structurally cannot express that (PA-verified: a deferred write registers no init thunk, so the bare form promotes module-init's; and `tare(@x, @x)` re-reads at reset time, giving the current value not the calibrated one). Thunk serves CONFIG; it cannot serve CALIBRATION. ⚠ The S337 "thunk, keep the family coherent" ruling was made BEFORE this was known — this reopens it on NEW INFORMATION, not by re-litigation. | bryan S337 · *"bank c as its own question"* |
 | dpa-027 | **BANKED — UNRUN** (S346, 2026-08-15). **Presence-match arm vocabulary — §18.8.2 says `.Some(v)`/`.None`, the compiler implements `not :>`/`given x :>` (measured S346: `.Some/.None` → E-MATCH-012 + E-TYPE-006; `not/given` compiles).** NARROW R1→R2; PA lean (a) strike the §18.8.2 `.Some/.None` prose + cross-ref §42.2.3 (limit wins) — R2 iff `git log -S`/user-voice finds a ruling behind the `.Some/.None` text. Split from S345 owed filing (d); the other half is a BUG (`g-lifecycle-return-match-fires-e-type-024`). | S346 bank |
+| dpa-028 | **BANKED — UNRUN** (S346, 2026-08-15). **Offline / PWA — native story or host-JS boundary by design?** Adopter #509 (4 days, 0 comments across three boots). R2, bryan rules; return leg = comment on #509. Facts S346: compiler has ZERO SW/manifest/cache surface; 6nz has no pattern (README:419 overclaims → `g-readme-6nz-claim-describes-planned-state-as-built`). | S346 bank |
+| dpa-029 | **BANKED — UNRUN** (S346, 2026-08-15). **Enterprise document workflows — JSON-locked response envelope (VERIFIED: `new Response` in a server fn → E-SCOPE-001) · `handle()` outside the protect/tenant egress floors · no multipart · no server render-to-string.** Adopter #471 (7 days, 0 comments). R2 + security lens (is `handle()`-with-a-body a 4th EgressSink for the ratified coverage TYPE?); bryan rules; return leg = comment on #471. | S346 bank |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -996,6 +998,129 @@ A verdict on subsume-vs-complement with worked adopter code for **each** of the 
 
 ---
 
+
+
+## dpa-028 — Offline / PWA: does scrml grow a NATIVE offline story (SW + Cache-API shell + manifest + write-queue/replay), or is that the host-JS boundary by design? (adopter #509)
+
+```
+id:        dpa-028
+status:    banked
+rung:      R2 (a direction ruling — bryan rules; adopter-driven, the exact class the S322 freeze-pause exists for)
+requested: adopter issue #509 (2026-08-11, 0 comments for 4 days across three boots) — banked S346-bryan; factual ack posted on the issue S346
+routes-to: scrml PA → the RETURN LEG is a comment on #509 (S310 return-leg rule)
+```
+
+### The question (the adopter's, verbatim-shaped)
+Field crews in mountain dead-zones must capture time/hours/miles + maintenance logs OFFLINE and sync on
+signal. Their design is deliberately thin: append-only per person (no CRDT), a `client_id` UUID +
+UNIQUE column for idempotent replay through existing server-fns, `localStorage` persistence via
+`when @var changes` (native today), and the §20.8 persistent shell to precache. **The one piece with
+no native story is the COLD OFFLINE BOOT: service-worker + Cache-API shell + manifest so the app loads
+with zero network.** They ask: (1) is native offline something scrml could/should grow, or is
+SW/manifest/static-asset serving the intended host-JS boundary an app owns? (2) was the 2026-07-05
+BaaS-parity "clear skip" of offline-sync a permanent design call or a deprioritisation? (3) is there a
+6nz pattern to copy? They will bridge with ~150 lines of quarantined host-JS if needed and rip it out
+when a native story lands — so the ruling decides whether they build a throwaway.
+
+### Facts established S346 (do NOT re-derive)
+- **Compiler surface: NONE.** `grep -rl 'serviceWorker|manifest.json|caches.open' compiler/src` → 0;
+  SPEC has no offline/PWA/service-worker section (SPEC-INDEX grep → 0). §20.8's persistent shell is the
+  nearest primitive and it is a NAV shell, not a cache shell.
+- **6nz: no pattern to point at.** `../6nz` holds 11 playground `.scrml` files; its `master-list.md`
+  lists "Performance + PWA architecture spec — authored before scaffolding" UNCHECKED; grep for
+  SW/manifest → nothing. README.md:419's "written entirely in scrml … offline-first PWA" describes
+  PLANNED state — filed `g-readme-6nz-claim-describes-planned-state-as-built` (LOW).
+- **The 2026-07-05 BaaS-parity "clear skip"** (`baas-parity-worth-it-2026-07-05.md`) — the DD must
+  quote its stated REASON for skipping offline-sync (was it "not our layer" or "not now"?); the answer
+  to the adopter's Q2 is that sentence, and it decides the rung.
+- **What IS native today and relevant:** `when @var changes` + `localStorage` (their persistence half);
+  server-fn idempotency via their UNIQUE-column design; §20.8 shell composition (#124/#215).
+
+### The fork (surface LIMIT first — FORK RULE row 1)
+(a) **Host-boundary by design** — SW/manifest/Cache-API are platform primitives an app declares as
+static assets; scrml owns the DATA half (write-queue semantics could ride existing state primitives)
+and stays out of the shell-cache half. Cheapest, no new surface; the adopter's ~150 lines are the
+intended answer, and the doc says so.
+(b) **Native offline as a `<program>` mode / attribute** (e.g. an `offline=` declaration that emits SW +
+manifest + a precache list from the §20.8 shell + a replay queue over server-fns) — a widening;
+possibly the "best expression of the intent" for a whole-stack compiler ("scrml IS the backend" — an
+app that cannot boot without the backend is a gap in that claim). Cost: a real arc.
+(c) A middle: emit the SW/manifest SCAFFOLD (`scrml generate pwa`, §"scrml generate" catalog exists) as
+adopter-owned files, keep the semantics host-JS. Tooling, not language.
+
+### Evidence the DD owes
+The 2026-07-05 skip's stated reason, verbatim · what Qwik/Next/SvelteKit/Astro ship for PWA (adapter
+vs core) · whether the write-queue/replay half is expressible in scrml state primitives TODAY (a
+worked adopter-shaped example) · the cold-boot half's minimal emitted surface if (b)/(c).
+
+### Anti-goals
+Do NOT design the primitive; do NOT ratify. Do NOT answer Q1/Q2 on the issue — bryan does.
+
+### Report-back
+§3 — one-liner + artifact path + `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA, whose return leg is a comment on #509.
+
+
+## dpa-029 — Enterprise document workflows (PDF / print / email / file-upload): which of the four host-escapes become NATIVE, and does document egress come inside the protect/tenant envelope? (adopter #471)
+
+```
+id:        dpa-029
+status:    banked
+rung:      R2 (direction + a SECURITY-envelope question; bryan rules; adopter-driven)
+requested: adopter issue #471 (2026-08-08, 0 comments for 7 days across three+ boots) — banked S346-bryan; factual ack posted on the issue S346
+routes-to: scrml PA → return leg = a comment on #471
+```
+
+### The four questions (the adopter surveyed the source first — their reading, with S346 verification)
+1. **Response envelope is JSON-locked.** A server fn / `<endpoint>` returns JSON only; `return new
+   Response(...)` in a server fn is `E-SCOPE-001`; `<endpoint>` forces `application/json` (§61.5). The
+   only binary/`Content-Disposition` path is `handle()` returning a raw Bun `Response`.
+   **VERIFIED S346 by execution:** `function pdf(id) { … return new Response("%PDF-1.4", {headers:{…}}) }`
+   → `E-SCOPE-001: Undeclared identifier Response`. → *Is a non-JSON / chosen-Content-Type response
+   path from a server fn or `<endpoint>` on the roadmap, or is `handle()` the long-term answer?*
+2. **`handle()` is OUTSIDE the tenant/`protect=` egress guarantees** (`E-PROTECT-004` /
+   `E-TENANT-RAW-EGRESS` — SPEC §14.8.9/§14.8.10 fail-closed gates name `handle()` as the
+   compiler-unanalyzable egress). Every document/email path must ride `handle()`, so the delivery
+   layer cannot inherit scrml's data-protection invariants — a real concern for multi-tenant
+   customer-facing docs. → *Native, or enforce redaction ourselves?*
+3. **No inbound multipart / file-upload parser.** `<endpoint accepts=:enum>` decodes JSON only; uploads
+   need `handle()` + `request.formData()` (host Bun). Also blocks a native attachment-storage story.
+   → *Native inbound-upload primitive planned, or host-escape by design?*
+4. **Document generation (HTML→PDF) + templating.** No `renderToString`; `format` is data-only; they'd
+   vendor a PDF lib via the `.js` sidecar. → *Fine as a vendored lib, or is server HTML render coming?*
+   (Note: §52.15 SSR prerender EXISTS server-side — the DD checks whether a server-side render-to-string
+   of a markup value is already reachable or one seam away.)
+
+### What is already established — do NOT re-derive
+- §61 `<endpoint>` is deliberately THIN (LIMIT-PRIMITIVES, §61.5 envelope; JSON-RPC-not-baked-in).
+- §60/§61 both say client-codegen SKIP for foreign wires; `handle()` (§40) is the sanctioned raw escape.
+- The auth-scoped confidentiality architecture (S256 ratified): THREE colocated mechanisms + ONE
+  compile-time `EgressSink × ConfidentialityAxis` coverage TYPE — **complete mediation without a
+  god-object.** Question 2 is exactly "is `handle()`-with-a-binary-body a fourth EgressSink the type
+  should cover?" — the ratified architecture has a place for it; the DD should say whether it fits.
+- §23 `_{}` foreign code + the `.js` sidecar (§23.4) exist for vendoring.
+
+### The forks (each: LIMIT vs WIDEN, surfaced first)
+Q1: (a) `handle()` is the answer, document it · (b) a typed binary/`Content-Type` return form for
+server fns / `<endpoint>` (a `Response`-shaped return type the compiler can still route through the
+egress redactor). Q2: (a) adopters redact themselves in `handle()` · (b) `handle()` becomes a
+covered EgressSink for the protect/tenant floors (structural-redaction of any row-shaped value that
+reaches it; binary bodies pass). Q3: (a) host-escape by design · (b) `<endpoint accepts=… body=multipart>`
+or a `<upload>` primitive. Q4: (a) vendored lib · (b) expose the SSR renderer as a server-side
+`render(markup) -> string`.
+
+### Evidence the DD owes
+Per question: the governing sentence (or "searched §X, §Y — none"); the smallest change that answers
+it; whether it widens; what the adopter loses if the answer is (a). Q2 gets the security lens: name
+what a `handle()`-body leak looks like today (worked example) and whether the coverage TYPE can express
+the new sink without a god-object.
+
+### Anti-goals
+Do NOT build; do NOT ratify; do NOT re-open §61's thin-envelope ruling as if unruled — extend it or not.
+
+### Report-back
+§3 — one-liner + artifact path + `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA, whose return leg is a comment on #471.
 
 
 ## dpa-027 — Presence-match arm vocabulary: §18.8.2 says `.Some(v)`/`.None`, the compiler implements `not :>`/`given x :>` — which is canonical? (NARROW; R1→R2)

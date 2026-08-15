@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 37 |
-| MED | 148 |
-| LOW | 65 |
+| MED | 149 |
+| LOW | 66 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -8312,3 +8312,13 @@ Same root cause as the round-5 review's B1 (the transitive limb's hop-edge scan 
 <!-- @gap id=g-lifecycle-return-match-fires-e-type-024 sev=MED status=open locus=searched:compiler/src/type-system.ts(E-TYPE-024 fire site + the match-subject type classification for a lifecycle-annotated return; not traced) prov=spec:§14.12.6.1-"The-caller-receives-a-value-typed-as-T-|-not"-+-form-3-`match-u-{-not-:>-…-given-u-:>-…-}` -->
 
 Executed at `f6883b26` (main + docs): `function loadUser(id) -> (not to User)`, then `match u { not :> … given u :> u.name }` → **`E-TYPE-024: Cannot match on struct-typed subject User`**; the §18.8.2 `.Some(v)`/`.None` spelling → the SAME `E-TYPE-024`. Control: the identical `match` over a PLAIN union (`let u: User | not` or `fn -> User | not`) with `not :>`/`given u :>` arms COMPILES clean. So the defect is specifically that a `(not to T)` lifecycle return is classified as the bare post-type `T` at the match subject, where §14.12.6.1 says verbatim the caller receives `T | not` and lists `match u { … }` as caller form 3. Newly-accepting toward the contract (a pre-existing normative sentence + worked example say the form is legal; the compiler holds it shut) — a bug fix, not a widening. Forms 1 (`given`) and 2 (`if (u is not) return`) NOT probed here — verify before assuming they work. Reproducers: the S346 scratchpad `dpa027/{a,b,c,d,e,f}.scrml` (re-derive from the shapes above if gone).
+
+### g-emit-parse-gate-reports-artifact-position-not-source-span — `E-CODEGEN-INVALID-LOGIC` (the emit-parse gate) reports Acorn's line/col INSIDE the emitted artifact; nothing maps it back to the `.scrml` span, so the adopter cannot locate the offending source — `NEW S346-bryan (adopter issue #519, pjoliver11, 2026-08-12 — DX, "low priority" per the reporter); MED; open`
+<!-- @gap id=g-emit-parse-gate-reports-artifact-position-not-source-span sev=MED status=open locus=compiler/src/codegen/validate-emit.ts:77-87(the Acorn SyntaxError's {pos,loc} is formatted as "artifact: X (byte, line, column)" — the artifact coordinate, by construction; no emitted-range→source-span map exists at that seam) prov=adopter:#519-the-emitted-line-reference-was-noise-the-raw-CG-E-EQ-004-list-is-what-located-the-#517-bug -->
+
+Adopter #519 (follow-up to #517/#518 — #518 fixed the SERVING half: `scrml dev` no longer serves a stale bundle on compile failure). The gate's own header (`validate-emit.ts:67-69`) says the diagnostic "names the artifact + the byte/line/column offset Acorn" reports and "frames the failure as a COMPILER DEFECT — the adopter cannot" fix it; correct framing, useless location. Two fix shapes the reporter named: (a) source maps threaded from codegen through the gate (principled; a real arc — no emitted-range→source-span map exists today anywhere in codegen); (b) a heuristic back-search from the emitted position to the nearest `.scrml` span (cheap, approximate). Not a correctness bug — the build fails correctly. Triaged, NOT scheduled; Peter's lane. Not yet acknowledged on the issue at filing time — ack posted S346.
+
+### g-readme-6nz-claim-describes-planned-state-as-built — `README.md:419` says 6nz is "written entirely in scrml … offline-first PWA"; 6nz's own `master-list.md` has the PWA architecture spec UNCHECKED ("authored before scaffolding") and the repo holds 11 playground `.scrml` files — an adopter (#509 Q3) planned against the claim and asked for the SW/manifest pattern it implies — `NEW S346-bryan (surfaced by adopter #509 Q3); LOW; open`
+<!-- @gap id=g-readme-6nz-claim-describes-planned-state-as-built sev=LOW status=open locus=README.md:419(the 6nz related-projects bullet; commit 53cc9111) prov=adopter:#509-Q3-"6NZ-is-an-offline-first-PWA-written-entirely-in-scrml-…-a-pointer-would-save-me-building-blind" -->
+
+Same class as the S280 README flagship that had never compiled and the S292 `orm-trap` article's seven false compiler claims: a public sentence describing PLANNED state as BUILT, and an adopter acting on it. Measured S346: `grep -rl 'serviceWorker|sw.js|manifest.json' ../6nz` → nothing; the compiler has zero service-worker / manifest / Cache-API surface (`grep -rl` over `compiler/src` → nothing; SPEC has no offline/PWA section). The prose gates (`snippet-gate.js` for code, `facts.ts` for numbers) do not cover descriptive claims — by design; this is a manual currency item. Fix = reword to the truthful tense ("designed as", "an offline-first PWA is the target"). bryan owns README wording (Rule 1 — surfaced, not volunteered as work).
