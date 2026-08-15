@@ -26,6 +26,7 @@ import {
   getCompileFailure,
   buildCompileErrorResponse,
   buildServeConfig,
+  compileThrowDiagnostic,
   sseClients,
 } from "../../src/commands/dev.js";
 
@@ -208,5 +209,76 @@ describe("§6 fetch() resumes normal serving once cleared", () => {
     const { fetch } = buildServeConfig(opts, BOGUS);
     const res = await fetch(htmlReq("/definitely-missing"), undefined);
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 — a THROWN compile maps to the SAME failure path (S346,
+//      g-dev-compile-throw-fail-open). #518 covered compileScrml RETURNING
+//      diagnostics; when it THROWS (ENOENT on a source deleted/renamed under
+//      the watcher, or any uncaught compiler internal error) the throw used to
+//      unwind past noteCompileResult and dev kept serving the last-good bundle
+//      at 200. runOnce now catches at its boundary and routes the throw
+//      through noteCompileResult as one diagnostic — compileThrowDiagnostic is
+//      that mapping. End-to-end (real CLI subprocess, real delete):
+//      compiler/tests/commands/dev-compile-throw-fail-closed.test.js.
+// ---------------------------------------------------------------------------
+
+describe("§7 compileThrowDiagnostic() — thrown compile → one served diagnostic", () => {
+  test("a filesystem error (ENOENT) keeps the OS code, names the path, says how to recover", () => {
+    const err = Object.assign(new Error("ENOENT: no such file or directory, open '/proj/entry.scrml'"), {
+      code: "ENOENT", syscall: "open", errno: -2, path: "/proj/entry.scrml",
+    });
+    const d = compileThrowDiagnostic(err);
+    expect(d.code).toBe("ENOENT");
+    expect(d.filePath).toBe("/proj/entry.scrml");
+    expect(d.message).toContain("no such file or directory");
+    expect(d.message).toContain("deleted, renamed, or unreadable");
+    // Not mis-framed as a compiler bug — the adopter's tree is the cause.
+    expect(d.message).not.toContain("compiler defect");
+  });
+
+  test("an internal error is framed as a COMPILER DEFECT with the top of the stack", () => {
+    const err = new TypeError("Cannot read properties of undefined (reading 'kind')");
+    const d = compileThrowDiagnostic(err);
+    expect(d.code).toBe("INTERNAL-COMPILER-ERROR");
+    expect(d.message).toContain("TypeError: Cannot read properties of undefined (reading 'kind')");
+    expect(d.message).toContain("This is a compiler defect");
+    expect(d.message).toContain("Please report it");
+    // Carries stack frames so the report is actionable.
+    expect(d.message).toContain("    at ");
+  });
+
+  test("an escaped error that already carries a string code keeps it", () => {
+    const err = Object.assign(new Error("bad stage state"), { code: "E-CG-999" });
+    const d = compileThrowDiagnostic(err);
+    expect(d.code).toBe("E-CG-999");
+  });
+
+  test("a non-Error throw (string) still produces a served diagnostic", () => {
+    const d = compileThrowDiagnostic("something awful");
+    expect(d.code).toBe("INTERNAL-COMPILER-ERROR");
+    expect(d.message).toContain("something awful");
+  });
+
+  test("routed through noteCompileResult, the fetch handler serves it as a 500 naming the error", async () => {
+    const err = Object.assign(new Error("ENOENT: no such file or directory, open '/proj/entry.scrml'"), {
+      code: "ENOENT", syscall: "open", errno: -2, path: "/proj/entry.scrml",
+    });
+    noteCompileResult({ errors: [compileThrowDiagnostic(err)], warnings: [] });
+    expect(getCompileFailure()).not.toBeNull();
+
+    const { fetch } = buildServeConfig({ port: 0, inputFiles: ["/proj/entry.scrml"] }, "/no/such/serve/dir");
+    const res = await fetch(jsonReq("/api/anything"), undefined);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.errors[0].code).toBe("ENOENT");
+    expect(body.errors[0].file).toBe("/proj/entry.scrml");
+
+    const html = await fetch(htmlReq("/"), undefined);
+    expect(html.status).toBe(500);
+    const text = await html.text();
+    expect(text).toContain("ENOENT");
+    expect(text).toContain("/proj/entry.scrml");
   });
 });
