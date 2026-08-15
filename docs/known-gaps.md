@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 38 |
+| HIGH | 37 |
 | MED | 150 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -6414,7 +6414,7 @@ Surfaced by the `chunk-namespacing` arc (S282), which found **four separate inst
 
 **Not yet swept.** The four above were found incidentally by one arc. No systematic sweep has run. <!-- @gap id=g-split-key-pair-class sev=MED status=open -->
 
-### G-PGNOTIFY-LISTEN-CASE-SPLIT — a `<channel>` name with any UPPERCASE letter notifies one PG channel and listens on another; the `watches=` feed delivers zero rows, silently — `NEW S282; HIGH; open`
+### G-PGNOTIFY-LISTEN-CASE-SPLIT — a `<channel>` name with any UPPERCASE letter notifies one PG channel and listens on another; the `watches=` feed delivers zero rows, silently — `NEW S282; HIGH; RESOLVED S301 (#281 e2c0f9fc — ONE derivation threaded to the LISTEN site + `LISTEN "scrml_ordersFeed"` quoted; ledger left `open` for six sessions, corrected S346 after a NO-OP dispatch re-verified the bite red→green)`
 **PA-CONFIRMED EMPIRICALLY at `34f2b863`** (compiled, emitted SQL read — not inferred).
 
 `compiler/src/codegen/emit-channel.ts` builds the PostgreSQL NOTIFY channel name twice, independently, and the two forms are not case-equivalent:
@@ -6435,7 +6435,7 @@ LISTEN scrml_ordersFeed           <- folds to scrml_ordersfeed at the server
 
 **Reachability today:** the trigger DDL and the LISTEN bridge ARE built and emitted (verified by compiling). The consumer half — `<onchange>` (§38.13.3) — is **Nominal/spec-ahead** per the §4.15 / §24.4 registry rows, so an adopter cannot yet receive frames through the sanctioned handler. That caps the blast radius **today** and does not reduce the defect: the moment the §38.13 impl wave lands, any camelCase channel name is a feed that silently delivers nothing.
 
-**Fix — the value already exists and is thrown away.** `buildWatchesTriggerDDL` RETURNS `notifyChannel` (`:917`); the caller at `:969` destructures only the three DDL strings and the site at `:990` rebuilds it by hand. Thread the returned value to the LISTEN site so the pair cannot drift, AND quote the identifier (`LISTEN "scrml_ordersFeed"`) so PostgreSQL does not fold it. Add a camelCase-named `watches=` conformance case. An instance of [[g-split-key-pair-class]]. <!-- @gap id=g-pgnotify-listen-case-split sev=HIGH status=open -->
+**Fix — the value already exists and is thrown away.** `buildWatchesTriggerDDL` RETURNS `notifyChannel` (`:917`); the caller at `:969` destructures only the three DDL strings and the site at `:990` rebuilds it by hand. Thread the returned value to the LISTEN site so the pair cannot drift, AND quote the identifier (`LISTEN "scrml_ordersFeed"`) so PostgreSQL does not fold it. Add a camelCase-named `watches=` conformance case. An instance of [[g-split-key-pair-class]]. <!-- @gap id=g-pgnotify-listen-case-split sev=HIGH status=resolved -->
 
 ### G-BATCH-HOIST-ACROSS-PROPAGATE-THROW — the #165 Promise.all batch-hoist fence covered `if/for/while/switch/match/try` guards but NOT `propagate`/`throw`/`fail` early-exits, NOR a call separated from the guard by a filler statement — `NEW S285; MED; RESOLVED S285 (#171)`
 **RESOLVED** in the follow-up to the first #165 fix. The FIRST fix (#167 `cba2311a`) folded the body-DG `control-anchors` edges into `depSets` — but those anchors are (a) emitted only for `CONTROL_FLOW_KINDS` = `{if,for,while,switch,match,try}` (omitting the early-exit family `return`/`throw`/`propagate`/`fail` that `route-inference.ts:2965` already recognises), and (b) anchored ONLY to the guard's IMMEDIATE successor `k+1`. Both holes were **PA-reproduced** post-land: a `propagate` (`const chk = validate(x)?`) guard hoisted the call, AND a plain `if…return` guard STILL hoisted a server call when a filler `const` sat between the guard and the call (the call is `k+2`, unanchored).
