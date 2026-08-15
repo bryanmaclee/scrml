@@ -31,7 +31,26 @@
 name: CI
 
 on:
+  # S345 — `push` is scoped to `main`. Every OTHER branch is covered by `pull_request`.
+  #
+  # WHY: an unscoped `push` meant every PR ran the gate TWICE — once from the branch push,
+  # once from the PR — both reporting under the required check name `gate`, so BOTH had to
+  # be green. That is not redundancy, it is doubled exposure: with any intermittent in the
+  # suite, a PR needs two independent clean runs instead of one, and today's landings each
+  # burned several re-runs while the underlying tree was fine. It also cost real diagnostic
+  # time, because two runs on one SHA reporting one check name reads as a contradiction
+  # ("push fails, pull_request passes") that invites a wrong root-cause.
+  #
+  # ⚑ WHAT IS STILL GATED — unchanged: every PR (via `pull_request`), and every push to
+  # `main` (the post-merge trunk check). Branch protection, the required `gate` check, and
+  # `enforce_admins=true` are all untouched. This changes WHEN a run starts, never whether
+  # a merge is allowed.
+  #
+  # THE HONEST COST: a feature branch with NO open PR gets no CI until a PR exists. That is
+  # the standard trade and it is recoverable — `workflow_dispatch` below re-fires any ref
+  # on demand.
   push:
+    branches: [main]
     paths-ignore:
       - '**.md'
       - 'handOffs/**'
