@@ -159,6 +159,19 @@ describe("flagship driver/hos — <engine> under an if=", () => {
     // Pins the PREMISE of this test — if the emitter ever hoists the anchor out of
     // the template, this test stops covering the defect and should be re-aimed.
     const tpls = [...html.matchAll(/<template id="_scrml_scrml_tpl_[^"]*">(.*?)<\/template>/gs)].map((m) => m[1]);
+    // ZZDIAG (S345, temporary): this assertion has failed intermittently in cloud
+    // across three sessions while passing locally, and its bare `false` names
+    // nothing. Print what WAS emitted so the next cloud failure is attributable.
+    if (!tpls.some((t) => t.includes("data-scrml-engine-mount"))) {
+      const ids = [...html.matchAll(/<template id="([^"]*)"/g)].map((m) => m[1]);
+      console.log("ZZDIAG html.length =", html.length);
+      console.log("ZZDIAG template count =", tpls.length, "ids =", JSON.stringify(ids));
+      console.log("ZZDIAG engine-mount occurrences in html =",
+        (html.match(/data-scrml-engine-mount/g) || []).length);
+      console.log("ZZDIAG outlet/main markers =",
+        JSON.stringify((html.match(/data-scrml-[a-z-]+/g) || []).slice(0, 40)));
+      console.log("ZZDIAG html head (900) =", JSON.stringify(html.slice(0, 900)));
+    }
     expect(tpls.some((t) => t.includes("data-scrml-engine-mount"))).toBe(true);
   });
 
