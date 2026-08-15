@@ -453,6 +453,24 @@ const <computed> = match @phase { .Idle :> { doHash = (x) => x; doHash("local") 
 <div><span>${OPEN}@computed${CLOSE}</span></div>
 </program>
 `,
+  // ROUND 5 — the shape round 4 EXEMPTED and pinned green (§11l "BITE — a hop
+  // caller's own PARAM still suppresses"). It belongs in this table precisely
+  // because the RI-only oracle called it clean while the emitted client was
+  //   async function _scrml_wrap_4(_scrml_fetch_doHash_3, extra) {
+  //     return await _scrml_fetch_doHash_3("x") + extra; }
+  //   _scrml_cs_derived_declare("computed", () => _scrml_wrap_4(…));
+  // — codegen renamed the PARAMETER BINDING itself, because its rename pass is
+  // raw text with no notion of parameter scope. The exemption was the one place
+  // the round-4 semantics still disagreed with emission.
+  "hop-param": `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(doHash, extra) { return doHash("x") + extra } ${CLOSE}
+const <computed> = wrap((v) => v, @pw)
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`,
 };
 
 // The accepted side of the disjunction: same shadow SHAPE, no server reach
@@ -489,6 +507,39 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §6 round-4 shadow shapes, executed
       }
     });
   }
+
+  /**
+   * THE `hop-param` DIFFERENTIAL, AT THE ARTIFACT LEVEL (round 5).
+   *
+   * Byte-identical to the `hop-param` shape above except the colliding parameter
+   * is renamed `fn`. It must compile clean AND emit a SYNCHRONOUS hop — that is
+   * what proves the refusal above is caused by the name collision (which codegen
+   * turns into a parameter rename + `async` colouring) and not by the hop shape,
+   * which is ordinary scrml.
+   */
+  const HOP_PARAM_CONTROL = `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) }
+function wrap(fn, extra) { return fn("x") + extra } ${CLOSE}
+const <computed> = wrap((v) => v, @pw)
+<div><span>${OPEN}@computed${CLOSE}</span></div>
+</program>
+`;
+
+  test("CONTROL — `hop-param` with the parameter renamed: clean, and the hop is NOT async", () => {
+    const c = compileToDisk("r4-shadow-hop-param-control", HOP_PARAM_CONTROL);
+    try {
+      expect(c.errorCodes).not.toContain(CODE);
+      // The hop is emitted as a plain function — no `async`, no `await`, and no
+      // fetch stub bound into the recompute.
+      expect(c.clientLoadedText).toMatch(/\bfunction _scrml_wrap_\d+\(fn, extra\)/);
+      expect(c.clientLoadedText).not.toMatch(/async function _scrml_wrap_\d+/);
+      expect(c.clientLoadedText).toMatch(/_scrml_cs_derived_declare\(\s*"computed"/);
+    } finally {
+      teardown("r4-shadow-hop-param-control");
+    }
+  });
 
   test("CONTROL — same shadow shape, purely client: clean, sync recompute, parses", () => {
     const c = compileToDisk("r4-shadow-control", SHADOW_CLIENT_CONTROL);
