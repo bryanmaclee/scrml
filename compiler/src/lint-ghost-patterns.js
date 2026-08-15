@@ -229,18 +229,72 @@ function mergeSkipRanges({ stringRanges, commentRanges }) {
  *
  * `skipMerged` MUST be sorted by start offset (use `mergeSkipRanges`).
  *
+ * THIS IS THE ORACLE, NOT THE HOT PATH (S346). It rescans the range list from
+ * index 0 on every call, and the builders below used to call it once per
+ * CHARACTER (not "once per `{` / `}`" as the old comment claimed) — O(chars ×
+ * ranges) per builder, five builders plus `findMatchingClose` nested inside
+ * three of them. On the 36-file trucking-dispatch app that was 343 ms of a
+ * fresh compile (8% of the whole compile) — and, when this function was first
+ * JIT-tiered in a process whose FIRST compile carried an EMPTY range list (a
+ * source with no string literal and no comment), the very same calls cost
+ * ~17× more for the rest of the process's life: 5.9 s of a 9.7 s compile,
+ * measured with `bun --cpu-prof`. That is what pushed the flagship browser
+ * test's whole-app compile past bun's 5 s per-test budget in cloud, in the
+ * orders where a no-string fixture compiled first. The builders now use
+ * `makeSkipCursor` (forward-only, O(chars + ranges)); this stays as the
+ * definition of the contract and the unit pin's reference implementation.
+ *
  * @param {number} i
  * @param {Array<[number, number]>} skipMerged
  * @returns {number}
  */
-function skipPastRanges(i, skipMerged) {
-  // Linear scan is fine — skip-range counts are small relative to char-by-char
-  // scans, and the brace counters call this once per `{` / `}`.
+export function skipPastRanges(i, skipMerged) {
   for (const [start, end] of skipMerged) {
     if (i < start) return i;
     if (i < end) return end;
   }
   return i;
+}
+
+/**
+ * A FORWARD-ONLY cursor over `skipMerged` with the exact semantics of
+ * `skipPastRanges(i, skipMerged)`, for callers whose queries are
+ * non-decreasing in `i` — which every scanner in this file is (each walks
+ * the source left to right; `findMatchingClose` and the tag-opener inner
+ * loop start at or after the position their caller last asked about).
+ *
+ * `from` positions the cursor for a first query at offset `from` (binary
+ * search — `findMatchingClose` starts mid-source). After that, each call
+ * advances past ranges that end at or before `i` and never looks back, so a
+ * full left-to-right pass costs O(chars + ranges) instead of O(chars × ranges).
+ * Byte-identical output to the oracle for monotone queries — pinned by
+ * `lint-ghost-patterns-skip-cursor.test.js` against random range sets.
+ *
+ * WHY A CLOSURE AND NOT A SHARED MODULE-LEVEL INDEX: `buildFunctionBodyRanges`
+ * calls `findMatchingClose` from successive regex matches, and a nested
+ * function's opener sits BEFORE the enclosing body's close — a shared index
+ * would already be past it. Every scan owns its cursor; nothing survives a call.
+ *
+ * @param {Array<[number, number]>} skipMerged — sorted, merged (mergeSkipRanges)
+ * @param {number} [from=0] — offset of the first query
+ * @returns {(i: number) => number}
+ */
+export function makeSkipCursor(skipMerged, from = 0) {
+  const n = skipMerged.length;
+  // First range whose end is > from.
+  let lo = 0;
+  let hi = n;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (skipMerged[mid][1] <= from) lo = mid + 1;
+    else hi = mid;
+  }
+  let r = lo;
+  return function skip(i) {
+    while (r < n && skipMerged[r][1] <= i) r++;
+    if (r < n && skipMerged[r][0] <= i) return skipMerged[r][1];
+    return i;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -263,9 +317,10 @@ function skipPastRanges(i, skipMerged) {
 function findMatchingClose(source, start, skipMerged) {
   let depth = 1;
   let i = start;
+  const skip = makeSkipCursor(skipMerged, start);
   while (i < source.length && depth > 0) {
     // If `i` is inside a skip range, leap past it
-    const skipped = skipPastRanges(i, skipMerged);
+    const skipped = skip(i);
     if (skipped !== i) {
       i = skipped;
       if (i >= source.length) break;
@@ -296,10 +351,11 @@ function findMatchingClose(source, start, skipMerged) {
 function buildLogicRanges(source, skipMerged) {
   const ranges = [];
   let i = 0;
+  const skip = makeSkipCursor(skipMerged);
   while (i < source.length) {
     // Don't open a logic range from inside a string / comment — phantom
     // `${...}` text in a doc-comment is not a real logic block.
-    const skipped = skipPastRanges(i, skipMerged);
+    const skipped = skip(i);
     if (skipped !== i) { i = skipped; continue; }
     if (source[i] === "$" && source[i + 1] === "{") {
       const start = i;
@@ -328,8 +384,9 @@ function buildLogicRanges(source, skipMerged) {
 function buildCssRanges(source, skipMerged) {
   const ranges = [];
   let i = 0;
+  const skip = makeSkipCursor(skipMerged);
   while (i < source.length) {
-    const skipped = skipPastRanges(i, skipMerged);
+    const skipped = skip(i);
     if (skipped !== i) { i = skipped; continue; }
     if (source[i] === "#" && source[i + 1] === "{") {
       const start = i;
@@ -359,8 +416,9 @@ function buildCssRanges(source, skipMerged) {
 function buildTildeRanges(source, skipMerged) {
   const ranges = [];
   let i = 0;
+  const skip = makeSkipCursor(skipMerged);
   while (i < source.length) {
-    const skipped = skipPastRanges(i, skipMerged);
+    const skipped = skip(i);
     if (skipped !== i) { i = skipped; continue; }
     if (source[i] === "~" && source[i + 1] === "{") {
       const start = i;
@@ -437,9 +495,12 @@ function buildFunctionBodyRanges(source, skipMerged) {
 function buildTagOpenerRanges(source, skipMerged) {
   const ranges = [];
   let i = 0;
+  // One cursor for both loops: the inner `j` walk starts at `i + 1` and the
+  // outer resumes at `j`, so the query sequence stays non-decreasing.
+  const skip = makeSkipCursor(skipMerged);
   while (i < source.length) {
     // Don't open a tag range from inside a string / comment.
-    const skipped = skipPastRanges(i, skipMerged);
+    const skipped = skip(i);
     if (skipped !== i) { i = skipped; continue; }
     if (source[i] === "<") {
       const next = source[i + 1];
@@ -449,7 +510,7 @@ function buildTagOpenerRanges(source, skipMerged) {
         const start = i;
         let j = i + 1;
         while (j < source.length) {
-          const sk = skipPastRanges(j, skipMerged);
+          const sk = skip(j);
           if (sk !== j) { j = sk; continue; }
           const ch = source[j];
           if (ch === ">") { j++; break; }
