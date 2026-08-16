@@ -249,6 +249,45 @@ pin that only watched the code could not tell a broken branch from a working one
 
 RESTORED → arc suites `162 pass / 0 fail` across both files.
 
+### BITE PROOF 6 — §8d, the fail-closed DECLINE fallback (a REFINEMENT of the PA's fix)
+
+The PA's stated fix was structural with no fallback. **The decline branch is reachable on
+ordinary code**, measured against the compiler's own front end (`.tmp/decline-probe.mjs`):
+
+```
+expr-whole    "hashPassword"                   expr-whole    "\"please join us\""
+expr-whole    "`please join us`"               expr-whole    "{ join: 1 }"
+expr-whole    "a.join"                         expr-whole    "[1].map(hashPassword)"
+expr-whole    "?{ SELECT 1 }"                  stmts         "1 /* join later */"
+expr-partial  "match @x { .A :> hashPassword }"
+DECLINE       "if @x { hashPassword } else { 1 }"
+DECLINE       "<div>hashPassword</div>"
+DECLINE       ")("        DECLINE  "hashPassword("        DECLINE  "\"unterminated"
+```
+
+An `if`-expression default is ordinary scrml and it DECLINES. So the fix adds a
+limb-(a)-only fallback, and §8d pins it.
+
+Mutation: `if (false && rawMode === "text-scan") scanRaw(raw);`
+
+```
+1172 |       expect(c.errorCodes).toEqual([]);
+                                  ^
+error: expect(received).toEqual(expected)
+- []
++ [ "E-CODEGEN-INVALID-LOGIC" ]
+(fail) …§8d… > an `if`-expression default (parses under NEITHER grammar) still escalates, clean
+ 0 pass / 1 fail
+```
+
+RESTORED → `43 pass / 0 fail`.
+
+**HONEST SCOPE OF THIS ONE.** With the fallback removed the shape does NOT leak — codegen's
+backstop fires instead (`E-CODEGEN-INVALID-LOGIC`, serverJs 1 -> 0). So the fallback's
+measured value on this shape is that a WORKING program stays a working program rather than
+being rejected by a backstop; I did not construct a decline shape that leaks. §8d claims
+exactly that and no more.
+
 ---
 
 ## B-2 — THE COUNTEREXAMPLES, REPRODUCED

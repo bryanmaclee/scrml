@@ -1124,6 +1124,67 @@ ${CLOSE}
 });
 
 // ---------------------------------------------------------------------------
+// §8d — THE DECLINE BRANCH IS REACHABLE AND LOAD-BEARING (round 7, B-1).
+//
+// `scanParamDefaultRaw` parses a default and, ON LIMB (a) ONLY, falls back to a
+// word-boundary text match when the text parses under NEITHER the expression
+// grammar nor the statement grammar. A decline is not an answer, and on the
+// direct limb a miss ships a server-only implementation to a browser.
+//
+// THE BRANCH IS NOT DEAD CODE. Measured against the compiler's own front end:
+//
+//   expr-whole    "hashPassword"            "please join us"      { join: 1 }
+//   expr-whole    a.join                    [1].map(hashPassword) ?{ SELECT 1 }
+//   stmts         1 /* join later */
+//   expr-partial  match @x { .A :> hashPassword }
+//   DECLINE       if @x { hashPassword } else { 1 }
+//   DECLINE       <div>hashPassword</div>
+//
+// An `if`-expression is an ORDINARY default, and it declines. This section pins
+// that the fallback carries it.
+//
+// MEASURED WITH THE FALLBACK REMOVED (which is what a structural-only fix would
+// be): the same source stops escalating (`serverJsFiles.length` 1 -> 0) and is
+// instead rejected by codegen's `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` family
+// backstop as `E-CODEGEN-INVALID-LOGIC`. So on THIS shape the removal is caught
+// by a backstop rather than leaking — that is the honest measurement and the
+// section claims nothing more. What it pins is that the working program stays a
+// working program.
+// ---------------------------------------------------------------------------
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §8d an UNPARSEABLE default is fail-closed on the direct limb (round 7)", () => {
+  const SRC = `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <flag> = true
+  <out> = ""
+  function f(h = if @flag { hashPassword } else { hashPassword }) { return h("k") }
+${CLOSE}
+<button onclick={ @out = f() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+  test("an `if`-expression default (parses under NEITHER grammar) still escalates, clean", () => {
+    const c = compileToDisk("r7-decline-if-default", SRC);
+    try {
+      // Compiles clean — no codegen backstop had to catch it.
+      expect(c.errorCodes).toEqual([]);
+      // And it escalated: the fail-closed fallback saw the name.
+      expect(c.serverJsFiles.length).toBeGreaterThan(0);
+      const serverText = c.serverJsFiles.map((f) => readFileSync(f, "utf8")).join("\n");
+      expect(serverText).toContain("hashPassword");
+      // Security floor, asserted as the floor and not as a proxy.
+      expect(c.clientLoadedText).not.toContain("Bun.password");
+      expect(c.clientLoadedText).not.toContain("argon2id");
+      expect(c.clientLoadedText).not.toContain("_scrml_stdlib.auth");
+    } finally {
+      teardown("r7-decline-if-default");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §9 — GAP PIN: A DESTRUCTURED PARAMETER DEFAULT IS A LIVE CONFIDENTIALITY LEAK
 // (round 7 — MEASURED, PRE-EXISTING ON `main`, NOT FIXED HERE).
 //
