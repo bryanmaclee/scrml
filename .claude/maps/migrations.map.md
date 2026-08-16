@@ -1,14 +1,18 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor)
+# ⚑ **CURRENCY RE-VERIFIED AT `c93a692c` (S346), NOT RE-WALKED. TEN windows with no DB/migration
+# surface movement.** Zero-diff re-run at this HEAD: `schema-differ.js`, `commands/db-migrate.js`,
+# `codegen/db-authoritative.ts`, `sql-table-refs.js` — all zero-diff over `4f034e13..c93a692c`.
+# No SQL-adjacent change this window.
+# ⚑ **WATERMARK CORRECTED at the S341 pass and ADVANCED again this pass to `c93a692c`** — line 3 carries the ancestor-of-`origin/main` watermark,
 # per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
 # `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
 # — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
 # communicating nothing this header does not already say.
 #
-# ⚑ **CONTENT AS OF `115e8b1b` — CURRENCY RE-VERIFIED AT `4f034e13`, NOT RE-WALKED. NINE windows with
+# ⚑ **CONTENT AS OF `115e8b1b` — CURRENCY RE-VERIFIED AT `4f034e13` (S341), and again at `c93a692c` (S346, header above), NOT RE-WALKED. NINE windows with
 # no DB/migration surface movement.** `115e8b1b` was one of only two stamps in this map set that was
 # ALREADY an ancestor of `origin/main` on arrival.
 #

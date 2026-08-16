@@ -1,38 +1,45 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48): `git merge-base --is-ancestor 8863d457 4f034e13` passes, so the delta arithmetic
-# below is bounded. **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was the tip
-# of `wrap/s331` and bounded nothing (MAP-STAMP RULE, primary.map.md).
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor)
+# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
+# bryan S343/S345/S346).** Ancestry CHECKED (invariant 48):
+# `git merge-base --is-ancestor 4f034e13 c93a692c` passes; the watermark IS `origin/main`'s tip at
+# generation (MAP-STAMP RULE, primary.map.md).
 #
-# **THE MOST IMPORTANT THING IN THIS HEADER IS A CORRECTION TO A SECTION THAT READ AS DONE AND WAS
-# NOT.** The `<timer>`/`<poll>` first-tick section below has said *"a `<poll>`'s first execution fires
-# IMMEDIATELY on arming"* since S314, and stated the two sub-rules (same tick path; once per ARMING,
-# not per resume) as settled. **That was the SPEC amendment. The CODE landed this window, at #510.**
-# Until then `_scrml_timer_start` had four parameters and no immediate-tick path at all — the
-# behaviour the section described was produced *accidentally*, by the very `collect.ts` descent defect
-# the same section names, and that defect ALSO ran a `<timer>` body at module init where no first tick
-# was wanted. **A map section that describes ratified intent in the present tense is indistinguishable
-# from one describing shipped behaviour.** The section is rewritten below to separate the two.
+# **A SMALL LANGUAGE-SURFACE WINDOW: SPEC byte-identical, zero new codes, zero conformance movement.
+# What moved is FIRE SURFACE, EMISSION HYGIENE and DETERMINISM — four items, each amended in place
+# below:**
+#   1. **§17.7.3 WIDENED (#515/#516):** `E-EACH-BODY-DECL-UNSUPPORTED` now fires at ANY body
+#      position (was `body[0]` only) and on the FULL name-binding decl set — `let`/`const`/`function`
+#      plus **`lin`** and **`~`/`var`** (both parse to `tilde-decl`). The carried claim that `~`/`var`
+#      "already fails loud via `E-CODEGEN-INVALID-LOGIC`" was TRUE ONLY AT FIRST POSITION — at any
+#      other position `var nm = 1` was the same silent list-killing miscompile. `type-decl` stays
+#      excluded (compile-time-only). Fire site moved to `emit-each.ts:1416`.
+#   2. **The three emitted `DOMContentLoaded` boot registrations carry `{ once: true }` (#526)** —
+#      `emit-event-wiring.ts` (`_scrml_boot` dispatch), `emit-variant-guard.ts` (the dispatcher
+#      init-fire), `emit-client.ts` (§20.8.3 link-boost). Production-identical — DCL fires once per
+#      real document; the `once` exists so a document that OUTLIVES the chunk (soft-nav'd page,
+#      shared happy-dom test document) cannot re-fire a stale boot whose selectors resolve onto a
+#      LATER chunk's nodes. That re-fire was the S345 repo-wide cloud gate red.
+#   3. **Compile determinism (#528, and the part it did NOT fix):** api.js's directory walks sort
+#      per-directory now — but `scanDirectory` was ALREADY terminally sorted since the initial
+#      commit, so the user-visible `scrml compile <dir>` path was never the leak. **The OPEN leak is
+#      §58.1/§58.12-relevant: `compileScrml`'s `inputFiles` ORDER mints route/logic-id/fetch-stub
+#      numbering, so the same file SET in two orders emits different artifacts INCLUDING generated
+#      server route URLs** (`g-compilescrml-input-order-dependent-emission`, HIGH, open;
+#      PA-reproduced — FORWARD vs REVERSED, 79 of 115 emitted files differ,
+#      `__ri_route__sessionStore_1` vs `_63`).
+#   4. **The ghost-pattern lint's range-skip is a forward-only cursor (#537, `makeSkipCursor`)** —
+#      byte-identical lint semantics, O(chars + ranges) instead of O(chars × ranges); the oracle
+#      `skipPastRanges` stays EXPORTED (zero src callers, on purpose) as the contract's reference
+#      implementation. The perf defect it kills was pushing the flagship whole-app compile past
+#      bun's REAL 5 s per-test default in cloud (`bunfig [test] timeout` is a key bun never read).
 #
-# **CARRIED AND RE-VERIFIED, NOT RE-DERIVED (both files are ZERO-DIFF this window):**
-# **(1) §18.5 — `planBlockArmLift` is the shared segmenter for TWO of FOUR routes, not "the one
-# classifier every path routes through".** The four-route table below stands unchanged.
-# **(2) §12.2 escalation is defined PER-FUNCTION and covers no other position.** Still true, still
-# normative at `SPEC.md:7312`. **What CHANGED is the reach of the one non-function position that is
-# closed:** `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19) now fires on a derived cell at ANY depth (#500) —
-# before this window its collector descended two hardcoded fields and **six positions still leaked.**
-# The mutable-cell initialiser and the markup interpolation remain OPEN. **Do not write or read
-# "Trigger 3 covers <position>".**
-#
-# New/rewritten this window: **§6.6.19** (the structural walk, the six leaking positions, and why
-# "add the field name" is the wrong fix), **§6.7.5/§6.7.6/§6.7.8** (rewritten — spec-ahead vs shipped,
-# plus the `DEFERRED_LIFECYCLE_BODY_TAGS` deny-set and its two deliberate exclusions), **§6.7.7**
-# (the request-ref attribute class, now closed on the two per-item paths by TWO DIFFERENT mechanisms),
-# **§17.7.3** (a NEW section — the each-body scope), and **§52.8** (a NEW section — the SSR-each
-# fallback, now loud).
+# **CARRIED AND RE-VERIFIED, NOT RE-DERIVED (`emit-logic.*` / `emit-control-flow.*` /
+# `route-inference.ts` / `collect.ts` all ZERO-DIFF this window):** the §18.5 four-route table, the
+# §12.2 per-function escalation scope + §6.6.19 ANY-depth reach, and the §6.7.5/§6.7.6/§6.7.8
+# spec-ahead-vs-shipped rewrite all stand unchanged below.
 # History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
@@ -364,7 +371,7 @@ is the only unit that HAS a placement to change, so:
 
 The positions this leaves uncovered, and their status at this HEAD:
 
-| Non-function position | Reaches a server-only module? | Status at `4f034e13` |
+| Non-function position | Reaches a server-only module? | Status at `c93a692c` (re-verified — `route-inference.ts` zero-diff this window) |
 |---|---|---|
 | `const <name> = …` **derived cell** RHS, **AT ANY DEPTH** | yes — invisible to Trigger 3 | **CLOSED by refusal — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486 shipped the refusal, #500 shipped its REACH; SIX positions still leaked in between)** |
 | `<name> = …` **mutable-cell initialiser** | yes — same client position | **OPEN. NOT diagnosed.** The error text for §6.6.19 says so out loud (see below) |
@@ -683,7 +690,12 @@ and will not fire again, so it must boot IMMEDIATELY. The emitted boot dispatch
 (`emit-event-wiring.ts`, mirrored in `emit-variant-guard.ts`) is therefore an IIFE around
 `function _scrml_boot()` plus a branch on the runtime flag `_scrml_chunk_loading`.
 **That flag is a DEPTH COUNTER, not a boolean** — the name is retained because the emitted dispatch
-tests it for truthiness, which reads a non-negative count correctly. It must COUNT because two
+tests it for truthiness, which reads a non-negative count correctly. **And since #526 the deferred
+branch registers with `{ once: true }`** (all three DCL boot registrations do — event-wiring,
+variant-guard dispatcher init-fire, link-boost): DCL fires once per real document, so `once` changes
+nothing in production; it auto-removes the listener so a longer-lived document (soft-nav'd page, a
+shared test document) can never re-fire a stale boot against a later chunk's nodes — the S345
+cross-file gate red. It must COUNT because two
 OVERLAPPING navigations (an impatient double-click) each inject a script: with a shared boolean, the
 first chunk's settle cleared the flag out from under the second, which then registered `_scrml_boot`
 on a `DOMContentLoaded` that had already fired — so it never booted, never registered its
@@ -890,7 +902,7 @@ TypeError at runtime); the `${for…lift}` half **FAILED LOUD** (`E-CODEGEN-INVA
 written). A mixed-text attr template remains in the loud category — verify against
 `docs/known-gaps.md` before scoping.
 
-## §17.7.3 — the `<each>` body scope is `@.` + an optional `as` alias, NOT author locals (`E-EACH-BODY-DECL-UNSUPPORTED`, NEW)
+## §17.7.3 — the `<each>` body scope is `@.` + an optional `as` alias, NOT author locals (`E-EACH-BODY-DECL-UNSUPPORTED`; WIDENED #515/#516)
 
 **The scope rule.** Inside an `<each>` body, the readable surface is the `@.` contextual sigil and, if
 declared, the `as` alias. **Author-declared locals are not part of it.**
@@ -902,7 +914,16 @@ codegen fell through to `inner = ""` and skipped it. **But a later `${nm}` still
 **WHOLE list** with it. Exit 0. No diagnostic. An empty list and a green compile.
 
 **The ruling (bryan, S339) is FAIL-CLOSED: reject the form loudly rather than ship a broken render.**
-`emit-each.ts:1387` fires once per offending decl and returns.
+`emit-each.ts:1416` fires and returns. **WIDENED at #515/#516 (S340-peter, bryan #508-review F2+F3):**
+the guard scans EVERY body position (`body.find`), not just `body[0]` — a decl in a non-first
+statement (`${ @.id  let nm = @.name }`) slipped the old guard and re-produced the same silent
+miscompile one statement over — and keys on the full name-binding decl-kind SET
+(`EACH_BODY_UNSUPPORTED_DECL_KINDS`: `let-decl`, `const-decl`, `function-decl`, `lin-decl`,
+`tilde-decl` — the last covers BOTH `~name` and the `var` keyword, which parse to the same kind).
+**The prior generation's carried belief that `~`/`var` "already fails loud via
+`E-CODEGEN-INVALID-LOGIC`" held only for the first position** (bryan delta-log [1437],
+PA-verified post-#515). Only `type-decl` is excluded — compile-time-only, no runtime local to
+dangle.
 
 **The row is careful about what it does NOT decide, and that care is the point.** Rejecting this form
 is not a ruling that author locals in an each body are forbidden. **Supporting them — replay the

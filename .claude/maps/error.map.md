@@ -1,80 +1,65 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48): `git merge-base --is-ancestor 8863d457 4f034e13` passes. **The watermark is
-# `origin/main`'s tip** — the prior stamp `616688ea` was a branch tip (MAP-STAMP RULE,
-# primary.map.md).
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor)
+# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
+# bryan S343/S345/S346).** Ancestry CHECKED (invariant 48); the watermark IS `origin/main`'s tip at
+# generation (MAP-STAMP RULE, primary.map.md).
 #
-# **THE CATALOG MOVED FOR A SECOND CONSECUTIVE WINDOW: 807 -> 809. TWO new codes, zero retired.**
-# Both are S339-peter, and **both were PINNED by a conformance case in the SAME PR that emitted
-# them** — which is why the census's PINNED bucket moved 341 -> 343 in exact lockstep with the total.
+# **THE CATALOG IS FLAT AT 809 — first flat window after two consecutive moves, and it is flat by
+# construction: `compiler/SPEC.md` and `compiler/SPEC-INDEX.md` are BYTE-IDENTICAL over this window**
+# (`git diff 4f034e13..c93a692c -- compiler/SPEC.md compiler/SPEC-INDEX.md` is empty). Zero codes in,
+# zero out, zero conformance-case movement (883 flat). Every catalog figure below carries.
 #
-#   - **`E-EACH-BODY-DECL-UNSUPPORTED`** (Error) — §17.7.3/§17.7.2, catalog row `SPEC.md:19577`,
-#     emitted at `codegen/emit-each.ts:1387` in `renderTemplateChildToJs`'s logic-child handler.
-#     Partitions into `result.errors`. **The defect it converts is the interesting part: it turns a
-#     SILENT-BROKEN BUNDLE into a compile error.** A `let`/`const`/`function` decl in an `<each>` body
-#     has no `exprNode`/`raw`, so codegen dropped it silently — while a later `${nm}` still lowered to
-#     a bare `String(nm)`, a dangling reference that throws inside the per-item render factory and
-#     renders the **WHOLE list empty, at exit 0, with no diagnostic.** Fail-CLOSED by user ruling.
-#     **It rejects a form; it does not forbid the feature** — supporting author locals (replay the
-#     binding into the factory closure, as the `for`-lift path does) is a separate §17.7.3
-#     language-surface ruling the row explicitly declines to pre-decide.
-#   - **`I-SSR-EACH-CLIENT-RENDERED`** (Info) — §52.8, catalog row `SPEC.md:19429`, emitted at
-#     `codegen/emit-ssr-render.ts:432`, wired at `emit-server.ts:5162`. **It adds no rejection at all
-#     — it SURFACES a pre-existing conservative fallback that was silent.** A top-level
-#     `<each in=@cell>` over an SSR-seeded server-authority cell falls back to client-only first paint
-#     when its row template is outside the §52.8 renderable subset; `buildOneRenderer` used to return
-#     a bare `null` and the adopter got nothing. It now returns `{ fallback: <reason> }` and the reason
-#     is interpolated into the lint. **Never fatal, and it does not change what compiles.**
+# **WHAT DID MOVE IS THE FIRE SURFACE OF ONE EXISTING CODE, AND IT REFUTED A RECORDED BELIEF:**
+# **`E-EACH-BODY-DECL-UNSUPPORTED` WIDENED at #515/#516 (S340-peter, bryan #508-review F2+F3).**
+#   · **Position: ANY body statement, not `body[0]`.** The old guard inspected only the FIRST
+#     statement, so `${ @.id  let nm = @.name }` slipped through and re-produced the exact silent
+#     miscompile one statement over.
+#   · **Kind: the full name-binding decl set** — `let-decl`, `const-decl`, `function-decl`,
+#     **`lin-decl` (added)**, and **`tilde-decl` (added — covers BOTH `~name` and the `var` keyword,
+#     which parse to the same kind)**. Only `type-decl` stays excluded (compile-time-only, no runtime
+#     local to dangle).
+#   · **The refuted belief:** the prior generation of this map carried "`~`/`var` already fails loud
+#     via `E-CODEGEN-INVALID-LOGIC`". **That held ONLY for the first-position case the old `body[0]`
+#     guard happened to inspect** — at a non-first position `var nm = 1` was SILENT (bryan delta-log
+#     [1437], PA-verified on main post-#515). A coverage claim proven on one position is not a
+#     coverage claim.
+#   · **The fire site MOVED: `emit-each.ts:1416`** (was `:1387`). Pinned by
+#     `unit/each-body-decl-unsupported-positions.test.js` (95L) on top of the existing conformance
+#     case.
 #
-# `bun scripts/s34-census.ts` RE-EXECUTED at this HEAD:
-# `809 rows (§34 19113..19993, derived) · 1858 source files · 883 conformance cases`
-# buckets `STRUCK 34 · PINNED 343 · IMPL-SITES 320 · DECLARED-AHEAD 14 · RUNTIME-SURFACED 3 ·
-# FALSE-CLAIM 95`. **PINNED +2 is the only bucket that moved. IMPL-SITES, DECLARED-AHEAD,
-# RUNTIME-SURFACED and FALSE-CLAIM are all FLAT — nothing this window was declared ahead of its
-# implementation, and nothing fell out of a pin.**
+# **NEW ERROR-SURFACE BEHAVIOUR WITH NO NEW CODE — `scrml dev` serves the REAL compile error at the
+# request (#518, adopter #517).** While the last compile is FAILING, the fetch handler short-circuits
+# every non-infra request: `Accept: text/html` gets a self-contained HTML overlay listing the
+# diagnostics (carrying the hot-reload script, so it auto-refreshes into the working app on the next
+# green compile); everything else gets JSON. Before: the last-good IN-MEMORY routes stayed registered
+# while a PARTIAL bundle hit disk, so the adopter saw a misleading runtime `X is not defined` instead
+# of the compile error. `formatDiagnostic` (dev.js) reads BOTH diagnostic shapes api.js emits — flat
+# `{filePath,line,column}` and BS-stage `{span:{file,line,col}}`. See build/structure maps.
 #
-# ⚠ **THE CENSUS'S `source files` FIGURE IS NOT A REPO FACT — do not carry it as one.** `filesScanned`
-# walks the FILESYSTEM over ten roots, so it counts whatever gitignored build output the checkout
-# holds; the prior header's `1887` does not reproduce at any commit. Tracked truth: 1,850 -> 1,858.
-# The `809` and `883` figures ARE index-derivable and were independently reproduced.
+# **NEW NEGATIVES THIS WINDOW — FIVE fixes landed with NO diagnostic, deliberately. Do not go looking
+# for an `E-` code to catch a regression in any of them:**
+#   - **#526 `{ once: true }` on the three emitted `DOMContentLoaded` boot registrations** —
+#     production-identical (DCL fires once per document); the defect it kills is a stale boot
+#     re-firing against a longer-lived document (the S345 cross-file gate red). Behavioural absence;
+#     browser tier is the gate.
+#   - **#528 api.js directory-walk sorts** — determinism, not diagnosis. ⚠ And the REAL
+#     order-dependence is STILL OPEN: `compileScrml`'s `inputFiles` order mints route/logic/stub ids
+#     (`g-compilescrml-input-order-dependent-emission`, HIGH — same file SET, two orders, 79 of 115
+#     emitted files differ, including server route URLs).
+#   - **#537 `lint-ghost-patterns.js` `makeSkipCursor`** — a pure performance re-plumb of the lint's
+#     range-skip; byte-identical lint OUTPUT, pinned by equivalence test against the retained oracle
+#     `skipPastRanges` (now an EXPORTED dead-in-src function, on purpose).
+#   - **#524 census `toRel()`** — cross-OS separator normalization in a PROBE, not the compiler.
+#   - **#515 tool import prune predicate unification** — the drop-a-live-import defect produced a
+#     runtime `ReferenceError`, not a diagnostic; the fix removes the defect, not the silence.
 #
-# **INDEPENDENT CROSS-CHECK RE-RUN, and it agrees exactly.** The manual `awk -F'|'` methodology
-# (below) returns **810 EWIH unique codes = 809 `[EWI]` + 1 `H-LIFECYCLE-001`** at this HEAD, matching
-# the census's 809 and the +2 delta. Raw prefix greps over the whole SPEC — **912** `^| E-`, **178**
-# `^| W-`, **10** `^| I-`, **2** `^| H-` — are **NOT** the catalog figure and must not be quoted as
-# one. Note the E- series moved 911 -> 912 while the catalog moved 807 -> 809: **the two series do not
-# track each other, and neither is derivable from the other.**
-#
-# **CARRIED, re-verified: `E-SQL-006` (§44.3) fires at COMPILE time on every server-fn emit path
-# (#476).** No new code; the code was always right, the SINK was not wired. If you are chasing a
-# diagnostic that "exists but never fires", **check whether its sink is drained on the path you are
-# testing before you conclude the detector is wrong.**
-#
-# **STANDING NEGATIVES CARRIED (each re-verified, none is an omission):** #460's §12.5 `SHALL` carries
-# NO code (enforced by construction — assert on the wire); #464's revert removed ~122 lines without
-# moving a census number; #458's `registerFnName` guard SILENTLY DROPS a malformed `fnNameMap` key
-# and raises no diagnostic, and the drop is testable (invariant 27,
-# `unit/mangler-region-fencing.test.js` §3); #452's route-handler `Response` contract is enforced by
-# EMISSION SHAPE — there is no `E-*-BARE-RETURN`; #479's §18.5 fixes are silent-wrong-output defects
-# with NO diagnostic and none was added.
-#
-# **NEW NEGATIVES THIS WINDOW — FOUR FIXES LANDED WITH NO DIAGNOSTIC, DELIBERATELY, AND EACH FOR ITS
-# OWN REASON. Do not go looking for an `E-` code to catch a regression in any of them:**
-#   - **#510 (§6.7.5/§6.7.6/§6.7.8) — the tick-tag body running once at module init.** A DESCENT bug
-#     in `collect.ts`; the correct behaviour is an absence of emission, and an absence has no code.
-#     The conformance/integration cases are the gate (`timer-poll-module-init.test.js`).
-#   - **#511/#512 (§6.7.7) — request-ref attribute mis-routing.** The `<each>` half was a **SILENT
-#     MISCOMPILE** (clean compile, `undefined.data` TypeError at runtime); the `${for…lift}` half
-#     FAILED LOUD as `E-CODEGEN-INVALID-LOGIC`. **Same class, opposite failure modes** — which is why
-#     "is this class closed?" cannot be answered by grepping for one code.
-#   - **S339 `emit-tool.ts` import over-import.** A correctness-of-output fix (the tool imported names
-#     it never used); nothing was ever wrong enough to diagnose.
-#   - **#510 `<timeout>` in `name-resolver.ts`.** The opposite shape — a code that FALSE-FIRED.
-#     `E-MARKUP-001` fired on a valid §6.7.8 element in every position. **A false-fire is a
-#     diagnostic-quality defect and it leaves no trace in any catalog count.**
+# **CARRIED, re-verified: `E-SQL-006` fires on every server-fn emit path; #460's §12.5 `SHALL`
+# carries NO code; the `E-PARSEVARIANT-*` trio is RUNTIME-SURFACED. The census bucket figures below
+# are the S341 run's — re-derive with `bun scripts/s34-census.ts` rather than citing, per standing
+# rule; nothing this window could have moved a bucket (SPEC + conformance byte-identical, and no
+# emitter added or removed a code push).**
 
 ## HOW TO LOOK UP A DIAGNOSTIC CODE (read this first)
 
@@ -140,7 +125,7 @@ row now exists AND it fires; the prior "NOT implemented — do not add" note her
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
 
-**809 distinct diagnostic codes** cataloged in §34 at `4f034e13` — **`bun scripts/s34-census.ts` is
+**809 distinct diagnostic codes** cataloged in §34 at `c93a692c` (SPEC byte-identical over `4f034e13..c93a692c`, so every §34 figure from the S341 walk carries exactly) — **`bun scripts/s34-census.ts` is
 the ORACLE and it was RE-EXECUTED this pass**, returning
 `809 rows (§34 19113..19993, derived) · 1858 source files · 883 conformance cases`. **+2
 (`E-EACH-BODY-DECL-UNSUPPORTED` §17.7.3, `I-SSR-EACH-CLIENT-RENDERED` §52.8 — both S339-peter), zero
@@ -199,7 +184,8 @@ part of the catalog and are included.
 | **`fe14c9b2..e80b692e` (THIS pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — `ast-builder.js:8535` / `:12927`, rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:2860`); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
 | **`e80b692e..b929b9c9` (THIS pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3755` `rejectFnEqualsBody`, four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
 | **`97576f35..6f176c0d` (THIS pass, S328)** | **806 -> 806** | **ZERO in, ZERO out — and the zero is load-bearing twice over.** (1) #460 added a normative §12.5 `SHALL` with **no code** (enforced by construction). (2) #464 REVERTED #450's `show=`-false SSR-hide, which also had no code — so ~122 lines of `emit-html.ts` left the tree without moving a single census number. #463 (`_blockTailIsValueExpr` keyword fence) and #466 (RCDATA per-item body) are both silent-wrong-output fixes with no diagnostic. **#466 explicitly DEFERS one: "a markup-returning call has no valid rendering in an RCDATA content model" needs a NEW §34 row and its own ruling — it was surfaced, not smuggled in.** |
-| **`8863d457..4f034e13` (THIS pass, S334-S340)** | **807 -> 809** | **+2, zero removed, and the two are opposite in kind.** `E-EACH-BODY-DECL-UNSUPPORTED` (Error; §17.7.3/§17.7.2; catalog row `SPEC.md:19577`; emitted `codegen/emit-each.ts:1387`) **REJECTS** a form that previously produced a silent-broken bundle — the decl was dropped, a later `${nm}` still emitted `String(nm)`, and the whole list rendered empty at exit 0. `I-SSR-EACH-CLIENT-RENDERED` (Info; §52.8; catalog row `SPEC.md:19429`; emitted `codegen/emit-ssr-render.ts:432`, wired `emit-server.ts:5162`) **REJECTS NOTHING** — it names a pre-existing conservative SSR fallback that used to be a bare `null` return. **Both PINNED in the same PR that emitted them** (`each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`; each `expected.json` READ to confirm a real `expect.codes` assertion, not a rationale-prose mention), so PINNED moved 341 -> 343 in lockstep and every other bucket is FLAT. **FOUR other fixes landed this window with NO code and each declined one for a different reason** — see the header's NEW NEGATIVES block; in particular #510's `<timeout>` fix is a **false-FIRE** repair, which moves no catalog number in either direction. |
+| **`4f034e13..c93a692c` (THIS pass, S340-S346)** | **809 -> 809** | **ZERO in, ZERO out — SPEC byte-identical, so the zero is by construction, not by census.** The window's one catalog-adjacent move is a FIRE-SURFACE widening of an existing code (`E-EACH-BODY-DECL-UNSUPPORTED`, #515/#516 — any body position, full name-binding decl set incl. `lin`/`~`/`var`; fire site now `emit-each.ts:1416`), which no catalog count can see. |
+| **`8863d457..4f034e13` (S334-S340)** | **807 -> 809** | **+2, zero removed, and the two are opposite in kind.** `E-EACH-BODY-DECL-UNSUPPORTED` (Error; §17.7.3/§17.7.2; catalog row `SPEC.md:19577`; emitted `codegen/emit-each.ts:1387`) **REJECTS** a form that previously produced a silent-broken bundle — the decl was dropped, a later `${nm}` still emitted `String(nm)`, and the whole list rendered empty at exit 0. `I-SSR-EACH-CLIENT-RENDERED` (Info; §52.8; catalog row `SPEC.md:19429`; emitted `codegen/emit-ssr-render.ts:432`, wired `emit-server.ts:5162`) **REJECTS NOTHING** — it names a pre-existing conservative SSR fallback that used to be a bare `null` return. **Both PINNED in the same PR that emitted them** (`each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`; each `expected.json` READ to confirm a real `expect.codes` assertion, not a rationale-prose mention), so PINNED moved 341 -> 343 in lockstep and every other bucket is FLAT. **FOUR other fixes landed this window with NO code and each declined one for a different reason** — see the header's NEW NEGATIVES block; in particular #510's `<timeout>` fix is a **false-FIRE** repair, which moves no catalog number in either direction. |
 | **`35d4d32e..616688ea` (S330-S334)** | **806 -> 807** | **+1, zero removed: `E-DERIVED-SERVER-ONLY-REACH`** (Error; §6.6.19 `SPEC.md:3694`; catalog row `:3304`; long row `:19483`; emitted `route-inference.ts:4429`, Step 3b). Landed WITH three conformance cases and a 379L unit test, so it enters **PINNED**, not IMPL-SITES — Rule 4 satisfied at landing. **Read the row's own scope sentence before asserting against it:** it fires ONLY for a `const <name>` DERIVED-cell RHS. A plain cell initialiser and a markup interpolation reach the same module from the same client position and are **NOT diagnosed** — the error text says so out loud, because deleting the `const` is the shortest edit that silences it and it restores the leak. Carve-out: NOT emitted in a `kind="tool"` program (§64). Migration measured at ZERO. **Second, timing-only movement in the same window: `E-SQL-006` (§44.3) now fires at COMPILE time on every server-fn emit path (#476) — no new code, a narrow sink (`preparedStmtErrors`) threaded and drained; +5 NEG conformance cases.** Third: #479's §18.5 fixes and #484's request-ref routing fix are silent-wrong-output classes with **no diagnostic added**, deliberately. |
 | **`b929b9c9..15e5e070` (prior pass)** | **805 -> 806** | **+1, zero removed:** `W-IF-IN-EACH` (§17.1 — `emit-each.ts`'s `renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch; warns when a NESTED, non-item-root, per-row `if=` inside `<each>` references the iteration item — the condition is a create-time-only append gate, not reactive on a same-key reconcile). GH adopter #409. |
 | **`fe14c9b2..e80b692e` — TOMBSTONES** | **18 -> 34 struck** | **+16 newly struck**, which the code TOTAL does not show (the count methodology deliberately strips `~~`): six phantom `E-ENGINE-*` (003/006/007/008/009/011/012 — seven rows, one of which was already struck), four `E-COMPONENT-*` (002-005), `E-PROTECT-002`, `W-PROTECT-001`, `E-TYPE-042`, `W-DEPRECATED-001`, `E-ENGINE-AUDIT-UNSUPPORTED-BODY`. **A struck row still counts in the 804 — read the tombstone bucket, not the total, to answer "what got withdrawn".** |
@@ -375,7 +361,7 @@ Keyed by PREFIX. A code not named individually below is still routed by its fami
 | **Schema (§38.6 / §39.5)** | E-SCHEMA-* / W-SCHEMA-* | **16** | protect-analyzer.ts, type-system.ts, **schema-differ.js** (`diffSchema` — `W-SCHEMA-002`, `W-SCHEMA-DESTRUCTIVE-DROP`, and NEW this window `W-SCHEMA-CONSTRAINT-TIGHTENED` :843/:857/:876/:895 + `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED` :916), **gauntlet-phase1-checks.js** (`E-SCHEMA-010` via `findNonLiteralSetItems`; NEW `E-SCHEMA-011` :796-810 via `parseColumns`'s `malformedReferences` + `referencesHint`) |
 | Confidentiality — tenant-row floor (§14.8.10) | E-TENANT-AGG/WRITE/RAW-EGRESS / I-TENANT-STRIP/ACROSS | 5 | codegen/tenant-egress.ts, emitted at codegen/emit-server.ts:1389/1405/1432 + :4893/4907 |
 | **SSR prerender FALLBACK visibility (§52.8) — NOT a confidentiality code, do not merge with the row below** | **`I-SSR-EACH-CLIENT-RENDERED`** | **1 (NEW this window)** | `codegen/emit-ssr-render.ts:432`, wired at `emit-server.ts:5162`. **Info, never fatal, changes nothing about what compiles** — it names a per-item template that falls outside the §52.8 renderable subset so the list ships EMPTY in the server HTML. **The sibling row below (`I-SSR-AUTH-SCOPED-CLIENT-HYDRATED`) is a CONFIDENTIALITY auto-omission and this one is a PERFORMANCE decline; they share a prefix and a fallback shape and nothing else.** |
-| **`<each>` body scope (§17.7.3)** | **`E-EACH-BODY-DECL-UNSUPPORTED`** | **1 (NEW this window)** | `codegen/emit-each.ts:1387`, in `renderTemplateChildToJs`'s logic-child handler. Partitions into `result.errors`. **Fail-CLOSED against a silent-broken bundle**, not a language prohibition — supporting author locals in an each body is a separate §17.7.3 ruling the row declines to pre-decide. |
+| **`<each>` body scope (§17.7.3)** | **`E-EACH-BODY-DECL-UNSUPPORTED`** | **1 (S339; WIDENED #515/#516)** | `codegen/emit-each.ts:1416`, in `renderTemplateChildToJs`'s logic-child handler — fires on a name-binding decl (`let`/`const`/`function`/`lin`/`~`/`var`) at ANY body position (`body.find`, not `body[0]`); `type-decl` excluded. Partitions into `result.errors`. **Fail-CLOSED against a silent-broken bundle**, not a language prohibition — supporting author locals in an each body is a separate §17.7.3 ruling the row declines to pre-decide. |
 | SSR prerender confidentiality (§52.15.5) | I-SSR-AUTH-SCOPED-CLIENT-HYDRATED | 1 | type-system.ts:10894 / :10935; auto-omit at codegen/emit-server.ts |
 | Auth (compile-time graph + §52 checks) | E-AUTH-* / E-AUTH-GRAPH-* | 9 | auth-graph.ts, type-system.ts (§52) |
 | **Auth WARNINGS — two DIFFERENT owners, do not merge with the row above** | **`W-AUTH-001`** · **`W-AUTH-MIDDLEWARE-AUTO-INJECTED`** · W-AUTH-PAGE-INFERRED / W-AUTH-LOGIN-MISSING / W-AUTH-RUNTIME-FALLBACK | 5+ | **`W-AUTH-001` -> `compiler/src/type-system.ts:10820`** — §52.11 ONLY: a `<var server>` with no detectable initial load. **`W-AUTH-MIDDLEWARE-AUTO-INJECTED` -> `compiler/src/route-inference.ts:5648` (Step 8b)** — §40.1.1/§12.2: `protect=` fields present with NO explicit `auth=` on `<program>` or any `<page>`, so auth middleware is auto-injected. **SPLIT AT S299** — these were ONE code with two unrelated meanings and only the §52.11 one documented. See "Code split" below. |
@@ -489,6 +475,14 @@ call and calls `collectErrors(stageName, result.errors, filePath)` to normalize 
 partition the error/warning streams. Generated scrml apps use `!{}` error-arm blocks + `fail`/`?`
 propagation (ErrorArm/FailExprNode/PropagateExprNode — see schema.map.md) lowered to try/catch
 envelopes by emit-logic.ts.
+
+**`scrml dev` compile-failure serving (#518, adopter #517).** `runOnce` records every pass's outcome
+via `noteCompileResult(result)` (exported; `getCompileFailure()` reads it); while `errors` is
+non-empty the fetch handler serves the REAL compile error at every non-infra request — HTML overlay
+(with hot-reload, auto-recovering on the next green pass) for `Accept: text/html`, JSON otherwise —
+and the last-good on-disk output is never served while broken, so the partial write is inert.
+⚠ A compileScrml THROW (as opposed to a returned `errors[]`) is NOT yet fail-closed on main — that is
+PR #539, in flight; do not read it as landed at this watermark.
 
 ## Global Error Boundaries
 `<errors>` element (§55.8) — the scrml-level component error boundary; ast-builder.js recognizes it

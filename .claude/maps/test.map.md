@@ -1,46 +1,56 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48). **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was a branch
-# tip (MAP-STAMP RULE, primary.map.md).
-# **+5 test files, ZERO deleted — 1,334 -> 1,339.** Conformance corpus **880 -> 883 (+3)**.
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor)
+# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
+# bryan S343/S345/S346).** Ancestry CHECKED (invariant 48); the watermark IS `origin/main`'s tip at
+# generation (MAP-STAMP RULE, primary.map.md).
+# **+5 test files, ZERO deleted — 1,339 -> 1,344.** Conformance corpus **FLAT at 883**. SPEC
+# byte-identical, so the §34 catalog is FLAT at 809.
 #
-# ⚠ **A COUNTING CAVEAT THAT WILL OTHERWISE READ AS DRIFT.** `docs/FACTS.md`'s `test files` counts
-# **`*.test.js` under `compiler/tests` only** — it EXCLUDES the 15 `*.test.ts` files in the same tree.
-# So `git ls-files | grep -cE '\.(test|spec)\.(js|ts|mjs)$'` returns **1,361** at this HEAD and that
-# is NOT a contradiction of 1,339; the two count different populations. **This map uses the FACTS
-# definition throughout so the numbers compose. State which derivation produced a count.**
+# ⚠ **THE COUNTING CAVEAT CARRIES.** `docs/FACTS.md`'s `test files` counts **`*.test.js` under
+# `compiler/tests` only** — it EXCLUDES the 15 `*.test.ts` files in the same tree, so a
+# `git ls-files` sweep over `*.test.*` returns a legitimately different, larger number. **This map
+# uses the FACTS definition throughout. State which derivation produced a count.**
 #
-# **THE TESTING LESSON OF THIS WINDOW IS THE POSITION AXIS, and it is a different shape from the
-# last one's `-neg` lesson.** `unit/route-inference-derived-server-only-reach.test.js` grew
-# **+459 lines in place (379 -> 836)** and every one of them exists because the bug was that a walk
-# MISSED POSITIONS. The file now carries a §9 POSITION axis asserting the refusal separately in each
-# of six shapes — `for`-lift body, `while`-lift body, `<each>` row body, `<engine>` state-child body,
-# loop-inside-conditional, and each shape inside a `kind="tool"` program. **A single "it works nested"
-# case would have passed against the broken walk for five of the six.** When the defect is
-# "enumeration missed a member", the test has to enumerate the members.
+# **THE TESTING LESSON OF THIS WINDOW: THE PER-TEST BUDGET YOU BELIEVE IS NOT THE ONE IN FORCE, AND A
+# TIMEOUT WEARS AN ASSERTION FAILURE'S CLOTHES.** `bunfig.toml` carried `[test] timeout = 10000` from
+# the initial split until S346 — **and bun does not read `[test].timeout`** (bun 1.3.14, verified: a
+# 6 s synchronous test under that file reported `timed out after 5000ms`; the `root` key in the same
+# file IS honoured, so the file loads). The effective budget was ALWAYS bun's default **5000 ms**,
+# locally and in CI. Worse: **a synchronous test that overruns still runs to completion — its
+# assertions PASS — and bun then reports it as `(fail) <name>`, the SAME marker an assertion failure
+# produces**, with the tell (`^ this test timed out after 5000ms.`) on a line the name-set gate's
+# `spawnSync` capture swallowed. That is how `flagship driver/hos … engine mount really does sit
+# inside an if= template` joined the browser failure set intermittently in cloud and burned THREE
+# sessions on compile-order/stray-file/module-state theories while the emitted HTML was fine the
+# whole time. The fix (#537) is three-sided: the whole-app compile moved into a `beforeAll` with an
+# EXPLICIT 60 s budget declared at the site; the ghost-lint hot path that made the compile slow
+# enough to overrun became a forward-only cursor (`makeSkipCursor` — 343 ms and, JIT-poisoned, 5.9 s
+# of the compile, gone); and `browser-baseline.ts` now prints a REASON EXCERPT beside every new
+# failure name. **Rule: a multi-second test declares its own `{ timeout }` at the site, with a
+# comment; and when a bun test "fails", read for the timeout tell before trusting the assertion.**
 #
-# **AND THE SECOND-ORDER LESSON THE SAME FILE TEACHES: it drove the fix to EXPORT its collector.**
-# The walk's termination and single-visit properties are properties of THAT walk and had to be
-# asserted against it directly — driving them through `runRI` conflates them with every other walk in
-# the stage, **demonstrably so: a synthetic cyclic AST blows the stack inside
-# `collectFileLevelBindingRoots` (`route-inference.ts:2600`, a walk with NO `seen` set at all) long
-# before it reaches the one under test.** A test that cannot isolate its subject is testing the stage,
-# not the subject.
+# **THE SECOND LESSON IS HERMETICITY, four fixes in one file** (`flagship-hos-engine-under-if`,
+# #531/#534/#527): a UNIQUE `mkdtemp` output dir per run (the fixed `/tmp` path was rmSync'd under
+# concurrent readers); the app walk SORTED at every level (readdir order is a property of the runner
+# IMAGE); the compile failing LOUD with codes + outputDir (was: a downstream bare `.toBe(true)`
+# naming nothing); and the emitted artifacts LOCATED by suffix search, never assumed at
+# `driver/hos.*` (`computeOutputBaseDir` derives layout from the input list's COMMON ANCESTOR, so
+# one stray `.scrml` shifts every relative path — and `read()` returned `""` for the missing path).
+# `browser-todomvc` got the same class of fix (#530): read the runtime file the PAGE references, not
+# whatever readdir returns first.
 #
 # **CARRIED AND STILL THE RULE: `expected.json`'s `codes` / `notCodes` are the assertion; the
-# `rationale` prose is not.** Both new codes this window were verified PINNED by READING their
-# `expected.json`, not by grepping for the code string:
-# `each/each-body-decl-unsupported-pos` asserts `codes: ["E-EACH-BODY-DECL-UNSUPPORTED"]` plus a
-# `severity` map, and `ssr/i-ssr-each-client-rendered-subset-pos` asserts
-# `codes: ["I-SSR-EACH-CLIENT-RENDERED"]` **with `notCodePrefixes: ["E-"]`** — the latter is what
-# makes it a real assertion that an INFO lint does not also break the compile.
+# `rationale` prose is not.** Zero conformance movement this window to re-verify it against.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
-Config: bunfig.toml (`[test] root="compiler/tests/", timeout=10000`)
+Config: bunfig.toml (`[test] root="compiler/tests/"` — **NO timeout key, deliberately (#537); the
+per-test budget is bun's DEFAULT 5000 ms everywhere.** The old `timeout = 10000` was never read —
+declare a site-level `{ timeout }` on any legitimately-slow test; per-run override is the CLI flag
+`bun test --timeout <ms>`. ⚠ bun marks a TIMED-OUT test with the same `(fail) <name>` marker as an
+assertion failure — the tell is the `^ this test timed out after Nms.` line after the marker)
 Run all: `bun test compiler/tests/`
 Run single: `bun test compiler/tests/unit/<file>.test.js`
 Coverage: `bun test compiler/tests/ --coverage`
@@ -48,25 +58,24 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1339** `*.test.js` total)
+## Test Categories (compiler/tests/, **1344** `*.test.js` total)
 
-Fresh recursive recount at `4f034e13`, all 9 categories individually re-verified; agrees with
-`docs/FACTS.md` (`test files | 1,339`), **which is the citable authority — do not hardcode a
-competing number.** Net **+5** this pass, decomposing as **unit +2**, **integration +2**,
-**conformance +1** (browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
-**ZERO deletions, second window running.** The category sum re-checks:
-881+195+132+92+11+8+4+2 = 1325, +14 top-level = **1339**.
+Fresh recursive recount at `c93a692c`, all 9 categories individually re-verified; agrees with
+`docs/FACTS.md` (`test files | 1,344`), **which is the citable authority — do not hardcode a
+competing number.** Net **+5** this pass, decomposing as **unit +4**, **integration +1** (conformance
+/ browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged). **ZERO deletions,
+third window running.** The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level =
+**1344**.
 
-**Note the conformance-TIER row moved for the first time in five windows** (131 -> 132). That row
-counts `compiler/tests/conformance/*.test.js` — the artifact-level harnesses — and is a DIFFERENT
-number from the 883 conformance CASES under `conformance/cases/`. Both moved this window and they
-moved for different reasons; **do not reconcile them.**
+Carried: the conformance-TIER row (132) counts `compiler/tests/conformance/*.test.js` — the
+artifact-level harnesses — and is a DIFFERENT number from the 883 conformance CASES under
+`conformance/cases/`; **do not reconcile them.** Neither moved this window.
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **881** (+2) | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **195** (+2) | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | **132** (+1 — **first move in five windows**) | `gate` (blocking) + pre-commit + pre-push |
+| Unit | `compiler/tests/unit/**/*.test.js` | **885** (+4) | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **196** (+1) | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | 132 (unchanged) | `gate` (blocking) + pre-commit + pre-push |
 | Browser | `compiler/tests/browser/**/*.test.js` | 92 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
@@ -74,7 +83,19 @@ moved for different reasons; **do not reconcile them.**
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 
-**Changed this pass — 5 added + 1 grown substantially in place, ZERO deleted:**
+**Changed this pass — 5 added + 2 reworked substantially in place, ZERO deleted:**
+
+| File | Tier | Lines | What it pins |
+|---|---|---|---|
+| `unit/lint-ghost-patterns-skip-cursor.test.js` | unit | **141** | **#537 — `makeSkipCursor` == `skipPastRanges` for every non-decreasing query sequence**, pinned against SEEDED-RANDOM range sets and walks, plus the `from`-offset binary-search seek. The oracle (`skipPastRanges`) stays EXPORTED with zero src callers precisely so this pin can exist — the model for replacing a hot path: keep the contract's reference implementation and equivalence-test the fast one against it. |
+| `unit/dev-compile-failure-serves-error.test.js` | unit | **212** | **#518 (adopter #517)** — while the last compile is failing, `scrml dev`'s fetch handler serves the REAL compile error at every non-infra request (HTML overlay with hot-reload for `Accept: text/html`, JSON otherwise) and resumes on success. Drives the handler through both states via the EXPORTED `noteCompileResult()` — no real compile, no server. |
+| `unit/each-body-decl-unsupported-positions.test.js` | unit | **95** | **#516 §17.7.3** — `E-EACH-BODY-DECL-UNSUPPORTED` fires at ANY body position (the old guard inspected `body[0]` only) and for the full name-binding decl set incl. `lin` and `~`/`var` (`var nm = 1` at a NON-first position was SILENT — the "tilde fails loud" belief held only for the first-position case). `type-decl` stays excluded (compile-time-only). |
+| `unit/issue-debt.test.js` | unit | **117** | **#536** — `issue-debt.ts`'s pure `classify()`: anchored `#<n>` mention matching (`#51` ≠ `#519`; `issues/<n>` URL counts), HOMED-GAP/-DPA/-BOTH/OWED partition, the SILENT (0-comment >2-day) flag, deterministic `--now` age. No network, no fs. |
+| `integration/g-tool-import-prune-dollar-prefixed.test.js` | integration | **83** | **#515 §64** — a `$`-prefixed local imported from a `.scrml` lib SURVIVES the tool import prune (the `\b` predicate judged it dead → dropped import → runtime `ReferenceError`). Pins the shared predicate `localServerImportNameUsed` at the tool site. |
+| `browser/flagship-hos-engine-under-if.browser.test.js` | browser | reworked | **#531/#534/#527/#537 — the hermeticity + budget rework** (see header): `mkdtemp` unique output dir, sorted app walk, loud compile failure, artifact LOCATION by suffix search, and the whole-app compile in a `beforeAll` with an explicit 60 s site-declared budget, run before happy-dom registers. |
+| `browser/browser-todomvc.test.js` | browser | reworked | **#530** — reads the runtime file the emitted PAGE references (the `<script src>` in the html), not whatever readdir returned first; same readdir-order class as flagship-hos. |
+
+**Prior pass — 5 added + 1 grown substantially in place, ZERO deleted:**
 
 | File | Tier | Lines | What it pins |
 |---|---|---|---|
@@ -85,7 +106,7 @@ moved for different reasons; **do not reconcile them.**
 | `integration/g-tool-over-imports-all-lib-exports.test.js` | integration | **70** | **S339 §64** — a headless `kind="tool"` importing a local `.scrml` lib emits only the specifiers its body references. Pins a CROSS-STAGE interaction (the component-expander's helper-bind augmentation vs the tool emitter) that no type binds. |
 | `conformance/conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` | conformance | **275** | **#500 §6.6.19** — the ARTIFACT-level assertion behind the position axis: for each leaking shape, that no `.server.js` is emitted and no server-only symbol reaches the client bundle. **This is the tier that would have caught the original S337 leak**; the unit tier alone asserts the diagnostic, not the artifact. |
 
-**Prior pass — 6 added, ZERO deleted:**
+**Two passes back — 6 added, ZERO deleted:**
 
 | File | Tier | Lines | What it pins |
 |---|---|---|---|
@@ -96,7 +117,7 @@ moved for different reasons; **do not reconcile them.**
 | `integration/g-server-fn-reindent-template-literal.test.js` | integration | **102** | **#474 §48** — the server-fn body reindent is template-literal-aware. A blind `code.split("\n").map(l => indent + l)` corrupted the COOKED VALUE of a multi-line template literal (the added indent becomes data, not layout). |
 | `unit/state-gap-integrity.test.js` | unit | **92** | **#485** — `scripts/state.ts`'s own ledger integrity: the `@gap` attribute bag matches `[\s\S]*?` so a marker whose `prov=`/`locus=` contains a literal `>` is not TRUNCATED and silently dropped from the count; duplicate `@gap` ids are deduped for counting and **THROW LOUD on conflicting sev/status**; and heading-vs-marker status drift is DETECTED (WARN-only). **A probe's own defects are in scope for the review floor — this is the test that says so.** |
 
-**Prior pass — 2 added, 1 DELETED:**
+**Three passes back — 2 added, 1 DELETED:**
 
 | File | Tier | Lines | What it pins |
 |---|---|---|---|
@@ -113,7 +134,7 @@ moved for different reasons; **do not reconcile them.**
 | ~~`unit/show-false-ssr-hidden-no-fouc.test.js`~~ | unit | ~~197~~ | **GONE — deleted at #464.** It pinned the #450 `show=`-false `display:none` injection; **that behaviour was reverted in full and this file no longer exists.** Do not resurrect it from this row. |
 | `browser/g-each-shorthand-markup-fn-mount.browser.test.js` | browser | 152 | #456 — a `:`-shorthand `<each>` body whose child is a markup-returning fn call MOUNTS per row, asserted in the browser tier at runtime. |
 
-**⚠ THE TESTING LESSON OF THIS WINDOW, and it is a repeat of the S276 shape — read it before you
+**⚠ A STANDING TESTING LESSON (S326 window, #452 — a repeat of the S276 shape); read it before you
 "preserve" an existing assertion.** #452's landing corrected **20 tolerate-or-assert-bare test sites
 across 6 files** (`integration/auth-csrf-synchronizer-token.test.js`,
 `integration/csrf-canonical-delivery.test.js`, `integration/session-establishment-roundtrip.test.js`,
@@ -123,8 +144,10 @@ expected behaviour, because the oracle shared the implementation's blind spot.**
 them was evidence of nothing. When a fix requires editing existing assertions, that is a signal to
 check whether the assertions were ever right, not a signal to minimise the diff.
 
-**`compiler/tests/browser/FAILURE-BASELINE.json` is unchanged, and that is a CLAIM, not an omission** —
-the browser tier gained a test and it passes, so the failure NAME SET did not move.
+**`compiler/tests/browser/FAILURE-BASELINE.json` is unchanged AGAIN this window, and that is a CLAIM,
+not an omission** — the flagship-hos rework and the todomvc fix changed HOW two browser tests obtain
+their subject, not whether they pass, so the failure NAME SET did not move. (The flagship-hos name's
+intermittent cloud JOINS were the #537 timeout, not a set change — see the header.)
 
 Carried from the prior pass, still true: `unit/error-handler-const-bind-r25-bug-49.test.js` and
 `integration/nested-error-handler-no-invalid-js.test.js` have an incidental blanket
@@ -132,9 +155,9 @@ Carried from the prior pass, still true: `unit/error-handler-const-bind-r25-bug-
 `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` firing described in error.map.md. Every subject assertion is
 untouched, and any OTHER new diagnostic still fails them.
 
-The top-level `conformance/` corpus moved **+15** this window — **880** cases (`docs/FACTS.md` is the
-authority; independently re-derived here as `git ls-files 'conformance/cases/**/case.scrml' | wc -l`
-= 880, and the `s34-census.ts` re-run agrees). **54 category directories, unchanged — `derived/` is
+The top-level `conformance/` corpus sits at **883** cases at `c93a692c` (`docs/FACTS.md` is the
+authority; FLAT this window — zero cases added or removed). The S331-window +15 and the S341-window
++3 below are retained as reading material on case-authoring shape, not as current deltas. **54 category directories, unchanged — `derived/` is
 NOT new** (it dates to the S231 D3 suite, `e86a76d0`; only three cases were added into it).
 **The fifteen split as SEVEN negative, five positive-fire, three fidelity:**
 
@@ -341,7 +364,7 @@ allowlist. **Adding a FIELD to a structural AST node grows this if the native mi
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh`
 (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage
 starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**883 cases** at `4f034e13`; re-derived by `find conformance/cases -name expected.json | wc -l`, which is exactly `facts.ts`'s own definition, and `docs/FACTS.md` is the authority) + per-impl adapters. **+3 this window: `each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`, `derived/e-derived-server-only-reach-nested-loop`.**
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**883 cases** at `c93a692c`, FLAT this window; re-derived by `find conformance/cases -name expected.json | wc -l`, which is exactly `facts.ts`'s own definition, and `docs/FACTS.md` is the authority) + per-impl adapters. **The prior window's +3 (`each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`, `derived/e-derived-server-only-reach-nested-loop`) are landed and carried.**
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL
 programs under a compile gate.
 
@@ -382,7 +405,10 @@ RETIRED (zero-immutable-columns DB-authoritative byte-identity, S288).
 **Browser-suite triage order.** Recompile `samples/compilation-tests/` fixtures FIRST (they go
 stale), then compare the WHOLE suite rather than an isolated file — happy-dom global state leaks
 between files, so a single-file run can be green while the suite is red, and vice versa. **Then run
-`bun scripts/browser-baseline.ts` and diff NAMES**, which is the comparison a human was doing by hand.
+`bun scripts/browser-baseline.ts` and diff NAMES**, which is the comparison a human was doing by hand —
+**and READ the reason excerpt it prints beside each new name (#537): `took N ms` + `^ this test timed
+out after 5000ms.` means a TIMEOUT, not an assertion failure, and the two wear the same `(fail)`
+marker.**
 
 ## THE PRE-LAND GATE FOR CODEGEN — `corpus-emit-differential` (NEW #428), and it is NOT `bun test`
 

@@ -15,6 +15,7 @@ was invisible to the session that incurred it and to every session after. Same s
 **Marker form** — append one line per PR, newest at the top of the log section:
 
 ```
+<!-- @review pr=541 verdict=carve-out by=S346-bryan date=2026-08-16 probe=file-set-verified-single-path-docs-pr-reviews-md-marker-recording-only-zero-code-paths-STRUCTURAL-NOTE-a-floor-binding-MERGED-PRs-can-never-read-zero-at-the-moment-a-floor-recording-PR-merges-so-this-row-is-always-owed-to-the-NEXT-session-batch note=the-instruments-own-recursion-cf-S328-397 -->
 <!-- @review pr=538 verdict=carve-out by=S346-bryan date=2026-08-16 probe=file-set-verified-two-paths-pr-reviews-md-and-delta-log-md-marker-recording-only-zero-code-paths note=review-ledger-bookkeeping -->
 <!-- @review pr=536 verdict=clean by=S346-bryan date=2026-08-16 probe=PA-read-the-classifier-mentions-is-hash-anchored-left-and-negative-lookahead-right-so-51-does-not-match-519-nor-519-match-5190-verified-by-bun-e-pagination-auto-widens-with-a-rows-lt-limit-completeness-proof-detection-only-exit-0-not-in-CI-pure-classifier-over-strings-with-injected-now-12-unit-tests-red-proven-twice-by-the-author-unanchored-includes-mutant-3-fail-and-label-swap-4-fail note=live-probe-reads-3-open-3-homed-0-OWED-on-main -->
 <!-- @review pr=540 verdict=carve-out by=S346-bryan date=2026-08-16 probe=file-set-verified-wrap-continuity-only-hand-off-rotation-changelog-master-list-delta-log-zero-code-paths note=session-wrap -->

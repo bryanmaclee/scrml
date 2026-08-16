@@ -1,13 +1,18 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor)
+# ⚑ **CURRENCY RE-VERIFIED AT `c93a692c` (S346), NOT RE-WALKED.** Over `4f034e13..c93a692c`:
+# `stdlib/` zero-diff; `compute-program-config.ts` zero-diff; `emit-server.ts` moved by exactly ONE
+# line and it is the `export` keyword on `localServerImportNameUsed` (the #515 import-prune predicate
+# unification), not an auth path; `commands/dev.js`'s #518 compile-failure serving touches no session
+# machinery. Every session/JWT/OAuth/CSRF claim below is carried and re-verified.
+# ⚑ **WATERMARK CORRECTED at the S341 pass and ADVANCED again this pass to `c93a692c`** — line 3 carries the ancestor-of-`origin/main` watermark,
 # per the MAP-STAMP RULE at the top of primary.map.md. The prior stamp `616688ea` was the tip of
 # `wrap/s331`, squash-merged onto main as `2391d483` — never an ancestor, so nothing it bounded was
 # actually bounded.
 #
-# ⚑ **CONTENT AS OF `616688ea` — CURRENCY VERIFIED AT `4f034e13`, NOT RE-WALKED.** The §20.5 session
+# ⚑ **CONTENT AS OF `616688ea` — CURRENCY VERIFIED AT `4f034e13` (S341), and again at `c93a692c` (S346, header above), NOT RE-WALKED.** The §20.5 session
 # surface, `compute-program-config.ts`, `emit-server.ts`'s session prologue and the
 # `scrml:auth`/`scrml:oauth` stdlib modules are **ZERO-DIFF this window** (`stdlib/` has no diff at
 # all; `emit-server.ts` moved by exactly ONE line and it is the §52.8 SSR-lint call signature at
