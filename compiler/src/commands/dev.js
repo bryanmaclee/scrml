@@ -1056,13 +1056,22 @@ export async function runDev(args) {
    * Stat snapshot of one source. `null` means absent/unreadable — a real
    * state (the deleted half of delete→restore), not an error.
    *
+   * `ctimeMs` is in the tuple deliberately (S346 review F1). {mtimeMs,size,ino}
+   * alone is EVASIBLE: an in-place same-length write followed by
+   * `utimesSync(f, atime, mtime)` restores mtime EXACTLY (measured:
+   * 1786895065901.5632 both sides, same size, same inode) and the edit is then
+   * served STALE at 200 — the silent class #518 closed, reintroduced. POSIX
+   * exposes no API to set ctime, and any content or metadata write moves it
+   * (the same probe: ctime 1786895065901.5632 -> 1786895065942.566), so adding
+   * it closes the evasion by construction rather than by enumerating writers.
+   *
    * @param {string} file absolute path
-   * @returns {{ mtimeMs: number, size: number, ino: number } | null}
+   * @returns {{ mtimeMs: number, ctimeMs: number, size: number, ino: number } | null}
    */
   function snapshotOf(file) {
     try {
       const st = statSync(file);
-      return { mtimeMs: st.mtimeMs, size: st.size, ino: Number(st.ino) || 0 };
+      return { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, ino: Number(st.ino) || 0 };
     } catch {
       return null;
     }
@@ -1082,7 +1091,8 @@ export async function runDev(args) {
     const cur = snapshotOf(file);
     const changed = (prev === null || prev === undefined) !== (cur === null)
       || (prev != null && cur !== null
-          && (prev.mtimeMs !== cur.mtimeMs || prev.size !== cur.size || prev.ino !== cur.ino));
+          && (prev.mtimeMs !== cur.mtimeMs || prev.ctimeMs !== cur.ctimeMs
+              || prev.size !== cur.size || prev.ino !== cur.ino));
     if (changed) fileSnapshots.set(file, cur);
     return changed;
   }
