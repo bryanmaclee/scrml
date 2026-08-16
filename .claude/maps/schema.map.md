@@ -1,14 +1,21 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor)
+# ⚑ **CURRENCY RE-VERIFIED AT `c93a692c` (S346), NOT RE-WALKED.** `git diff --name-only
+# 4f034e13..c93a692c -- compiler/src/types` is **EMPTY** (TEN windows now), and the window's 15
+# source-bearing files added no exported type or interface — the two API-surface moves are FUNCTION
+# exports, not shapes (`emit-server.ts` exports `localServerImportNameUsed`; `lint-ghost-patterns.js`
+# exports `skipPastRanges` + new `makeSkipCursor`, and `commands/dev.js` exports
+# `noteCompileResult`/`getCompileFailure` — all documented in structure/error maps). `emit-each.ts`'s
+# #515 additions are module-level `const` Set/Record literals, not types.
+# ⚑ **WATERMARK CORRECTED at the S341 pass and ADVANCED again this pass to `c93a692c`** — line 3 carries the ancestor-of-`origin/main` watermark,
 # per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
 # `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
 # — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
 # communicating nothing this header does not already say.
 #
-# ⚑ **CONTENT AS OF `fe14c9b2` — CURRENCY RE-VERIFIED AT `4f034e13`, NOT RE-WALKED. NINE windows.**
+# ⚑ **CONTENT AS OF `fe14c9b2` — CURRENCY RE-VERIFIED AT `4f034e13` (S341), and again at `c93a692c` (S346, header above), NOT RE-WALKED. NINE windows.**
 # `git diff --name-only 8863d457..4f034e13 -- compiler/src/types` is **EMPTY**.
 #
 # ⚠ **AND THE OLD STAMP WAS ITSELF OFF-MAIN — THIS MAP IS THE WORST INSTANCE IN THE SET.** `fe14c9b2`

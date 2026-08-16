@@ -1,28 +1,28 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
-# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
-# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
-# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
-# communicating nothing this header does not already say.
-#
-# ⚑ **CONTENT AS OF `e80b692e` — CURRENCY RE-VERIFIED AT `4f034e13`, NOT RE-WALKED.** `e80b692e` was
-# one of only two stamps in this map set that was ALREADY an ancestor of `origin/main` on arrival.
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor; identical to the watermark this pass)
+# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators).** Ancestry CHECKED
+# (invariant 48); the watermark IS `origin/main`'s tip at generation (MAP-STAMP RULE, primary.map.md).
 #
 # **Zero env-surface diff, verified by DIFFING rather than by assuming:**
-# `git diff 8863d457..4f034e13 -- compiler/src/ scripts/ lsp/` contains **no added and no removed**
-# `process.env` / `Bun.env` line (grep count of `^[+-].*(process\.env|Bun\.env)` over the window diff
-# is **0**), and `.github/` + `package.json` are zero-diff, so the CI secret surface is unchanged.
-# Every key name below still holds.
+# `git diff 4f034e13..c93a692c -- compiler/src/ scripts/ lsp/` contains **no added and no removed**
+# `process.env` / `Bun.env` line (grep count over the window diff is **0**), and `package.json` is
+# zero-diff, so the key tables below all still hold. The ONE new `scripts/` file (`issue-debt.ts`,
+# #536) was checked INDIVIDUALLY, not covered by the aggregate: it reads no environment variable —
+# repo paths via `fileURLToPath`, sub-process via `spawnSync` `gh` (which reads its own auth from its
+# own config, not from an env key this map would list). Same for the `commands/dev.js` additions
+# (#518): zero env reads.
 #
-# ⚠ **THE THREE NEW `scripts/` FILES THIS WINDOW WERE CHECKED INDIVIDUALLY, NOT COVERED BY THE
-# AGGREGATE.** `boot.ts`, `dpa-debt.ts` and `source-text-regex-census.ts` are 688 new lines in a
-# directory this map's enumeration covers, so "the diff has no env line" had to hold for the ADDED
-# files too, not merely net-out across the window. It does: none reads an environment variable — they
-# resolve repo paths and shell out to `git` / `gh` / sibling scripts. **`gh` reads its own auth from
-# its own config, not from an env key this map would list.**
+# **TWO CONFIG FILES DID MOVE THIS WINDOW, and one of them is the headline of the whole map set:**
+#   · **`bunfig.toml` (#537, S346) — the `[test] timeout = 10000` key is DELETED, and the deletion is
+#     a CORRECTION, not a change of budget: bun NEVER READ IT.** `[test].timeout` is not a bunfig key
+#     (bun 1.3.14, verified empirically — a 6 s synchronous test under the old file reported `timed
+#     out after 5000ms`; the `root` key in the same file IS honoured, so the file loads). The
+#     effective per-test budget was always bun's DEFAULT **5000 ms**, locally and in CI. See the
+#     bunfig section below for the standing rule.
+#   · **`.github/workflows/ci.yml` (#532, S345) — the `push` trigger is now scoped `branches: [main]`.**
+#     No secret, no step, no required-check change — see build.map.md / infra.map.md.
 
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 
@@ -68,7 +68,16 @@ CONSTANTS in `schema-differ.js`, not configuration.
 ## Config Files
 
 ### bunfig.toml  [repo root]
-`[test]` section: test root = `compiler/tests/`, timeout = 10000ms.
+`[test]` section: test root = `compiler/tests/` — **and deliberately NO `timeout` key (#537, S346).**
+The file carried `timeout = 10000` from the initial split until S346 and **bun does not read
+`[test].timeout`** — the effective per-test budget was always bun's default **5000 ms**. ⚠ The prior
+generation of this map printed `timeout = 10000ms` as if it were live configuration; **that claim was
+wrong at every stamp that carried it**, not merely stale. The standing rule (stated in the file
+itself): a test/hook that legitimately runs multi-second declares its own budget at the site
+(`test(name, fn, { timeout })` / `beforeAll(fn, { timeout })`) with a comment saying why; the only
+per-run knob is the CLI flag `bun test --timeout <ms>`. **Do NOT re-add a key to widen the default
+silently** — `scripts/browser-baseline.ts` gates on the browser tier's failure NAME SET, and a
+timed-out test produces the same `(fail) <name>` marker as a failed assertion.
 
 ### compiler/src/unit-cc-exemption-list.json
 List of unit-test files exempted from code-coverage enforcement (currently empty array).

@@ -1,17 +1,35 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48). **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was the tip of
-# `wrap/s331` and bounded nothing (MAP-STAMP RULE, primary.map.md).
-# External deps RE-VERIFIED unchanged: `git diff --name-only 8863d457..4f034e13 -- package.json` is
-# EMPTY. No add, no bump, no removal; version stays **v0.7.1** — NINE windows now. Same for
-# `stdlib/`, `compiler/runtime/`, `compiler/native-parser/`, `lsp/`, `editors/`, `.github/` — all
-# zero-diff. **Everything that moved this window is an INTERNAL graph edge, not an external
-# dependency, for the second window running.**
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor; identical to the watermark this pass)
+# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
+# bryan S343/S345/S346).** Ancestry CHECKED (invariant 48):
+# `git merge-base --is-ancestor 4f034e13 c93a692c` passes; the watermark IS `origin/main`'s tip at
+# generation (MAP-STAMP RULE, primary.map.md).
+# External deps RE-VERIFIED unchanged: `git diff --name-only 4f034e13..c93a692c -- package.json` is
+# EMPTY. No add, no bump, no removal; version stays **v0.7.1** — TEN windows now. Same for
+# `stdlib/`, `compiler/runtime/`, `compiler/native-parser/`, `lsp/`, `editors/` — all zero-diff.
+# **Everything that moved this window is an INTERNAL edge or a script, for the third window running.**
 #
-# **THREE NEW INTERNAL EDGES THIS WINDOW, and each exists because a caller needed something it could
+# **ONE NEW INTERNAL EDGE THIS WINDOW, and it exists to KILL a drifting duplicate predicate:**
+# **`codegen/emit-tool.ts` -> `codegen/emit-server.ts` (`localServerImportNameUsed`, newly EXPORTED)**
+# — #515 (S340-peter, a #508-review HIGH). The tool emitter's local-`.scrml` import tree-shake had its
+# OWN liveness predicate (`identReferencedInSrc`, a `\b`-fenced regex); JS `\b` cannot match a
+# boundary before a leading `$` (both sides non-word), so a `$`-prefixed import local was judged dead
+# and the whole import dropped — a dangling reference, `ReferenceError` at tool runtime. The local
+# copy is DELETED; both prune sites (server + tool) now share the ONE predicate with manual boundary
+# guards. **Rule 7 in the flesh: a second implementation of a predicate is a second thing that can be
+# wrong — and this one WAS.**
+#
+# Also this window (NOT a graph edge, but a shape the graph reader needs): `emit-event-wiring.ts`,
+# `emit-variant-guard.ts` and `emit-client.ts` all register their emitted `DOMContentLoaded` boot
+# listeners with **`{ once: true }`** (#526) — production-identical (DCL fires once per document);
+# it exists so a document that OUTLIVES the chunk (soft-nav'd page, shared test document) cannot
+# re-fire a stale boot whose selectors resolve onto a LATER chunk's nodes (the S345 cross-file gate
+# red). And `emit-each.ts`'s §17.7.3 each-body decl guard WIDENED (#515/#516) — see domain.map.md.
+#
+# **CARRIED from the prior window (edges landed S334-S340, re-labelled, still true):**
+# **THREE INTERNAL EDGES (prior window), each because a caller needed something it could
 # not previously reach:**
 #   1. **`codegen/emit-each.ts` -> `codegen/reactive-deps.ts`** (`collectRequestIds`) — #511, §6.7.7.
 #      The per-item `<each>` body attr needed the file's registered `<request>` id set, which only the
@@ -26,7 +44,7 @@
 #      builder gained a diagnostic sink so a previously SILENT SSR fallback could become a lint;
 #      `emit-server.ts:5162` now passes `errors` and `filePath` down to it.
 #
-# Also this window, and it is a graph edge in the other direction: **`codegen/emit-tool.ts` now
+# Carried, and it is a graph edge in the other direction: **`codegen/emit-tool.ts` still
 # depends on the SHAPE of what `component-expander.ts:4069` did to an import's specifier list.** The
 # helper-bind pass AUGMENTS a local `.scrml` import with the lib's other non-component exports; a
 # headless `kind="tool"` inlines no components, so the augmentation is inapplicable and the tool

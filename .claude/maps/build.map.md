@@ -1,44 +1,43 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
-# generated-at: 4f034e13 (informational — not the currency anchor)
-# **PARTIALLY RE-WALKED over `8863d457` -> `4f034e13`.** Ancestry CHECKED (invariant 48).
-# **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was a branch tip that bounded
-# nothing (MAP-STAMP RULE, primary.map.md).
+# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
+# generated-at: c93a692c (informational — not the currency anchor; identical to the watermark this pass)
+# **RE-WALKED over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344, bryan
+# S343/S345/S346).** Ancestry CHECKED (invariant 48); the watermark IS `origin/main`'s tip at
+# generation (MAP-STAMP RULE, primary.map.md).
 #
-# **`.github/`, `package.json`, `bunfig.toml`, `Dockerfile` and every git hook are ZERO-DIFF this
-# window, for a SECOND consecutive window** — verified `git diff --name-only 8863d457..4f034e13 --
-# .github/ package.json` is EMPTY. Every CI step, trigger, packaging, CLI and hook claim below is
-# UNCHANGED and re-verified, not re-derived.
+# **THIS WINDOW BREAKS THE "ZERO-DIFF `.github/` + `bunfig.toml`" STREAK — both moved, and both moves
+# are corrections of things the repo BELIEVED rather than new machinery:**
 #
-# **WHAT MOVED IS `scripts/`, AND THIS TIME IT GAINED THREE WHOLE FILES (688 lines) — none of which
-# is a gate.** Last window `scripts/` moved by three probe-INTEGRITY fixes; this window it moved by
-# three NEW PROBES. The standing fact holds and is now load-bearing twice: `scripts/` is explicitly
-# inside the review floor's **code-bearing** population, because a probe defect is exactly the class
-# the floor exists to catch. **A script that measures the repo is not exempt from being measured.**
+#   · **`bunfig.toml` (#537): the `[test] timeout = 10000` key is DELETED because bun NEVER READ IT.**
+#     `[test].timeout` is not a bunfig key (bun 1.3.14, verified empirically); the effective per-test
+#     budget was ALWAYS bun's default **5000 ms**, locally and in CI. A test that needs longer
+#     declares its own budget at the site (`test(name, fn, { timeout })` / `beforeAll(fn,
+#     { timeout })`). **And bun reports a TIMED-OUT test with the SAME `(fail) <name>` marker an
+#     assertion failure produces** — the flagship-hos browser test's "intermittent assertion red" was
+#     a whole-app compile overrunning 5 s, misread for three sessions. Several test comments still
+#     cite "the bunfig default 10s per-test timeout"; **that number was never in force**
+#     (non-compliance.report.md).
+#   · **`.github/workflows/ci.yml` (#532): the `push` trigger is scoped `branches: [main]`.** An
+#     unscoped `push` ran the gate TWICE per PR — both reporting under the required check name `gate`,
+#     so with any intermittent in the suite a PR needed TWO independent clean runs. Every PR is still
+#     gated via `pull_request`; every push to `main` still runs the post-merge trunk check; branch
+#     protection, the required `gate` check and `enforce_admins=true` are untouched. **Honest cost:**
+#     a branch with NO open PR gets no CI until a PR exists (`workflow_dispatch` re-fires on demand).
 #
-#   · **`scripts/boot.ts` (NEW, 422L, #492 → #493 → #498)** — the executable boot read-set gate +
-#     PICKUP-led digest. **Written because a memory NAVIGATES and does not GATE.** S335 short-booted,
-#     skipping both user-voice ledgers and the per-user profile, and led orientation with a fresh
-#     option-menu instead of the agreed pickup. See its own section below.
-#   · **`scripts/dpa-debt.ts` (NEW, 121L, #507)** — the deliberation-queue probe. **Written because
-#     `handOffs/dpa-queue.md` was the one file the dPA drains and NO boot probe read it**; `dpa-024`
-#     sat `BANKED — UNRUN` for six sessions as a result. See its own section below.
-#   · **`scripts/source-text-regex-census.ts` (NEW, 145L, #513)** — the probe for the S338 post-AST
-#     source-text rule. See its own section below.
+# **`scripts/` gained ONE file — `issue-debt.ts` (261L, #536), the adopter-issues obligation probe —
+# and `browser-baseline.ts` learned to print the WHY beside the WHICH (#537).** Both below.
+# `package.json`, `Dockerfile` (still none) and every git hook are ZERO-DIFF this window — verified
+# `git diff --name-only 4f034e13..c93a692c -- package.json scripts/git-hooks/` is EMPTY.
 #
-# **NONE OF THE THREE IS A CI GATE, AND EACH SAYS SO IN ITS OWN HEADER — that is a repeated design
-# decision, not an omission.** The stated reason is `pa-base` §8's cry-wolf shape: a red-over-backlog
-# gate gets bypassed and then deleted, so a probe that reports beats a gate that is ignored. Two of
-# the three go further and name the DEFAULT as detection: `boot.ts`'s bare run never fails a boot on a
-# network hiccup, and `--check` exits 1 on exactly TWO classes (a MISSING read-set file, an ABSENT
-# PICKUP block) — **a repo merely BEHIND origin is a warning, because that is timing, not a defect.**
-#
-# The gate topology below is unchanged: `gate` stays at 12 steps, `advisory-review` stays DISABLED,
-# `cloud-maps` Stage 2 stays DELETED (**no scheduled map refresh — a map stamp is exactly as old as
-# the last wrap, and this window proved the second half of that sentence: it can also be off-main and
-# bound nothing**), and the wide-corpus emit-differential (#428) remains the standing BY-HAND pre-land
-# gate for codegen.
+# The gate topology below is otherwise unchanged: `gate` stays at 12 steps (ZERO step diff — #532
+# changed WHEN a run starts, never a step), `advisory-review` stays DISABLED, `cloud-maps` Stage 2
+# stays DELETED (**no scheduled map refresh — a map stamp is exactly as old as the last wrap**), and
+# the wide-corpus emit-differential (#428) remains the standing BY-HAND pre-land gate for codegen.
+# ⚠ NEW STANDING CAVEAT for that gate's subject: `compileScrml`'s `inputFiles` ORDER is part of the
+# comparison surface — the same file SET in two orders emits different artifacts
+# (`g-compilescrml-input-order-dependent-emission`, HIGH, open; #528's directory-walk sorts did NOT
+# close it — `scanDirectory` was already terminally sorted). Hold the input order fixed base-vs-head.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -207,6 +206,13 @@ written rots silently.
   self-host have no name-set assertion (`g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion`,
   LOW). **Deliberately NOT in pre-push:** local environments vary far more than CI, and it was
   exactly a local environment difference that made the first recorded baseline wrong.
+  **#537 (S346): every NEW failure name now prints a REASON EXCERPT beside it (`failureReason()`).**
+  The name-set key is deliberately blind to everything but `<suite> > <name>`, and
+  `spawnSync(..., {encoding:"utf8"})` swallows the tier's stdout — so a TIMEOUT (bun: `(fail) <name>`
+  THEN `^ this test timed out after Nms.`) was indistinguishable from an assertion failure (bun:
+  `error:` block THEN `(fail) <name>`) at the gate's output. The excerpt is the nearest preceding
+  `error:` block (capped at 8 lines), the marker's own timing, and any `^`-prefixed line after the
+  marker. **Best-effort and diagnostic-only — NEVER an input to the comparison.**
 - **`scripts/s34-census.ts` — NEW (S310). GATE (`--check-new`), and the §34 oracle otherwise. ⚑ ITS WINDOWS-ONLY `ENOENT` IS FIXED AT #473 (S332-peter) — `fileURLToPath(import.meta.url)`, not `new URL(import.meta.url).pathname`. The four-window-old "this tool is broken" note is RETIRED; it runs on every platform now. Re-executed at `616688ea`: `807 rows (§34 19113..19991, derived) · 1887 source files · 880 conformance cases`.**
   `bun scripts/s34-census.ts [--full] [--json]` classifies every catalogued diagnostic into
   STRUCK / PINNED / IMPL-SITES / DECLARED-AHEAD / RUNTIME-SURFACED / FALSE-CLAIM;
@@ -230,8 +236,8 @@ executable check the boot always runs, not a stronger reminder.
 2. **VERIFIES every Profile-A read-set source EXISTS and is CURRENT.** Both user-voice ledgers and
    the per-user profile are in the set **BY CONSTRUCTION** (that is the S335 miss encoded).
 3. **DELEGATES the mandatory probes to their authoritative scripts** — `review-debt.ts`, `threads.ts`,
-   and `gh` for issues/PRs/runs — **never a reimplementation, so a probe cannot drift from its source
-   of truth.** This is the same rule `dpa-debt.ts` states from the other direction, and it is the
+   `dpa-debt.ts`, **`issue-debt.ts` (NEW #536)**, and `gh` for issues/PRs/runs — **never a
+   reimplementation, so a probe cannot drift from its source of truth.** This is the same rule `dpa-debt.ts` states from the other direction, and it is the
    generalisable one: **a second implementation of a probe is a second thing that can be wrong.**
 4. **EXTRACTS and PRINTS the `## ⏭ NEXT-SESSION PICKUP` block from `hand-off.md` FIRST** — orientation
    leads with the handshake, not a menu.
@@ -259,6 +265,33 @@ Sub-processes via `spawnSync` with explicit arg arrays, no shell.
 
 **SCOPE — additive.** It does NOT touch bryan's boot contract (`.pa-base/profile` · `/boot` ·
 `pa-base.md`); it is wired into peter's `/boot` only, and the shared-contract amendment was ROUTED.
+
+## `scripts/issue-debt.ts` — the adopter-issues obligation probe (NEW #536, S346) — NEVER a gate, never in CI
+
+**The same `pa-base` §10 hole as dpa-debt, in the ISSUES channel: the boot probe READ `gh issue list
+--state open` and the PA STATED the open issues — which discharges nothing.** At S346 three open
+issues (#519, a DX bug, 08-12 · #509, offline/PWA direction · #471, document-workflow direction) had
+been NAMED in the S343/S344/S345/S346 boot reports and acted on by NOBODY: zero comments, no
+`docs/known-gaps.md` entry, no `handOffs/dpa-queue.md` item. Adopter BUGS have a lane (peter); a
+DIRECTION question had none, so it was everyone's and therefore no one's.
+
+**The obligation it asserts: every OPEN adopter issue has a HOME, or it is OWED.** A HOME is one of
+exactly two in-repo artifacts — a `#<n>` mention in `docs/known-gaps.md` (HOMED-GAP) or in
+`handOffs/dpa-queue.md` (HOMED-DPA). OWED prints number · age · comment count · title; **0 comments
+AND >2 days old is the loud shape (SILENT)** — the adopter has heard nothing and the repo holds
+nothing.
+
+**Design constraints, each a named prior scar:** DETECTION NOT CONTROL (exit 0 always in default
+mode; `--check` is for the PA's hand, NEVER CI — §8 cry-wolf); ANCHORED MATCH (`#51` must not match
+`#519`; the `issues/<n>` URL form counts as a mention — the repeating false-positive class: boot's
+PICKUP `indexOf` #492, the S337 ledger regex, dpa-debt's status cell); PURE CLASSIFIER (`classify()`
+over strings + a fixed `now` — no gh, no fs, no clock — pinned by `unit/issue-debt.test.js` without a
+network; `import.meta.main` gates the CLI); SELF-REPORTED TOTALS NEVER HEAD-CUT (`--limit`
+auto-widens ×4 to a ceiling and prints `SCAN MAY BE TRUNCATED` if still full — §8 truncated probe);
+DETERMINISTIC AGE (`--now=<ISO>`); WINDOWS-FIRST (`fileURLToPath`, `spawnSync` arg arrays, no shell).
+
+**Modes.** bare = boot-probe report (exit 0) · `--check` = exit 1 iff any OWED · `--json` ·
+`--now=<ISO>` · `--repo=owner/name` · `--gaps=<path> --queue=<path>` · `--limit=N`.
 
 ## `scripts/dpa-debt.ts` — the deliberation-queue probe (NEW #507) — NEVER a gate, never in CI
 
@@ -474,11 +507,11 @@ extension: `<base>.client.js` → `<base>.client.<hash>.js`, `<base>.css` → `<
 Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/src/commands/build.js`
 (`generateServerEntry`), `compiler/src/commands/dev.js` (`devCacheHeaders`).
 
-## CI/CD Pipeline  [.github/workflows/ci.yml] — ONE NEW TRIGGER THIS WINDOW, ZERO step changes
+## CI/CD Pipeline  [.github/workflows/ci.yml] — the `push` trigger SCOPED to `main` this window (#532), ZERO step changes
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 
 **gate** — BLOCKING (the merge-gate), **12 steps** (+2 this window). checkout **(`fetch-depth: 0`, NEW)** → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → **`bun scripts/browser-baseline.ts --check` (NEW, S313 — bryan RULED promote)** → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (NEW, the SPEC §34.0 row-provenance gate)**.
-Triggers: push (paths-ignore: `**.md`, `handOffs/**`, `docs/**`), pull_request, **and `workflow_dispatch: {}` (NEW #454)**. `concurrency: group ci-${{ref}}, cancel-in-progress: true`. **Gate step COUNT is unchanged at 12 — #454 added a way to START a run, not a step and not a way to skip one.**
+Triggers: **push `branches: [main]` (NEW #532, S345 — an unscoped `push` ran the gate TWICE per PR under the one required check name, doubling intermittent exposure; paths-ignore: `**.md`, `handOffs/**`, `docs/**` unchanged)**, pull_request, and `workflow_dispatch: {}` (#454). **A branch with no open PR now gets NO CI until a PR exists — the standard trade; `workflow_dispatch` re-fires any post-#454 ref on demand.** `concurrency: group ci-${{ref}}, cancel-in-progress: true`. **Gate step COUNT is unchanged at 12 — #454 added a way to START a run, not a step and not a way to skip one.**
 
 ### `workflow_dispatch` — the manual re-fire lever (NEW #454). Read the two constraints BEFORE you need it.
 
