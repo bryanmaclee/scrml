@@ -1040,7 +1040,17 @@ export async function runDev(args) {
   // Warn at most once about the watch limit so a degraded watcher does not
   // spam the console on every failed watch attempt.
   let watchLimitWarned = false;
+  // Debounce quiet period: one editor save can fire several directory events;
+  // wait for a short quiet window so one save is one recompile, not several.
+  const WATCH_DEBOUNCE_QUIET_MS = 100;
+  // MAX-WAIT bound on that debounce: the stat sweep is guaranteed to run
+  // within this long of the OLDEST un-swept event, however fast events keep
+  // arriving — bounds worst-case hot-reload latency under sibling churn.
+  const WATCH_DEBOUNCE_MAX_WAIT_MS = 250;
   let debounceTimer = null;
+  // Timestamp of the oldest event not yet covered by a stat sweep; 0 = none
+  // pending. Set on the first event of a burst, cleared whenever a sweep runs.
+  let oldestPendingEventAt = 0;
 
   /**
    * Stat snapshot of one source. `null` means absent/unreadable — a real
@@ -1123,52 +1133,90 @@ export async function runDev(args) {
   }
 
   function scheduleRecompile(_eventType, _filename) {
-    // NO filename filter here: an editor's atomic save is reported under its
-    // TMP file's name (e.g. `.entry.scrml.tmp`), and a directory event may
-    // carry no name at all. The debounced pass below stats the WATCHED source
-    // set and recompiles only when one of them actually changed — sibling-file
-    // churn in a source directory (or the dist/ subdirectory appearing) stats
-    // clean and is skipped silently.
+    // NO filename filter here — deliberately. An editor's atomic save is
+    // reported under its TMP file's name (e.g. `.entry.scrml.tmp`), and a
+    // directory event may carry no name at all. A filter would have to
+    // enumerate every shape an event's filename can take (real name, TMP
+    // name, null, per-platform variance) — an enumerate-forever list. The
+    // stat sweep (sweepAndRecompile) is immune to filename shape entirely:
+    // it stats the WATCHED source set and recompiles only when one of them
+    // actually changed — sibling-file churn in a source directory (or the
+    // dist/ subdirectory appearing) stats clean and is skipped silently.
+    //
+    // The debounce over that sweep is MAX-WAIT-BOUNDED. A plain debounce
+    // (clearTimeout + re-arm on every event) is unbounded: with no filename
+    // filter, ANY sibling writing faster than the quiet period (an appended
+    // log, a test watcher, editor swap/backup churn) re-arms it forever and
+    // the sweep never runs — hot-reload starves (PA-measured S346: a real
+    // edit under 40 ms sibling churn was NEVER detected). The max-wait
+    // guarantees the sweep runs within WATCH_DEBOUNCE_MAX_WAIT_MS of the
+    // oldest un-swept event, bounding worst-case latency by construction —
+    // which is why max-wait beats a filter.
+    const now = Date.now();
+    if (oldestPendingEventAt === 0) oldestPendingEventAt = now;
+    if (now - oldestPendingEventAt >= WATCH_DEBOUNCE_MAX_WAIT_MS) {
+      // The oldest pending event has waited the full bound: sweep NOW instead
+      // of re-arming. Under continuous churn this fires once per max-wait
+      // period, and the sweep early-returns when no watched source changed,
+      // so the steady-state cost is one stat pass per period — not a compile.
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+      oldestPendingEventAt = 0;
+      sweepAndRecompile();
+      return;
+    }
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(async () => {
-      let sourceChanged = false;
-      for (const f of watchedFiles) {
-        // No short-circuit: EVERY changed file's snapshot must be refreshed
-        // this pass, or the leftovers re-trigger a recompile on the next
-        // unrelated directory event.
-        if (snapshotChanged(f)) sourceChanged = true;
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      oldestPendingEventAt = 0;
+      sweepAndRecompile();
+    }, WATCH_DEBOUNCE_QUIET_MS);
+  }
+
+  /**
+   * The stat sweep + recompile behind the debounce: stat every watched source
+   * against its snapshot; if none changed this was sibling churn — return
+   * silently. Otherwise recompile, extend the watch set with newly gathered
+   * imports, reload routes + server config, and signal connected browsers.
+   */
+  async function sweepAndRecompile() {
+    let sourceChanged = false;
+    for (const f of watchedFiles) {
+      // No short-circuit: EVERY changed file's snapshot must be refreshed
+      // this pass, or the leftovers re-trigger a recompile on the next
+      // unrelated directory event.
+      if (snapshotChanged(f)) sourceChanged = true;
+    }
+    if (!sourceChanged) return;
+    console.log(`[dev] Change detected — recompiling...`);
+    const recomputeGathered = { files: [] };
+    const { success, outputDir: recompileOutputDir } = runOnce(opts, recomputeGathered);
+    // BUG-1 fix: a recompile may have pulled in NEW imports. Because we now
+    // watch individual files (not dirs), we can start watches on the newly
+    // gathered sources immediately — no restart needed.
+    for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
+      watchFile(f);
+    }
+    if (success) {
+      // Reload server routes to pick up any changes to server functions.
+      await loadServerRoutes(recompileOutputDir || serveDir);
+      // Reload the Bun.serve() instance to update WebSocket handlers if they changed.
+      // server.reload() updates the config in-place, preserving existing connections.
+      try {
+        server.reload(buildServeConfig(opts, serveDir));
+      } catch {
+        // Fallback: stop and restart (drops SSE connections, browser auto-reconnects)
+        server.stop(true);
+        server = Bun.serve(buildServeConfig(opts, serveDir));
       }
-      if (!sourceChanged) return;
-      console.log(`[dev] Change detected — recompiling...`);
-      const recomputeGathered = { files: [] };
-      const { success, outputDir: recompileOutputDir } = runOnce(opts, recomputeGathered);
-      // BUG-1 fix: a recompile may have pulled in NEW imports. Because we now
-      // watch individual files (not dirs), we can start watches on the newly
-      // gathered sources immediately — no restart needed.
-      for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
-        watchFile(f);
+      // C18 (§38.6): refresh broadcast() handle after reload/restart.
+      globalThis._scrml_active_server = server;
+      // Signal all connected browsers to reload.
+      broadcastReload();
+      if (sseClients.size > 0) {
+        console.log(`[dev] Signalled ${sseClients.size} browser(s) to reload`);
       }
-      if (success) {
-        // Reload server routes to pick up any changes to server functions.
-        await loadServerRoutes(recompileOutputDir || serveDir);
-        // Reload the Bun.serve() instance to update WebSocket handlers if they changed.
-        // server.reload() updates the config in-place, preserving existing connections.
-        try {
-          server.reload(buildServeConfig(opts, serveDir));
-        } catch {
-          // Fallback: stop and restart (drops SSE connections, browser auto-reconnects)
-          server.stop(true);
-          server = Bun.serve(buildServeConfig(opts, serveDir));
-        }
-        // C18 (§38.6): refresh broadcast() handle after reload/restart.
-        globalThis._scrml_active_server = server;
-        // Signal all connected browsers to reload.
-        broadcastReload();
-        if (sseClients.size > 0) {
-          console.log(`[dev] Signalled ${sseClients.size} browser(s) to reload`);
-        }
-      }
-    }, 100);
+    }
   }
 
   // Register each gathered source file (entry + transitive imports): one
