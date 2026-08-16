@@ -311,7 +311,85 @@ async function loadServerRoutes(outputDir) {
 }
 
 /**
+ * Turn an exception thrown OUT of `compileScrml` into one diagnostic in the
+ * shape the fetch handler already renders (`formatDiagnostic` /
+ * `buildCompileErrorResponse`): `{ stage, code, message, filePath, line, column }`.
+ *
+ * Two classes, framed differently for the adopter:
+ *
+ *  - a FILESYSTEM error on a source (`ENOENT` when an entry was deleted or
+ *    renamed under the watcher, `EACCES`, `EISDIR`, …; recognisable by the
+ *    Node system-error fields `syscall`/`errno`/`path`) — this is the
+ *    adopter's tree, not a compiler bug: keep the OS `code` (`ENOENT`) as the
+ *    diagnostic code, name the path, and say how to recover;
+ *  - ANYTHING ELSE (a TypeError deep in a stage, an escaped CGError, …) — a
+ *    COMPILER DEFECT: the compiler is supposed to RETURN diagnostics, never
+ *    throw, so say so plainly (the `validate-emit.ts` "This is a compiler
+ *    defect … please report it" framing) and carry the top of the stack so
+ *    the report is actionable. The code is deliberately un-prefixed
+ *    (`INTERNAL-COMPILER-ERROR`, not `E-…`) so it cannot be mistaken for a
+ *    §34-registered diagnostic; an escaped error that already carries a
+ *    string `code` keeps it.
+ *
+ * Exported so the gated unit tier can pin the mapping without a live compile.
+ *
+ * @param {unknown} err  whatever `compileScrml` threw
+ * @returns {{ stage: string, code: string, message: string, filePath: string, line?: number, column?: number }}
+ */
+export function compileThrowDiagnostic(err) {
+  const e = (err && typeof err === "object") ? /** @type {any} */ (err) : { message: String(err) };
+  const rawMessage = typeof e.message === "string" && e.message ? e.message : String(err);
+  const isFsError = typeof e.code === "string"
+    && (typeof e.syscall === "string" || typeof e.errno === "number" || typeof e.path === "string");
+
+  if (isFsError) {
+    const path = typeof e.path === "string" ? e.path : "";
+    return {
+      stage: "DEV",
+      code: e.code,
+      message:
+        `${rawMessage}\n` +
+        `  A source file could not be read while scrml dev was watching it (deleted, renamed, or unreadable). ` +
+        `Restore it — or restart scrml dev with the new path — and this page reloads automatically. ` +
+        `scrml dev is not serving a partial/stale bundle.`,
+      filePath: path,
+      line: undefined,
+      column: undefined,
+    };
+  }
+
+  const stackLines = typeof e.stack === "string" ? e.stack.split("\n") : [];
+  // Drop the leading "Name: message" line (already in the message) and keep
+  // the top frames — enough to locate the throw, not the whole event loop.
+  const frames = stackLines.filter((l) => /^\s+at\s/.test(l)).slice(0, 8);
+  const name = typeof e.name === "string" && e.name ? e.name : "Error";
+  return {
+    stage: "DEV",
+    code: typeof e.code === "string" && e.code ? e.code : "INTERNAL-COMPILER-ERROR",
+    message:
+      `${name}: ${rawMessage}\n` +
+      `  This is a compiler defect (the compiler threw instead of reporting a diagnostic). Please report it. ` +
+      `scrml dev is not serving a partial/stale bundle.` +
+      (frames.length ? `\n${frames.join("\n")}` : ""),
+    filePath: e.filePath || e.file || e.span?.file || "",
+    line: e.line ?? e.span?.line,
+    column: e.column ?? e.col ?? e.span?.col,
+  };
+}
+
+/**
  * Run a single compilation pass.
+ *
+ * Contract (S346, g-dev-compile-throw-fail-open): `runOnce` NEVER throws. A
+ * throw out of `compileScrml` is a compile FAILURE like any other — it is
+ * routed through the SAME `noteCompileResult` / `compileFailure` path #518
+ * built for the returns-diagnostics case, so the fetch handler serves the
+ * real error at the request. Before this, the throw unwound past
+ * `noteCompileResult` into the async debounce callback in `scheduleRecompile`
+ * (an unhandled promise rejection that Bun merely logs while cli.js's
+ * top-level `await runDev()` is pending), `compileFailure` stayed `null`, and
+ * dev kept serving the last-good/partial bundle at HTTP 200 for a tree that no
+ * longer compiled — fail-OPEN, the exact class #518 closed, one path over.
  *
  * @param {object} opts
  * @returns {{ success: boolean, outputDir: string }}
@@ -326,21 +404,37 @@ function runOnce(opts, gatheredOut) {
     console.error(line);
   }
 
-  const result = compileScrml({
-    inputFiles,
-    outputDir,
-    verbose,
-    convertLegacyCss,
-    embedRuntime,
-    gather,
-    write: true,
-    log: console.log,
-    // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml default.
-    validateEmit,
-    // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
-    // `classic` keeps the shared runtime byte-identical to pre-arc output.
-    moduleFormat,
-  });
+  let result;
+  try {
+    result = compileScrml({
+      inputFiles,
+      outputDir,
+      verbose,
+      convertLegacyCss,
+      embedRuntime,
+      gather,
+      write: true,
+      log: console.log,
+      // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml default.
+      validateEmit,
+      // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
+      // `classic` keeps the shared runtime byte-identical to pre-arc output.
+      moduleFormat,
+    });
+  } catch (err) {
+    // Fail CLOSED: a throw is a failed compile. Record it exactly like a
+    // returned fatal diagnostic so the fetch handler serves THIS error (not a
+    // stale bundle) until the next green pass clears it.
+    const diag = compileThrowDiagnostic(err);
+    noteCompileResult({ errors: [diag], warnings: [] });
+    console.error(`[dev] Compile threw — treating it as a compile failure (the error is served at every request; no stale bundle):`);
+    const loc = diag.line ? `:${diag.line}${diag.column ? `:${diag.column}` : ""}` : "";
+    console.error(`  [${diag.stage}] ${diag.filePath}${loc} ${diag.code}: ${diag.message}`);
+    // Mirror compileScrml's own default (api.js: dist/ next to the first
+    // input) so the caller's serve-dir resolution is unchanged on this path.
+    const fallbackOut = outputDir || (inputFiles.length > 0 ? join(dirname(inputFiles[0]), "dist") : "");
+    return { success: false, outputDir: fallbackOut };
+  }
 
   // W2 B5: surface the gathered .scrml file set so the watcher can extend
   // dirsToWatch to include any sibling-directory imports.
@@ -899,97 +993,244 @@ export async function runDev(args) {
   // server.reload() since reload() returns the same server instance.
   globalThis._scrml_active_server = server;
 
-  console.log(`[dev] Serving ${serveDir} at http://localhost:${opts.port}`);
+  // Log the port Bun actually BOUND (`server.port`), not the requested one:
+  // `--port 0` asks the OS for an ephemeral port, and `opts.port` would print
+  // `localhost:0`. Harnesses (and humans) read the real port back from here.
+  console.log(`[dev] Serving ${serveDir} at http://localhost:${server.port}`);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
 
-  // BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): watch the
-  // bounded set of gathered `.scrml` source files DIRECTLY (one fs.watch per
-  // real source) instead of `fs.watch(dirname(input), {recursive:true})`.
+  // BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01), reworked S346
+  // (g-dev-watcher-dies-on-delete-rename-permanent-500): watch each DISTINCT
+  // directory that contains a gathered `.scrml` source, NON-recursively — one
+  // `fs.watch(dir)` per source directory — plus a per-file stat snapshot
+  // (mtime/size/inode) of every watched source.
   //
-  // The recursive dir-watch registered an inotify watch for every file in the
-  // entry's directory tree — including `node_modules`, sibling repos, `.git`,
-  // and `.claude/worktrees` when run from a large parent directory — blowing
-  // `fs.inotify.max_user_watches` and crashing the server with an unhandled
-  // ENOSPC. Per-file watching is bounded by source count and never touches
-  // those trees (fs.watch has no ignore-pattern support, so per-file is the
-  // robust exclusion mechanism).
+  // Why not per-FILE watches (the original BUG-1 shape): a per-file inotify
+  // watch follows the INODE, so the file being deleted, renamed away, or
+  // replaced by an editor's atomic save (write tmp + rename over) fires at
+  // most one final event and is DEAD thereafter — no recompile ever fires for
+  // that path again. Post-#518 (dev correctly refuses to serve a stale bundle
+  // on a failed compile) a dead watch upgraded that from "stale app, no hot
+  // reload" to a PERMANENT 500 on a project that has since been fixed on
+  // disk, until restart. A non-recursive DIRECTORY watch survives all of
+  // those mutations (verified on this platform: Bun fs.watch/inotify reports
+  // dir-level rename/change events for rm, re-create, vim-style rename, and
+  // atomic save — the atomic save is reported under the TMP file's name,
+  // which is why change detection below uses the stat snapshots rather than
+  // the reported filename).
   //
-  // `watchedFiles` tracks which absolute source paths already have a live
-  // watch so the re-gather pass can add watches for NEW imports without
-  // double-watching existing ones.
+  // Why this does NOT reintroduce the BUG-1 ENOSPC crash: BUG-1 was
+  // `fs.watch(dir, {recursive:true})` registering an inotify watch for EVERY
+  // file under a large parent tree (node_modules, .git, sibling repos). A
+  // non-recursive dir watch is ONE inotify watch per distinct source
+  // directory — bounded by the source set and strictly fewer watches than
+  // the per-file scheme it replaces. Output written under `dist/` is a
+  // SUBdirectory and never fires the parent's non-recursive watch, so
+  // compiling cannot re-trigger the watcher.
+  //
+  // `watchedFiles` tracks which absolute source paths are registered so the
+  // re-gather pass can add NEW imports without double-registering;
+  // `watchedDirs` tracks which directories already carry the single dir
+  // watch; `fileSnapshots` carries the per-file stat snapshot that decides
+  // whether a directory event was actually a source change.
   const watchedFiles = new Set();
+  const watchedDirs = new Set();
+  /** @type {Map<string, { mtimeMs: number, size: number, ino: number } | null>} */
+  const fileSnapshots = new Map();
   // Warn at most once about the watch limit so a degraded watcher does not
   // spam the console on every failed watch attempt.
   let watchLimitWarned = false;
+  // Debounce quiet period: one editor save can fire several directory events;
+  // wait for a short quiet window so one save is one recompile, not several.
+  const WATCH_DEBOUNCE_QUIET_MS = 100;
+  // MAX-WAIT bound on that debounce: the stat sweep is guaranteed to run
+  // within this long of the OLDEST un-swept event, however fast events keep
+  // arriving — bounds worst-case hot-reload latency under sibling churn.
+  const WATCH_DEBOUNCE_MAX_WAIT_MS = 250;
   let debounceTimer = null;
+  // Timestamp of the oldest event not yet covered by a stat sweep; 0 = none
+  // pending. Set on the first event of a burst, cleared whenever a sweep runs.
+  let oldestPendingEventAt = 0;
 
   /**
-   * Start watching a single source file. Wrapped so a watch failure (e.g.
-   * ENOSPC at the inotify limit) degrades gracefully — the dev server keeps
-   * serving with hot-reload disabled rather than crashing.
+   * Stat snapshot of one source. `null` means absent/unreadable — a real
+   * state (the deleted half of delete→restore), not an error.
    *
-   * @param {string} file absolute `.scrml` path
+   * `ctimeMs` is in the tuple deliberately (S346 review F1). {mtimeMs,size,ino}
+   * alone is EVASIBLE: an in-place same-length write followed by
+   * `utimesSync(f, atime, mtime)` restores mtime EXACTLY (measured:
+   * 1786895065901.5632 both sides, same size, same inode) and the edit is then
+   * served STALE at 200 — the silent class #518 closed, reintroduced. POSIX
+   * exposes no API to set ctime, and any content or metadata write moves it
+   * (the same probe: ctime 1786895065901.5632 -> 1786895065942.566), so adding
+   * it closes the evasion by construction rather than by enumerating writers.
+   *
+   * @param {string} file absolute path
+   * @returns {{ mtimeMs: number, ctimeMs: number, size: number, ino: number } | null}
    */
-  function watchFile(file) {
-    if (watchedFiles.has(file)) return;
-    const warnLimit = (err) => {
-      if (watchLimitWarned) return;
-      watchLimitWarned = true;
-      if (err && err.code === "ENOSPC") {
-        console.error(`[dev] file-watch limit hit (fs.inotify.max_user_watches) — hot-reload disabled; raise the limit with: sudo sysctl fs.inotify.max_user_watches=524288`);
-      } else {
-        console.error(`[dev] file watch failed (${err && err.message ? err.message : err}) — hot-reload may be degraded; server still serving`);
-      }
-    };
+  function snapshotOf(file) {
     try {
-      const w = watch(file, (eventType, filename) => scheduleRecompile(eventType, filename || file));
-      // A watcher `error` event (e.g. ENOSPC, file removed) must NEVER crash
-      // the server. Warn once and keep serving.
+      const st = statSync(file);
+      return { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, ino: Number(st.ino) || 0 };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Did `file` change since its recorded snapshot? Present↔absent counts as a
+   * change (delete AND restore both recompile); so does a new inode with
+   * identical mtime/size (atomic save). Updates the snapshot when changed so
+   * one edit is one recompile, not an event-storm of them.
+   *
+   * @param {string} file absolute path
+   * @returns {boolean}
+   */
+  function snapshotChanged(file) {
+    const prev = fileSnapshots.get(file);
+    const cur = snapshotOf(file);
+    const changed = (prev === null || prev === undefined) !== (cur === null)
+      || (prev != null && cur !== null
+          && (prev.mtimeMs !== cur.mtimeMs || prev.ctimeMs !== cur.ctimeMs
+              || prev.size !== cur.size || prev.ino !== cur.ino));
+    if (changed) fileSnapshots.set(file, cur);
+    return changed;
+  }
+
+  const warnLimit = (err) => {
+    if (watchLimitWarned) return;
+    watchLimitWarned = true;
+    if (err && err.code === "ENOSPC") {
+      console.error(`[dev] file-watch limit hit (fs.inotify.max_user_watches) — hot-reload disabled; raise the limit with: sudo sysctl fs.inotify.max_user_watches=524288`);
+    } else {
+      console.error(`[dev] file watch failed (${err && err.message ? err.message : err}) — hot-reload may be degraded; server still serving`);
+    }
+  };
+
+  /**
+   * Ensure the single non-recursive watch on one source DIRECTORY. Wrapped so
+   * a watch failure (e.g. ENOSPC at the inotify limit) degrades gracefully —
+   * the dev server keeps serving with hot-reload disabled rather than
+   * crashing.
+   *
+   * @param {string} dir absolute directory path
+   */
+  function watchDir(dir) {
+    if (watchedDirs.has(dir)) return;
+    try {
+      const w = watch(dir, (eventType, filename) => scheduleRecompile(eventType, filename));
+      // A watcher `error` event (e.g. ENOSPC, the directory itself removed)
+      // must NEVER crash the server. Warn once and keep serving.
       w.on("error", (err) => warnLimit(err));
-      watchedFiles.add(file);
+      watchedDirs.add(dir);
     } catch (err) {
       // Synchronous watch() failure (also ENOSPC on some platforms).
       warnLimit(err);
     }
   }
 
-  function scheduleRecompile(eventType, filename) {
-    if (filename && !filename.endsWith(".scrml")) return;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(async () => {
-      console.log(`[dev] Change detected — recompiling...`);
-      const recomputeGathered = { files: [] };
-      const { success, outputDir: recompileOutputDir } = runOnce(opts, recomputeGathered);
-      // BUG-1 fix: a recompile may have pulled in NEW imports. Because we now
-      // watch individual files (not dirs), we can start watches on the newly
-      // gathered sources immediately — no restart needed.
-      for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
-        watchFile(f);
-      }
-      if (success) {
-        // Reload server routes to pick up any changes to server functions.
-        await loadServerRoutes(recompileOutputDir || serveDir);
-        // Reload the Bun.serve() instance to update WebSocket handlers if they changed.
-        // server.reload() updates the config in-place, preserving existing connections.
-        try {
-          server.reload(buildServeConfig(opts, serveDir));
-        } catch {
-          // Fallback: stop and restart (drops SSE connections, browser auto-reconnects)
-          server.stop(true);
-          server = Bun.serve(buildServeConfig(opts, serveDir));
-        }
-        // C18 (§38.6): refresh broadcast() handle after reload/restart.
-        globalThis._scrml_active_server = server;
-        // Signal all connected browsers to reload.
-        broadcastReload();
-        if (sseClients.size > 0) {
-          console.log(`[dev] Signalled ${sseClients.size} browser(s) to reload`);
-        }
-      }
-    }, 100);
+  /**
+   * Register one source file for change detection: record its stat snapshot
+   * and make sure its containing directory is watched. Idempotent.
+   *
+   * @param {string} file absolute `.scrml` path (POSIX-canonical)
+   */
+  function watchFile(file) {
+    if (watchedFiles.has(file)) return;
+    watchedFiles.add(file);
+    fileSnapshots.set(file, snapshotOf(file));
+    watchDir(dirname(file));
   }
 
-  // Start a watch on each gathered source file (entry + transitive imports).
+  function scheduleRecompile(_eventType, _filename) {
+    // NO filename filter here — deliberately. An editor's atomic save is
+    // reported under its TMP file's name (e.g. `.entry.scrml.tmp`), and a
+    // directory event may carry no name at all. A filter would have to
+    // enumerate every shape an event's filename can take (real name, TMP
+    // name, null, per-platform variance) — an enumerate-forever list. The
+    // stat sweep (sweepAndRecompile) is immune to filename shape entirely:
+    // it stats the WATCHED source set and recompiles only when one of them
+    // actually changed — sibling-file churn in a source directory (or the
+    // dist/ subdirectory appearing) stats clean and is skipped silently.
+    //
+    // The debounce over that sweep is MAX-WAIT-BOUNDED. A plain debounce
+    // (clearTimeout + re-arm on every event) is unbounded: with no filename
+    // filter, ANY sibling writing faster than the quiet period (an appended
+    // log, a test watcher, editor swap/backup churn) re-arms it forever and
+    // the sweep never runs — hot-reload starves (PA-measured S346: a real
+    // edit under 40 ms sibling churn was NEVER detected). The max-wait
+    // guarantees the sweep runs within WATCH_DEBOUNCE_MAX_WAIT_MS of the
+    // oldest un-swept event, bounding worst-case latency by construction —
+    // which is why max-wait beats a filter.
+    const now = Date.now();
+    if (oldestPendingEventAt === 0) oldestPendingEventAt = now;
+    if (now - oldestPendingEventAt >= WATCH_DEBOUNCE_MAX_WAIT_MS) {
+      // The oldest pending event has waited the full bound: sweep NOW instead
+      // of re-arming. Under continuous churn this fires once per max-wait
+      // period, and the sweep early-returns when no watched source changed,
+      // so the steady-state cost is one stat pass per period — not a compile.
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+      oldestPendingEventAt = 0;
+      sweepAndRecompile();
+      return;
+    }
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      oldestPendingEventAt = 0;
+      sweepAndRecompile();
+    }, WATCH_DEBOUNCE_QUIET_MS);
+  }
+
+  /**
+   * The stat sweep + recompile behind the debounce: stat every watched source
+   * against its snapshot; if none changed this was sibling churn — return
+   * silently. Otherwise recompile, extend the watch set with newly gathered
+   * imports, reload routes + server config, and signal connected browsers.
+   */
+  async function sweepAndRecompile() {
+    let sourceChanged = false;
+    for (const f of watchedFiles) {
+      // No short-circuit: EVERY changed file's snapshot must be refreshed
+      // this pass, or the leftovers re-trigger a recompile on the next
+      // unrelated directory event.
+      if (snapshotChanged(f)) sourceChanged = true;
+    }
+    if (!sourceChanged) return;
+    console.log(`[dev] Change detected — recompiling...`);
+    const recomputeGathered = { files: [] };
+    const { success, outputDir: recompileOutputDir } = runOnce(opts, recomputeGathered);
+    // BUG-1 fix: a recompile may have pulled in NEW imports. Because we now
+    // watch individual files (not dirs), we can start watches on the newly
+    // gathered sources immediately — no restart needed.
+    for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
+      watchFile(f);
+    }
+    if (success) {
+      // Reload server routes to pick up any changes to server functions.
+      await loadServerRoutes(recompileOutputDir || serveDir);
+      // Reload the Bun.serve() instance to update WebSocket handlers if they changed.
+      // server.reload() updates the config in-place, preserving existing connections.
+      try {
+        server.reload(buildServeConfig(opts, serveDir));
+      } catch {
+        // Fallback: stop and restart (drops SSE connections, browser auto-reconnects)
+        server.stop(true);
+        server = Bun.serve(buildServeConfig(opts, serveDir));
+      }
+      // C18 (§38.6): refresh broadcast() handle after reload/restart.
+      globalThis._scrml_active_server = server;
+      // Signal all connected browsers to reload.
+      broadcastReload();
+      if (sseClients.size > 0) {
+        console.log(`[dev] Signalled ${sseClients.size} browser(s) to reload`);
+      }
+    }
+  }
+
+  // Register each gathered source file (entry + transitive imports): one
+  // stat snapshot per file + one non-recursive watch per distinct directory.
   for (const file of deriveWatchFiles(opts, gatheredOut.files)) {
     watchFile(file);
   }
