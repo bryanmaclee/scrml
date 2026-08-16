@@ -86,6 +86,15 @@ export function enumerateScrmlCorpus() {
       });
     }
   }
+  // Deterministic order (S347-peter): walkDir yields FILESYSTEM order, so
+  // consumers that sample or index by position (e.g. the F3 §6 "every Nth file"
+  // exemplar audit) tested a DIFFERENT set of files per machine / runner-image —
+  // a silent coverage-nondeterminism hazard (same class as the compileScrml
+  // input-order fix). Sort by the POSIX-normalized `relpath` (code-unit, NOT
+  // locale `localeCompare`) so Windows and Linux enumerate identically, matching
+  // the Linux-generated allowlist. Allowlist membership is relpath-KEYED, so this
+  // reorders reporting only — it does not change any parity pass/fail.
+  out.sort((a, b) => (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0));
   return out;
 }
 
@@ -96,11 +105,15 @@ export function enumerateScrmlCorpus() {
 export function enumerateBenchCorpus() {
   const out = [];
   walkDir(BENCH_DIR, ".js", out);
-  return out.map((f) => ({
-    source: "bench",
-    path: f,
-    relpath: relative(REPO_ROOT, f).replaceAll("\\", "/"),
-  }));
+  return out
+    .map((f) => ({
+      source: "bench",
+      path: f,
+      relpath: relative(REPO_ROOT, f).replaceAll("\\", "/"),
+    }))
+    // Deterministic order (S347-peter) — same rationale as enumerateScrmlCorpus:
+    // sort by POSIX relpath so the bench enumeration is machine/OS-stable.
+    .sort((a, b) => (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0));
 }
 
 /**
