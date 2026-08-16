@@ -34,3 +34,19 @@ Append-only. Worktree: /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/ag
 - Post-fix: pin 1 GREEN (1 pass, 1.1 s incl. server startup); pin 2 GREEN (3 pass);
   PA harness re-run => TIME-TO-DETECT: 89 ms (sweep phase-dependent, bound ~290 ms worst
   case = 250 + one 40 ms churn interval). Commands tier full: 188 pass 0 fail (10 files).
+
+## 3. Verification sweep
+
+- Reviewer-figure adjudication: our runs reproduce STARVATION (NOT DETECTED within
+  12000 ms), not the dead reviewer's bounded 12,168 ms. Command:
+  `bun $SCRATCH/devchurn-a87/run.mjs $WORKTREE_ROOT $SCRATCH/devchurn-a87/app`.
+  (12,168 ms is consistent with misreading the harness's own 12 s give-up line as a
+  detection time.)
+- `-o` = source-dir loop check: 30 s run with `--output` = the watched source dir,
+  ephemeral port. SERVER-UP: true; INITIAL-COMPILE-LINES: 1; RECOMPILES: 0;
+  TOTAL COMPILES: 1 — no loop (emit-writes stat clean and the sweep early-returns).
+- Contract gate `bun test compiler/tests/{unit,integration,conformance}`:
+  22356 pass / 70 skip / 1 todo / 0 fail (22427 tests, 1228 files, 233 s).
+- Commands tier `bun test compiler/tests/commands`: 188 pass / 0 fail (10 files).
+- Fail-closed half untouched (out of scope): runOnce try/catch -> noteCompileResult
+  intact; api.js untouched; docs/known-gaps.md untouched.
