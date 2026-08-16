@@ -3414,16 +3414,24 @@ function buildPerFileEscalationServerOnlyBindings(
  * (The compile was NOT exit 0 there — codegen's E-ASYNC-STDLIB-IN-SYNC-CALLBACK
  * backstop refuses the async CALL in a default — but the leaking artifact set was
  * written beside the error, and a bare-reference default `h = hashPassword` has
- * no backstop at all.) The scan root is now `[body, ...fnDeclParamDefaultRoots]`,
- * in this limb's own raw-subtree mode — text-scan, the direct limb's deliberate
- * fail-closed choice, so a name inside a string literal in a DEFAULT does fire
- * (the same accepted over-fire as escape-hatch raw text, same direction: a
- * relocation, never a leak). §12.2 Trigger 3's rule is "a server-only stdlib
- * import escalates the function that uses it", and a default IS the function
- * using it. This is a placement change for that shape (the call now runs
- * server-side); its direction of change is measured separately from B1's.
- * Nested declarations' defaults are reached by the scanner's own
- * `function-decl` branch (shared with the hop edge set — one predicate).
+ * no backstop at all.) The scan root is now `[body, ...fnDeclParamDefaultRoots]`.
+ * §12.2 Trigger 3's rule is "a server-only stdlib import escalates the function
+ * that uses it", and a default IS the function using it. This is a placement
+ * change for that shape (the call now runs server-side); its direction of change
+ * is measured separately from B1's. Nested declarations' defaults are reached by
+ * the scanner's own `function-decl` branch (shared with the hop edge set — one
+ * predicate).
+ *
+ * AND A DEFAULT IS SCANNED STRUCTURALLY, NOT BY TEXT (round 7, B-1 — CORRECTING
+ * round 6). Round 6 handed each default in as an `escape-hatch`, which this limb
+ * text-scans. §12.4 is normative and unamended — a function SHALL NOT be
+ * classified on identifier names inside string-literal contents — and the
+ * escalation name set here is ordinary English (`join`, `resolve`, `basename`,
+ * `dirname`, `env`, `cwd`, `exit`, `platform`), so
+ * `function greet(msg = "please join us")` beside `import { join } from
+ * 'scrml:path'` relocated `greet` to the server AND DROPPED THE DEFAULT, at exit
+ * 0 with no diagnostic. Defaults now arrive as `param-default` roots; see
+ * `scanParamDefaultRaw` for the rule and the six measured shapes.
  */
 function collectServerOnlyBindingModules(
   fnNode: FunctionDeclNode,
@@ -3558,18 +3566,27 @@ type RawSubtreeMode = "text-scan" | "structural";
  * clean scan. So a trailing-content result is re-parsed as STATEMENTS, which
  * covers the whole text; the partial expression AST is used only if the statement
  * parse also fails, since a partial structural answer still beats a text guess.
+ *
+ * `parsed` IS REPORTED SEPARATELY FROM `names`, AND THE DISTINCTION IS
+ * LOAD-BEARING (round 7, B-1). An empty `names` has two causes that a caller on a
+ * CONFIDENTIALITY boundary must not conflate: "parsed, and there is no reference"
+ * (a real answer) versus "did not parse, so no answer was produced" (a DECLINE).
+ * Limb (b) treats both alike on purpose — see `RawSubtreeMode`. The parameter-
+ * DEFAULT scanner does not: it needs the structural answer where one exists (§12.4
+ * forbids classifying on a string literal's contents) and the fail-closed text
+ * scan where none does.
  */
 function collectRawReferenceNames(
   raw: string,
   live: Map<string, string>,
-): Map<string, string> {
+): { parsed: boolean; names: Map<string, string> } {
   const found = new Map<string, string>();
-  if (!raw || live.size === 0) return found;
+  if (!raw || live.size === 0) return { parsed: false, names: found };
 
   const expr = parseExpression(raw);
   const whole = expr.ast && !expr.trailingContent ? expr.ast : null;
   const ast = whole ?? parseStatements(raw).ast ?? expr.ast;
-  if (!ast) return found;
+  if (!ast) return { parsed: false, names: found };
 
   walkEsTree(ast, (n, parent) => {
     if (n.type !== "Identifier" || typeof n.name !== "string") return;
@@ -3587,7 +3604,7 @@ function collectRawReferenceNames(
     if (mod !== undefined) found.set(n.name, mod);
   });
 
-  return found;
+  return { parsed: true, names: found };
 }
 
 /**
@@ -3617,11 +3634,12 @@ function collectRawReferenceNames(
  * x("k") }` under a derived cell compiled at exit 0 with `function
  * _scrml_wrap_4(x = _scrml_fetch_doHash_3)` in the client — the async fetch stub
  * bound as the default and a Promise rendered. Each string default is now handed
- * to the same raw-subtree rule an `escape-hatch` gets (`rawMode`): limb (b)
- * parses it, limb (a) text-scans it. That is the ONE predicate applied to one
- * more representation, not a second reader — see `fnDeclParamDefaultRoots` for
- * the top-level twin the callers use, since the scan root is a function's BODY
- * and its own params are a sibling of that root.
+ * in as a `param-default` root and PARSED on BOTH limbs (round 7, B-1, correcting
+ * round 6's `escape-hatch` routing, which text-scanned it on limb (a) and
+ * violated §12.4). That is the ONE predicate applied to one more representation,
+ * not a second reader — see `scanParamDefaultRaw` for the rule and
+ * `fnDeclParamDefaultRoots` for the top-level twin the callers use, since the
+ * scan root is a function's BODY and its own params are a sibling of that root.
  */
 function scanForServerOnlyBindingRefs(
   root: unknown,
@@ -3660,7 +3678,48 @@ function scanForServerOnlyBindingRefs(
   // POSITIONS, exactly as the walk below does for a lowered scrml subtree.
   // Declines (contributes nothing) when the text does not parse.
   const scanStructuredRaw = (raw: string): void => {
-    for (const [name, mod] of collectRawReferenceNames(raw, live)) found.set(name, mod);
+    for (const [name, mod] of collectRawReferenceNames(raw, live).names) found.set(name, mod);
+  };
+
+  // A `function-decl` PARAMETER DEFAULT is scanned STRUCTURALLY ON BOTH LIMBS —
+  // round 7, B-1, and this is the ONE raw position where the limbs agree.
+  //
+  // WHY IT IS NOT `scanRaw` ON LIMB (a). §12.4 is normative and UNAMENDED: "it
+  // SHALL NOT classify a function based on the names of identifiers that appear
+  // inside string-literal contents of its body … matching a server-fn name as a
+  // token inside a string literal is NOT a reference and SHALL NOT propagate
+  // taint." Round 6 routed defaults through `scanRaw`, whose word-boundary regex
+  // does exactly that. The escalation name set for limb (a) is ordinary English —
+  // `scrml:path` alone exports `join`, `resolve`, `basename`, `dirname`;
+  // `scrml:process` exports `env`, `cwd`, `exit`, `platform` — so MEASURED at
+  // `ff0cbdd8`, `function greet(msg = "please join us")` beside
+  // `import { join } from 'scrml:path'` relocated `greet` to the server, DROPPED
+  // the default (the emitted handler reads the parameter out of the request body
+  // and nothing supplies it), and returned `null` where the string was expected.
+  // Exit 0, no diagnostic. Five more shapes measured identical: a template
+  // literal, an object property KEY, a member property (`msg = opts.join`), a
+  // COMMENT inside a default, and a NESTED declaration's default escalating the
+  // OUTER function.
+  //
+  // WHY THIS IS NOT THE S331 RULING BEING OVERTURNED. The escape-hatch branch
+  // below still text-scans on limb (a) and is untouched; the note there stands.
+  // The parameter-default position is NEW SURFACE introduced in round 6 and never
+  // shipped, so narrowing it is a defect fix, not a relaxation of a shipped
+  // confidentiality rule.
+  //
+  // AND THE CONFIDENTIALITY FLOOR IS STILL HELD, because a DECLINE is not an
+  // answer. Where the default does not parse at all, limb (a) — where a miss
+  // ships a server-only implementation into a browser bundle — falls back to the
+  // word-boundary scan. Limb (b) declines outright, which is the S343 blocker's
+  // requirement (its name set is every server-reaching function name in the file,
+  // so a text guess there refuses correct programs on a name coincidence).
+  const scanParamDefaultRaw = (raw: string): void => {
+    const structural = collectRawReferenceNames(raw, live);
+    if (structural.parsed) {
+      for (const [name, mod] of structural.names) found.set(name, mod);
+      return;
+    }
+    if (rawMode === "text-scan") scanRaw(raw);
   };
 
   const seen = new Set<unknown>();
@@ -3728,15 +3787,22 @@ function scanForServerOnlyBindingRefs(
       // fall through — an escape-hatch may still carry structured children
     }
 
+    // A PARAMETER DEFAULT root, handed in by a caller whose scan root is a
+    // function BODY (`fnDeclParamDefaultRoots` — `params` is a sibling of `body`,
+    // never a descendant). Its own rule, shared with the nested branch below, so
+    // the top-level and nested positions cannot drift.
+    if (kind === "param-default" && typeof n.raw === "string") {
+      scanParamDefaultRaw(n.raw);
+      return;
+    }
+
     // A nested `function-decl`'s parameter DEFAULTS are raw source strings (see
-    // the doc comment above) — apply the same raw-subtree rule to each one. The
-    // generic descent below still walks the param objects for anything
-    // structured they carry (a destructure-pattern `name`).
+    // the doc comment above) — apply the SAME parameter-default rule the callers
+    // apply to the top-level function's own defaults. The generic descent below
+    // still walks the param objects for anything structured they carry (a
+    // destructure-pattern `name`).
     if (kind === "function-decl") {
-      for (const r of fnDeclParamDefaultRoots(n)) {
-        if (rawMode === "structural") scanStructuredRaw(r.raw);
-        else scanRaw(r.raw);
-      }
+      for (const r of fnDeclParamDefaultRoots(n)) scanParamDefaultRaw(r.raw);
       // fall through — the body and params are walked by the generic recursion
     }
 
@@ -3755,11 +3821,14 @@ function scanForServerOnlyBindingRefs(
  *
  * `params[i].defaultValue` is a RAW SOURCE STRING (`ast-builder.js`
  * `parseParamList` — codegen emits it verbatim as JS default-parameter syntax),
- * so it is returned in the ONE shape `scanForServerOnlyBindingRefs` already has
- * a rule for: an `escape-hatch` whose `.raw` is scanned by the caller's
- * `RawSubtreeMode` — parsed on limb (b), text-matched on limb (a). Nothing new
- * is invented for the position; a default is one more raw subtree of the
- * function it belongs to.
+ * so it is returned as a `param-default` root — the ONE shape
+ * `scanForServerOnlyBindingRefs` has a parameter-default rule for
+ * (`scanParamDefaultRaw`: STRUCTURAL on both limbs, with a fail-closed text-scan
+ * on limb (a) only where the text does not parse at all). It is deliberately NOT
+ * an `escape-hatch` root: round 6 used that kind, which text-scans on limb (a),
+ * and §12.4's unamended SHALL NOT forbids classifying a function on identifier
+ * names inside string-literal contents — see `scanParamDefaultRaw` for the six
+ * measured over-fires that produced.
  *
  * WHY THE CALLERS NEED THIS AS WELL AS THE WALK'S OWN `function-decl` branch:
  * both per-function scans (`collectServerOnlyBindingModules` for §12.2
@@ -3776,13 +3845,13 @@ function scanForServerOnlyBindingRefs(
  */
 function fnDeclParamDefaultRoots(
   fnNode: { params?: unknown },
-): Array<{ kind: "escape-hatch"; raw: string }> {
-  const roots: Array<{ kind: "escape-hatch"; raw: string }> = [];
+): Array<{ kind: "param-default"; raw: string }> {
+  const roots: Array<{ kind: "param-default"; raw: string }> = [];
   const params = Array.isArray(fnNode.params) ? (fnNode.params as unknown[]) : [];
   for (const p of params) {
     if (!p || typeof p !== "object") continue;
     const dv = (p as { defaultValue?: unknown }).defaultValue;
-    if (typeof dv === "string" && dv.length > 0) roots.push({ kind: "escape-hatch", raw: dv });
+    if (typeof dv === "string" && dv.length > 0) roots.push({ kind: "param-default", raw: dv });
   }
   return roots;
 }
