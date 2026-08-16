@@ -44,6 +44,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-027 | **COMPLETE (ADVISORY) dPA 2026-08-15 — R1 CONFIRMED, awaiting PA/bryan.** **No ruling behind `.Some/.None` — a REJECT:** drafted 2026-03-27 → **R-18-006 BLOCKING** (undefined magic names; enum collision) → removed → **REINSTATED the next day by the truncation-reconstruction `549e5b3`** from a changelog the re-review had flagged stale → mechanical passes → cited into §53.15 :33812 (S154) → one S19 fixture authored from it has failed E-MATCH-012 in every sweep. `not`/`given` have user voice; 0 compiler paths recognise `.Some`. **3/3 (a) STRIKE**, with corrections: striking leaves TWO vocabularies (`is some` + `given`), not one; the worst dangling citation is **E-MATCH-012's own message (prescribes deprecated `=>`)**. Type reason: `.Some` = constructor elimination over a TAGGED sum vs an idempotent UNTAGGED union — strictly coarser; would be scrml's only undeclarable, unshadowable constructor. → `scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; PA lean (a) supported |
 | dpa-028 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan; return leg = #509 comment.** **The 07-05 skip was CRDT-class SYNC, ruled DEFER "for now"; the cold-boot SW/manifest piece appears NOWHERE in it → NEW question.** **⚑ Fork (a) is NOT AVAILABLE as written — no static/public asset dir** (both servers serve `dist/`; nothing copies user files; no `Service-Worker-Allowed`) → 5/5: the static floor is a PREREQUISITE under every fork. **The DATA half COMPILED GREEN in native scrml first try** and stays userland under every fork (0/4 build-graph owners ship a write-queue; BG Sync Chromium-only). **⚑ Emitter DEFECT:** `flush()` clears `@queue` before its fire-and-forget server calls resolve (dpa-020/023 class). **Panel 4–1**: (c) one-shot `scrml generate pwa` vs (a′) floor + recipe + readable `chunks.json`; ALL: worker CODE adopter-owned, precache DATA from `chunks.json` (already emitted), single-owner artifacts, no per-build rewrite of adopter files, **never an offline route RENDERER**; (b) 0/5 (Flutter + Qwik emitted then WITHDREW). No 6nz pattern. Adopter's ~150 lines NOT a throwaway under any ruling. → `scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending |
 | dpa-029 | **COMPLETE (ADVISORY) dPA 2026-08-15 — ★★ carries a LIVE LEAK routed as a DEFECT ahead of the rulings; return leg = #471 comment.** `handle()` returning `new globalThis.Response(JSON.stringify(u))` on a `protect=` row **compiles CLEAN and ships `passwordHash` at HTTP 200** (RUN) while the server-fn route redacts: `Response` not allowlisted (**the SPEC's own §40.3.5 example fails E-SCOPE-001**) but `globalThis` is; E-PROTECT-004 is a per-body SOURCE-TEXT regex ("a lint mislabeled as a fail-closed gate"); the redactor passes any `instanceof Response` untouched (fail-OPEN); `.reveal(` is whole-body though field-level was RATIFIED S230 (dpa-017). **7/7 on sequence: DEFECT tickets FIRST** (deny-unless-revealed at the wrapper · `reveal("col")` · allowlist + member-chain walk · regex→lint · E-MW-003/004 unemitted · §40.3.4 vs emit). Direction after: Q1 4–2 typed `Egress<Bytes>` return — **framed as the dpa-002 raw-route REOPEN** (dissent: "no second envelope while the first is provably unsound"); Q3 5/7 `File`/multipart PARAM on the same contract — **the `handle()`+`request.formData()` path the S346 ack pointed to is RUNTIME-BROKEN** (no await inserted); Q4 (a) print the route (not one seam away); Q5 adapter — **§23.4 sidecar is Nominal**, ack's "vendor via .js sidecar" needs correcting. Adopter today (7/7): treat `handle()` as OUTSIDE the envelope. → `scrml-support/docs/deep-dives/document-workflows-egress-envelope-dpa-029-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending; DEFECTS to file |
+| dpa-030 | **BANKED — UNRUN.** Banked S347 2026-08-16. ⚑ *Re-banked at S346 in the hand-off, the wrap and user-voice — but never written HERE, so it did not exist to the dPA and `dpa-debt` read `0 UNRUN` correctly. The §10 obligation/probe mismatch again, fourth-plus instance; found at S347 boot when bryan said he was about to fire the dPA.* **Successor to the WITHDRAWN dpa-029 Q3.** Q3 offered "(a) host-escape by design vs (b) native" — but the host-escape it named is RUNTIME-BROKEN, so (a) was never a live option and the fork was invalid as framed. **Whether uploads exist is SETTLED, not a question** (bryan S346: *"We have NO upload path?! Really?!"*). The only open axis is the SHAPE: a `File`/multipart PARAMETER on the server-fn / `<endpoint>` contract adopters already write, vs a dedicated `<upload>` primitive. PA lean = the parameter (LIMIT wins, FORK RULE row 1; dpa-029 panel 5/7), **recorded, not ruled**. | S346 bryan — reverse-ouroboros correction; banked S347; bryan rules; return leg = a comment on #471 |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -1426,3 +1427,154 @@ A direct answer to **Q4** (Road-B's charter) with its cost stated both ways — 
 
 ### Report-back
 §3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA. **RUN-not-RATIFY.**
+
+---
+
+## dpa-030 — File upload: where does a file ARRIVE? A `File`/multipart PARAMETER on the contract adopters already write, or a dedicated `<upload>` primitive? (SHAPE only — the capability is settled)
+
+```
+id:        dpa-030
+status:    banked   # banked → running → complete → ratified(by PA)
+rung:      R2 (structural design fork on a primitive surface; bryan rules; adopter-driven)
+requested: bryan S346 2026-08-16 (the reverse-ouroboros correction) — successor to the WITHDRAWN dpa-029 Q3
+banked:    S347 2026-08-16
+routes-to: scrml PA → return leg = a comment on adopter issue #471
+```
+
+### ⚑ SCOPE-LOCK — read this before anything else
+
+**Whether scrml gets a working upload path is NOT the question. It is settled.** bryan, S346 verbatim:
+*"The question should be, is it done in apps? can scrml do it? We have NO upload path?! Really?! because
+no one has ever bult an app that requred upload."* For a compiler whose thesis is *"scrml IS the
+backend"*, having no upload path is the thesis failing on a routine app.
+
+**The ONE axis this DD decides: where does a file ARRIVE?**
+- **(a) a `File` / multipart PARAMETER** on the server-fn / `<endpoint>` contract adopters already write.
+- **(b) a dedicated `<upload>` primitive** (a structural element with its own surface).
+
+**PA lean: (a).** LIMIT wins (FORK RULE row 1 — it rides an existing contract instead of minting a new
+primitive); dpa-029's panel was 5/7 for it, framed as a **coeffect** — the parameter endorses size/mime,
+it never declassifies. **Recorded as a lean, NOT ruled.** If the DD finds (b) is right, say so; a
+widening can be the correct answer (S322 — the freeze motivation is paused, quality is the only axis).
+
+### Why dpa-029 Q3 was WITHDRAWN and this replaces it
+
+Q3 was framed *"(a) host-escape by design · (b) `<endpoint accepts=… body=multipart>` or an `<upload>`
+primitive."* **Option (a) named a path that does not work**, so the fork was invalid as framed. A fork
+whose cheap pole is a broken path will always resolve to the cheap pole for the wrong reason.
+
+### Established facts — do NOT re-derive, all PA-verified by execution
+
+1. **`<endpoint accepts=:enum>` decodes JSON only** (§61.3 request-decode via `parseVariant`; §61.5
+   envelope). There is no multipart limb.
+2. **`handle()` + `request.formData()` compiles CLEAN and then throws at runtime.** The emitter writes
+   `const fd = request.formData();` with no `await`, so `.get()` runs on a Promise → `TypeError`. Filed
+   HIGH: `g-handle-request-formdata-emitted-unawaited`. PA-reproduced by emission.
+3. **`await` is refused by design, language-wide** (§19.9.8; the no-async/await standing rule; CPS/
+   body-split is the sanctioned async surface). So (2) is not a missing keyword the adopter can supply —
+   only the compiler can insert the boundary. **The host-escape is structurally unavailable, not merely
+   undocumented.**
+4. ⇒ **There is NO working upload path at all today**, native or escaped.
+5. **`handle()` is OUTSIDE the protect/tenant envelope AND currently leaks.** `handle()` +
+   `new globalThis.Response(JSON.stringify(row))` over a `protect=` table ships the protected column at
+   HTTP 200 (`g-handle-globalthis-response-ships-protected-columns`, HIGH, PA-reproduced; violates
+   dpa-017 RATIFIED S230). The dpa-029 sequencing dissent applies here verbatim: *"the ruling must not
+   add a second egress envelope while the first one is provably unsound."* **An upload answer routed
+   through `handle()` inherits an envelope known to be broken — weigh that as a fact, not a hypothetical.**
+6. The auth-scoped confidentiality architecture (RATIFIED S256) is `EgressSink × ConfidentialityAxis` —
+   complete mediation without a god-object. **An upload is INGRESS, not egress.** Whether that coverage
+   TYPE has an ingress twin, or whether endorsement is a genuinely new axis, is an open question this DD
+   should NAME (it need not settle it).
+
+### ⚑ FACT 7 — the SPEC ALREADY ANTICIPATED THIS CASE AND PARKED IT BEHIND A WITNESS THAT HAS ARRIVED
+
+Found S347 by the sliding-doors audit (durable-tier slice), not by memory. **§61.10 records two
+corpus-zero deferrals, and one of them is this exact question:**
+
+> *"**The `raw` path-bound raw-wire escape** — DEFERRED, gated on a **witnessed untypeable inbound
+> case** (§61.8); `handle()` (§40) is the interim raw escape."*
+
+and, in the same list:
+
+> *"**Non-`:enum` request shapes** — `accepts=` is `:enum`-only … A non-variant inbound shape is not
+> expressible as an `accepts=` enum and is `E-ENDPOINT-ACCEPTS-NOT-ENUM`; **such a contract is the
+> deferred `raw` escape's territory** (or `handle()` today)."*
+
+**A multipart upload IS a non-`:enum` inbound shape.** So the SPEC already classified this case, already
+routed it to a deferred primitive, and already named `handle()` as the interim. Three consequences the
+DD must take as given:
+
+1. **The witness has arrived** — adopter #471. The deferral condition was *"a witnessed untypeable
+   inbound case"*; that is no longer hypothetical, which means the deferral has EXPIRED on its own
+   stated terms. This is the audit's `already-biting` class.
+2. **The named interim does not work.** §61.10 points at `handle()`; facts 2 and 5 above show `handle()`
+   is runtime-broken for `formData()` and ships `protect=` columns. **The SPEC's own fallback is
+   unsound**, so "wait for the witness, use `handle()` meanwhile" was never a working posture.
+3. **The fork therefore has a THIRD pole the bank did not name** — reviving the deferred `raw`
+   path-bound escape, rather than (a) a parameter or (b) an `<upload>` element. The DD SHALL evaluate it
+   as a first-class option and say why it wins or loses. ⚠ Note it interacts with dpa-002 (which KILLED
+   `raw` and kept `handle()`) — so reviving it is a REOPEN of a ratified decision, and must be argued as
+   one, not smuggled.
+
+**Do not read this as the PA pre-deciding.** It is evidence the bank was missing, and it cuts against the
+PA's own recorded lean as much as for it.
+
+### ⚑ METHOD CONSTRAINT — Rule 6 binds this DD, and it is the load-bearing instruction
+
+**Do not accept the parameter framing just because it is the PA's lean and the cheaper pole.** Rule 6
+(state-primacy at intake) says an ask arrives already framed, and *that framing is a design decision
+nobody deliberated*. "A file is a parameter" is exactly such a framing.
+
+So: **run Pillar 5b's ratified operational test on the upload itself** — does it have named conditions
+and a transition contract, and does *"what condition is this in?"* read sensibly? An upload plausibly
+does (`idle → receiving → stored | rejected`), which is the shape scrml claims as its bet. **Reuse 5b's
+existing test; do NOT invent a second classifier.** The guardrail in the other direction is 5b's own
+escape clause: a conversion to state must win on a NAMED axis (ergonomics / spec-clarity / runtime-cost),
+never on preference — converting a genuine calculation into a state shape to satisfy a bias makes the
+language worse.
+
+### ⚑ FORBIDDEN REASONING — the S346 ruling binds this DD
+
+**"The corpus shows zero uploads" is NOT admissible** as evidence about whether or how to build this.
+Corpus-zero is a **BLAST-RADIUS instrument only** ("how many existing files break if I change this").
+The corpus was written by us to demonstrate a language growing from nothing; it is evidence about its
+authors, not about adopters. **The only two admissible questions: is it done in apps? can scrml express
+it?** — the second answered by COMPILING, not by reading. Any pole that reaches for corpus-zero as a
+reason to prefer the smaller surface should be caught and named as re-litigation.
+
+### Evidence the DD owes
+
+- **Per fork: the governing sentence, quoted** from `compiler/SPEC.md` with its §ref — or the explicit
+  *"searched §X, §Y, §Z — no governing sentence found."* Outcome 2 is a FINDING: it means this is a
+  RULING, not a fix.
+- **What an adopter WRITES today under each fork** — real worked scrml, COMPILED, not sketched. Include
+  the failure mode each fork produces when the file is absent, oversized, or the wrong mime.
+- **Direction-of-change** for each fork (inert / newly-rejecting / newly-accepting / semantics-changed)
+  and whether it widens the surface.
+- **Prior art, on the specific axis** — in frameworks that OWN the backend (Rails/ActiveStorage,
+  Django, Phoenix `Plug.Upload`, Laravel, ASP.NET), is the file a PARAMETER of the handler or a distinct
+  primitive, and does the framework own STORAGE? Then the same question for the route-handler crowd
+  (Remix/Next route handlers, SvelteKit form actions). The interesting cell is where a framework that
+  owns the backend chose a primitive anyway, and why.
+- **Endorsement**: where do size/mime/count limits live in each fork, and is that a coeffect on the
+  parameter, an attribute on the primitive, or a refinement type (§53)? scrml already has a predicate
+  vocabulary — say whether it reaches.
+- **The storage question, NAMED not decided**: does scrml own where the bytes land (a blob table / an
+  `<storage>` surface) or is that adopter territory? **State whether the shape choice FORECLOSES either
+  answer** — that is the part that matters now.
+- **`<form enctype="multipart/form-data">` interaction**: §41.14 `formFor` emits forms and §41.14.3 has
+  a progressive-enhancement `<form action=>` default. Does either fork compose with that, or contradict it?
+
+### Anti-goals
+
+- Do **NOT** re-litigate whether uploads should exist. Settled.
+- Do **NOT** invoke corpus-zero as evidence about the capability (see FORBIDDEN REASONING).
+- Do **NOT** build; do **NOT** ratify (RUN-not-RATIFY).
+- Do **NOT** design the storage layer — name it and its foreclosure risk, then stop.
+- Do **NOT** treat `handle()` as a sound envelope; fact 5 is a defect, not a baseline.
+- Do **NOT** re-open §61's thin-envelope ruling as if unruled — extend it or do not.
+
+### Report-back
+
+§3 — one-liner + artifact path + a `(dpa: …)` breadcrumb in `delta-log.md`. Artifact →
+`scrml-support/docs/deep-dives/`. Routes to the scrml PA, whose return leg is a comment on #471.
