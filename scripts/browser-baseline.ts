@@ -146,6 +146,55 @@ function runTier(): {
   return { names: [...names].sort(), ranOk, raw, reported, parsed: names.size, parseOk };
 }
 
+/**
+ * The REASON excerpt for one failing test, pulled from bun's raw output — printed beside every NEW
+ * failure name so the gate says WHY, not just WHICH.
+ *
+ * WHY THIS EXISTS (S346, flagship-hos). The name-set gate is deliberately blind to everything but the
+ * `<suite> > <name>` key, and `spawnSync(..., {encoding:"utf8"})` swallows the tier's stdout — so
+ * when `flagship driver/hos … engine mount really does sit inside an if= template` joined the set
+ * intermittently in cloud, three sessions read it as "the emitted html lacks the template" and chased
+ * compile order / stray files / module-level compiler state. The line bun had printed the whole time
+ * was `^ this test timed out after 5000ms.` — a synchronous whole-app compile overrunning bun's
+ * DEFAULT per-test budget (the repo's `bunfig.toml [test] timeout` key is not one bun reads). A
+ * timed-out test and a failed assertion produce the SAME `(fail) <name>` marker, so the key alone
+ * cannot tell them apart; the excerpt can.
+ *
+ * bun's two shapes:
+ *   assertion / thrown:  `error: …` (+ Expected/Received + stack)  THEN  `(fail) name [ms]`
+ *   timeout:             `(fail) name [ms]`  THEN  `  ^ this test timed out after Nms.`
+ * so the excerpt is: the nearest preceding `error:` block (capped), the marker line's own timing, and
+ * any `^`-prefixed line right after the marker. Best-effort — a diagnostic, never an input to the
+ * comparison.
+ */
+function failureReason(raw: string, name: string): string[] {
+  const lines = raw.split("\n");
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const marker = new RegExp(`\\(fail\\)\\s+${esc}\\s+\\[([\\d.]+\\s*m?s)\\]`);
+  const idx = lines.findIndex((l) => marker.test(l));
+  if (idx < 0) return ["(no `(fail)` marker line found for this name — run the file directly with `bun test <file>`)"];
+  const out: string[] = [];
+  const timing = marker.exec(lines[idx])?.[1];
+  if (timing) out.push(`took ${timing}`);
+  // Preceding `error:` block — walk back up to 20 lines for the nearest `error:` line.
+  let from = -1;
+  for (let i = idx - 1; i >= 0 && i >= idx - 20; i--) {
+    if (/^\s*(error:|[A-Za-z]*Error:)/.test(lines[i])) { from = i; break; }
+  }
+  if (from >= 0) {
+    const block = lines.slice(from, idx).map((l) => l.trimEnd()).filter((l) => l.trim() !== "");
+    for (const l of block.slice(0, 8)) out.push(l.trim());
+    if (block.length > 8) out.push(`… (${block.length - 8} more line(s))`);
+  }
+  // Following `^`-prefixed line(s) — bun's timeout marker.
+  for (let i = idx + 1; i < lines.length && i <= idx + 3; i++) {
+    if (/^\s*\^/.test(lines[i])) out.push(lines[i].trim());
+    else break;
+  }
+  if (out.length === (timing ? 1 : 0)) out.push("(no reason excerpt found — run the file directly with `bun test <file>`)");
+  return out;
+}
+
 function readBaseline(): Baseline {
   if (!existsSync(BASELINE_PATH)) {
     console.error(`\n  MISSING — ${BASELINE_PATH} does not exist.`);
@@ -240,7 +289,12 @@ function main(): void {
 
   if (added.length) {
     console.error(`\n  NEW FAILURE(S) — ${added.length} test(s) fail that the baseline does not list:\n`);
-    for (const n of added) console.error(`    + ${n}`);
+    for (const n of added) {
+      console.error(`    + ${n}`);
+      // The WHY, beside the WHICH — see failureReason(). A timeout and an assertion failure share
+      // the same marker; only this excerpt tells them apart.
+      for (const l of failureReason(raw, n)) console.error(`        │ ${l}`);
+    }
     console.error(
       "\n  This is a REGRESSION. The browser tier's count alone would not have shown it.\n" +
         "  Fix the regression, or — if the failure is genuinely environmental and accepted —\n" +
