@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 37 |
-| MED | 150 |
+| HIGH | 41 |
+| MED | 151 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -8345,3 +8345,43 @@ Fix: sort the walk (code-unit) — one line; the S345 sweep's remaining unfixed 
 
 ### g-residual-order-bearing-readdir-and-unonced-self-host-dcl — three residual order/registration hazards from the #526/#528 reviews, all PRE-EXISTING and non-artifact: `commands/generate.js:152` (first `<program>` file found wins → which root feeds the auth-scaffold hint), `commands/dev.js:843` (multi-input dev serves the FIRST `.html` found at `/`), and `compiler/self-host/cg-parts/section-emit-wiring.js:1199` (the only DOMContentLoaded registration left WITHOUT `{ once: true }` — reachable only under `scrml compile --self-host` when `dist/self-host/cg.js` exists) — `NEW S346-bryan (S239 review-floor passes on #526 + #528); LOW; open`
 <!-- @gap id=g-residual-order-bearing-readdir-and-unonced-self-host-dcl sev=LOW status=open locus=compiler/src/commands/generate.js:152+compiler/src/commands/dev.js:843+compiler/self-host/cg-parts/section-emit-wiring.js:1199 prov=rationale:review-floor-census-of-every-readdirSync-and-every-DOMContentLoaded-registration-in-compiler-src-and-self-host-after-526-and-528 -->
+
+## §S346-dpa — filed S346-bryan from the dPA drain (dpa-026/027/028/029), every one PA-verified before filing
+
+### g-handle-globalthis-response-ships-protected-columns — `handle()` + `new globalThis.Response(JSON.stringify(row))` returns a `protect=`-declared column at HTTP 200 with a CLEAN compile: `E-PROTECT-004` never fires, and the runtime redactor is skipped by an `instanceof Response` passthrough placed BEFORE it — `NEW S346-bryan (dpa-029 drain; PA-REPRODUCED by emission at 2709e540 with a differential control); HIGH; open; ⚑ VIOLATES THE RATIFIED dpa-017 (S230) raw-egress fail-closed ruling; ROUTED TO BRYAN`
+<!-- @gap id=g-handle-globalthis-response-ships-protected-columns sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(the route-handler exit: `if (_scrml_result instanceof Response) return _scrml_result;` is emitted BEFORE `JSON.stringify(_scrml_protect_redact(...))`, so a hand-built Response bypasses the redactor)+compiler/src/type-system.ts:7257(LOGIC_SCOPE_GLOBAL_ALLOWLIST — `globalThis` is allowlisted, `Response` is not, so the bare form is refused and the qualified form is not)+the E-PROTECT-004 per-body source-text scan prov=ruling:dpa-017-RATIFIED-S230-raw-egress-fail-closed-plus-field-level-reveal-the-build-honours-neither -->
+
+**PA-verified by emission** (not relayed): the differential is decisive and one keystroke wide.
+```
+q2a  return new Response(JSON.stringify(u))              → E-SCOPE-001  (refused)
+q2g  return new globalThis.Response(JSON.stringify(u))   → compiles CLEAN, no E-PROTECT-004
+```
+Emitted for q2g (`<db src="app.db" protect="passwordHash" tables="users">`, `.../scratchpad/leak/g/q2g.server.js:205-211`):
+```js
+const u = _scrml_protect_tag((await _scrml_sql`select id, name, passwordHash …`)[0] ?? null, ["passwordHash"]);
+return new globalThis.Response(JSON.stringify(u));   // serialized RAW — the compiler TAGGED it, then stringified it
+…
+if (_scrml_result instanceof Response) return _scrml_result;                       // ← fail-OPEN passthrough
+const _scrml_resp_body = JSON.stringify(_scrml_protect_redact(_scrml_result) ?? null);  // ← never reached
+```
+The row is TAGGED — the compiler knows the column is protected — and the value is stringified before any redactor sees it. **This is not a missing sink; it is a fail-OPEN default at an existing one.** Three compounding halves, each independently worth fixing: (a) the `instanceof Response` passthrough (both at the wrapper and at `runtime` `:31`) returns un-redacted; (b) `E-PROTECT-004` is a per-body SOURCE-TEXT regex (Rule 7 class) — silent on `globalThis.Response`, silent on helper indirection, silent on string bodies, and suppressed wholesale by any `.reveal(` in the body — i.e. **a lint mislabelled as a fail-closed gate, which is the worse defect**; (c) SPEC §40.3.5's OWN `handle()` example (`new Response("Forbidden", {status:403})`) fails `E-SCOPE-001`, so the documented shape does not compile while the leaking shape does. Fix direction (dPA panel 7/7, advisory): deny-unless-revealed at the wrapper + field-level `reveal("col")` per dpa-017 + allowlist/member-chain walk + regex→lint reclassification. **Direction rulings (the typed-egress fork) are bryan's and are SEPARATE from these defects — the defects land first.** Adopter #471 informed + given the projection workaround (comment 5304843089).
+
+### g-handle-request-formdata-emitted-unawaited — `handle()` + `request.formData()` compiles clean and emits the call UN-AWAITED, so `.get()` runs on a Promise → `TypeError`; there is no working inbound-multipart path, and `await` is refused by design (`E-AWAIT-NOT-IN-SCRML`) — `NEW S346-bryan (dpa-029 q3a/q3a′; PA-REPRODUCED at 2709e540 — emitted `const fd = request.formData();`); HIGH; open`
+<!-- @gap id=g-handle-request-formdata-emitted-unawaited sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts,emit-functions.ts,scheduling.ts(the auto-await injectors do not treat a host-method call returning a Promise as an await site; same family as g-auto-await-family-not-closed-150-bare-server-call-sites) prov=adopter:#471-point-3-the-PA-ack-pointed-the-adopter-at-this-path-and-it-is-runtime-broken -->
+
+Sibling of the auto-await family (§13.2's position-invariant mandate delivered by retrofit — the S322 re-examination test's worked example). The adopter was told this was the host-escape path; corrected on the issue. Until fixed, uploads are inline `_{}` + `Bun.write`.
+
+### g-tare-bare-form-in-onclick-compiles-clean-then-fails — bare `tare(@x)` in an `onclick=` attribute compiles CLEAN in both markup forms: the call-ref form throws `ReferenceError: tare is not defined` at runtime, the expression form silently promotes the WRONG value (reset → 42) — the position checks walk an 11-name hand-maintained field list — `NEW S346-bryan (dpa-026 drain, 5/5 fixtures compiled + run on feat/tare-primitive-land); HIGH; open; ⚑ GATES PR #501`
+<!-- @gap id=g-tare-bare-form-in-onclick-compiles-clean-then-fails sev=HIGH status=open locus=searched:the-tare-position-checks-on-feat/tare-primitive-land(an 11-name field list; dpa-025 hand-maintained-list class) prov=dd:scrml-support/docs/deep-dives/tare-thunk-vs-capture-dpa-026-2026-08-15.md -->
+
+Same class as dpa-025 (a hand-maintained field list blind to positions outside it) — the fourth instance. **Also from that drain: SPEC §6.8.4's normative claim that the runtime-capture case is "deliberately NOT expressible by either form" is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler compiles clean and IS a runtime snapshot (reset → 5 after bumps to 8), and `E-TARE-DEFERRED-POSITION`'s own message steers users to that shape. dPA reco: correct §6.8.4 **before #501 merges**. Both are PR #501's blockers now.
+
+### g-offline-write-queue-flush-clears-queue-before-fire-and-forget-completes — the adopter-shaped offline write-queue compiles green in native scrml, but `flush()` clears `@queue` SYNCHRONOUSLY while the server calls it triggers are fire-and-forget IIFEs — a failed replay loses the record — `NEW S346-bryan (dpa-028 drain, emitter defect found while compiling the adopter's shape); HIGH; open`
+<!-- @gap id=g-offline-write-queue-flush-clears-queue-before-fire-and-forget-completes sev=HIGH status=open locus=searched:compiler/src/codegen/scheduling.ts,emit-functions.ts(the fire-and-forget IIFE emission for a server call in a loop body; dpa-020/023 auto-await family) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md -->
+
+dpa-020/023 class (the async boundary). Adopter #509's design depends on exactly this shape (append-only queue + idempotent replay), so it is adopter-blocking for the offline arc regardless of how the direction fork is ruled. **Also established there: fork (a) "host-boundary by design" is NOT AVAILABLE as written — there is no static/public asset dir, both servers serve `dist/`, nothing copies user files in, and no `Service-Worker-Allowed` header — so a static-asset floor is a prerequisite under EVERY fork** (5/5 panel).
+
+### g-some-none-optional-match-prose-is-a-reconstruction-artifact — SPEC §18.8.2's `.Some(value)`/`.None` optional-match vocabulary was REJECTED at review 2026-03-27 (R-18-006 BLOCKING, *"No magic names are introduced"*), removed, and then REINSTATED by a 2026-03-28 reconstruction that replayed a stale changelog; it has 0 compiler paths, 0 user statements, and its one fixture has failed `E-MATCH-012` in every sweep since — `NEW S346-bryan (dpa-027 drain, archaeology across scrml + frozen scrml8; 3/3 STRIKE); MED; open; supersedes the dpa-027 bank`
+<!-- @gap id=g-some-none-optional-match-prose-is-a-reconstruction-artifact sev=MED status=open locus=compiler/SPEC.md(§18.8.2 optional-match prose + worked example; the §53.15 citation at :33812 that consumed it) prov=dd:scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md -->
+
+Confirms the S346 PA lean (a) — strike — with two corrections to it: striking leaves **two** live vocabularies (`is some` AND `given`), not one, and the worst dangling citation is **`E-MATCH-012`'s own message**, which prescribes the deprecated `=>` arrow. **★ The durable method finding: a reconstruction is a laundering vector** — draft → changelog → reconstruction → citation → fixture, five hops, no hop reads the compiler. Same shape as pa-base §1's laundering trace, in the SPEC's own history.
