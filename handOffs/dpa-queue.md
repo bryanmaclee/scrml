@@ -40,7 +40,10 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-023 | **DIRECTION RATIFIED S337 (build deferred, ruled (b)) · ⚑ FIRST WITNESSED CASE FILED S338 (bryan: "i, and file it as dpa-023's first witnessed case").** **The witnessed case:** `function doHash(p){ return hashPassword(p) }` + `const <h> = doHash(@pw)` compiles clean (exit 0, no diagnostic) and emits `_scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(...))` where the fetch is `async` — and the runtime is synchronous BY DESIGN (`_scrml_derived_get`: `_scrml_derived_cache[name] = fn()`, no await, §6.6.4). **A derived cell whose recompute returns a PROMISE**, rendered into the DOM. PA-verified on main at both emit and runtime-path level. §6.6.19 refuses the DIRECT reach and misses it ONE HOP AWAY. **This is the `(not to T)` async-boundary shape with a real adopter-facing symptom** — the by-construction form (a type-state making the async boundary unrepresentable in a synchronous position) versus the retrofit now shipping (position-by-position refusal, which is the S322 under-design signature). The S338 refusal fix is explicitly REVERSIBLE and PROVISIONAL so it does not foreclose this rung. **Prior state:**  ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier and its re-ruling request had ALREADY been acted on (option C retired S322).* 5-pole live poll, verified by execution (7 fixtures + 3 emitted programs RUN). **COMPLEMENT, not subsume — the frame is RIGHT and the implementation is missing its middle state.** A `(not to T)` cell has THREE states (`not → pending → T`); the compiler models TWO and the assignment illegally jumps 1→3. Mechanism: `classifyWriteAgainstSpec` is a SOURCE-TEXT comparison that never consults the type, with no third state to return (`type-system.ts:25865`, duplicated `:26799`) — **the whole bug is two lines.** ⚠ Its re-ruling request RETIRED option C (S322). **The `pending` rung is the live open item** (5/5 convergence; conditions: the marker is sugar, drop the "does not color the function" pitch as measured-false, and the rule must be `E-` not `I-`). ⚠ PA-verified FALSE: the DD's §19.6-containment-by-string-rewrite mechanism claim. → `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` | S322 block · "bank it" |
 | dpa-024 | **COMPLETE (ADVISORY) dPA 2026-08-10 — Q4 ACTED ON, rest awaiting bryan.** ⚑ *Sat BANKED-UNRUN from S331 to S337 because the PA filed its Q4 under "OWED BY BRYAN" — a question only the DD could answer — while bryan waited on the agreed "say when it's ready" signal. No boot probe reads this file; that is the real reason it was invisible.* **Q4's banked premise was FACTUALLY WRONG and the DD caught it:** self-host-v2 is NOT chartered as a parity target — parity framing was DROPPED S222 (`compiler-reimagining-derisk-2026-06-26/RULING.md:11`, PA-verified verbatim), replaced by D3 conformance-as-oracle S230, and firewalled. **Do not change the charter.** **The real risk is one layer down:** `self-host-v2/progress.md` carries **53** `byte-identical`/`impl#1` mentions as success conditions — the sanctioned tier-2 scaffold became the de-facto definition of done, and nothing said when it stops. Activates the day the parser wave opens (lexer 337/337 done; parser NOT started), because impl#1's `FileAST` carries the **127 in-place decoration fields** skeleton-RULING:13 forbids. **RULED + LANDED S337** (bryan: *"go, take the tier-2 retirement rule"*) → `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md`: 3 clauses (scaffold never an exit criterion · AST-parity FORBIDDEN as an oracle from the parser wave · divergence = freedom exercised not debt owed) + **conformance fork 2 RESOLVED** to the mixed-pipeline bootstrap (FORK RULE rows 1-4 unanimous). No code, no charter change, no rework. **Rival hypothesis SURVIVES, restated:** a canonical AST EXISTS (`types/ast.ts`, day one) but is NOT load-bearing — 16 modules shadow it as `Record<string,unknown>`, which is what lets 127 `_`-prefixed decoration fields typecheck; 24% of open gaps but **39-42% of open HIGHs** (~1.7x severity enrichment); passes the detection-window falsifier (spans S297-S331, static + grep-visible). Subsumes the S331 refuted hypothesis's surviving claim. **Q5 null: MET for impl#1** (off the V1 critical path, terminal, ~76% of gaps outside the class → keep patching; no impl#1 re-architecture proposed), **NOT met for impl#2**. **⚑ THE CORRECTIVE, against the intuition that opened the question:** the never-ending bug loop is mostly NOT architectural — conformance pins ~18 of ~60 surfaces, so ~42 are unpinned and each pass finds genuinely NEW defects. **The loop ends when the CONTRACT is complete, not when the architecture changes.** **R3 NOT recommended** (zero rival architectures survived; only one was ever on the table and it is ratified). → `scrml-support/docs/deep-dives/compiler-architecture-for-this-language-dpa-024-2026-08-10.md` | bryan S331 *"bank the deep-dive"* → **S337 FIRED + Q4 RULED**; §§1-3/Q5 advisory, awaiting ratify/reject |
 | dpa-025 | **RATIFIED S338 2026-08-11 (bryan: "a, and grep the compiler for source-text regexes") — option (a): ratify the finding, take the no-regret moves now, run the §6.1 blind fuzz BEFORE committing to A1. PA re-measured the headline before surfacing and it REPRODUCES (34 fields / 33 optional / 32 degenerate exact / ~70 sites) — unlike the S337 `127`. bryan added a SECOND instruction that reprioritises the measurement: **census the compiler for source-text regexes** — cheaper than the fuzz and it measures the PROBLEM not the fix. First result: **232 post-AST source-text gates across 49 files** (vs 182 legitimate pre-AST), and **232 is a FLOOR** — the probe keys on identifier names and cannot see `postRe.test(t)`, with 81 opaque-arg sites unclassifiable. Prior state:**  ⚑ **VERDICT: the answer is an OPTIONAL FIELD, not a missing primitive.** `emitExpr` is ALREADY one choke point; `EmitExprContext` = **33 fields / 32 OPTIONAL / 68 construction sites / 32 degenerate `{mode:"client"}` populating zero** — so a feature works only where someone remembered to thread it. That is the mechanism behind the field-list/parallel-walker class S337 hit four times: not an ABSENT capability, an OPTIONAL one. **★★ Live hazard found en route: `emit-logic.ts:1628` DEFAULTS A MISSING SERVER BOUNDARY TO CLIENT EMIT**, warned only under `SCRML_DEBUG` so silent by default — while `PIPELINE.md` 0.5.1 makes "client JS MUST NOT contain server-context constructs" an explicit CG output invariant (`E-CG-006`) and the source ships `SCRML_STRICT_BOUNDARY=1` **off**. Third fail-open-by-default in this area. **★ The ledger cannot measure itself and it corrupted this DD's own numbers** — 50 of 209 heading-extracted "open" rows are marked resolved in the body; 48 `status=open` entries are absent from a heading extraction entirely (the open gap `g-known-gaps-heading-and-marker-status-can-disagree-silently`). Gap counts quoted anywhere are SOFT until that is fixed. **A dPA pole proposed a retroactive §34 emitter gate that §34.0 had ALREADY declined** verbatim — caught as re-litigation. → `scrml-support/docs/deep-dives/population-first-missing-primitive-2026-08-10.md` | bryan S337 fired · **RUN-not-RATIFY, awaiting ratify/reject** |
-| dpa-026 | **BANKED — UNRUN** (S337, 2026-08-10). **Is `tare` one keyword doing TWO jobs — thunk at module-init, CAPTURE at runtime — or an argument for two?** bryan: *"a, and bank c as its own question."* **The motivating metaphor is the case that does not work.** You tare a scale at RUNTIME, in a handler, after a reading — and thunk semantics structurally cannot express that (PA-verified: a deferred write registers no init thunk, so the bare form promotes module-init's; and `tare(@x, @x)` re-reads at reset time, giving the current value not the calibrated one). Thunk serves CONFIG; it cannot serve CALIBRATION. ⚠ The S337 "thunk, keep the family coherent" ruling was made BEFORE this was known — this reopens it on NEW INFORMATION, not by re-litigation. | bryan S337 · *"bank c as its own question"* |
+| dpa-026 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan.** ⚑ **The branch SPEC's "runtime-capture is NOT expressible by either form" is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler = a runtime SNAPSHOT (compiled + RUN), and E-TARE-DEFERRED-POSITION's own message steers users to it. `reset` has ONE job (registries populate only at module-init). Calibration is expressible TODAY twice with zero syntax; the data pattern (`<zero>` cell + derived `net`) is canonical in every paradigm polled; corpus 0 calibration usages. **Panel 4/5 fork 1 · 1/5 fork 2 (`capture` verb) · 5/5 REJECT position-keyed semantics · 5/5 DEFECT: bare `tare` in a markup handler compiles clean in both forms** (one a runtime ReferenceError, one a live wrong-value promotion — the dpa-025 11-name-field-list class). Bridge = a checkable read-set diagnostic (WARN on `tare(@x,@x)`). **Reco: fork 1 patched — correct §6.8.4 BEFORE PR #501 merges.** → `scrml-support/docs/deep-dives/tare-thunk-vs-capture-dpa-026-2026-08-15.md` | bryan S337 · *"bank c as its own question"* → **RUN 2026-08-15, awaiting ratify/reject** |
+| dpa-027 | **COMPLETE (ADVISORY) dPA 2026-08-15 — R1 CONFIRMED, awaiting PA/bryan.** **No ruling behind `.Some/.None` — a REJECT:** drafted 2026-03-27 → **R-18-006 BLOCKING** (undefined magic names; enum collision) → removed → **REINSTATED the next day by the truncation-reconstruction `549e5b3`** from a changelog the re-review had flagged stale → mechanical passes → cited into §53.15 :33812 (S154) → one S19 fixture authored from it has failed E-MATCH-012 in every sweep. `not`/`given` have user voice; 0 compiler paths recognise `.Some`. **3/3 (a) STRIKE**, with corrections: striking leaves TWO vocabularies (`is some` + `given`), not one; the worst dangling citation is **E-MATCH-012's own message (prescribes deprecated `=>`)**. Type reason: `.Some` = constructor elimination over a TAGGED sum vs an idempotent UNTAGGED union — strictly coarser; would be scrml's only undeclarable, unshadowable constructor. → `scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; PA lean (a) supported |
+| dpa-028 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan; return leg = #509 comment.** **The 07-05 skip was CRDT-class SYNC, ruled DEFER "for now"; the cold-boot SW/manifest piece appears NOWHERE in it → NEW question.** **⚑ Fork (a) is NOT AVAILABLE as written — no static/public asset dir** (both servers serve `dist/`; nothing copies user files; no `Service-Worker-Allowed`) → 5/5: the static floor is a PREREQUISITE under every fork. **The DATA half COMPILED GREEN in native scrml first try** and stays userland under every fork (0/4 build-graph owners ship a write-queue; BG Sync Chromium-only). **⚑ Emitter DEFECT:** `flush()` clears `@queue` before its fire-and-forget server calls resolve (dpa-020/023 class). **Panel 4–1**: (c) one-shot `scrml generate pwa` vs (a′) floor + recipe + readable `chunks.json`; ALL: worker CODE adopter-owned, precache DATA from `chunks.json` (already emitted), single-owner artifacts, no per-build rewrite of adopter files, **never an offline route RENDERER**; (b) 0/5 (Flutter + Qwik emitted then WITHDREW). No 6nz pattern. Adopter's ~150 lines NOT a throwaway under any ruling. → `scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending |
+| dpa-029 | **COMPLETE (ADVISORY) dPA 2026-08-15 — ★★ carries a LIVE LEAK routed as a DEFECT ahead of the rulings; return leg = #471 comment.** `handle()` returning `new globalThis.Response(JSON.stringify(u))` on a `protect=` row **compiles CLEAN and ships `passwordHash` at HTTP 200** (RUN) while the server-fn route redacts: `Response` not allowlisted (**the SPEC's own §40.3.5 example fails E-SCOPE-001**) but `globalThis` is; E-PROTECT-004 is a per-body SOURCE-TEXT regex ("a lint mislabeled as a fail-closed gate"); the redactor passes any `instanceof Response` untouched (fail-OPEN); `.reveal(` is whole-body though field-level was RATIFIED S230 (dpa-017). **7/7 on sequence: DEFECT tickets FIRST** (deny-unless-revealed at the wrapper · `reveal("col")` · allowlist + member-chain walk · regex→lint · E-MW-003/004 unemitted · §40.3.4 vs emit). Direction after: Q1 4–2 typed `Egress<Bytes>` return — **framed as the dpa-002 raw-route REOPEN** (dissent: "no second envelope while the first is provably unsound"); Q3 5/7 `File`/multipart PARAM on the same contract — **the `handle()`+`request.formData()` path the S346 ack pointed to is RUNTIME-BROKEN** (no await inserted); Q4 (a) print the route (not one seam away); Q5 adapter — **§23.4 sidecar is Nominal**, ack's "vendor via .js sidecar" needs correcting. Adopter today (7/7): treat `handle()` as OUTSIDE the envelope. → `scrml-support/docs/deep-dives/document-workflows-egress-envelope-dpa-029-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending; DEFECTS to file |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -997,15 +1000,226 @@ A verdict on subsume-vs-complement with worked adopter code for **each** of the 
 
 
 
+## dpa-028 — Offline / PWA: does scrml grow a NATIVE offline story (SW + Cache-API shell + manifest + write-queue/replay), or is that the host-JS boundary by design? (adopter #509)
+
+```
+id:        dpa-028
+status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-15 (ADVISORY) → DD written, staged insight CANDIDATE, NOT ratified.
+rung:      R2 (a direction ruling — bryan rules; adopter-driven, the exact class the S322 freeze-pause exists for)
+requested: adopter issue #509 (2026-08-11, 0 comments for 4 days across three boots) — banked S346-bryan; factual ack posted on the issue S346
+routes-to: scrml PA → the RETURN LEG is a comment on #509 (S310 return-leg rule)
+```
+
+### Verdict (dPA, 2026-08-15 — ADVISORY, NOT ratified)
+**Artifact:** `scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md`
+
+**One-liner:** **The 2026-07-05 "clear skip" was about CRDT-class SYNC and was DEFER-for-now, not permanent** — row 13 verbatim: *"Hand-roll local cache + mutation queue + conflict resolution … VERY HIGH (CRDT/conflict resolution) … QUESTIONABLE for server-rendered whole-stack … DEFER"*; bullet: *"deliberate non-goal **for now**, not an oversight"*; the words service worker / PWA / manifest / Cache API / cold boot appear **NOWHERE** in that DD → the adopter's cold-boot question is NEW, correctly R2. **⚑ Fork (a) "host boundary by design" is NOT AVAILABLE as written**: no static/public asset dir; `scrml dev` and `_server.js` both serve `dist/`; nothing copies user files in; no `Service-Worker-Allowed`; `/sw.js` must be hand-dropped after every build — **5/5 voices: a static-asset floor is scrml's job and a PREREQUISITE under every fork.** **The DATA half is expressible in native scrml TODAY**: an adopter-shaped queue/replay program (`when @queue changes { localStorage… }`, `when @online changes { flush() }`, `on mount { navigator.onLine … }`, server fn with `INSERT … ON CONFLICT(client_id) DO NOTHING`) **COMPILED GREEN first try**, no foreign code — and stays USERLAND under every fork (0 of 4 build-graph owners ship a write-queue; Angular closed it "not planned"; Background Sync is Chromium-only). **⚑ Separable emitter DEFECT** found by compiling it: `flush()` clears `@queue` synchronously while each server call is a fire-and-forget IIFE → a failed replay silently drops the row (the dpa-020/dpa-023 async class; htmx: *"the client becomes authoritative over 'sent' … a bug to fix (await before dequeue), not evidence the model is wrong"*). **Panel 4–1**: (c) a `scrml generate pwa` scaffold (pwa-architecture · qwik [a flip vote against its compiler-owns-it default] · nextjs [after the floor] · htmx [with condition]) vs (a′) floor + doc recipe + readable `chunks.json` (simplicity, adversarial); **ALL agree**: worker CODE adopter-owned, precache DATA content-hashed from the build graph (`chunks.json` already IS the list — *"scrml is already standing where Qwik retreated TO"*), single-owner artifacts (the pwa voice's regenerate-inside-`sw.js` = *"Hickey's braid"* → rejected; a scaffold must be one-shot like `generate auth`, ZERO per-build participation, *"if that discipline can't hold, it's (b)"*), and **never an offline route RENDERER** (only the shell + last-known server-rendered snapshots may be precached). **(b) 0/5** — Flutter web EMITTED the SW then WITHDREW (*"sends the message that it is necessary or recommended … not the case"*), Qwik City retreated to `modulepreload` (a SW *"cannot be un-shipped in one release"*); Angular/Blazor still emit; SvelteKit exposes data only. **Q3: no 6nz pattern** (README:419 = planned state; gap filed S346). Adopter's ~150 lines are NOT a throwaway under any ruling (~40 absorbed under (c); ~110 stay theirs).
+
+**Bycatch:** `_scrml_effect` runs `when @online changes` once eagerly at registration (`flush()` at boot — spec-intent to confirm) · PRIMER has 0 `when @` / 0 `localStorage` entries · a `_{ navigator.onLine }` block in a client fn escalates the fn to the server where `navigator.onLine` is `undefined` and the client continuation reads an unbound local (documented §23.2.4, footgun-shaped) · SPEC §40.3.4 says `handle()` applies to statically-served assets; the emit reaches it only on matched routes. Anti-goals honored: primitive not designed; NOT ratified; Q1/Q2 not answered on the issue.
+
+
+### The question (the adopter's, verbatim-shaped)
+Field crews in mountain dead-zones must capture time/hours/miles + maintenance logs OFFLINE and sync on
+signal. Their design is deliberately thin: append-only per person (no CRDT), a `client_id` UUID +
+UNIQUE column for idempotent replay through existing server-fns, `localStorage` persistence via
+`when @var changes` (native today), and the §20.8 persistent shell to precache. **The one piece with
+no native story is the COLD OFFLINE BOOT: service-worker + Cache-API shell + manifest so the app loads
+with zero network.** They ask: (1) is native offline something scrml could/should grow, or is
+SW/manifest/static-asset serving the intended host-JS boundary an app owns? (2) was the 2026-07-05
+BaaS-parity "clear skip" of offline-sync a permanent design call or a deprioritisation? (3) is there a
+6nz pattern to copy? They will bridge with ~150 lines of quarantined host-JS if needed and rip it out
+when a native story lands — so the ruling decides whether they build a throwaway.
+
+### Facts established S346 (do NOT re-derive)
+- **Compiler surface: NONE.** `grep -rl 'serviceWorker|manifest.json|caches.open' compiler/src` → 0;
+  SPEC has no offline/PWA/service-worker section (SPEC-INDEX grep → 0). §20.8's persistent shell is the
+  nearest primitive and it is a NAV shell, not a cache shell.
+- **6nz: no pattern to point at.** `../6nz` holds 11 playground `.scrml` files; its `master-list.md`
+  lists "Performance + PWA architecture spec — authored before scaffolding" UNCHECKED; grep for
+  SW/manifest → nothing. README.md:419's "written entirely in scrml … offline-first PWA" describes
+  PLANNED state — filed `g-readme-6nz-claim-describes-planned-state-as-built` (LOW).
+- **The 2026-07-05 BaaS-parity "clear skip"** (`baas-parity-worth-it-2026-07-05.md`) — the DD must
+  quote its stated REASON for skipping offline-sync (was it "not our layer" or "not now"?); the answer
+  to the adopter's Q2 is that sentence, and it decides the rung.
+- **What IS native today and relevant:** `when @var changes` + `localStorage` (their persistence half);
+  server-fn idempotency via their UNIQUE-column design; §20.8 shell composition (#124/#215).
+
+### The fork (surface LIMIT first — FORK RULE row 1)
+(a) **Host-boundary by design** — SW/manifest/Cache-API are platform primitives an app declares as
+static assets; scrml owns the DATA half (write-queue semantics could ride existing state primitives)
+and stays out of the shell-cache half. Cheapest, no new surface; the adopter's ~150 lines are the
+intended answer, and the doc says so.
+(b) **Native offline as a `<program>` mode / attribute** (e.g. an `offline=` declaration that emits SW +
+manifest + a precache list from the §20.8 shell + a replay queue over server-fns) — a widening;
+possibly the "best expression of the intent" for a whole-stack compiler ("scrml IS the backend" — an
+app that cannot boot without the backend is a gap in that claim). Cost: a real arc.
+(c) A middle: emit the SW/manifest SCAFFOLD (`scrml generate pwa`, §"scrml generate" catalog exists) as
+adopter-owned files, keep the semantics host-JS. Tooling, not language.
+
+### Evidence the DD owes
+The 2026-07-05 skip's stated reason, verbatim · what Qwik/Next/SvelteKit/Astro ship for PWA (adapter
+vs core) · whether the write-queue/replay half is expressible in scrml state primitives TODAY (a
+worked adopter-shaped example) · the cold-boot half's minimal emitted surface if (b)/(c).
+
+### Anti-goals
+Do NOT design the primitive; do NOT ratify. Do NOT answer Q1/Q2 on the issue — bryan does.
+
+### Report-back
+§3 — one-liner + artifact path + `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA, whose return leg is a comment on #509.
+
+
+## dpa-029 — Enterprise document workflows (PDF / print / email / file-upload): which of the four host-escapes become NATIVE, and does document egress come inside the protect/tenant envelope? (adopter #471)
+
+```
+id:        dpa-029
+status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-15 (ADVISORY) → DD written, staged insight CANDIDATE, NOT ratified.
+rung:      R2 (direction + a SECURITY-envelope question; bryan rules; adopter-driven)
+requested: adopter issue #471 (2026-08-08, 0 comments for 7 days across three+ boots) — banked S346-bryan; factual ack posted on the issue S346
+routes-to: scrml PA → return leg = a comment on #471
+```
+
+### Verdict (dPA, 2026-08-15 — ADVISORY, NOT ratified)
+**Artifact:** `scrml-support/docs/deep-dives/document-workflows-egress-envelope-dpa-029-2026-08-15.md`
+
+**One-liner:** **★★ LIVE LEAK, runtime-proven, against the RATIFIED dpa-017 floor** — a `handle()` body that SELECTs a `protect="passwordHash"` row and returns `new globalThis.Response(JSON.stringify(u))` **compiles CLEAN** (3 infos, NO E-PROTECT-004) and ships **`200 {"id":1,"name":"alice","passwordHash":"SECRET-HASH-XYZ"}`** while the normal server-fn route returns `{"id":1,"name":"alice"}`. Three defects compose: `Response`/`Request`/`Headers`/`Blob`/`File`/`FormData` are NOT on `LOGIC_SCOPE_GLOBAL_ALLOWLIST` (**the SPEC's OWN §40.3.5 `handle()` example fails E-SCOPE-001**) but `globalThis` IS and the walker checks only the leftmost base; the "fail-closed" E-PROTECT-004 gate as BUILT is a per-function-body SOURCE-TEXT co-occurrence regex over four spellings (`protect-egress.ts:274-303`) — silent on `globalThis.Response`, on helper indirection (measured), on string/CSV bodies, and suppressed wholesale by any `.reveal(` (*"a lint mislabeled as a fail-closed gate, and the mislabelling is the worse defect"* — IFC); the runtime redactor BEGINS `if (value instanceof Response) return value;` (*"Not a missing sink — a fail-OPEN default at an existing one"* — reference-monitor). **dpa-017 (RATIFIED S230) rules "raw/FFI egress fail-closed" and "field-level `reveal("col")` = sole declassification" — the build honours neither** (`.reveal(` is whole-body, all columns). **→ 7/7 on SEQUENCE: DEFECT tickets FIRST, no ruling needed** — deny-unless-revealed at the emitted wrapper (request-scoped taint bit; blast radius on legitimate `handle()` bodies UNMEASURED — say so), `reveal("col")`, allowlist the Bun HTTP vocabulary WITH member-chain walking (closes the bypass), regex → lint or transitive-closure scope, emit or strike E-MW-003/004, reconcile §40.3.4 with the emit. **Direction after:** **Q1** 4–2 for a typed compiler-serialized `Egress<Bytes>` return ("same sink, second ENCODING"; `Bytes` uninhabitable from `Row<P≠{}>` without `.reveal()`; Hono's `c.body()`) vs (a) document `handle()` — **framed honestly as the dpa-002 (S216) raw-route REOPEN**, and its confidentiality story must sit at the document builder's INPUT (a PDF cannot be redacted at the bytes); simplicity's dissent stands as a sequencing claim: *"the ruling must not add a second egress envelope while the first one is provably unsound."* **Q3** 5/7 for a `File`/multipart PARAMETER on the SAME server-fn/`<endpoint>` contract (a coeffect: endorse size/mime, never declassify), not an `<upload>` element — and **the `handle()` + `request.formData()` path the S346 ack pointed the adopter to is RUNTIME-BROKEN** (compiles clean, no await inserted for the host promise → `TypeError`; *"a boundary you cannot cross because the door was never built is a bug"*; *"green-compile-then-crash on the sanctioned path is the failure mode that costs trust"*). **Q4** (a) 4/7 — NOT one seam away (the §52.8 renderer is a compile-time per-`<each>` emitter over a conservative subset; a whole-markup `render()` is a NEW sink + a declassification of §12.5.3): *"a route already IS a server-rendered document — print it"*. **Q5** (adopter's 5th, omitted from the bank) adapter via `scrml:http`/`_{}` — 7/7 — and **the §23.4 `use foreign:` sidecar is Nominal (E-FOREIGN-SIDECAR-NOMINAL)**, so the ack's "vendor via the .js sidecar" needs correcting (vendoring today = inline `_{}` / `vendor:`; PDF-lib vendor fixture not compiled — flagged).
+
+**Adopter today (7/7):** treat `handle()` as OUTSIDE the protect/tenant envelope; never issue a protected-column query in `handle()` or its callees; project in a dedicated server fn; do NOT rely on E-PROTECT-004 (it did not fire on a live leak); do NOT use `handle()`+`request.formData()`; uploads via `_{}` + `Bun.write`; print an authenticated route for PDF. **Second runtime defect (q2h):** a `handle()`→server-fn call is emitted bare → `ReferenceError` (cf. closed #1 for fn→fn). Anti-goals honored: nothing built; §61's thin-envelope ruling extended-or-not, not re-opened; NOT ratified.
+
+
+### The four questions (the adopter surveyed the source first — their reading, with S346 verification)
+1. **Response envelope is JSON-locked.** A server fn / `<endpoint>` returns JSON only; `return new
+   Response(...)` in a server fn is `E-SCOPE-001`; `<endpoint>` forces `application/json` (§61.5). The
+   only binary/`Content-Disposition` path is `handle()` returning a raw Bun `Response`.
+   **VERIFIED S346 by execution:** `function pdf(id) { … return new Response("%PDF-1.4", {headers:{…}}) }`
+   → `E-SCOPE-001: Undeclared identifier Response`. → *Is a non-JSON / chosen-Content-Type response
+   path from a server fn or `<endpoint>` on the roadmap, or is `handle()` the long-term answer?*
+2. **`handle()` is OUTSIDE the tenant/`protect=` egress guarantees** (`E-PROTECT-004` /
+   `E-TENANT-RAW-EGRESS` — SPEC §14.8.9/§14.8.10 fail-closed gates name `handle()` as the
+   compiler-unanalyzable egress). Every document/email path must ride `handle()`, so the delivery
+   layer cannot inherit scrml's data-protection invariants — a real concern for multi-tenant
+   customer-facing docs. → *Native, or enforce redaction ourselves?*
+3. **No inbound multipart / file-upload parser.** `<endpoint accepts=:enum>` decodes JSON only; uploads
+   need `handle()` + `request.formData()` (host Bun). Also blocks a native attachment-storage story.
+   → *Native inbound-upload primitive planned, or host-escape by design?*
+4. **Document generation (HTML→PDF) + templating.** No `renderToString`; `format` is data-only; they'd
+   vendor a PDF lib via the `.js` sidecar. → *Fine as a vendored lib, or is server HTML render coming?*
+   (Note: §52.15 SSR prerender EXISTS server-side — the DD checks whether a server-side render-to-string
+   of a markup value is already reachable or one seam away.)
+
+### What is already established — do NOT re-derive
+- §61 `<endpoint>` is deliberately THIN (LIMIT-PRIMITIVES, §61.5 envelope; JSON-RPC-not-baked-in).
+- §60/§61 both say client-codegen SKIP for foreign wires; `handle()` (§40) is the sanctioned raw escape.
+- The auth-scoped confidentiality architecture (S256 ratified): THREE colocated mechanisms + ONE
+  compile-time `EgressSink × ConfidentialityAxis` coverage TYPE — **complete mediation without a
+  god-object.** Question 2 is exactly "is `handle()`-with-a-binary-body a fourth EgressSink the type
+  should cover?" — the ratified architecture has a place for it; the DD should say whether it fits.
+- §23 `_{}` foreign code + the `.js` sidecar (§23.4) exist for vendoring.
+
+### The forks (each: LIMIT vs WIDEN, surfaced first)
+Q1: (a) `handle()` is the answer, document it · (b) a typed binary/`Content-Type` return form for
+server fns / `<endpoint>` (a `Response`-shaped return type the compiler can still route through the
+egress redactor). Q2: (a) adopters redact themselves in `handle()` · (b) `handle()` becomes a
+covered EgressSink for the protect/tenant floors (structural-redaction of any row-shaped value that
+reaches it; binary bodies pass). Q3: (a) host-escape by design · (b) `<endpoint accepts=… body=multipart>`
+or a `<upload>` primitive. Q4: (a) vendored lib · (b) expose the SSR renderer as a server-side
+`render(markup) -> string`.
+
+### Evidence the DD owes
+Per question: the governing sentence (or "searched §X, §Y — none"); the smallest change that answers
+it; whether it widens; what the adopter loses if the answer is (a). Q2 gets the security lens: name
+what a `handle()`-body leak looks like today (worked example) and whether the coverage TYPE can express
+the new sink without a god-object.
+
+### Anti-goals
+Do NOT build; do NOT ratify; do NOT re-open §61's thin-envelope ruling as if unruled — extend it or not.
+
+### Report-back
+§3 — one-liner + artifact path + `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA, whose return leg is a comment on #471.
+
+
+## dpa-027 — Presence-match arm vocabulary: §18.8.2 says `.Some(v)`/`.None`, the compiler implements `not :>`/`given x :>` — which is canonical? (NARROW; R1→R2)
+
+```
+id:        dpa-027
+status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-15 (ADVISORY) → DD written, staged insight CANDIDATE, NOT ratified.
+rung:      R1 (PA lean recorded) — R2 if the DD finds the .Some/.None text has a ruling behind it
+requested: bryan, S345 (owed filing (d), banked S346 after the PA split it — the other half is a BUG, `g-lifecycle-return-match-fires-e-type-024`)
+routes-to: scrml PA
+```
+
+### Verdict (dPA, 2026-08-15 — ADVISORY, NOT ratified)
+**Artifact:** `scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md`
+
+**One-liner:** **R1 HOLDS — there is no ruling behind `.Some/.None`; there is a REJECT.** Provenance (git -S across scrml + the frozen scrml8 archive): drafted 2026-03-27 in the §18 rewrite as `::Some/::None` → the same day's language-design review flagged it **R-18-006 BLOCKING** (*"undefined constructs … not defined in §14.3, §14.4, or any other section … a developer could legitimately declare `type Option:enum = { Some(value:T) None }`"*) → the repair REMOVED it (re-review: *"the `::Some` / `::None` removal is complete. No magic names are introduced"*, and warned the `spec-updates-§18` changelog still carried it) → **`549e5b3` 2026-03-28 "Reconstruct SPEC.md from update docs after truncation" replayed that changelog and REINSTATED the rejected draft** → mechanical passes (`::`→`.` s38, `null`→`not` s62, `=>`→`:>` S148) → the S154 enum-subset DD took it at face value and cited it into **§53.15 :33812** → an S19 fixture (`phase2-match-optional-039.scrml`, expected clean) was authored from it and **has failed E-MATCH-012 in every sweep since**. `not` (S38, *"instead of nothing i like not"*) + `given` (2026-04-07 full replacement) landed in §42 with user voice; **0** compiler code paths recognise `.Some`/`.None`; 0 user statements on Some/None/Option anywhere. **3/3 LIVE voices (type-systems · elm · simplicity-adversarial) → (a) STRIKE**, with two corrections to the PA's lean: (i) striking leaves **TWO** vocabularies (predicate `is some`/`is not` + arm `given`/`not`) — "the minimum defensible move, not full consolidation"; (ii) the worst dangling citation is **E-MATCH-012's own message** (`type-system.ts:17253`), which prescribes the DEPRECATED `not => …` — "a compiler error teaching rejected syntax is the worst dangling citation of the three" (PRIMER:616 same). Type-theoretic reason (sharper than the archaeology): `T | not` is an idempotent UNTAGGED union (`T | not | not = T | not`); `.Some/.None` is constructor elimination over a TAGGED sum — they agree at one nesting level only, `.Some(value)` is strictly COARSER over `A | B | not`, and `.Some` would be scrml's only undeclarable, unshadowable constructor (name-resolution hazard when `T` is a user enum with a `Some` member — R-18-006 restated as soundness). Option (b) aliases: 3/3 reject ("a false Maybe-shaped API surface … worse than no sugar at all"). Honest adopter cost of (a): non-parallel arms / no visible unwrap → answer with a worked example, not a second grammar.
+
+**Follow-ups (a) requires:** strike §18.8.2 :13007-13037 + cross-ref §42.2.3/§14.12.6.1 (record the reason as "REJECTED 2026-03-27, reinstated by reconstruction", not "limit wins") · retarget §53.15 :33812 · fix E-MATCH-012 message `=>`→`:>` (+ PRIMER:616-620) · rewrite/retire the failing fixture · add the three-ways worked example. **Method note:** reconstruction is a laundering vector (draft → changelog → reconstruction → citation → fixture) — diff a reconstructed section against its last review verdict. Anti-goal honored: `E-TYPE-024` lifecycle-return defect untouched; NOT ratified.
+
+
+### The question
+
+Two normative sections give two different arm vocabularies for discriminating a `T | not` value in a
+`match`, and the compiler implements exactly one of them:
+
+- **§18.8.2** ("Match over Union Types (`A | B | not`)"), verbatim: *"Optional match: For a value of
+  type `T | not`: `.Some(value)` matches the present case and binds the unwrapped value as `value` with
+  type `T`. `.None` matches the `not` case."* — with a worked example `match val { .Some(s) :> … .None :> … }`.
+- **§14.12.6.1** (form 3) + **§42.2.3**: `match u { not :> handleAbsence()  given u :> { … u.name … } }`.
+
+**Executed S346 at `f6883b26`** (reproducers in the S346 scratchpad `dpa027/`; shapes below are enough
+to re-derive): over a PLAIN union `let u: User | not` (and `fn -> User | not`):
+- `not :>` / `given u :>` arms → **compiles clean**.
+- `.Some(v)` / `.None` arms → **`E-MATCH-012`** ("lacks a `not` arm") **+ `E-TYPE-006`** ("missing
+  members: struct") — the `.Some`/`.None` spelling is not recognised at all.
+So the §18.8.2 optional-match prose describes a form the compiler has never accepted; the live form is
+§42's `not`/`given`.
+
+### What is already established — do NOT re-derive
+- `not` is scrml's SOLE absence value (S89 ruling, §42.1); `null`/`undefined` do not exist; there are
+  no generics (`Option<T>` is not a scrml type). `Some`/`None` are not declared anywhere as scrml enum
+  variants — `.Some(value)` is an Option-type idiom borrowed from elsewhere.
+- `given x :>` is the ratified narrow-to-present form (§42.2.3, S135 cluster N).
+- The compiler's `E-MATCH-012` message itself prescribes the `not => …` arm — the implementation and its
+  own diagnostic agree on the `not`/`given` vocabulary.
+
+### PA lean (FORK RULE row 1, LIMIT wins — recorded, not ruled)
+(a) **Strike the `.Some(value)`/`.None` prose + example from §18.8.2 and cross-reference §42.2.3 /
+§14.12.6.1 form 3 as THE optional-match form.** One vocabulary, the native one; nothing an adopter can
+write today stops working (the struck form never compiled — measured); the compiler already agrees.
+Rule 4b: the provenance of the §18.8.2 sentence being changed is UNKNOWN to the PA — the DD's first job
+is `git log -S '.Some(value)' -- compiler/SPEC.md` + a user-voice sweep for `Some`/`None`/`Option`;
+if a ruling put it there, this becomes R2 and bryan rules.
+(b) implement `.Some/.None` as aliases — a WIDENING that adds a second spelling of the same
+discrimination and a foreign idiom; disfavoured under limit-primitives-not-godify.
+(c) something else.
+
+### Anti-goals
+Do NOT touch the lifecycle-return `E-TYPE-024` defect here (it is a bug with its own gap entry).
+Do NOT ratify — RUN-not-RATIFY.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA.
+
+
 ## dpa-026 — Is `tare` one keyword doing two jobs? (thunk vs capture, by position)
 
 ```
 id:        dpa-026
-status:    banked
+status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-15 (ADVISORY) → DD written, staged insight CANDIDATE, NOT ratified.
 rung:      R2 minimum
 requested: bryan, S337 (2026-08-10) — "a, and bank c as its own question"
 routes-to: scrml PA
 ```
+
+### Verdict (dPA, 2026-08-15 — ADVISORY, NOT ratified)
+**Artifact:** `scrml-support/docs/deep-dives/tare-thunk-vs-capture-dpa-026-2026-08-15.md`
+
+**One-liner:** **The SPEC's own "not expressible" sentence is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler compiles clean on the branch and is a runtime SNAPSHOT (reset → the captured value, stable across later writes), and E-TARE-DEFERRED-POSITION's own message steers users to exactly that shape. **`reset` has ONE job** (both thunk registries populate only at module-init — verified in emitter + runtime + a compiled main fixture). **The calibration case is expressible TODAY, twice, with zero new syntax**, and the data pattern (`<zero>` cell + derived `net`; the tare button is `@zero = @raw`; `reset(@zero)` = factory) is the canonical answer in every paradigm polled (xstate: *"not a workaround, the canonical one"*; elm: *"D is the canonical answer, not a fallback"*). Corpus: 0 calibration-shaped usages; all 43 `reset(` are form/counter clears. **Panel: 4/5 fork 1 (nothing new), 1/5 fork 2 (a `capture(@x)` verb — solid-signals: the hidden `_scrml_default_fns` slot is "a hidden, writable, unobservable second reactive axis per cell"), 5/5 REJECT fork 3 (position-keyed semantics — "makes hoisting unsafe"; E-TARE-BEFORE-DECL is "scar tissue from this exact mistake once already"), 5/5 call the markup-handler hole a DEFECT** (bare `tare(@x)` in `onclick=` COMPILES CLEAN in both forms — call-ref → runtime `ReferenceError: tare is not defined`, expression → a live wrong-value promotion; the checks walk an 11-name field list = the dpa-025 class). The panel's one live split — bless Fixture A as closure semantics (xstate, type-systems) vs refuse it as an accident (elm, simplicity) — is BRIDGED by a CHECKABLE property, not a doc: the DG already knows every expression's cell-read-set → state `cellReads(e)=∅ ⟹ snapshot / ≠∅ ⟹ live` at each `tare` site and WARN on `tare(@x, @x)` (a no-op baseline). Prior art (web): every design that FUSED restore + re-baseline by argument presence (RHF, Formik, vee-validate) grew confusion issues; Angular kept `defaultValue` read-only + explicit `overwriteDefaultValue` after adopters asked for `setCurrentValuesAsDefault()` (the tare button); nobody keys on source position. **Reco: fork 1 patched — correct §6.8.4 BEFORE PR #501 merges; fix the diagnostic to point at D; ship the read-set diagnostic; close the markup hole as a defect; hold fork 2 in reserve; fork 4 (assignable slot) only if the baseline ever needs to be READ.**
+
+**Bycatch:** the §34 E-TARE-BEFORE-DECL row on the branch still says a tare in a function body "is legal wherever written" (stale vs §6.8.4); the literal S337 quote "tare stores a thunk, keep the family coherent. go build it." has no standalone `>` user-voice block (only PA-attributed in BRIEF/SPEC/PR body). **Anti-goals honored:** the config-case thunk ruling not re-litigated (the prior art now supports it independently); `tare` not proposed for removal; NOT ratified.
+
 
 ### The question
 
@@ -1062,7 +1276,7 @@ Routes to scrml PA.
 
 ```
 id:        dpa-025
-status:    banked
+status:    ratified   # S338 (bryan: "a, and grep the compiler for source-text regexes"); reconciled S346 — table is the authority
 rung:      R2 minimum; escalate to R3 if two or more candidate primitives survive and compete
 requested: bryan, S337 (2026-08-10) — "add that to dpa-025 so i can run it"
 routes-to: scrml PA

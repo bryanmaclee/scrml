@@ -1,0 +1,16 @@
+<program db="postgres://localhost/app">
+  <schema>
+    orders {
+      id: integer primary key
+      status: text
+      total: real
+    }
+  </schema>
+  <channel name="ordersFeed" watches=orders>
+      <onchange>
+          <Inserted(row) : { @orders = [...@orders, row] }>
+          <Updated(row) : { @orders = @orders.map(r => r.id == row.id ? row : r) }>
+          <Deleted(key) : { @orders = @orders.filter(r => r.id != key) }>
+      </onchange>
+  </channel>
+</program>

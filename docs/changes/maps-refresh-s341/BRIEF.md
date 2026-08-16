@@ -3,7 +3,7 @@
 <!-- Archived verbatim per pa-base §5 (brief archival). Committed BEFORE the worktree was cut,
      so this file exists inside the agent's workspace. -->
 
-DONE-PROBE: `git merge-base --is-ancestor "$(sed -n '3p' .claude/maps/primary.map.md | grep -oE 'commit: [0-9a-f]+' | cut -d' ' -f2)" origin/main`
+DONE-PROBE: git merge-base --is-ancestor "$(sed -n '3p' .claude/maps/primary.map.md | grep -oE 'commit: [0-9a-f]+' | cut -d' ' -f2)" origin/main
 
 ---
 
