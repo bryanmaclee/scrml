@@ -446,9 +446,45 @@ The 2 text-only changes are FULLY ATTRIBUTABLE and are the only ones:
      * conformance/cases/derived/e-derived-server-only-reach-transitive/case.scrml
 ```
 
-— the two `E-DERIVED-SERVER-ONLY-REACH` cases whose message lost the false `(§6.6.4)`
-citation (B-4). **7409/7409 artifacts byte-identical.** Zero newly-rejecting, zero
-newly-accepting, zero placement movement anywhere in the corpus.
+**7409/7409 artifacts byte-identical.** Zero newly-rejecting, zero newly-accepting, zero
+placement movement anywhere in the corpus.
+
+### The two text-only diffs, extracted word-by-word (`.tmp/f6-explain.mjs`)
+
+They are two DIFFERENT causes, and neither is a behaviour change:
+
+```
+=== conformance/cases/derived/e-derived-server-only-reach-lambda-hop/case.scrml ===
+  exitCode base=1 head=1
+    base: …runtime invokes the recompute with no `await` (§6.6.4). The cell's…
+    head: …runtime invokes the recompute with no `await`. The cell's value…
+  codes base=["E-DERIVED-SERVER-ONLY-REACH","W-PROGRAM-REDUNDANT-LOGIC","W-PROGRAM-SPA-INFERRED"]
+  codes head=["E-DERIVED-SERVER-ONLY-REACH","W-PROGRAM-REDUNDANT-LOGIC","W-PROGRAM-SPA-INFERRED"]
+  codes IDENTICAL: true
+  artifacts (11) byte-identical: true
+
+=== conformance/cases/derived/e-derived-server-only-reach-transitive/case.scrml ===
+  exitCode base=1 head=1
+    base: …cleaner source. See SPEC §40.8. (line 22, col 1) -->…
+    head: …cleaner source. See SPEC §40.8. (line 25, col 1) -->…
+  codes base=["E-DERIVED-SERVER-ONLY-REACH","W-PROGRAM-REDUNDANT-LOGIC","W-PROGRAM-SPA-INFERRED"]
+  codes head=["E-DERIVED-SERVER-ONLY-REACH","W-PROGRAM-REDUNDANT-LOGIC","W-PROGRAM-SPA-INFERRED"]
+  codes IDENTICAL: true
+  artifacts (11) byte-identical: true
+```
+
+1. **`lambda-hop`** — the SHIPPED DIAGNOSTIC STRING lost the false `(§6.6.4)` citation.
+   That is B-4's source edit at `route-inference.ts:6188`, and it is the ONLY compiler-
+   behaviour-visible change this branch makes to any corpus source. It is text-only by
+   construction: a citation removed from a message body changes no code, no severity, no
+   exit disposition, and no artifact.
+2. **`transitive`** — a LINE NUMBER moved, `(line 22, col 1)` -> `(line 25, col 1)`. This is
+   NOT the compiler at all: I edited the `//` COMMENT at the top of that fixture (the same
+   §6.6.4 citation fix), adding 3 lines, which shifted the span an unrelated
+   `W-PROGRAM-*` warning reports. The compiler behaved identically on both sides.
+
+Both keep the SAME diagnostic-code multiset, the SAME exit code, and 11/11 byte-identical
+artifacts. Neither is a placement, refusal, or emission change.
 
 ⚠ **TWO INSTRUMENT DEFECTS FOUND AND CORRECTED BEFORE THE NUMBERS ABOVE WERE TRUSTED**, and
 the first run's numbers were garbage:
