@@ -2058,3 +2058,50 @@ function wrap(cfg, x = cfg.doHash) { return x }`,
     expect(errorsWithCode(out, CODE).length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §11o — RESIDUAL-3 SCOPE CORRECTION (round 6): an `if`-expression RHS PARSES
+// as statements and FIRES — it is NOT the decline class.
+//
+// Rounds 4 and 5 both cited the `if`-expression RHS as Residual 3's worked
+// example ("declined by this limb; codegen refuses it at exit 1 with
+// E-CODEGEN-INVALID-LOGIC instead"). Executed round 6 ON THE ROUND-5 TREE
+// ITSELF (`bf99a93a`): that exact shape IS refused by this limb with the chain
+// message and NO E-CODEGEN-INVALID-LOGIC anywhere — the round-3 partial-parse
+// fix re-parses escape-hatch raw text as STATEMENTS, and an `if` statement
+// parses. The SPEC's Residual 3 is corrected in the same change; this pin keeps
+// the corrected behaviour from drifting back to a silent decline.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11o — an if-expression RHS parses as statements and fires (Residual-3 scope, round 6)`, () => {
+  test("one-hop reach inside an `if`-expression RHS: FIRES with the chain", () => {
+    const source = `<program>
+\${
+  import { hashPassword } from 'scrml:auth'
+  <pw> = "secret"
+  <flag> = true
+  function doHash(p) { return hashPassword(p) }
+  const <computed> = if (@flag) { doHash(@pw) } else { "n" }
+}
+<div>\${@computed}</div>
+</program>`;
+    const { out } = runRIOn(source);
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].message).toContain("const <computed> -> doHash");
+  });
+
+  test("BITE — the same `if`-expression RHS with a purely-client callee: 0 diagnostics", () => {
+    const source = `<program>
+\${
+  <pw> = "secret"
+  <flag> = true
+  function pure(p) { return p + "!" }
+  const <computed> = if (@flag) { pure(@pw) } else { "n" }
+}
+<div>\${@computed}</div>
+</program>`;
+    const { out } = runRIOn(source);
+    expect((out.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+  });
+});
