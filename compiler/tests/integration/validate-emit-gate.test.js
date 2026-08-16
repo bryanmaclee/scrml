@@ -31,7 +31,9 @@ beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "validate-emit-gate-")); });
 afterAll(() => { if (TMP) rmSync(TMP, { recursive: true, force: true }); });
 
 function walkScrml(dir, acc = []) {
-  for (const e of readdirSync(dir)) {
+  // Deterministic order (S347-peter sweep-tail): sort readdir basenames
+  // (code-unit, NOT locale) so enumeration is machine/OS-stable.
+  for (const e of readdirSync(dir).sort()) {
     const p = join(dir, e);
     if (statSync(p).isDirectory()) walkScrml(p, acc);
     else if (e.endsWith(".scrml")) acc.push(p);
@@ -41,7 +43,7 @@ function walkScrml(dir, acc = []) {
 
 function walkJs(dir, acc = []) {
   let entries;
-  try { entries = readdirSync(dir); } catch { return acc; }
+  try { entries = readdirSync(dir).sort(); } catch { return acc; }
   for (const e of entries) {
     const p = join(dir, e);
     if (statSync(p).isDirectory()) walkJs(p, acc);

@@ -88,6 +88,11 @@ function walkDir(dir, ext, out) {
   } catch (_e) {
     return; // missing dir treated as empty
   }
+  // Deterministic order (S347-peter sweep-tail): sort by basename (code-unit, NOT
+  // locale) so `programFiles`/`allScrml` are built in a stable order — the
+  // `chosen = appScrml ?? programFiles[0]` entry pick (multi-<program> app with no
+  // app.scrml) becomes machine/OS-stable instead of readdir-first.
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const ent of entries) {
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {

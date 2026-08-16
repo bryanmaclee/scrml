@@ -95,7 +95,10 @@ const isGate = (ln: string) =>
 type Hit = { file: string; line: number; arg: string; kind: string; text: string };
 
 function walk(dir: string, out: string[] = []): string[] {
-  for (const e of readdirSync(dir)) {
+  // Deterministic order (S347-peter sweep-tail, g-census-json-and-listing-order-
+  // readdir-dependent): sort readdir basenames (code-unit, NOT locale) so `--json`
+  // hits[] order and the default listing's equal-count tie-order are machine-stable.
+  for (const e of readdirSync(dir).sort()) {
     const p = join(dir, e);
     if (statSync(p).isDirectory()) { if (e !== "node_modules") walk(p, out); }
     else if (/\.(ts|js)$/.test(e) && !/\.d\.ts$/.test(e)) out.push(p);

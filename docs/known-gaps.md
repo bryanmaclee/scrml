@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 40 |
 | MED | 151 |
-| LOW | 69 |
+| LOW | 68 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -8338,10 +8338,14 @@ Pre-existing (the try/catch is unchanged context in #530). Fix: a missing refere
 
 Also cosmetic from the same pass: on the loud-fail path `art` is never cached, so each of the 7 tests recompiles the whole app; `expect(errors).toEqual([])` in `boot()` is unreachable-dead post-#531. Fix: `afterAll(() => rmSync(OUT, {recursive:true, force:true}))`; basename match (`=== "hos.html"`) instead of suffix.
 
-### g-census-json-and-listing-order-readdir-dependent — `scripts/source-text-regex-census.ts`'s `walk()` (`:98`) is unsorted, so `--json` `hits[]` order and the default listing's tie-order (files with equal counts) are readdir-dependent — counts stable, bytes not — `NEW S346-bryan (S239 review-floor pass on #524 — the fix is complete for the SEPARATOR axis; this is the enumeration-order axis, pre-existing); LOW; open`
-<!-- @gap id=g-census-json-and-listing-order-readdir-dependent sev=LOW status=open locus=scripts/source-text-regex-census.ts:98(walk() — unsorted readdirSync; same class as the S345 order-dependency sweep) prov=rationale:review-floor-on-524-summary-identical-fs-order-vs-reversed-json-2561-line-diff-listing-344-line-diff -->
+### g-census-json-and-listing-order-readdir-dependent — `scripts/source-text-regex-census.ts`'s `walk()` (`:98`) is unsorted, so `--json` `hits[]` order and the default listing's tie-order (files with equal counts) are readdir-dependent — counts stable, bytes not — `NEW S346-bryan (S239 review-floor pass on #524 — the fix is complete for the SEPARATOR axis; this is the enumeration-order axis, pre-existing); LOW; RESOLVED S347-peter`
+<!-- @gap id=g-census-json-and-listing-order-readdir-dependent sev=LOW status=resolved locus=scripts/source-text-regex-census.ts:98(walk() — unsorted readdirSync; same class as the S345 order-dependency sweep) prov=rationale:review-floor-on-524-summary-identical-fs-order-vs-reversed-json-2561-line-diff-listing-344-line-diff -->
 
-Fix: sort the walk (code-unit) — one line; the S345 sweep's remaining unfixed hazards belong to the same sweep-tail: `validate-emit-gate.test.js:33` · ~~`parser-conformance-collect-hoisted.test.js:592`~~ **RESOLVED S347-peter** (root: `parser-conformance/corpus-enumerator.js` `enumerateScrmlCorpus`/`enumerateBenchCorpus` returned FILESYSTEM order → the `i % STEP` exemplar sample tested a different 20 files per machine; sorted by POSIX `relpath`, code-unit; 4190 parser-conformance tests green incl. the within-node parity gate) · `render-corpus-enumerator.js:214` (narrower — final rows already sorted; bites only a multi-`<program>` app lacking `app.scrml`, and its `inputFiles` emission is now canonical via `g-compilescrml-input-order-dependent-emission`).
+Fix: sort the walk (code-unit). **The S345 order-dependency sweep-tail is now CLEARED (S347-peter), all by code-unit `readdirSync().sort()` at the walk:**
+- `scripts/source-text-regex-census.ts:98` — **RESOLVED** (this gap; `--json` hits[] + tie-order now stable).
+- `validate-emit-gate.test.js:33/42` — **RESOLVED** (`walkScrml` + `walkJs` sorted; 3/3 green; note its `inputFiles`→compileScrml order was already canonical via `g-compilescrml-input-order-dependent-emission`, so this hardens the test's own enumeration incl. `fires[0]`).
+- `parser-conformance-collect-hoisted.test.js:592` — **RESOLVED** (root `corpus-enumerator.js` `enumerateScrmlCorpus`/`enumerateBenchCorpus` sorted by POSIX `relpath`; the `i % STEP` exemplar sample was testing a different 20 files per machine; 4190 parser-conformance tests green incl. the within-node parity gate).
+- `render-corpus-enumerator.js:214` — **RESOLVED** (`walkDir` sorted by basename → the `chosen = appScrml ?? programFiles[0]` entry pick is stable; e2e-render-map 4/4 green).
 
 ### g-residual-order-bearing-readdir-and-unonced-self-host-dcl — three residual order/registration hazards from the #526/#528 reviews, all PRE-EXISTING and non-artifact: `commands/generate.js:152` (first `<program>` file found wins → which root feeds the auth-scaffold hint), `commands/dev.js:843` (multi-input dev serves the FIRST `.html` found at `/`), and `compiler/self-host/cg-parts/section-emit-wiring.js:1199` (the only DOMContentLoaded registration left WITHOUT `{ once: true }` — reachable only under `scrml compile --self-host` when `dist/self-host/cg.js` exists) — `NEW S346-bryan (S239 review-floor passes on #526 + #528); LOW; open`
 <!-- @gap id=g-residual-order-bearing-readdir-and-unonced-self-host-dcl sev=LOW status=open locus=compiler/src/commands/generate.js:152+compiler/src/commands/dev.js:843+compiler/self-host/cg-parts/section-emit-wiring.js:1199 prov=rationale:review-floor-census-of-every-readdirSync-and-every-DOMContentLoaded-registration-in-compiler-src-and-self-host-after-526-and-528 -->
