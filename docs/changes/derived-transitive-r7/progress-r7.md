@@ -248,3 +248,239 @@ chain string moves, and **the mutated chain reads as an improvement** — which 
 pin that only watched the code could not tell a broken branch from a working one.
 
 RESTORED → arc suites `162 pass / 0 fail` across both files.
+
+---
+
+## B-2 — THE COUNTEREXAMPLES, REPRODUCED
+
+```
+$ bun .tmp/b2-probe.mjs
+
+=== residual4-fn-valued ===
+  errorCodes = []
+  codegen rewrote to the fetch stub at 2 site(s):
+     async function _scrml_fetch_doHash_3(p) {
+     let f = _scrml_fetch_doHash_3;
+
+=== destructured-default ===
+  errorCodes = []
+  codegen rewrote to the fetch stub at 2 site(s):
+     async function _scrml_fetch_doHash_3(p) {
+     function _scrml_wrap_4({ x = _scrml_fetch_doHash_3 }) {
+```
+
+Both are rewrites route inference does not refuse. The universal is FALSE.
+
+**AND THE BRIEF'S SUGGESTED BOUND IS ALSO FALSE.** *"every SAME-FILE reference to a
+`function`-declaration name that codegen would rewrite is refused"* — `doHash` in the
+destructured default IS a same-file `function`-declaration name, it IS rewritten, and it
+is NOT refused. So no bound was written. The SPEC now states the MEASURED SCOPE (an
+enumeration of the shapes the limb was built for) and says in terms that the two sets are
+INCOMPARABLE.
+
+### AND IT IS WORSE THAN THE BRIEF STATED — the destructured default is a LEAK
+
+```
+$ bun .tmp/b2-destructured-direct.mjs
+=== direct-destructured-default ===          function f({ h = hashPassword }) { return h("k") }
+  errorCodes=[] serverJs=0
+  CLIENT LEAK: Bun.password=true argon2id=true _scrml_stdlib.auth=true
+    | const { hashPassword } = _scrml_stdlib.auth;
+    | function _scrml_f_3({ h = hashPassword }) {
+    | async function hashPassword(password) {
+=== direct-plain-default ===                 function f(h = hashPassword) { return h("k") }
+  errorCodes=[] serverJs=1
+  CLIENT LEAK: Bun.password=false argon2id=false _scrml_stdlib.auth=false
+```
+
+Identical on the pre-fix tree (measured via `git stash`), so **PRE-EXISTING, not caused by
+this round.** And provably pre-existing on `origin/main`, whose scan root is `body` alone:
+
+```
+$ git show origin/main:compiler/src/route-inference.ts | grep -n "scanForServerOnlyBindingRefs(body"
+3431:  for (const mod of scanForServerOnlyBindingRefs(body, live).values()) found.add(mod);
+```
+
+### The discriminator: the NESTED twin is already correct
+
+```
+$ bun .tmp/b2-destructured-nested.mjs
+=== direct-nested-destructured ===   function outer(v){ function inner({h = hashPassword}){…} … }
+  errorCodes=[] serverJs=1     CLIENT LEAK: Bun.password=false _scrml_stdlib.auth=false
+=== direct-array-destructured ===    function f([ h = hashPassword ]) { return h("k") }
+  errorCodes=[] serverJs=0     CLIENT LEAK: Bun.password=true  _scrml_stdlib.auth=true
+```
+
+So the gap is the TOP-LEVEL scan ROOT (`fnNode.params` is a sibling of `fnNode.body`), not
+an unreadable pattern — the walk reaches a NESTED declaration's `params` generically.
+NOT FIXED HERE (it moves placement and carries a companion shadow-set over-fire); recorded
+as §6.6.19 residual 6 and pinned as an executed gap at conf §9.
+
+---
+
+## B-4 — THE GOVERNING-SENTENCE GATE: OUTCOME (2), A FINDING
+
+`SPEC.md:2960` is `#### 6.6.4 Diamond Dependency — Structural Solution`
+(`<price>`/`<quantity>`/`<subtotal>` ordering).
+
+```
+$ sed -n '2960,2995p' compiler/SPEC.md | grep -ci "await\|async\|promise"
+0
+```
+
+**Searched for a section that normatively states the derived recompute is invoked without
+`await`: §6.6.1-§6.6.19, §13 (Async Model), §19.9 (Server Function Errors), and a
+whole-document grep for `un-awaited` / `not awaited` / `no \`await\`` / `never awaited`.
+NO GOVERNING SENTENCE EXISTS.** Every hit is one of the §6.6.19 sites that cite §6.6.4.
+
+Nearest normative anchors, which ENTAIL the property but do not state it:
+- **§6.6.3 Phase 3 (SHALL)** — on read the runtime *"SHALL re-evaluate the derived
+  expression, clear the dirty flag, cache the new result, and return it."*
+- **§6.6.5 (SHALL)** — *"`flush()` SHALL be a built-in function that **synchronously**
+  re-evaluates all dirty derived nodes in the current reactive graph **before returning**."*
+  A recompute that awaited could not satisfy this.
+- **§6.6.7** — the emitted shape is `_scrml_derived_declare("total", () => …)`, a plain
+  non-`async` thunk.
+
+**AND A TENSION WORTH SURFACING:** §13.2 normatively says *"The compiler SHALL insert
+`await` at every call site where a server-generated fetch call is made."* Inside a derived
+thunk it does not, and cannot — which is precisely why §6.6.19 refuses instead of emitting.
+§6.6 owes the un-awaited sentence; §13.2 owes the corresponding carve-out. Recorded in
+§6.6.19's cross-reference block; **the shipped adopter-facing diagnostic now carries NO
+citation after "no `await`"**, with a source comment forbidding one until §6.6 has a
+sentence.
+
+`runtime-template.js:1245`/`:1268` cite §6.6.4 for re-entrance prevention and are CORRECT —
+§6.6.4 does contain *"The dirty flag SHALL be cleared immediately when re-evaluation
+begins … This prevents re-entrant re-evaluation."* Left alone.
+
+---
+
+## F6 — DIRECTION-OF-CHANGE, RE-RUN WITH THE TRACKED SCRIPT
+
+`scripts/corpus-emit-differential.ts` (NOT a scratchpad `diff-run.mjs`). The base side is a
+`git archive origin/dtr-r6` snapshot at `.tmp/base-dtr-r6`, given its own git identity so
+the two sides are distinguishable revisions.
+
+```
+$ bun scripts/corpus-emit-differential.ts capture \
+    --compiler-root <WT>/.tmp/base-dtr-r6 --label base-dtr-r6-ff0cbdd8 \
+    --work /tmp/dtr-r7-diff/base-work --manifest /tmp/dtr-r7-diff/base.manifest.json \
+    --expect-total 1909
+$ bun scripts/corpus-emit-differential.ts capture \
+    --compiler-root <WT> --label head-dtr-r7 \
+    --work /tmp/dtr-r7-diff/head-work --manifest /tmp/dtr-r7-diff/head.manifest.json \
+    --expect-total 1909
+$ bun scripts/corpus-emit-differential.ts diff \
+    --base /tmp/dtr-r7-diff/base.manifest.json --head /tmp/dtr-r7-diff/head.manifest.json \
+    --json /tmp/dtr-r7-diff/diff.json
+```
+
+```
+EMIT DIFFERENTIAL   base=base-dtr-r6-ff0cbdd8 (c07b1b55)   head=head-dtr-r7 (73ca53f0)
+
+   TOTAL          base  1909 of  1909    head  1909 of  1909
+   source SET delta: none — the two sides enumerated the SAME 1909 sources
+   cross-check   : AGREE (walk set == independent `find` set, both directions)
+   expect-total  : ASSERTED and MATCHED (1909)
+
+VERDICT: 2 DIFFERENCE(S)   over 1909 common sources of 1909 base / 1909 head enumerated
+                           and 7409 compared artifacts
+  sources enumerated        base 1909   head 1909
+  source set delta          0
+  compile-failure delta     0 newly failing / 0 newly passing
+  diagnostic changes        0 code / 2 text-only
+  artifact set delta        0 added / 0 removed
+  artifact content diffs    0 of 7409 compared
+  syntax delta (effective)  0 new / 0 fixed / 0 message-changed
+  syntax delta (script)     0 new / 0 fixed
+  syntax delta (module)     0 new / 0 fixed
+  load-context changes      0
+  bare server-fn sites      base 145 / head 145  (delta 0, in 0 source(s))
+```
+
+The 2 text-only changes are FULLY ATTRIBUTABLE and are the only ones:
+
+```
+   diagnostic-TEXT-only changes (same codes): 2 of 1909 common sources (full list, no cap):
+     * conformance/cases/derived/e-derived-server-only-reach-lambda-hop/case.scrml
+     * conformance/cases/derived/e-derived-server-only-reach-transitive/case.scrml
+```
+
+— the two `E-DERIVED-SERVER-ONLY-REACH` cases whose message lost the false `(§6.6.4)`
+citation (B-4). **7409/7409 artifacts byte-identical.** Zero newly-rejecting, zero
+newly-accepting, zero placement movement anywhere in the corpus.
+
+⚠ **TWO INSTRUMENT DEFECTS FOUND AND CORRECTED BEFORE THE NUMBERS ABOVE WERE TRUSTED**, and
+the first run's numbers were garbage:
+1. A `git archive` extraction has no `.git`, so `git rev-parse HEAD` walked UP and returned
+   the HEAD of the enclosing worktree — **both sides reported the same revision** and the
+   harness correctly refused with `INCOMPARABLE`. Fixed by giving the snapshot its own repo.
+2. `--work` under the head's own compiler root makes the compiler print the out-dir
+   RELATIVELY, which `normalizeStream` (which folds the ABSOLUTE work path) cannot fold.
+   That alone produced **1228 phantom text-only diffs and 1021 phantom artifact diffs.**
+   Fixed by putting both work dirs under the system temp dir, outside both roots.
+   **Had the harness not refused on (1), (2)'s noise would have read as a real regression.**
+
+The brief's cited `2366/0/0` from the untracked scratchpad script does not correspond to
+this instrument's population: the tracked script's five default roots enumerate **1909**
+`.scrml` sources and REPORT the 457 excluded ones by directory (compiler 123, dashboard 1,
+docs 286, handOffs 47).
+
+---
+
+## R26 EMPIRICAL — the SYMPTOM on real sources, not "tests pass"
+
+`.tmp/r26.mjs` compiles the same 139 real sources on BOTH trees —
+`docs/readme-snippets/tasks-app.scrml` plus every `samples/compilation-tests/*.scrml`
+containing a `function` with a parenthesised default, plus a 1-in-4 stride — and compares
+three observables per source: the diagnostic multiset, the PLACEMENT (`.server.js` count +
+the sorted set of server-hosted function names read out of the emitted handlers), and the
+artifact-name set.
+
+```
+$ bun .tmp/r26-cmp.mjs
+R26 COMPARISON — 139 sources
+  new/changed refusals (diagnostic multiset) : 0
+  PLACEMENT drift (.server.js set + hosted fn names) : 0
+  artifact-name-set drift : 0
+  TOTAL differing sources : 0
+  positive control — sources that DO emit a .server.js on head : 17
+  positive control — sources with >=1 diagnostic on head : 11
+```
+
+The positive controls are what make the zeros mean something: 17 of the 139 genuinely
+escalate and 11 genuinely diagnose, so the comparison is not vacuously green.
+
+`docs/readme-snippets/tasks-app.scrml`, both sides identical:
+```
+codes=[]  serverJsCount=1  serverHostedFns=["createTask","loadTasks","toggle"]
+artifacts=[scrml-runtime.<HASH>.js, tasks-app.client.js, tasks-app.css,
+           tasks-app.html, tasks-app.server.js]
+```
+
+---
+
+## CURRENCY GATES
+
+```
+$ bun run scripts/regen-spec-index.ts --check
+  SPEC-INDEX totals are STALE.  have: 37,243  want: 37,259
+$ bun run scripts/regen-spec-index.ts        # regenerated, committed
+$ bun run scripts/regen-spec-index.ts --check
+  SPEC-INDEX totals OK — Total lines: 37,259 | Total sections: 65 + appendices
+```
+
+`bun scripts/facts.ts --check` FAILS — **and it fails IDENTICALLY on the untouched base**
+(verified by stashing every change and re-running). PRE-EXISTING; the brief directs that
+`docs/FACTS.md` be regenerated after merge, so it is left alone.
+
+---
+
+## CONFORMANCE
+
+```
+$ bun conformance/run.ts
+conformance (impl#1): 886/886 cases pass
+```
+
