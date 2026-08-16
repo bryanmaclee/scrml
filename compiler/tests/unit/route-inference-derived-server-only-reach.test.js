@@ -321,8 +321,9 @@ describe(`${CODE} §7 — RHS-local shadowing (DIRECT limb only, since round 4)`
   // passes `shadow: "none"` and fires on every reference (§11l): codegen's
   // server-fn rename has no notion of scope and reaches a reference under a
   // same-named binder, so an RI suppression there silently miscompiled. Firing
-  // on every reference is what keeps every shape codegen would rewrite inside
-  // RI's refusal set (containment, not equality — see §11n). Limb (a) keeps the
+  // on every reference is what refuses each shape codegen was MEASURED to
+  // rewrite among the ones this limb was built for — an ENUMERATION, never a
+  // set relation; the two sets are INCOMPARABLE (see §11n). Limb (a) keeps the
   // suppression: codegen does NOT rename server-only IMPORT references, so the
   // emitted CALL does resolve to the local binder.
   //
@@ -875,7 +876,10 @@ describe(`${CODE} §10 — structural walk: termination, identity, skip-list`, (
 // THE FAILURE IS NOT THE DIRECT LIMB'S FAILURE. Confidentiality is INTACT here:
 // the server-only implementation stays server-side and the call lowers to a fetch
 // stub. But `_scrml_derived_get` invokes the recompute thunk with no `await`
-// (§6.6.4), so the PROMISE becomes the cell's value and is what gets rendered.
+// (a synchronous pull, §6.6.3 — this cited `§6.6.4` until round 7, which is
+// Diamond Dependency and contains no `await`/`async`/`Promise`; no section
+// states the un-awaited invocation, see §6.6.19's cross-reference block), so the
+// PROMISE becomes the cell's value and is what gets rendered.
 // Measured on `main` before this landed, all at exit 0 with an empty diagnostic set:
 //
 //   `_scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(…))`   // 1 hop
@@ -1684,13 +1688,20 @@ const <computed> = doHash("seed")
 // codegen renamed the shadowed call to the fetch stub anyway, so the "clean"
 // compile called the server and rendered a Promise, with the local binder dead.
 //
-// THE CONTRACT IS CONTAINMENT, ONE-DIRECTIONAL: every shape codegen would
-// rewrite to the fetch stub is refused at compile time. Codegen's
-// reference-renaming on this limb has no notion of scope (a reference under a
-// same-named binder is renamed), so RI suppresses on no name either — and RI's
-// refusal set is a strict SUPERSET of codegen's rewrite set (an operator-position
-// name, `doHash + 1`, is refused here and rewritten nowhere). Nothing in this
-// file asserts, or may assert, that the two sets are equal.
+// THE CONTRACT IS A MEASURED SCOPE, NOT A SET RELATION (corrected round 7).
+// Codegen's reference-renaming on this limb has no notion of scope (a reference
+// under a same-named binder is renamed), so RI suppresses on no name either, and
+// that refuses each shape codegen was MEASURED to rewrite among the ones this
+// limb was built for.
+//
+// THE TWO SETS ARE INCOMPARABLE. NEITHER CONTAINS THE OTHER. Rounds 3-6 each
+// shipped a "strict SUPERSET" / "containment" claim here and each was falsified
+// by a reproducer:
+//     rewritten, NOT refused:  `let f = doHash`               (§6.6.19 residual 4)
+//     rewritten, NOT refused:  `function wrap({ x = doHash })` (§6.6.19 residual 6)
+//     refused, rewritten NOWHERE: `doHash + 1` (operator position)
+// Nothing in this file asserts, or may assert, that either set contains,
+// covers, is a superset of, or equals the other.
 //
 // ROUND 5 removed the LAST suppression — a hop caller's own PARAMETERS. Round 4
 // kept it as "provably scope-correct", which is true of the scanner and false of
@@ -1931,12 +1942,20 @@ function g(p) { return doHash(p) }`,
 //   inference; the bare-reference and callback-reference forms had no refusal
 //   from anywhere. Codegen renames the name in the default position either way.
 //
-// The containment this limb owes: every shape codegen would rewrite is refused
-// at compile time. RI's refusal set CONTAINS codegen's rewrite set (a name in
-// operator position — `doHash + 1` — is refused here and rewritten nowhere, so
-// the two are not equal and no test in this file says they are). The default
-// position was outside the containment; these pins put it inside and keep it
-// there. Executed-artifact twins: conf §7.
+// These pins add the TOP-LEVEL STRING default to the enumeration of shapes this
+// limb refuses. They do NOT establish a set relation, and round 7 corrected the
+// text that said they did: the refusal set and codegen's rewrite set are
+// INCOMPARABLE (`let f = doHash` and `function wrap({ x = doHash })` are
+// rewritten and NOT refused — §6.6.19 residuals 4 and 6; `doHash + 1` is refused
+// and rewritten nowhere).
+//
+// AND THE OTHER REPRESENTATION OF THIS POSITION IS STILL OPEN. A DESTRUCTURED
+// default (`function wrap({ x = doHash })`) is on neither tree, because
+// `fnDeclParamDefaultRoots` reads `params[i].defaultValue` only when it is a
+// top-level string — measured round 7, at exit 0, with the DIRECT-limb twin
+// shipping `Bun.password` to the browser. Do not read these pins as covering
+// "parameter defaults". Executed-artifact twins: conf §7; the open half is
+// pinned as an executed gap at conf §9.
 // ---------------------------------------------------------------------------
 
 describe(`${CODE} §11n — a hop caller's PARAMETER DEFAULT is a reach (round 6)`, () => {

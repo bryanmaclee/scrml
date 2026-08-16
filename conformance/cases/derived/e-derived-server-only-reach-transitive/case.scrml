@@ -10,8 +10,11 @@ ${ import { hashPassword } from 'scrml:auth' }
 // `Bun.password.hash` implementation stay server-side, and `doHash` becomes a route
 // handler plus a client fetch stub. Nothing leaks.
 //
-// What breaks is the READ. The stub is `async`, and §6.6.4 invokes a derived
-// recompute with no `await`, so `@hashed` would hold the pending Promise and the
+// What breaks is the READ. The stub is `async`, and the derived recompute is a
+// synchronous pull (§6.6.3) invoked with no `await` — this cited `§6.6.4` until
+// round 7, which is Diamond Dependency and says nothing about `await`; no
+// section states the un-awaited invocation, see §6.6.19's cross-reference
+// block — so `@hashed` would hold the pending Promise and the
 // markup would render it. Measured on `main` before S338, at exit 0 with an empty
 // diagnostic set:
 //

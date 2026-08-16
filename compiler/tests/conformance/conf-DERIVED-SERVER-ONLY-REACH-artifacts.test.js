@@ -301,7 +301,10 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §4 a client-safe member in the sam
 //   async function _scrml_fetch_doHash_3(p) { … await _scrml_fetch_with_csrf_retry(…) … }
 //   _scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(_scrml_cs_reactive_get("pw")));
 //
-// `_scrml_derived_get` calls the thunk with no `await` (§6.6.4), so `@h` held the
+// `_scrml_derived_get` calls the thunk with no `await` (a synchronous pull, §6.6.3
+// — this cited `§6.6.4` until round 7, which is Diamond Dependency and says
+// nothing about `await`; no section states the un-awaited invocation, see
+// §6.6.19's cross-reference block), so `@h` held the
 // Promise and the markup rendered it.
 const TRANSITIVE_LEAK = `<program>
 ${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
@@ -382,10 +385,16 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §5 a hop through a local function 
 //   REACH) or the emitted client contains NO async stub bound into a derived
 //   recompute — and parses (`node --check`).
 //
-// Under the final semantics every transitive-limb shadow shape takes the first
-// disjunct (RI fires on every reference — a refusal set that CONTAINS every
-// shape codegen's scope-blind renaming would rewrite; containment, not
-// equality), and the accepted control takes the second. The §1/§5 gap pins
+// Under the final semantics every SHAPE IN THIS TABLE takes the first disjunct
+// (RI fires on every reference), and the accepted control takes the second.
+//
+// THAT IS A STATEMENT ABOUT THIS TABLE, NOT A SET RELATION (corrected round 7).
+// Earlier generations of this comment said RI's refusal set "CONTAINS every
+// shape codegen's scope-blind renaming would rewrite". It does not: `let f =
+// doHash` and `function wrap({ x = doHash })` are both rewritten by codegen at
+// exit 0 with NO refusal (§6.6.19 residuals 4 and 6, the latter pinned at §9
+// below), while `doHash + 1` is refused and rewritten nowhere. The two sets are
+// INCOMPARABLE. The §1/§5 gap pins
 // still apply: a REFUSED compile still writes artifacts to disk, so the refusal
 // (exit disposition), not artifact absence, is the contract — consumers key on
 // the exit code, never on artifact presence.

@@ -4010,20 +4010,32 @@ function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<str
  *
  * `"none"` — LIMB (b). NO name-based suppression at all: any reference to a
  *   server-reaching function name fires. This is the round-4 blocker fix. The
- *   property it buys is ONE-DIRECTIONAL CONTAINMENT, and only that: every shape
- *   codegen would rewrite to the async fetch stub is refused at compile time.
- *   RI's refusal set is a strict SUPERSET of codegen's rewrite set — codegen's
- *   `post-fn-name-mangle` (emit-client.ts) renames a name only where its
- *   lookahead admits it (a name in OPERATOR position, `doHash + 1`, is renamed
- *   nowhere and refused here), and its rename does reach a reference under a
- *   same-named RHS-local binder — so an RI suppression on a name-set basis is
- *   precisely the shape that compiled at exit 0 while the client bound an
- *   async stub into the synchronous derived recompute (measured: if-sibling,
- *   while-body, match-arm-sibling, the SPEC-blessed RHS-local shadow itself,
- *   — round 5, in `computeServerReachingFns` — a hop caller's own parameter,
- *   and — round 6 — a hop caller's parameter DEFAULT). Do not write the two
- *   sets as equal, agreeing, or "the same" anywhere: three review rounds each
- *   refused an arc for re-minting that claim. The GOVERNING DESIGN INTENT
+ *   property it buys is a MEASURED SCOPE, and it is NOT A SET RELATION.
+ *
+ *   THE TWO SETS ARE INCOMPARABLE — NEITHER CONTAINS THE OTHER, AND WRITING
+ *   OTHERWISE IS WHAT GOT ROUNDS 3, 4, 5 AND 6 REFUSED (round 7). Each of those
+ *   rounds shipped some form of "RI's refusal set is a strict SUPERSET of
+ *   codegen's rewrite set" (round 6 re-minted it as "containment"), and a
+ *   30-second reproducer falsifies it in BOTH directions:
+ *
+ *     codegen REWRITES, RI does NOT refuse — exit 0, measured round 7:
+ *       `let f = doHash`               -> `let f = _scrml_fetch_doHash_3;`
+ *          (§6.6.19 residual 4 — the hop population is `function` decls only)
+ *       `function wrap({ x = doHash })` -> `function _scrml_wrap_4({ x = _scrml_fetch_doHash_3 })`
+ *          (§6.6.19 residual 6 — a DESTRUCTURED default is on neither tree)
+ *
+ *     RI refuses, codegen rewrites NOWHERE:
+ *       `doHash + 1` — `post-fn-name-mangle` (emit-client.ts) renames a name
+ *       only where its lookahead admits it, and an OPERATOR position is not one.
+ *
+ *   WHAT IS ACTUALLY TRUE is an enumeration, not a quantifier: on the shapes
+ *   this limb was built for, firing on every reference refuses each one codegen
+ *   was MEASURED to rewrite — if-sibling, while-body, match-arm-sibling, the
+ *   SPEC-blessed RHS-local shadow itself, (round 5, in `computeServerReachingFns`)
+ *   a hop caller's own parameter, and (round 6) a hop caller's top-level string
+ *   parameter DEFAULT. Do not restate that enumeration as "every shape", a
+ *   superset, a containment, a covering, an equality, or "the same". The
+ *   GOVERNING DESIGN INTENT
  *   remains real lexical scoping in scanner and codegen together (pre-S338
  *   §6.6.19 sentence; restoration arc queued S345); until that lands, firing on
  *   every reference is the loud, fail-closed interim, per the arc's own rule
@@ -4360,9 +4372,18 @@ function computeServerReachingFns(
     // doHash) { return x("k") }` had NO edge to `doHash` at all — measured on the
     // frozen round-5 tree: exit 0, zero diagnostics, and the client bound the
     // async fetch stub as the default (`_scrml_wrap_4(x = _scrml_fetch_doHash_3)`)
-    // under a derived recompute. Codegen's rename reaches the default position;
-    // the containment this limb owes — every shape codegen would rewrite is
-    // refused at compile time — did not hold there. See `fnDeclParamDefaultRoots`.
+    // under a derived recompute. Codegen's rename reaches the default position,
+    // and this limb did not. See `fnDeclParamDefaultRoots`.
+    //
+    // ONLY THE TOP-LEVEL STRING FORM IS COVERED, AND THE UNCOVERED ONE IS A LEAK
+    // (round 7, §6.6.19 residual 6). `fnDeclParamDefaultRoots` reads
+    // `params[i].defaultValue` only when it is a top-level STRING; for a
+    // DESTRUCTURED parameter the whole pattern is in `params[i].name` and the
+    // per-property default lives inside it. Measured: `function wrap({ x = doHash })`
+    // is refused by nothing and emitted as `function _scrml_wrap_4({ x = _scrml_fetch_doHash_3 })`,
+    // and the DIRECT-limb twin `function f({ h = hashPassword })` ships
+    // `Bun.password` to the browser at exit 0. Do NOT read the round-6 fix as
+    // covering "parameter defaults" — it covers one of their two representations.
     const scanRoot: unknown[] = [body, ...fnDeclParamDefaultRoots(callerRecord.fnNode)];
     for (const reachedName of scanForServerOnlyBindingRefs(scanRoot, live, "structural", true).keys()) {
       const globalIds = fnNameToNodeIds.get(reachedName);
@@ -5904,9 +5925,21 @@ export function runRI(input: RIInput): RIOutput {
   //     HAS placed on the server. Confidentiality is intact: the secret stays
   //     server-side and the call lowers to a fetch stub. But the stub is
   //     `async`, and `_scrml_derived_get` (`dist/scrml-runtime.js`) invokes the
-  //     recompute thunk with NO `await` — §6.6.4 — so **the Promise itself
-  //     becomes the cell's value and is rendered**. A CORRECTNESS failure, at
-  //     exit 0, with nothing on stderr.
+  //     recompute thunk with NO `await` — a synchronous pull, §6.6.3 — so **the
+  //     Promise itself becomes the cell's value and is rendered**. A CORRECTNESS
+  //     failure, at exit 0, with nothing on stderr.
+  //
+  //     ⚠ THE CITATION HERE READ `§6.6.4` UNTIL ROUND 7 AND IT WAS FALSE.
+  //     §6.6.4 is "Diamond Dependency — Structural Solution"; it contains no
+  //     `await`, `async` or `Promise`. A search of §6.6.1-§6.6.19, §13 and §19.9
+  //     found NO sentence stating that the recompute is invoked without `await`.
+  //     §6.6.3's Phase-3 SHALL (re-evaluate on read and return) and §6.6.5's
+  //     `flush()` SHALL (synchronously re-evaluate before returning) ENTAIL it,
+  //     and §6.6.7 emits a plain non-`async` thunk — but no sentence says it, and
+  //     §13.2's "SHALL insert `await` at every call site where a server-generated
+  //     fetch call is made" is in unresolved tension with it. §6.6 owes the
+  //     sentence; recorded in §6.6.19's cross-reference block. Cite §6.6.3 for
+  //     what it governs; do not manufacture a citation for what nothing does.
   //
   // Measured on `main` at S338, four shapes, all exit 0:
   //   `doHash` (1 hop) · a `?{}` helper (1 hop, and a SECOND emission route —
@@ -6105,9 +6138,11 @@ export function runRI(input: RIInput): RIOutput {
       // Codegen's rename to the fetch stub reaches a reference under a
       // same-named RHS-local binder (measured), so a name-set suppression here
       // is exactly the shape that miscompiles at exit 0. Firing on every
-      // reference keeps the containment — every shape codegen would rewrite is
-      // refused — without claiming the two sets are equal (they are not: an
-      // operator-position name is refused here and rewritten nowhere). See
+      // reference refuses each shape codegen was MEASURED to rewrite among the
+      // ones this limb was built for. That is an ENUMERATION, not a set
+      // relation: the refusal set and codegen's rewrite set are INCOMPARABLE
+      // (`let f = doHash` and `function wrap({ x = doHash })` are rewritten and
+      // NOT refused; `doHash + 1` is refused and rewritten nowhere). See
       // `collectDerivedRhsServerOnlyRefs` for the full story.
       const hopRefs = collectDerivedRhsServerOnlyRefs(
         declNode,
@@ -6148,9 +6183,18 @@ export function runRI(input: RIInput): RIOutput {
         `is on the server because ${describeReachTerminus(cursor)}. ` +
         (alsoReached ? `The RHS also reaches ${alsoReached}. ` : "") +
         `A call from the client to a server-placed function lowers to a \`fetch\`, so it is ` +
+        // NO SECTION CITATION AFTER "no `await`" — DELIBERATE (round 7, B-4).
+        // This read `(§6.6.4)` for three rounds; §6.6.4 is "Diamond Dependency —
+        // Structural Solution" and says nothing about `await`, so an adopter who
+        // followed the pointer landed on `<price>`/`<quantity>` arithmetic. A
+        // search of §6.6.1-§6.6.19, §13 and §19.9 found no section that states
+        // the un-awaited invocation, so there is nothing to point at yet — see
+        // §6.6.19's cross-reference block for the recorded gap. §6.6.3 above
+        // covers the synchronous-recompute half, which is the part that HAS a
+        // governing sentence. Do not restore a citation here until §6.6 has one.
         `ASYNCHRONOUS — but a derived cell is a SYNCHRONOUS reactive recompute (§6.6.3: lazy ` +
-        `pull with dirty flags), and the runtime invokes the recompute with no \`await\` ` +
-        `(§6.6.4). The cell's value would therefore be the pending Promise itself, and that ` +
+        `pull with dirty flags), and the runtime invokes the recompute with no \`await\`. ` +
+        `The cell's value would therefore be the pending Promise itself, and that ` +
         `Promise is what every reader of \`@${cellName}\` — a markup interpolation, another ` +
         `derived cell, a dependency-graph edge — would render. The compiler refuses rather than ` +
         `emitting that. This is a CORRECTNESS refusal, not a confidentiality one: ` +
