@@ -39,3 +39,31 @@ branch `fix/flagship-hos-hermetic`, base `2709e540`.
    60 s budget (precedent: `integration/w3-splitter-trucking-characterization.test.js`).
 4. `bunfig.toml` — remove the dead `timeout` key, say why.
 5. Gates + FINDINGS.md.
+
+## 5. Executed (post-plan)
+- Commit 3ad870c7 `gate(browser-baseline)`: failureReason() excerpt beside each NEW failure
+  name. Smoke-tested on timeout/expect/throw shapes with regex-special suite names.
+- CLOUD BITE: `workflow_dispatch` on this branch at 3ad870c7 (pre-compiler-fix) = run
+  31915126678 → gate FAILED on exactly the flagship name, and the NEW excerpt prints
+  `took 5257.19ms` + `^ this test timed out after 5000ms.` — the mechanism observed in cloud.
+  PA independently confirmed a DOCS-ONLY delta (a333777f on brief/s346-briefs, run
+  31915273220) fails the same way; 5 of 8 recent gate runs red, change-independent.
+- Commit 75d4162e `perf(ghost-lint)`: makeSkipCursor (forward-only) in the five range
+  builders + findMatchingClose; skipPastRanges kept exported as the oracle. Pin
+  compiler/tests/unit/lint-ghost-patterns-skip-cursor.test.js (4 tests, ~27k checks).
+  Repo-wide lint digest (2398 .scrml): identical diagnostics, 14.0s -> 1.5s. Synthetic
+  160k-char/6k-range: 6556ms -> 32ms. Corpus emit differential vs main 2709e540:
+  NO DIFFERENCES (1906/1906 sources, 7383/7383 artifacts byte-identical, exit 0).
+- Commit 916a8eff `test(flagship-hos)` + bunfig: compile in beforeAll({timeout:60_000})
+  before happy-dom registration; dead `[test] timeout` key removed with rationale.
+  (Verified bun hook semantics: beforeAll with no options times out at 5000ms and fails the
+  suite's first test; with {timeout:60000} it passes.)
+- Commit 39e2c305 facts regen (+61 lines, +1 test file).
+
+## 6. Gates (all on 39e2c305)
+- flagship pair 5x writer-first + 5x victim-first: 10/10 green.
+- All 13 pre-fix RED pairs: green (fails=0).
+- Sorted-order tier: 730 pass / 48 fail = exactly the baseline names; flagship-fails=0.
+- `bun scripts/browser-baseline.ts --check`: PASS, 48 asserted names UNCHANGED.
+- Contract gate: 0 fail (pre-commit hook full run, twice: ~28.7k pass).
+- Cloud verify runs on the FIXED tree: see below (appended as they complete).
