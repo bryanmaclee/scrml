@@ -114,6 +114,13 @@ function compileToDisk(name, source) {
     outDir,
     codes: (result.errors ?? []).map((e) => e.code),
     errorCodes: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code),
+    // The diagnostic TEXT for `CODE`, joined. §6.6.19 requires the message to
+    // name the HOP CHAIN, and §7's test names promised that fact for three
+    // rounds while asserting nothing about it (round 7, F2).
+    codeMessages: (result.errors ?? [])
+      .filter((e) => e.code === CODE)
+      .map((e) => e.message ?? "")
+      .join("\n"),
     serverJsFiles: files.filter((f) => f.endsWith(".server.js")),
     clientLoaded,
     clientLoadedText: clientLoaded.map((f) => readFileSync(f, "utf8")).join("\n"),
@@ -680,10 +687,35 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §7 a hop caller's PARAMETER DEFAUL
     test(`${name}: refused with the code, and the chain names the hop`, () => {
       const c = compileToDisk(`r6-param-default-${name}`, source);
       try {
+        // ORDER IS THE ASSERTION (round 7, F2 — this block used to assert
+        // `toContain(CODE)` FIRST and then `expect(assertRefusedOrStubFree(c))
+        // .toBe("refused")`, which is a TAUTOLOGY: the helper returns
+        // `"refused"` iff the code is present, which the line above had already
+        // established, so the helper's own body — the stub-free grep and the
+        // `node --check` parse of every client artifact — was UNREACHABLE and
+        // this section gated nothing beyond the code. §6 calls the helper first
+        // and does bite; §7 now matches it. Call the helper FIRST so that if one
+        // of these shapes ever stops refusing, the disjunction's OTHER branch
+        // actually runs and says what is wrong with the artifacts.
+        const disposition = assertRefusedOrStubFree(c);
+        expect(disposition).toBe("refused");
         expect(c.errorCodes).toContain(CODE);
-        // The disjunction contract of §6 holds here too: refused, so no stub
-        // may be trusted to be absent — the artifact set is still written (§1).
-        expect(assertRefusedOrStubFree(c)).toBe("refused");
+        // AND THE FACT THE TEST NAME PROMISES, WHICH NOTHING ASSERTED (round 7,
+        // F2). §6.6.19 requires the message to name the hop chain from the
+        // derived cell through each intermediate function to the server-placed
+        // one. Asserting it here is what distinguishes "refused BECAUSE the
+        // parameter default produced a hop edge through `wrap`" from "refused
+        // for some unrelated reason that happens to carry the same code" — and
+        // the chain string is the ONLY observable that moves when the
+        // nested-declaration branch is disabled (F1).
+        //
+        // MEASURED with that branch disabled, `default-nested-decl` still
+        // refuses but its chain becomes `const <computed> -> wrap -> inner ->
+        // doHash` — which is why the round-6 unit pin that watched only the
+        // chain string could not tell a broken branch from a working one: the
+        // longer chain arguably reads BETTER. This assertion pins the SHIPPED
+        // chain, so a change to it is a decision someone has to make on purpose.
+        expect(c.codeMessages).toContain("const <computed> -> wrap -> doHash");
       } finally {
         teardown(`r6-param-default-${name}`);
       }
@@ -805,6 +837,392 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §8 a §12.2 Trigger 3 reach in a p
       expect(c.clientLoadedText).not.toContain("_scrml_fetch_f_");
     } finally {
       teardown("t3-default-client-safe");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8b — §12.2 TRIGGER 3, THE OTHER DIRECTION: A NAME THAT IS NOT A REFERENCE
+// SHALL NOT ESCALATE (round 7, B-1).
+//
+// WHY THIS SECTION EXISTS AT ALL, AND IT IS THE WHOLE LESSON OF THIS FILE
+// APPLIED TO ITSELF. §8 above pins that a parameter default CAN escalate. It
+// says nothing about which defaults MAY NOT, and the arc suite was measured
+// IDENTICAL — 149 pass / 0 fail — on the tree that over-fired and the tree that
+// does not. Nothing caught the over-fire being introduced and nothing would have
+// caught it being removed. That is how it shipped.
+//
+// WHAT WAS MEASURED at `ff0cbdd8`, executing these exact sources: every shape
+// below relocated its function to the server at exit 0 with ZERO diagnostics,
+// because round 6 routed a `function-decl`'s raw-source default through the
+// direct limb's word-boundary TEXT scan, and the limb-(a) name set is ordinary
+// English (`scrml:path` exports `join`, `resolve`, `basename`, `dirname`;
+// `scrml:process` exports `env`, `cwd`, `exit`, `platform`).
+//
+// AND THE CONSEQUENCE IS NOT A ROUND TRIP, IT IS A WRONG ANSWER. For
+// `string-literal`, the emitted `case.server.js` was
+//
+//     const _scrml_body = await _scrml_req.json();
+//     const msg = _scrml_body["msg"];          // <- the default is GONE
+//
+// so `greet()` with no argument returned `null` instead of `"please join us"`.
+// The escalation deletes the default; no diagnostic says so.
+//
+// §12.4 IS NORMATIVE AND UNAMENDED (`SPEC.md:7463`): "it SHALL NOT classify a
+// function based on the names of identifiers that appear inside string-literal
+// contents of its body … matching a server-fn name as a token inside a string
+// literal is NOT a reference and SHALL NOT propagate taint."
+//
+// EACH ASSERTION HERE IS DIRECTIONAL AND BOTH DIRECTIONS ARE COVERED:
+//   - §8b goes red if the over-fire RETURNS (`serverJsFiles.length` becomes > 0).
+//   - §8 and §8c go red if a genuine catch is LOST (`serverJsFiles.length`
+//     becomes 0 and the auth implementation appears in a client-loaded artifact).
+// Bite proofs for both directions are recorded in
+// `docs/changes/derived-transitive-r7/progress-r7.md`.
+// ---------------------------------------------------------------------------
+
+// Every shape below imports a REAL escalation-server-only module (`scrml:path`,
+// limb (a) member `join`) and then uses the word `join` in a position that
+// §12.4 says is NOT a reference.
+const T3_NON_REFERENCE_DEFAULTS = {
+  // A STRING LITERAL. §12.4's own worked case.
+  "string-literal": `<program>
+${OPEN}
+  import { join } from 'scrml:path'
+  <out> = ""
+  function greet(msg = "please join us") { return msg }
+${CLOSE}
+<button onclick={ @out = greet() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+  // A TEMPLATE literal — the same rule, a different literal node.
+  "template-literal": `<program>
+${OPEN}
+  import { join } from 'scrml:path'
+  <out> = ""
+  function greet(msg = \`please join us\`) { return msg }
+${CLOSE}
+<button onclick={ @out = greet() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+  // An OBJECT PROPERTY KEY. A non-computed `Property.key` is not a reference —
+  // the same rule `collectRawReferenceNames` already applies to a lowered
+  // subtree, now applied to a default.
+  "object-property-key": `<program>
+${OPEN}
+  import { join } from 'scrml:path'
+  <out> = ""
+  function greet(opts = { join: 1 }) { return opts.join }
+${CLOSE}
+<button onclick={ @out = greet() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+  // A MEMBER PROPERTY. A non-computed `MemberExpression.property` is not a
+  // reference either.
+  "member-property": `<program>
+${OPEN}
+  import { join } from 'scrml:path'
+  <opts> = { join: 1 }
+  <out> = ""
+  function greet(a, msg = a.join) { return msg }
+${CLOSE}
+<button onclick={ @out = greet(@opts) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+  // A NESTED declaration's default escalating the OUTER function. This shape is
+  // the reason the fix could not live only in `collectServerOnlyBindingModules`:
+  // it fires through the scanner's OWN `function-decl` branch, a SECOND site.
+  "nested-decl-string-literal": `<program>
+${OPEN}
+  import { join } from 'scrml:path'
+  <out> = ""
+  function outer(v) { function inner(msg = "please join us") { return msg } return inner() }
+${CLOSE}
+<button onclick={ @out = outer(1) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+};
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §8b a NON-reference in a parameter default does NOT escalate (round 7)", () => {
+  for (const [name, source] of Object.entries(T3_NON_REFERENCE_DEFAULTS)) {
+    test(`${name}: compiles clean and stays CLIENT-side (§12.4 SHALL NOT)`, () => {
+      const c = compileToDisk(`r7-nonref-default-${name}`, source);
+      try {
+        expect(c.errorCodes).toEqual([]);
+        // THE BITING ASSERTION. A `.server.js` is emitted only when route
+        // inference escalated a function; zero means the word inside the literal
+        // was not read as a reference. This goes red the moment the over-fire
+        // returns.
+        expect(c.serverJsFiles.length).toBe(0);
+        // …and no fetch stub was minted for the function, i.e. no new public
+        // route was created for it.
+        expect(c.clientLoadedText).not.toMatch(/_scrml_fetch_(greet|outer)_\d+/);
+      } finally {
+        teardown(`r7-nonref-default-${name}`);
+      }
+    });
+  }
+
+  /**
+   * THE DEFAULT SURVIVES INTO THE EMITTED CLIENT — the consequence assertion.
+   *
+   * `serverJsFiles.length === 0` says the function was not relocated. This says
+   * the thing an adopter would actually notice: the default value is still there
+   * and still the string they wrote. Pre-fix the emitted server handler read
+   * `msg` from the request body and nothing supplied it, so `greet()` returned
+   * `null`.
+   */
+  test("the parameter default is PRESERVED in the emitted client function", () => {
+    const c = compileToDisk("r7-nonref-default-preserved", T3_NON_REFERENCE_DEFAULTS["string-literal"]);
+    try {
+      expect(c.errorCodes).toEqual([]);
+      expect(c.clientLoadedText).toMatch(/\bfunction _scrml_greet_\d+\(msg = "please join us"\)/);
+    } finally {
+      teardown("r7-nonref-default-preserved");
+    }
+  });
+
+  /**
+   * A COMMENT inside a default, held separately because of a PRE-EXISTING and
+   * UNRELATED codegen defect.
+   *
+   * `function greet(msg = 1 /* join later *␘/)` is rejected by client codegen
+   * with `E-CODEGEN-INVALID-LOGIC` — measured round 7 with NO import at all and
+   * with a purely client-safe import, so it is not caused by anything in this
+   * arc. Round 6's over-fire MASKED it by relocating the function to the server.
+   * The property this section owns is placement, so placement is what is
+   * asserted; the codegen defect is surfaced as its own item, not folded in.
+   */
+  test("comment-in-default: not escalated (the pre-existing codegen refusal is NOT this rule's)", () => {
+    const src = `<program>
+${OPEN}
+  import { join } from 'scrml:path'
+  <out> = ""
+  function greet(msg = 1 /* join later */) { return msg }
+${CLOSE}
+<button onclick={ @out = greet() }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+    const c = compileToDisk("r7-nonref-default-comment", src);
+    try {
+      expect(c.serverJsFiles.length).toBe(0);
+      expect(c.clientLoadedText).not.toMatch(/_scrml_fetch_greet_\d+/);
+      // Pinned so the day the codegen defect is fixed this line goes red and a
+      // reader is sent here rather than quietly widening the expectation.
+      expect(c.errorCodes).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+    } finally {
+      teardown("r7-nonref-default-comment");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8c — THE NESTED-`function-decl` GUARD, PINNED (round 7, F1).
+//
+// `scanForServerOnlyBindingRefs`'s `kind === "function-decl"` branch scans a
+// NESTED declaration's parameter defaults. It is load-bearing for a real
+// confidentiality leak and had ZERO coverage: the unit test that claims to
+// "isolate reason (2)" only observes the diagnostic's CHAIN STRING, and the
+// mutated chain reads like an improvement, so disabling the branch did not go
+// red anywhere.
+//
+// MEASURED with the branch disabled: `function outer(v) { function inner(h =
+// hashPassword("k")) { return h } return inner() }` compiles at exit 0 with ZERO
+// `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client and
+// a real `Bun.password.hash(…{ algorithm: "argon2id" })` in the runtime the
+// emitted HTML loads. The bite proof is in `progress-r7.md`.
+//
+// This is the §12.2 Trigger 3 (DIRECT/confidentiality) limb, not §7's transitive
+// one: no derived cell appears in either source.
+// ---------------------------------------------------------------------------
+
+const T3_NESTED_DECL_DEFAULT = {
+  // a CALL in the nested default.
+  "nested-default-call": `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <out> = ""
+  function outer(v) { function inner(h = hashPassword("k")) { return h } return inner() }
+${CLOSE}
+<button onclick={ @out = outer(1) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+  // a BARE REFERENCE in the nested default — the form with no codegen backstop
+  // behind it at all.
+  "nested-default-bare-ref": `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <out> = ""
+  function outer(v) { function inner(h = hashPassword) { return h("k") } return inner() }
+${CLOSE}
+<button onclick={ @out = outer(1) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`,
+};
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §8c a NESTED declaration's default escalates the OUTER function (round 7)", () => {
+  for (const [name, source] of Object.entries(T3_NESTED_DECL_DEFAULT)) {
+    test(`${name}: escalated, and NOTHING server-only reaches the browser`, () => {
+      const c = compileToDisk(`r7-nested-decl-${name}`, source);
+      try {
+        expect(c.errorCodes).toEqual([]);
+        // The outer function escalated — the nested default was seen.
+        expect(c.serverJsFiles.length).toBeGreaterThan(0);
+        const serverText = c.serverJsFiles.map((f) => readFileSync(f, "utf8")).join("\n");
+        expect(serverText).toContain("hashPassword");
+        // THE SECURITY ASSERTION. Not a proxy for the leak — the leak itself.
+        expect(c.clientLoaded.length).toBeGreaterThan(0);
+        expect(c.clientLoadedText).not.toContain("Bun.password");
+        expect(c.clientLoadedText).not.toContain("argon2id");
+        expect(c.clientLoadedText).not.toContain("_scrml_stdlib.auth");
+      } finally {
+        teardown(`r7-nested-decl-${name}`);
+      }
+    });
+  }
+
+  /**
+   * THE OVER-FIRE CONTROL for §8c, so "escalated" above is attributable to the
+   * REACH and not to nesting. Identical shape, client-safe `scrml:math` member.
+   */
+  test("CONTROL — the same nested default with a client-safe member: clean, stays client-side", () => {
+    const src = `<program>
+${OPEN}
+  import { round } from 'scrml:math'
+  <out> = ""
+  function outer(v) { function inner(h = round(1.5)) { return h } return inner() }
+${CLOSE}
+<button onclick={ @out = outer(1) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+    const c = compileToDisk("r7-nested-decl-control", src);
+    try {
+      expect(c.errorCodes).toEqual([]);
+      expect(c.serverJsFiles.length).toBe(0);
+    } finally {
+      teardown("r7-nested-decl-control");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — GAP PIN: A DESTRUCTURED PARAMETER DEFAULT IS A LIVE CONFIDENTIALITY LEAK
+// (round 7 — MEASURED, PRE-EXISTING ON `main`, NOT FIXED HERE).
+//
+// !! THIS SECTION ASSERTS A LEAK, NOT SAFETY. READ BEFORE TRUSTING IT. !!
+//
+// `fnDeclParamDefaultRoots` returns `params[i].defaultValue` only when it is a
+// top-level STRING. For a DESTRUCTURED parameter, `ast-builder.js`'s
+// `parseParamList` puts the whole pattern in `params[i].name` as a structured
+// `DestructurePattern` and the per-property default lives INSIDE it — so
+// `function f({ h = hashPassword }) { … }` is on NEITHER tree.
+//
+// MEASURED at `ff0cbdd8` AND after round 7's B-1 fix, identically, at exit 0
+// with ZERO diagnostics:
+//     ZERO `.server.js`
+//     `const { hashPassword } = _scrml_stdlib.auth;`  in the client
+//     `Bun.password` + `argon2id`                     in the runtime the HTML loads
+// i.e. §12.2 Trigger 3's own founding symptom, reproduced exactly.
+//
+// PRE-EXISTING, and provably so: on `origin/main` the scan root of
+// `collectServerOnlyBindingModules` is `body` alone (`scanForServerOnlyBindingRefs(body, live)`),
+// so NO parameter default of any shape is scanned there. Round 6 added top-level
+// string defaults; the destructured position was never covered on either tree.
+//
+// THE FIX IS KNOWN AND IS NOT TAKEN HERE, deliberately: the NESTED twin already
+// escalates correctly (asserted below), because the walk descends a nested
+// `function-decl`'s `params` generically and reaches the pattern. Only the
+// TOP-LEVEL scan root misses it, since `fnNode.params` is a sibling of `body`.
+// Adding `fnNode.params` to that root closes it — but it MOVES PLACEMENT, needs
+// its own direction-of-change measurement, and carries a companion over-fire
+// (`collectServerOnlyBindingModules`'s shadow set reads `p.name` as a string, so
+// a pattern's own bound names neither shadow nor are excluded). That is its own
+// change with its own evidence, not a rider on this one.
+//
+// WHEN IT IS FIXED, THESE EXPECTATIONS MUST INVERT, NOT BE DELETED — the flip is
+// the evidence the gap closed. Same convention as §1 and §5.
+// ---------------------------------------------------------------------------
+
+const DESTRUCTURED_DEFAULT_LEAK = `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <out> = ""
+  function f({ h = hashPassword }) { return h("k") }
+${CLOSE}
+<button onclick={ @out = f({}) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+const ARRAY_DESTRUCTURED_DEFAULT_LEAK = `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <out> = ""
+  function f([ h = hashPassword ]) { return h("k") }
+${CLOSE}
+<button onclick={ @out = f([]) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+// The NESTED twin — identical default position, one level in. This one is
+// CORRECT today, and asserting it is what proves the gap is the top-level scan
+// ROOT and not the pattern being unreadable.
+const DESTRUCTURED_DEFAULT_NESTED_OK = `<program>
+${OPEN}
+  import { hashPassword } from 'scrml:auth'
+  <out> = ""
+  function outer(v) { function inner({ h = hashPassword }) { return h("k") } return inner({}) }
+${CLOSE}
+<button onclick={ @out = outer(1) }>go</button>
+<div id="out">${OPEN}@out${CLOSE}</div>
+</program>
+`;
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §9 GAP PIN: a TOP-LEVEL destructured parameter default leaks", () => {
+  for (const [name, source] of [
+    ["object-pattern", DESTRUCTURED_DEFAULT_LEAK],
+    ["array-pattern", ARRAY_DESTRUCTURED_DEFAULT_LEAK],
+  ]) {
+    test(`${name}: NOT escalated, and the auth implementation IS in the browser bundle`, () => {
+      const c = compileToDisk(`r7-destructured-${name}`, source);
+      try {
+        // Exit 0. Nothing says anything.
+        expect(c.errorCodes).toEqual([]);
+        // Not escalated.
+        expect(c.serverJsFiles.length).toBe(0);
+        // THE LEAK. These `toContain`s are the inversion point: when the gap
+        // closes they become `not.toContain` and `serverJsFiles.length` becomes
+        // `toBeGreaterThan(0)`.
+        expect(c.clientLoaded.length).toBeGreaterThan(0);
+        expect(c.clientLoadedText).toContain("_scrml_stdlib.auth");
+        expect(c.clientLoadedText).toContain("Bun.password");
+        expect(c.clientLoadedText).toContain("argon2id");
+      } finally {
+        teardown(`r7-destructured-${name}`);
+      }
+    });
+  }
+
+  test("the NESTED twin is correct today — so the gap is the top-level scan ROOT, not the pattern", () => {
+    const c = compileToDisk("r7-destructured-nested-ok", DESTRUCTURED_DEFAULT_NESTED_OK);
+    try {
+      expect(c.errorCodes).toEqual([]);
+      expect(c.serverJsFiles.length).toBeGreaterThan(0);
+      expect(c.clientLoadedText).not.toContain("Bun.password");
+      expect(c.clientLoadedText).not.toContain("argon2id");
+      expect(c.clientLoadedText).not.toContain("_scrml_stdlib.auth");
+    } finally {
+      teardown("r7-destructured-nested-ok");
     }
   });
 });
