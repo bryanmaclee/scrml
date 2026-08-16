@@ -140,10 +140,14 @@ export function scanDirectory(dirPath) {
     let entries;
     try {
       // SORTED (S345): readdirSync returns FILESYSTEM order, a property of the machine
-      // (and, in CI, of the runner image) rather than of the project. Feeding that order
-      // into the compile made emitted output environment-dependent — witnessed when a
-      // runner-image rebuild changed the emitted HTML of a multi-file app. Sorting makes
-      // `scrml compile <dir>` deterministic across machines.
+      // (and, in CI, of the runner image) rather than of the project. Sort it so this
+      // walk contributes a stable per-directory order. NOTE (S347-peter correction): this
+      // sort is defense-in-depth, NOT the determinism guarantee the original comment
+      // claimed — `scanDirectory` already ends in a terminal `results.sort()`, so
+      // `scrml compile <dir>` was order-stable before this. The environment-dependence
+      // that actually reached emitted route URLs was `compileScrml`'s dependence on the
+      // ORDER of `inputFiles` (explicit-file / API / dev.js modes bypass this walk
+      // entirely); that is canonicalised at the compile entry (`resolvedInputFiles.sort()`).
       entries = readdirSync(dir).sort();
     } catch {
       return;
@@ -907,7 +911,17 @@ export function compileScrml(options = {}) {
   // synthesizing 5000+ .scrml files on disk. Adopter override path: a
   // future scrmlconfig setting can plumb through the same option.
   const GATHER_LIMIT = options.gatherLimit ?? 5000;
-  let resolvedInputFiles = inputFiles.map(f => resolve(f));
+  // §47/§58 determinism (S347-peter, g-compilescrml-input-order-dependent-emission):
+  // the route/logic/fetch-stub id counters mint in `inputFiles` TRAVERSAL order, so
+  // the SAME file SET passed in two argv/glob orders emitted different artifacts —
+  // including generated server route URLs (`__ri_route__…_1` vs `…_63`), so two
+  // machines could build a client and server that disagree about where to fetch.
+  // The argv order is caller/shell-collation-dependent (LC_ALL=C vs en_US.UTF-8 sort
+  // globs differently). Canonicalise the seed here — code-unit order (plain `.sort()`,
+  // matching the `scanDirectory` walk; NOT locale `localeCompare`, which is the very
+  // non-determinism this removes) — so the gathered set, and thus every minted id, is
+  // a pure function of the file SET, not the order it was passed.
+  let resolvedInputFiles = inputFiles.map(f => resolve(f)).sort();
   if (gatherEnabled && resolvedInputFiles.length > 0) {
     // Dedup KEY is separator-canonical (PathKeyedSet folds `\`↔`/`); the
     // compiled VALUE stays uniformly NATIVE — both the explicit entry seed

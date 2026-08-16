@@ -387,3 +387,75 @@ describe("FX-1 — diagnostic stream determinism", () => {
     expect(tupleA).toEqual(tupleB);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §8 — INPUT-ORDER invariance (g-compilescrml-input-order-dependent-emission, S347)
+//
+// Every FX-1 test above re-compiles with the SAME `inputFiles` order, so they
+// prove same-source→same-bytes but NOT that the emitted artifact is a pure
+// function of the file SET. It was not: `compileScrml` minted route/logic/
+// fetch-stub ids in `inputFiles` TRAVERSAL order, and `resolvedInputFiles`
+// (api.js gather seed) was never canonicalised — so the SAME set passed in a
+// different argv/glob order (locale-dependent shell collation) emitted DIFFERENT
+// artifacts, INCLUDING generated server route URLs (`__ri_route__…_1` vs `…_63`).
+// Two machines could build a client and a server that disagree about where to
+// fetch — a §47 content-addressing + §58 determinism violation.
+//
+// Bite (verified pre-fix on this exact fixture): FORWARD vs REVERSED inputFiles
+// produced 5 differing emitted files. The fix canonicalises the seed
+// (`resolvedInputFiles.sort()`, code-unit order). This block is the pin.
+// ---------------------------------------------------------------------------
+describe("FX-1 — INPUT-ORDER invariance (§47/§58: same SET → same bytes, any order)", () => {
+  const REVERSED = [...FX1_INPUTS].reverse();
+
+  // Collect every string-valued output field per path, so the comparison covers
+  // .html AND the server emit where the route-URL divergence actually lived.
+  function outputsByPath(result) {
+    const m = new Map();
+    for (const [path, out] of result.outputs) {
+      const fields = {};
+      for (const [k, v] of Object.entries(out)) {
+        if (typeof v === "string") fields[k] = v;
+      }
+      m.set(path, fields);
+    }
+    return m;
+  }
+
+  test("chunks.json manifest is byte-identical FORWARD vs REVERSED input order", () => {
+    const fwd = compileFx1({ inputFiles: FX1_INPUTS });
+    const rev = compileFx1({ inputFiles: REVERSED });
+    expect(rev.chunksManifestJson()).toBe(fwd.chunksManifestJson());
+  });
+
+  test("every emitted output field (HTML + server JS, incl. route URLs) is byte-identical across input order", () => {
+    const fwd = outputsByPath(compileFx1({ inputFiles: FX1_INPUTS }));
+    const rev = outputsByPath(compileFx1({ inputFiles: REVERSED }));
+    // Same set of emitted paths.
+    expect([...rev.keys()].sort()).toEqual([...fwd.keys()].sort());
+    for (const [path, fFwd] of fwd) {
+      const fRev = rev.get(path);
+      expect(Object.keys(fRev).sort()).toEqual(Object.keys(fFwd).sort());
+      for (const [field, valFwd] of Object.entries(fFwd)) {
+        // Byte-for-byte — a single minted-id delta (e.g. __ri_route__…_N) fails here.
+        expect(fRev[field]).toBe(valFwd);
+      }
+    }
+  });
+
+  test("generated server route ids do not depend on input order", () => {
+    const routesOf = (result) => {
+      const ids = new Set();
+      for (const [, out] of result.outputs) {
+        for (const v of Object.values(out)) {
+          if (typeof v !== "string") continue;
+          for (const m of v.matchAll(/__ri_route__[A-Za-z0-9_]+/g)) ids.add(m[0]);
+        }
+      }
+      return [...ids].sort();
+    };
+    const fwd = routesOf(compileFx1({ inputFiles: FX1_INPUTS }));
+    const rev = routesOf(compileFx1({ inputFiles: REVERSED }));
+    expect(rev).toEqual(fwd);
+  });
+});
