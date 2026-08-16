@@ -8488,3 +8488,45 @@ Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
 
 Related: [[g-spa-runtime-gzip-budget-knife-edge]] is unaffected. dpa-031 D2/D3 are the sibling defects of instance 1 and are filed with the dPA's other routed defects.
 <!-- @gap id=g-unexpanded-markup-element-survives-into-emitted-html sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/component-expander.ts,compiler/src/codegen/emit-form-for.ts,compiler/src/codegen/emit-machines.ts — the expansion sites are known, the SHARED root is not established prov=dd:scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md (instance 1, D1) + rationale:instance-2-found-PA-direct-while-verifying-an-unrelated-claim-and-the-common-root-is-explicitly-unverified -->
+
+### G-DESTRUCTURED-PARAM-DEFAULT-SHIPS-SERVER-ONLY-STDLIB-TO-THE-BROWSER — a pattern-bound parameter default reaching `scrml:auth` emits NO `.server.js` and ships argon2id client-side — `NEW S347; HIGH; open (PA-reproduced on main; PRE-EXISTING)`
+
+**PA-reproduced by execution S347.** Surfaced by the dtr-r7 fix round as §6.6.19 residual 6 and independently re-run by the PA on `main`:
+
+```scrml
+import { hashPassword } from 'scrml:auth'
+function f({ h = hashPassword }) { return h(@pw) }
+```
+
+| | observed |
+|---|---|
+| exit code / diagnostics | **0 / none** |
+| `.server.js` emitted | **zero** |
+| shipped client runtime | contains **`Bun.password`** + **argon2id** |
+
+The real argon2id implementation and the credential-handling path reach the browser with no diagnostic. The array-pattern form (`function f([h = hashPassword])`) behaves identically.
+
+**Not a dtr-r7 regression — PRE-EXISTING on `main`**, whose §12.2 Trigger 3 scan root is `body` alone (verified by `git show`). dtr-r7 explicitly did NOT fix it, correctly: the fix moves placement, so it owes its own direction-of-change measurement, and it carries a companion over-fire (`collectServerOnlyBindingModules`'s shadow set reads `p.name` as a string, so a pattern's bound names neither shadow nor are excluded).
+
+**The locus is a scan ROOT, not an unreadable pattern — which is what makes it tractable.** `fnNode.params` is a sibling of `body`, and the **nested twin already escalates correctly**, so the compiler can plainly see the shape; the top-level root simply never looks there. Same family as the S331/#486 derived-cell reach (fixed for its positions) and the S299 Trigger-3 wiring.
+
+**Why it is HIGH and not MED:** this is the §12.2 confidentiality boundary failing silently in the *unsafe* direction. Per `primary.map.md` invariant 52, under-inclusion here is a silent leak while over-inclusion is only a relocation — and this is the under-inclusion case. It is also invisible to every gate: exit 0, no code delta, and the emit differential sees a stable artifact.
+
+Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §9 in the §1/§5 convention — **its expectations invert when it closes**, so the pin becomes the regression guard rather than needing a rewrite.
+<!-- @gap id=g-destructured-param-default-ships-server-only-stdlib-to-browser sev=HIGH status=open locus=compiler/src/route-inference.ts(the Trigger-3 top-level scan root — `fnNode.params` is a sibling of `body` and is never walked; the nested `function-decl` branch already handles its twin) prov=rationale:PA-reproduced-on-main-exit-0-zero-server-js-argon2id-in-the-shipped-runtime-and-the-nested-twin-already-escalates-so-the-gap-is-the-root-not-the-pattern -->
+
+### G-EXPORT-LET-POSITION-HAS-NO-NORMATIVE-HOME-AND-THE-ENFORCEMENT-IS-NOT-WHERE-THE-CORPUS-SAYS — `NEW S347; MED; open`
+
+**PA-measured S347.** `export let` occurs **ZERO times in the 37,152-line SPEC**. The operator position against it is long-standing and was ratified in full at S347 (four reasons, user-voice) — but neither the position nor its actual enforcement shape is written anywhere normative.
+
+**And the corpus describes the enforcement wrongly.** dpa-031 recorded *"S316/#388 `export let` rejection UNAFFECTED — still rejected under §21.2."* Measured:
+
+- `export let theme = "dark"` + `import { theme }` + `${theme}` → **compiles clean, value arrives.** `gauntlet-phase1-checks.js:211` lists `export let x` explicitly among *"valid file-top declarations."*
+- The MUTATING form (`export function setTheme(t) { theme = t }`) → **`E-MU-001`.**
+
+**So the gate is on the WRITE, not the declaration.** That is coherent — an unmutated `export let` is a shared CONSTANT and a constant crossing as a bare name is fine — but it means the recorded rationale ("rejected under §21.2") points at the wrong mechanism, and a future session reasoning from it will mis-scope.
+
+**⚑ The scope limit is the reason this is filed at all** (bryan, S347: *"I just wanted the reasoning layed out so that is dosnt effect the wrong decisions"*): the four reasons are about `let`'s FORM, not about sharing, and they do **NOT** decide **cell exportability** (`export <theme> = "dark"`), which preserves the sigil, a declarable owner, a transition slot, and graph locality. That is dpa-031's OQ-1, a MODULE-SYSTEM question. Citing the `export let` position against exportable cells is citing it out of scope.
+
+Owed: a §21.2 sentence stating the position and the real enforcement point, carrying the four reasons as `provenance: ruling:user-voice-scrml.md S347`.
+<!-- @gap id=g-export-let-position-has-no-normative-home sev=MED status=open locus=searched:compiler/SPEC.md(§21.2 export forms — zero occurrences of "export let" anywhere in 37,152 lines),compiler/src/gauntlet-phase1-checks.js:211 prov=ruling:user-voice-scrml.md S347 — the four reasons ratified verbatim, captured expressly to scope-limit them -->
