@@ -1486,6 +1486,39 @@ whose cheap pole is a broken path will always resolve to the cheap pole for the 
    TYPE has an ingress twin, or whether endorsement is a genuinely new axis, is an open question this DD
    should NAME (it need not settle it).
 
+### ⚑ FACT 7 — the SPEC ALREADY ANTICIPATED THIS CASE AND PARKED IT BEHIND A WITNESS THAT HAS ARRIVED
+
+Found S347 by the sliding-doors audit (durable-tier slice), not by memory. **§61.10 records two
+corpus-zero deferrals, and one of them is this exact question:**
+
+> *"**The `raw` path-bound raw-wire escape** — DEFERRED, gated on a **witnessed untypeable inbound
+> case** (§61.8); `handle()` (§40) is the interim raw escape."*
+
+and, in the same list:
+
+> *"**Non-`:enum` request shapes** — `accepts=` is `:enum`-only … A non-variant inbound shape is not
+> expressible as an `accepts=` enum and is `E-ENDPOINT-ACCEPTS-NOT-ENUM`; **such a contract is the
+> deferred `raw` escape's territory** (or `handle()` today)."*
+
+**A multipart upload IS a non-`:enum` inbound shape.** So the SPEC already classified this case, already
+routed it to a deferred primitive, and already named `handle()` as the interim. Three consequences the
+DD must take as given:
+
+1. **The witness has arrived** — adopter #471. The deferral condition was *"a witnessed untypeable
+   inbound case"*; that is no longer hypothetical, which means the deferral has EXPIRED on its own
+   stated terms. This is the audit's `already-biting` class.
+2. **The named interim does not work.** §61.10 points at `handle()`; facts 2 and 5 above show `handle()`
+   is runtime-broken for `formData()` and ships `protect=` columns. **The SPEC's own fallback is
+   unsound**, so "wait for the witness, use `handle()` meanwhile" was never a working posture.
+3. **The fork therefore has a THIRD pole the bank did not name** — reviving the deferred `raw`
+   path-bound escape, rather than (a) a parameter or (b) an `<upload>` element. The DD SHALL evaluate it
+   as a first-class option and say why it wins or loses. ⚠ Note it interacts with dpa-002 (which KILLED
+   `raw` and kept `handle()`) — so reviving it is a REOPEN of a ratified decision, and must be argued as
+   one, not smuggled.
+
+**Do not read this as the PA pre-deciding.** It is evidence the bank was missing, and it cuts against the
+PA's own recorded lean as much as for it.
+
 ### ⚑ METHOD CONSTRAINT — Rule 6 binds this DD, and it is the load-bearing instruction
 
 **Do not accept the parameter framing just because it is the PA's lean and the cheaper pole.** Rule 6
