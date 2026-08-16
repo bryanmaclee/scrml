@@ -8429,3 +8429,45 @@ dpa-020/023 class (the async boundary). Adopter #509's design depends on exactly
 <!-- @gap id=g-some-none-optional-match-prose-is-a-reconstruction-artifact sev=MED status=open locus=compiler/SPEC.md(§18.8.2 optional-match prose + worked example; the §53.15 citation at :33812 that consumed it) prov=dd:scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md -->
 
 Confirms the S346 PA lean (a) — strike — with two corrections to it: striking leaves **two** live vocabularies (`is some` AND `given`), not one, and the worst dangling citation is **`E-MATCH-012`'s own message**, which prescribes the deprecated `=>` arrow. **★ The durable method finding: a reconstruction is a laundering vector** — draft → changelog → reconstruction → citation → fixture, five hops, no hop reads the compiler. Same shape as pa-base §1's laundering trace, in the SPEC's own history.
+
+### G-EMITTED-JS-NEVER-MINIFIED-PRIZE-UNMEASURED — the compiler ships unminified JS and nobody has measured what a mangle-only pass would buy — `NEW S347; MED; open (an unmeasured optimization, not a defect)`
+
+**Measured S347, PA-direct.** The shipped artifacts are not minified in any form: a real client chunk is 677 lines, avg 56 chars/line, with **45 comments surviving into the artifact**. There is no mangle, no whitespace strip, no dead-code pass in the emit path.
+
+**What is actually known (and what is NOT):**
+
+| measurement | result | trustworthy? |
+|---|---|---|
+| `_scrml_*` identifier text as a share of RAW bytes (runtime + client) | 26,849 chars / 214,171 B ≈ **12.5%** | yes |
+| renaming all 233 distinct `_scrml_*` identifiers to minimal names — RAW | −23,202 B (**10.8%**) | yes |
+| the same rename — **GZIP** | −1,568 B (**2.7%**) | yes — gzip absorbs ~93% of the raw win via LZ77 back-references |
+| the same rename, per-app **client chunk**, gzip | 5,366 → 4,923 B (−443 B, **8.3%**) | yes |
+| `bun build --minify` on a client chunk, gzip | 5,395 → 3,315 B (−2,080 B, **38.6%**) | ⚠ **partly** — see below |
+| `bun build --minify` on an SPA runtime, gzip | 17,406 → 817 B (−95%) | ❌ **NO — contaminated** |
+
+**⚑ The headline number is not usable, and that is the finding.** `bun build --minify` does not isolate mangling: given a file as an entry point it also **re-bundles and tree-shakes**, dropping every export the file itself does not reference. That is what produces the absurd 95% on the runtime. The 38.6% client-chunk figure is likelier to be mostly real but is contaminated by the same mechanism and must not be quoted as the prize. **The prize is UNMEASURED.** Measuring it is the work; §8's *"a fix built before the problem is measured is a fix whose value is unmeasured"* applies directly.
+
+**Why it is worth measuring anyway.** [[g-spa-runtime-gzip-budget-knife-edge]] (HIGH, open) records the assembled SPA runtime at **16,257 B against a 16,384 B budget — a 127 B margin** — and puts a fork to bryan: (a) hold 16 KB and require zero-core-residue from every future feature forever, or (b) raise the budget. **A real mangle-only win of even a few percent gives that budget air and may dissolve the fork rather than answer it.** ⚠ The budget test (`v0-3-x-spa-tree-shake-phase-b.test.js:145`) **PASSES today, 19/19, verified S347** — the re-trigger has NOT fired; this entry does not claim otherwise.
+
+**Why it is not filed as a defect.** Unminified output may be deliberate: SPEC §47 (Output Name Encoding) is a normative contract over these names; readable emitted JS is a stated project value; and a mangler cannot safely rename cross-chunk-referenced or string-looked-up names, which `_scrml_*` names are in places. **Class: compiler-spec, not language-spec** — emitted-JS shape is implementation freedom (the S278 ESM-chunks precedent), so this needs no language ruling.
+
+Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
+<!-- @gap id=g-emitted-js-never-minified-prize-unmeasured sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/codegen/index.ts,compiler/src/api.js — no minify/mangle stage found in the emit path at all prov=rationale:measured-S347-the-shipped-artifact-carries-45-comments-and-677-lines-and-no-mangle-stage-exists-while-an-open-HIGH-fork-turns-on-a-127-byte-gzip-margin -->
+
+### G-ENDPOINT-MALFORMED-JSON-BODY-THROWS-INSTEAD-OF-COMPILER-OWNED-400 — an unparseable request body escapes as an uncaught `SyntaxError` instead of §61.3's structured 400 — `NEW S347; HIGH; open (PA-reproduced by execution)`
+
+**PA-reproduced S347** by driving the emitted server module directly (no socket, per the S273 determinism rule). SPEC §61.3 makes the request decode **compiler-owned**: a malformed body / unknown variant / bad payload returns a structured `{ error: { kind, message } }` at 400, *"never an author arm"*. Three of the four cases honour that; the fourth does not.
+
+| request | result |
+|---|---|
+| valid variant + payload | **200** `{"ok":true,...}` — typed decode works |
+| payload field missing | **400** `{"error":{"kind":"InvalidPayload",...}}` ✅ |
+| unknown variant | **400** `{"error":{"kind":"UnknownVariant",...}}` ✅ |
+| **malformed JSON body** | **THREW** `SyntaxError: Failed to parse JSON` — uncaught ❌ |
+
+**Locus:** the emitted `_scrml_endpoint_<n>` opens with an unguarded `const _scrml_body = await _scrml_req.json();`. A malformed body dies there and **never reaches `parseVariant`**, so the compiler-owned envelope that §61.3 promises is structurally unreachable for exactly the input class most likely to arrive from a foreign client — which is the whole population `<endpoint>` exists to serve (§61.1: the caller is foreign and has its own SDK).
+
+**Filed HIGH, and the reason is the composition, not the status code.** On its own this is a 500-instead-of-400 contract violation. It composes with the dpa-030 D4 finding (**no body-size ceiling on any of the three JSON prologues**) into an unguarded parse over an unbounded body at a public inbound route. Related: S347 answered the blocking OQ that a ceiling is implementable — Bun stream-count-aborts `req.body` without materializing (10 MiB offered / 1 MiB ceiling → 413, 20 of 160 chunks pulled, backpressure held), so the fix has no unknowns.
+
+**Corrects a PA-authored fact in the same breath:** the dpa-030 bank's established fact 4 (*"there is NO working upload path at all"*) is **FALSE as an absolute** — base64-in-JSON over `<endpoint>` compiles, runs, returns 200, and round-trips bytes identically. The true statement is that a *capability* path exists and a *production-viable* one does not (4/3 inflation, full materialization, no streaming, no ceiling, no multipart).
+<!-- @gap id=g-endpoint-malformed-json-body-throws-instead-of-400 sev=HIGH status=open locus=compiler/src/codegen/emit-endpoint.ts(the emitted `_scrml_endpoint_<n>` prologue — `await _scrml_req.json()` is unguarded; searched emit-endpoint.ts,emit-server.ts) prov=spec:§61.3 — "a §61.3 decode failure is the compiler-owned `{ error: { kind, message } }` (400)", which this input class cannot reach -->
