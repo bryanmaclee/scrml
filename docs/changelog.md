@@ -6089,6 +6089,23 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-16/17 (S347-bryan — five dPA rulings, a live leak fixed on a branch, and five dispatches that corrected me)
+
+**One PR merged (#544, docs). THREE code branches pushed, green, and DELIBERATELY HELD pending their S239 passes** — `comment-token-faithfulness` `215984b9` (conformance 883/883, core tier 22,460/0), the D2/D3/D4 security cluster `45fc29b5` (30,053 pass, zero new failures by name), and `dtr-r7` `152dfa47` (DO-NOT-LAND). Not running those gates to tidy the board before wrapping was a choice: the gate exists to catch what a green suite ships past.
+
+**Five operator rulings executed**, each with its load-bearing premise reproduced by the PA before surfacing: **dpa-030** uploads (fork (a) narrowed — `File` as the 7th builtin primitive, defects first) · **dpa-026** `tare` (one verb; §6.8.4's sentence is false in BOTH clauses by execution) · **dpa-027** `.Some/.None` (strike — the SPEC's own worked example does not compile) · **dpa-031** free store (do not widen — the gap was already filled and §51.0.A named a substitute that does not work cross-file) · **dpa-028** offline (the static floor is a prerequisite, not a fork). Plus **B-3's follow-on** (fix the tokenizer, not the sentence — *"not seeing comments is a non-starter for any serious language"*) and **D1** (retire the PE mandate, keep the capability).
+
+⭐ **`E-SCOPE-001` from a comment.** `function greet(/* the message */ msg)` failed to compile because `readBlockComment()` is entered after `/*` is consumed and appends `*/` itself — a COMMENT token carried its content and CLOSING delimiter but not its opening one, and `appendTok` fed that into both the default AND the parameter-NAME buffer. Fixed at the root (token faithfulness + skip-at-consumer), with a self-host parity fix the agent caught unprompted. Blast radius measured twice: every COMMENT consumer discards the token.
+
+⭐ **The dpa-029 protect leak is fixed on a branch and the fix NARROWS rather than closes the class** — `JSON.stringify(row)` redacts, `JSON.stringify({...row})` still leaks, because spread drops the non-enumerable `toJSON`. **dpa-021 (RATIFIED S319) already solved this exact shape: "one raw binding CANNOT serve both forms; one Proxy can."**
+
+⭐ **The sliding-doors audit's structural finding: the rule already existed and DECAYED.** Rule 2 was ratified ~S66, sharpened at S86, applied at S144 to void a corpus-zero decision — then `set` (S170), js-host Fork 2 (S178) and D1 (S230) all post-date it and all used corpus-zero as load-bearing. The deliverable is an ENFORCEMENT SURFACE, not a principle — and S347/S348-peter independently shipped exactly that (`scripts/corpus-zero-debt.ts`, #552).
+
+**7 new gaps, 4 HIGH.** Two live on `main`: the destructured-parameter-default argon2id leak, and the `{...row}` spread residual.
+
+**Five dispatches corrected the PA, four on RELAYED premises** — the recorded rule: anything entering a brief, ledger or ruling gets reproduced first, or is labelled RELAYED-UNVERIFIED in the brief.
+
+
 ### 2026-08-14/15 — S345 (bryan): four rulings executed, and a repo-wide gate outage that was never a flake
 
 Booted on S343's four held items and closed all four. The session was then taken over by an
