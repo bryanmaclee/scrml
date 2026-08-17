@@ -1,61 +1,65 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. ROTATED at S346-bryan:      -->
-<!-- prior wrap handOffs/hand-off-s345-bryan.md (S345-bryan).      -->
-<!-- Mechanical stream: handOffs/delta-log.md [1493]-[1521].       -->
+<!-- hand-off.md — live session state. PICKUP updated at S348-peter. -->
+<!-- Body below the PICKUP is S346-bryan's WRAP (historical context). -->
+<!-- Mechanical stream: handOffs/delta-log.md [1493]-[1536].         -->
 <!-- ============================================================= -->
 
-# scrml — Session 346 (bryan · ASUS-Vivobook) — WRAP
+# scrml — Session 348 (peter · Windows clone) — WRAP
 
-**Date:** 2026-08-15/16. `/boot` Profile A, solo (S345-bryan + S344-peter both WRAPPED at boot).
-**Five PRs merged (#532 #535 #536 #537 #538), one open (#539).** `main` `901e3778` → `c93a692c`.
-The session's two headlines are a three-session "intermittent" that turned out to be a **timeout**,
-and an operator correction that **re-opens a decade of reasoning** and authorizes a multi-session audit.
+**Date:** 2026-08-16. `/boot` Profile A. The sliding-doors audit's flagship deliverable **R1 SHIPPED
++ merged + green** (PR #552); **R6** re-triggered in the ledger; **R5** banked for bryan. Continuity
+rides this wrap's PR. (S346-bryan's WRAP is preserved below the PICKUP as history.)
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-### 1. The arc bryan authorized — the SLIDING-DOORS AUDIT (open-ended, multi-session)
+### 1. The SLIDING-DOORS AUDIT — coverage-complete; R1 the deliverable is SHIPPED
 
-**Charter + raw inventory + instrument + guards:**
-`../scrml-support/docs/audits/sliding-doors-corpus-zero-2026-08-16/CHARTER.md`. **Scoped and SIZED,
-not started** — pick up at Method step 1 (classify a slice).
+`../scrml-support/docs/audits/sliding-doors-corpus-zero-2026-08-16/`. **All 5 source areas classified,
+GRAPH drawn, compile-probe done — 324 sites → ~37 decisions. CHARTER.status is now corrected.** Ground
+in `FINDINGS.md` (newest-first) + `GRAPH.md`, NOT a re-classification pass. Remaining value-add is
+R5/R6/R2-R4 below — the classification is done.
 
-- **324 candidate sites across 117 files**, swept over 2,575 markdown files in both repos
-  (`candidate-sites-raw.txt`, unclassified, beside the charter).
-- **The rule being applied:** corpus-zero is a **BLAST-RADIUS instrument only** (legitimate: "how many
-  files break if I change this"). It is **worthless for whether a capability should exist** — the two
-  questions there are *is it done in apps?* and *can scrml express it?* (answered by COMPILING).
-- **The instrument is a GRAPH, not a list:** nodes carry the option NOT taken, the verbatim reason,
-  `corpus-role`, reversibility, dependents; **edges are the value** — they answer *which single
-  reversal unlocks the most*.
-- ⚠ **My phrasing vocabulary is a hand-maintained list (dpa-025 class) and WILL miss shapes** — the
-  completeness probe against random non-hit changelog decisions is MANDATORY, not optional. My first
-  sweep this session returned **all zeros** on a broken file list, which looks exactly like a clean
-  result; caught only by sanity-checking against a hit I already knew existed.
+- **R1 ⭐ SHIPPED (this session):** `scrml/scripts/corpus-zero-debt.ts` — the 3rd debt-probe (beside
+  review-debt/issue-debt), tested 20/20, wired into `scripts/boot.ts` (`corpus-zero` probe), PR **#552
+  merged, main CI green**. It flags undisposed corpus-zero in `scrml-support/docs/deep-dives`+`debates`
+  at authoring time; author disposes each via a `<!-- @corpus-zero role=… disposition=… -->` marker
+  (grep can't classify → author does, once). Epoch `2026-08-16`; `--check` for a human, never CI.
+  - ⚠ **It caught 2 real OWED on run #1, both bryan's live lane — his to dispose, do NOT mark them:**
+    `deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md:15` (dpa-031, a TRUE overrule-shape → mark
+    `role=load-bearing disposition=overruled`) and `file-upload-arrival-shape-dpa-030-2026-08-16.md:344`
+    (dpa-030, a FALSE POSITIVE — `no adopter` matched "no adopter **intent**", a security phrase → mark
+    `role=data` or note the vocabulary tightening).
 
-### 2. Owed to the operator — ONE AT A TIME, not a board
+### 2. Owed to the operator — ONE AT A TIME, not a board (S346 cadence)
 
 bryan, S346: *"I am not sure that I can hold all of the abstract in my head all at once to rule here."*
-I surfaced six at once; that was the error. Surface ONE in depth → rule → bank → next.
+Surface ONE in depth → rule → bank → next. **NEW this session at the top:**
 
 | item | the single axis | PA rec |
 |---|---|---|
-| **dpa-030** uploads (supersedes the dpa-029 Q3 framing) | where does a file arrive — a `File`/multipart PARAM on the server-fn/`<endpoint>` contract, or an `<upload>` primitive? | **(a) parameter** — keeps the compiler owning the decode |
-| **dpa-026** tare | bless `const c = @x; tare(@x, c)` in prose, or correct §6.8.4 and merely tolerate it? (the sentence is FALSE either way) | **(b) correct + tolerate** |
-| **dpa-027** `.Some/.None` | strike the §18.8.2 prose (it was REJECTED 2026-03-27 and reinstated by a reconstruction replaying a stale changelog) | **(a) strike** |
-| **dpa-028** offline/PWA | (a′) static-asset floor + recipe, or (c) + a one-shot `scrml generate pwa` scaffold? ⚠ fork (a)-as-written is NOT AVAILABLE — there is no static/public dir | **(a′) now, (c) when proven** |
-| **dpa-029 Q1** document egress | `handle()` documented, or a typed `Egress<Bytes>` return? | **defer until the defects land** — *"no second envelope while the first is provably unsound"* |
-| **dpa-022 · dpa-024** | ran, never ratified | offer to re-surface with fresh framing rather than rule cold |
+| **R5 `d1-no-editions`** ⭐ BANKED S348 → `audits/…/rulings-pending/R5-d1-no-editions.md` | keep language≠compiler semver split, but was "no editions *ever*" earned by a language-design argument or only the "two friends" premise the corpus now falsifies (#471, Peter)? Guard-4 circularity: D1+D4 both terminate at "two friends" | **keep no-editions but RE-EARN on the Go/C++ `-std=` argument; strike the population premise from both doors** |
+| **dpa-030** uploads | file arrives as a `File`/multipart PARAM on the server-fn/`<endpoint>` contract, or an `<upload>` primitive? | **(a) parameter** — compiler owns the decode |
+| **dpa-026** tare | bless `const c = @x; tare(@x, c)` in prose, or correct §6.8.4 and merely tolerate it? (false either way) | **(b) correct + tolerate** |
+| **dpa-027** `.Some/.None` | strike the §18.8.2 prose (REJECTED 2026-03-27, reinstated by a stale-changelog replay) | **(a) strike** |
+| **dpa-028** offline/PWA | (a′) static-asset floor + recipe, or (c) + one-shot `scrml generate pwa`? ⚠ (a)-as-written NOT AVAILABLE — no static dir | **(a′) now, (c) when proven** |
+| **dpa-029 Q1** doc egress · **dpa-022 · dpa-024** | egress: `handle()` vs typed `Egress<Bytes>` (defer); 022/024 ran-never-ratified | defer / re-surface fresh |
 
 ### 3. In flight
 
-- **PR #539** — `scrml dev` fail-closed + bounded watcher. **S239 CLEAN-TO-LAND, 0 blockers.** Merge
-  when the gate is green (standing authority). Its three non-blocking findings are in the PR body.
-- **`dtr-r6`** @ `ff0cbdd8` — B1..B7 done incl. the Trigger-3 param-default escalation; the agent died
-  on the session limit and I salvaged its uncommitted SPEC note + 47 test lines. **Needs its S239 pass
-  before landing** (round 5 was DO-NOT-LAND; the standing constraint is write only one-directional
-  CONTAINMENT, never a codegen-agreement claim).
-- **PR #501 tare** — CONFLICTING, and now **blocked on dpa-026** (its SPEC §6.8.4 sentence is false by
-  execution, and bare `tare(@x)` in `onclick=` compiles clean then fails). Blockers posted on the PR.
+- **R6 `g-decl-span-overshoot-systemic`** — RE-TRIGGERED LOW→MED/open this session (verified: shipping
+  LSP `handlers.js:529/:80` consumes non-fn decl span; overshoot reproduced on HEAD). **The FIX is a
+  scoped follow-up:** a **dual-parser lockstep** PR (`ast-builder.js` + native/self-host together, or the
+  within-node parity gate reds), `peek()`→`peek(-1)` across ~40 non-fn decl sites, each per-site verified
+  that `peek(-1)` is its true end. Do NOT blanket-edit.
+- **PR #539** — `scrml dev` fail-closed + bounded watcher. **S239 CLEAN-TO-LAND, 0 blockers.** Merge on
+  green (standing authority). Non-blocking findings in the PR body.
+- **`dtr-r6`** @ `ff0cbdd8` — B1..B7 done; agent died on session limit, uncommitted SPEC note + 47 test
+  lines salvaged. **Needs its S239 pass before landing** (round 5 was DO-NOT-LAND; write only
+  one-directional CONTAINMENT, never a codegen-agreement claim).
+- **PR #501 tare** — CONFLICTING + **blocked on dpa-026** (§6.8.4 sentence false by execution; bare
+  `tare(@x)` in `onclick=` compiles clean then fails). Blockers posted.
+- **Open PRs at wrap:** #544 (dpa-030 verdict), #529 (draft, browser-tier order), #501 (tare). Plus this
+  wrap's continuity PR (known-gaps R6 re-trigger + delta-log + changelog).
 
 ## 🚨 THE HEADLINE — a three-session "intermittent" that was a TIMEOUT
 
