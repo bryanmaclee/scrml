@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 40 |
 | MED | 151 |
-| LOW | 68 |
+| LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -8349,6 +8349,45 @@ Fix: sort the walk (code-unit). **The S345 order-dependency sweep-tail is now CL
 
 ### g-residual-order-bearing-readdir-and-unonced-self-host-dcl — three residual order/registration hazards from the #526/#528 reviews, all PRE-EXISTING and non-artifact: `commands/generate.js:152` (first `<program>` file found wins → which root feeds the auth-scaffold hint), `commands/dev.js:843` (multi-input dev serves the FIRST `.html` found at `/`), and `compiler/self-host/cg-parts/section-emit-wiring.js:1199` (the only DOMContentLoaded registration left WITHOUT `{ once: true }` — reachable only under `scrml compile --self-host` when `dist/self-host/cg.js` exists) — `NEW S346-bryan (S239 review-floor passes on #526 + #528); LOW; open`
 <!-- @gap id=g-residual-order-bearing-readdir-and-unonced-self-host-dcl sev=LOW status=open locus=compiler/src/commands/generate.js:152+compiler/src/commands/dev.js:843+compiler/self-host/cg-parts/section-emit-wiring.js:1199 prov=rationale:review-floor-census-of-every-readdirSync-and-every-DOMContentLoaded-registration-in-compiler-src-and-self-host-after-526-and-528 -->
+
+### g-bare-arrow-binding-false-e-mu-001 — a bare-name binding holding an ARROW FUNCTION (`fmt = (n) => …`, no `const`/`function`/`<>`) fires an unconditional, false `E-MU-001: fmt declared but never used` even when `fmt` is plainly called; both canonical forms track correctly — `NEW S347-peter (PA-characterized end to end: differential + both loci pinned + blast-radius measured); LOW; open; ⚠ RULING NEEDED (language-surface fork)`
+<!-- @gap id=g-bare-arrow-binding-false-e-mu-001 sev=LOW status=open locus=parse:compiler/src/ast-builder.js:9681+13906(bare `name = expr` → kind:"tilde-decl")+mustuse:compiler/src/type-system.ts:17865-17888(fresh tilde-decl → mustUseTracker.declare(); discriminator at :17873 `!knownBindings.has(name)`) prov=rationale:PA-reproduced-on-HEAD-with-a-4-form-differential-both-canonical-forms-compile-clean -->
+
+**Symptom (adopter-facing).** A helper written as a bare-name arrow binding inside a `${…}` logic block and called in markup fails to compile:
+```scrml
+<program>
+${
+    <items>: number[] = [10, 20]
+    fmt = (n) => "$" + n          // ← bare: no `const`, no `function`, no `<>`
+}
+<ul><each in=@items as it><li>${fmt(it)}</li></each></ul>   // fmt IS called here
+</program>
+```
+→ `error [E-MU-001]: Variable \`fmt\` was declared but never used before this scope closes.` — an **unconditional, false** "unused" (it fires even for `${@fmt}` read use; prefixing `_fmt` or removing the decl are the only escapes the message offers, both wrong for a called helper).
+
+**Differential (all minimal, compiled on HEAD `c159f1a2`), which is the whole finding:**
+
+| declaration | used how | result |
+|---|---|---|
+| `function fmt(n){…}` | `${fmt(it)}` in an `<each>` row | ✅ compiles (proven by flagship `examples/08-chat.scrml:172` `${formatTime(msg.sent_at)}`) |
+| `const fmt = (n)=>…` | `${fmt(it)}` | ✅ compiles |
+| **bare `fmt = (n)=>…`** | `${fmt(it)}` **or** `${@fmt}` | ❌ **E-MU-001, always** |
+| bare `count = 0` (scalar) | `${@count}` / `${count}` | ✅ compiles |
+| bare `orphan = 42` (scalar) | *unused* | ✅ compiles (NOT must-use) |
+
+So it is **not** an `<each>`-scope bug (the original probe attribution) and **not** read-vs-call — it is specific to a bare-name binding whose RHS is an **arrow function**.
+
+**Mechanism (pinned, both loci).** A bare `name = expr` in a logic block is parsed as `kind:"tilde-decl"` (`ast-builder.js:9681`, dup at `:13906`) — the §48.3.3 `~`/accumulator-reassignment form. At TS, a *fresh* tilde-decl (`!knownBindings.has(name)`, `type-system.ts:17873`) is registered `mustUseTracker.declare()` → E-MU-001 on scope exit if unused. The arrow binding's use `${fmt(it)}` lives in a **markup interpolation whose ident-scan never reaches this logic block's `mustUseTracker.markUsed`**, so it is unconditionally "unused." **Sub-question for the fixer (not fully traced):** why bare-SCALAR (`orphan=42`) escapes — either it lands in `knownBindings` (so :17873 skips it) or it is not classified tilde-decl; the discriminator to confirm is at `type-system.ts:17873`.
+
+**SPEC-normative context.** Bare `name = value` (no `const`/`let`/`<>`/`@`) is **not a canonical declaration form** — canonical logic locals are `let`/`const` (§6, §40.8 auto-lift list), helpers are `function`/`fn`/`const`; `tilde-decl` is the §48.3.3 `fn`-body accumulator, not a program-scope helper decl. The S123 "V-kill" retired implicit phantom-synthesis from bare writes for exactly this reason. So a bare-arrow helper is a non-canonical shape the compiler currently *half*-accepts.
+
+**Blast-radius (measured, per the blast-radius-instrument discipline).** `grep` over `examples/ samples/ benchmarks/ stdlib/` for bare-name arrow bindings = **0** — no corpus file uses this form; both canonical forms are what the corpus (and 08-chat) use. **5** test files assert `E-MU-001` (the surface any fix must keep green).
+
+**⚠ THE RULING (language-surface — bryan's):**
+- **(a) accept + track** — treat a bare-arrow binding as a real helper decl and make its markup use count (or reclassify it away from `tilde-decl`). Fixes the false error; keeps the form legal.
+- **(b) reject + steer** — a bare `name = <arrow>` at logic scope is not a declaration; fire a *clear* diagnostic ("bare `fmt = …`; did you mean `const fmt = …` or `function fmt(…)`?"), consistent with the S123 clear-steer philosophy.
+
+The message ("never used") is wrong under **both** poles, but the correct replacement differs by pole, so no message change should land ahead of the ruling. Recommendation: **(b)** — it is the smaller, more honest change, matches S123, and the form has zero corpus and two working canonical alternatives; but the pick is bryan's. (PA note: filed, not fixed — a language-surface fork routed to the operator per the boundary; the mechanical fix for either pole is well-scoped by the pinned loci above.)
 
 ## §S346-dpa — filed S346-bryan from the dPA drain (dpa-026/027/028/029), every one PA-verified before filing
 
