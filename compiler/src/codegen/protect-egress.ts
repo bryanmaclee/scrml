@@ -27,6 +27,16 @@
  *      `reveal`-stamped. Redaction is sound BY CONSTRUCTION — the compiler reads
  *      a tag at egress; it never proves a return clean (no value-flow obligation).
  *
+ *   4. (dpa-030 D2c) "the single compiler-owned egress sink" was a PREMISE, not a
+ *      fact. A hand-written `new Response(JSON.stringify(row))` is a second sink,
+ *      it is reachable from clean scrml source, and `JSON.stringify` drops the
+ *      descriptor by the same property that makes the descriptor invisible in
+ *      output. So a tagged row now carries a non-enumerable `toJSON` that returns
+ *      the REDACTED projection. Deny-unless-revealed at the SERIALIZER — which is
+ *      where the boundary actually is, and which is why it needs no allow-list of
+ *      egress shapes and produces no false positive on a body that returns a bare
+ *      `403` with no row in it.
+ *
  * Soundness bound (§14.8.9 normative — DO NOT over-claim): complete for
  * explicit-column flows of statically-resolvable SQL, by ORIGIN. NOT covered:
  * derived/implicit flows (`{ hasPw: row.pw != "" }` — a value of independent
@@ -199,17 +209,34 @@ export const SERVER_PROTECT_HELPER: string = [
   "// originate from a `protect=` field. It is enumerable (so `{...row}` spread /",
   "// `.map` carry it) but Symbol-keyed (so JSON.stringify ignores it). The egress",
   "// sink reads it and drops protected columns unless `reveal`-stamped.",
+  "//",
+  "// A tagged row ALSO carries a non-enumerable `toJSON`, so serializing it",
+  "// directly -- `new Response(JSON.stringify(row))` in a hand-written handler --",
+  "// yields the REDACTED projection, not the raw row. Without it the descriptor is",
+  "// silently dropped at exactly the boundary it exists to guard: `JSON.stringify`",
+  "// ignores Symbol keys, which is what makes the descriptor invisible in the",
+  "// output AND what makes it useless there. `reveal(\"col\")` rebuilds the",
+  "// descriptor and reinstalls the hook, so a declassified column still ships.",
   "const _SCRML_PROTECT = Symbol.for(\"scrml.protect.origin\");",
+  "function _scrml_protect_mark(row, descriptor) {",
+  "  row[_SCRML_PROTECT] = descriptor;",
+  "  // Non-enumerable: invisible to `Object.keys` / `{...row}` / the redactor's own",
+  "  // rebuild, so it never appears as a column in any output.",
+  "  Object.defineProperty(row, \"toJSON\", {",
+  "    value: function () { return _scrml_protect_redact(this); },",
+  "    enumerable: false, configurable: true, writable: true,",
+  "  });",
+  "  return row;",
+  "}",
   "function _scrml_protect_tag(value, cols) {",
   "  if (value == null || typeof value !== \"object\") return value;",
   "  if (Array.isArray(value)) {",
   "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) row[_SCRML_PROTECT] = { cols, revealed: [] };",
+  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_protect_mark(row, { cols, revealed: [] });",
   "    }",
   "    return value;",
   "  }",
-  "  value[_SCRML_PROTECT] = { cols, revealed: [] };",
-  "  return value;",
+  "  return _scrml_protect_mark(value, { cols, revealed: [] });",
   "}",
   "function _scrml_protect_reveal(value, col) {",
   "  if (value == null || typeof value !== \"object\") return value;",
@@ -217,8 +244,7 @@ export const SERVER_PROTECT_HELPER: string = [
   "  const d = value[_SCRML_PROTECT];",
   "  if (!d) return value;",
   "  const next = { ...value };",
-  "  next[_SCRML_PROTECT] = { cols: d.cols, revealed: [...d.revealed, col] };",
-  "  return next;",
+  "  return _scrml_protect_mark(next, { cols: d.cols, revealed: [...d.revealed, col] });",
   "}",
   "function _scrml_protect_redact(value) {",
   "  if (value == null || typeof value !== \"object\") return value;",

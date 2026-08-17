@@ -4312,17 +4312,35 @@ export function generateServerJs(
       // 200 with an empty-object body — a DENY silently becoming a SUCCESS.
       // MEASURED with the guard removed: the 403 came back 200.
       // That is a fail-OPEN shape, which is the one kind this whole change
-      // exists to remove, so it is guarded even though no corpus source reaches
-      // it today (a plain body naming `Response` build-blocks on E-SCOPE-001).
-      // §14.8.9/§14.8.10 already model a manual-`Response` / `handle()` body as
-      // a live server-fn egress kind, so the shape is anticipated, not
-      // hypothetical.
+      // exists to remove, so it is guarded. **The parenthetical that used to
+      // stand here — "no corpus source reaches it today (a plain body naming
+      // `Response` build-blocks on E-SCOPE-001)" — is RETRACTED (dpa-030 D2a):
+      // `Response` is now a logic-scope global because SPEC §39.3.2/§39.3.5
+      // require it, so this shape is ordinary adopter source.** It was never as
+      // unreachable as that note claimed either — `new globalThis.Response(...)`
+      // always compiled clean.
       //
-      // Placed BEFORE the redact deliberately: a `Response` is an opaque stream
-      // handle, not a row set — `_scrml_protect_redact` cannot inspect or strip
-      // it, so routing one through the redact would buy nothing and only risk
-      // mangling the handle. A body that hand-builds a `Response` is taking
-      // ownership of its own egress.
+      // ⚠ READ THIS BEFORE TRUSTING THE ORDERING. The justification that used to
+      // sit here said:
+      //
+      //     "a `Response` is an opaque stream handle, not a row set —
+      //      `_scrml_protect_redact` cannot inspect or strip it"
+      //
+      // **That premise is FALSE and was falsified by execution (dpa-029).**
+      // `new globalThis.Response(JSON.stringify(row))` IS a row set — stringified.
+      // The guard is a fail-OPEN default at a confidentiality sink, and for a
+      // `protect=` app it shipped the protected column at HTTP 200 with the
+      // compiler's own `I-PROTECT-STRIP-001` printed on the same build.
+      //
+      // The guard STAYS, because it is right about the 403: enveloping a
+      // `Response` destroys it. What changed is that it is no longer the last
+      // line of defense. `_scrml_protect_redact` genuinely cannot introspect an
+      // already-serialized body, so the strip moved to where the serialization
+      // happens: a tagged row carries a non-enumerable `toJSON` that returns the
+      // redacted projection, so `JSON.stringify(row)` inside a hand-built
+      // `Response` redacts at the point of the leak (see SERVER_PROTECT_HELPER).
+      // Deny-unless-revealed at the SERIALIZER, not at the Response — which is
+      // why a body that returns a bare `403` with no row in it is unaffected.
       lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
       {
         // M-7C-D-12 Track 2 (§57 Wire Format): same `T | not` envelope-wrap

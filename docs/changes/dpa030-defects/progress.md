@@ -329,3 +329,141 @@ AFTER:   error [E-PROTECT-004]: server function `getUser` selects a protected
 into a `Response` there is not caught: neither body co-occurs with the other's half. A
 call-graph transitive closure would track NAMES; the leak is a VALUE flow. That case is
 closed by D2c instead, at the serializer, where the descriptor actually travels.
+
+---
+
+## 4. D2c — deny-unless-revealed AT THE SERIALIZER
+
+**Files:** `compiler/src/codegen/protect-egress.ts` (`SERVER_PROTECT_HELPER` + module
+doc), `compiler/src/codegen/emit-server.ts` (the falsified-premise comment),
+`compiler/tests/integration/g-sql-row-protect-leak.test.js`.
+
+### The falsified premise, quoted where it lived
+
+`emit-server.ts` justified putting the `Response` passthrough BEFORE the redact with:
+
+> "Placed BEFORE the redact deliberately: a `Response` is an opaque stream handle, not
+> a row set — `_scrml_protect_redact` cannot inspect or strip it, so routing one through
+> the redact would buy nothing…"
+
+dpa-029 falsified that by execution. `new globalThis.Response(JSON.stringify(row))` **is a
+row set, stringified.** The retraction is now written at the site, so the next reader is
+not reassured by it.
+
+### What I did NOT do, and why
+
+The brief's direction was "make the wrapper deny-unless-revealed". Blanket-denying every
+`Response` return in a protect-active app would refuse **SPEC §39.3.5's own worked
+example** (`return new Response("Forbidden", { status: 403 })`) — a body with no row in it
+at all. That is a false positive rate of ~100% on legitimate `handle()` bodies, and the
+`Response` carries no descriptor by then so the wrapper cannot tell the two apart.
+
+**The boundary is the SERIALIZER, not the `Response`.** So a tagged row now carries a
+non-enumerable `toJSON` returning the REDACTED projection: `JSON.stringify(row)` inside a
+hand-built `Response` strips at the exact point of the leak. Same policy the brief asked
+for — deny unless revealed — applied one layer down, where it is precise:
+
+- zero false positives (a 403 with no row is untouched);
+- no allow-list of egress shapes to keep current;
+- it covers the CROSS-FUNCTION case the compile gate documents as out of reach, because
+  the descriptor travels with the VALUE and a call-graph closure only tracks NAMES.
+
+The `instanceof Response` guard STAYS. It is right about the 403: enveloping a `Response`
+would `JSON.stringify` it to `"{}"` and turn a DENY into a 200 SUCCESS. It is just no
+longer the last line of defence.
+
+### Executed, not grepped
+
+The SHIPPED `SERVER_PROTECT_HELPER` string, eval'd:
+
+```
+1. author JSON.stringify(row)          = {"id":1,"name":"ada"}          <- THE FIX
+2. Object.keys(row)                    = ["id","name","passwordHash"]   <- surface unchanged
+3. direct read row.passwordHash        = SECRET                         <- server-side use OK
+4. compiler sink redact-then-stringify = {"id":1,"name":"ada"}          <- unchanged
+5. after reveal, JSON.stringify        = {"id":1,"name":"ada","passwordHash":"SECRET"}
+6. descriptor survives spread          = true                           <- prior invariant held
+7. array of rows                       = [{"id":1},{"id":2}]
+8. nested in a wrapper object          = {"user":{"id":1,"name":"ada"},"ok":true}
+9. strip-all sentinel                  = {}
+```
+
+Line 3 is the design point: the floor is about EGRESS. `Bun.password.verify(pw,
+row.passwordHash)` — the reason you SELECT a protected column server-side — is a member
+read and is unaffected. Only whole-row serialization redacts.
+
+### End-to-end: the cross-function shape the compile gate cannot see
+
+`crossfn.scrml` — `fetchUser` runs the query, `serveUser` builds the `Response`:
+
+```
+$ bun compiler/bin/scrml.js compile crossfn.scrml -o out
+Compiled 1 file in 107.7ms          <- NO E-PROTECT-004; the gate is within-function
+```
+
+emitted `crossfn.server.js`:
+
+```js
+async function fetchUser(id) {
+  return _scrml_protect_tag((await _scrml_sql`SELECT * FROM users WHERE id = ${id}`)[0] ?? null, ["passwordHash"]);
+}
+...
+    let u = await fetchUser(id);
+    return new Response(JSON.stringify(u), { status: 200 });   // <- toJSON redacts HERE
+```
+
+### A PRE-EXISTING TEST WAS PINNING THE LEAK
+
+`g-sql-row-protect-leak.test.js` — the file whose own header says *"never ships the
+protected column"* — carried:
+
+```js
+test("descriptor is JSON-invisible (never serialized as data)", () => {
+  const row = _scrml_protect_tag({ id: 1, passwordHash: "x" }, ["passwordHash"]);
+  expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1, passwordHash: "x" });
+});
+```
+
+Its INTENT (the Symbol descriptor must never appear as a data key) is real and is kept.
+The assertion it wrote asserted that an author's own `JSON.stringify(taggedRow)` emits the
+protected column verbatim — the D2 defect, green in the suite. Rewritten to check the
+intent (no key contains `scrml.protect`, no key is `toJSON`, on BOTH the direct and the
+redact paths) plus the corrected outcome.
+
+### Direction of change
+
+**semantics-changed**, server-side only, fail-CLOSED: `JSON.stringify` of a
+protect-TAGGED row now yields the redacted projection. Untagged objects are byte-identical
+(pinned by a negative-control test), so a non-protect app is unaffected — the helper is
+only injected when `_scrml_protect_tag` / `_redact` / `_reveal` is referenced at all.
+
+### Bite proof
+
+```
+$ bun test compiler/tests/integration/g-sql-row-protect-leak.test.js   # WITH the fix
+ 61 pass  0 fail
+
+$ git checkout compiler/src/codegen/protect-egress.ts                  # fix REMOVED
+ 54 pass  7 fail
+   (fail) THE LEAK, closed: an author's own JSON.stringify(row) drops the column
+   (fail) an ARRAY of tagged rows redacts every row
+   (fail) a tagged row NESTED in a plain wrapper still redacts
+   (fail) the `*` strip-all sentinel serializes to `{}`, not the row
+   (fail) reveal ROUND-TRIPS: a declassified column ships through the author's stringify
+   (fail) CROSS-FUNCTION: the tag travels with the VALUE, so the serializer still strips
+   (fail) descriptor is JSON-invisible (never serialized as a data key)
+
+$ <restore>                                                            # fix BACK
+ 61 pass  0 fail
+```
+
+### What stays OPEN after D2c
+
+`{...row}` spread drops the non-enumerable `toJSON` (it keeps the enumerable Symbol
+descriptor, so the compiler sink still redacts it — only an AUTHOR's own
+`JSON.stringify({...row})` in a hand-built `Response` would leak). Making `toJSON`
+enumerable would close it but would put `"toJSON"` into `Object.keys(row)` — an observable
+surface change with unmeasured blast radius. Within a single function that shape is
+build-blocked by D2b; across functions it is the residual. **Surfaced, not closed.**
+
+Full tiers after D2c: `22397 pass · 0 fail`. `bun conformance/run.ts` → `883/883`.

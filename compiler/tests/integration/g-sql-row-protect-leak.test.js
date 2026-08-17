@@ -183,10 +183,30 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
     expect(out).toEqual([{ id: 1, extra: true }, { id: 2, extra: true }]);
   });
 
-  test("descriptor is JSON-invisible (never serialized as data)", () => {
-    const { _scrml_protect_tag } = loadHelper();
+  // ⚠ REWRITTEN at dpa-030 D2c, and the reason matters. The original read:
+  //
+  //     expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1, passwordHash: "x" });
+  //
+  // Its INTENT was "the Symbol descriptor is metadata, not data — it must never
+  // appear as a key in serialized output", which is a real and still-live
+  // invariant. But the assertion it wrote **pinned the leak**: it asserted that
+  // an author's own `JSON.stringify(taggedRow)` emits the protected column
+  // verbatim. That is precisely the D2 defect, green in the suite, in the very
+  // file whose header says "never ships the protected column".
+  //
+  // The invariant is kept; the leak assertion is not.
+  test("descriptor is JSON-invisible (never serialized as a data key)", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, passwordHash: "x" }, ["passwordHash"]);
-    expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1, passwordHash: "x" });
+    const keysOf = (v) => Object.keys(JSON.parse(JSON.stringify(v)));
+    // Neither the descriptor nor the serializer hook is ever a key, on either
+    // the direct-serialize path or the compiler-owned redact-then-serialize one.
+    for (const k of [...keysOf(row), ...keysOf(_scrml_protect_redact(row))]) {
+      expect(k).not.toContain("scrml.protect");
+      expect(k).not.toBe("toJSON");
+    }
+    // …and the direct path now redacts rather than shipping the column.
+    expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1 });
   });
 
   test("reveal round-trip: revealed column is admitted", () => {
@@ -474,6 +494,102 @@ describe("§14.8.9 E-PROTECT-004 is STRUCTURAL — the source-text evasions are 
     expect(fires(
       `      function getUser(id) {\n        const Response = makeBox\n        let u = ${SELECT}\n        return new Response(u)\n      }\n      function makeBox(v) { return v }`,
     )).toBe(false);
+  });
+
+  // THE HONEST BOUND. The compile gate is within-function; this shape is the one
+  // it cannot see, and the one D2c's serializer hook exists for.
+  test("CROSS-FUNCTION is NOT caught by the compile gate (the documented bound)", () => {
+    const { result } = compileSource(protectProgram(
+      `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new Response(JSON.stringify(u))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dpa-030 D2c — deny-unless-revealed AT THE SERIALIZER.
+//
+// The redactor used to begin `if (_scrml_result instanceof Response) return
+// _scrml_result;` — a fail-OPEN default at a confidentiality sink — justified in
+// the emitter by the premise "a `Response` is an opaque stream handle, not a row
+// set". dpa-029 falsified that by execution: `new Response(JSON.stringify(row))`
+// IS a row set, stringified, and it shipped the protected column at HTTP 200.
+//
+// The guard stays (enveloping a Response destroys an adopter's deliberate 403).
+// What changed is that a tagged row carries a non-enumerable `toJSON` returning
+// the REDACTED projection, so the strip happens where the serialization happens.
+// This EXECUTES the shipped helper — not a re-implementation of it.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 D2c — a tagged row redacts itself at JSON.stringify", () => {
+  test("THE LEAK, closed: an author's own JSON.stringify(row) drops the column", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
+    expect(JSON.stringify(row)).toBe('{"id":1,"name":"ada"}');
+    expect(JSON.stringify(row)).not.toContain("SECRET");
+  });
+
+  test("an ARRAY of tagged rows redacts every row", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    const rows = _scrml_protect_tag([{ id: 1, passwordHash: "S1" }, { id: 2, passwordHash: "S2" }], ["passwordHash"]);
+    expect(JSON.stringify(rows)).toBe('[{"id":1},{"id":2}]');
+  });
+
+  test("a tagged row NESTED in a plain wrapper still redacts", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
+    expect(JSON.stringify({ user: row, ok: true })).toBe('{"user":{"id":1},"ok":true}');
+  });
+
+  test("the `*` strip-all sentinel serializes to `{}`, not the row", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    expect(JSON.stringify(_scrml_protect_tag({ a: 1, b: 2 }, "*"))).toBe("{}");
+  });
+
+  test("reveal ROUND-TRIPS: a declassified column ships through the author's stringify", () => {
+    const { _scrml_protect_tag, _scrml_protect_reveal } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
+    const revealed = _scrml_protect_reveal(row, "passwordHash");
+    expect(JSON.parse(JSON.stringify(revealed)).passwordHash).toBe("SECRET");
+    // …and the ORIGINAL row is untouched — reveal is a fresh value, not a mutation.
+    expect(JSON.stringify(row)).not.toContain("SECRET");
+  });
+
+  // NEGATIVE CONTROLS — the hook must not change any observable surface but the
+  // serializer's. A `toJSON` that showed up as a column would be a new defect.
+  test("`toJSON` is NON-enumerable — invisible to Object.keys and to spread", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
+    expect(Object.keys(row)).toEqual(["id", "passwordHash"]);
+    expect(Object.keys({ ...row })).toEqual(["id", "passwordHash"]);
+  });
+
+  test("a DIRECT member read is unaffected — server-side use of the column still works", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
+    // This is how the column is legitimately consumed server-side, e.g.
+    // `Bun.password.verify(pw, row.passwordHash)`. The floor is about EGRESS.
+    expect(row.passwordHash).toBe("SECRET");
+  });
+
+  test("the compiler-owned sink is unchanged (redact-then-stringify, no double strip)", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
+    expect(JSON.stringify(_scrml_protect_redact(row))).toBe('{"id":1,"name":"ada"}');
+  });
+
+  test("an UNTAGGED object serializes byte-identically (zero overhead off the floor)", () => {
+    loadHelper();
+    expect(JSON.stringify({ id: 1, passwordHash: "SECRET" })).toBe('{"id":1,"passwordHash":"SECRET"}');
+  });
+
+  // The cross-function shape the compile gate documents as out of its reach.
+  test("CROSS-FUNCTION: the tag travels with the VALUE, so the serializer still strips", () => {
+    const { _scrml_protect_tag } = loadHelper();
+    const fetchUser = () => _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
+    const serveUser = () => JSON.stringify(fetchUser());   // a different function
+    expect(serveUser()).toBe('{"id":1}');
   });
 });
 
