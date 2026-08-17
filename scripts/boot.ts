@@ -292,6 +292,13 @@ function allProbes(): Probe[] {
     // and dpa-022/023 read UNRUN for a day AFTER running. pa-base §10: a channel the probe does
     // not read does not exist to the PA.
     runProbe("dpa", "Deliberation queue (unrun / unratified)", "bun", ["scripts/dpa-debt.ts"]),
+    // S348: the sliding-doors audit's STRUCTURAL FINDING — Rule 2 (S66, "corpus-zero is not
+    // load-bearing") existed and DECAYED, specifically in autonomous deep-dives outside bryan's live
+    // view. The deliverable is not a principle (it is already in three contracts) but an ENFORCEMENT
+    // surface: a probe that reads a deliberation artifact and flags an undisposed corpus-zero
+    // justification at authoring time. pa-base §10 again — a rule read only at boot, violated hours
+    // later in a doc that never re-reads it. Detection, not control; never CI.
+    runProbe("corpus-zero", "Corpus-zero debt (undisposed deliberation)", "bun", ["scripts/corpus-zero-debt.ts"]),
     // S346: the `issues` probe below READS the channel; this one ASSERTS the obligation. Three open
     // issues (#519 #509 #471) were NAMED at four consecutive boots and homed by nobody — zero
     // comments, no known-gaps entry, no dpa-queue item. pa-base §10: an obligation and its probe
