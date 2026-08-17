@@ -7273,6 +7273,24 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   "requestAnimationFrame", "cancelAnimationFrame",
   "performance", "crypto", "alert", "confirm", "prompt",
   "URL", "URLSearchParams", "Buffer", "process",
+  // §40.3 / §39.3.2 — the Bun HTTP request/response vocabulary. `handle(request,
+  // resolve)` is DEFINED to take a `Request` and return a `Response` (§39.3.2:
+  // "The return type of `handle` is `Response`. Returning a non-`Response` value
+  // is a compile error (E-MW-004)"), and §39.3.5's own worked example writes
+  //     return new Response("Forbidden", { status: 403 })
+  // — which fired a spurious E-SCOPE-001. **The SPEC's own normative example did
+  // not compile.** The omission also made the confidentiality picture WORSE, not
+  // better: the shortest way around the false positive is `globalThis.Response`,
+  // which the base-only member walk waved through AND which the E-PROTECT-004
+  // source-text regex did not match — so the "safe" refusal of the bare form was
+  // pushing authors onto the one spelling that leaked (see the `globalThis`
+  // resolution in `checkLogicExprIdents` and the structural gate in
+  // `codegen/protect-egress.ts`). Scoped to the six names §40 / §19.9.8 / the
+  // `File` primitive actually require; the adjacent streaming/abort vocabulary
+  // (`ReadableStream`, `AbortController`, `TextEncoder`, …) is deliberately NOT
+  // added here without a ruling — widening an allowlist is easy to do and hard
+  // to un-do.
+  "Response", "Request", "Headers", "Blob", "File", "FormData",
   // Language keywords that may surface as idents after expression parsing
   "this", "self", "super", "event", "arguments",
   // scrml-specific — meta / compiler / SQL / error-context built-ins.
@@ -7367,6 +7385,80 @@ const RESERVED_AMBIENT_PROJECTION_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * `globalThis.<name>` is the ONE member access that is not a member access:
+ * `globalThis` IS the global object, so `globalThis.Response` and a bare
+ * `Response` name the same binding by definition. The bare-base rule
+ * ("member-access chains: only the base ident is looked up") therefore waves
+ * `globalThis.<anything>` through unconditionally — a hole in a scope check
+ * whose whole job is to refuse names that resolve to nothing.
+ *
+ * That hole was load-bearing for a live confidentiality leak, not a typo class.
+ * `new Response(...)` in a `protect=` server fn was refused by E-SCOPE-001;
+ * `new globalThis.Response(...)` compiled clean AND slipped the E-PROTECT-004
+ * source-text regex, shipping the protected column at HTTP 200. Closing this is
+ * what makes the two spellings behave identically (measured: the three-way
+ * differential bare / qualified / aliased).
+ *
+ * SCOPED DELIBERATELY TO `globalThis`. `window.` and `self.` are NOT resolved
+ * this way — they are DOM objects with a large property surface the compiler has
+ * no model of, and the corpus uses `window.addEventListener` /
+ * `window.dispatchEvent` / `window.__cmMod`, none of which are (or should be)
+ * logic-scope globals. Extending this walk to `window` would be newly-rejecting
+ * on real source. `globalThis` has ZERO corpus occurrences (measured over every
+ * tracked `*.scrml`), so this rule's migration cost is measured-zero — which is a
+ * statement about blast radius, NOT evidence that nobody would write it.
+ *
+ * The property is a plain string on the `member` node (never an `IdentExpr`), so
+ * `forEachIdentInExprNode` cannot see it; this is a small dedicated walk rather
+ * than surgery on a walker with many consumers.
+ */
+function checkGlobalThisMemberReads(
+  exprNode: unknown,
+  span: Span,
+  globalNameResolves: (name: string) => boolean,
+  errors: TSError[],
+): void {
+  const seen = new Set<unknown>();
+  const visit = (node: unknown, depth: number): void => {
+    if (!node || typeof node !== "object" || depth > 512) return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const el of node) visit(el, depth + 1);
+      return;
+    }
+    const n = node as { kind?: unknown; object?: unknown; property?: unknown };
+    if (
+      n.kind === "member"
+      && typeof n.property === "string"
+      && (n.object as { kind?: unknown; name?: unknown })?.kind === "ident"
+      && (n.object as { name?: unknown }).name === "globalThis"
+    ) {
+      const name = n.property;
+      if (name && !name.startsWith("_") && !globalNameResolves(name)) {
+        errors.push(new TSError(
+          "E-SCOPE-001",
+          `E-SCOPE-001: Undeclared global \`globalThis.${name}\` in logic expression. ` +
+          `\`globalThis.<name>\` addresses the global scope by name, so it resolves ` +
+          `through the same ladder as the bare form — and \`${name}\` is not a known ` +
+          `global, declared type, function, or import. Check for a typo, or write the ` +
+          `bare \`${name}\` if you meant a local binding.`,
+          span,
+        ));
+      }
+    }
+    // Structural descent (invariant 52): every array- and object-valued property
+    // is visited. A field-listed walk is the fail-OPEN shape — this check exists
+    // because one of those waved a leak through.
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      visit((n as Record<string, unknown>)[key], depth + 1);
+    }
+  };
+  visit(exprNode, 0);
+}
+
+/**
  * Walk every identifier in a logic-context ExprNode and emit E-SCOPE-001 for
  * any bare ident that cannot be resolved against:
  *   - the current ScopeChain (covers function params, let/const locals,
@@ -7411,6 +7503,20 @@ function checkLogicExprIdents(
   // conditions, return, props, attr-value interpolations, …). Gated on a
   // genuine struct-typed binding — no-op for the `asIs` default.
   checkRowFieldAccessInExpr(exprNode, span, scopeChain, errors);
+  // The resolution ladder shared by the bare-ident path below and the
+  // `globalThis.<name>` path — one definition, so the two spellings of the same
+  // global cannot drift apart again (which is exactly how the confidentiality
+  // bypass opened: `Response` was refused and `globalThis.Response` was not).
+  const globalNameResolves = (name: string): boolean =>
+    name.startsWith("_")
+    || LOGIC_SCOPE_GLOBAL_ALLOWLIST.has(name)
+    || typeRegistry.has(name)
+    || (knownFnNames?.has(name) ?? false)
+    // `lookup` returns `null` (not `undefined`) on a miss — truthiness, not an
+    // `!== undefined` compare, which would resolve EVERY name and make this
+    // whole check inert. Caught by the bite proof, not by review.
+    || scopeChain.lookup(name) !== null;
+  checkGlobalThisMemberReads(exprNode, span, globalNameResolves, errors);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -7488,6 +7594,28 @@ function checkLogicExprIdents(
     // Split off member-chain base.
     const base = raw.includes(".") ? raw.slice(0, raw.indexOf(".")) : raw;
     if (!base) return;
+    // `globalThis.<name>` is not a member access on an object the compiler has
+    // no model of — it IS the global scope, addressed by name. So the tail
+    // resolves through exactly the same ladder as the bare form. Some upstream
+    // paths hand this walker a DOTTED ident name (`"globalThis.Response"`)
+    // rather than a structural `member` node; the structural form is handled by
+    // `checkGlobalThisMemberReads` above. Both spellings, one rule.
+    if (base === "globalThis" && raw.length > "globalThis.".length && raw[10] === ".") {
+      const tail = raw.slice(11);
+      const head = tail.includes(".") ? tail.slice(0, tail.indexOf(".")) : tail;
+      if (head && !globalNameResolves(head)) {
+        errors.push(new TSError(
+          "E-SCOPE-001",
+          `E-SCOPE-001: Undeclared global \`globalThis.${head}\` in logic expression. ` +
+          `\`globalThis.<name>\` addresses the global scope by name, so it resolves ` +
+          `through the same ladder as the bare form — and \`${head}\` is not a known ` +
+          `global, declared type, function, or import. Check for a typo, or write the ` +
+          `bare \`${head}\` if you meant a local binding.`,
+          span,
+        ));
+      }
+      return;
+    }
     // Exclude the declared name itself (no TDZ in scrml, but a self-mention
     // in the init shouldn't flag the variable's own name).
     if (excludeName && base === excludeName) return;

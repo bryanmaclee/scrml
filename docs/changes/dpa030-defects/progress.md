@@ -118,3 +118,118 @@ fully structural — no source-text reconstruction needed:
 
 So `?{}` queries, their `.reveal("col")` chain, and the constructor callee are all
 first-class nodes. **Rule 7 applies literally: the tree already knows.**
+
+Also confirmed structurally in a second fixture (`shapes.scrml` / `foreign.scrml`):
+`const-decl.initExpr` for the alias, `call`+`member{property:"json"}` for
+`Response.json(u)`, `typeAnnotation: "asIs"` on the decl, `kind: "foreign"` for `_{}`.
+
+---
+
+## 2. D2a — the E-SCOPE-001 half (allowlist + `globalThis.` resolution)
+
+**Files:** `compiler/src/type-system.ts`,
+`compiler/tests/unit/logic-scope-bun-http-globals.test.js` (new),
+`compiler/tests/integration/authed-server-fn-response-http.test.js`.
+
+Two changes in one walker, because they are one bug:
+
+1. `Response`, `Request`, `Headers`, `Blob`, `File`, `FormData` added to
+   `LOGIC_SCOPE_GLOBAL_ALLOWLIST`.
+2. New `checkGlobalThisMemberReads` — a STRUCTURAL walk (invariant 52: descend every
+   array/object property, deny-list `span` + `_`-prefixed, identity `seen` set, 512 depth
+   cap) that resolves `globalThis.<name>` through the same ladder as the bare form. The
+   dotted-string ident spelling (`"globalThis.Response"`, which some upstream paths
+   produce) is handled on the bare path. **One ladder, both spellings** — extracted as
+   `globalNameResolves` so they cannot drift apart again, which is exactly how the bypass
+   opened.
+
+### Direction of change
+
+- **newly-ACCEPTING** for the six names. Governing sentence, SPEC §39.3.2 (`SPEC.md:22628`):
+  > "The return type of `handle` is `Response`. Returning a non-`Response` value is a
+  > compile error (E-MW-004)."
+  and §39.3.5's own worked example (`SPEC.md:22655-22660`):
+  > ```scrml
+  > ${ function handle(request, resolve) {
+  >     if (!isAllowedIP(request)) {
+  >         return new Response("Forbidden", { status: 403 })
+  >     }
+  >     return resolve(request)
+  > } }
+  > ```
+  The language REQUIRED a name the scope check refused. This is toward-the-contract.
+- **newly-REJECTING** for `globalThis.<not-a-global>`.
+
+### Measured migration for the newly-rejecting half
+
+```
+grep -rl 'globalThis' --include='*.scrml' .   ->  0 files
+```
+
+**Zero.** No tracked `*.scrml` mentions `globalThis` at all. That is a statement about
+BLAST RADIUS only — per the S346 reverse-ouroboros rule it is NOT evidence that nobody
+would write it. The reason to close it is that it is a hole in a resolution check, and it
+was load-bearing for a leak.
+
+`window.` / `self.` are deliberately NOT resolved this way, and that is measured, not
+assumed:
+
+```
+window.location 57 · window.history 2 · window.WebSocket 1 · window.removeEventListener 1
+window.dispatchEvent 1 · window.__cmMod 1 · window.addEventListener 1
+```
+
+`addEventListener` / `dispatchEvent` / `__cmMod` are not (and should not be) logic-scope
+globals, so extending the rule to `window` WOULD be newly-rejecting on real source. It
+needs a DOM property model, which is out of scope here. Pinned with a test so a later
+"make it symmetric" edit has to argue with an assertion. **OPEN.**
+
+### Bite proof
+
+```
+$ bun test compiler/tests/unit/logic-scope-bun-http-globals.test.js     # WITH the fix
+ 18 pass  0 fail
+
+$ git checkout compiler/src/type-system.ts                             # fix REMOVED
+$ bun test compiler/tests/unit/logic-scope-bun-http-globals.test.js
+ 9 pass  9 fail
+   (fail) a TYPO behind `globalThis.` is refused (was: silently accepted)
+     expect(received).toBeGreaterThan(expected)   Expected: > 0   Received: 0
+   (fail) bare `Response` resolves in logic scope
+   ... 7 more
+
+$ <restore>                                                            # fix BACK
+ 18 pass  0 fail
+```
+
+A bug the bite proof caught that review did not: `globalNameResolves` first used
+`scopeChain.lookup(name) !== undefined`, but `lookup` returns **`null`** on a miss
+(`type-system.ts:3383`). The whole check was inert and the compile still looked clean. An
+assertion you cannot make fail is a hypothesis — this one was a hypothesis for ten minutes.
+
+### One pre-existing test intentionally rewritten
+
+`compiler/tests/integration/authed-server-fn-response-http.test.js` carried an S325 test:
+
+```js
+test("the shape still build-blocks on E-SCOPE-001 (pins the upstream gate)", () => {
+  // If this ever stops firing, the shape becomes adopter-reachable and the
+  // passthrough guard below stops being belt-and-braces and becomes load-bearing.
+  expect(errors.map((e) => e.code)).toContain("E-SCOPE-001");
+});
+```
+
+That is a prophecy, and D2a fulfils it. Rewritten to assert the new fact (no E-SCOPE-001
+on `Response`) with the reasoning in the block comment. **And the S325 note was already
+wrong when it was written:** `new globalThis.Response(...)` was ALWAYS clean, so the
+"upstream gate" it leaned on was one keystroke wide the whole time. That is recorded in
+the file so the next reader is not reassured by it.
+
+### Regression run after D2a
+
+```
+bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance
+ 22373 pass · 70 skip · 1 todo · 1 fail
+```
+The single fail is the S325 prophecy test above; after the rewrite that file is
+`17 pass 0 fail`.

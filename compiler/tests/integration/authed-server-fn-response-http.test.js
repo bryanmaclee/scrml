@@ -701,20 +701,28 @@ describe("emission shape — every server-fn route handler terminates in a Respo
 // adopter's deliberate 403 / 404 / redirect would be re-emitted as a 200 with
 // an empty-object body. A DENY silently becoming a SUCCESS.
 //
-// HONEST SCOPE. This shape is NOT reachable from clean scrml source today: a
-// body naming `Response` build-blocks on `E-SCOPE-001` (asserted below, so the
-// day that gate changes these tests say so), and the `_{}` escape-hatch forms
-// fail earlier still. But codegen EMITS the handler regardless of the
-// downstream diagnostic, so the emitted code path is real and executable — and
-// §14.8.9/§14.8.10 already model a manual-`Response`/`handle()` body as a live
-// server-fn egress kind, so the shape is anticipated rather than hypothetical.
-// A fail-OPEN shape is the exact category this change exists to remove, so it
-// is guarded and pinned rather than left to the upstream gate alone.
+// SCOPE — AND THIS PARAGRAPH IS THE INTERESTING ONE, so read it before editing.
+//
+// The S325 generation of this block said the shape was "NOT reachable from clean
+// scrml source today: a body naming `Response` build-blocks on `E-SCOPE-001`",
+// and pinned that with a test whose comment read *"if this ever stops firing,
+// the shape becomes adopter-reachable and the passthrough guard below stops
+// being belt-and-braces and becomes load-bearing."*
+//
+// IT STOPPED FIRING, DELIBERATELY (dpa-030 D2). `Response` / `Request` /
+// `Headers` / `Blob` / `File` / `FormData` are now logic-scope globals, because
+// SPEC §39.3.2 is normative that "the return type of `handle` is `Response`" and
+// §39.3.5's own worked example returns `new Response("Forbidden", {status: 403})`
+// — the SPEC's example did not compile. So the prophecy above is now the fact:
+// **this shape IS adopter-reachable and this guard IS load-bearing.**
+//
+// It was never really belt-and-braces even at S325, for a reason nobody had
+// measured: `new globalThis.Response(...)` was ALWAYS clean (`globalThis` was
+// allowlisted and the walker checked only the leftmost base), so the "upstream
+// gate" the S325 note relied on was one keystroke wide the whole time.
 // ---------------------------------------------------------------------------
 describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
-  // A server fn that hand-builds a 403. `Response` is not a declared scrml
-  // identifier, so this reports E-SCOPE-001 — but codegen still emits the
-  // handler, which is what we execute.
+  // A server fn that hand-builds a 403 — clean scrml as of dpa-030 D2.
   const BODY_BUILDS_RESPONSE = `<program auth="required">
   \${
     export server function deny() {
@@ -724,11 +732,12 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
   <button onclick=deny()>D</button>
 </program>`;
 
-  test("the shape still build-blocks on E-SCOPE-001 (pins the upstream gate)", () => {
+  test("the shape is now adopter-reachable — NO E-SCOPE-001 on `Response`", () => {
     const { errors } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-gate");
-    // If this ever stops firing, the shape becomes adopter-reachable and the
-    // passthrough guard below stops being belt-and-braces and becomes load-bearing.
-    expect(errors.map((e) => e.code)).toContain("E-SCOPE-001");
+    const scopeHits = errors.filter(
+      (e) => e.code === "E-SCOPE-001" && String(e.message ?? "").includes("Response"),
+    );
+    expect(scopeHits).toEqual([]);
   });
 
   test("the guard is emitted ahead of the envelope, in that order", () => {
