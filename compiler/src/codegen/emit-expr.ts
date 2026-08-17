@@ -1606,9 +1606,112 @@ function isDispatchPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
   return ctx.serverFnPeerDispatchObjs.has((obj as { name: string }).name);
 }
 
+/**
+ * dpa-030 D3 — FILE-SCOPED host-async binding map (§19.9.8 JS-host boundary).
+ *
+ * §19.9.8 is absolute: `await` is not valid scrml source, anywhere
+ * (`E-AWAIT-NOT-IN-SCRML`). So when a compiler-provided binding's §-normative
+ * type has Promise-returning methods, **only the compiler can insert the
+ * boundary** — the adopter is structurally unable to. §19.9.8's own JS-host
+ * interop clause states the obligation:
+ *
+ *   "the body-split / CPS machinery handles the await-equivalent at the
+ *    boundary — the scrml-side code reads the resolved value, no source-level
+ *    `await` is needed. … the JS-side mechanism is bounded at the boundary; the
+ *    scrml-side surface is uniform."
+ *
+ * It was not bounded. Two shapes MEASURED broken by execution of the emitted
+ * artifact, both of them SPEC worked examples:
+ *
+ *   §39.3.1 (the primary `handle()` example)
+ *     const response = resolve(request)
+ *     response.headers.set("X-Response-Time", …)
+ *     -> emitted `const response = resolve(request);` where `resolve` is
+ *        compiler-emitted `async` ->
+ *        TypeError: undefined is not an object (evaluating 'response.headers.set')
+ *
+ *   the upload shape
+ *     const fd = request.formData()
+ *     fd.get("name")
+ *     -> emitted unawaited -> TypeError: fd.get is not a function
+ *
+ * KEY = the binding's ident name. VALUE = the method names whose call must be
+ * `await`-lowered; an EMPTY set means the BINDING ITSELF is an async callable, so
+ * a bare `name(...)` is awaited.
+ *
+ * WHY FILE-SCOPED RATHER THAN CTX-THREADED — the same argument the Issue #26
+ * classifier above makes, and it applies verbatim: scrml has many expression
+ * emit boundaries (if/while/for/match conditions, the SQL interpolation path,
+ * nested lambdas) that reconstruct a FRESH `EmitExprContext` and drop threaded
+ * fields. A correctness fix at a host-async boundary must not depend on threading
+ * being complete across every one of them — a single missed site is a silent
+ * `TypeError` in the adopter's server, and the `if`-nested `request.formData()`
+ * shape is precisely one of those reconstructing boundaries. Set + restored by
+ * emit-server around the `handle()` body emission.
+ */
+let _hostAsyncBindings: Map<string, ReadonlySet<string>> | null = null;
+
+/**
+ * Install (or clear) the file-scoped host-async binding map. Returns the PREVIOUS
+ * value so the caller restores it (the same re-entrancy hygiene
+ * `setServerAsyncClassifier` uses).
+ */
+export function setHostAsyncBindings(
+  m: Map<string, ReadonlySet<string>> | null,
+): Map<string, ReadonlySet<string>> | null {
+  const prev = _hostAsyncBindings;
+  _hostAsyncBindings = m;
+  return prev;
+}
+
+/**
+ * The WHATWG `Body` mixin's Promise-returning methods — the closed, spec-defined
+ * set shared by `Request` and `Response`. Listed rather than inferred so the
+ * lowering never awaits a SYNC method (`clone()`, `headers`) and never guesses:
+ * a member call outside this set on a host binding is emitted bare.
+ */
+export const HOST_BODY_CONSUMING_METHODS: ReadonlySet<string> = new Set([
+  "json", "text", "formData", "arrayBuffer", "blob", "bytes",
+]);
+
+/**
+ * Is `node` a call on a host-async binding that must be `await`-lowered?
+ * Two shapes: a bare `resolve(...)` (empty method set == the binding is itself an
+ * async callable) and a `request.formData()` member call whose method is in the
+ * binding's set. A LOCAL of the same name shadows the binding — same guard the
+ * bare-peer path uses, so an author's own `function resolve()` wins.
+ */
+function isHostAsyncBoundaryCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  if (_hostAsyncBindings == null || _hostAsyncBindings.size === 0) return false;
+  if (ctx.mode !== "server") return false;
+  const call = node as CallExpr;
+  if (call.optional) return false;
+  const callee = call.callee;
+  if (callee.kind === "ident" && typeof (callee as { name?: unknown }).name === "string") {
+    const name = (callee as { name: string }).name;
+    if (ctx.declaredNames != null && ctx.declaredNames.has(name)) return false;
+    const methods = _hostAsyncBindings.get(name);
+    return methods != null && methods.size === 0;
+  }
+  if (callee.kind === "member" && !(callee as MemberExpr).optional) {
+    const m = callee as MemberExpr;
+    if (typeof m.property !== "string") return false;
+    const obj = m.object;
+    if (obj.kind !== "ident" || typeof (obj as { name?: unknown }).name !== "string") return false;
+    const methods = _hostAsyncBindings.get((obj as { name: string }).name);
+    return methods != null && methods.has(m.property);
+  }
+  return false;
+}
+
 function isAwaitedPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
   if (node.kind !== "call") return false;
   const call = node as CallExpr;
+  // dpa-030 D3 — a §19.9.8 JS-host boundary call is awaited on the same terms as
+  // a peer (and needs the identical receiver-paren wrap: without it
+  // `await request.formData().get(k)` mis-parses as `await (….get(k))`).
+  if (isHostAsyncBoundaryCall(node, ctx)) return ctx.peerAwaitable !== false;
   // #284 dispatch-table: a member/index callee on a peer-bearing dispatch table
   // is awaited exactly like a bare peer (subject to the same position guard).
   if (isDispatchPeerCall(node, ctx)) return ctx.peerAwaitable !== false;
@@ -3270,6 +3373,25 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
       return `${callee}(${args})`;
     }
+    return `await ${callee}(${args})`;
+  }
+
+  // dpa-030 D3 — §19.9.8 JS-host async boundary. `resolve(request)` (the §39.3.2
+  // route-dispatch callable, emitted `async`) and `request.formData()` / `.json()`
+  // / `.text()` / … (the WHATWG `Body` mixin) return Promises. §19.9.8 forbids
+  // `await` in scrml source outright, so the adopter CANNOT insert the boundary —
+  // only the compiler can, and §19.9.8's own JS-host clause says it must ("the
+  // JS-side mechanism is bounded at the boundary; the scrml-side surface is
+  // uniform"). Unawaited, SPEC §39.3.1's own worked example throws
+  // `TypeError: undefined is not an object (evaluating 'response.headers.set')`
+  // — measured by executing the emitted artifact, not inferred.
+  //
+  // A non-awaitable position (`peerAwaitable === false` — a sync callback body or
+  // a parameter default) records nothing here: unlike a peer call this is a HOST
+  // boundary with no fail-closed diagnostic sink of its own, and emitting bare is
+  // the pre-existing behaviour. Surfaced as OPEN rather than silently widened.
+  if (isHostAsyncBoundaryCall(node, ctx)) {
+    if (ctx.peerAwaitable === false) return `${callee}(${args})`;
     return `await ${callee}(${args})`;
   }
 

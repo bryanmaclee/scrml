@@ -467,3 +467,146 @@ surface change with unmeasured blast radius. Within a single function that shape
 build-blocked by D2b; across functions it is the residual. **Surfaced, not closed.**
 
 Full tiers after D2c: `22397 pass · 0 fail`. `bun conformance/run.ts` → `883/883`.
+
+---
+
+## 5. D3 — the JS-host async boundary in `handle()`
+
+**Files:** `compiler/src/codegen/emit-expr.ts`, `compiler/src/codegen/emit-server.ts`,
+`compiler/tests/integration/handle-host-async-boundary.test.js` (new).
+
+### Premise verification — and the brief UNDERSTATED this one
+
+The brief scoped D3 to `request.formData()`. Compiling first (rather than reading the
+source) surfaced a second, more central instance of the same defect: **SPEC §39.3.1's
+PRIMARY `handle()` worked example is dead on arrival.**
+
+```scrml
+${ function handle(request, resolve) {
+    const start = Date.now()
+    const response = resolve(request)                 // <- resolve is emitted `async`
+    response.headers.set("X-Response-Time", `${Date.now() - start}ms`)
+    return response
+} }
+```
+
+Both proven by EXECUTING the emitted `_scrml_mw_wrap` verbatim out of the artifact:
+
+```
+$ bun exec.ts out3931/spec3931.server.js
+      const response = resolve(request);
+      response.headers.set("X-Response-Time", `${Date.now() - start}ms`);
+--- executing ---
+THREW: TypeError: undefined is not an object (evaluating 'response.headers.set')
+
+$ bun exec.ts out/upload.server.js
+        const fd = request.formData();
+        const name = fd.get("name");
+--- executing ---
+THREW: TypeError: fd.get is not a function. (In 'fd.get("name")', 'fd.get' is undefined)
+```
+
+### The fix
+
+A FILE-SCOPED host-async binding map (`setHostAsyncBindings`), set + restored by
+emit-server around the `handle()` body emission only:
+
+```
+resolve -> {}                              (empty set == the binding IS an async callable)
+request -> HOST_BODY_CONSUMING_METHODS     (json text formData arrayBuffer blob bytes)
+```
+
+**File-scoped, not ctx-threaded, and that choice is load-bearing.** The Issue #26
+classifier ten lines above states the argument and it applies verbatim: control-flow
+emitters (`if`/`while`/`for`/`match`), the SQL interpolation path and nested lambdas all
+reconstruct a FRESH `EmitExprContext` and drop threaded fields — there are 29 threading
+sites for the sibling `serverFnPeerDispatchObjs` option. The `request.formData()` shape in
+the brief is nested inside an `if`, i.e. exactly one of those reconstructing boundaries. A
+threaded fix would have looked right and silently missed it. The nesting is preserved in
+the test on purpose.
+
+`HOST_BODY_CONSUMING_METHODS` is the WHATWG `Body` mixin, listed rather than inferred, so
+the lowering never awaits a SYNC method — `request.clone()` stays bare (negative control).
+
+### After
+
+```
+      const response = await resolve(request);            -> 200, X-Response-Time set
+        const fd = await request.formData();              -> 200, body "ada"
+        new Response((await request.formData()).get("name"))   <- receiver parens
+```
+
+### Direction of change
+
+**semantics-changed** (a Promise is now resolved where it previously leaked), inside
+`handle()` bodies only. It cannot be newly-rejecting (no new diagnostic) and it cannot be
+newly-accepting (no new source shape admitted).
+
+### Measured migration
+
+7 tracked `*.scrml` declare `function handle(request, resolve)`:
+
+```
+samples/gauntlet-r14/go-api-service.scrml       samples/gauntlet-r13/go-api-service.scrml
+samples/gauntlet-r14/react-auth-dashboard.scrml samples/gauntlet-r13/react-auth-dashboard.scrml
+conformance/cases/middleware/duplicate-handle-pos/case.scrml
+conformance/cases/middleware/duplicate-handle-neg/case.scrml
+examples/20-middleware.scrml
+```
+
+`examples/20-middleware.scrml` — the SHIPPED middleware example — carries the §39.3.1
+shape and was broken. Base vs head on the same file:
+
+```
+BASE: 52:      const response = resolve(request);
+HEAD: 52:      const response = await resolve(request);
+```
+
+So the migration is not "zero corpus files affected" — it is "the flagship example was
+DOA and is now correct". Nothing needs an author edit; the change is entirely in emission.
+
+### Bite proof
+
+```
+$ bun test compiler/tests/integration/handle-host-async-boundary.test.js  # WITH the fix
+ 11 pass  0 fail
+
+$ git checkout compiler/src/codegen/{emit-expr,emit-server}.ts            # fix REMOVED
+ 4 pass  7 fail
+   (fail) EXECUTED: it returns 200 (before: TypeError on response.headers.set)
+   (fail) the emitted dispatch is awaited
+   (fail) EXECUTED: request.formData() (before: TypeError: fd.get is not a function)
+   (fail) EXECUTED: request.text()
+   (fail) EXECUTED: request.json()
+   (fail) RECEIVER POSITION: `request.formData().get(k)` gets the precedence parens
+   (fail) the binding map is scoped to the handle() body — a SIBLING fn is unaffected
+
+$ <restore>                                                               # fix BACK
+ 11 pass  0 fail
+```
+
+### WHERE I WAS WRONG — recorded because the test caught it, not review
+
+I assumed §39.3.2 left the parameter SPELLINGS free and wrote a test for
+`function handle(req, next)`. **It does not.** §12.2 Trigger 8 pins recognition to *"the
+reserved name `handle` joined with the §39.3.2 signature shape (exactly two parameters
+named `request` and `resolve`; not a generator)"* — `isHandleEscapeHatch`,
+`ast-builder.js:12673`. `handle(req, next)` is not the escape hatch at all: it is a dead
+ordinary function, `W-DEAD-FUNCTION`, and NO `.server.js` is emitted. The comment I had
+written claiming otherwise is removed and the fact is pinned by a test.
+
+Related, pre-existing, NOT changed: `requestParamName` reads
+`typeof handleParams[0] === 'string' ? handleParams[0] : 'request'`, but params are
+`{name}` OBJECTS — so that ternary always takes the default. It is harmless (Trigger 8
+pins the name to `request` anyway) but it is a dead branch. Surfaced, not touched.
+
+### What stays OPEN after D3
+
+- **The boundary is `handle()`-scoped.** An `<endpoint>` arm or a server fn that receives
+  a `Request` by another route does not get this lowering, because nothing types those
+  parameters as `Request`. Closing it generally needs the type system to carry host types
+  to codegen, not a wider name list.
+- **A non-awaitable position emits BARE with no diagnostic.** The peer-call path records
+  such sites and raises `E-SERVER-FN-IN-SYNC-CALLBACK`; the host boundary has no
+  fail-closed sink of its own. `request.json()` inside a sync `.map` callback still leaks
+  a Promise, silently. Surfaced, deliberately not widened in this round.

@@ -9,7 +9,7 @@ import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
-import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, setServerAsyncClassifier, setHostAsyncBindings, HOST_BODY_CONSUMING_METHODS, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -3117,20 +3117,60 @@ export function generateServerJs(
 
       const handleParams: any[] = _scrml_handleNode.params ?? [];
       const requestParamName: string = typeof handleParams[0] === 'string' ? handleParams[0] : 'request';
+      // §12.2 Trigger 8 PINS both spellings — recognition is "the reserved name
+      // `handle` joined with the §39.3.2 signature shape (exactly two parameters
+      // named `request` and `resolve`)", enforced by `isHandleEscapeHatch` in
+      // ast-builder.js. A `function handle(req, next)` is NOT the escape hatch (it
+      // is a dead ordinary function; W-DEAD-FUNCTION, no `.server.js` emitted), so
+      // these two reads can only ever produce `request` / `resolve`. Derived from
+      // the node anyway, mirroring the line above, rather than hard-coding a
+      // literal that would silently drift if Trigger 8 ever widened.
+      const resolveParamName: string =
+        typeof handleParams[1] === 'string' ? handleParams[1]
+        : (typeof handleParams[1]?.name === 'string' ? handleParams[1].name : 'resolve');
 
       if (requestParamName !== '_scrml_mw_req') {
         lines.push(`      const ${requestParamName} = _scrml_mw_req;`);
       }
 
-      for (const stmt of handleBody) {
-        // E-SQL-006 (§44.3) — the §39.3 `handle()` escape-hatch body runs server-
-        // side and may hold a `?{...}.prepare()`; thread the shared sink (drained
-        // deduped at the tail). The resolve-index PRE-SCAN loop above stays sink-
-        // less on purpose (it is throwaway + partial, so it must not push).
-        const code = emitLogicNode(stmt, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors });
-        if (code) {
-          for (const line of code.split('\n')) lines.push('      ' + line);
+      // dpa-030 D3 — §19.9.8 JS-host async boundary for the two bindings the
+      // §39.3.2 signature DEFINES:
+      //
+      //     function handle(request: Request, resolve: (req: Request) => Response) -> Response
+      //
+      // `resolve` is emitted `async` (it dispatches the route), and `request` is a
+      // WHATWG `Request` whose `Body`-mixin methods return Promises. §19.9.8
+      // forbids `await` in scrml source outright (`E-AWAIT-NOT-IN-SCRML`), so the
+      // adopter is STRUCTURALLY unable to insert the boundary — only the compiler
+      // can, and §19.9.8's JS-host clause says the compiler must ("the JS-side
+      // mechanism is bounded at the boundary; the scrml-side surface is uniform").
+      //
+      // MEASURED before this landed, by EXECUTING the emitted artifact:
+      //   SPEC §39.3.1's own primary example -> TypeError: undefined is not an
+      //     object (evaluating 'response.headers.set')     [resolve unawaited]
+      //   `const fd = request.formData(); fd.get("name")`
+      //     -> TypeError: fd.get is not a function          [request unawaited]
+      //
+      const _prevHostAsync = setHostAsyncBindings(new Map([
+        // EMPTY set == the binding is itself an async callable: `resolve(req)`.
+        [resolveParamName, new Set<string>()],
+        [requestParamName, HOST_BODY_CONSUMING_METHODS],
+      ]));
+      try {
+        for (const stmt of handleBody) {
+          // E-SQL-006 (§44.3) — the §39.3 `handle()` escape-hatch body runs server-
+          // side and may hold a `?{...}.prepare()`; thread the shared sink (drained
+          // deduped at the tail). The resolve-index PRE-SCAN loop above stays sink-
+          // less on purpose (it is throwaway + partial, so it must not push).
+          const code = emitLogicNode(stmt, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors });
+          if (code) {
+            for (const line of code.split('\n')) lines.push('      ' + line);
+          }
         }
+      } finally {
+        // Scoped to the `handle()` body ONLY. `request` / `resolve` are ordinary
+        // names anywhere else in the file and must not acquire an await there.
+        setHostAsyncBindings(_prevHostAsync);
       }
 
       lines.push("    })();");
