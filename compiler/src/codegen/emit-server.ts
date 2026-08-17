@@ -27,6 +27,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, SERVER_PROTECT_HELPER, type ProtectContext } from "./protect-egress.ts";
+import { SERVER_JSON_BODY_GUARD_HELPER, emitJsonBodyRead } from "./server-body-guard.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -3890,6 +3891,20 @@ export function generateServerJs(
       lines.push(`  }`);
     }
 
+    // dpa-030 D4 — the bounded, fail-closed body read, emitted ONCE for BOTH the
+    // baseline-CSRF and non-CSRF arms below (they previously each carried their
+    // own bare `await _scrml_req.json()`).
+    //
+    // POSITION IS LOAD-BEARING. This sits AFTER the auth/CSRF gates (an
+    // unauthenticated request must not get the server to read its body at all)
+    // and BEFORE the `BEGIN DEFERRED` transaction envelope and the result-capture
+    // IIFE. Both of the early exits are plain `return`s of a real `Response`:
+    // inside the envelope they would leave a transaction open, and inside the
+    // IIFE the CSRF arm's exit has no `instanceof Response` passthrough, so a
+    // 413 would be `JSON.stringify`d to `"{}"` and re-emitted as a 200 — the same
+    // DENY-becomes-SUCCESS shape D2c documents.
+    for (const _l of emitJsonBodyRead("  ")) lines.push(_l);
+
     if (useBaselineCsrf) {
       // §8.9.2: implicit per-handler transaction envelope (Tier 1 coalescing).
       // §44.6: transactions deferred to SPEC-ISSUE-018 — use sql.unsafe()
@@ -3936,8 +3951,8 @@ export function generateServerJs(
 
       lines.push(`  const _scrml_result = await (async () => {`);
 
-      lines.push(`    const _scrml_body = await _scrml_req.json();`);
-
+      // `_scrml_body` is bound above the envelope by `emitJsonBodyRead` — see the
+      // position note there. It is in scope here through the enclosing handler.
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(`    const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
       }
@@ -4139,8 +4154,8 @@ export function generateServerJs(
         lines.push(`  }`);
       }
     } else {
-      lines.push(`  const _scrml_body = await _scrml_req.json();`);
-
+      // `_scrml_body` is bound by `emitJsonBodyRead` above the CSRF/non-CSRF
+      // split — one bounded read serving both arms.
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(`  const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
       }
@@ -4667,7 +4682,13 @@ export function generateServerJs(
 
       lines.push(`// --- §61 <endpoint> ${_epMethod} ${_epPath} (accepts=${_epEnum.name}) ---`);
       lines.push(`async function ${_epHandler}(_scrml_req) {`);
-      lines.push(`  const _scrml_body = await _scrml_req.json();`);
+      // dpa-030 D4 — an `<endpoint>` is the MOST exposed of the three prologues:
+      // §61.7 makes a JSON+bearer route CSRF-exempt BY CONSTRUCTION, so an
+      // unauthenticated foreign client reaches this line directly. Before the
+      // guard, `{not json` threw an uncaught SyntaxError one line ABOVE the
+      // decode — making §61.3's own compiler-owned 400 envelope structurally
+      // unreachable for the input class a foreign client is most likely to send.
+      for (const _l of emitJsonBodyRead("  ")) lines.push(_l);
       lines.push(`  // §61.3 — decode the request body against accepts= (parseVariant §41.13).`);
       lines.push(`  const _scrml_decoded = ${_epDecode};`);
       lines.push(`  // §61.3 — a ::ParseError decode failure → the compiler-owned 400 envelope.`);
@@ -5661,6 +5682,14 @@ export function generateServerJs(
   // emitted call (a non-protect app emits none of these and is byte-unchanged).
   if (finalEmitted.includes("_scrml_protect_")) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_PROTECT_HELPER);
+  }
+
+  // §61.3 / dpa-030 D4 — the bounded, fail-closed JSON body-read helper. Same
+  // inline-on-use gate as the protect block above: a server bundle with no JSON
+  // prologue (no server-fn route, no `<endpoint>`) references
+  // `_scrml_read_json_body` nowhere and is byte-unchanged.
+  if (finalEmitted.includes("_scrml_read_json_body(")) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_JSON_BODY_GUARD_HELPER);
   }
 
   // §14.8.11 — A1/S2 DB-authoritative principal transaction wrapper (CONDITIONAL

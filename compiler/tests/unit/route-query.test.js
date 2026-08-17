@@ -287,7 +287,11 @@ describe("RQ8: route.query injection precedes body deserialization", () => {
     ]);
 
     const routeQueryPos = serverJs.indexOf("const _scrml_url = new URL");
-    const bodyPos = serverJs.indexOf("_scrml_body = await _scrml_req.json()");
+    // dpa-030 D4 — the prologue is no longer a bare `await _scrml_req.json()`; it
+    // is the bounded, fail-closed read (413 over the ceiling, 400 on malformed).
+    // The INVARIANT this test exists for is unchanged: route.query injection
+    // still precedes body deserialization. Only the marker moved.
+    const bodyPos = serverJs.indexOf("const _scrml_body_read = await _scrml_read_json_body(");
 
     expect(routeQueryPos).toBeGreaterThanOrEqual(0);
     expect(bodyPos).toBeGreaterThanOrEqual(0);

@@ -119,7 +119,12 @@ describe("<endpoint> codegen — server route-handler (§61.6), parseVariant dec
     const js = serverJs(compile(FSP_ENDPOINT));
     // The async server handler reads the request body, then decodes it.
     expect(js).toContain(`async function _scrml_endpoint_`);
-    expect(js).toContain(`const _scrml_body = await _scrml_req.json();`);
+    // dpa-030 D4 — the read is now bounded + fail-closed rather than a bare
+    // `await _scrml_req.json()`. §61.3's decode-failure envelope was structurally
+    // UNREACHABLE for a malformed body before this: `req.json()` threw one line
+    // above `parseVariant`. Both halves asserted, in order.
+    expect(js).toContain(`const _scrml_body_read = await _scrml_read_json_body(_scrml_req);`);
+    expect(js).toContain(`const _scrml_body = _scrml_body_read.value;`);
     // The §61.3 boundary-parse — a parseVariant decode IIFE against FspMethod
     // (REUSE emit-parse-variant — the same `switch (_v.tag)` shape <api> uses).
     expect(js).toContain(`switch (_v.tag)`);

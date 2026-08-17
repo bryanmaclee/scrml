@@ -93,11 +93,19 @@ function stubRequest(path, body) {
     ["x-csrf-token", "tok"],
     ["cookie", "scrml_csrf=tok"],
   ]);
+  // dpa-030 D4 — the emitted JSON prologue stream-counts `req.body` against a
+  // size ceiling instead of calling `req.json()`, so a duck-typed request needs a
+  // real `body` ReadableStream (a real `Request` always has one). Without it every
+  // POST takes the "request has no body" 400 arm.
+  const bodyStr = JSON.stringify(body ?? {});
   return {
     url: `http://localhost${path}`,
     method: "POST",
     headers: { get: (k) => headers.get(String(k).toLowerCase()) ?? null },
     json: async () => body,
+    body: new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode(bodyStr)); c.close(); },
+    }),
   };
 }
 

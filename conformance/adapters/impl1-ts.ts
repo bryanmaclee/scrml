@@ -767,6 +767,22 @@ function installServerDispatchFetch(mod: ServerModule): () => void {
       headers: { get: (k: string) => hmap[String(k).toLowerCase()] ?? null },
       json: async () => JSON.parse(bodyStr || "null"),
       text: async () => bodyStr,
+      // dpa-030 D4 — THIRD fidelity the real Fetch API provides. The emitted JSON
+      // prologue no longer calls `req.json()`: it STREAM-COUNTS `req.body` against
+      // a ceiling (so an oversized body is 413'd and aborted without being
+      // materialized) and JSON.parses the counted bytes (so a malformed body is a
+      // §61.3 400 envelope, not an uncaught SyntaxError). A duck-typed request
+      // with no `body` would take the "request has no body" 400 arm on EVERY
+      // POST. Real `Request.body` is a ReadableStream; so is this.
+      //
+      // `null` — not `undefined` — for a body-less request, matching WHATWG:
+      // `Request.body` is null exactly when there is no body, and the guard
+      // distinguishes the two.
+      body: bodyStr
+        ? new ReadableStream({
+            start(c) { c.enqueue(new TextEncoder().encode(bodyStr)); c.close(); },
+          })
+        : null,
     };
     const resp = (await mod.fetch(req)) as any;
     const r = resp || emptyJson();

@@ -172,6 +172,12 @@ type Load:enum = {
         },
       },
       json: async () => ({ raw }),
+      // dpa-030 D4 — the emitted JSON prologue stream-counts `req.body` against a
+      // size ceiling rather than calling `req.json()`; a duck-typed request needs
+      // a real `body` ReadableStream (every real `Request` has one).
+      body: new ReadableStream({
+        start(c) { c.enqueue(new TextEncoder().encode(JSON.stringify({ raw }))); c.close(); },
+      }),
     });
 
     // Match → coerced variant string (no TypeError — the whole point).

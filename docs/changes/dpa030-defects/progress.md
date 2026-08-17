@@ -610,3 +610,153 @@ pins the name to `request` anyway) but it is a dead branch. Surfaced, not touche
   such sites and raises `E-SERVER-FN-IN-SYNC-CALLBACK`; the host boundary has no
   fail-closed sink of its own. `request.json()` inside a sync `.map` callback still leaks
   a Promise, silently. Surfaced, deliberately not widened in this round.
+
+---
+
+## 6. D4 — the bounded, fail-closed JSON body read
+
+**Files:** `compiler/src/codegen/server-body-guard.ts` (new),
+`compiler/src/codegen/emit-server.ts`,
+`compiler/tests/integration/json-body-guard.test.js` (new),
+plus five test/harness updates (below) and `docs/FACTS.md` (regenerated).
+
+### Premise verification — EXECUTED against `examples/33-endpoint.scrml`
+
+```
+$ bun exec33.ts out33/33-endpoint.server.js
+route under test: POST /fsp
+malformed  : THREW SyntaxError: Failed to parse JSON
+empty      : THREW SyntaxError: Unexpected end of JSON input
+well-formed: status=400 {"error":{"kind":"UnknownVariant", ...}}
+10MiB body : status=400 {"error":{"kind":"UnknownVariant", ...}}     <- read IN FULL
+```
+
+Both halves of the brief confirmed. The 10 MiB body was materialized and processed; a
+malformed body threw one line ABOVE `parseVariant`, making §61.3's compiler-owned envelope
+structurally unreachable for it. An `<endpoint>` is the most exposed of the three prologues:
+§61.7 makes JSON+bearer routes CSRF-exempt BY CONSTRUCTION, so an unauthenticated foreign
+client reaches that line directly.
+
+### After
+
+```
+$ bun exec33.ts out33b/33-endpoint.server.js
+malformed  : status=400 {"error":{"kind":"MalformedBody","message":"request body is not valid JSON: ..."}}
+empty      : status=400 {"error":{"kind":"MalformedBody", ...}}
+well-formed: status=400 {"error":{"kind":"UnknownVariant", ...}}      <- decode path INTACT
+10MiB body : status=413 {"error":{"kind":"PayloadTooLarge","message":"request body exceeds 1048576 bytes"}}
+```
+
+### Where the limit lives — a PROPOSAL, and what I refused to do
+
+`SERVER_JSON_BODY_LIMIT_BYTES = 1 MiB`, a single compiler-owned constant, emitted as a
+NAMED `const _SCRML_JSON_BODY_LIMIT = 1048576;` in the adopter's own bundle (greppable;
+pinned by a test).
+
+**I did NOT invent `<program maxBodySize="…">`.** It is the obvious ergonomic home and it
+is a LANGUAGE-SURFACE addition to §40's ratified `<program>` attribute registry — the
+brief says do not invent one without flagging it, and Rule 4 says SPEC is normative. **This
+needs ratification.** The constant is deliberately a single site so a future `<program>`
+attribute or `scrml.toml` key has exactly one thing to feed.
+
+1 MiB rationale: these three prologues decode a JSON RPC / `<endpoint>` argument list, not
+a payload (nginx defaults to 1 MiB, Express `json()` to 100 KiB). **File uploads do NOT
+pass through here** — they arrive as `multipart/form-data` via `request.formData()` in a
+`handle()` body (D3's path), which this constant does not bound. Conflating the two would
+either cripple uploads or un-bound RPC.
+
+### Enforceable, not advisory — measured, and it runs unconditionally
+
+The brief's OQ-1 probe was re-proved against the SHIPPED emission, twice:
+
+```
+STREAM (always runs, no HTTP stack):
+  10 MiB offered / 1 MiB ceiling -> 413 PayloadTooLarge
+  the source ReadableStream counted its OWN pull() calls: pulls < 160, and
+  pulls * 64KiB <= ceiling + 4 chunks     <- the source STOPS being pulled
+
+OVER HTTP (Bun.serve + a streaming client): 413, sent < 160 chunks
+```
+
+The STREAM test is the load-bearing one because it measures the exact property (the
+source stops being pulled) with nothing between it and the handler. The OVER-HTTP test is
+`domPolluted()`-guarded: happy-dom (registered globally by sibling browser tests) replaces
+`fetch` with an implementation that cannot send a streaming request body at all
+(`HPE_UNEXPECTED_CONTENT_LENGTH`) — it would measure the shim, not the server. Reason
+written at the skip so it cannot read as a silent pass.
+
+### Direction of change
+
+**semantics-changed**, fail-CLOSED: a body over the ceiling is 413 (was: read in full); a
+malformed body is 400 (was: uncaught `SyntaxError`). No new diagnostic, so it can be
+neither newly-rejecting nor newly-accepting AT COMPILE TIME.
+
+### Measured migration
+
+- **Compile side: ZERO.** All 65 `examples/**/*.scrml` compile identically — 4 errors
+  before, the SAME 4 `E-ERROR-009` after (verified by stashing `emit-server.ts` and
+  re-running). No source anywhere needs an edit.
+- **Emission side: 36 of 38 emitted server bundles across `examples/` now carry the
+  guard.** The 2 that do not have no JSON prologue — that is the inline-on-use gate
+  working, pinned by a negative-control test.
+
+### THE INTERFACE CHANGE, and it is the thing to read in this section
+
+The emitted handler no longer calls `_scrml_req.json()`. It reads `_scrml_req.body` (a
+`ReadableStream`) and `_scrml_req.headers.get("Content-Length")`. **Every production host
+is `Bun.serve()`, which hands a real WHATWG `Request` — verified by grep across
+`commands/build.js` and `commands/dev.js`, there is no other caller of the emitted `fetch`
+in the tree.** But THREE test harnesses hand the handler a DUCK-TYPED request with `json()`
+and no `body`, and every POST through them took the "request has no body" 400 arm:
+
+| harness | fix |
+|---|---|
+| `conformance/adapters/impl1-ts.ts` `installServerDispatchFetch` | `body:` ReadableStream (the shim's THIRD documented Fetch fidelity) |
+| `compiler/tests/integration/d5-server-closes-over-module-const.test.js` | `body:` on `stubRequest` |
+| `compiler/tests/integration/ss22-enum-toenum-server-emission.test.js` | `body:` on `mk()` |
+
+I deliberately did NOT add a "no `.body`? fall back to `.json()`" path. That is the
+make-the-product-weaker-to-satisfy-a-mock move, and it would put a fail-OPEN branch inside
+a DoS guard. WHATWG says `Request.body` is `null` exactly when there is no body; the guard
+distinguishes `null` (400, correct) from a stand-in that never had the field.
+
+Three further assertions needed updating because the emission genuinely changed shape —
+in each case the test's INVARIANT is unchanged and only its marker moved:
+
+- `unit/route-query.test.js` — "route.query precedes body deserialization" now keys on
+  `const _scrml_body_read = await _scrml_read_json_body(`.
+- `unit/endpoint-decl-codegen.test.js` — asserts both halves of the new read.
+- `integration/authed-server-fn-response-http.test.js` — `yieldsResponse` now recognises
+  `_scrml_body_read.response` (the same allowance it already makes for `_scrml_authResult`),
+  so "EVERY exit of every route handler is a Response" still holds and still means it.
+
+### Bite proof
+
+```
+$ bun test compiler/tests/integration/json-body-guard.test.js   # WITH the fix
+ 12 pass  0 fail
+
+$ git checkout compiler/src/codegen/emit-server.ts              # fix REMOVED
+ 4 pass  7 fail   (the STREAM proof was added after this run; it fails identically)
+   (fail) EXECUTED: `{not json at all` -> 400 { error: { kind, message } }
+   (fail) EXECUTED: an EMPTY body -> 400, not `Unexpected end of JSON input`
+   (fail) EXECUTED: a body over the ceiling -> 413, not a 200
+   (fail) a declared Content-Length over the ceiling is rejected WITHOUT reading the body
+   (fail) OVER HTTP: the oversized body is ABORTED mid-stream, not fully pulled
+   (fail) the helper is emitted ONCE even with several JSON prologues
+   (fail) the ceiling is a NAMED const in the adopter's own bundle
+
+$ <restore>                                                     # fix BACK
+ 12 pass  0 fail
+```
+
+### What stays OPEN after D4
+
+- **The `<program maxBodySize=>` / `scrml.toml` knob is UNRATIFIED.** 1 MiB is a compiler
+  constant today. An adopter who needs a larger RPC body has no supported way to raise it.
+- **`request.formData()` uploads are UNBOUNDED.** D3 made that path work; nothing bounds
+  it. It is a different read path with a different right answer (a multipart-aware,
+  per-part ceiling) and it is the natural next unit for the `File` primitive build.
+- **No `Content-Type` check.** A body that is not JSON at all still reaches `JSON.parse`
+  and gets the 400. Correct behaviour, but a 415 would be more honest for a
+  `Content-Type: text/xml` body. Not widened here.

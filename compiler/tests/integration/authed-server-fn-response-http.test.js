@@ -308,6 +308,14 @@ function yieldsResponse(expr) {
   if (expr.type === "NewExpression" && expr.callee.type === "Identifier" && expr.callee.name === "Response") return true;
   // `const _scrml_authResult = _scrml_auth_check(req); if (_scrml_authResult) return _scrml_authResult;`
   if (expr.type === "Identifier" && /^_scrml_(authResult|csrf_403|slAuth)/.test(expr.name)) return true;
+  // dpa-030 D4 — `const _scrml_body_read = await _scrml_read_json_body(req);
+  //               if (!_scrml_body_read.ok) return _scrml_body_read.response;`
+  // The `.response` member of that result object is a `Response` on every path
+  // that produces one (413 over the ceiling, 400 on a malformed body), and it is
+  // only ever returned under the `!ok` guard.
+  if (expr.type === "MemberExpression"
+      && expr.object.type === "Identifier" && expr.object.name === "_scrml_body_read"
+      && !expr.computed && expr.property.name === "response") return true;
   if (expr.type === "AwaitExpression") return yieldsResponse(expr.argument);
   if (expr.type === "ConditionalExpression") return yieldsResponse(expr.consequent) && yieldsResponse(expr.alternate);
   return false;
