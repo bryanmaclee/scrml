@@ -8581,3 +8581,25 @@ mounted routes      = POST /_scrml/__ri_route_persistSignup_1
 
 **Test-oracle defect found alongside:** `compiler/tests/unit/form-for-expander.test.js:162,205` hand-feeds `peActionUrl: "/api/persistSignup"` and asserts the expander echoed it — a tautological passthrough that could never have caught this. The R26 synth-AST class.
 <!-- @gap id=g-formfor-pe-fallback-mandated-unoptoutable-and-nonfunctional sev=HIGH status=open locus=compiler/SPEC.md(§41.14.3 mandates the /api/ prefix — the normative site) + compiler/src/type-system.ts:20155,20157(the two mint sites) + compiler/src/codegen/emit-server.ts(no urlencoded parse, header-only CSRF, JSON response) prov=ruling:user-voice-scrml.md S347 — bryan "a, land the defects first"; established by execution, not inspection -->
+
+### G-PROTECT-TAG-TOJSON-HOOK-DROPPED-BY-OBJECT-SPREAD — the redaction survives `JSON.stringify(row)` but not `JSON.stringify({...row})` — `NEW S347; HIGH; open (disclosed residual of the D2 fix, PA-reproduced)`
+
+**PA-reproduced S347** by driving the shipped `_scrml_protect_tag` helper directly:
+
+```
+JSON.stringify(row)        -> {"id":1,"name":"ada"}                          redacted
+JSON.stringify([row])      -> [{"id":1,"name":"ada"}]                        redacted
+Object.keys(row)           -> ["id","name","passwordHash"]                   unchanged (by design)
+JSON.stringify({...row})   -> {"id":1,"name":"ada","passwordHash":"SECRET"}  LEAKS
+```
+
+The D2c fix attaches a **non-enumerable `toJSON`** to a tagged row, which is what makes direct serialization redact while leaving `Object.keys` and direct field access intact (so `Bun.password.verify(row.passwordHash, …)` still works — a deliberate and correct property). **Object spread copies only enumerable own properties, so `{...row}` drops the hook** and the resulting plain object serializes in full.
+
+**Severity: HIGH, and the reason is the distance.** The fixed shape is `JSON.stringify(u)`; the leaking shape is `JSON.stringify({...u})`. That is a one-keystroke variant, it is idiomatic JS, and it produces no diagnostic. **D2 narrows the leak; it does not close the class.**
+
+**Why the implementing agent did not fix it, and the reasoning is sound:** making `toJSON` enumerable would put `"toJSON"` into `Object.keys(row)` for every protected row — an unmeasured blast radius across every consumer that enumerates a row. Disclosed rather than papered over.
+
+**⚑ A precedent the agent did not have — dpa-021 solved this exact shape.** Its verdict on the `@session` binding was verbatim that *"one **raw** binding CANNOT serve both forms; one **Proxy** can"*, and it was **RATIFIED S319**. A Proxy `get`/`ownKeys` trap survives spread in a way a non-enumerable data property cannot, because the trap intercepts the copy rather than being skipped by it. **That is the structural answer, it is already ratified for a sibling problem, and it should be evaluated before any incremental patch here.** Cross-ref `dpa-021` + `g-session-ambient-unlowered-trust-boundary-inversion`.
+
+Related: closes-adjacent-to `g-handle-globalthis-response-ships-protected-columns` (the reported instance, fixed by D2a/D2b/D2c). This entry is the residual that fix leaves behind, and it is pinned by the D2 test suite.
+<!-- @gap id=g-protect-tag-tojson-hook-dropped-by-object-spread sev=HIGH status=open locus=compiler/src/codegen/protect-egress.ts(the emitted `_scrml_protect_tag` / `_scrml_protect_mark` helper — the non-enumerable toJSON hook) prov=rationale:PA-reproduced-by-driving-the-shipped-helper-object-spread-copies-only-enumerable-own-properties-so-the-hook-is-dropped-and-dpa-021-already-ratified-the-Proxy-answer-for-the-identical-shape -->
