@@ -10823,9 +10823,46 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // remains a syntactically-valid JS string literal. Backtick-derived STRING
     // tokens carry `isTemplate: true` and are re-emitted with backticks so any
     // embedded `${...}` interpolations survive.
+    //
+    // -------------------------------------------------------------------------
+    // COMMENT TOKENS ARE SKIPPED, AND RE-EMITTING THEM WOULD BE ACTIVELY WRONG
+    // -------------------------------------------------------------------------
+    //
+    // NEITHER buffer is JavaScript. `defBuf` becomes a default-value EXPRESSION,
+    // but `cur` is the parameter NAME-and-TYPE buffer and it is consumed by
+    // STRING SURGERY in pushParam a few lines above — `LIN_PREFIX` (`/^lin\s+/`),
+    // `indexOf(':')`, `.trim()`. Nothing parses it.
+    //
+    // So a FAITHFUL re-emission does not fix this. `greet(/* the message */ msg)`
+    // re-emitted faithfully yields the parameter name `/* the message */ msg`,
+    // which is exactly as wrong as the pre-faithfulness `the message */ msg`.
+    // Re-emitting fixes `defBuf` and leaves `cur` broken. SKIPPING FIXES BOTH.
+    // This is the same strategy, for the same reason, as the S184
+    // lifecycle-field-comment-leak fix in `collectBracedBody`.
+    //
+    // ⚠ THE GLUE HAZARD — the space below is load-bearing, not defensive.
+    // The space rule above only fires for an INCOMING IDENT/KEYWORD/AT_IDENT, so
+    // dropping a comment between two tokens of any other kind would WELD them:
+    // `msg = 1 /*c*/ 2` would become the default `12`, a silently wrong value
+    // that compiles clean. (Measured pre-fix it recorded `1c*/2`, so the weld is
+    // real and not hypothetical.) Emitting a separator turns that into `1 2`,
+    // which fails to parse — correctly, because `1 2` is not valid JS either and
+    // was never a valid default. A comment is whitespace to a JS lexer; the one
+    // faithful thing to put in its place is whitespace.
+    //
+    // Consequence worth naming: `greet(msg = /* x */)` now records NO default
+    // rather than the garbage default `x*/`. That matches what `greet(msg =)`
+    // has always done, so it joins an existing class rather than opening a new
+    // one — see docs/changes/comment-token-faithfulness/progress.md.
     function appendTok(bufName, tok) {
       const buf = bufName === 'cur' ? cur : defBuf;
       let next = buf;
+      if (tok.kind === 'COMMENT') {
+        if (buf.length > 0 && buf[buf.length - 1] !== ' ') next = buf + ' ';
+        if (bufName === 'cur') cur = next;
+        else defBuf = next;
+        return;
+      }
       if (buf.length > 0 && (tok.kind === 'IDENT' || tok.kind === 'KEYWORD' || tok.kind === 'AT_IDENT') &&
           buf[buf.length - 1] !== ' ') {
         next += ' ';
