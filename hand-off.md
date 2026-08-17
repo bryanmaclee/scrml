@@ -4,6 +4,126 @@
 <!-- Mechanical stream: handOffs/delta-log.md [1493]-[1536].         -->
 <!-- ============================================================= -->
 
+# scrml — Session 347 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-16/17. `/boot` Profile A. Booted solo; **S347-peter and S348-peter ran concurrently**
+and landed 9 PRs under me — this wrap ADDS to their hand-off rather than replacing it.
+
+**Nothing of mine is on `main` except docs.** One PR merged (#544). **THREE code branches are pushed,
+green, and DELIBERATELY HELD.** That is the headline state, and it is a choice, not a stall.
+
+## ⏭ NEXT-SESSION PICKUP (bryan lane)
+
+### 1. Three branches, all owing the SAME gate
+
+| branch | SHA | state | blocked on |
+|---|---|---|---|
+| `comment-token-faithfulness` | `215984b9` | complete · conformance 883/883 · core tier **22,460 / 0 fail** | **S239 pass** |
+| D2/D3/D4 (`worktree-agent-ac0d4d12007dc725e`) | `45fc29b5` | complete · 30,053 pass · zero new failures by name | **S239 pass** — and it is a SECURITY change |
+| `dtr-r7` | `152dfa47` | **DO-NOT-LAND** | comment-tokens landing, THEN re-review at the new SHA |
+
+**I did NOT run the S239 passes to tidy the board before wrapping.** That gate exists to catch what a
+green suite ships past; running it hurriedly to reduce a branch count is how a security change lands
+unreviewed. Next session runs them properly.
+
+⚠ **`dtr-r7` re-review must bind to a NEW SHA** — a fix round supersedes the ref it was written against,
+and a finding cleared on the old ref is not cleared on the new one unless it was structural.
+
+### 2. The operator queue — 3 ADVISORY left
+
+`dpa-029 Q1` (document egress — its DEFECTS were sequenced first, which is NOT a ruling on the direction)
+· `dpa-022` · `dpa-024`. **Do not rule 022/024 cold** — they ran 2026-08-05/08-10 and dpa-024's Q4 premise
+was already found factually wrong once. Re-frame, then surface.
+
+### 3. Owed by me, not started
+
+- **The D1 SPEC amendment** (ruled S347): retire §41.14.3's *"Adopters SHALL NOT need to set a
+  `progressive=` attribute; PE is structural default"*, make PE opt-in via that attribute, fix the FALSE
+  `§12.5` cross-ref (§12.5 is "Server Function Return Values"), and carry `supersedes:` — OQ-FF-2 was a
+  judged 52/60 verdict.
+- **Review floor: 10 OWED** (9 Peter's #545-#553, 1 mine #544 recorded in this wrap). Code-bearing
+  carve-out rate is healthy at **1/67**.
+- **Maps: NOT refreshed.** Deliberate — my changes are unlanded, so refreshing would stamp maps against
+  a tree that does not exist. Refresh after the three branches land. `primary.map.md` invariant **50 is
+  already stale** (dtr-r7 amends §12.2) and invariant 52 needs the parameter-defaults row.
+
+## ⚑ THE DURABLE LESSON — five dispatches corrected me, four on RELAYED premises
+
+Not an apology; a rule with a measurement behind it.
+
+| corrected | what I got wrong | reproduced by me first? |
+|---|---|---|
+| dtr-r7 fix round | my one-line fix was incomplete (needed a 2nd site) + pure-structural would have narrowed a confidentiality check | ✅ yes |
+| dtr-r7 fix round | my proposed B-2 bound was ALSO false | ✅ yes |
+| D1 agent | `formFor` expands fine — my unexpanded-`<formFor/>` claim | ❌ **no** |
+| D2 agent | "deny-unless-revealed at the wrapper" is right policy, WRONG layer (it refuses SPEC's own 403) | ❌ **no** |
+| comment-token agent | anchor (B) fails LOUD, not silently | ❌ **no** |
+
+**The pattern: my verification holds when I execute, and fails when I relay someone else's execution.**
+`pa-base` §8 already says findings are claims — including a satellite's. The operational form:
+**anything entering a brief, a ledger, or a ruling gets reproduced by me first, or is labelled
+RELAYED-UNVERIFIED in the brief itself.** I did that correctly for dpa-026/027/028/030/031 and skipped it
+for three dispatch briefs.
+
+## ⚑ MISSES (mine, recorded because they will recur)
+
+1. **★ Wrong-repo dispatch.** Fired an `isolation:"worktree"` agent while my shell was in `scrml-support`;
+   it provisioned there, had no `compiler/`, and could author nothing. **The rule is in my own memory
+   file** ([[feedback_agent_isolation_cwd_routing]]) and I had already watched the CWD drift THREE times
+   that session. Fix is mechanical: **assert the root immediately before every dispatch**, not merely
+   after a sibling `cd`. The agent turned the failure into three premise corrections, which is the only
+   reason it cost nothing.
+2. **★ I brought bryan a ruling on a SHALL I had not falsification-tested.** B-3's §12.2 sentence was
+   ratified, and the re-review then falsified its comment clause by execution. The fix round had marked
+   it `rationale:` PRECISELY to invite scrutiny; I upgraded it to `ruling:` without applying the scrutiny
+   that marking was asking for. **A `rationale:` provenance is a request for adversarial reading, not a
+   formality.**
+3. **★ I let an unreproducible observation into a HIGH gap as corroborating evidence** (the `formFor`
+   instance-2). Flagged it as "may be my usage" — correct — and filed it anyway. Withdrawn.
+4. Shared ONE frozen worktree across three concurrent reviewers and authorised one to MUTATE it. The
+   §5 moving-ref hazard in a variant I created: freezing a ref is not enough if you then hand out write
+   authority on it. One reviewer detected it and self-recovered; I moved the others.
+5. Used `-m` with backticks in a commit message; shell ate a word. `-F` is the convention and it is in
+   memory.
+
+## 🔒 SECURITY STATE — read before touching `emit-server.ts`
+
+**The dpa-029 leak is FIXED ON A BRANCH, NOT ON MAIN.** `handle()` + `new globalThis.Response(...)` over
+a `protect=` table still ships the column on `main` today.
+
+And the fix **NARROWS the class rather than closing it** — PA-reproduced against the shipped helper:
+
+```
+JSON.stringify(row)      -> {"id":1,"name":"ada"}                redacted
+JSON.stringify({...row}) -> {...,"passwordHash":"SECRET"}        LEAKS
+```
+
+Object spread drops the non-enumerable `toJSON` hook. **One keystroke from the fixed shape, idiomatic JS,
+no diagnostic** → `g-protect-tag-tojson-hook-dropped-by-object-spread` (HIGH). **dpa-021, RATIFIED S319,
+already solved this exact shape**: *"one raw binding CANNOT serve both forms; one Proxy can."* Evaluate
+the Proxy before any incremental patch.
+
+Also live on `main`: `g-destructured-param-default-ships-server-only-stdlib-to-browser` (HIGH) — a
+pattern-bound parameter default reaching `scrml:auth` emits NO `.server.js` and ships argon2id to the
+browser at exit 0.
+
+## 🧷 STATE
+
+- **main** `89f56280`, coherence 0/0. **scrml-support** 0/0.
+- Cloud `gate` GREEN on #544; `tracking` red is the documented non-required lane.
+- **Browser tier baseline ~48 failures** (measured 729/50 vs 730/48, fixtures primed) and the required
+  gate is `unit+conformance+gauntlet` — **nothing required watches it.** Worth a look; I did not
+  establish whether it is tracked.
+- **The full gate is NOT run-to-run deterministic** — 22,427/1 then 22,435/0 on identical state. An
+  8-test swing in the TOTAL suggests a file failing to load, i.e. the S346 timeout class.
+- ⚠ A compiler-source commit fires a post-commit hook running the whole suite: **~9 minutes of SILENT
+  output against a 600s watchdog.** It killed one dispatch outright and stalled another after it had
+  finished its work. Standing tax on every codegen dispatch.
+- Gaps: see `docs/known-gaps.md` §0 (regenerated). **7 new S347 entries**, 4 HIGH.
+- Adopter issues 3 open / 3 homed / 0 OWED. **#509 answered facts-only** per ruling.
+
+---
+
 # scrml — Session 348 (peter · Windows clone) — WRAP
 
 **Date:** 2026-08-16. `/boot` Profile A. The sliding-doors audit's flagship deliverable **R1 SHIPPED
