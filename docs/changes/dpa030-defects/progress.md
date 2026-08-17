@@ -760,3 +760,68 @@ $ <restore>                                                     # fix BACK
 - **No `Content-Type` check.** A body that is not JSON at all still reaches `JSON.parse`
   and gets the 400. Correct behaviour, but a 415 would be more honest for a
   `Content-Type: text/xml` body. Not widened here.
+
+---
+
+## 7. Final verification
+
+```
+bun run test
+  BEFORE : 29988 pass · 216 skip · 1 todo · 55 fail · 132788 expect · 1362 files
+  AFTER  : 30053 pass · 216 skip · 1 todo · 53 fail · 132963 expect · 1365 files
+```
+
+Compared by NAME, not by count:
+
+```
+NEW failures (in AFTER, not in BEFORE):     (none)
+FIXED (in BEFORE, not in AFTER):
+  (fail) TodoMVC §0: SKIP — dist not compiled > benchmarks/todomvc/dist/app.html must exist
+  (fail) TodoMVC §1: initial render — HTML structure > dist files exist
+```
+
+**Zero new failures.** The two that disappeared are the TodoMVC `dist`-not-compiled pair —
+an environment artifact of having run `bun run pretest`, not an effect of any change here.
+The remaining 53 are the known browser-tier baseline (navigate-wave1c cross-chunk, Bug 60
+compound render, transition directives, §51.0.S engine runtime, region-swap reactivity)
+plus the four ~10 s `commands/dev` watcher tests.
+
+```
+bun test compiler/tests/{unit,integration,conformance}   22420 pass · 0 fail
+bun conformance/run.ts                                   883/883 cases pass
+bun scripts/facts.ts --check                             PASS (regenerated: +1 src file, +3 test files)
+bun run scripts/regen-spec-index.ts --check              OK — 37,152 lines / 65 sections
+```
+
+No `--no-verify` anywhere; every commit ran the full pre-commit gate.
+
+---
+
+## 8. Where the brief's diagnosis needed correcting
+
+1. **D3 was UNDERSTATED.** The brief scoped it to `request.formData()`. Compiling first
+   found that **SPEC §39.3.1's PRIMARY `handle()` worked example** — `const response =
+   resolve(request)` then `response.headers.set(...)` — is dead on arrival with the same
+   root cause, and `examples/20-middleware.scrml` ships that exact shape.
+
+2. **§19.9.8's JS-host clause does NOT enumerate this case.** The brief says D3 "violates
+   §19.9.8's own JS-host boundary clause". The clause's ENUMERATION is `^{}` meta-block /
+   `_{}` foreign block / server-function return type / `use foreign:` import — a host
+   METHOD CALL on a host object is not in it. The clause's PRINCIPLE ("the JS-side
+   mechanism is bounded at the boundary; the scrml-side surface is uniform") plainly
+   covers it, and `E-AWAIT-NOT-IN-SCRML` makes the compiler the only party that CAN fix
+   it. So the obligation holds; the citation is to the principle, not the list.
+
+3. **"Make the wrapper deny-unless-revealed" would have been wrong as literally written.**
+   Blanket-denying every `Response` return in a protect-active app refuses SPEC §39.3.5's
+   own `return new Response("Forbidden", { status: 403 })`. The boundary is the
+   SERIALIZER, not the `Response` — see D2c.
+
+4. **A PRE-EXISTING TEST WAS PINNING THE LEAK.** `g-sql-row-protect-leak.test.js`, the
+   file whose header says "never ships the protected column", asserted
+   `expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1, passwordHash: "x" })` — i.e.
+   that an author's own stringify emits the protected column. Green in the suite the
+   whole time.
+
+5. **My OWN error, caught by a test:** §39.3.2 does NOT leave the `handle()` parameter
+   spellings free. §12.2 Trigger 8 pins them to exactly `request` and `resolve`.
