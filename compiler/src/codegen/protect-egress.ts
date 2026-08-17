@@ -250,6 +250,177 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
   return `_scrml_protect_tag(${inner}, ${colsArg})`;
 }
 
+// ---------------------------------------------------------------------------
+// §14.8.9 fail-closed gate (E-PROTECT-004) — the STRUCTURAL detector.
+//
+// WHAT THIS REPLACED, AND WHY IT HAD TO GO. Until dpa-030 this gate was a
+// per-body SOURCE-TEXT co-occurrence regex over the fn's source slice:
+//
+//     /\bnew\s+Response\b/    /\bResponse\s*\.\s*json\b/    /\basIs\b/
+//     /(^|[^A-Za-z0-9_$])_\{/     and     /\.\s*reveal\s*\(/  -> suppress ALL
+//
+// It was documented as a fail-closed gate. It was a LINT, and the mislabelling
+// was the worse defect, because everything downstream — the SPEC row, the
+// conformance case, the §14.8.9 closed-world argument — was written as if a
+// sound gate existed. Measured evasions, all of which compiled CLEAN and shipped
+// the protected column at HTTP 200:
+//
+//   · `new globalThis.Response(...)` — `\bnew\s+Response\b` does not match;
+//   · `const R = globalThis.Response` … `new R(...)` — nothing matches;
+//   · ANY `.reveal(` anywhere in the body — including `u.reveal("name")` on a
+//     column that is not protected — suppressed the gate for EVERY protected
+//     column in that body.
+//
+// Rule 7: don't ask the text what the tree already knows. The `function-decl`
+// node this gate is handed carries `sqlNode.kind === "sql"` with the query text,
+// `initExpr` for an alias binding, `exprNode` with a real `{kind:"new", callee:
+// {kind:"member", object:{kind:"ident",name:"globalThis"}, property:"Response"}}`
+// callee, `typeAnnotation: "asIs"`, and `kind: "foreign"` for `_{}`. Every
+// evasion above is visible in the tree; none of them is visible to a regex over
+// the same bytes.
+//
+// The walk is STRUCTURAL per invariant 52: every array- and object-valued
+// property is descended, exclusions are a two-clause deny-list (`span`, plus the
+// `_`-prefixed side-table convention), termination is an identity `seen` set plus
+// a 512 depth cap. Enumerating field names is the fail-OPEN shape and "add the
+// missing field" is the defect class, not the fix.
+//
+// SOUNDNESS BOUND, STATED HONESTLY. This gate is WITHIN-FUNCTION. A row fetched
+// in fn A, returned to fn B, and serialized into a `Response` there is NOT caught
+// here — neither body co-occurs with the other's half. That case is closed at
+// RUNTIME instead, by the `toJSON` the tagged row carries (see
+// SERVER_PROTECT_HELPER), because the descriptor travels with the VALUE and a
+// call-graph closure only tracks NAMES. The two are complementary: this one is
+// loud and early, that one is total and late.
+// ---------------------------------------------------------------------------
+
+/** Global namespace objects whose `.<name>` IS the global of that name. */
+const GLOBAL_NAMESPACE_OBJECTS: ReadonlySet<string> = new Set(["globalThis", "window", "self"]);
+
+/** The raw-egress constructor names §14.8.9 cannot redact past. */
+const RAW_EGRESS_CTORS: ReadonlySet<string> = new Set(["Response"]);
+
+type AnyNode = Record<string, unknown>;
+
+const isNode = (v: unknown): v is AnyNode =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Structural walk shared by the collectors below. Descends EVERY array- and
+ * object-valued property; the only exclusions are `span` (pure position data)
+ * and the codebase's `_`-prefixed side-table convention.
+ */
+function walkStructurally(root: unknown, visit: (node: AnyNode) => void): void {
+  const seen = new Set<unknown>();
+  const go = (node: unknown, depth: number): void => {
+    if (node === null || typeof node !== "object" || depth > 512) return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const el of node) go(el, depth + 1);
+      return;
+    }
+    visit(node as AnyNode);
+    for (const key of Object.keys(node as AnyNode)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      go((node as AnyNode)[key], depth + 1);
+    }
+  };
+  go(root, 0);
+}
+
+/**
+ * Resolve an expression node to the GLOBAL name it constructs / reads, following
+ * `globalThis.X` / `window.X` / `self.X` and any local alias binding. Returns
+ * null when the node does not name a global.
+ */
+function resolveGlobalName(node: unknown, aliases: Map<string, string>): string | null {
+  if (!isNode(node)) return null;
+  if (node.kind === "ident" && typeof node.name === "string") {
+    return aliases.get(node.name) ?? node.name;
+  }
+  if (
+    node.kind === "member"
+    && typeof node.property === "string"
+    && isNode(node.object)
+    && node.object.kind === "ident"
+    && typeof node.object.name === "string"
+    && GLOBAL_NAMESPACE_OBJECTS.has(node.object.name)
+  ) {
+    return node.property;
+  }
+  return null;
+}
+
+/**
+ * Local `const R = globalThis.Response` style aliases, collected in a first pass
+ * so a `new R(...)` earlier in walk order than its binding still resolves. The
+ * alias is transitive by construction: a second `const S = R` resolves through
+ * the map because `resolveGlobalName` consults it for a bare ident.
+ */
+function collectGlobalAliases(fnNode: unknown): Map<string, string> {
+  const aliases = new Map<string, string>();
+  // Two sweeps so `const S = R` picks up `const R = globalThis.Response`
+  // regardless of which the walk reaches first.
+  for (let pass = 0; pass < 2; pass++) {
+    walkStructurally(fnNode, (n) => {
+      if ((n.kind !== "const-decl" && n.kind !== "let-decl") || typeof n.name !== "string") return;
+      const target = resolveGlobalName(n.initExpr, aliases);
+      if (target && target !== n.name) aliases.set(n.name, target);
+    });
+  }
+  return aliases;
+}
+
+/**
+ * Column names declassified by a `reveal("col")` in this body.
+ *
+ * Two spellings, both structural: a `.reveal("col")` member call on the value
+ * (`{kind:"call", callee:{kind:"member", property:"reveal"}, args:[lit]}`), and
+ * a `?{}.reveal("col")` query chain (`chainedCalls: [{method:"reveal", args}]`).
+ * The chain form's `args` is a raw argument-list STRING the parser produced — a
+ * leaf, not a body scan — so lexing a string literal out of it is reading the
+ * parser's own output, not re-parsing the source.
+ *
+ * A DYNAMIC `u.reveal(colName)` contributes NOTHING to this set: it cannot be
+ * proven to cover any particular column, and §14.8.9 is a fail-closed floor, so
+ * an unprovable declassification declassifies nothing. That is a loud, reversible
+ * refusal; the alternative (treat it as covering everything) is the off-switch
+ * this change exists to remove. Measured: zero dynamic reveals in the corpus.
+ */
+function collectRevealedColumns(fnNode: unknown): Set<string> {
+  const cols = new Set<string>();
+  const literalArg = (arg: unknown): string | null => {
+    if (!isNode(arg)) return null;
+    if (arg.kind === "lit" && arg.litType === "string" && typeof arg.value === "string") {
+      return arg.value;
+    }
+    return null;
+  };
+  walkStructurally(fnNode, (n) => {
+    if (
+      n.kind === "call"
+      && isNode(n.callee)
+      && n.callee.kind === "member"
+      && n.callee.property === "reveal"
+    ) {
+      for (const a of (Array.isArray(n.args) ? n.args : [])) {
+        const lit = literalArg(a);
+        if (lit !== null) cols.add(lit);
+      }
+      return;
+    }
+    if (Array.isArray(n.chainedCalls)) {
+      for (const call of n.chainedCalls) {
+        if (!isNode(call) || call.method !== "reveal") continue;
+        const raw = typeof call.args === "string" ? call.args : "";
+        for (const m of raw.matchAll(/["']([^"']*)["']/g)) cols.add(m[1]);
+      }
+    }
+  });
+  return cols;
+}
+
 /**
  * §14.8.9 fail-closed gate (E-PROTECT-004) — detect a protected-origin value
  * reaching a RAW / compiler-UNANALYZABLE egress within a single server-function
@@ -260,44 +431,75 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
  *     body), so a row manually serialized there would LEAK;
  *   - an `asIs`-typed value (§14.1.1) — escapes the type system.
  *
- * Returns the offending query + egress kind (→ E-PROTECT-004), or null. The
- * closed-world precondition of §14.8.9 rests on every egress being compiler-
- * emitted and descriptor-preserving; this gate enforces it fail-closed. It scans
- * the fn's SOURCE slice (a manual `Response` / `_{}` / `asIs` is AUTHORED, never
- * compiler-emitted, so a source scan distinguishes it from the codegen's own
- * `new Response(...)` serializer). Conservative: co-occurrence of a protected
- * query and a raw egress in the same body fires (the floor never silently ships
- * a protected column through a path it cannot redact). A `reveal(...)` anywhere
- * in the body SUPPRESSES the gate — the author explicitly declassified (§14.8.9
- * "declassify explicitly with `reveal` or project the column out").
+ * Takes the `function-decl` AST NODE (not its source slice). Returns the
+ * offending query + egress kind (→ E-PROTECT-004), or null.
+ *
+ * DECLASSIFICATION IS PER-COLUMN, not per-body. `reveal("col")` names ONE column;
+ * §14.8.9's own conformance rationale says it "stamps the column's provenance
+ * descriptor as declassified". So a body that reveals `name` and leaks
+ * `passwordHash` now FIRES — under the old rule any `.reveal(` at all suppressed
+ * the gate wholesale, which made the sole declassification primitive double as an
+ * unconditional off-switch. A query whose origins are UNRESOLVABLE (`{all:true}`,
+ * the CTE/UNION/dynamic strip-all path) can never be covered by a named reveal —
+ * there is no name to check against — so it always fires at a raw egress.
  */
 export function detectProtectedRawEgress(
-  fnSource: string,
+  fnNode: unknown,
   ctx: ProtectContext,
 ): { query: string; egressKind: string } | null {
-  if (!fnSource) return null;
-  // Is a protected-origin `?{}` SELECT present in this body?
+  if (!fnNode || typeof fnNode !== "object") return null;
+
+  const aliases = collectGlobalAliases(fnNode);
+  const revealed = collectRevealedColumns(fnNode);
+
+  // --- pass 1: the protected-origin query whose columns are NOT all declassified.
   let protectedQuery: string | null = null;
-  const sqlRe = /\?\{`([^`]*)`\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = sqlRe.exec(fnSource)) !== null) {
-    if (resolveProtectedOutputColumns(m[1], ctx) !== null) {
-      protectedQuery = m[1].trim().replace(/\s+/g, " ").slice(0, 60);
-      break;
-    }
-  }
-  if (!protectedQuery) return null;
-  // Explicit declassification anywhere in the body suppresses the gate.
-  if (/\.\s*reveal\s*\(/.test(fnSource)) return null;
-  // Is there a raw / unredactable egress in the same body?
+  walkStructurally(fnNode, (n) => {
+    if (protectedQuery !== null) return;
+    if (n.kind !== "sql" || typeof n.query !== "string") return;
+    const resolved = resolveProtectedOutputColumns(n.query, ctx);
+    if (resolved === null) return;
+    // Unresolvable origins (`{all:true}` — the CTE/UNION/dynamic strip-all path)
+    // cannot be declassified by name: there is no column name to check a
+    // `reveal("col")` against, so no reveal covers them.
+    const uncovered = "all" in resolved || resolved.cols.some((c) => !revealed.has(c));
+    if (!uncovered) return;
+    protectedQuery = n.query.trim().replace(/\s+/g, " ").slice(0, 60);
+  });
+  if (protectedQuery === null) return null;
+
+  // --- pass 2: a raw / unredactable egress in the same body.
   let egressKind: string | null = null;
-  if (/(^|[^A-Za-z0-9_$])_\{/.test(fnSource)) {
-    egressKind = "a `_{}` foreign-code block (§23)";
-  } else if (/\bnew\s+Response\b/.test(fnSource) || /\bResponse\s*\.\s*json\b/.test(fnSource)) {
-    egressKind = "a manual `Response` / `handle()` body (§40)";
-  } else if (/\basIs\b/.test(fnSource)) {
-    egressKind = "an `asIs`-typed value (§14.1.1)";
-  }
-  if (!egressKind) return null;
+  const setKind = (k: string): void => { if (egressKind === null) egressKind = k; };
+  walkStructurally(fnNode, (n) => {
+    if (egressKind !== null) return;
+    // `_{}` foreign-code block (§23) — opaque interior, nothing to redact through.
+    if (n.kind === "foreign") {
+      setKind("a `_{}` foreign-code block (§23)");
+      return;
+    }
+    // `new <Response>(...)` — bare, `globalThis.`-qualified, or alias-bound.
+    if (n.kind === "new") {
+      const ctor = resolveGlobalName(n.callee, aliases);
+      if (ctor && RAW_EGRESS_CTORS.has(ctor)) {
+        setKind("a manual `Response` / `handle()` body (§40)");
+      }
+      return;
+    }
+    // `<Response>.json(...)` — the static-factory spelling of the same egress.
+    if (n.kind === "call" && isNode(n.callee) && n.callee.kind === "member"
+        && n.callee.property === "json") {
+      const recv = resolveGlobalName(n.callee.object, aliases);
+      if (recv && RAW_EGRESS_CTORS.has(recv)) {
+        setKind("a manual `Response` / `handle()` body (§40)");
+      }
+      return;
+    }
+    // An `asIs`-typed binding (§14.1.1) escapes the type system entirely.
+    if (typeof n.typeAnnotation === "string" && /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(n.typeAnnotation)) {
+      setKind("an `asIs`-typed value (§14.1.1)");
+    }
+  });
+  if (egressKind === null) return null;
   return { query: protectedQuery, egressKind };
 }

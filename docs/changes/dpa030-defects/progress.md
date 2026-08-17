@@ -233,3 +233,99 @@ bun test compiler/tests/unit compiler/tests/integration compiler/tests/conforman
 ```
 The single fail is the S325 prophecy test above; after the rewrite that file is
 `17 pass 0 fail`.
+
+---
+
+## 3. D2b — the fail-closed gate goes structural (E-PROTECT-004)
+
+**Files:** `compiler/src/codegen/protect-egress.ts`,
+`compiler/src/codegen/emit-server.ts`,
+`compiler/tests/integration/g-sql-row-protect-leak.test.js`.
+
+`detectProtectedRawEgress` no longer takes the fn's SOURCE SLICE. It takes the
+`function-decl` NODE and walks it structurally (invariant 52: every array/object-valued
+property descended, deny-list `span` + `_`-prefixed, identity `seen`, 512 depth cap).
+
+What the regex could not see and the tree always could:
+
+| spelling | old regex | new |
+|---|---|---|
+| `new Response(...)` | fires | fires |
+| `new globalThis.Response(...)` | **silent** | fires |
+| `const R = globalThis.Response` … `new R(...)` | **silent** | fires |
+| `const R = globalThis.Response; const S = R; new S(...)` | **silent** | fires |
+| `new window.Response(...)` / `new self.Response(...)` | **silent** | fires |
+| `globalThis.Response.json(u)` | fires (by accident — the substring matched) | fires |
+| `u.reveal("name")` while `passwordHash` leaks | **suppressed wholesale** | fires |
+| `u.reveal(colName)` — dynamic | **suppressed wholesale** | fires (fail-closed) |
+| `const Response = makeBox; new Response(u)` (a LOCAL shadow) | fires (**false positive**) | silent |
+
+Declassification is now PER-COLUMN. §14.8.9's own conformance rationale says `reveal`
+"stamps **the column's** provenance descriptor as declassified" — the old rule made the
+sole declassification primitive double as an unconditional per-body off-switch. An
+unresolvable-origin query (`{all:true}`, the CTE/UNION/dynamic strip-all path) can never
+be covered by a named reveal, so it always fires at a raw egress.
+
+### Direction of change
+
+**newly-REJECTING** (six new fire shapes) and **newly-ACCEPTING** in exactly one place: a
+LOCAL binding that shadows `Response` is no longer mistaken for the global.
+
+### Measured migration
+
+Compiled all **75** tracked `*.scrml` files containing `protect=` (the complete
+protect-active corpus: `samples/`, `examples/23-trucking-dispatch/**`, `docs/website/`,
+`stdlib/`, `conformance/cases/**`, `compiler/self-host/`) under BOTH detectors, via
+`compileScrml`, and compared E-PROTECT-004 hits:
+
+```
+BASE (regex)      FILES=75  E-PROTECT-004 HITS=1  CRASHED=0
+HEAD (structural) FILES=75  E-PROTECT-004 HITS=1  CRASHED=0
+    both: conformance/cases/protect/raw-egress-e004/case.scrml
+```
+
+**Delta zero.** No file newly fails, none newly passes. Per the S346 reverse-ouroboros
+rule that is BLAST RADIUS, not demand evidence — it says the corpus never exercised any
+evasion, not that no adopter would.
+
+Full tiers after D2b: `22386 pass · 0 fail` (unit+integration+conformance).
+`bun conformance/run.ts` → `883/883`.
+
+### Bite proof
+
+```
+$ bun test compiler/tests/integration/g-sql-row-protect-leak.test.js    # WITH the fix
+ 50 pass  0 fail
+
+$ git checkout compiler/src/codegen/{protect-egress,emit-server}.ts     # fix REMOVED
+$ bun test compiler/tests/integration/g-sql-row-protect-leak.test.js
+ 43 pass  7 fail
+   (fail) THE LEAK: `new globalThis.Response(...)` (the one-keystroke bypass)
+   (fail) an ALIASED constructor — `const R = globalThis.Response` … `new R(...)`
+   (fail) a TRANSITIVE alias — `const R = globalThis.Response` then `const S = R`
+   (fail) `window.Response` / `self.Response` are the same global by another name
+   (fail) revealing the WRONG column no longer suppresses the gate
+   (fail) a DYNAMIC `reveal(<expr>)` declassifies nothing — fail-closed
+   (fail) a LOCAL binding that shadows `Response` is not the raw egress
+
+$ <restore>                                                             # fix BACK
+ 50 pass  0 fail
+```
+
+### End-to-end repro, before and after
+
+```
+$ bun compiler/bin/scrml.js compile qualified2.scrml -o out
+BEFORE:  Compiled 1 file in 112ms                          <- HTTP 200 ships passwordHash
+AFTER:   error [E-PROTECT-004]: server function `getUser` selects a protected
+         (`protect=`) column in `SELECT * FROM users WHERE id = ${id}` and reaches
+         a manual `Response` / `handle()` body (§40) …
+         FAILED — 1 error, 5 warnings
+```
+
+### What stays OPEN after D2b
+
+**This gate is WITHIN-FUNCTION.** A row fetched in fn A, returned to fn B, and serialized
+into a `Response` there is not caught: neither body co-occurs with the other's half. A
+call-graph transitive closure would track NAMES; the leak is a VALUE flow. That case is
+closed by D2c instead, at the serializer, where the descriptor actually travels.

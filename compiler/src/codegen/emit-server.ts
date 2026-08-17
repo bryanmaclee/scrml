@@ -1804,20 +1804,30 @@ export function generateServerJs(
     return e;
   };
 
-  // §14.8.9 fail-closed gate — E-PROTECT-004. Scan each server-fn SOURCE for a
+  // §14.8.9 fail-closed gate — E-PROTECT-004. Walk each server-fn AST NODE for a
   // protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress (`_{}`
   // / manual `Response` / `asIs`) where origin-keyed structural redaction cannot
   // be guaranteed. The compiler never silently ships a protected column through
-  // a path it cannot redact. (Gated on protect-active; a `reveal` declassifies.)
+  // a path it cannot redact. Declassification is PER-COLUMN (`reveal("col")`),
+  // not per-body.
+  //
+  // dpa-030 D2b: this used to slice `fileAST._sourceText` by the fn span and run
+  // co-occurrence REGEXES over the bytes. `new globalThis.Response(...)`, an
+  // aliased `const R = globalThis.Response`, and any `.reveal(` anywhere in the
+  // body all defeated it — measured, at HTTP 200, on a `protect=` column. The
+  // detector is now structural (see `codegen/protect-egress.ts`); the source text
+  // is no longer read here at all.
   if (_protectActive) {
-    const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
-    if (_src) {
+    {
       const _seenEProtect = new Set<string>();
       for (const fn of fnNodes) {
         const _sp = (fn as { span?: { start?: number; end?: number } }).span;
+        // The gate now reads the fn NODE, not a slice of `_sourceText`, so it no
+        // longer needs a resolvable span to DO its work — but the diagnostic
+        // still needs one to point at. A span-less node keeps its previous
+        // (skipped) treatment rather than silently reporting at position 0.
         if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
-        const _fnSrc = _src.slice(_sp.start, _sp.end);
-        const _leak = detectProtectedRawEgress(_fnSrc, _protectCtx);
+        const _leak = detectProtectedRawEgress(fn, _protectCtx);
         if (_leak) {
           const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
           const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;

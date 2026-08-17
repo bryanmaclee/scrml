@@ -376,6 +376,108 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
 });
 
 // ---------------------------------------------------------------------------
+// dpa-030 D2b — THE EVASIONS. Every one of these compiled CLEAN before the gate
+// went structural, and every one ships the protected column at HTTP 200.
+//
+// The old gate was a per-body SOURCE-TEXT co-occurrence regex
+// (`/\bnew\s+Response\b/`, `/\bResponse\s*\.\s*json\b/`, `/\basIs\b/`,
+// `/(^|[^A-Za-z0-9_$])_\{/`, and `/\.\s*reveal\s*\(/` as a wholesale
+// suppressor). It was labelled fail-closed and behaved like a lint. Each test
+// below is a spelling of the SAME program that the regex could not see and the
+// AST always could.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 E-PROTECT-004 is STRUCTURAL — the source-text evasions are closed", () => {
+  const fires = (body) => {
+    const { result } = compileSource(protectProgram(body));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    return all.some((d) => d.code === "E-PROTECT-004");
+  };
+  const SELECT = `?{\`SELECT * FROM users WHERE id = \${id}\`}.get()`;
+
+  test("THE LEAK: `new globalThis.Response(...)` (the one-keystroke bypass)", () => {
+    expect(fires(
+      `      function getUser(id) {\n        let u = ${SELECT}\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("an ALIASED constructor — `const R = globalThis.Response` … `new R(...)`", () => {
+    expect(fires(
+      `      function getUser(id) {\n        const R = globalThis.Response\n        let u = ${SELECT}\n        return new R(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("a TRANSITIVE alias — `const R = globalThis.Response` then `const S = R`", () => {
+    expect(fires(
+      `      function getUser(id) {\n        const R = globalThis.Response\n        const S = R\n        let u = ${SELECT}\n        return new S(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("`window.Response` / `self.Response` are the same global by another name", () => {
+    expect(fires(
+      `      function getUser(id) {\n        let u = ${SELECT}\n        return new window.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+    expect(fires(
+      `      function getUser(id) {\n        let u = ${SELECT}\n        return new self.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("`globalThis.Response.json(u)` — the static-factory spelling", () => {
+    expect(fires(
+      `      function getUser(id) {\n        let u = ${SELECT}\n        return globalThis.Response.json(u)\n      }`,
+    )).toBe(true);
+  });
+
+  // DECLASSIFICATION IS PER-COLUMN. The old rule made `reveal` an unconditional
+  // off-switch: revealing ANY column suppressed the gate for EVERY protected
+  // column in the body.
+  test("revealing the WRONG column no longer suppresses the gate", () => {
+    expect(fires(
+      `      function getUser(id) {\n        let u = ${SELECT}\n        return new Response(JSON.stringify(u.reveal("name")))\n      }`,
+    )).toBe(true);
+  });
+
+  test("revealing the ACTUAL protected column still suppresses it (§14.8.9 admit path)", () => {
+    expect(fires(
+      `      function getUser(id) {\n        let u = ${SELECT}\n        return new Response(JSON.stringify(u.reveal("passwordHash")))\n      }`,
+    )).toBe(false);
+  });
+
+  test("a DYNAMIC `reveal(<expr>)` declassifies nothing — fail-closed", () => {
+    expect(fires(
+      `      function getUser(id, col) {\n        let u = ${SELECT}\n        return new Response(JSON.stringify(u.reveal(col)))\n      }`,
+    )).toBe(true);
+  });
+
+  // NEGATIVE CONTROLS — the gate must stay silent where it always was, or the
+  // "structural" rewrite is just a wider net.
+  test("a protected query with NO raw egress stays clean (the floor strips it)", () => {
+    expect(fires(
+      `      function getUser(id) {\n        return ${SELECT}\n      }`,
+    )).toBe(false);
+  });
+
+  test("a raw `Response` with NO protected query stays clean", () => {
+    expect(fires(
+      `      function ping() {\n        return new globalThis.Response("pong")\n      }`,
+    )).toBe(false);
+  });
+
+  test("a SELECT that projects the protected column OUT stays clean", () => {
+    expect(fires(
+      `      function getUser(id) {\n        let u = ?{\`SELECT id, name FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u))\n      }`,
+    )).toBe(false);
+  });
+
+  // A local named `Response` SHADOWS the global — it is not the egress ctor.
+  // The regex could never make this distinction; the alias map can.
+  test("a LOCAL binding that shadows `Response` is not the raw egress", () => {
+    expect(fires(
+      `      function getUser(id) {\n        const Response = makeBox\n        let u = ${SELECT}\n        return new Response(u)\n      }\n      function makeBox(v) { return v }`,
+    )).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // LAYER 3b — channel `broadcast()` (§38) + SSE `server function*` (§37) egress
 // sinks. These are ADDITIONAL compiler-emitted client-egress serializers; the
 // floor redacts at them identically to the server-fn return.
