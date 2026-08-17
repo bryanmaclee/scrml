@@ -1351,10 +1351,43 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
     return id;
   }
 
+  // ---------------------------------------------------------------------------
+  // COMMENT tokens are FAITHFUL: `tok.text === source.slice(span.start, span.end)`
+  // ---------------------------------------------------------------------------
+  //
+  // Both readers OWN their opening delimiter — they are entered with `pos` still
+  // sitting on the `/`, consume the two-character opener themselves, and put it
+  // in `.text`. Do NOT re-add an `advance(2)` at the call sites.
+  //
+  // Before this change the callers ate `//` / `/*` first, so `start` was captured
+  // TWO CHARACTERS LATE and `.text` held the comment CONTENT plus, for a block
+  // comment, the CLOSING `*/` it appended itself. That token was asymmetric in
+  // both directions at once: no opener in the text, and a span that began inside
+  // the comment. Two consequences, both measured:
+  //
+  //   1. Any consumer that reassembled source from `.text` produced text that is
+  //      not a comment and not valid JS — `/* the message */ msg` came back as
+  //      `the message */ msg`, which `parseParamList` then recorded as a
+  //      PARAMETER NAME (E-SCOPE-001 on the real name), and `lin /*c*/ msg`
+  //      came back as `linc*/ msg`, which silently defeated the `^lin\s+`
+  //      linearity check.
+  //   2. Every COMMENT token's reported line/col was two columns to the right of
+  //      the comment it described.
+  //
+  // The invariant is now TOTAL over every COMMENT token this file emits — see
+  // `compiler/tests/unit/comment-token-faithfulness.test.js`, which asserts it
+  // across all three production sites (these two readers plus
+  // `tokenizePassthrough`, which was already faithful).
+  //
+  // The trailing `\n` stays INSIDE a line comment's span and text. It was always
+  // in the span; shrinking `end` to exclude it would break the invariant in the
+  // other direction and change what newline-sensitive consumers see.
+
   function readLineComment() {
     const start = absOff();
     const l = line, c = col;
-    let text = "";
+    let text = "//";
+    advance(2); // consume the opening `//`
     while (pos < content.length && content[pos] !== "\n") {
       text += content[pos];
       advance();
@@ -1366,7 +1399,8 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
   function readBlockComment() {
     const start = absOff();
     const l = line, c = col;
-    let text = "";
+    let text = "/*";
+    advance(2); // consume the opening `/*`
     while (pos < content.length) {
       if (content[pos] === "*" && ch(1) === "/") {
         text += "*/";
@@ -1376,6 +1410,8 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
       text += content[pos];
       advance();
     }
+    // An UNTERMINATED block comment falls out of the loop at EOF with no `*/`
+    // appended — the invariant still holds, because the span ends at EOF too.
     tokens.push(makeToken("COMMENT", text, start, absOff(), l, c));
   }
 
@@ -1836,16 +1872,15 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
       continue;
     }
 
-    // Line comment
+    // Line comment — readLineComment consumes the `//` itself so the token's
+    // span starts AT the `/` and its text is the whole comment. Do not advance.
     if (c0 === "/" && ch(1) === "/") {
-      advance(2);
       readLineComment();
       continue;
     }
 
-    // Block comment
+    // Block comment — readBlockComment consumes the `/*` itself, same reason.
     if (c0 === "/" && ch(1) === "*") {
-      advance(2);
       readBlockComment();
       continue;
     }

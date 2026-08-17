@@ -5202,18 +5202,28 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         depth--;
         if (depth === 0) { lastTok = consume(); break; }
       }
-      // S184 (lifecycle-field-comment-leak): a COMMENT token's `.text` is the
-      // comment CONTENT with the leading `//` or `/*` glyph already stripped by
-      // the tokenizer (readLineComment / readBlockComment). Pushing that text
-      // into the braced-body `raw` leaks the bare comment words into the
-      // struct-field type-expr string — e.g. a field annotated
+      // S184 (lifecycle-field-comment-leak): a COMMENT token's text must never
+      // reach the braced-body `raw`, because `raw` is consumed as CODE. A field
+      // annotated
       //   passwordHash: (not to string)   // ...transitions to string...
-      // reaches the type system as `(not to string) ...transitions to string...`,
+      // reached the type system as `(not to string) ...transitions to string...`,
       // defeating the `endsWith(")")` lifecycle-wrap gate in
       // isFunctionTypeAnnotation and mis-firing E-STRUCT-FUNCTION-FIELD on a
       // valid lifecycle field. Consume the comment token (advance past it) but
       // do NOT contribute its text to the body, exactly as the tokenizer's own
       // token-walk helpers skip COMMENT tokens (tokenizer.ts ~995).
+      //
+      // UPDATED (comment-token-faithfulness): this comment used to justify the
+      // skip by saying the tokenizer had "already stripped" the leading `//` /
+      // `/*` glyph. THAT IS NO LONGER TRUE, and it was never the reason the skip
+      // is correct. A COMMENT token's `.text` is now the FAITHFUL source text,
+      // delimiters included (`tok.text === source.slice(span.start, span.end)`,
+      // asserted in comment-token-faithfulness.test.js). SKIPPING IS STILL THE
+      // ONLY CORRECT ANSWER, and it is now correct for the honest reason: `raw`
+      // is JavaScript-to-be, and a comment is not a value. Re-emitting a
+      // faithful `/* ... */` here would merely swap one wrong body for another,
+      // because the downstream consumers do string surgery on `raw` rather than
+      // parsing it. The same argument closes parseParamList's `cur`/`defBuf`.
       lastTok = consume();
       if (lastTok.kind === "COMMENT") continue;
       // g-literal-arg-expr-serializer-wrong-span (string half): re-quote STRING
