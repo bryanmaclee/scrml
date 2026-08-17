@@ -572,11 +572,25 @@ ${
 
         // --- Nested scanner helpers ---
 
+        // A COMMENT token is FAITHFUL source text: its `text` equals
+        // `source.slice(span.start, span.end)`. Both readers OWN their opening
+        // delimiter — they are entered with `pos` still on the `/`, consume the
+        // two-character opener themselves, and put it in `text`. Do NOT re-add
+        // an `advance(2)` at the call sites below.
+        //
+        // Mirrors compiler/src/tokenizer.ts, where the full rationale lives. In
+        // short: the callers used to eat `//` / `/*` first, so `start` was
+        // captured two characters INSIDE the comment while `text` held the
+        // content plus, for a block comment, the CLOSING `*/` and no opener.
+        // Anything reassembling source from `text` got back something that is
+        // neither a comment nor valid JS.
+
         function readLineComment() {
             let start = absOff()
             let l = line
             let c = col
-            let text = ""
+            let text = "//"
+            advance(2)
             while (pos < content.length && content[pos] != "\n") {
                 text = text + content[pos]
                 advance()
@@ -589,7 +603,8 @@ ${
             let start = absOff()
             let l = line
             let c = col
-            let text = ""
+            let text = "/*"
+            advance(2)
             while (pos < content.length) {
                 if (content[pos] == "*" && ch(1) == "/") {
                     text = text + "*/"
@@ -756,16 +771,15 @@ ${
             // Whitespace
             if (isWhitespace(c0)) { advance(); continue }
 
-            // Line comment
+            // Line comment — readLineComment consumes the `//` itself so the
+            // token's span starts AT the `/`. Do not advance here.
             if (c0 == "/" && ch(1) == "/") {
-                advance(2)
                 readLineComment()
                 continue
             }
 
-            // Block comment
+            // Block comment — readBlockComment consumes the `/*` itself.
             if (c0 == "/" && ch(1) == "*") {
-                advance(2)
                 readBlockComment()
                 continue
             }
