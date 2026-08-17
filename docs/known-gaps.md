@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 40 |
-| MED | 152 |
+| HIGH | 45 |
+| MED | 154 |
 | LOW | 68 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -8421,6 +8421,20 @@ Sibling of the auto-await family (§13.2's position-invariant mandate delivered 
 Same class as dpa-025 (a hand-maintained field list blind to positions outside it) — the fourth instance. **Also from that drain: SPEC §6.8.4's normative claim that the runtime-capture case is "deliberately NOT expressible by either form" is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler compiles clean and IS a runtime snapshot (reset → 5 after bumps to 8), and `E-TARE-DEFERRED-POSITION`'s own message steers users to that shape. dPA reco: correct §6.8.4 **before #501 merges**. Both are PR #501's blockers now.
 
 ### g-offline-write-queue-flush-clears-queue-before-fire-and-forget-completes — the adopter-shaped offline write-queue compiles green in native scrml, but `flush()` clears `@queue` SYNCHRONOUSLY while the server calls it triggers are fire-and-forget IIFEs — a failed replay loses the record — `NEW S346-bryan (dpa-028 drain, emitter defect found while compiling the adopter's shape); HIGH; open`
+
+**⚑ NEEDS-REPRODUCTION (PA, S347) — do NOT dispatch a fix on this premise yet.** Two PA attempts to reproduce the fire-and-forget ordering FAILED. Both fixtures failed to compile (PA error in the `<db>`/`<schema>` shape — `E-SQL-004`, then `E-PA-005`/`E-SCHEMA-001`/`E-SCHEMA-003`), and the one emission obtained showed:
+
+```js
+async function _scrml_flush_5() {
+  for (const it of _scrml_cs_reactive_get("queue")) {
+  await _scrml_fetch_send_4(it);
+}
+```
+
+— an `await`, i.e. the OPPOSITE of the reported behaviour. **This neither confirms nor falsifies the entry**: the dPA compiled the adopter's REAL shape and the PA did not, so the difference may be the shape rather than the compiler. But the entry currently rests on a claim no one has reproduced twice, and it was **excluded from the #509 return-leg comment** on the S346 rule that an ack naming a working path owes a compile.
+
+**What closing this needs first:** the adopter's actual `flush()` shape (or the dPA's fixture), compiled, with the emission pasted. If it shows the `await` above, the entry is a false positive and should be retracted rather than fixed.
+
 <!-- @gap id=g-offline-write-queue-flush-clears-queue-before-fire-and-forget-completes sev=HIGH status=open locus=searched:compiler/src/codegen/scheduling.ts,emit-functions.ts(the fire-and-forget IIFE emission for a server call in a loop body; dpa-020/023 auto-await family) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md -->
 
 dpa-020/023 class (the async boundary). Adopter #509's design depends on exactly this shape (append-only queue + idempotent replay), so it is adopter-blocking for the offline arc regardless of how the direction fork is ruled. **Also established there: fork (a) "host-boundary by design" is NOT AVAILABLE as written — there is no static/public asset dir, both servers serve `dist/`, nothing copies user files in, and no `Service-Worker-Allowed` header — so a static-asset floor is a prerequisite under EVERY fork** (5/5 panel).
@@ -8429,3 +8443,163 @@ dpa-020/023 class (the async boundary). Adopter #509's design depends on exactly
 <!-- @gap id=g-some-none-optional-match-prose-is-a-reconstruction-artifact sev=MED status=open locus=compiler/SPEC.md(§18.8.2 optional-match prose + worked example; the §53.15 citation at :33812 that consumed it) prov=dd:scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md -->
 
 Confirms the S346 PA lean (a) — strike — with two corrections to it: striking leaves **two** live vocabularies (`is some` AND `given`), not one, and the worst dangling citation is **`E-MATCH-012`'s own message**, which prescribes the deprecated `=>` arrow. **★ The durable method finding: a reconstruction is a laundering vector** — draft → changelog → reconstruction → citation → fixture, five hops, no hop reads the compiler. Same shape as pa-base §1's laundering trace, in the SPEC's own history.
+
+### G-EMITTED-JS-NEVER-MINIFIED-PRIZE-UNMEASURED — the compiler ships unminified JS and nobody has measured what a mangle-only pass would buy — `NEW S347; MED; open (an unmeasured optimization, not a defect)`
+
+**Measured S347, PA-direct.** The shipped artifacts are not minified in any form: a real client chunk is 677 lines, avg 56 chars/line, with **45 comments surviving into the artifact**. There is no mangle, no whitespace strip, no dead-code pass in the emit path.
+
+**What is actually known (and what is NOT):**
+
+| measurement | result | trustworthy? |
+|---|---|---|
+| `_scrml_*` identifier text as a share of RAW bytes (runtime + client) | 26,849 chars / 214,171 B ≈ **12.5%** | yes |
+| renaming all 233 distinct `_scrml_*` identifiers to minimal names — RAW | −23,202 B (**10.8%**) | yes |
+| the same rename — **GZIP** | −1,568 B (**2.7%**) | yes — gzip absorbs ~93% of the raw win via LZ77 back-references |
+| the same rename, per-app **client chunk**, gzip | 5,366 → 4,923 B (−443 B, **8.3%**) | yes |
+| `bun build --minify` on a client chunk, gzip | 5,395 → 3,315 B (−2,080 B, **38.6%**) | ⚠ **partly** — see below |
+| `bun build --minify` on an SPA runtime, gzip | 17,406 → 817 B (−95%) | ❌ **NO — contaminated** |
+
+**⚑ The headline number is not usable, and that is the finding.** `bun build --minify` does not isolate mangling: given a file as an entry point it also **re-bundles and tree-shakes**, dropping every export the file itself does not reference. That is what produces the absurd 95% on the runtime. The 38.6% client-chunk figure is likelier to be mostly real but is contaminated by the same mechanism and must not be quoted as the prize. **The prize is UNMEASURED.** Measuring it is the work; §8's *"a fix built before the problem is measured is a fix whose value is unmeasured"* applies directly.
+
+**Why it is worth measuring anyway.** [[g-spa-runtime-gzip-budget-knife-edge]] (HIGH, open) records the assembled SPA runtime at **16,257 B against a 16,384 B budget — a 127 B margin** — and puts a fork to bryan: (a) hold 16 KB and require zero-core-residue from every future feature forever, or (b) raise the budget. **A real mangle-only win of even a few percent gives that budget air and may dissolve the fork rather than answer it.** ⚠ The budget test (`v0-3-x-spa-tree-shake-phase-b.test.js:145`) **PASSES today, 19/19, verified S347** — the re-trigger has NOT fired; this entry does not claim otherwise.
+
+**Why it is not filed as a defect.** Unminified output may be deliberate: SPEC §47 (Output Name Encoding) is a normative contract over these names; readable emitted JS is a stated project value; and a mangler cannot safely rename cross-chunk-referenced or string-looked-up names, which `_scrml_*` names are in places. **Class: compiler-spec, not language-spec** — emitted-JS shape is implementation freedom (the S278 ESM-chunks precedent), so this needs no language ruling.
+
+Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
+<!-- @gap id=g-emitted-js-never-minified-prize-unmeasured sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/codegen/index.ts,compiler/src/api.js — no minify/mangle stage found in the emit path at all prov=rationale:measured-S347-the-shipped-artifact-carries-45-comments-and-677-lines-and-no-mangle-stage-exists-while-an-open-HIGH-fork-turns-on-a-127-byte-gzip-margin -->
+
+### G-ENDPOINT-MALFORMED-JSON-BODY-THROWS-INSTEAD-OF-COMPILER-OWNED-400 — an unparseable request body escapes as an uncaught `SyntaxError` instead of §61.3's structured 400 — `NEW S347; HIGH; open (PA-reproduced by execution)`
+
+**PA-reproduced S347** by driving the emitted server module directly (no socket, per the S273 determinism rule). SPEC §61.3 makes the request decode **compiler-owned**: a malformed body / unknown variant / bad payload returns a structured `{ error: { kind, message } }` at 400, *"never an author arm"*. Three of the four cases honour that; the fourth does not.
+
+| request | result |
+|---|---|
+| valid variant + payload | **200** `{"ok":true,...}` — typed decode works |
+| payload field missing | **400** `{"error":{"kind":"InvalidPayload",...}}` ✅ |
+| unknown variant | **400** `{"error":{"kind":"UnknownVariant",...}}` ✅ |
+| **malformed JSON body** | **THREW** `SyntaxError: Failed to parse JSON` — uncaught ❌ |
+
+**Locus:** the emitted `_scrml_endpoint_<n>` opens with an unguarded `const _scrml_body = await _scrml_req.json();`. A malformed body dies there and **never reaches `parseVariant`**, so the compiler-owned envelope that §61.3 promises is structurally unreachable for exactly the input class most likely to arrive from a foreign client — which is the whole population `<endpoint>` exists to serve (§61.1: the caller is foreign and has its own SDK).
+
+**Filed HIGH, and the reason is the composition, not the status code.** On its own this is a 500-instead-of-400 contract violation. It composes with the dpa-030 D4 finding (**no body-size ceiling on any of the three JSON prologues**) into an unguarded parse over an unbounded body at a public inbound route. Related: S347 answered the blocking OQ that a ceiling is implementable — Bun stream-count-aborts `req.body` without materializing (10 MiB offered / 1 MiB ceiling → 413, 20 of 160 chunks pulled, backpressure held), so the fix has no unknowns.
+
+**Corrects a PA-authored fact in the same breath:** the dpa-030 bank's established fact 4 (*"there is NO working upload path at all"*) is **FALSE as an absolute** — base64-in-JSON over `<endpoint>` compiles, runs, returns 200, and round-trips bytes identically. The true statement is that a *capability* path exists and a *production-viable* one does not (4/3 inflation, full materialization, no streaming, no ceiling, no multipart).
+<!-- @gap id=g-endpoint-malformed-json-body-throws-instead-of-400 sev=HIGH status=open locus=compiler/src/codegen/emit-endpoint.ts(the emitted `_scrml_endpoint_<n>` prologue — `await _scrml_req.json()` is unguarded; searched emit-endpoint.ts,emit-server.ts) prov=spec:§61.3 — "a §61.3 decode failure is the compiler-owned `{ error: { kind, message } }` (400)", which this input class cannot reach -->
+
+### G-UNEXPANDED-MARKUP-ELEMENT-SURVIVES-INTO-EMITTED-HTML — an element that MUST expand can silently fail to, ship as an inert custom tag, and pass every gate — `NEW S347; HIGH; open (class; two PA-confirmed instances)`
+
+**Two instances, both PA-reproduced by execution S347, found independently hours apart.**
+
+**Instance 1 — cross-file engine mount (dpa-031 D1).** `export <engine for=Phase initial=.Idle>` in one file, `import { phase }` + `<phase/>` in another. Emitted `main.html` contains a literal **`<phase />`**. The arm text appears **0 times in the importer** and **1 time in the defining file**, isolating the fault to the cross-file mount. Compile is clean — **zero errors, zero diagnostics**. A `data-scrml-engine-mount=` slot IS emitted, so the machinery partially fired; the importer's mount did not.
+
+**Instance 2 — `formFor` (found while verifying a different claim).** `<formFor for=Signup onsubmit=saveSignup/>` with a server-escalating handler emits `<formFor for="Signup" data-scrml-bind-onsubmit="…" />` into the HTML. No `<form>` element, no fields, no action. Exit 0, zero diagnostics. The client JS contains **zero** references to `formFor` or any `_scrml_*form*` symbol.
+
+**⚑ CORRECTION S347 — INSTANCE 2 DID NOT REPRODUCE. The PA was wrong.** A dispatched agent compiled the canonical `formFor` shape (lifted from `conformance/cases/form-for/formfor-submit-collects-values/case.scrml`) AND the PA's own described shape (struct + `?{}`-escalating handler + `<schema>` + `db=`): **both expand fully** into a real `<form>` with field divs, a hidden `_csrf` input and a submit button. Every non-expanding path it could construct fails LOUD (`E-FORMFOR-NOT-IMPORTED`, `E-COMPONENT-035`, `E-SCHEMA-003`). **The PA's exit-0-unexpanded observation is not reproducible from the description given and remains unexplained** — the invocation evidently differed from what was reported. **Instance 2 is WITHDRAWN as evidence.** This entry now rests on ONE confirmed instance (the cross-file engine mount, PA-verified by execution), and the shared-root question is moot until a second instance is actually reproduced.
+
+**⚠ The shared ROOT is NOT established.** Two instances of the same SHAPE is not proof of one cause, and instance 2's invocation has not been ruled out as user error (the `formFor` surface is `<formFor for=T onsubmit=fn/>` per §41.14 and PRIMER §13.6, which is what was written). **Do not scope a fix on the assumption of a common root — establish it first.**
+
+**Why the class is HIGH regardless of root.** The failure is **silently dead UI**: the page renders, nothing is missing from the author's perspective except the thing they asked for, and every gate is green. It is invisible to the emit differential (the artifact is *stable*, just wrong), invisible to the conformance suite (no case pins cross-file mount rendering), and invisible to `E-MARKUP-001`, which fires on unknown elements at **SOURCE** level — `<phase/>` and `<formFor/>` are both *known* at source and resolve to real constructs. Nothing inspects the **EMITTED** HTML. For instance 1, three HIGH defects sat under a SPEC sentence ratified as **`final`** for ~169 sessions precisely because that path was never exercised end-to-end.
+
+**The cheap detector, and it is the durable half.** By construction, **no lowercase element that is not a known HTML/SVG/MathML element (or a hyphenated custom element) should survive into emitted HTML** — every scrml structural element and every expandable construct is supposed to be gone by then. `isKnownElementName` already exists (landed S264 for `E-MARKUP-001`) and can be reused against the emit rather than the source. That is a post-emit assertion, not a new analysis, and it would have caught **both** instances at their landing commit. Same shape as the S346 lesson that a probe must read the artifact the obligation is about.
+
+Related: [[g-spa-runtime-gzip-budget-knife-edge]] is unaffected. dpa-031 D2/D3 are the sibling defects of instance 1 and are filed with the dPA's other routed defects.
+<!-- @gap id=g-unexpanded-markup-element-survives-into-emitted-html sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/component-expander.ts,compiler/src/codegen/emit-form-for.ts,compiler/src/codegen/emit-machines.ts — the expansion sites are known, the SHARED root is not established prov=dd:scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md (instance 1, D1) + rationale:instance-2-found-PA-direct-while-verifying-an-unrelated-claim-and-the-common-root-is-explicitly-unverified -->
+
+### G-DESTRUCTURED-PARAM-DEFAULT-SHIPS-SERVER-ONLY-STDLIB-TO-THE-BROWSER — a pattern-bound parameter default reaching `scrml:auth` emits NO `.server.js` and ships argon2id client-side — `NEW S347; HIGH; open (PA-reproduced on main; PRE-EXISTING)`
+
+**PA-reproduced by execution S347.** Surfaced by the dtr-r7 fix round as §6.6.19 residual 6 and independently re-run by the PA on `main`:
+
+```scrml
+import { hashPassword } from 'scrml:auth'
+function f({ h = hashPassword }) { return h(@pw) }
+```
+
+| | observed |
+|---|---|
+| exit code / diagnostics | **0 / none** |
+| `.server.js` emitted | **zero** |
+| shipped client runtime | contains **`Bun.password`** + **argon2id** |
+
+The real argon2id implementation and the credential-handling path reach the browser with no diagnostic. The array-pattern form (`function f([h = hashPassword])`) behaves identically.
+
+**Not a dtr-r7 regression — PRE-EXISTING on `main`**, whose §12.2 Trigger 3 scan root is `body` alone (verified by `git show`). dtr-r7 explicitly did NOT fix it, correctly: the fix moves placement, so it owes its own direction-of-change measurement, and it carries a companion over-fire (`collectServerOnlyBindingModules`'s shadow set reads `p.name` as a string, so a pattern's bound names neither shadow nor are excluded).
+
+**The locus is a scan ROOT, not an unreadable pattern — which is what makes it tractable.** `fnNode.params` is a sibling of `body`, and the **nested twin already escalates correctly**, so the compiler can plainly see the shape; the top-level root simply never looks there. Same family as the S331/#486 derived-cell reach (fixed for its positions) and the S299 Trigger-3 wiring.
+
+**Why it is HIGH and not MED:** this is the §12.2 confidentiality boundary failing silently in the *unsafe* direction. Per `primary.map.md` invariant 52, under-inclusion here is a silent leak while over-inclusion is only a relocation — and this is the under-inclusion case. It is also invisible to every gate: exit 0, no code delta, and the emit differential sees a stable artifact.
+
+Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §9 in the §1/§5 convention — **its expectations invert when it closes**, so the pin becomes the regression guard rather than needing a rewrite.
+<!-- @gap id=g-destructured-param-default-ships-server-only-stdlib-to-browser sev=HIGH status=open locus=compiler/src/route-inference.ts(the Trigger-3 top-level scan root — `fnNode.params` is a sibling of `body` and is never walked; the nested `function-decl` branch already handles its twin) prov=rationale:PA-reproduced-on-main-exit-0-zero-server-js-argon2id-in-the-shipped-runtime-and-the-nested-twin-already-escalates-so-the-gap-is-the-root-not-the-pattern -->
+
+### G-EXPORT-LET-POSITION-HAS-NO-NORMATIVE-HOME-AND-THE-ENFORCEMENT-IS-NOT-WHERE-THE-CORPUS-SAYS — `NEW S347; MED; open`
+
+**PA-measured S347.** `export let` occurs **ZERO times in the 37,152-line SPEC**. The operator position against it is long-standing and was ratified in full at S347 (four reasons, user-voice) — but neither the position nor its actual enforcement shape is written anywhere normative.
+
+**And the corpus describes the enforcement wrongly.** dpa-031 recorded *"S316/#388 `export let` rejection UNAFFECTED — still rejected under §21.2."* Measured:
+
+- `export let theme = "dark"` + `import { theme }` + `${theme}` → **compiles clean, value arrives.** `gauntlet-phase1-checks.js:211` lists `export let x` explicitly among *"valid file-top declarations."*
+- The MUTATING form (`export function setTheme(t) { theme = t }`) → **`E-MU-001`.**
+
+**So the gate is on the WRITE, not the declaration.** That is coherent — an unmutated `export let` is a shared CONSTANT and a constant crossing as a bare name is fine — but it means the recorded rationale ("rejected under §21.2") points at the wrong mechanism, and a future session reasoning from it will mis-scope.
+
+**⚑ The scope limit is the reason this is filed at all** (bryan, S347: *"I just wanted the reasoning layed out so that is dosnt effect the wrong decisions"*): the four reasons are about `let`'s FORM, not about sharing, and they do **NOT** decide **cell exportability** (`export <theme> = "dark"`), which preserves the sigil, a declarable owner, a transition slot, and graph locality. That is dpa-031's OQ-1, a MODULE-SYSTEM question. Citing the `export let` position against exportable cells is citing it out of scope.
+
+Owed: a §21.2 sentence stating the position and the real enforcement point, carrying the four reasons as `provenance: ruling:user-voice-scrml.md S347`.
+<!-- @gap id=g-export-let-position-has-no-normative-home sev=MED status=open locus=searched:compiler/SPEC.md(§21.2 export forms — zero occurrences of "export let" anywhere in 37,152 lines),compiler/src/gauntlet-phase1-checks.js:211 prov=ruling:user-voice-scrml.md S347 — the four reasons ratified verbatim, captured expressly to scope-limit them -->
+
+### G-FORMFOR-PE-FALLBACK-IS-MANDATED-UNOPTOUTABLE-AND-100-PERCENT-NONFUNCTIONAL — §41.14.3's progressive-enhancement `<form action=>` is broken in FOUR independent ways, and the SPEC mandates the first one — `NEW S347; HIGH; open (SPEC amendment + a design fork, NOT an implementer fix)`
+
+**Established by EXECUTION** — the emitted `signup.server.js`'s WinterCG `fetch()` driven with exactly what a browser sends for a native no-JS form POST:
+
+```
+emitted form action = /api/__ri_route_persistSignup_1
+mounted routes      = POST /_scrml/__ri_route_persistSignup_1
+
+[emitted action] /api/…     -> NO ROUTE MATCHED            => 404
+[actual mount  ] /_scrml/…  -> 403 {"error":"CSRF validation failed"}
+[CSRF hand-fed ] urlencoded -> THREW SyntaxError: Failed to parse JSON
+[js client     ] JSON + X-CSRF-Token -> 200 "ok"    <- negative control
+```
+
+**Four independent breakages, not one:**
+1. **404** — the emitted prefix `/api/` is never mounted. Zero `/api` handling in the toolchain.
+2. **403** — the handler validates CSRF from the **`X-CSRF-Token` header**, which a native form POST cannot send. The hidden `<input name="_csrf">` is populated only by client JS and the server never reads the field.
+3. **500** — the handler does `await req.json()`; a native form sends `application/x-www-form-urlencoded`. **No emitter anywhere parses a form-encoded request body.**
+4. **Not a page** — returns `JSON.stringify(result)` as `application/json`, so a browser that navigated the POST renders raw JSON. No 303, no re-render.
+
+**⚑ THE OBVIOUS FIX IS A FALSE FIX — bite-proven.** Patching `action=` to the real mount converts a dead 404 into a 403 and then a 500: `BASELINE /api/ -> 404 · BITE /_scrml/ -> 403 · RESTORE -> 404`. **It makes the feature LOOK wired**, which is strictly worse for the next investigator. A hazard block with this evidence is landed at the emission site so nobody swaps the prefix and declares victory.
+
+**⚑ RULE 4 BLOCKER — the current emission is SPEC-CONFORMANT and an implementer CANNOT fix it.** `SPEC.md` §41.14.3 states normatively: *"the outer `<form>` element receives `action="/api/<derived-route>" method="POST"`"*. **PA-verified.** Two SPEC defects sit behind this gap:
+- §41.14.3 mandates `/api/…` while the RI convention is `/_scrml/<generated-route-name>` — **the SPEC contradicts itself.**
+- §41.14.3 cross-references *"§12.5 route inference"*; **§12.5 is "Server Function Return Values"** (`SPEC.md:7381`) — **PA-verified false citation.**
+
+**Scope narrowing that bounds the severity:** with JS enabled the emitted handler calls `event.preventDefault()`, so the dead `action=` is never navigated. **The defect is NO-JS-ONLY.** Nothing breaks for JS-enabled users — which is also why it survived: nobody exercises the path the mandate exists to serve.
+
+**This is a DESIGN FORK, not a defect queue item** — the PE default is **mandated, un-opt-out-able, and 100% non-functional**: make it REAL (form-encoded body parsing + CSRF via the form field + a 303 + a real mount), or RETIRE the un-opt-out-able mandate. Surfaced to bryan S347.
+
+**Blast radius (blast-radius use only, not demand evidence):** 5 conformance cases under `conformance/cases/form-for/` use `onsubmit=`, plus 3 doc-comment mentions in `stdlib/data/form-for.scrml`. **Zero `examples/` apps use `formFor` with `onsubmit=`.**
+
+**Test-oracle defect found alongside:** `compiler/tests/unit/form-for-expander.test.js:162,205` hand-feeds `peActionUrl: "/api/persistSignup"` and asserts the expander echoed it — a tautological passthrough that could never have caught this. The R26 synth-AST class.
+<!-- @gap id=g-formfor-pe-fallback-mandated-unoptoutable-and-nonfunctional sev=HIGH status=open locus=compiler/SPEC.md(§41.14.3 mandates the /api/ prefix — the normative site) + compiler/src/type-system.ts:20155,20157(the two mint sites) + compiler/src/codegen/emit-server.ts(no urlencoded parse, header-only CSRF, JSON response) prov=ruling:user-voice-scrml.md S347 — bryan "a, land the defects first"; established by execution, not inspection -->
+
+### G-PROTECT-TAG-TOJSON-HOOK-DROPPED-BY-OBJECT-SPREAD — the redaction survives `JSON.stringify(row)` but not `JSON.stringify({...row})` — `NEW S347; HIGH; open (disclosed residual of the D2 fix, PA-reproduced)`
+
+**PA-reproduced S347** by driving the shipped `_scrml_protect_tag` helper directly:
+
+```
+JSON.stringify(row)        -> {"id":1,"name":"ada"}                          redacted
+JSON.stringify([row])      -> [{"id":1,"name":"ada"}]                        redacted
+Object.keys(row)           -> ["id","name","passwordHash"]                   unchanged (by design)
+JSON.stringify({...row})   -> {"id":1,"name":"ada","passwordHash":"SECRET"}  LEAKS
+```
+
+The D2c fix attaches a **non-enumerable `toJSON`** to a tagged row, which is what makes direct serialization redact while leaving `Object.keys` and direct field access intact (so `Bun.password.verify(row.passwordHash, …)` still works — a deliberate and correct property). **Object spread copies only enumerable own properties, so `{...row}` drops the hook** and the resulting plain object serializes in full.
+
+**Severity: HIGH, and the reason is the distance.** The fixed shape is `JSON.stringify(u)`; the leaking shape is `JSON.stringify({...u})`. That is a one-keystroke variant, it is idiomatic JS, and it produces no diagnostic. **D2 narrows the leak; it does not close the class.**
+
+**Why the implementing agent did not fix it, and the reasoning is sound:** making `toJSON` enumerable would put `"toJSON"` into `Object.keys(row)` for every protected row — an unmeasured blast radius across every consumer that enumerates a row. Disclosed rather than papered over.
+
+**⚑ A precedent the agent did not have — dpa-021 solved this exact shape.** Its verdict on the `@session` binding was verbatim that *"one **raw** binding CANNOT serve both forms; one **Proxy** can"*, and it was **RATIFIED S319**. A Proxy `get`/`ownKeys` trap survives spread in a way a non-enumerable data property cannot, because the trap intercepts the copy rather than being skipped by it. **That is the structural answer, it is already ratified for a sibling problem, and it should be evaluated before any incremental patch here.** Cross-ref `dpa-021` + `g-session-ambient-unlowered-trust-boundary-inversion`.
+
+Related: closes-adjacent-to `g-handle-globalthis-response-ships-protected-columns` (the reported instance, fixed by D2a/D2b/D2c). This entry is the residual that fix leaves behind, and it is pinned by the D2 test suite.
+<!-- @gap id=g-protect-tag-tojson-hook-dropped-by-object-spread sev=HIGH status=open locus=compiler/src/codegen/protect-egress.ts(the emitted `_scrml_protect_tag` / `_scrml_protect_mark` helper — the non-enumerable toJSON hook) prov=rationale:PA-reproduced-by-driving-the-shipped-helper-object-spread-copies-only-enumerable-own-properties-so-the-hook-is-dropped-and-dpa-021-already-ratified-the-Proxy-answer-for-the-identical-shape -->

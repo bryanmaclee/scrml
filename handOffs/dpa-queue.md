@@ -40,11 +40,13 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-023 | **DIRECTION RATIFIED S337 (build deferred, ruled (b)) · ⚑ FIRST WITNESSED CASE FILED S338 (bryan: "i, and file it as dpa-023's first witnessed case").** **The witnessed case:** `function doHash(p){ return hashPassword(p) }` + `const <h> = doHash(@pw)` compiles clean (exit 0, no diagnostic) and emits `_scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(...))` where the fetch is `async` — and the runtime is synchronous BY DESIGN (`_scrml_derived_get`: `_scrml_derived_cache[name] = fn()`, no await, §6.6.4). **A derived cell whose recompute returns a PROMISE**, rendered into the DOM. PA-verified on main at both emit and runtime-path level. §6.6.19 refuses the DIRECT reach and misses it ONE HOP AWAY. **This is the `(not to T)` async-boundary shape with a real adopter-facing symptom** — the by-construction form (a type-state making the async boundary unrepresentable in a synchronous position) versus the retrofit now shipping (position-by-position refusal, which is the S322 under-design signature). The S338 refusal fix is explicitly REVERSIBLE and PROVISIONAL so it does not foreclose this rung. **Prior state:**  ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier and its re-ruling request had ALREADY been acted on (option C retired S322).* 5-pole live poll, verified by execution (7 fixtures + 3 emitted programs RUN). **COMPLEMENT, not subsume — the frame is RIGHT and the implementation is missing its middle state.** A `(not to T)` cell has THREE states (`not → pending → T`); the compiler models TWO and the assignment illegally jumps 1→3. Mechanism: `classifyWriteAgainstSpec` is a SOURCE-TEXT comparison that never consults the type, with no third state to return (`type-system.ts:25865`, duplicated `:26799`) — **the whole bug is two lines.** ⚠ Its re-ruling request RETIRED option C (S322). **The `pending` rung is the live open item** (5/5 convergence; conditions: the marker is sugar, drop the "does not color the function" pitch as measured-false, and the rule must be `E-` not `I-`). ⚠ PA-verified FALSE: the DD's §19.6-containment-by-string-rewrite mechanism claim. → `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` | S322 block · "bank it" |
 | dpa-024 | **COMPLETE (ADVISORY) dPA 2026-08-10 — Q4 ACTED ON, rest awaiting bryan.** ⚑ *Sat BANKED-UNRUN from S331 to S337 because the PA filed its Q4 under "OWED BY BRYAN" — a question only the DD could answer — while bryan waited on the agreed "say when it's ready" signal. No boot probe reads this file; that is the real reason it was invisible.* **Q4's banked premise was FACTUALLY WRONG and the DD caught it:** self-host-v2 is NOT chartered as a parity target — parity framing was DROPPED S222 (`compiler-reimagining-derisk-2026-06-26/RULING.md:11`, PA-verified verbatim), replaced by D3 conformance-as-oracle S230, and firewalled. **Do not change the charter.** **The real risk is one layer down:** `self-host-v2/progress.md` carries **53** `byte-identical`/`impl#1` mentions as success conditions — the sanctioned tier-2 scaffold became the de-facto definition of done, and nothing said when it stops. Activates the day the parser wave opens (lexer 337/337 done; parser NOT started), because impl#1's `FileAST` carries the **127 in-place decoration fields** skeleton-RULING:13 forbids. **RULED + LANDED S337** (bryan: *"go, take the tier-2 retirement rule"*) → `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md`: 3 clauses (scaffold never an exit criterion · AST-parity FORBIDDEN as an oracle from the parser wave · divergence = freedom exercised not debt owed) + **conformance fork 2 RESOLVED** to the mixed-pipeline bootstrap (FORK RULE rows 1-4 unanimous). No code, no charter change, no rework. **Rival hypothesis SURVIVES, restated:** a canonical AST EXISTS (`types/ast.ts`, day one) but is NOT load-bearing — 16 modules shadow it as `Record<string,unknown>`, which is what lets 127 `_`-prefixed decoration fields typecheck; 24% of open gaps but **39-42% of open HIGHs** (~1.7x severity enrichment); passes the detection-window falsifier (spans S297-S331, static + grep-visible). Subsumes the S331 refuted hypothesis's surviving claim. **Q5 null: MET for impl#1** (off the V1 critical path, terminal, ~76% of gaps outside the class → keep patching; no impl#1 re-architecture proposed), **NOT met for impl#2**. **⚑ THE CORRECTIVE, against the intuition that opened the question:** the never-ending bug loop is mostly NOT architectural — conformance pins ~18 of ~60 surfaces, so ~42 are unpinned and each pass finds genuinely NEW defects. **The loop ends when the CONTRACT is complete, not when the architecture changes.** **R3 NOT recommended** (zero rival architectures survived; only one was ever on the table and it is ratified). → `scrml-support/docs/deep-dives/compiler-architecture-for-this-language-dpa-024-2026-08-10.md` | bryan S331 *"bank the deep-dive"* → **S337 FIRED + Q4 RULED**; §§1-3/Q5 advisory, awaiting ratify/reject |
 | dpa-025 | **RATIFIED S338 2026-08-11 (bryan: "a, and grep the compiler for source-text regexes") — option (a): ratify the finding, take the no-regret moves now, run the §6.1 blind fuzz BEFORE committing to A1. PA re-measured the headline before surfacing and it REPRODUCES (34 fields / 33 optional / 32 degenerate exact / ~70 sites) — unlike the S337 `127`. bryan added a SECOND instruction that reprioritises the measurement: **census the compiler for source-text regexes** — cheaper than the fuzz and it measures the PROBLEM not the fix. First result: **232 post-AST source-text gates across 49 files** (vs 182 legitimate pre-AST), and **232 is a FLOOR** — the probe keys on identifier names and cannot see `postRe.test(t)`, with 81 opaque-arg sites unclassifiable. Prior state:**  ⚑ **VERDICT: the answer is an OPTIONAL FIELD, not a missing primitive.** `emitExpr` is ALREADY one choke point; `EmitExprContext` = **33 fields / 32 OPTIONAL / 68 construction sites / 32 degenerate `{mode:"client"}` populating zero** — so a feature works only where someone remembered to thread it. That is the mechanism behind the field-list/parallel-walker class S337 hit four times: not an ABSENT capability, an OPTIONAL one. **★★ Live hazard found en route: `emit-logic.ts:1628` DEFAULTS A MISSING SERVER BOUNDARY TO CLIENT EMIT**, warned only under `SCRML_DEBUG` so silent by default — while `PIPELINE.md` 0.5.1 makes "client JS MUST NOT contain server-context constructs" an explicit CG output invariant (`E-CG-006`) and the source ships `SCRML_STRICT_BOUNDARY=1` **off**. Third fail-open-by-default in this area. **★ The ledger cannot measure itself and it corrupted this DD's own numbers** — 50 of 209 heading-extracted "open" rows are marked resolved in the body; 48 `status=open` entries are absent from a heading extraction entirely (the open gap `g-known-gaps-heading-and-marker-status-can-disagree-silently`). Gap counts quoted anywhere are SOFT until that is fixed. **A dPA pole proposed a retroactive §34 emitter gate that §34.0 had ALREADY declined** verbatim — caught as re-litigation. → `scrml-support/docs/deep-dives/population-first-missing-primitive-2026-08-10.md` | bryan S337 fired · **RUN-not-RATIFY, awaiting ratify/reject** |
-| dpa-026 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan.** ⚑ **The branch SPEC's "runtime-capture is NOT expressible by either form" is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler = a runtime SNAPSHOT (compiled + RUN), and E-TARE-DEFERRED-POSITION's own message steers users to it. `reset` has ONE job (registries populate only at module-init). Calibration is expressible TODAY twice with zero syntax; the data pattern (`<zero>` cell + derived `net`) is canonical in every paradigm polled; corpus 0 calibration usages. **Panel 4/5 fork 1 · 1/5 fork 2 (`capture` verb) · 5/5 REJECT position-keyed semantics · 5/5 DEFECT: bare `tare` in a markup handler compiles clean in both forms** (one a runtime ReferenceError, one a live wrong-value promotion — the dpa-025 11-name-field-list class). Bridge = a checkable read-set diagnostic (WARN on `tare(@x,@x)`). **Reco: fork 1 patched — correct §6.8.4 BEFORE PR #501 merges.** → `scrml-support/docs/deep-dives/tare-thunk-vs-capture-dpa-026-2026-08-15.md` | bryan S337 · *"bank c as its own question"* → **RUN 2026-08-15, awaiting ratify/reject** |
-| dpa-027 | **COMPLETE (ADVISORY) dPA 2026-08-15 — R1 CONFIRMED, awaiting PA/bryan.** **No ruling behind `.Some/.None` — a REJECT:** drafted 2026-03-27 → **R-18-006 BLOCKING** (undefined magic names; enum collision) → removed → **REINSTATED the next day by the truncation-reconstruction `549e5b3`** from a changelog the re-review had flagged stale → mechanical passes → cited into §53.15 :33812 (S154) → one S19 fixture authored from it has failed E-MATCH-012 in every sweep. `not`/`given` have user voice; 0 compiler paths recognise `.Some`. **3/3 (a) STRIKE**, with corrections: striking leaves TWO vocabularies (`is some` + `given`), not one; the worst dangling citation is **E-MATCH-012's own message (prescribes deprecated `=>`)**. Type reason: `.Some` = constructor elimination over a TAGGED sum vs an idempotent UNTAGGED union — strictly coarser; would be scrml's only undeclarable, unshadowable constructor. → `scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; PA lean (a) supported |
-| dpa-028 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan; return leg = #509 comment.** **The 07-05 skip was CRDT-class SYNC, ruled DEFER "for now"; the cold-boot SW/manifest piece appears NOWHERE in it → NEW question.** **⚑ Fork (a) is NOT AVAILABLE as written — no static/public asset dir** (both servers serve `dist/`; nothing copies user files; no `Service-Worker-Allowed`) → 5/5: the static floor is a PREREQUISITE under every fork. **The DATA half COMPILED GREEN in native scrml first try** and stays userland under every fork (0/4 build-graph owners ship a write-queue; BG Sync Chromium-only). **⚑ Emitter DEFECT:** `flush()` clears `@queue` before its fire-and-forget server calls resolve (dpa-020/023 class). **Panel 4–1**: (c) one-shot `scrml generate pwa` vs (a′) floor + recipe + readable `chunks.json`; ALL: worker CODE adopter-owned, precache DATA from `chunks.json` (already emitted), single-owner artifacts, no per-build rewrite of adopter files, **never an offline route RENDERER**; (b) 0/5 (Flutter + Qwik emitted then WITHDREW). No 6nz pattern. Adopter's ~150 lines NOT a throwaway under any ruling. → `scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending |
+| dpa-026 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan.** ⚑ **The branch SPEC's "runtime-capture is NOT expressible by either form" is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler = a runtime SNAPSHOT (compiled + RUN), and E-TARE-DEFERRED-POSITION's own message steers users to it. `reset` has ONE job (registries populate only at module-init). Calibration is expressible TODAY twice with zero syntax; the data pattern (`<zero>` cell + derived `net`) is canonical in every paradigm polled; corpus 0 calibration usages. **Panel 4/5 fork 1 · 1/5 fork 2 (`capture` verb) · 5/5 REJECT position-keyed semantics · 5/5 DEFECT: bare `tare` in a markup handler compiles clean in both forms** (one a runtime ReferenceError, one a live wrong-value promotion — the dpa-025 11-name-field-list class). Bridge = a checkable read-set diagnostic (WARN on `tare(@x,@x)`). **Reco: fork 1 patched — correct §6.8.4 BEFORE PR #501 merges.** → `scrml-support/docs/deep-dives/tare-thunk-vs-capture-dpa-026-2026-08-15.md` | **RATIFIED S347 2026-08-16** (bryan: *"your rec"*) — fork 1, `tare` keeps ONE verb; §6.8.4's runtime-capture sentence CORRECTED (false in both clauses, PA-verified by execution) before #501; bare-form defect fixed first. bryan S337 · *"bank c as its own question"* → **RUN 2026-08-15, awaiting ratify/reject** |
+| dpa-027 | **COMPLETE (ADVISORY) dPA 2026-08-15 — R1 CONFIRMED, awaiting PA/bryan.** **No ruling behind `.Some/.None` — a REJECT:** drafted 2026-03-27 → **R-18-006 BLOCKING** (undefined magic names; enum collision) → removed → **REINSTATED the next day by the truncation-reconstruction `549e5b3`** from a changelog the re-review had flagged stale → mechanical passes → cited into §53.15 :33812 (S154) → one S19 fixture authored from it has failed E-MATCH-012 in every sweep. `not`/`given` have user voice; 0 compiler paths recognise `.Some`. **3/3 (a) STRIKE**, with corrections: striking leaves TWO vocabularies (`is some` + `given`), not one; the worst dangling citation is **E-MATCH-012's own message (prescribes deprecated `=>`)**. Type reason: `.Some` = constructor elimination over a TAGGED sum vs an idempotent UNTAGGED union — strictly coarser; would be scrml's only undeclarable, unshadowable constructor. → `scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md` | **RATIFIED S347 2026-08-16** (bryan: *"your rec"*) — STRIKE the §18.8.2 `.Some`/`.None` prose (its own worked example fails to compile, PA-verified), fix §53.15's dangling citation, fix `E-MATCH-012`'s message to `:>`. Archaeology NOT verified and not load-bearing. S346 bank → **RUN 2026-08-15**; PA lean (a) supported |
+| dpa-028 | **COMPLETE (ADVISORY) dPA 2026-08-15 — awaiting bryan; return leg = #509 comment.** **The 07-05 skip was CRDT-class SYNC, ruled DEFER "for now"; the cold-boot SW/manifest piece appears NOWHERE in it → NEW question.** **⚑ Fork (a) is NOT AVAILABLE as written — no static/public asset dir** (both servers serve `dist/`; nothing copies user files; no `Service-Worker-Allowed`) → 5/5: the static floor is a PREREQUISITE under every fork. **The DATA half COMPILED GREEN in native scrml first try** and stays userland under every fork (0/4 build-graph owners ship a write-queue; BG Sync Chromium-only). **⚑ Emitter DEFECT:** `flush()` clears `@queue` before its fire-and-forget server calls resolve (dpa-020/023 class). **Panel 4–1**: (c) one-shot `scrml generate pwa` vs (a′) floor + recipe + readable `chunks.json`; ALL: worker CODE adopter-owned, precache DATA from `chunks.json` (already emitted), single-owner artifacts, no per-build rewrite of adopter files, **never an offline route RENDERER**; (b) 0/5 (Flutter + Qwik emitted then WITHDREW). No 6nz pattern. Adopter's ~150 lines NOT a throwaway under any ruling. → `scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md` | **RATIFIED S347 2026-08-16** (bryan: *"your rec, facts only on #509"*) — static-asset floor is a PREREQUISITE not a fork (PA-verified: no publicDir/staticDir anywhere, no `Service-Worker-Allowed`); ship (a′) recipe; DEFER the `generate pwa` scaffold with a named re-trigger; #509 return leg posted FACTS-ONLY. S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending |
 | dpa-029 | **COMPLETE (ADVISORY) dPA 2026-08-15 — ★★ carries a LIVE LEAK routed as a DEFECT ahead of the rulings; return leg = #471 comment.** `handle()` returning `new globalThis.Response(JSON.stringify(u))` on a `protect=` row **compiles CLEAN and ships `passwordHash` at HTTP 200** (RUN) while the server-fn route redacts: `Response` not allowlisted (**the SPEC's own §40.3.5 example fails E-SCOPE-001**) but `globalThis` is; E-PROTECT-004 is a per-body SOURCE-TEXT regex ("a lint mislabeled as a fail-closed gate"); the redactor passes any `instanceof Response` untouched (fail-OPEN); `.reveal(` is whole-body though field-level was RATIFIED S230 (dpa-017). **7/7 on sequence: DEFECT tickets FIRST** (deny-unless-revealed at the wrapper · `reveal("col")` · allowlist + member-chain walk · regex→lint · E-MW-003/004 unemitted · §40.3.4 vs emit). Direction after: Q1 4–2 typed `Egress<Bytes>` return — **framed as the dpa-002 raw-route REOPEN** (dissent: "no second envelope while the first is provably unsound"); Q3 5/7 `File`/multipart PARAM on the same contract — **the `handle()`+`request.formData()` path the S346 ack pointed to is RUNTIME-BROKEN** (no await inserted); Q4 (a) print the route (not one seam away); Q5 adapter — **§23.4 sidecar is Nominal**, ack's "vendor via .js sidecar" needs correcting. Adopter today (7/7): treat `handle()` as OUTSIDE the envelope. → `scrml-support/docs/deep-dives/document-workflows-egress-envelope-dpa-029-2026-08-15.md` | S346 bank → **RUN 2026-08-15**; bryan rules; return leg pending; DEFECTS to file |
-| dpa-030 | **BANKED — UNRUN.** Banked S347 2026-08-16. ⚑ *Re-banked at S346 in the hand-off, the wrap and user-voice — but never written HERE, so it did not exist to the dPA and `dpa-debt` read `0 UNRUN` correctly. The §10 obligation/probe mismatch again, fourth-plus instance; found at S347 boot when bryan said he was about to fire the dPA.* **Successor to the WITHDRAWN dpa-029 Q3.** Q3 offered "(a) host-escape by design vs (b) native" — but the host-escape it named is RUNTIME-BROKEN, so (a) was never a live option and the fork was invalid as framed. **Whether uploads exist is SETTLED, not a question** (bryan S346: *"We have NO upload path?! Really?!"*). The only open axis is the SHAPE: a `File`/multipart PARAMETER on the server-fn / `<endpoint>` contract adopters already write, vs a dedicated `<upload>` primitive. PA lean = the parameter (LIMIT wins, FORK RULE row 1; dpa-029 panel 5/7), **recorded, not ruled**. | S346 bryan — reverse-ouroboros correction; banked S347; bryan rules; return leg = a comment on #471 |
+| dpa-030 | **COMPLETE (ADVISORY) dPA 2026-08-16 — awaiting bryan; return leg = #471 comment.** **Fork (a), narrowed: mint `File` as the 7th builtin primitive** (the S109 `date`/`timestamp` move, same reason), as a **capability HANDLE** (storage unforeclosed), routed through **§12 server fns — NOT by widening `<endpoint accepts=>`, which RE-OPENS §61.3/§61.10 rather than extending it.** **`<upload>` REJECTED 5/5.** **★★ Established fact 4 is FALSE by execution — base64-in-JSON over `<endpoint>` COMPILES AND RUNS (200 + typed decode + compiler-owned 400); the gap is ENCODING/TRANSPORT, not capability.** **★★ 3 of 4 layers already BUILT** (`bind:files` compiles+wires · hand-authored `enctype="multipart/form-data"` emits **with CSRF** · typed transport carries bytes); missing = a type NAME + a server DECODE. **The tell: `FileList` occurs ONCE in the 37k-line SPEC and ZERO times in `compiler/src/`; `emit-form-for.ts:290`'s `file` branch is DEAD CODE.** **★★ 4 DEFECTS ROUTED FIRST: (D1 NEW HIGH) `formFor`'s mandated un-opt-out-able PE fallback posts to a 404** (`/api/…` emitted vs `/_scrml/…` mounted; zero `/api` handling anywhere) · **(D2 known HIGH — MECHANISM LOCATED) the raw-egress gate is a source-text regex bypassed by `globalThis.` — instance #233 of dpa-025's RATIFIED S338 census class, inside that census's stated blind spot** · (D3) `formData()` unawaited, violating §19.9.8's own boundary clause · (D4 NEW) no body-size ceiling on any of 3 JSON prologues = live DoS. **★ Pole 3's falsifier was already met (§38/§37 exist) — re-polled, it did NOT flip: `<channel>` is app-scope broadcast → a privacy bug; PA-verified stronger (`E-CHANNEL-007` forces STATIC `topic=`). Progress → §37 SSE, DEFERRED.** **★ The PA lean's rationale is unavailable — (a) mints a primitive too, a TYPE not an element.** **⚑ OQ-1 BLOCKING + cheap (~20 lines): can Bun stream-count-abort `req.body` without materializing? If NO, the bound is advisory-only and pole 5 switches to (b).** → `scrml-support/docs/deep-dives/file-upload-arrival-shape-dpa-030-2026-08-16.md` | **RATIFIED S347 2026-08-16** (bryan: *"a, land the defects first"*) — fork (a) NARROWED: `File` as the 7th builtin primitive, a capability HANDLE on the existing server-fn contract, NOT by widening `<endpoint accepts=>`; `<upload>` rejected; the four defects land FIRST. S346 bryan — reverse-ouroboros correction; banked S347; **RUN 2026-08-16**; bryan rules; return leg pending; DEFECTS to file |
+| ~~dpa-030 (prior row)~~ | *Banked S347 2026-08-16.* ⚑ *Re-banked at S346 in the hand-off, the wrap and user-voice — but never written HERE, so it did not exist to the dPA and `dpa-debt` read `0 UNRUN` correctly. The §10 obligation/probe mismatch again, fourth-plus instance; found at S347 boot when bryan said he was about to fire the dPA.* **Successor to the WITHDRAWN dpa-029 Q3.** Q3 offered "(a) host-escape by design vs (b) native" — but the host-escape it named is RUNTIME-BROKEN, so (a) was never a live option and the fork was invalid as framed. **Whether uploads exist is SETTLED, not a question** (bryan S346: *"We have NO upload path?! Really?!"*). The only open axis is the SHAPE: a `File`/multipart PARAMETER on the server-fn / `<endpoint>` contract adopters already write, vs a dedicated `<upload>` primitive. PA lean = the parameter (LIMIT wins, FORK RULE row 1; dpa-029 panel 5/7), **recorded, not ruled**. | S346 bryan — reverse-ouroboros correction; banked S347; bryan rules; return leg = a comment on #471 |
+| dpa-031 | **COMPLETE (ADVISORY) dPA 2026-08-16 — awaiting bryan.** ★★ **The gap was ALREADY FILLED and §51.0.A named the wrong thing as the filler.** scrml HAS a free-shaped, TYPED, FAIL-CLOSED shared store today — top-level cell + cross-file component ambient read, compiled AND executed in a real DOM (8 live `_scrml_effect` subs; a leaf 3 files deep re-renders on every write; missing ambient cell = `E-STATE-UNDECLARED` at COMPILE time). §15.13.4 is written over `@var` GENERICALLY, not over engine cells — so both adjectives in "free-shaped / **untyped** global store" are inaccurate. **Meanwhile the substitute §51.0.A names DOES NOT WORK CROSS-FILE and was never exercised end-to-end: D1** inert unexpanded `<engineVar />`, green compile, 0 diagnostics, renders NOTHING (**PA-CONFIRMED by execution S347** — arm text 0× in the importer, 1× in the definer) · **D2** engine var absent from the module-registry footer · **D3** `initial=.Variant(payload)` drops the payload → `TypeError` surfacing as *nothing happening*. **Three HIGH defects sat under a ratified `final` for ~169 sessions.** The rule that actually binds is unwritten anywhere: **a shared cell must be declared in the ENTRY file** (cells not exportable, §21.2). Prop-drilling friction **MEASURED, not asserted: 4.55× identifier repetition** (91 vs 20) for byte-identical output. **Direction (advisory): do NOT widen, no store primitive** — fix D1/D2/D3, rewrite §51.0.A's justification to the real rule, bank cell-exportability as a MODULE-SYSTEM question. **S316/#388 `export let` rejection UNAFFECTED.** Honest null offered and DECLINED on evidence. | **RATIFIED S347 2026-08-16** (bryan: *"your rec"*) — do NOT widen, no store primitive; file D1/D2/D3; rewrite §51.0.A's justification to the real (unwritten) entry-file rule; leave `final` alone until the defects are fixed. S346 reverse-ouroboros arc → audit node `free-shaped-global-store-not-built`; banked S347; **RUN 2026-08-16**; bryan rules; 7 defects to file (3 HIGH) |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -1434,7 +1436,7 @@ A direct answer to **Q4** (Road-B's charter) with its cost stated both ways — 
 
 ```
 id:        dpa-030
-status:    banked   # banked → running → complete → ratified(by PA)
+status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-16 (ADVISORY) → DD written, 2 insight CANDIDATES staged, 4 defects routed, NOT ratified. Verdict at the item tail.
 rung:      R2 (structural design fork on a primitive surface; bryan rules; adopter-driven)
 requested: bryan S346 2026-08-16 (the reverse-ouroboros correction) — successor to the WITHDRAWN dpa-029 Q3
 banked:    S347 2026-08-16
@@ -1474,7 +1476,16 @@ whose cheap pole is a broken path will always resolve to the cheap pole for the 
    body-split is the sanctioned async surface). So (2) is not a missing keyword the adopter can supply —
    only the compiler can insert the boundary. **The host-escape is structurally unavailable, not merely
    undocumented.**
-4. ⇒ **There is NO working upload path at all today**, native or escaped.
+4. ⚑ **CORRECTED S347 — this fact was WRONG as I first wrote it.** I banked *"there is NO working upload
+   path at all today, native or escaped."* **PA-falsified by execution:** base64-in-JSON over `<endpoint>`
+   **compiles, runs, returns 200 with a typed decode, and round-trips bytes identically** (400 + a
+   compiler-owned envelope on a missing payload field and on an unknown variant). The dPA caught this
+   first; I then reproduced it. **The true statement:** a CAPABILITY path exists; a PRODUCTION-VIABLE one
+   does not — 4/3 size inflation, `await req.json()` materializes the whole body, no streaming, no size
+   ceiling, and no multipart. **The gap is ENCODING/TRANSPORT, not capability**, and any pole reasoning
+   from "scrml cannot receive a file" is reasoning from a false premise I introduced.
+   Found en route: a malformed body throws an uncaught `SyntaxError` instead of §61.3's compiler-owned
+   400 → `g-endpoint-malformed-json-body-throws-instead-of-400` (HIGH).
 5. **`handle()` is OUTSIDE the protect/tenant envelope AND currently leaks.** `handle()` +
    `new globalThis.Response(JSON.stringify(row))` over a `protect=` table ships the protected column at
    HTTP 200 (`g-handle-globalthis-response-ships-protected-columns`, HIGH, PA-reproduced; violates
@@ -1578,3 +1589,182 @@ reason to prefer the smaller surface should be caught and named as re-litigation
 
 §3 — one-liner + artifact path + a `(dpa: …)` breadcrumb in `delta-log.md`. Artifact →
 `scrml-support/docs/deep-dives/`. Routes to the scrml PA, whose return leg is a comment on #471.
+
+### Verdict (dPA, 2026-08-16 — ADVISORY, NOT ratified)
+
+**Artifact:** `scrml-support/docs/deep-dives/file-upload-arrival-shape-dpa-030-2026-08-16.md`
+
+**One-line:** **Fork (a) — but the fork was drawn one layer too high and the ruling is narrower than either pole:** mint **`File` as the 7th builtin primitive** (the S109 `date`/`timestamp` move, for the S109 reason), specify it as a **capability HANDLE** so storage stays unforeclosed, route it through **§12 server fns — NOT by widening `<endpoint accepts=>`, which would RE-OPEN §61.3/§61.10 rather than extend it** — and hold the ruling behind 4 defect fixes. **`<upload>` as a structural element REJECTED 5/5.**
+
+**★★ ESTABLISHED FACT 4 IS FALSE.** *"There is NO working upload path at all today"* — **verified false by execution**: base64-in-JSON over the existing `<endpoint>` **compiles AND RUNS** (200 + typed decode + compiler-owned 400). **The gap is ENCODING/TRANSPORT (multipart), not capability.**
+
+**★★ THREE OF FOUR LAYERS ARE ALREADY BUILT.** `<input type="file" bind:files=@x>` compiles + wires (§5.4, P8) · a hand-authored `<form enctype="multipart/form-data">` compiles + emits **with CSRF auto-injected** (P6) · the typed transport carries bytes today (P5). **Missing: a type NAME and a server DECODE.** The tell — §5.4 says the bound cell "is typed `FileList`", and **`FileList` occurs EXACTLY ONCE in the 37k-line SPEC and ZERO times in `compiler/src/`**; `emit-form-for.ts:290`'s `file` branch is **DEAD CODE** because `inputShapeForFieldType` has no case that returns it. (Same shape: SPEC:8195 maps `BLOB → bytes`; `bytes` was never minted either.)
+
+**★★ 4 DEFECTS ROUTED AHEAD OF THE RULING** (dpa-029 7/7 precedent, concurred 3/5 explicitly): **(D1, NEW HIGH)** `formFor`'s **mandated, un-opt-out-able** PE fallback posts to a **404** — emits `action="/api/…"`, route inference mounts `/_scrml/…`, **zero `/api` handling exists anywhere**; verified by execution → `g-formfor-pe-action-prefix-mismatch-404`. **(D2, known HIGH — MECHANISM LOCATED)** the raw-egress gate is a **source-text regex** (`protect-egress.ts:296`); executed: `new Response(…)` fires, **`new globalThis.Response(…)` does NOT**, nor does an aliased `const R = globalThis.Response`. **This is instance #233 of the class dpa-025's RATIFIED S338 census targets, and it sat in that census's stated blind spot.** Fix must be structural, not a harder regex. **(D3)** `request.formData()` emitted unawaited — reproduced at emit **and** runtime; **violates §19.9.8's own JS-host boundary clause**, and the adopter structurally cannot fix it (`E-AWAIT-NOT-IN-SCRML`). **(D4, NEW)** **no request-body size ceiling on any of the 3 JSON prologues** — a live DoS predating uploads.
+
+**★ Two panel premises corrected by PA verification.** (i) Pole 3 (Phoenix) conditioned its verdict on "a persistent-connection primitive" — **scrml HAS one** (§38 `<channel>`, §37 SSE). Re-polled, it did **not** simply flip: `<channel>` is **app-scope broadcast** and would be a **privacy bug** (every visitor's filename broadcast to every visitor) — **PA-verified stronger than it knew**: §38 mandates `name=`/`topic=` be **static** (`E-CHANNEL-007`), the WS URL is compile-time and shared, and the SPEC's own pattern is broadcast-then-filter-client-side. **Progress belongs on §37 SSE (1:1 by construction), and is DEFERRED out of this ruling.** (ii) The PA lean's rationale ("LIMIT wins — rides an existing contract without minting a primitive") is **unavailable**: fork (a) mints a primitive too, a *type* rather than an *element*.
+
+**★ The strongest challenge, stated at full force in the artifact:** a blind 8-framework prior-art survey found arrival-layer primitives are minted for **exactly one** reason — *the transport stopped being an HTTP form post* (LiveView/Livewire/Blazor, 3 independent mints in 12 months) — and **scrml's JSON-only server-fn stub puts it in that class**. It does not carry because **every such primitive REQUIRES JS**, which **contradicts §41.14.3's mandated PE default**. Those frameworks had ONE transport that couldn't carry bytes; **scrml has TWO, and the mandated PE form post is already multipart-native and already emits correctly.** The precedent scrml's PE rule selects is **Livewire's** (change the transport, keep the parameter SHAPE), not LiveView's. **5/5 backend-owning frameworks did add a dedicated surface — but at DIFFERENT LAYERS, and Rails/Django's are at PERSISTENCE, driven by service portability, not by arrival.**
+
+**Endorsement:** count = expressible today (array cardinality). Size = **surface reaches, checking does not** — `length(<=N)` already means byte-count on blobs (§39.5.8), but a refinement evaluates on a value that exists, and holding a 4 GB part IS the loss ⇒ **a resource coeffect, not a refinement**; keep the declaration site, change the **LOWERING** to a streaming 413 abort (precedented: `req` already lowers differently for `text`/`blob`). Mime = **do NOT ship as a refinement** — it ranges over an adversary-controlled header; *"a mime check after buffering is theater."* **LiveView is the only surveyed framework enforcing size per-chunk at the file's own declaration site — the property to match. Rails' `has_one_attached` (zero enforceable constraints, core validator PR closed unmerged) is the anti-pattern.**
+
+**⚑ OQ-1 IS BLOCKING AND CHEAP (~20 lines):** can a Bun handler read `req.body` as a `ReadableStream`, count bytes, and abort at N **without materializing**? **If NO, the declared bound is advisory-only and pole 5 switches to (b)** — a primitive can own its reader; a parameter inherits the pipeline. This is the one experiment that could still flip the verdict, and it was scoped but **not run**.
+
+**Staged insight CANDIDATES (2, in-artifact, NOT landed):** *"A missing capability is often a missing NAME, not a missing mechanism — and the walkers will tell you which"* (a dead walker branch + a type named only in prose = a naming bug wearing a feature request's clothes; ADDING an element vs ACTIVATING machinery already paid for are opposite fixes) · *"A primitive's layer is chosen by the TRANSPORT, not by the domain"* (⇒ **§41.14.3's PE default does real design work far outside forms — it is the constraint that selects parameter over primitive, and weakening PE silently re-opens every such choice**).
+
+**RUN-not-RATIFY honored** — no SPEC edit, no insight landed, no compiler source touched, item NOT flipped to `ratified`.
+
+---
+
+## dpa-031 — Ad-hoc shared reactive state: is the engine-singleton actually a complete substitute for a free-shaped store, or did "zero corpus demand" close a real gap?
+
+```
+id:        dpa-031
+status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-16 (ADVISORY) → DD written, 3 insight CANDIDATES staged, 7 defects routed (3 HIGH), NOT ratified. Verdict at the item tail.
+rung:      R2 (axiom-adjacent: what scrml's shared-state model IS; bryan rules)
+requested: the S346 sliding-doors arc — audit node `free-shaped-global-store-not-built`
+banked:    S347 2026-08-16
+routes-to: scrml PA
+```
+
+### ⚑ SCOPE-LOCK — what is and is not being asked
+
+**NOT asked: "is the engine-singleton good?"** It is good, it is ratified, and it is not on trial.
+**NOT asked: "should scrml ship a Redux/Zustand clone?"** Almost certainly no.
+
+**Asked: can scrml express ad-hoc shared reactive state that is NOT a state machine — and if the answer
+is awkward, was that awkwardness ever actually weighed?** Because on the record it was not: the option
+was closed on *"zero corpus demand"*, and the corpus was ours.
+
+### The chain — established, do NOT re-derive
+
+1. `hand-off-183.md:21` (S178, DD1 Fork 2): *"do NOT build 2C (free store — **zero corpus demand**)."*
+2. Hardened into normative **SPEC §51.0.A** (`SPEC.md:27603`): *"scrml ships NO free-shaped / untyped
+   global store … Genuinely-shared reactive state **SHALL** be modeled as an engine … This
+   explicit-data-flow + typed-engine-singleton model is scrml's **final** shared-state design."*
+3. Mirrored into **`PRIMER:683`** — a MANDATORY boot read, so every PA re-reads it as settled.
+4. Re-cited at **S316 / #388** to reject `export let`. A decision is already built on it.
+
+**⚑ The DD answered the apps-test in its own body, AGAINST its own recommendation** — the sharpest fact
+here, and the reason this is banked rather than closed. Its own text records that 2C *"matches the
+unanimous framework field"*, that 2A leaves *"scrml on the minority side of the entire framework field"*,
+and that prop-drilling is *"a known friction."* **Corpus-zero beat unanimous prior art, and the omission
+was then positively ratified as FINAL.** Do not re-derive these; they are quoted from the artifact.
+
+### The two tests
+
+- **`apps-test` — ALREADY ANSWERED, YES.** Svelte stores · Riverpod · Zustand · Pinia · Redux · MobX ·
+  Jotai · Recoil. Do not spend a poll re-establishing this.
+- **`scrml-test` — THE JOB. Answer it by COMPILING, not by reading the SPEC.** Author the shapes those
+  libraries are actually reached for and compile each one:
+  theme / locale preference · auth session + current user · a toast/notification queue · a shopping cart ·
+  websocket connection status · a feature-flag bag · an "unsaved changes" dirty-tracker.
+  For each: **what does an adopter write today**, does it compile, and what does it cost? Report the
+  emitted shape, not an impression.
+
+### ⚑ METHOD CONSTRAINT — Pillar 5b's escape clause is load-bearing HERE, in the reverse direction
+
+scrml's bet is state-primacy (Rule 6), and that bias is exactly what makes this question hard to see from
+inside. **5b's own escape clause is the guardrail: a conversion to state must be defensible on a NAMED
+axis (ergonomics / spec-clarity / runtime-cost), never a preference.** A theme string and a toast queue
+have no meaningful variant set; forcing a variant enum onto them to satisfy the bias is precisely the
+failure 5b warns about — *"converting a genuine calculation into a state shape to satisfy a bias makes
+the language worse."* Run 5b's ratified two-table test on each shape above and report which side it lands
+on. **Do not invent a second classifier.**
+
+### ⚑ FORBIDDEN REASONING (S346, standing)
+
+**"The corpus shows zero free-store usage" is INADMISSIBLE here** — it is the exact reasoning under
+audit, and it is circular twice over (the corpus cannot contain a construct the language refuses).
+Corpus-zero is a BLAST-RADIUS instrument only. Any pole reaching for it should be named as re-litigation.
+
+### Evidence the DD owes
+
+- The **governing sentence** for each fork, quoted with its §ref — or the explicit *"searched §X, §Y, §Z
+  — none found."* Note §51.0.A's SHALL already exists, so a widening must argue **supersession**, not
+  silence.
+- **Compiled** adopter code for each shape above, both the engine-singleton route and whatever the
+  awkward-but-legal alternative is today.
+- Whether the recorded *"known friction"* of prop-drilling is real at scale — measure it on a shape with
+  3+ levels of nesting, do not assert it.
+- **Direction-of-change** if the answer is to widen, and what `final` in §51.0.A costs to amend
+  (`supersedes:` per Rule 4b).
+- The honest null is a first-class outcome: **"the engine-singleton covers all seven shapes, `final`
+  stands, and the justification should simply be rewritten to the real reason"** would be a complete and
+  valuable answer.
+
+### Anti-goals
+
+Do NOT build. Do NOT ratify (RUN-not-RATIFY). Do NOT propose a store library. Do NOT re-open whether the
+engine-singleton is a good primitive. Do NOT reason from corpus counts.
+
+### Report-back
+
+§3 — one-liner + artifact path + a `(dpa: …)` breadcrumb in `delta-log.md`. Artifact →
+`scrml-support/docs/deep-dives/`. Routes to the scrml PA.
+
+---
+
+### ✅ COMPLETE — dPA 2026-08-16 (ADVISORY, NOT ratified)
+
+**Artifact:** `scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md`
+
+**One-line verdict:** *"Zero corpus demand" closed a gap that was already filled — and named the wrong
+thing as the filler: **scrml HAS a free-shaped, typed, fail-closed shared reactive store today** (top-level
+cell + cross-file ambient read — compiled, executed, works), while **the engine-singleton §51.0.A names as
+its substitute does not work across files in v0.7.1** (emits an inert `<engineVar />`, green compile, 0
+diagnostics, renders nothing).
+
+**★ The sharpest fact.** The substitute has never been exercised end-to-end. A cross-file engine singleton
+carrying a payload — the exact shape §51.0.A prescribes for shared app state — cannot render today: the
+cross-file mount emits an unexpanded tag (D1), the engine var is missing from the module registry so the
+importer's destructure binds `undefined` (D2), and `initial=.Variant(payload)` drops its payload → a
+`TypeError` at boot and on every write, thrown inside handlers so it surfaces as *nothing happening* (D3).
+Three HIGH defects sat under a ratified `final` for ~169 sessions. A same-file control renders correctly,
+isolating the fault to the cross-file mount, not to engines.
+
+**★ Both adjectives in "free-shaped / untyped global store" are inaccurate** about what scrml lacks. Cells
+are typed (`<session>: Session`, `<cart>: CartLine[]` — idiomatic per `examples/25-triage-board.scrml:48`),
+ambient-read at any depth across files with live subscriptions (§15.13.4 is written over `@var` generically,
+NOT over engine cells), and **fail-closed** — a missing ambient cell is `E-STATE-UNDECLARED` at compile time,
+not a runtime undefined. What scrml actually lacks is a store *library*, and the rule that genuinely binds is
+unwritten anywhere in SPEC: **a shared cell must be declared in the ENTRY file** (cells are not exportable,
+§21.2 — `E-IMPORT-004` on a `store.scrml`).
+
+**★ Pillar 5b's two-table test, run per shape (no second classifier): 3 STATE · 1 borderline · 4 DATA.**
+For half the canonical shapes the engine is the wrong reach. **The feature-flag bag inverts
+`examples/29-engine-vs-flags.scrml`'s own lesson** — example 29's "three booleans → reach for an engine"
+holds because 5 of 8 combinations are nonsense; a flag bag has **all** 2^N combinations real, which is
+exactly when the boolean bag is right and the engine is wrong. That premise is never stated in the example.
+
+**★ Prop-drilling friction MEASURED, not asserted** (3 levels, 8 shapes): **4.55× identifier repetition**
+(91 vs 20 mentions) for byte-identical output — and worse than that, **the reactive form the SPEC documents
+does not compile**: §15.13.3 teaches `bind:name=@name` for live props; the compiler answers `E-ATTR-011`
+(only `bind:value/checked/selected/group/this` exist). The non-bind form stays live only because CE
+inlines it back to the ambient read — which itself contradicts §15.13.3's "evaluated once".
+
+**Direction (advisory):** do NOT widen, no store primitive. (1) Fix D1/D2/D3 — until D1 lands §51.0.A rests
+on an unimplemented mechanism. (2) Rewrite §51.0.A's justification to the real rule (the item's nominated
+honest outcome, corrected on facts) — defensible on ergonomics + spec-clarity, both NAMED 5b axes.
+(3) The genuine residual is **cell exportability (§21.2), a module-system question, not a shared-state one**
+→ recommend banking as OQ-1. Amendment cost is small: 8 `§51.0.A` citations + 3 phrasings; **the S316/#388
+`export let` rejection is UNAFFECTED** (still rejected under §21.2), so it needs no re-litigation.
+Supersession argued on new evidence, not silence.
+
+**Honest null offered and DECLINED on evidence** — the engine-singleton does not cover all seven shapes.
+
+**7 defects routed** (3 HIGH: D1 cross-file mount inert · D2 engine var unregistered · D3 payload dropped at
+`initial=`; 2 MED: D4 `bind:` prop rejected vs §15.13.3 · D5 cross-file component cannot reference its own
+file's sibling, `known-gaps` records this class fixed at S166 `9d12d980` — reproduces; 2 LOW: D6 §21.2-vs-§21.8
+SPEC self-contradiction on engine exportability · D7 `Theme` is a reserved identifier, so the most canonical
+global-store shape cannot use its own name). None appear as filed `known-gaps` entries.
+
+**3 insight CANDIDATES staged (in-artifact, NOT landed):** *"A prohibition the compiler does not enforce is a
+description that has drifted, not a rule"* (converges with dpa-030's candidate from the opposite side —
+recorded, not claimed as novel) · *"A design principle carries its premise with it — and inverts when the
+premise flips"* · *"Verify the substitute, not just the thing being removed."*
+
+**Method:** every claim compiled on v0.7.1 and, where behaviour was at issue, **executed in a real DOM**
+(happy-dom, chunks run in document order) — 10 probes, incl. a same-file control isolating D1 and a direct
+reproduction of D3's two throws. **RUN-not-RATIFY honored** — no SPEC edit, no insight landed, no compiler
+source touched, item NOT flipped to `ratified`.
