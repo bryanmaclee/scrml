@@ -8421,6 +8421,20 @@ Sibling of the auto-await family (§13.2's position-invariant mandate delivered 
 Same class as dpa-025 (a hand-maintained field list blind to positions outside it) — the fourth instance. **Also from that drain: SPEC §6.8.4's normative claim that the runtime-capture case is "deliberately NOT expressible by either form" is FALSE by execution** — `const c = @x; tare(@x, c)` in a handler compiles clean and IS a runtime snapshot (reset → 5 after bumps to 8), and `E-TARE-DEFERRED-POSITION`'s own message steers users to that shape. dPA reco: correct §6.8.4 **before #501 merges**. Both are PR #501's blockers now.
 
 ### g-offline-write-queue-flush-clears-queue-before-fire-and-forget-completes — the adopter-shaped offline write-queue compiles green in native scrml, but `flush()` clears `@queue` SYNCHRONOUSLY while the server calls it triggers are fire-and-forget IIFEs — a failed replay loses the record — `NEW S346-bryan (dpa-028 drain, emitter defect found while compiling the adopter's shape); HIGH; open`
+
+**⚑ NEEDS-REPRODUCTION (PA, S347) — do NOT dispatch a fix on this premise yet.** Two PA attempts to reproduce the fire-and-forget ordering FAILED. Both fixtures failed to compile (PA error in the `<db>`/`<schema>` shape — `E-SQL-004`, then `E-PA-005`/`E-SCHEMA-001`/`E-SCHEMA-003`), and the one emission obtained showed:
+
+```js
+async function _scrml_flush_5() {
+  for (const it of _scrml_cs_reactive_get("queue")) {
+  await _scrml_fetch_send_4(it);
+}
+```
+
+— an `await`, i.e. the OPPOSITE of the reported behaviour. **This neither confirms nor falsifies the entry**: the dPA compiled the adopter's REAL shape and the PA did not, so the difference may be the shape rather than the compiler. But the entry currently rests on a claim no one has reproduced twice, and it was **excluded from the #509 return-leg comment** on the S346 rule that an ack naming a working path owes a compile.
+
+**What closing this needs first:** the adopter's actual `flush()` shape (or the dPA's fixture), compiled, with the emission pasted. If it shows the `await` above, the entry is a false positive and should be retracted rather than fixed.
+
 <!-- @gap id=g-offline-write-queue-flush-clears-queue-before-fire-and-forget-completes sev=HIGH status=open locus=searched:compiler/src/codegen/scheduling.ts,emit-functions.ts(the fire-and-forget IIFE emission for a server call in a loop body; dpa-020/023 auto-await family) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md -->
 
 dpa-020/023 class (the async boundary). Adopter #509's design depends on exactly this shape (append-only queue + idempotent replay), so it is adopter-blocking for the offline arc regardless of how the direction fork is ruled. **Also established there: fork (a) "host-boundary by design" is NOT AVAILABLE as written — there is no static/public asset dir, both servers serve `dist/`, nothing copies user files in, and no `Service-Worker-Allowed` header — so a static-asset floor is a prerequisite under EVERY fork** (5/5 panel).
