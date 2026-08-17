@@ -8494,6 +8494,8 @@ Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
 
 **Instance 2 — `formFor` (found while verifying a different claim).** `<formFor for=Signup onsubmit=saveSignup/>` with a server-escalating handler emits `<formFor for="Signup" data-scrml-bind-onsubmit="…" />` into the HTML. No `<form>` element, no fields, no action. Exit 0, zero diagnostics. The client JS contains **zero** references to `formFor` or any `_scrml_*form*` symbol.
 
+**⚑ CORRECTION S347 — INSTANCE 2 DID NOT REPRODUCE. The PA was wrong.** A dispatched agent compiled the canonical `formFor` shape (lifted from `conformance/cases/form-for/formfor-submit-collects-values/case.scrml`) AND the PA's own described shape (struct + `?{}`-escalating handler + `<schema>` + `db=`): **both expand fully** into a real `<form>` with field divs, a hidden `_csrf` input and a submit button. Every non-expanding path it could construct fails LOUD (`E-FORMFOR-NOT-IMPORTED`, `E-COMPONENT-035`, `E-SCHEMA-003`). **The PA's exit-0-unexpanded observation is not reproducible from the description given and remains unexplained** — the invocation evidently differed from what was reported. **Instance 2 is WITHDRAWN as evidence.** This entry now rests on ONE confirmed instance (the cross-file engine mount, PA-verified by execution), and the shared-root question is moot until a second instance is actually reproduced.
+
 **⚠ The shared ROOT is NOT established.** Two instances of the same SHAPE is not proof of one cause, and instance 2's invocation has not been ruled out as user error (the `formFor` surface is `<formFor for=T onsubmit=fn/>` per §41.14 and PRIMER §13.6, which is what was written). **Do not scope a fix on the assumption of a common root — establish it first.**
 
 **Why the class is HIGH regardless of root.** The failure is **silently dead UI**: the page renders, nothing is missing from the author's perspective except the thing they asked for, and every gate is green. It is invisible to the emit differential (the artifact is *stable*, just wrong), invisible to the conformance suite (no case pins cross-file mount rendering), and invisible to `E-MARKUP-001`, which fires on unknown elements at **SOURCE** level — `<phase/>` and `<formFor/>` are both *known* at source and resolve to real constructs. Nothing inspects the **EMITTED** HTML. For instance 1, three HIGH defects sat under a SPEC sentence ratified as **`final`** for ~169 sessions precisely because that path was never exercised end-to-end.
@@ -8544,3 +8546,38 @@ Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` 
 
 Owed: a §21.2 sentence stating the position and the real enforcement point, carrying the four reasons as `provenance: ruling:user-voice-scrml.md S347`.
 <!-- @gap id=g-export-let-position-has-no-normative-home sev=MED status=open locus=searched:compiler/SPEC.md(§21.2 export forms — zero occurrences of "export let" anywhere in 37,152 lines),compiler/src/gauntlet-phase1-checks.js:211 prov=ruling:user-voice-scrml.md S347 — the four reasons ratified verbatim, captured expressly to scope-limit them -->
+
+### G-FORMFOR-PE-FALLBACK-IS-MANDATED-UNOPTOUTABLE-AND-100-PERCENT-NONFUNCTIONAL — §41.14.3's progressive-enhancement `<form action=>` is broken in FOUR independent ways, and the SPEC mandates the first one — `NEW S347; HIGH; open (SPEC amendment + a design fork, NOT an implementer fix)`
+
+**Established by EXECUTION** — the emitted `signup.server.js`'s WinterCG `fetch()` driven with exactly what a browser sends for a native no-JS form POST:
+
+```
+emitted form action = /api/__ri_route_persistSignup_1
+mounted routes      = POST /_scrml/__ri_route_persistSignup_1
+
+[emitted action] /api/…     -> NO ROUTE MATCHED            => 404
+[actual mount  ] /_scrml/…  -> 403 {"error":"CSRF validation failed"}
+[CSRF hand-fed ] urlencoded -> THREW SyntaxError: Failed to parse JSON
+[js client     ] JSON + X-CSRF-Token -> 200 "ok"    <- negative control
+```
+
+**Four independent breakages, not one:**
+1. **404** — the emitted prefix `/api/` is never mounted. Zero `/api` handling in the toolchain.
+2. **403** — the handler validates CSRF from the **`X-CSRF-Token` header**, which a native form POST cannot send. The hidden `<input name="_csrf">` is populated only by client JS and the server never reads the field.
+3. **500** — the handler does `await req.json()`; a native form sends `application/x-www-form-urlencoded`. **No emitter anywhere parses a form-encoded request body.**
+4. **Not a page** — returns `JSON.stringify(result)` as `application/json`, so a browser that navigated the POST renders raw JSON. No 303, no re-render.
+
+**⚑ THE OBVIOUS FIX IS A FALSE FIX — bite-proven.** Patching `action=` to the real mount converts a dead 404 into a 403 and then a 500: `BASELINE /api/ -> 404 · BITE /_scrml/ -> 403 · RESTORE -> 404`. **It makes the feature LOOK wired**, which is strictly worse for the next investigator. A hazard block with this evidence is landed at the emission site so nobody swaps the prefix and declares victory.
+
+**⚑ RULE 4 BLOCKER — the current emission is SPEC-CONFORMANT and an implementer CANNOT fix it.** `SPEC.md` §41.14.3 states normatively: *"the outer `<form>` element receives `action="/api/<derived-route>" method="POST"`"*. **PA-verified.** Two SPEC defects sit behind this gap:
+- §41.14.3 mandates `/api/…` while the RI convention is `/_scrml/<generated-route-name>` — **the SPEC contradicts itself.**
+- §41.14.3 cross-references *"§12.5 route inference"*; **§12.5 is "Server Function Return Values"** (`SPEC.md:7381`) — **PA-verified false citation.**
+
+**Scope narrowing that bounds the severity:** with JS enabled the emitted handler calls `event.preventDefault()`, so the dead `action=` is never navigated. **The defect is NO-JS-ONLY.** Nothing breaks for JS-enabled users — which is also why it survived: nobody exercises the path the mandate exists to serve.
+
+**This is a DESIGN FORK, not a defect queue item** — the PE default is **mandated, un-opt-out-able, and 100% non-functional**: make it REAL (form-encoded body parsing + CSRF via the form field + a 303 + a real mount), or RETIRE the un-opt-out-able mandate. Surfaced to bryan S347.
+
+**Blast radius (blast-radius use only, not demand evidence):** 5 conformance cases under `conformance/cases/form-for/` use `onsubmit=`, plus 3 doc-comment mentions in `stdlib/data/form-for.scrml`. **Zero `examples/` apps use `formFor` with `onsubmit=`.**
+
+**Test-oracle defect found alongside:** `compiler/tests/unit/form-for-expander.test.js:162,205` hand-feeds `peActionUrl: "/api/persistSignup"` and asserts the expander echoed it — a tautological passthrough that could never have caught this. The R26 synth-AST class.
+<!-- @gap id=g-formfor-pe-fallback-mandated-unoptoutable-and-nonfunctional sev=HIGH status=open locus=compiler/SPEC.md(§41.14.3 mandates the /api/ prefix — the normative site) + compiler/src/type-system.ts:20155,20157(the two mint sites) + compiler/src/codegen/emit-server.ts(no urlencoded parse, header-only CSRF, JSON response) prov=ruling:user-voice-scrml.md S347 — bryan "a, land the defects first"; established by execution, not inspection -->
