@@ -19,6 +19,7 @@ import { statSync, readdirSync, watch } from "fs";
 import { resolve, dirname, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
+import { stripRedundantCode } from "./diagnostic-format.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -429,7 +430,7 @@ function runOnce(opts, gatheredOut) {
     noteCompileResult({ errors: [diag], warnings: [] });
     console.error(`[dev] Compile threw — treating it as a compile failure (the error is served at every request; no stale bundle):`);
     const loc = diag.line ? `:${diag.line}${diag.column ? `:${diag.column}` : ""}` : "";
-    console.error(`  [${diag.stage}] ${diag.filePath}${loc} ${diag.code}: ${diag.message}`);
+    console.error(`  [${diag.stage}] ${diag.filePath}${loc} ${diag.code}: ${stripRedundantCode(diag.code, diag.message)}`);
     // Mirror compileScrml's own default (api.js: dist/ next to the first
     // input) so the caller's serve-dir resolution is unchanged on this path.
     const fallbackOut = outputDir || (inputFiles.length > 0 ? join(dirname(inputFiles[0]), "dist") : "");
@@ -451,7 +452,7 @@ function runOnce(opts, gatheredOut) {
     console.error(`[dev] ${lintDiags.length} ghost-pattern lint${lintDiags.length !== 1 ? "s" : ""}:`);
     for (const d of lintDiags) {
       const rel = d.filePath || d.file || "";
-      console.error(`  [${d.code}] ${rel}:${d.line}:${d.column} ${d.message}`);
+      console.error(`  [${d.code}] ${rel}:${d.line}:${d.column} ${stripRedundantCode(d.code, d.message)}`);
     }
   }
 
@@ -488,7 +489,7 @@ function runOnce(opts, gatheredOut) {
       const line = e.line ?? e.span?.line;
       const col = e.column ?? e.col ?? e.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
-      console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${e.message?.slice(0, 120)}`);
+      console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`);
     }
     return { success: false, outputDir: result.outputDir };
   }

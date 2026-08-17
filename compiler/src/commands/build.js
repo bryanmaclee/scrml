@@ -18,6 +18,7 @@ import { statSync, readdirSync, readFileSync, writeFileSync, existsSync } from "
 import { resolve, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
+import { stripRedundantCode } from "./diagnostic-format.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -744,7 +745,7 @@ export async function runBuild(args) {
       const line = e.line ?? e.span?.line;
       const col = e.column ?? e.col ?? e.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
-      console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${e.message?.slice(0, 120)}`);
+      console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`);
     }
     process.exit(1);
   }
@@ -756,7 +757,7 @@ export async function runBuild(args) {
       const line = w.line ?? w.span?.line;
       const col = w.column ?? w.col ?? w.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
-      console.warn(`  [warn] ${rel}${loc} ${w.code}: ${w.message?.slice(0, 120)}`);
+      console.warn(`  [warn] ${rel}${loc} ${w.code}: ${stripRedundantCode(w.code, w.message)?.slice(0, 120)}`);
     }
   }
 
