@@ -1,8 +1,69 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. PICKUP updated at S348-peter. -->
-<!-- Body below the PICKUP is S346-bryan's WRAP (historical context). -->
-<!-- Mechanical stream: handOffs/delta-log.md [1493]-[1536].         -->
+<!-- hand-off.md — live session state. PICKUP updated at S349-peter. -->
+<!-- Body below the PICKUP is S347-bryan + S348-peter WRAPs (history). -->
+<!-- Mechanical stream: handOffs/delta-log.md [1537]-[1541].         -->
 <!-- ============================================================= -->
+
+# scrml — Session 349 (peter · Windows clone) — WRAP
+
+**Date:** 2026-08-17. `/boot` Profile A. Booted after **S347-bryan #554** landed (its PICKUP is
+authoritative on the operator queue; the boot digest printed the STALE S348-peter one — [1538]).
+Operator AFK ("do what you can without me"). Session = **verification + an adversarial review-floor
+drain that found two real bugs**, both fixed on branches (PRs open, NOT merged — no main-write auth).
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⭐ Merge my two review-floor fix PRs on green — both verified, tested, CI-safe
+
+Found by an adversarial S239 pass on merged determinism/formatting PRs; both PA-reproduced, both a
+one-site completion of the PR they follow:
+
+- **PR #556** (`fix/api-cross-os-sort-key`, MED) — #546 sorted the input seed on the NATIVE separator;
+  `\`/`/` flip nested-vs-sibling order cross-OS → route-id divergence (the §58 "two machines" bug #546
+  itself cites). Fix sorts by a POSIX-folded key (`compareInputPathsCanonical`); **POSIX-identical on
+  Linux/CI** so no gate regression; +§9 synthetic cross-OS pin. determinism 27/27.
+- **PR #555** (`fix/dev-warn-loop-strip-redundant-code`, LOW) — #550 missed the 4th dev.js diagnostic
+  site (the warning loop, `dev.js:469`) → self-prefixed W-* warnings double-print. Fix mirrors the 3
+  sibling sites; +regression test. diagnostic-format 8/8.
+
+**On merge:** flip gaps `g-api-cross-os-sort-key-native-separator` + `g-dev-warn-loop-double-prints-self-prefixed-code` to `status=resolved`.
+
+### 2. ⭐ The OQ-2 finding is a GAP IN BRYAN'S HELD D4 branch — verify at his S239 pass
+
+`handOffs/incoming/S349-peter-dpa030-OQ-verification-for-bryan.md` (full memo). D4 (body-size ceiling)
+censused the **three `emit-server.ts` HTTP prologues**; there is a **fourth unbounded ingress door** —
+`emit-channel.ts:1109` server WS `message(ws,raw)→JSON.parse(raw)`, and **`maxPayloadLength` appears
+ZERO times in the whole repo** (only Bun's 16 MB default). When D4's S239 pass runs on `45fc29b5`,
+confirm it also bounds the WS door — else the DoS class D4 claims to close is still open on `<channel>`.
+
+Also in that memo: **dpa-030 OQ-1 = SOUND** (Bun `req.body` streams + aborts at a CONSTANT ~512 KB, not
+a fraction → a `File` size bound IS enforceable as a streaming abort; spec "413-or-reset"). dpa-030 is
+already RULED fork(a) (S347), so OQ-1/OQ-2 feed the **Phase-1 impl** (File as 7th primitive), not a ruling.
+
+### 3. Carry-forward — bryan's S347 lane, STILL OPEN (his WRAP is below, unchanged)
+
+- **Three held branches owing their S239 pass:** `comment-token-faithfulness` `215984b9` · the D2/D3/D4
+  security cluster `45fc29b5` (see §2) · `dtr-r7` `152dfa47` (DO-NOT-LAND until comment-tokens land).
+- **Operator queue: dpa-029 Q1 · dpa-022 · dpa-024** only (dpa-030/026/027/028/031 RULED S347). Do NOT
+  rule 022/024 cold (stale premises — bryan's note).
+- **The D1 SPEC amendment** (ruled S347): retire §41.14.3's PE-structural-default, make PE opt-in, fix
+  the false §12.5 cross-ref, carry `supersedes:`.
+
+### 4. State
+
+- **Review floor: 0 OWED** (drained S349 — 10 markers: 2 finding, 3 clean, 5 carve-out). #554 recorded.
+- **Corpus-zero: 2 OWED, both bryan's live lane** (dpa-031 overrule + dpa-030 false-positive) — his to dispose.
+- **main** unchanged by me except this continuity PR (docs); the 2 code fixes are on branches → PRs #555/#556.
+- Gaps: HIGH 45 · MED 155 · LOW 69 (+1 MED +1 LOW this session, both fix-pending-PR).
+
+## WHAT LANDED THIS SESSION (S349-peter)
+
+- dpa-030 **OQ-1 (SOUND) + OQ-2 (fourth ingress door / D4-gap)** resolved by execution + source-census ([1537]).
+- Caught the **stale-PICKUP drift** ([1538]) → memory `concurrent-sessions-handoff-carries-two-pickups`.
+- Adversarial review-floor pass → **2 verified findings** (#546 MED cross-OS, #550 LOW dev-warn) ([1539]);
+  both **fixed → PRs #556/#555** (not merged) ([1540]); **review floor drained**, 2 gaps filed ([1541]).
+
+---
 
 # scrml — Session 347 (bryan · ASUS-Vivobook) — WRAP
 

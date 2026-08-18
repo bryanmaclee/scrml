@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S349 — 2026-08-17 (peter · Windows clone) — an adversarial review-floor drain that found two real bugs; dpa-030 OQ-1/OQ-2 resolved
+
+Booted after S347-bryan #554 (its PICKUP is authoritative — the boot digest printed the stale S348-peter one). Operator AFK. No merges to main this session: two code fixes are on branches as PRs #555/#556, and the continuity ledger rides this wrap's PR.
+
+- **dpa-030 OQ-1 = SOUND (by execution).** A Bun handler streams `req.body` and aborts at budget reading a CONSTANT ~512KB (524118 @4MB vs 524117 @40MB — a 1-byte spread across a 10× payload swing) = bounded socket-buffer overhead, not a fraction → a declared `File` size bound IS enforceable as a streaming abort (pole 5 stays on fork (a)). A mid-upload abort surfaces as a connection RESET, not always a clean 413 (spec "413-or-reset").
+- **dpa-030 OQ-2 = a fourth ingress door, and a gap in bryan's held D4 branch.** The `<channel>` server WS `message(ws,raw)→JSON.parse(raw)` (`emit-channel.ts:1109`) decodes adopter payloads OUTSIDE the three `emit-server.ts` HTTP prologues, and `maxPayloadLength` appears ZERO times in the repo (Bun's 16MB default only) — so D4's body-size census (the 3 prologues) misses it. Memo → `handOffs/incoming/S349-peter-dpa030-OQ-verification-for-bryan.md`. (dpa-030 already ruled fork (a) at S347; these feed the Phase-1 impl, not a ruling.)
+- **Adversarial S239 review-floor pass → 2 verified findings, both fixed on branches (PRs open, NOT merged):**
+  - **#546 → PR #556 (MED cross-OS):** the input-order canonicalisation sorted the NATIVE separator, flipping nested-vs-prefix-colliding-sibling order across OS → route/fetch id divergence (the §58 "two machines" bug #546 itself cites). Fix sorts by a POSIX-folded key (new `compareInputPathsCanonical`); POSIX-identical on Linux/CI so no gate regression; +§9 synthetic cross-OS pin. determinism 27/27, multipage 40/40.
+  - **#550 → PR #555 (LOW):** the dev.js warning loop (`:469`) missed `stripRedundantCode` → self-prefixed W-* warnings (W-PROGRAM-001 etc.) double-print + eat the 120-char slice. Fix mirrors the three sibling sites; +regression test. diagnostic-format 8/8.
+- **Review floor drained — 0 OWED** (10 markers: 2 finding, 3 clean, 5 carve-out; #554 recorded — the floor-recording recursion). 2 gaps filed, both fix-pending-PR. Gaps: HIGH 45 · MED 155 · LOW 69.
+- **Continuity:** the stale-PICKUP drift caught (#554 supersedes #553 on the operator queue) → memory `concurrent-sessions-handoff-carries-two-pickups`; delta-log [1537]-[1541].
+
 ## S348 — 2026-08-16 (peter · Windows clone) — the sliding-doors audit's flagship deliverable R1 SHIPPED; R6 re-triggered; R5 banked
 
 **Value-add session on the corpus-zero audit (coverage was already complete at S347).** Landed the arc's true deliverable and moved the two other live pickups. R1 rode its own PR (#552, merged, main CI green); R6/R5 + continuity ride this wrap's PR; the audit's FINDINGS/CHARTER/R5-bank direct-pushed to scrml-support.

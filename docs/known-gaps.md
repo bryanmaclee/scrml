@@ -31,12 +31,20 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 45 |
-| MED | 154 |
-| LOW | 68 |
+| MED | 155 |
+| LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
 <!-- ⚑ S345 filing batch — the S342 arc-audit backlog (bryan-ratified): 40 entries sourced from scrml-support/handOffs/s342-arc-audit/ (classify-write, g263, derived-transitive, harness, tare-pr501, dead-session) -->
+
+<!-- ⚑ S349-peter filing batch — 2 findings from an adversarial S239 review-floor pass (both PA-reproduced, both fix-pending-PR) -->
+
+### g-api-cross-os-sort-key-native-separator — `compileScrml`'s input-order canonicalisation (`api.js`) sorts the NATIVE-separator resolved path, so `\`=0x5C (Windows) vs `/`=0x2F (POSIX) flip nested-vs-prefix-colliding-sibling order across OS (`sub/a.scrml` vs `sub2.scrml`) → route/logic/fetch-stub ids mint in a different traversal order → a Windows client and a Linux server disagree on a `__ri_route__` fetch URL — the §58 "two machines" divergence #546 itself cites, left open on the separator axis (the dedup key was separator-canonical via `PathKeyedSet`, the sort key was not) — `NEW S349-peter (adversarial S239 review-floor pass on #546); MED; open — FIX in PR #556 (sort by a POSIX-folded key, compareInputPathsCanonical; POSIX-identical on Linux/CI so no gate regression; +synthetic cross-OS pin)`
+<!-- @gap id=g-api-cross-os-sort-key-native-separator sev=MED status=open locus=compiler/src/api.js prov=rationale:review-floor-on-546-resolvedInputFiles-map-resolve-f-sort-sorts-the-native-separator-backslash-0x5C-sorts-after-digits-slash-0x2F-before-nested-vs-prefix-colliding-sibling-flips-cross-OS-ids-mint-in-traversal-order-fix-in-PR-556 -->
+
+### g-dev-warn-loop-double-prints-self-prefixed-code — `scrml dev`'s non-fatal-warning loop (`dev.js:469`) prints `w.message` RAW while prepending `[${w.code}]`, so self-prefixed W-* warnings (W-PROGRAM-001, W-CONST-AT-DEPRECATED, W-PROGRAM-SPA-INFERRED, W-STATE-BLOCK-BARE-WRITE-DECL) double-print their code AND the redundant prefix eats the 120-char slice — the 4th dev.js diagnostic site #550 missed (error/lint/throw were stripped) — `NEW S349-peter (adversarial S239 review-floor pass on #550); LOW; open — FIX in PR #555 (route through stripRedundantCode + regression test); residuals disclosed: semdiff.js:364 (out-of-scope per #550), dev.js:644 browser-overlay HTML doubling (different surface)`
+<!-- @gap id=g-dev-warn-loop-double-prints-self-prefixed-code sev=LOW status=open locus=compiler/src/commands/dev.js:469 prov=rationale:review-floor-on-550-stripRedundantCode-covers-433-455-492-but-not-the-warning-loop-469-W-star-literals-self-prefix-in-ast-builder-js-confirmed-reproduced-on-HEAD-fix-in-PR-555 -->
 
 ### g-match-presence-discrimination-does-not-transition-shape1-cell — `match x { not => …, given x => … }` never transitions a Shape-1 presence cell — the arm body still reads pre-transition and E-TYPE-001 fires, silently withholding one of §14.12.6.1's three normative escape hatches — `NEW S345-bryan (S342 arc audit, classify-write.md round-1 §10.1); MED; open (pre-existing — measured identically on both refs)`
 <!-- @gap id=g-match-presence-discrimination-does-not-transition-shape1-cell sev=MED status=open locus=compiler/src/type-system.ts prov=rationale:checkArmHasGivenPattern-expects-given-name-on-arm-test-or-arm-variant-and-the-match-not-given-arm-source-form-never-surfaces-it-so-the-arm-body-reads-pre-transition-and-E-TYPE-001-fires -->
