@@ -4166,6 +4166,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         let bracketDepth = 1;
         while (bracketDepth > 0 && peek().kind !== "EOF") {
           const t = peek();
+          // §27.1 — `@arr[/* i */ 0]`. `innerText` below becomes BOTH a parsed
+          // ExprNode AND a `raw` index string that codegen rewrites with
+          // comment-naive string surgery (the same `rewrite.ts` segment scanner
+          // whose apostrophe handling produced the `when`-body blocker). A
+          // comment is not a value; carrying one in an index expression buys
+          // nothing and exposes every downstream rewriter to it. Drop it.
+          if (t.kind === "COMMENT") { consume(); continue; }
           if (t.kind === "PUNCT" && t.text === "[") bracketDepth++;
           if (t.kind === "PUNCT" && t.text === "]") {
             bracketDepth--;
@@ -5370,6 +5377,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // Consume the token — including `/` which collectExpr would stop at for operators
       lastTok = consume();
+      // §27.1 — a comment is a COMMENT in every scrml context, INCLUDING a lift
+      // body's markup. It must not become a rendered text node. Pre-guard, a
+      // `// note` inside `lift <div> … </div>` pushed the comment through
+      // `joinWithNewlines` into the lift's raw expression, where the markup
+      // re-slicer turned it into visible page text — base rendered the comment's
+      // CONTENT (" Default-slot content…"), and the faithful-token change made it
+      // render the delimiter too ("// Default-slot content…"). Both are wrong:
+      // §27.2 gives markup its own `<!-- -->` form and states the `//` form
+      // "works in all contexts", so a `//` line here is a comment, not content.
+      // Measured on samples/compilation-tests/gauntlet-r10-bun-admin.scrml,
+      // gauntlet-r10-odin-filebrowser.scrml, samples/gauntlet-s19-phase4/
+      // nested-comments.scrml. `collectExpr` (the sibling collector) has skipped
+      // comments since BUG-2; this closes the same hole on the lift path.
+      if (lastTok.kind === "COMMENT") continue;
       // Re-quote STRING tokens so their delimiters are preserved
       if (lastTok.kind === "STRING") {
         // A4: preserve backtick templates so `${...}` interpolations
@@ -5553,6 +5574,28 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           span: spanOf(startTok, peek()),
         };
       }
+      // §27.1 — A COMMENT IS NOT A TEXT NODE. §27.2 gives markup its own
+      // `<!-- -->` form and states that the `//` form "works in all contexts";
+      // §27.1 states `//` "is valid in all scrml contexts". A `//` line inside a
+      // `lift` markup body is therefore a COMMENT, and rendering it is wrong.
+      //
+      // This fell through to the text-content accumulator below, so the author's
+      // note became a visible DOM text node. MEASURED on three shipped corpus
+      // sources (base c159f1a2 -> this build):
+      //   samples/gauntlet-s19-phase4/nested-comments.scrml
+      //     " Default-slot content — becomes the body.\n"   -> (nothing)
+      //   samples/compilation-tests/gauntlet-r10-bun-admin.scrml
+      //     " FRICTION NOTE: Inline conditional class …"    -> (nothing)
+      //   samples/compilation-tests/gauntlet-r10-odin-filebrowser.scrml
+      //     ">\n ---- Level 2: children of root nodes ----…" -> ">"
+      // The leak is PRE-EXISTING (base rendered the comment's CONTENT, with the
+      // `//` stripped by the old lossy tokenizer); the faithful-token change made
+      // it render the delimiter too. Neither is right. This removes it.
+      //
+      // Direction of change: NEWLY-CORRECT rendering, three corpus sources
+      // affected, measured by scripts/corpus-emit-differential.ts over 1906
+      // sources / 7383 artifacts.
+      if (t.kind === "COMMENT") { consume(); continue; }
       // Text content — consume and accumulate.
       // GITI-008: coalesce consecutive text tokens into one child. The
       // tokenizer splits `Hello world` into separate tokens with the
@@ -5886,6 +5929,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const atTopLevel = () => parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
     while (peek().kind !== 'EOF') {
       const t = peek();
+      // §27.1 — a comment is valid inside a type annotation (`x: /* t */ string`),
+      // and the annotation STRING it builds is never parsed: it is consumed by
+      // surgery (`isFunctionTypeAnnotation`'s `endsWith(")")`, `indexOf(':')`,
+      // `findTopLevelArrow`'s whitespace-boundary `to` detection). A comment
+      // re-emitted into it defeats every one of those — the exact S184
+      // lifecycle-field-comment-leak failure, one collector over. Drop it.
+      if (t.kind === 'COMMENT') { consume(); continue; }
       if (t.text === '(') {
         parenDepth++;
         parts.push(t.text);
@@ -8240,6 +8290,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const t = consume();
             if (t.text === "(") parenDepth++;
             if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
+            // §27.1 — a comment is valid inside these arguments. `argParts` is joined
+            // into a `raw` args string that codegen rewrites with comment-naive string
+            // surgery; a comment is not a value, so it contributes nothing. Drop it.
+            if (t.kind === "COMMENT") continue;
             argParts.push(t.text);
           }
           const _ramArgs = argParts.join(" ").trim();
@@ -8411,6 +8465,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           const t = consume();
           if (t.text === "(") parenDepth++;
           if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
+          // §27.1 — a comment is valid inside these arguments. `argParts` is joined
+          // into a `raw` args string that codegen rewrites with comment-naive string
+          // surgery; a comment is not a value, so it contributes nothing. Drop it.
+          if (t.kind === "COMMENT") continue;
           argParts.push(t.text);
         }
         const argsStr = argParts.join(" ").trim();
@@ -8519,6 +8577,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           let d = 1;
           while (d > 0 && peek().kind !== "EOF") {
             const t = consume();
+            // §27.1 — a comment is valid inside a C-style `for` header. `rawParts` is
+            // joined into the `( init; cond; update )` string `emitForStmt` re-splits on
+            // `;` — a `/*a;b*/` comment would forge a section boundary. Drop it.
+            if (t.kind === "COMMENT") continue;
             rawParts.push(t.text);
             if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
             if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d--;
@@ -9254,6 +9316,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -9288,6 +9354,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -9537,6 +9607,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -9570,6 +9644,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -9841,6 +9919,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         };
         while (peek() && bdepth > 0) {
           const t = peek();
+          // §27.1 — a comment is valid in a match-arm payload binding list
+          // (`<Ok(/* the row */ row) :> { … }`). Two reasons to drop it, both
+          // structural: (1) `allBindingTokens` is joined + `\s+`-collapsed into
+          // `bindingText`, which codegen's `parseBindingList` splits on `,`/`:`
+          // to emit `const local = subject.data.field` — a comment there forges
+          // or corrupts those separators; (2) `finalizeSegment` detects the NAMED
+          // form positionally (`segmentTokens[0]` IDENT, `[1]` `:`), so a leading
+          // comment token silently demotes a named binding to positional.
+          if (t.kind === 'COMMENT') { consume(); continue; }
           if (t.kind === 'PUNCT' && t.text === '(') {
             bdepth++;
             segmentTokens.push(t);
@@ -10404,6 +10491,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         if (t.kind === 'PUNCT' && (t.text === '(' || t.text === '[' || t.text === '{')) d++;
         else if (t.kind === 'PUNCT' && (t.text === ')' || t.text === ']' || t.text === '}')) d--;
+        // §27.1 — a comment is valid in a destructure default (`{a = /*d*/ 1}`).
+        // `buf` is joined into a default-value EXPRESSION string. Drop it.
+        if (t.kind === "COMMENT") { consume(); continue; }
         buf.push(consume().text);
       }
       return buf.join(' ').trim();
@@ -10591,6 +10681,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         let d = 1;
         while (d > 0 && peek().kind !== 'EOF') {
           const t = consume();
+          // §27.1 — a comment is valid inside a C-style `for` header. `rawParts` is
+          // joined into the `( init; cond; update )` string `emitForStmt` re-splits on
+          // `;` — a `/*a;b*/` comment would forge a section boundary. Drop it.
+          if (t.kind === "COMMENT") continue;
           rawParts.push(t.text);
           if (t.kind === 'PUNCT' && (t.text === '(' || t.text === '[' || t.text === '{')) d++;
           if (t.kind === 'PUNCT' && (t.text === ')' || t.text === ']' || t.text === '}')) d--;
@@ -11890,6 +11984,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const t = consume();
             if (t.text === "(") parenDepth++;
             if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
+            // §27.1 — a comment is valid inside these arguments. `argParts` is joined
+            // into a `raw` args string that codegen rewrites with comment-naive string
+            // surgery; a comment is not a value, so it contributes nothing. Drop it.
+            if (t.kind === "COMMENT") continue;
             argParts.push(t.text);
           }
           const _ramArgs2 = argParts.join(" ").trim();
@@ -12047,6 +12145,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           const t = consume();
           if (t.text === "(") parenDepth++;
           if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
+          // §27.1 — a comment is valid inside these arguments. `argParts` is joined
+          // into a `raw` args string that codegen rewrites with comment-naive string
+          // surgery; a comment is not a value, so it contributes nothing. Drop it.
+          if (t.kind === "COMMENT") continue;
           argParts.push(t.text);
         }
         const _resArgs = argParts.join(" ").trim();
@@ -12611,6 +12713,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -12645,6 +12751,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -12927,6 +13037,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -12961,6 +13075,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
+          // §27.1 — a comment is valid inside a return-type annotation
+          // (`function f(): /* t */ string`). `returnTypeAnnotation` is a TYPE STRING
+          // consumed by surgery, never parsed; a comment in it is not a type. Drop it.
+          if (peek().kind === "COMMENT") { consume(); continue; }
           if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
           else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
           else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
@@ -13094,6 +13212,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           let d = 1;
           while (d > 0 && peek().kind !== "EOF") {
             const t = consume();
+            // §27.1 — a comment is valid inside a C-style `for` header. `rawParts` is
+            // joined into the `( init; cond; update )` string `emitForStmt` re-splits on
+            // `;` — a `/*a;b*/` comment would forge a section boundary. Drop it.
+            if (t.kind === "COMMENT") continue;
             rawParts.push(t.text);
             if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
             if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d--;
@@ -13590,6 +13712,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
             }
           } else {
+            // §27.1 — a comment is valid in a cleanup callback body. `callbackParts` is
+            // joined into JavaScript-to-be and rewritten by comment-naive surgery.
+            if (lastTok.kind === "COMMENT") continue;
             callbackParts.push(lastTok.text);
           }
         }
@@ -13649,6 +13774,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               if (depth === 0) { lastTok = consume(); break; }
             }
             lastTok = consume();
+            // §27.1 — `//` "is valid in all scrml contexts", and a `when message`
+            // body is one of them. `bodyParts` is JAVASCRIPT-TO-BE: it is joined
+            // and handed to `emitEscapeHatch` -> `rewriteExpr`, which does STRING
+            // SURGERY (it is string-aware but NOT comment-aware). A comment is not
+            // a value, so it is dropped here rather than re-emitted — the same
+            // answer, for the same reason, as `collectBracedBody` and
+            // `parseParamList`. See the sibling guard in the `when … changes`
+            // collector below for the executed failure this prevents.
+            if (lastTok.kind === "COMMENT") continue;
             if (lastTok.kind === "STRING") {
               // A4: preserve backtick templates so `${...}` interpolations
 
@@ -13721,6 +13855,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             if (depth === 0) { lastTok = consume(); break; }
           }
           lastTok = consume();
+          // §27.1 — "`//` is a single-line comment. It is valid in all scrml
+          // contexts." A `when @x changes { … }` body IS a scrml context, so a
+          // comment in it must compile. It did not: `bodyParts` is joined into
+          // `bodyRaw`, routed to `emitEscapeHatch` -> `rewriteExpr`, and
+          // `rewriteReactiveRefsAST` (codegen/rewrite.ts:300) bails on a body it
+          // cannot parse, falling back to the STRING-AWARE-BUT-COMMENT-NAIVE
+          // segment scanner at rewrite.ts:307. An apostrophe inside the comment
+          // ("Can't") then opens a string span that never closes, so every
+          // following `@ref` is left RAW and codegen emits `@count` into
+          // JavaScript — E-CODEGEN-INVALID-LOGIC, zero artifacts. Measured on
+          // samples/compilation-tests/gauntlet-r10-svelte-dashboard.scrml.
+          //
+          // Re-emitting the comment faithfully does NOT fix it (the surgery is
+          // still comment-naive); dropping it does. A comment is not a value.
+          if (lastTok.kind === "COMMENT") continue;
           if (lastTok.kind === "STRING") {
             // A4: preserve backtick templates so `${...}` interpolations
 
@@ -13776,6 +13925,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           if (t.text === "," && depth === 1) { consume(); break; }
           lastTok = consume();
+          // §27.1 — a comment is valid in an `upload(...)` argument. These parts are
+          // joined into expression strings that codegen rewrites. Drop it.
+          if (lastTok.kind === "COMMENT") continue;
           fileParts.push(lastTok.text);
         }
         // Collect second arg (url)
@@ -13805,6 +13957,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
             }
           } else {
+            // §27.1 — a comment is valid in an `upload(...)` argument. These parts are
+            // joined into expression strings that codegen rewrites. Drop it.
+            if (lastTok.kind === "COMMENT") continue;
             urlParts.push(lastTok.text);
           }
         }
@@ -14494,6 +14649,9 @@ function parseTestBody(tokens, filePath, span, errors) {
 
     while (i < tokens.length && tokens[i].kind !== "EOF") {
       const tok = tokens[i];
+      // §27.1 — a comment is valid inside a `<test>` body / assert expression.
+      // These parts are joined into JavaScript-to-be. Drop it.
+      if (tok.kind === "COMMENT") { i++; continue; }
       if (tok.kind === "PUNCT" && tok.text === "{") {
         depth++;
         parts.push(tokenToSourceText(tok));
@@ -14547,6 +14705,9 @@ function parseTestBody(tokens, filePath, span, errors) {
     let depth = 0;
     while (i < tokens.length && tokens[i].kind !== "EOF") {
       const tok = tokens[i];
+      // §27.1 — a comment is valid inside a `<test>` body / assert expression.
+      // These parts are joined into JavaScript-to-be. Drop it.
+      if (tok.kind === "COMMENT") { i++; continue; }
       if (tok.kind === "PUNCT" && tok.text === "}" && depth === 0) break;
       if (depth === 0 && tok.kind === "IDENT" &&
           (tok.text === "assert" || tok.text === "test" ||

@@ -1271,6 +1271,22 @@ ${
                     pushParam(cur)
                     cur = ""
                     consume()
+                } else if (tok.kind == "COMMENT") {
+                    // A COMMENT never contributes to `cur`. `cur` is the parameter
+                    // NAME-and-TYPE buffer and `pushParam` above consumes it by
+                    // STRING SURGERY (`indexOf(":")`, `.trim()`) — nothing parses
+                    // it — so `greet(/* the message */ msg)` would otherwise record
+                    // the comment AS PART OF THE PARAMETER NAME. Mirrors
+                    // compiler/src/ast-builder.js `parseParamList` -> `appendTok`,
+                    // where the full rationale lives.
+                    //
+                    // The separator is load-bearing, not defensive: `cur` is built
+                    // by bare concatenation, so silently dropping a comment BETWEEN
+                    // two tokens would WELD them (`lin /*c*/ msg` -> `linmsg`,
+                    // defeating the linearity prefix check). A comment is
+                    // whitespace to a JS lexer; whitespace is what replaces it.
+                    if (cur.length > 0 && cur[cur.length - 1] != " ") { cur = cur + " " }
+                    consume()
                 } else {
                     cur += tok.text
                     consume()
