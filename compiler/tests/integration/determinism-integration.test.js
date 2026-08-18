@@ -56,7 +56,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { compileScrml } from "../../src/api.js";
+import { compileScrml, compareInputPathsCanonical } from "../../src/api.js";
 
 // ---------------------------------------------------------------------------
 // FX-1 fixture reuse (cornerstone — `multipage-multirole/routes/{index, loads, admin}.scrml`)
@@ -457,5 +457,51 @@ describe("FX-1 — INPUT-ORDER invariance (§47/§58: same SET → same bytes, a
     const fwd = routesOf(compileFx1({ inputFiles: FX1_INPUTS }));
     const rev = routesOf(compileFx1({ inputFiles: REVERSED }));
     expect(rev).toEqual(fwd);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — CROSS-OS input-order invariance (g-api-cross-os-sort-key-native-separator, S349)
+//
+// §8 proves same-machine order-invariance but re-compiles on ONE host, so every
+// resolved path shares ONE separator — it CANNOT catch the cross-OS flip. The §8
+// seed sorted the NATIVE path: `\`=0x5C sorts AFTER digits, `/`=0x2F BEFORE, so a
+// nested-subdir entry vs a prefix-colliding sibling flips order across OS, ids
+// mint in traversal order, and a Windows client + Linux server disagree — the very
+// §58 "two machines" divergence §8 exists to close, left open on the separator
+// axis. The fix folds `\`↔`/` for the compare KEY (compareInputPathsCanonical).
+//
+// This is a SYNTHETIC cross-OS pin: it feeds both-separator spellings of the SAME
+// logical set directly to the comparator, so it runs (and must pass) on EITHER
+// host — a plain `.sort()` here fails on Windows spellings while passing on POSIX.
+// ---------------------------------------------------------------------------
+describe("§9 — compareInputPathsCanonical: separator-invariant order (cross-OS)", () => {
+  const posixKey = (arr) => [...arr].sort(compareInputPathsCanonical).map((p) => p.replaceAll("\\", "/"));
+
+  test("the flip case — nested entry vs prefix-colliding sibling sorts identically under \\ and /", () => {
+    // `sub/a.scrml` vs `sub2.scrml`: `/`<`2`<`\`, so a native `.sort()` orders
+    // them oppositely on Windows vs POSIX. The canonical comparator must not.
+    const posix = posixKey(["/r/sub/a.scrml", "/r/sub2.scrml"]);
+    const win   = posixKey(["\\r\\sub\\a.scrml", "\\r\\sub2.scrml"]);
+    expect(win).toEqual(posix);
+    expect(posix).toEqual(["/r/sub/a.scrml", "/r/sub2.scrml"]); // POSIX-native order is the canon
+  });
+
+  test("input argv order does not matter, on EITHER separator", () => {
+    const canon = ["/r/a/x.scrml", "/r/a2.scrml", "/r/a/y.scrml"];
+    for (const spell of [
+      ["/r/a2.scrml", "/r/a/y.scrml", "/r/a/x.scrml"],          // POSIX, shuffled
+      ["\\r\\a2.scrml", "\\r\\a\\y.scrml", "\\r\\a\\x.scrml"],  // Windows, shuffled
+    ]) {
+      expect(posixKey(spell)).toEqual(posixKey(canon));
+    }
+  });
+
+  test("comparator is a total order (antisymmetric + reflexive) so the sort is stable", () => {
+    const p = "\\r\\sub\\a.scrml", q = "/r/sub/a.scrml";
+    expect(compareInputPathsCanonical(p, p)).toBe(0);
+    expect(compareInputPathsCanonical(p, q)).toBe(0);         // same logical path, either spelling
+    expect(compareInputPathsCanonical("/a", "/b")).toBe(-1);
+    expect(compareInputPathsCanonical("/b", "/a")).toBe(1);
   });
 });
