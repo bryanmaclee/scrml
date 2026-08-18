@@ -26,7 +26,7 @@ import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
-import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, SERVER_PROTECT_HELPER, type ProtectContext } from "./protect-egress.ts";
+import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgressAcrossFile, SERVER_PROTECT_HELPER, type ProtectContext } from "./protect-egress.ts";
 import { SERVER_JSON_BODY_GUARD_HELPER, emitJsonBodyRead } from "./server-body-guard.ts";
 import {
   buildTenantContext,
@@ -1818,33 +1818,44 @@ export function generateServerJs(
   // body all defeated it — measured, at HTTP 200, on a `protect=` column. The
   // detector is now structural (see `codegen/protect-egress.ts`); the source text
   // is no longer read here at all.
+  //
+  // S350: the gate also reaches ACROSS THE SAME-FILE CALL GRAPH. It used to go
+  // silent across one call hop in both directions (SELECT in a callee + raw
+  // egress in the caller, and the reverse) — measured, exit 0, zero diagnostics.
+  // `detectProtectedRawEgressAcrossFile` takes the whole `fnNodes` list and
+  // reports at the innermost function whose effective body holds both halves.
   if (_protectActive) {
     {
       const _seenEProtect = new Set<string>();
-      for (const fn of fnNodes) {
-        const _sp = (fn as { span?: { start?: number; end?: number } }).span;
-        // The gate now reads the fn NODE, not a slice of `_sourceText`, so it no
-        // longer needs a resolvable span to DO its work — but the diagnostic
-        // still needs one to point at. A span-less node keeps its previous
-        // (skipped) treatment rather than silently reporting at position 0.
+      for (const _leak of detectProtectedRawEgressAcrossFile(fnNodes, _protectCtx)) {
+        const _sp = (_leak.fn as { span?: { start?: number; end?: number } }).span;
+        // The gate reads the fn NODE, not a slice of `_sourceText`, so it does
+        // not need a resolvable span to DO its work — but the diagnostic still
+        // needs one to point at. A span-less node keeps its previous (skipped)
+        // treatment rather than silently reporting at position 0.
         if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
-        const _leak = detectProtectedRawEgress(fn, _protectCtx);
-        if (_leak) {
-          const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
-          const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
-          if (_seenEProtect.has(_dedupKey)) continue;
-          _seenEProtect.add(_dedupKey);
-          errors.push(new CGError(
-            "E-PROTECT-004",
-            `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
-            `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
-            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: declassify ` +
-            `explicitly at the value with \`reveal("col")\`, project the protected column out of the SELECT, or return the ` +
-            `row through the normal compiler-emitted response (not a manual \`Response\` / \`_{}\` / \`asIs\`).`,
-            (_sp as any),
-            "error",
-          ));
-        }
+        const _fnName = (_leak.fn as { name?: string }).name ?? "<anonymous>";
+        const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
+        if (_seenEProtect.has(_dedupKey)) continue;
+        _seenEProtect.add(_dedupKey);
+        // Name the other function when a half of the leak lives across a call,
+        // so the diagnostic points at code the author can actually see.
+        const _selects = _leak.queryFn
+          ? `calls \`${_leak.queryFn}\`, which selects a protected (\`protect=\`) column in \`${_leak.query}\`,`
+          : `selects a protected (\`protect=\`) column in \`${_leak.query}\``;
+        const _reaches = _leak.egressFn
+          ? `and reaches ${_leak.egressKind} via \`${_leak.egressFn}\``
+          : `and reaches ${_leak.egressKind}`;
+        errors.push(new CGError(
+          "E-PROTECT-004",
+          `E-PROTECT-004: server function \`${_fnName}\` ${_selects} ${_reaches} — an egress the compiler cannot ` +
+          `redact, so a protected column cannot be proven stripped at this boundary (§14.8.9). The compiler will not ` +
+          `silently ship it. Resolution: declassify explicitly at the value with \`reveal("col")\`, project the ` +
+          `protected column out of the SELECT, or return the row through the normal compiler-emitted response (not a ` +
+          `manual \`Response\` / \`_{}\` / \`asIs\`).`,
+          (_sp as any),
+          "error",
+        ));
       }
     }
   }
@@ -4388,14 +4399,19 @@ export function generateServerJs(
       // compiler's own `I-PROTECT-STRIP-001` printed on the same build.
       //
       // The guard STAYS, because it is right about the 403: enveloping a
-      // `Response` destroys it. What changed is that it is no longer the last
-      // line of defense. `_scrml_protect_redact` genuinely cannot introspect an
-      // already-serialized body, so the strip moved to where the serialization
-      // happens: a tagged row carries a non-enumerable `toJSON` that returns the
-      // redacted projection, so `JSON.stringify(row)` inside a hand-built
-      // `Response` redacts at the point of the leak (see SERVER_PROTECT_HELPER).
-      // Deny-unless-revealed at the SERIALIZER, not at the Response — which is
-      // why a body that returns a bare `403` with no row in it is unaffected.
+      // `Response` destroys it. `_scrml_protect_redact` genuinely cannot
+      // introspect an already-serialized body — so §14.8.9 does not TRY to
+      // redact that path, it REFUSES TO COMPILE it: `E-PROTECT-004` fires when a
+      // protected-origin row can reach a hand-built `Response` (see
+      // `codegen/protect-egress.ts`, and since S350 that gate reaches across the
+      // same-file call graph, not just within one body). Fail-closed at compile
+      // time, not best-effort at run time.
+      //
+      // ⚠ A value-level `toJSON` hook on the tagged row was tried here
+      // (dpa-030 D2c) and REMOVED at S350: a value cannot know WHY it is being
+      // serialized, so it both missed any shallow copy (`{...row}`) and stripped
+      // server-INTERNAL serialization that never crosses the wire. Do not
+      // reintroduce it — the passthrough below is guarded by the compile gate.
       lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
       {
         // M-7C-D-12 Track 2 (§57 Wire Format): same `T | not` envelope-wrap

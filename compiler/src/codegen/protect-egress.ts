@@ -27,15 +27,25 @@
  *      `reveal`-stamped. Redaction is sound BY CONSTRUCTION — the compiler reads
  *      a tag at egress; it never proves a return clean (no value-flow obligation).
  *
- *   4. (dpa-030 D2c) "the single compiler-owned egress sink" was a PREMISE, not a
- *      fact. A hand-written `new Response(JSON.stringify(row))` is a second sink,
- *      it is reachable from clean scrml source, and `JSON.stringify` drops the
- *      descriptor by the same property that makes the descriptor invisible in
- *      output. So a tagged row now carries a non-enumerable `toJSON` that returns
- *      the REDACTED projection. Deny-unless-revealed at the SERIALIZER — which is
- *      where the boundary actually is, and which is why it needs no allow-list of
- *      egress shapes and produces no false positive on a body that returns a bare
- *      `403` with no row in it.
+ *   4. "the single compiler-owned egress sink" is a PREMISE, not a fact: a
+ *      hand-written `new Response(JSON.stringify(row))` is a SECOND sink and it
+ *      is reachable from clean scrml source. §14.8.9 answers that premise
+ *      failure by REFUSING TO COMPILE (`E-PROTECT-004`, below) — "the compiler
+ *      will not ship a protected column through a path it cannot redact" — NOT
+ *      by trying to redact the un-redactable path anyway.
+ *
+ *      A value-level `toJSON` hook was tried here (dpa-030 D2c) and REMOVED
+ *      (S350). A value cannot know WHY it is being serialized, and that single
+ *      property produced both of its failure modes: it UNDER-fired after any
+ *      shallow copy (`{...row}`, `Object.assign`, `structuredClone`,
+ *      `.map(r => ({...r}))` — the hook is an own property of the row and does
+ *      not survive the copy, while the Symbol descriptor does), and it
+ *      OVER-fired on server-INTERNAL serialization (stringifying a row into an
+ *      audit table, a log line, or a cache entry silently lost columns — a
+ *      behaviour regression on code that never crosses the wire). Patching the
+ *      spread would have been a per-position fix for a whole class. The
+ *      compile-time refusal is the sanctioned mechanism; a serialization hook
+ *      is not.
  *
  * Soundness bound (§14.8.9 normative — DO NOT over-claim): complete for
  * explicit-column flows of statically-resolvable SQL, by ORIGIN. NOT covered:
@@ -210,33 +220,27 @@ export const SERVER_PROTECT_HELPER: string = [
   "// `.map` carry it) but Symbol-keyed (so JSON.stringify ignores it). The egress",
   "// sink reads it and drops protected columns unless `reveal`-stamped.",
   "//",
-  "// A tagged row ALSO carries a non-enumerable `toJSON`, so serializing it",
-  "// directly -- `new Response(JSON.stringify(row))` in a hand-written handler --",
-  "// yields the REDACTED projection, not the raw row. Without it the descriptor is",
-  "// silently dropped at exactly the boundary it exists to guard: `JSON.stringify`",
-  "// ignores Symbol keys, which is what makes the descriptor invisible in the",
-  "// output AND what makes it useless there. `reveal(\"col\")` rebuilds the",
-  "// descriptor and reinstalls the hook, so a declassified column still ships.",
+  "// The descriptor is METADATA ONLY. It changes NOTHING an ordinary JS consumer",
+  "// can observe: `row.passwordHash` still reads, `Object.keys(row)` is unchanged,",
+  "// and a server-internal `JSON.stringify(row)` -- into an audit table, a log",
+  "// line, a cache entry -- still serializes the FULL row. Confidentiality is",
+  "// enforced at the two places that are actually egress: the compiler-emitted",
+  "// sink calls `_scrml_protect_redact` below, and any egress the compiler CANNOT",
+  "// redact is refused at compile time with `E-PROTECT-004` (§14.8.9 fail-closed).",
+  "// A serialization hook on the value was deliberately NOT used: a value cannot",
+  "// know why it is being serialized, so it strips internal reads it should not",
+  "// and misses any shallow copy it should have caught.",
   "const _SCRML_PROTECT = Symbol.for(\"scrml.protect.origin\");",
-  "function _scrml_protect_mark(row, descriptor) {",
-  "  row[_SCRML_PROTECT] = descriptor;",
-  "  // Non-enumerable: invisible to `Object.keys` / `{...row}` / the redactor's own",
-  "  // rebuild, so it never appears as a column in any output.",
-  "  Object.defineProperty(row, \"toJSON\", {",
-  "    value: function () { return _scrml_protect_redact(this); },",
-  "    enumerable: false, configurable: true, writable: true,",
-  "  });",
-  "  return row;",
-  "}",
   "function _scrml_protect_tag(value, cols) {",
   "  if (value == null || typeof value !== \"object\") return value;",
   "  if (Array.isArray(value)) {",
   "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_protect_mark(row, { cols, revealed: [] });",
+  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) row[_SCRML_PROTECT] = { cols, revealed: [] };",
   "    }",
   "    return value;",
   "  }",
-  "  return _scrml_protect_mark(value, { cols, revealed: [] });",
+  "  value[_SCRML_PROTECT] = { cols, revealed: [] };",
+  "  return value;",
   "}",
   "function _scrml_protect_reveal(value, col) {",
   "  if (value == null || typeof value !== \"object\") return value;",
@@ -244,7 +248,8 @@ export const SERVER_PROTECT_HELPER: string = [
   "  const d = value[_SCRML_PROTECT];",
   "  if (!d) return value;",
   "  const next = { ...value };",
-  "  return _scrml_protect_mark(next, { cols: d.cols, revealed: [...d.revealed, col] });",
+  "  next[_SCRML_PROTECT] = { cols: d.cols, revealed: [...d.revealed, col] };",
+  "  return next;",
   "}",
   "function _scrml_protect_redact(value) {",
   "  if (value == null || typeof value !== \"object\") return value;",
@@ -311,13 +316,26 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
 // a 512 depth cap. Enumerating field names is the fail-OPEN shape and "add the
 // missing field" is the defect class, not the fix.
 //
-// SOUNDNESS BOUND, STATED HONESTLY. This gate is WITHIN-FUNCTION. A row fetched
-// in fn A, returned to fn B, and serialized into a `Response` there is NOT caught
-// here — neither body co-occurs with the other's half. That case is closed at
-// RUNTIME instead, by the `toJSON` the tagged row carries (see
-// SERVER_PROTECT_HELPER), because the descriptor travels with the VALUE and a
-// call-graph closure only tracks NAMES. The two are complementary: this one is
-// loud and early, that one is total and late.
+// SOUNDNESS BOUND, STATED HONESTLY. The gate reaches ACROSS THE CALL BOUNDARY —
+// a row fetched in fn A, returned to fn B, and serialized into a `Response`
+// there DOES fire, via the same-file call graph resolved in `detectRawEgressSet`
+// below. It is a NAME-based closure over same-file server functions, and it is
+// bounded accordingly: an indirect call (a function value passed as an argument,
+// stored in an object, or reached through an import) is not resolved, and it is
+// not a value-flow analysis — a callee that fetches a protected row and a caller
+// that raw-egresses ANYTHING are enough to fire, whether or not that particular
+// row is the one serialized.
+//
+// That over-approximation is deliberate and it is the fail-closed direction: the
+// remedy is `reveal("col")`, projecting the column out of the SELECT, or
+// returning through the compiler-emitted response — all loud, all reversible.
+//
+// WHAT IS *NOT* HERE, AND WHY. A value-level `toJSON` hook on the tagged row was
+// tried (dpa-030 D2c) as a "total and late" runtime complement to this "loud and
+// early" compile-time gate, and it was REMOVED at S350. It was not complementary;
+// it was unsound in both directions — defeated by any shallow copy, and firing on
+// server-internal serialization that never crosses the wire. §14.8.9 mandates
+// REFUSAL at an unredactable egress, not best-effort redaction of one.
 // ---------------------------------------------------------------------------
 
 /** Global namespace objects whose `.<name>` IS the global of that name. */
@@ -448,37 +466,24 @@ function collectRevealedColumns(fnNode: unknown): Set<string> {
 }
 
 /**
- * §14.8.9 fail-closed gate (E-PROTECT-004) — detect a protected-origin value
- * reaching a RAW / compiler-UNANALYZABLE egress within a single server-function
- * body, where the structural redaction floor cannot guarantee the strip:
- *   - a `_{}` foreign-code block (§23) — opaque interior;
- *   - a manual `Response` / `handle()` body (§40) — the floor's redact passes a
- *     `Response` instance through untouched (it cannot introspect a serialized
- *     body), so a row manually serialized there would LEAK;
- *   - an `asIs`-typed value (§14.1.1) — escapes the type system.
- *
- * Takes the `function-decl` AST NODE (not its source slice). Returns the
- * offending query + egress kind (→ E-PROTECT-004), or null.
+ * The protected-origin query in THIS body whose columns are not all declassified
+ * by `revealed`, or null. The returned string is the trimmed query text for the
+ * diagnostic.
  *
  * DECLASSIFICATION IS PER-COLUMN, not per-body. `reveal("col")` names ONE column;
  * §14.8.9's own conformance rationale says it "stamps the column's provenance
  * descriptor as declassified". So a body that reveals `name` and leaks
- * `passwordHash` now FIRES — under the old rule any `.reveal(` at all suppressed
- * the gate wholesale, which made the sole declassification primitive double as an
- * unconditional off-switch. A query whose origins are UNRESOLVABLE (`{all:true}`,
- * the CTE/UNION/dynamic strip-all path) can never be covered by a named reveal —
- * there is no name to check against — so it always fires at a raw egress.
+ * `passwordHash` FIRES — under the pre-dpa-030 rule any `.reveal(` at all
+ * suppressed the gate wholesale, which made the sole declassification primitive
+ * double as an unconditional off-switch. A query whose origins are UNRESOLVABLE
+ * (`{all:true}`, the CTE/UNION/dynamic strip-all path) can never be covered by a
+ * named reveal — there is no name to check against — so it always fires.
  */
-export function detectProtectedRawEgress(
+function findProtectedQuery(
   fnNode: unknown,
   ctx: ProtectContext,
-): { query: string; egressKind: string } | null {
-  if (!fnNode || typeof fnNode !== "object") return null;
-
-  const aliases = collectGlobalAliases(fnNode);
-  const revealed = collectRevealedColumns(fnNode);
-
-  // --- pass 1: the protected-origin query whose columns are NOT all declassified.
+  revealed: ReadonlySet<string>,
+): string | null {
   let protectedQuery: string | null = null;
   walkStructurally(fnNode, (n) => {
     if (protectedQuery !== null) return;
@@ -492,9 +497,17 @@ export function detectProtectedRawEgress(
     if (!uncovered) return;
     protectedQuery = n.query.trim().replace(/\s+/g, " ").slice(0, 60);
   });
-  if (protectedQuery === null) return null;
+  return protectedQuery;
+}
 
-  // --- pass 2: a raw / unredactable egress in the same body.
+/**
+ * The raw / compiler-unredactable egress in THIS body, or null. Aliases are
+ * collected PER BODY (never merged across the call graph): a `const R =
+ * globalThis.Response` in one function must not make an unrelated local `R` in
+ * another function resolve to `Response`.
+ */
+function findRawEgress(fnNode: unknown): string | null {
+  const aliases = collectGlobalAliases(fnNode);
   let egressKind: string | null = null;
   const setKind = (k: string): void => { if (egressKind === null) egressKind = k; };
   walkStructurally(fnNode, (n) => {
@@ -526,6 +539,210 @@ export function detectProtectedRawEgress(
       setKind("an `asIs`-typed value (§14.1.1)");
     }
   });
+  return egressKind;
+}
+
+/**
+ * §14.8.9 fail-closed gate (E-PROTECT-004) — detect a protected-origin value
+ * reaching a RAW / compiler-UNANALYZABLE egress within a SINGLE server-function
+ * body, where the structural redaction floor cannot guarantee the strip:
+ *   - a `_{}` foreign-code block (§23) — opaque interior;
+ *   - a manual `Response` / `handle()` body (§40) — the floor's redact passes a
+ *     `Response` instance through untouched (it cannot introspect a serialized
+ *     body), so a row manually serialized there would LEAK;
+ *   - an `asIs`-typed value (§14.1.1) — escapes the type system.
+ *
+ * Takes the `function-decl` AST NODE (not its source slice). Returns the
+ * offending query + egress kind (→ E-PROTECT-004), or null.
+ *
+ * This is the INTRAPROCEDURAL entry. `detectProtectedRawEgressAcrossFile` below
+ * is the one the emitter calls; it reaches across the same-file call graph.
+ */
+export function detectProtectedRawEgress(
+  fnNode: unknown,
+  ctx: ProtectContext,
+): { query: string; egressKind: string } | null {
+  if (!fnNode || typeof fnNode !== "object") return null;
+  const revealed = collectRevealedColumns(fnNode);
+  const query = findProtectedQuery(fnNode, ctx, revealed);
+  if (query === null) return null;
+  const egressKind = findRawEgress(fnNode);
   if (egressKind === null) return null;
-  return { query: protectedQuery, egressKind };
+  return { query, egressKind };
+}
+
+// ---------------------------------------------------------------------------
+// §14.8.9 fail-closed gate, INTERPROCEDURAL (S350).
+//
+// The intraprocedural gate above fires only when the protected SELECT and the
+// raw egress sit in the SAME body. MEASURED: it goes silent across ONE call hop,
+// in BOTH directions —
+//
+//   (a) SELECT in a callee, raw `Response` in the caller:
+//         function fetchUser(id) { return ?{`SELECT * FROM users …`}.get() }
+//         function handle(req, resolve) {
+//           let u = fetchUser(1)
+//           return new globalThis.Response(JSON.stringify({...u}))
+//         }
+//   (b) SELECT in the caller, raw `Response` in a callee:
+//         function wrap(u) { return new globalThis.Response(JSON.stringify(u)) }
+//         function handle(req, resolve) {
+//           let u = ?{`SELECT * FROM users …`}.get()
+//           return wrap(u)
+//         }
+//
+// Both compiled EXIT 0 with zero diagnostics before this change. The spread is
+// not what defeats the gate — the CALL BOUNDARY is; (a) goes silent with or
+// without the `{...u}`.
+//
+// THE FIX IS A NAME-KEYED CALL CLOSURE over the file's own server functions.
+// For each function F, the EFFECTIVE BODY is F plus every same-file function F
+// transitively calls; the existing single-body predicates then run over that set
+// unchanged. One rule covers both directions: in (a) the query is in the callee
+// and the egress in the root, in (b) the reverse, and closure(handle) contains
+// both either way.
+//
+// BOUND, STATED HONESTLY. This is a NAME closure, not a value-flow analysis:
+//   · an INDIRECT call (a function passed as an argument, stored in an object,
+//     or reached through an import) is NOT resolved — the edge is only
+//     `{kind:"call", callee:{kind:"ident", name}}` against a same-file
+//     `function-decl` name;
+//   · it does not prove the protected row is the value that reaches the egress.
+//     A callee that selects a protected row plus a caller that raw-egresses
+//     ANYTHING is enough to fire.
+// Both are the fail-CLOSED direction (over-approximate, loud, and reversible by
+// `reveal("col")`, by projecting the column out, or by returning through the
+// compiler-emitted response). Under-approximating here would be a silent leak.
+//
+// ⚠ SEQUENCING CONSTRAINT — read before touching the `handle()` call path.
+// `handle()` currently cannot call ANY same-file user function at RUNTIME: the
+// callee is escalated into its own route handler while the emitted `handle()`
+// body still calls the original bare name, which binds to nothing in the module
+// (`g-handle-middleware-call-to-escalated-fn-emits-undefined-reference`, HIGH,
+// pre-existing — NOT introduced here). So shapes (a) and (b) throw a
+// ReferenceError today instead of shipping the column: the leak is MASKED, not
+// absent. **Whoever fixes that undefined-callee defect without this gate in
+// place UNMASKS a confidentiality leak.** This gate is a PREREQUISITE for that
+// fix, not an alternative to it.
+// ---------------------------------------------------------------------------
+
+/** Same-file functions this body calls by bare name (`fetchUser(1)`). */
+function collectCalledNames(fnNode: unknown): Set<string> {
+  const names = new Set<string>();
+  walkStructurally(fnNode, (n) => {
+    if (
+      n.kind === "call"
+      && isNode(n.callee)
+      && n.callee.kind === "ident"
+      && typeof n.callee.name === "string"
+    ) {
+      names.add(n.callee.name);
+    }
+  });
+  return names;
+}
+
+/**
+ * The EFFECTIVE BODY of `root`: `root` itself plus every same-file function it
+ * transitively calls. Breadth-first with an identity `seen` set, so mutual and
+ * self recursion terminate.
+ */
+function callClosure(root: unknown, byName: ReadonlyMap<string, unknown>): unknown[] {
+  const bodies: unknown[] = [root];
+  const seen = new Set<unknown>([root]);
+  for (let i = 0; i < bodies.length; i++) {
+    for (const name of collectCalledNames(bodies[i])) {
+      const callee = byName.get(name);
+      if (!callee || seen.has(callee)) continue;
+      seen.add(callee);
+      bodies.push(callee);
+    }
+  }
+  return bodies;
+}
+
+/** One E-PROTECT-004 finding, keyed to the function the diagnostic reports on. */
+export interface ProtectedRawEgressFinding {
+  /** The `function-decl` node the diagnostic is reported at. */
+  fn: unknown;
+  /** The offending query text (trimmed for the message). */
+  query: string;
+  /** Human-readable egress kind (`a manual \`Response\` …`). */
+  egressKind: string;
+  /** Name of the function holding the query, when it is NOT `fn`. */
+  queryFn: string | null;
+  /** Name of the function holding the egress, when it is NOT `fn`. */
+  egressFn: string | null;
+}
+
+const fnNameOf = (n: unknown): string =>
+  (isNode(n) && typeof n.name === "string") ? n.name : "<anonymous>";
+
+/**
+ * §14.8.9 fail-closed gate across the same-file call graph. Returns one finding
+ * per leak path, reported at the INNERMOST function whose effective body holds
+ * both halves — so a chain `handle -> serve -> fetchUser` with the egress in
+ * `serve` reports once, on `serve`, rather than once per enclosing caller.
+ */
+export function detectProtectedRawEgressAcrossFile(
+  fnNodes: readonly unknown[],
+  ctx: ProtectContext,
+): ProtectedRawEgressFinding[] {
+  const fns = fnNodes.filter((f) => f && typeof f === "object");
+  if (fns.length === 0) return [];
+
+  // Name -> node. A duplicate name keeps the FIRST declaration (the emitter's
+  // own resolution order); an ambiguous name is not a reason to stop analysing.
+  const byName = new Map<string, unknown>();
+  for (const f of fns) {
+    const name = isNode(f) ? f.name : undefined;
+    if (typeof name === "string" && !byName.has(name)) byName.set(name, f);
+  }
+
+  const closures = new Map<unknown, unknown[]>();
+  for (const f of fns) closures.set(f, callClosure(f, byName));
+
+  // A finding per root whose effective body holds both halves.
+  const raw = new Map<unknown, ProtectedRawEgressFinding>();
+  for (const f of fns) {
+    const bodies = closures.get(f)!;
+    // `reveal("col")` is honoured across the whole effective body, exactly as it
+    // is across a single body: the author named the column explicitly, and the
+    // closure is the unit this gate reasons about.
+    const revealed = new Set<string>();
+    for (const b of bodies) for (const c of collectRevealedColumns(b)) revealed.add(c);
+
+    let query: string | null = null;
+    let queryHolder: unknown = null;
+    for (const b of bodies) {
+      const q = findProtectedQuery(b, ctx, revealed);
+      if (q !== null) { query = q; queryHolder = b; break; }
+    }
+    if (query === null) continue;
+
+    let egressKind: string | null = null;
+    let egressHolder: unknown = null;
+    for (const b of bodies) {
+      const e = findRawEgress(b);
+      if (e !== null) { egressKind = e; egressHolder = b; break; }
+    }
+    if (egressKind === null) continue;
+
+    raw.set(f, {
+      fn: f,
+      query,
+      egressKind,
+      queryFn: queryHolder === f ? null : fnNameOf(queryHolder),
+      egressFn: egressHolder === f ? null : fnNameOf(egressHolder),
+    });
+  }
+
+  // Report the INNERMOST firing root: drop any root whose effective body strictly
+  // contains another firing root, so one leak path yields one diagnostic.
+  const findings: ProtectedRawEgressFinding[] = [];
+  for (const [f, finding] of raw) {
+    const inner = closures.get(f)!.some((b) => b !== f && raw.has(b));
+    if (!inner) findings.push(finding);
+  }
+  return findings;
 }

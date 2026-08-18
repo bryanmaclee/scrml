@@ -183,30 +183,34 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
     expect(out).toEqual([{ id: 1, extra: true }, { id: 2, extra: true }]);
   });
 
-  // ⚠ REWRITTEN at dpa-030 D2c, and the reason matters. The original read:
+  // ⚠ REWRITTEN TWICE. dpa-030 D2c changed the last assertion from the full row
+  // to `{ id: 1 }` on the theory that a value-level `toJSON` hook should redact
+  // an author's own `JSON.stringify`. **That hook was removed at S350** — a value
+  // cannot know WHY it is being serialized, so it stripped server-INTERNAL
+  // serialization (an audit row, a log line, a cache entry) that never crosses
+  // the wire, and it missed any shallow copy (`{...row}`) that does.
   //
-  //     expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1, passwordHash: "x" });
-  //
-  // Its INTENT was "the Symbol descriptor is metadata, not data — it must never
-  // appear as a key in serialized output", which is a real and still-live
-  // invariant. But the assertion it wrote **pinned the leak**: it asserted that
-  // an author's own `JSON.stringify(taggedRow)` emits the protected column
-  // verbatim. That is precisely the D2 defect, green in the suite, in the very
-  // file whose header says "never ships the protected column".
-  //
-  // The invariant is kept; the leak assertion is not.
+  // The invariant this test actually owns is the ORIGINAL one, and it is still
+  // live: the Symbol descriptor is METADATA, not data — it must never appear as
+  // a key in serialized output. The full-fidelity assertion below is not a
+  // "pinned leak"; it is the deliberate post-S350 semantics. Confidentiality on
+  // the raw-egress path is carried by the COMPILE-TIME gate (E-PROTECT-004,
+  // §14.8.9 fail-closed), which refuses to compile source where a protected row
+  // can reach an egress the compiler cannot redact — see the cross-function
+  // tests below.
   test("descriptor is JSON-invisible (never serialized as a data key)", () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, passwordHash: "x" }, ["passwordHash"]);
     const keysOf = (v) => Object.keys(JSON.parse(JSON.stringify(v)));
-    // Neither the descriptor nor the serializer hook is ever a key, on either
+    // Neither the descriptor nor any serializer hook is ever a key, on either
     // the direct-serialize path or the compiler-owned redact-then-serialize one.
     for (const k of [...keysOf(row), ...keysOf(_scrml_protect_redact(row))]) {
       expect(k).not.toContain("scrml.protect");
       expect(k).not.toBe("toJSON");
     }
-    // …and the direct path now redacts rather than shipping the column.
-    expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1 });
+    // Tagging changes NOTHING an ordinary JS consumer observes: a server-internal
+    // stringify is full-fidelity, exactly as it is for an untagged object.
+    expect(JSON.parse(JSON.stringify(row))).toEqual({ id: 1, passwordHash: "x" });
   });
 
   test("reveal round-trip: revealed column is admitted", () => {
@@ -496,73 +500,148 @@ describe("§14.8.9 E-PROTECT-004 is STRUCTURAL — the source-text evasions are 
     )).toBe(false);
   });
 
-  // THE HONEST BOUND. The compile gate is within-function; this shape is the one
-  // it cannot see, and the one D2c's serializer hook exists for.
-  test("CROSS-FUNCTION is NOT caught by the compile gate (the documented bound)", () => {
-    const { result } = compileSource(protectProgram(
+  // ---- S350: the gate reaches ACROSS THE SAME-FILE CALL GRAPH ----------------
+  //
+  // ⚠ THE TEST BELOW USED TO ASSERT `false` — "CROSS-FUNCTION is NOT caught by
+  // the compile gate (the documented bound)". That bound was real and it was the
+  // whole justification for dpa-030 D2c's value-level `toJSON` hook. The hook is
+  // gone (it was unsound in both directions); the bound is closed HERE instead,
+  // where §14.8.9 says it belongs — fail-closed at compile time.
+
+  test("CROSS-FUNCTION (a): SELECT in a callee, raw egress in the caller — FIRES", () => {
+    expect(fires(
       `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
       + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new Response(JSON.stringify(u))\n      }`,
-    ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    )).toBe(true);
+  });
+
+  test("CROSS-FUNCTION (b): SELECT in the caller, raw egress in a callee — FIRES", () => {
+    expect(fires(
+      `      function wrap(u) {\n        return new globalThis.Response(JSON.stringify(u))\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = ${SELECT}\n        return wrap(u)\n      }`,
+    )).toBe(true);
+  });
+
+  test("CROSS-FUNCTION: the SPREAD is not what defeats it — the CALL BOUNDARY was", () => {
+    // Same shape as (a) with `{...u}`. Both spellings fire, which is the point:
+    // patching the spread would have been a per-position fix for a whole class.
+    expect(fires(
+      `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new globalThis.Response(JSON.stringify({ ...u }))\n      }`,
+    )).toBe(true);
+  });
+
+  test("TRANSITIVE: the query is two call hops away — FIRES", () => {
+    expect(fires(
+      `      function raw(id) {\n        return ${SELECT}\n      }\n`
+      + `      function fetchUser(id) {\n        return raw(id)\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("RECURSION terminates — a self-calling fn does not hang the closure", () => {
+    expect(fires(
+      `      function fetchUser(id) {\n        if (id > 0) { return fetchUser(id) }\n        return ${SELECT}\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("MUTUAL recursion terminates", () => {
+    expect(fires(
+      `      function a(id) {\n        return b(id)\n      }\n`
+      + `      function b(id) {\n        return a(id)\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = a(id)\n        return u\n      }`,
+    )).toBe(false);
+  });
+
+  // ---- the cross-call NEGATIVE controls (the gate must not over-fire) --------
+
+  test("CROSS-FUNCTION reveal: a `reveal(\"col\")` in the CALLEE suppresses the gate", () => {
+    // Declassification is honoured across the effective body, exactly as it is
+    // within one body — otherwise an explicit `reveal` would be unsilenceable
+    // the moment the author factored the query into a helper.
+    expect(fires(
+      `      function fetchUser(id) {\n        let u = ${SELECT}\n        return u.reveal("passwordHash")\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new Response(JSON.stringify(u))\n      }`,
+    )).toBe(false);
+  });
+
+  test("an UNCALLED sibling with a raw egress does not implicate a clean caller", () => {
+    // `deny` is never called from `serveUser`, so it is not in its closure.
+    expect(fires(
+      `      function deny() {\n        return new globalThis.Response("no", { status: 403 })\n      }\n`
+      + `      export server function serveUser(id) {\n        return ${SELECT}\n      }`,
+    )).toBe(false);
+  });
+
+  test("a CALLED sibling with a raw egress but NO protected query stays clean", () => {
+    expect(fires(
+      `      function deny() {\n        return new globalThis.Response("no", { status: 403 })\n      }\n`
+      + `      export server function serveUser(id) {\n        return deny()\n      }`,
+    )).toBe(false);
+  });
+
+  test("an alias in ONE function does not resolve a same-named local in ANOTHER", () => {
+    // `collectGlobalAliases` is per-body and must stay per-body: merging alias
+    // maps across the closure would make `new R(...)` in `mk` resolve to the
+    // `Response` that only `other` aliases.
+    expect(fires(
+      `      function other() {\n        const R = globalThis.Response\n        return new R("x")\n      }\n`
+      + `      function mk(v) {\n        const R = makeBox\n        return new R(v)\n      }\n`
+      + `      function makeBox(v) { return v }\n`
+      + `      export server function serveUser(id) {\n        let u = ${SELECT}\n        return mk(u)\n      }`,
+    )).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// dpa-030 D2c — deny-unless-revealed AT THE SERIALIZER.
+// S350 — WHERE THE §14.8.9 BOUNDARY ACTUALLY IS, AND WHERE IT IS NOT.
 //
-// The redactor used to begin `if (_scrml_result instanceof Response) return
-// _scrml_result;` — a fail-OPEN default at a confidentiality sink — justified in
-// the emitter by the premise "a `Response` is an opaque stream handle, not a row
-// set". dpa-029 falsified that by execution: `new Response(JSON.stringify(row))`
-// IS a row set, stringified, and it shipped the protected column at HTTP 200.
+// dpa-030 D2c installed a non-enumerable `toJSON` on every tagged row, so that
+// an author's own `JSON.stringify(row)` returned the REDACTED projection. The
+// hook was REMOVED at S350. Executed evidence, on the helper the branch shipped:
 //
-// The guard stays (enveloping a Response destroys an adopter's deliberate 403).
-// What changed is that a tagged row carries a non-enumerable `toJSON` returning
-// the REDACTED projection, so the strip happens where the serialization happens.
-// This EXECUTES the shipped helper — not a re-implementation of it.
+//     JSON.stringify(u)      = {"id":1,"name":"ada"}                         <- redacted
+//     JSON.stringify({...u}) = {"id":1,"name":"ada","passwordHash":"SECRET"} <- LEAKS
+//     descriptor survives spread?  true
+//     toJSON survives spread?      false
+//
+// A value cannot know WHY it is being serialized, and that single property
+// produced both failure modes: it UNDER-fired after any shallow copy (`{...u}`,
+// `Object.assign`, `structuredClone`, `.map(r => ({...r}))` — all the same hole,
+// so patching the spread would have been a per-position fix), and it OVER-fired
+// on server-INTERNAL serialization, silently dropping columns from an audit row
+// or a log line that never crosses the wire.
+//
+// §14.8.9 mandates REFUSAL at an egress the compiler cannot redact, not
+// best-effort redaction of one: "Fail-closed: the compiler will not ship a
+// protected column through a path it cannot redact." So the raw-egress path is
+// closed by E-PROTECT-004 at COMPILE time (now including across the same-file
+// call graph — see the cross-function tests above), and the runtime helper is
+// back to being pure metadata.
+//
+// These tests EXECUTE the shipped helper — not a re-implementation of it.
 // ---------------------------------------------------------------------------
-describe("§14.8.9 D2c — a tagged row redacts itself at JSON.stringify", () => {
-  test("THE LEAK, closed: an author's own JSON.stringify(row) drops the column", () => {
+describe("§14.8.9 S350 — the tag is metadata; the gate is the mechanism", () => {
+  test("a tagged row serializes at FULL FIDELITY (server-internal use is unaffected)", () => {
     const { _scrml_protect_tag } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
-    expect(JSON.stringify(row)).toBe('{"id":1,"name":"ada"}');
-    expect(JSON.stringify(row)).not.toContain("SECRET");
+    // An audit row / log line / cache entry stringified server-side must be the
+    // whole row. Under the D2c hook this returned `{"id":1,"name":"ada"}` — a
+    // silent behaviour regression on code that never touches the wire.
+    expect(JSON.stringify(row)).toBe('{"id":1,"name":"ada","passwordHash":"SECRET"}');
   });
 
-  test("an ARRAY of tagged rows redacts every row", () => {
+  test("tagging is OBSERVATIONALLY INERT to an ordinary JS consumer", () => {
     const { _scrml_protect_tag } = loadHelper();
-    const rows = _scrml_protect_tag([{ id: 1, passwordHash: "S1" }, { id: 2, passwordHash: "S2" }], ["passwordHash"]);
-    expect(JSON.stringify(rows)).toBe('[{"id":1},{"id":2}]');
-  });
-
-  test("a tagged row NESTED in a plain wrapper still redacts", () => {
-    const { _scrml_protect_tag } = loadHelper();
-    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
-    expect(JSON.stringify({ user: row, ok: true })).toBe('{"user":{"id":1},"ok":true}');
-  });
-
-  test("the `*` strip-all sentinel serializes to `{}`, not the row", () => {
-    const { _scrml_protect_tag } = loadHelper();
-    expect(JSON.stringify(_scrml_protect_tag({ a: 1, b: 2 }, "*"))).toBe("{}");
-  });
-
-  test("reveal ROUND-TRIPS: a declassified column ships through the author's stringify", () => {
-    const { _scrml_protect_tag, _scrml_protect_reveal } = loadHelper();
+    const plain = { id: 1, name: "ada", passwordHash: "SECRET" };
     const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
-    const revealed = _scrml_protect_reveal(row, "passwordHash");
-    expect(JSON.parse(JSON.stringify(revealed)).passwordHash).toBe("SECRET");
-    // …and the ORIGINAL row is untouched — reveal is a fresh value, not a mutation.
-    expect(JSON.stringify(row)).not.toContain("SECRET");
-  });
-
-  // NEGATIVE CONTROLS — the hook must not change any observable surface but the
-  // serializer's. A `toJSON` that showed up as a column would be a new defect.
-  test("`toJSON` is NON-enumerable — invisible to Object.keys and to spread", () => {
-    const { _scrml_protect_tag } = loadHelper();
-    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
-    expect(Object.keys(row)).toEqual(["id", "passwordHash"]);
-    expect(Object.keys({ ...row })).toEqual(["id", "passwordHash"]);
+    expect(JSON.stringify(row)).toBe(JSON.stringify(plain));
+    expect(Object.keys(row)).toEqual(Object.keys(plain));
+    expect(Object.keys({ ...row })).toEqual(Object.keys(plain));
+    // No serializer hook is installed at all — not enumerable, not hidden.
+    expect(row.toJSON).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(row, "toJSON")).toBeUndefined();
   });
 
   test("a DIRECT member read is unaffected — server-side use of the column still works", () => {
@@ -573,26 +652,56 @@ describe("§14.8.9 D2c — a tagged row redacts itself at JSON.stringify", () =>
     expect(row.passwordHash).toBe("SECRET");
   });
 
-  test("the compiler-owned sink is unchanged (redact-then-stringify, no double strip)", () => {
+  // ---- the COMPILER-OWNED sink is the redaction mechanism -------------------
+
+  test("the compiler-owned sink redacts (redact-then-stringify)", () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
     expect(JSON.stringify(_scrml_protect_redact(row))).toBe('{"id":1,"name":"ada"}');
   });
 
-  test("an UNTAGGED object serializes byte-identically (zero overhead off the floor)", () => {
-    loadHelper();
-    expect(JSON.stringify({ id: 1, passwordHash: "SECRET" })).toBe('{"id":1,"passwordHash":"SECRET"}');
+  test("THE PROPERTY THE HOOK LACKED: the sink redacts THROUGH a shallow copy", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
+    // The Symbol descriptor is an enumerable own property, so it SURVIVES every
+    // shallow copy — which is exactly what `toJSON` did not do.
+    for (const copy of [{ ...row }, Object.assign({}, row), [row].map((r) => ({ ...r }))[0]]) {
+      expect(JSON.stringify(_scrml_protect_redact(copy))).toBe('{"id":1,"name":"ada"}');
+    }
   });
 
-  // The cross-function shape the compile gate documents as out of its reach.
-  test("CROSS-FUNCTION: the tag travels with the VALUE, so the serializer still strips", () => {
-    const { _scrml_protect_tag } = loadHelper();
-    const fetchUser = () => _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
-    const serveUser = () => JSON.stringify(fetchUser());   // a different function
-    expect(serveUser()).toBe('{"id":1}');
+  test("an ARRAY of tagged rows redacts every row at the sink", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const rows = _scrml_protect_tag([{ id: 1, passwordHash: "S1" }, { id: 2, passwordHash: "S2" }], ["passwordHash"]);
+    expect(JSON.stringify(_scrml_protect_redact(rows))).toBe('[{"id":1},{"id":2}]');
+  });
+
+  test("a tagged row NESTED in a plain wrapper still redacts at the sink", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
+    expect(JSON.stringify(_scrml_protect_redact({ user: row, ok: true }))).toBe('{"user":{"id":1},"ok":true}');
+  });
+
+  test("the `*` strip-all sentinel drops every column at the sink", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    expect(JSON.stringify(_scrml_protect_redact(_scrml_protect_tag({ a: 1, b: 2 }, "*")))).toBe("{}");
+  });
+
+  test("reveal ROUND-TRIPS at the sink, and does not mutate the original row", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "SECRET" }, ["passwordHash"]);
+    const revealed = _scrml_protect_reveal(row, "passwordHash");
+    expect(JSON.parse(JSON.stringify(_scrml_protect_redact(revealed))).passwordHash).toBe("SECRET");
+    // reveal is a fresh value, not a mutation — the original still redacts.
+    expect(JSON.stringify(_scrml_protect_redact(row))).not.toContain("SECRET");
+  });
+
+  test("an UNTAGGED object is untouched at the sink (zero overhead off the floor)", () => {
+    const { _scrml_protect_redact } = loadHelper();
+    expect(JSON.stringify(_scrml_protect_redact({ id: 1, passwordHash: "SECRET" })))
+      .toBe('{"id":1,"passwordHash":"SECRET"}');
   });
 });
-
 // ---------------------------------------------------------------------------
 // LAYER 3b — channel `broadcast()` (§38) + SSE `server function*` (§37) egress
 // sinks. These are ADDITIONAL compiler-emitted client-egress serializers; the
