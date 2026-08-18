@@ -8578,6 +8578,17 @@ Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` 
 
 **Distinct from** [[g-protect-tag-tojson-hook-dropped-by-object-spread]] — that is a confidentiality defect on the same `handle()` surface; this is a plain miscompile and fails LOUD at runtime rather than shipping a secret. They were found in the same repro and share the `handle()`-calls-an-escalated-fn shape, so a fix for either should check the other.
 
+**BOTH DIRECTIONS OF THE CALL BOUNDARY FAIL — PA-executed, second shape added S350.** It is not specific to the callee doing the SQL:
+
+| shape | result |
+|---|---|
+| SQL in the callee, raw `Response` in `handle()` | `ReferenceError: fetchUser is not defined` |
+| SQL in `handle()`, raw `Response` in the callee (with a SEEDED `app.db` so the query actually runs) | `ReferenceError: wrap is not defined` |
+
+So **`handle()` cannot call ANY same-file user function.** Every callee is escalated into its own `_scrml_handler_<name>_N` route while the emitted `handle()` body still calls the original bare name.
+
+⚑ **SEQUENCING HAZARD — THIS BUG IS CURRENTLY LOAD-BEARING. DO NOT FIX IT ALONE.** `E-PROTECT-004` is INTRAPROCEDURAL (PA-measured S350): it fires on a protected SELECT + a raw egress in the SAME body and goes silent across a call hop. That cross-call confidentiality gap is real, but today it is **UNREACHABLE via `handle()` — because every cross-call shape throws before it can ship a column.** Fixing this ReferenceError WITHOUT first extending `E-PROTECT-004` across the call boundary would **UNMASK a live confidentiality leak**. State it as *masked, not absent*. Same shape as the S343 "the over-fire masks the lambda-param miscompile" finding — a bug whose removal makes a worse bug live. The gate extension is tracked as Unit 2 of the `egress-tojson-root` arc and is a **prerequisite** for closing this entry.
+
 **NOT investigated:** whether the same shape breaks from a non-`handle()` server function calling an escalated sibling, and whether the callee being `export`ed changes the outcome. Both are one compile each.
 
 ### g-template-literal-in-param-default-truncated-defeats-trigger-3-escalation — a template literal in a `function` parameter default is truncated at its first interpolation, dropping the interpolation AND the function body, so a server-only binding referenced there never escalates and argon2id ships to the browser — `NEW S349-bryan; HIGH; open`
