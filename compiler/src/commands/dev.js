@@ -466,7 +466,7 @@ function runOnce(opts, gatheredOut) {
       const line = w.line ?? w.span?.line;
       const col = w.column ?? w.col ?? w.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
-      console.error(`  ${w.code ? "[" + w.code + "] " : ""}${rel}${loc} ${w.message?.slice(0, 120)}`);
+      console.error(`  ${w.code ? "[" + w.code + "] " : ""}${rel}${loc} ${stripRedundantCode(w.code, w.message)?.slice(0, 120)}`);
     }
   }
 
