@@ -8539,6 +8539,29 @@ The real argon2id implementation and the credential-handling path reach the brow
 Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §9 in the §1/§5 convention — **its expectations invert when it closes**, so the pin becomes the regression guard rather than needing a rewrite.
 <!-- @gap id=g-destructured-param-default-ships-server-only-stdlib-to-browser sev=HIGH status=open locus=compiler/src/route-inference.ts(the Trigger-3 top-level scan root — `fnNode.params` is a sibling of `body` and is never walked; the nested `function-decl` branch already handles its twin) prov=rationale:PA-reproduced-on-main-exit-0-zero-server-js-argon2id-in-the-shipped-runtime-and-the-nested-twin-already-escalates-so-the-gap-is-the-root-not-the-pattern -->
 
+### g-ws-message-door-has-no-body-ceiling-d4-census-missed-it — the `<channel>` server WebSocket `message(ws, raw)` handler `JSON.parse`s an adopter-supplied frame with NO scrml size ceiling, so the dpa-030 D4 body-size fix closes three of FOUR ingress doors — `NEW S350-bryan; HIGH; open`
+
+<!-- @gap id=g-ws-message-door-has-no-body-ceiling-d4-census-missed-it sev=HIGH status=open locus=compiler/src/codegen/emit-channel.ts:1107(the emitted `message(ws, raw)` handler; `JSON.parse(raw)` at :1109 with no length/byte guard — PA-verified by grep on BOTH main d604df09 and the held branch 45fc29b5) prov=rationale:routed-to-the-PA-by-S349-peter-as-dpa-030-OQ-2-and-PA-CONFIRMED-on-the-branch-peter-could-not-inspect -->
+
+**PA-CONFIRMED on the artifact the reporter could not reach.** S349-peter routed this as dpa-030 OQ-2 and recorded the limit of their own evidence verbatim: *"I could not inspect `45fc29b5` directly — bryan's held branches are on his own remote."* The PA has that branch. Checked, and the finding holds.
+
+| | main `d604df09` | held branch `45fc29b5` |
+|---|---|---|
+| `maxPayloadLength` occurrences in `compiler/src` | **0** | **0** |
+| a length / byte / size guard in the emitted `message(ws, raw)` | **none** | **none** |
+
+`emit-channel.ts:1107` emits `message(ws, raw) {` and `:1109` `const d = JSON.parse(raw);`, binding the decoded payload to the channel's `onserver:message` handler param (§38.6.1). The dpa-030 **D4** fix added a bounded, fail-closed read to the **three `emit-server.ts` HTTP prologues** — its census enumerated those three and stopped. This is the fourth door.
+
+**Severity reasoning, stated so nobody over- or under-reacts.** Unlike the three HTTP prologues — which had *no* bound at all before D4 — this door does inherit Bun's default `websocket.maxPayloadLength` of 16 MB. So it is bounded, just not by anything **scrml declares or an adopter can see**, and 16 MB per frame with no frame-rate bound is still a remote resource-exhaustion vector on an unauthenticated surface. Filed HIGH because it is the same class D4 treats as HIGH and because the class is currently reported as closed when it is not.
+
+**What is actually wrong is the CLAIM, not just the code.** D4 asserts it closes the unbounded-ingress class. It closes three quarters of it. Whatever narrows this door should also narrow D4's own text in the same landing (§2 same-landing discipline) — otherwise the ledger keeps a closed-looking entry over an open door.
+
+**Pre-existing on main — NOT introduced by the security cluster.** Landing that cluster does not regress this; it simply does not finish it. That distinction is why this is an incompleteness to sequence, not a reason to hold the cluster.
+
+**Where the ceiling should live is NOT yet a language surface.** `server-body-guard.ts`'s own header flags this deliberately: a `<program maxBodySize="…">` attribute is the obvious ergonomic home and is a LANGUAGE-SURFACE addition needing ratification (Rule 4). Do not invent it while closing this door; feed the existing compiler-owned constant.
+
+**⚑ FILING-CHANNEL NOTE.** This sat in `handOffs/incoming/` as a routed memo and **never reached this ledger** — zero occurrences of `maxPayloadLength` here before this entry. The obligation was named in one artifact and every probe read another (base §10, the contract's most-repeated failure). It survived only because the PA chased a memo it had already archived to `read/`.
+
 ### g-handle-middleware-call-to-escalated-fn-emits-undefined-reference — a `handle()` middleware body that CALLS a function route inference escalated into its own route handler emits a bare, undefined reference, so every request through the middleware throws `ReferenceError` at exit 0 — `NEW S350-bryan; HIGH; open`
 
 <!-- @gap id=g-handle-middleware-call-to-escalated-fn-emits-undefined-reference sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:3100(the `handle()` escape-hatch body is emitted verbatim into the middleware IIFE; the callee was separately lifted to a route handler by compiler/src/route-inference.ts:4430 `middleware-handle` — PA-located-verify: BOTH loci are located-not-traced, the PA reproduced the SYMPTOM by execution but did not trace which pass owns the missing binding) prov=rationale:PA-reproduced-by-execution-on-main-d604df09-and-on-branch-45fc29b5-identically-so-it-is-pre-existing-not-branch-introduced -->
