@@ -642,10 +642,36 @@ describe("§14.8.9 E-PROTECT-004 is STRUCTURAL — the source-text evasions are 
     )).toBe(true);
   });
 
-  test("B2: `asIs` on a PARAM annotation is a raw egress", () => {
+  // ⚠ INVERTED at fix round 2 (H2), and this is a deliberate COVERAGE REDUCTION
+  // vs main — recorded here rather than buried. A PARAM annotation is an
+  // INGRESS: `function fmt(v: asIs)` describes a value coming IN and says
+  // nothing about a protected row going OUT. Treating it as an egress hard-blocked
+  // valid code, and `callClosure` propagated the false egress to every caller.
+  //
+  // WHAT THIS STOPS LOOKING AT, counted honestly: main's source-text `\basIs\b`
+  // regex fired on this position, so a param that IS the sink —
+  // `function f(sink: asIs) { sink(row) }` — is no longer caught. Separating a
+  // sink param from an ordinary formatting param is a value-flow question, not
+  // an annotation question.
+  test("B2/H2: `asIs` on a PARAM annotation is an INGRESS — NOT an egress", () => {
     expect(fires(
       `      export server function getUser(id, sink: asIs) {\n        let u = ${SELECT}\n        return u\n      }`,
-    )).toBe(true);
+    )).toBe(false);
+  });
+
+  test("H2: an asIs-typed param in a CALLEE does not implicate its caller (the false build break)", () => {
+    // The reported shape: `fmt` merely formats a string, the row never leaves.
+    expect(fires(
+      `      function fmt(v: asIs) { return v }\n`
+      + `      export server function getUser(id) {\n        let u = ${SELECT}\n        return fmt(u.name)\n      }`,
+    )).toBe(false);
+  });
+
+  test("H2: dropping `: asIs` from that param changes nothing (it was never the reason)", () => {
+    expect(fires(
+      `      function fmt(v) { return v }\n`
+      + `      export server function getUser(id) {\n        let u = ${SELECT}\n        return fmt(u.name)\n      }`,
+    )).toBe(false);
   });
 
   test("B2: `asIs[]` (array suffix) still matches the token, not a substring", () => {

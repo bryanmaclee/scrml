@@ -1828,12 +1828,25 @@ export function generateServerJs(
     {
       const _seenEProtect = new Set<string>();
       for (const _leak of detectProtectedRawEgressAcrossFile(fnNodes, _protectCtx)) {
-        const _sp = (_leak.fn as { span?: { start?: number; end?: number } }).span;
         // The gate reads the fn NODE, not a slice of `_sourceText`, so it does
         // not need a resolvable span to DO its work — but the diagnostic still
-        // needs one to point at. A span-less node keeps its previous (skipped)
-        // treatment rather than silently reporting at position 0.
-        if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
+        // needs one to POINT AT.
+        //
+        // ⚠ This used to `continue` on a span-less node. That was survivable when
+        // every root reported independently (a sibling still fired); it is NOT
+        // survivable now that the innermost-root filter elects exactly ONE root
+        // per leak path, because dropping that one root DISCARDS THE WHOLE
+        // FINDING — a silent fail-open in a fail-closed gate. A confidentiality
+        // diagnostic is never dropped for want of a cursor: fall back to the
+        // holder of either half, then to the file head.
+        const _spanOf = (n: unknown): { start?: number; end?: number } | null => {
+          const sp = (n as { span?: { start?: number; end?: number } } | null)?.span;
+          return sp && typeof sp.start === "number" && typeof sp.end === "number" ? sp : null;
+        };
+        const _sp = _spanOf(_leak.fn)
+          ?? _spanOf(_leak.egressHolder)
+          ?? _spanOf(_leak.queryHolder)
+          ?? { start: 0, end: 0 };
         const _fnName = (_leak.fn as { name?: string }).name ?? "<anonymous>";
         const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
         if (_seenEProtect.has(_dedupKey)) continue;

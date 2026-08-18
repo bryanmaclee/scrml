@@ -344,6 +344,18 @@ const GLOBAL_NAMESPACE_OBJECTS: ReadonlySet<string> = new Set(["globalThis", "wi
 /** The raw-egress constructor names §14.8.9 cannot redact past. */
 const RAW_EGRESS_CTORS: ReadonlySet<string> = new Set(["Response"]);
 
+/**
+ * Node kinds where an `asIs` annotation describes a value going OUT — a
+ * value-binding declaration, or a function's return type. A PARAM entry is
+ * deliberately absent: a param annotation is an INGRESS (see `findRawEgress`).
+ */
+const ASIS_EGRESS_NODE_KINDS: ReadonlySet<string> = new Set([
+  "function-decl",
+  "let-decl",
+  "const-decl",
+  "state-decl",
+]);
+
 type AnyNode = Record<string, unknown>;
 
 const isNode = (v: unknown): v is AnyNode =>
@@ -425,6 +437,61 @@ function collectGlobalAliases(fnNode: unknown): Map<string, string> {
  * The chain form's `args` is a raw argument-list STRING the parser produced — a
  * leaf, not a body scan — so lexing a string literal out of it is reading the
  * parser's own output, not re-parsing the source.
+ *
+ * ═══ OPEN FAIL-OPEN — READ BEFORE CHANGING THIS FUNCTION (S350 fix round 2, H1) ═══
+ *
+ * This returns a flat BAG OF COLUMN NAMES. It records THAT a column was revealed
+ * somewhere in the body, never WHICH VALUE was revealed. The declassification
+ * check downstream therefore asks "was this column name revealed anywhere",
+ * which is an off-switch with a smaller radius than the one round 1 removed —
+ * not the absence of one. THREE measured fail-opens, all exit 0, zero
+ * diagnostics, all shipping `passwordHash` at HTTP 200:
+ *
+ *   (1) TWO SITES, TWO BINDINGS — reveal `a`, egress `b`:
+ *         let a = ?{`SELECT * FROM users …`}.get()
+ *         let b = ?{`SELECT * FROM users …`}.get()
+ *         let x = a.reveal("passwordHash")
+ *         return new globalThis.Response(JSON.stringify(b))
+ *
+ *   (2) ONE SITE, ALIASED — reveal `a`, egress an alias of `a`:
+ *         let a = ?{`SELECT * FROM users …`}.get()
+ *         let b = a
+ *         let x = a.reveal("passwordHash")
+ *         return new globalThis.Response(JSON.stringify(b))
+ *
+ *   (3) ONE SITE, TWO VALUES — both from the same callee:
+ *         let a = fetchUser(1)
+ *         let b = fetchUser(2)
+ *         let x = a.reveal("passwordHash")
+ *         return new globalThis.Response(JSON.stringify(b))
+ *
+ * WHY BINDING IDENTITY DOES NOT FIX THIS, which is the part worth carrying:
+ *
+ *   · (1) alone would yield to binding identity — two sites, two names.
+ *   · (2) DEFEATS binding identity outright, and for a semantic reason:
+ *     `_scrml_protect_reveal` RETURNS A FRESH VALUE and leaves the receiver
+ *     tagged (asserted in `g-sql-row-protect-leak.test.js`). So `a.reveal(…)`
+ *     does NOT declassify `a`. Keying declassification on the RECEIVER binding
+ *     is modelling the primitive backwards, and would mark `a` — and every alias
+ *     of it — declassified.
+ *   · (3) is unanswerable by ANY location-keyed scheme. ONE static query site,
+ *     TWO runtime values, one revealed and one not. Site identity, binding
+ *     identity and function identity all collapse them into one fact.
+ *
+ * The general statement: **`reveal` is a VALUE-level operation, and every fact
+ * this pass can compute is LOCATION-level** (a query site, a binding name, a
+ * function name). A location-keyed declassification check has a fail-open
+ * wherever one value is revealed and a sibling from the same location is not.
+ * Answering it soundly means tracking values through bindings, aliases,
+ * containers and RETURNS — dataflow this compiler does not have.
+ *
+ * Deliberately NOT patched here: each of the last two rounds traded a fail-open
+ * in this mechanism for a false positive or the reverse, and a fourth narrowing
+ * of the same shape would do it again. Escalated to the operator as a design
+ * question (does cross-call declassification ship at all, or does `reveal`
+ * narrow to "declassify at the value you send"). Do not add another
+ * name-keyed narrowing here without that ruling.
+ * ═══════════════════════════════════════════════════════════════════════════
  *
  * A DYNAMIC `u.reveal(colName)` contributes NOTHING to this set: it cannot be
  * proven to cover any particular column, and §14.8.9 is a fail-closed floor, so
@@ -574,37 +641,58 @@ function findRawEgress(fnNode: unknown): string | null {
     }
     // An `asIs`-typed value (§14.1.1) escapes the type system entirely.
     //
-    // MATCH THE CONVENTION, NOT A LIST OF FIELD NAMES. Every position an
-    // annotation can occupy lands on a node property whose key ENDS IN
-    // `Annotation` — MEASURED, not assumed, by walking a real AST that spells
-    // `asIs` in every position the grammar allows (see the per-position tests in
-    // `g-sql-row-protect-leak.test.js`):
+    // TWO tests, and BOTH are load-bearing: the annotation KEY matches by
+    // convention, and the NODE KIND must be an EGRESS position.
+    //
+    // (1) KEY, by convention — every position an annotation can occupy lands on
+    // a property whose key ENDS IN `Annotation`. MEASURED by walking a real AST
+    // that spells `asIs` in every position the grammar allows:
     //
     //   returnTypeAnnotation  on `function-decl`   — `function f() -> asIs`
     //   typeAnnotation        on `let-decl`        — `let u: asIs = …`
     //   typeAnnotation        on `const-decl`      — `const u: asIs = …`
-    //   typeAnnotation        on a param entry     — `function f(sink: asIs)`
     //   typeAnnotation        (array/union suffix) — `let u: asIs[]`
+    //   typeAnnotation        on a PARAM entry     — `function f(sink: asIs)`
     //
-    // The node-field set ending in `Annotation` is exactly
-    // {`typeAnnotation`, `returnTypeAnnotation`} at this revision
-    // (`synthReturnTypeAnnotation` is a LOCAL in ast-builder and lands as
-    // `returnTypeAnnotation`), so the suffix test is equivalent today and stays
-    // correct when a new annotation position is added. Enumerating the two names
-    // is the fail-OPEN shape this file's invariant-52 note warns about —
-    // `returnTypeAnnotation` is precisely the one a two-name list missed.
+    // Enumerating the two live field names is the fail-OPEN shape this file's
+    // invariant-52 note warns about — `returnTypeAnnotation` is precisely the one
+    // a two-name list missed, and that was a measured coverage REGRESSION.
     //
-    // ⚠ `function-decl.raw` also contains the literal text `asIs` for every one
-    // of these spellings, because it is the fn's SOURCE SLICE. It is deliberately
-    // NOT matched: reading it would re-introduce the source-text co-occurrence
-    // regex dpa-030 D2b removed, and would fire on `asIs` in a comment or a
-    // string literal. The `Annotation` suffix cannot select a source-text field.
-    for (const key of Object.keys(n)) {
-      if (!key.endsWith("Annotation")) continue;
-      const ann = n[key];
-      if (typeof ann === "string" && /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(ann)) {
-        setKind("an `asIs`-typed value (§14.1.1)");
-        return;
+    // (2) NODE KIND, by POSITIVE membership — the key test alone swept in the
+    // PARAM entry, and **a parameter annotation is an INGRESS, not an egress**.
+    // `function fmt(v: asIs)` describes a value coming IN; it says nothing about
+    // a protected row going OUT. Matching it hard-blocked valid code, and
+    // `callClosure` then propagated the false egress to every caller:
+    //
+    //   function fmt(v: asIs) { return v }
+    //   export server function getUser(id) {
+    //     let u = ?{`SELECT * FROM users …`}.get()
+    //     return fmt(u.name)          // a string — the row never leaves
+    //   }
+    //
+    // fired E-PROTECT-004; deleting `: asIs` made it compile. So the egress
+    // positions are named POSITIVELY (invariant 54: opt in on a positive
+    // membership test, never on the absence of one) — a value-BINDING decl, or a
+    // function's RETURN type. A param entry carries no `kind` at all, so it can
+    // never satisfy this test even if a new annotation key appears on it.
+    //
+    // ⚠ KNOWN COVERAGE EDGE, deliberately given up with this rule: an asIs-typed
+    // param that is itself the sink — `function f(sink: asIs) { sink(row) }` — is
+    // no longer an egress here. Distinguishing a sink param from an ordinary
+    // formatting param is a value-flow question, not an annotation question.
+    //
+    // ⚠ `function-decl.raw` also holds the literal text `asIs` for every one of
+    // these spellings, because it is the fn's SOURCE SLICE. Deliberately NOT
+    // matched: reading it would re-introduce the source-text co-occurrence regex
+    // dpa-030 D2b removed, and would fire on `asIs` in a comment or a string.
+    if (typeof n.kind === "string" && ASIS_EGRESS_NODE_KINDS.has(n.kind)) {
+      for (const key of Object.keys(n)) {
+        if (!key.endsWith("Annotation")) continue;
+        const ann = n[key];
+        if (typeof ann === "string" && /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(ann)) {
+          setKind("an `asIs`-typed value (§14.1.1)");
+          return;
+        }
       }
     }
   });
@@ -695,8 +783,21 @@ export function detectProtectedRawEgress(
 // fix, not an alternative to it.
 // ---------------------------------------------------------------------------
 
-/** Same-file functions this body calls by bare name (`fetchUser(1)`). */
+/**
+ * Same-file functions this body calls by bare name (`fetchUser(1)`).
+ *
+ * MEMOIZED per node: the call closure re-asks this for every body it reaches,
+ * and the answer is root-independent. Keyed on node identity in a WeakMap, so a
+ * stale AST cannot pin memory and a fresh compile of a fresh AST never sees a
+ * previous file's answer.
+ */
+const _calledNamesMemo = new WeakMap<object, Set<string>>();
+
 function collectCalledNames(fnNode: unknown): Set<string> {
+  if (fnNode !== null && typeof fnNode === "object") {
+    const hit = _calledNamesMemo.get(fnNode as object);
+    if (hit) return hit;
+  }
   const names = new Set<string>();
   walkStructurally(fnNode, (n) => {
     if (
@@ -708,6 +809,9 @@ function collectCalledNames(fnNode: unknown): Set<string> {
       names.add(n.callee.name);
     }
   });
+  if (fnNode !== null && typeof fnNode === "object") {
+    _calledNamesMemo.set(fnNode as object, names);
+  }
   return names;
 }
 
@@ -742,6 +846,13 @@ export interface ProtectedRawEgressFinding {
   queryFn: string | null;
   /** Name of the function holding the egress, when it is NOT `fn`. */
   egressFn: string | null;
+  /**
+   * The nodes holding each half. The emitter needs a resolvable span to point
+   * the diagnostic at, and the reported root may not have one — these are the
+   * fallbacks so a span-less root can never SILENTLY DISCARD a finding.
+   */
+  queryHolder: unknown;
+  egressHolder: unknown;
 }
 
 const fnNameOf = (n: unknown): string =>
@@ -835,6 +946,8 @@ export function detectProtectedRawEgressAcrossFile(
           egressKind: egressOf.get(e)!,
           queryFn: q === f ? null : fnNameOf(q),
           egressFn: e === f ? null : fnNameOf(e),
+          queryHolder: q,
+          egressHolder: e,
         };
         break outer;
       }
