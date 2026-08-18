@@ -419,3 +419,150 @@ accommodate prose, least of all in a security fix round.
 
 No `--no-verify`. No `core.hooksPath` override. Did not touch the `handle()` undefined-callee defect
 or `docs/known-gaps.md`.
+
+## 2026-08-18 — FIX ROUND 2 (re-review of `da526a7d`, 6 findings, 2 HIGH)
+
+Both HIGHs and M3 reproduced on this tree before any code changed.
+
+| case | shape | MAIN | `da526a7d` | verdict |
+|---|---|---|---|---|
+| H1 | reveal `a`, egress `b`, two query sites | 0 silent | **0 SILENT** | **H1 CONFIRMED — fail-open** |
+| H2 | `fmt(v: asIs)` callee, row never leaves | 0 silent | **1 FIRES** | **H2 CONFIRMED — false build break** |
+| H2b | identical with `: asIs` dropped | 0 silent | 0 silent | the annotation is the whole difference |
+| M3 | shared `bad()` 404 helper + protect app | 0 silent | **1 FIRES** | M3 CONFIRMED (was relayed) |
+
+### H2 — FIXED. The convention was right; it needed the ingress/egress half.
+
+Matching every key ending in `Annotation` swept in the PARAM entry. A param
+annotation is an INGRESS. Egress positions are now named by POSITIVE node-kind
+membership (`function-decl` for a return type; `let-decl`/`const-decl`/`state-decl`
+for a binding), which is invariant 54's rule — opt in on a positive test, never on
+the absence of one. A param entry carries no `kind` at all, so it can never satisfy
+the test even if a new annotation key lands on it.
+
+**COUNTED, because round 1's own instruction demands it before any narrowing.** This
+gives up one position main covered: main's source-text regex fired on a param, so
+`function f(sink: asIs) { sink(row) }` — a param that IS the sink — is no longer
+caught. Case N drops from `p1..p5` to `p1/p2/p3/p5`. Separating a sink param from a
+formatting param is a value-flow question, not an annotation question. The B2 param
+test is INVERTED with that reasoning at its site, plus two tests for the reported
+false-break shape.
+
+### L5 — FIXED. A dropped finding is a fail-open.
+
+A span-less innermost root hit `continue` and discarded the WHOLE finding. That was
+survivable when every root reported independently; it is not once the innermost
+filter elects exactly ONE root per leak path. Now falls back: egress holder's span →
+query holder's span → file head. The finding carries both holder nodes so the
+emitter can do that. A confidentiality diagnostic is never dropped for want of a
+cursor.
+
+### L6 — FIXED. `collectCalledNames` memoized per node (WeakMap).
+
+### M3 — REPRODUCED, deliberately NOT fixed, and here is the cost
+
+`bad()` returns a raw `Response` built from a literal; it takes no parameters, so the
+protected row cannot be handed to it. Closure pairing still matches the query in
+`getUser` with the egress in `bad`.
+
+The cheap rule I considered: **an egress in a callee can only carry the row if the
+callee can RECEIVE it — a zero-arity callee cannot.** That is a DETECTION-precision
+fix, not a new declassification hole, which is the safer axis. But it is not
+soundness-free: a zero-param helper could read a module-level binding holding the
+row, and §14.8.9's stated bound only clearly excludes values "computed from" a
+protected column, not the row itself parked in module scope.
+
+I did not implement it, for one reason: **it is entangled with the H1 verdict.** If
+cross-call pairing goes back to design, M3 evaporates. If Unit 2 ships as-is, M3 is
+worth doing and the rule above is the proposal. Adding a narrowing to a mechanism I
+am simultaneously recommending be reconsidered would be working against my own
+recommendation. Cost of leaving it: a shared 404/403 helper — the natural factoring
+now that D2a made `new Response(...)` ordinary adopter source — hard-blocks any
+`protect=` app, with no remedy (`reveal` on a Response carrying no row is nonsense).
+
+### M4 — untouched, as instructed. R5 / R6 — unchanged from round 1.
+
+---
+
+## H1 — ATTEMPTED VIA BINDING IDENTITY AS INSTRUCTED. IT DOES NOT WORK.
+## Escalating, per the escape clause.
+
+I probed the class before coding, and it is wider than the reported shape. **Three
+fail-opens, three DIFFERENT mechanisms**, all exit 0 with zero diagnostics, all
+shipping `passwordHash` at HTTP 200 — measured on `da526a7d`:
+
+| # | shape | binding identity? |
+|---|---|---|
+| H1 | two query sites, two bindings; reveal `a`, egress `b` | **would fix** |
+| H1b | one site; `let b = a`; reveal `a`, egress `b` | **fixes it BACKWARDS** |
+| H1c | one site in a callee; `a = fetchUser(1)`, `b = fetchUser(2)`; reveal `a`, egress `b` | **cannot fix, ever** |
+
+**H1b is the one that kills the approach, and for a semantic reason.**
+`_scrml_protect_reveal` RETURNS A FRESH VALUE and leaves the receiver tagged — this
+repo asserts it: *"reveal is a fresh value, not a mutation — the original still
+redacts."* So `a.reveal("pw")` does **not** declassify `a`. Keying declassification
+on the RECEIVER binding models the primitive backwards and would mark `a`, and every
+alias of it, declassified. Binding identity does not merely miss H1b; it makes it
+worse.
+
+**H1c is unanswerable by any location-keyed scheme.** ONE static query site, TWO
+runtime values, one revealed and one not. Site identity, binding identity and
+function identity all collapse them into a single fact. There is no location to key
+on that separates them.
+
+**The general statement:** `reveal` is a VALUE-level operation, and every fact this
+pass can compute is LOCATION-level — a query site, a binding name, a function name. A
+location-keyed declassification check has a fail-open wherever one value is revealed
+and a sibling from the same location is not. That is not a bug in any one narrowing;
+it is the shape of all of them, which is why two rounds produced five defects here
+and each fix traded a fail-open for a false positive or the reverse.
+
+**I also checked the obvious alternative** — "the reveal must appear inside the egress
+expression" (declassify where you send). It closes H1, H1b and H1c and keeps the one
+gate-relevant corpus reveal green (`reveal-suppresses-e004` is exactly that shape).
+But it breaks TWO documented spellings: the cross-call factoring where the helper
+reveals and returns (case F), and the `?{}.reveal("col")` query-chain form this file
+already supports. Rescuing those needs a per-function "returns only declassified
+values" summary — i.e. new interprocedural analysis. **Not built: the instruction was
+explicitly not to build analysis infrastructure to save the unit.**
+
+### The asymmetry that I think is the actual decision
+
+Cross-call has two halves and they have opposite safety properties:
+
+- **DETECTION cross-call** — over-approximating is SAFE. A false pairing costs a
+  false positive (M3). This half works.
+- **DECLASSIFICATION cross-call** — over-approximating is a FAIL-OPEN. Every
+  approximation tried has produced one.
+
+So the shippable configuration, if Unit 2 ships, is *detection cross-call ON,
+declassification cross-call OFF (fail closed)* — which means `reveal` narrows to
+"declassify the value at the place you send it". That is a coherent language rule
+rather than a compiler wart, and it matches what §14.8.9 already says `reveal` is
+for: greppable at the boundary, in source and in the emitted handler. But it is a
+SEMANTIC NARROWING of a ratified primitive, so it is the operator's ruling, not
+mine, and it is why I stopped here.
+
+The three shapes and the reasoning are recorded in a block comment on
+`collectRevealedColumns` so the next person hits them before touching it.
+
+### Verification at `0fed3f4c`
+
+23-shape A/B matrix, both compilers. Every round-1 fix re-confirmed intact:
+K/K2 (cycle) FIRE, M/M2 (unrelated reveal) FIRE, C/D/E FIRE, F/P (both legitimate
+reveal factorings) SILENT, G/H/Q SILENT. H2/H2b now SILENT. H1/H1b/H1c still silent —
+the open fail-open. M3 still fires.
+
+- `g-sql-row-protect-leak` **91/91**, `json-body-guard` **15/15**,
+  `server-function-sse` **30/30**
+- Conformance **883/883**
+- Full suite **30086 pass / 53 fail / 30356 tests**; failing NAME SET byte-identical
+  to the `a112c92f` baseline (`diff` empty) — **zero new failures**
+- Corpus differential vs `a112c92f`: **221 artifacts, 221 of 221 `*.server.js`, ZERO
+  `*.client.js`, 0 newly failing / 0 newly passing compiles.** Byte-identical to round
+  1's differential, because round 2's changes are compiler-side only and do not alter
+  emitted text. The 1 text-only diagnostic remains the shifted emitted line number
+  already explained.
+
+No `--no-verify`, no `core.hooksPath` override, `handle()` and `known-gaps.md`
+untouched.
