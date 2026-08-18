@@ -113,6 +113,29 @@ export function toPosixSpecifier(p) {
   return typeof p === "string" ? p.replaceAll("\\", "/") : p;
 }
 
+/**
+ * Order-canonical comparator for the resolved input-file SET.
+ *
+ * The compare KEY must be separator-canonical, NOT the native path. `resolve(f)`
+ * yields `\` on Windows and `/` on POSIX; `\`=0x5C sorts AFTER digits while
+ * `/`=0x2F sorts BEFORE them, so a nested-subdir entry and a prefix-colliding
+ * sibling (`sub/a.scrml` vs `sub2.scrml`) flip relative order across OS. Because
+ * route/logic/fetch-stub ids mint in `inputFiles` traversal order, that flip
+ * makes a Windows-built client and a Linux-built server disagree about a fetch
+ * URL — the very §58 "two machines" divergence the input-order canonicalisation
+ * exists to remove (`g-api-cross-os-sort-key-native-separator`, S349-peter).
+ * Fold `\`↔`/` for the COMPARISON only (the same fold `PathKeyedSet` uses for
+ * dedup); callers keep the NATIVE values for the `filePath` contract.
+ *
+ * @param {string} a — a resolved (native-separator) absolute path
+ * @param {string} b — a resolved (native-separator) absolute path
+ * @returns {-1|0|1}
+ */
+export function compareInputPathsCanonical(a, b) {
+  const ka = toPosixSpecifier(a), kb = toPosixSpecifier(b);
+  return ka < kb ? -1 : ka > kb ? 1 : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Directory scanner
 // ---------------------------------------------------------------------------
@@ -921,7 +944,11 @@ export function compileScrml(options = {}) {
   // matching the `scanDirectory` walk; NOT locale `localeCompare`, which is the very
   // non-determinism this removes) — so the gathered set, and thus every minted id, is
   // a pure function of the file SET, not the order it was passed.
-  let resolvedInputFiles = inputFiles.map(f => resolve(f)).sort();
+  // Canonicalise the seed by a SEPARATOR-CANONICAL key (not the native path, whose
+  // `\`/`/` ordering flips cross-OS and would reopen the §58 "two machines"
+  // divergence this exists to close — see compareInputPathsCanonical). Values stay
+  // native for the `filePath` contract; comparison is POSIX-folded, code-unit.
+  let resolvedInputFiles = inputFiles.map(f => resolve(f)).sort(compareInputPathsCanonical);
   if (gatherEnabled && resolvedInputFiles.length > 0) {
     // Dedup KEY is separator-canonical (PathKeyedSet folds `\`↔`/`); the
     // compiled VALUE stays uniformly NATIVE — both the explicit entry seed
