@@ -214,6 +214,70 @@ describe("the body-size ceiling", () => {
   }, 20000);
 });
 
+// ---------------------------------------------------------------------------
+// S350 fix round 1, R4 — `getReader()` must be INSIDE the try.
+//
+// `_scrml_read_json_body` took the reader on the line BEFORE its `try`. When the
+// body stream is already locked or disturbed — a `handle()` middleware that
+// called `request.json()` and then passed the same request down to the route —
+// `getReader()` throws `TypeError: ReadableStream is locked` and that TypeError
+// ESCAPED UNCAUGHT, bypassing the compiler-owned envelope §61.3 exists to
+// guarantee. MEASURED by executing the emitted helper, not by reading it.
+// ---------------------------------------------------------------------------
+describe("§61.3 R4 — a locked/disturbed body still gets the compiler-owned envelope", () => {
+  // Pull the SHIPPED helper out of a real emitted artifact and run it, so this
+  // exercises the bytes the server actually loads.
+  async function loadBodyReader(serverJs) {
+    const sliceFn = (name) => {
+      const asyncAt = serverJs.indexOf(`async function ${name}(`);
+      const start = asyncAt >= 0 ? asyncAt : serverJs.indexOf(`function ${name}(`);
+      expect(start).toBeGreaterThan(-1);
+      let depth = 0, i = serverJs.indexOf("{", start), end = -1;
+      for (; i < serverJs.length; i++) {
+        if (serverJs[i] === "{") depth++;
+        else if (serverJs[i] === "}") { depth--; if (depth === 0) { end = i + 1; break; } }
+      }
+      return serverJs.slice(start, end);
+    };
+    const limit = serverJs.match(/const _SCRML_JSON_BODY_LIMIT = [^;]+;/)[0];
+    const src = [limit, sliceFn("_scrml_body_error"), sliceFn("_scrml_read_json_body")].join("\n");
+    const factory = new Function(`${src}\nreturn _scrml_read_json_body;`);
+    return factory();
+  }
+
+  test("EXECUTED: a LOCKED body returns the 400 envelope instead of throwing", async () => {
+    const { serverJs } = compileApp(ENDPOINT_APP);
+    const read = await loadBodyReader(serverJs);
+    const req = post(JSON.stringify({ type: "Ping" }));
+    req.body.getReader();                       // a prior consumer holds the reader
+    const r = await read(req);                  // must NOT throw
+    expect(r.ok).toBe(false);
+    expect(r.response.status).toBe(400);
+    expect((await r.response.json()).error.kind).toBe("MalformedBody");
+  });
+
+  test("EXECUTED: a DISTURBED body (already read) returns the 400 envelope", async () => {
+    const { serverJs } = compileApp(ENDPOINT_APP);
+    const read = await loadBodyReader(serverJs);
+    const req = post(JSON.stringify({ type: "Ping" }));
+    await req.json();                           // handle() consumed it first
+    const r = await read(req);
+    expect(r.ok).toBe(false);
+    expect(r.response.status).toBe(400);
+  });
+
+  test("EXECUTED negative control: the happy path and the malformed path are unchanged", async () => {
+    const { serverJs } = compileApp(ENDPOINT_APP);
+    const read = await loadBodyReader(serverJs);
+    const ok = await read(post(JSON.stringify({ type: "Ping" })));
+    expect(ok.ok).toBe(true);
+    expect(ok.value.type).toBe("Ping");
+    const bad = await read(post("{not json"));
+    expect(bad.ok).toBe(false);
+    expect(bad.response.status).toBe(400);
+  });
+});
+
 describe("NEGATIVE CONTROLS", () => {
   // Inline-on-use: an `auth="required"` program emits a real server bundle (the
   // `/_scrml/session` projection + destroy routes + the SSR compose handler) and

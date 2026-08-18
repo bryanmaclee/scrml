@@ -479,25 +479,63 @@ function collectRevealedColumns(fnNode: unknown): Set<string> {
  * (`{all:true}`, the CTE/UNION/dynamic strip-all path) can never be covered by a
  * named reveal — there is no name to check against — so it always fires.
  */
+interface ProtectedQuerySite {
+  /** Trimmed query text for the diagnostic. */
+  text: string;
+  /** Protected OUTPUT column names, or `"*"` for the strip-all sentinel. */
+  cols: string[] | "*";
+}
+
+/**
+ * Every protected-origin query site in THIS body, with the columns each one
+ * carries. ROOT-INDEPENDENT and reveal-INDEPENDENT, so it is walked once per
+ * function and reused for every (root, egress, query) pair the closure loop
+ * considers — the pairing loop must never re-walk an AST.
+ */
+function collectProtectedQuerySites(fnNode: unknown, ctx: ProtectContext): ProtectedQuerySite[] {
+  const sites: ProtectedQuerySite[] = [];
+  walkStructurally(fnNode, (n) => {
+    if (n.kind !== "sql" || typeof n.query !== "string") return;
+    const resolved = resolveProtectedOutputColumns(n.query, ctx);
+    if (resolved === null) return;
+    sites.push({
+      text: n.query.trim().replace(/\s+/g, " ").slice(0, 60),
+      cols: "all" in resolved ? "*" : resolved.cols,
+    });
+  });
+  return sites;
+}
+
+/**
+ * The first site in `sites` whose columns are NOT all declassified by
+ * `revealed`, or null. A pure list scan — no AST walk.
+ *
+ * Unresolvable origins (`"*"` — the CTE/UNION/dynamic strip-all path) can never
+ * be covered by a named reveal: there is no column name to check against.
+ */
+function firstUncoveredSite(
+  sites: readonly ProtectedQuerySite[],
+  revealed: ReadonlySet<string>,
+): string | null {
+  for (const site of sites) {
+    const uncovered = site.cols === "*" || site.cols.some((c) => !revealed.has(c));
+    if (uncovered) return site.text;
+  }
+  return null;
+}
+
+/**
+ * The protected-origin query in THIS body that `revealed` does not fully
+ * declassify, or null. Walks the body, then applies the coverage rule — the
+ * SAME rule the interprocedural path applies, via the same two helpers, so the
+ * two entries can never drift apart.
+ */
 function findProtectedQuery(
   fnNode: unknown,
   ctx: ProtectContext,
   revealed: ReadonlySet<string>,
 ): string | null {
-  let protectedQuery: string | null = null;
-  walkStructurally(fnNode, (n) => {
-    if (protectedQuery !== null) return;
-    if (n.kind !== "sql" || typeof n.query !== "string") return;
-    const resolved = resolveProtectedOutputColumns(n.query, ctx);
-    if (resolved === null) return;
-    // Unresolvable origins (`{all:true}` — the CTE/UNION/dynamic strip-all path)
-    // cannot be declassified by name: there is no column name to check a
-    // `reveal("col")` against, so no reveal covers them.
-    const uncovered = "all" in resolved || resolved.cols.some((c) => !revealed.has(c));
-    if (!uncovered) return;
-    protectedQuery = n.query.trim().replace(/\s+/g, " ").slice(0, 60);
-  });
-  return protectedQuery;
+  return firstUncoveredSite(collectProtectedQuerySites(fnNode, ctx), revealed);
 }
 
 /**
@@ -534,9 +572,40 @@ function findRawEgress(fnNode: unknown): string | null {
       }
       return;
     }
-    // An `asIs`-typed binding (§14.1.1) escapes the type system entirely.
-    if (typeof n.typeAnnotation === "string" && /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(n.typeAnnotation)) {
-      setKind("an `asIs`-typed value (§14.1.1)");
+    // An `asIs`-typed value (§14.1.1) escapes the type system entirely.
+    //
+    // MATCH THE CONVENTION, NOT A LIST OF FIELD NAMES. Every position an
+    // annotation can occupy lands on a node property whose key ENDS IN
+    // `Annotation` — MEASURED, not assumed, by walking a real AST that spells
+    // `asIs` in every position the grammar allows (see the per-position tests in
+    // `g-sql-row-protect-leak.test.js`):
+    //
+    //   returnTypeAnnotation  on `function-decl`   — `function f() -> asIs`
+    //   typeAnnotation        on `let-decl`        — `let u: asIs = …`
+    //   typeAnnotation        on `const-decl`      — `const u: asIs = …`
+    //   typeAnnotation        on a param entry     — `function f(sink: asIs)`
+    //   typeAnnotation        (array/union suffix) — `let u: asIs[]`
+    //
+    // The node-field set ending in `Annotation` is exactly
+    // {`typeAnnotation`, `returnTypeAnnotation`} at this revision
+    // (`synthReturnTypeAnnotation` is a LOCAL in ast-builder and lands as
+    // `returnTypeAnnotation`), so the suffix test is equivalent today and stays
+    // correct when a new annotation position is added. Enumerating the two names
+    // is the fail-OPEN shape this file's invariant-52 note warns about —
+    // `returnTypeAnnotation` is precisely the one a two-name list missed.
+    //
+    // ⚠ `function-decl.raw` also contains the literal text `asIs` for every one
+    // of these spellings, because it is the fn's SOURCE SLICE. It is deliberately
+    // NOT matched: reading it would re-introduce the source-text co-occurrence
+    // regex dpa-030 D2b removed, and would fire on `asIs` in a comment or a
+    // string literal. The `Annotation` suffix cannot select a source-text field.
+    for (const key of Object.keys(n)) {
+      if (!key.endsWith("Annotation")) continue;
+      const ann = n[key];
+      if (typeof ann === "string" && /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(ann)) {
+        setKind("an `asIs`-typed value (§14.1.1)");
+        return;
+      }
     }
   });
   return egressKind;
@@ -683,6 +752,27 @@ const fnNameOf = (n: unknown): string =>
  * per leak path, reported at the INNERMOST function whose effective body holds
  * both halves — so a chain `handle -> serve -> fetchUser` with the egress in
  * `serve` reports once, on `serve`, rather than once per enclosing caller.
+ *
+ * -- REVEAL IS PATH-SCOPED, NOT CLOSURE-SCOPED (S350 fix round 1, B3) --
+ * `reveal("col")` is honoured only from the body holding the protected QUERY and
+ * the body holding the EGRESS. It was briefly unioned across the WHOLE closure,
+ * which re-created at call-graph scope exactly the defect this gate's header
+ * says was removed at body scope: a `reveal("passwordHash")` on a completely
+ * unrelated value in an unrelated sibling function silently suppressed the gate
+ * for a protected query elsewhere in the file -- a fail-OPEN, MEASURED.
+ *
+ * Query-holder + egress-holder is the tightest scope that still covers both
+ * natural factorings -- the reveal at the fetch (`return u.reveal("pw")` inside
+ * the helper) and the reveal at the send (`JSON.stringify(u.reveal("pw"))` at
+ * the boundary). It is deliberately NOT the transitive path: a reveal on a
+ * MIDDLE function that neither queries nor egresses is not honoured, because the
+ * call graph cannot distinguish "this middle function reveals the row that
+ * leaks" from "this middle function reveals something unrelated" without
+ * value-flow analysis. That case FAILS CLOSED, which is the mandated direction;
+ * the author moves the reveal to either end to silence it.
+ *
+ * For a single body, query-holder == egress-holder == that body, so the
+ * intraprocedural semantics are unchanged.
  */
 export function detectProtectedRawEgressAcrossFile(
   fnNodes: readonly unknown[],
@@ -700,49 +790,96 @@ export function detectProtectedRawEgressAcrossFile(
   }
 
   const closures = new Map<unknown, unknown[]>();
-  for (const f of fns) closures.set(f, callClosure(f, byName));
+  const closureSets = new Map<unknown, Set<unknown>>();
+  for (const f of fns) {
+    const c = callClosure(f, byName);
+    closures.set(f, c);
+    closureSets.set(f, new Set(c));
+  }
+
+  // Per-BODY facts, computed ONCE and reused for every root that reaches this
+  // body. Both are root-independent, so the pairing loop below re-reads a map
+  // instead of re-walking the AST per (root, body) pair.
+  const revealsOf = new Map<unknown, Set<string>>();
+  const egressOf = new Map<unknown, string | null>();
+  const sitesOf = new Map<unknown, ProtectedQuerySite[]>();
+  for (const f of fns) {
+    revealsOf.set(f, collectRevealedColumns(f));
+    egressOf.set(f, findRawEgress(f));
+    sitesOf.set(f, collectProtectedQuerySites(f, ctx));
+  }
 
   // A finding per root whose effective body holds both halves.
   const raw = new Map<unknown, ProtectedRawEgressFinding>();
   for (const f of fns) {
     const bodies = closures.get(f)!;
-    // `reveal("col")` is honoured across the whole effective body, exactly as it
-    // is across a single body: the author named the column explicitly, and the
-    // closure is the unit this gate reasons about.
-    const revealed = new Set<string>();
-    for (const b of bodies) for (const c of collectRevealedColumns(b)) revealed.add(c);
+    const egressBodies = bodies.filter((b) => egressOf.get(b) != null);
+    if (egressBodies.length === 0) continue;
 
-    let query: string | null = null;
-    let queryHolder: unknown = null;
-    for (const b of bodies) {
-      const q = findProtectedQuery(b, ctx, revealed);
-      if (q !== null) { query = q; queryHolder = b; break; }
+    let found: ProtectedRawEgressFinding | null = null;
+    // Pair each candidate egress with each candidate query holder, and scope the
+    // reveal set to exactly those two bodies (see the header note).
+    const queryBodies = bodies.filter((b) => sitesOf.get(b)!.length > 0);
+    if (queryBodies.length === 0) continue;
+
+    outer:
+    for (const e of egressBodies) {
+      for (const q of queryBodies) {
+        const revealed = new Set<string>(revealsOf.get(q));
+        for (const c of revealsOf.get(e)!) revealed.add(c);
+        const query = firstUncoveredSite(sitesOf.get(q)!, revealed);
+        if (query === null) continue;
+        found = {
+          fn: f,
+          query,
+          egressKind: egressOf.get(e)!,
+          queryFn: q === f ? null : fnNameOf(q),
+          egressFn: e === f ? null : fnNameOf(e),
+        };
+        break outer;
+      }
     }
-    if (query === null) continue;
-
-    let egressKind: string | null = null;
-    let egressHolder: unknown = null;
-    for (const b of bodies) {
-      const e = findRawEgress(b);
-      if (e !== null) { egressKind = e; egressHolder = b; break; }
-    }
-    if (egressKind === null) continue;
-
-    raw.set(f, {
-      fn: f,
-      query,
-      egressKind,
-      queryFn: queryHolder === f ? null : fnNameOf(queryHolder),
-      egressFn: egressHolder === f ? null : fnNameOf(egressHolder),
-    });
+    if (found) raw.set(f, found);
   }
 
-  // Report the INNERMOST firing root: drop any root whose effective body strictly
-  // contains another firing root, so one leak path yields one diagnostic.
+  // -- REPORT THE INNERMOST FIRING ROOT, AND NEVER DROP A CYCLE (B1) --
+  //
+  // The first cut of this filter was `closure(f).some(b => b !== f && raw.has(b))`
+  // -- "drop f if its effective body contains any other firing root". On a call
+  // CYCLE that drops EVERYTHING: with `a -> b -> a`, closure(a) contains b and
+  // closure(b) contains a, so each is "not innermost" because of the other, both
+  // are dropped, and every enclosing caller is dropped with them. MEASURED: a
+  // protected SELECT in `a`, a raw `Response` in `b`, and one back-edge `b -> a`
+  // took the gate from exit 1 to exit 0. **Adding a call edge silently turned a
+  // confidentiality gate off**, and mutual recursion between two server helpers
+  // is ordinary code.
+  //
+  // The fix is STRICT containment. R' is strictly inside R only when R' is
+  // reachable from R and R is NOT reachable from R' -- so two functions in the
+  // same cycle never suppress each other, while a genuine outer caller still
+  // defers to the inner one. "Cannot determine an innermost root" is exactly the
+  // case that must fail CLOSED, so a cycle FIRES; it just fires once.
+  const strictlyInside = (inner: unknown, outer: unknown): boolean =>
+    inner !== outer
+    && closureSets.get(outer)!.has(inner)
+    && !closureSets.get(inner)!.has(outer);
+
+  const survivors = fns.filter(
+    (f) => raw.has(f) && ![...raw.keys()].some((other) => strictlyInside(other, f)),
+  );
+
+  // Survivors that are mutually reachable describe ONE leak path through one
+  // cycle; keep a single deterministic representative (first in `fnNodes` order,
+  // which is the emitter's own order) so a cycle yields one diagnostic rather
+  // than one per member.
   const findings: ProtectedRawEgressFinding[] = [];
-  for (const [f, finding] of raw) {
-    const inner = closures.get(f)!.some((b) => b !== f && raw.has(b));
-    if (!inner) findings.push(finding);
+  const claimed = new Set<unknown>();
+  for (const f of survivors) {
+    if (claimed.has(f)) continue;
+    for (const g of survivors) {
+      if (closureSets.get(f)!.has(g) && closureSets.get(g)!.has(f)) claimed.add(g);
+    }
+    findings.push(raw.get(f)!);
   }
   return findings;
 }

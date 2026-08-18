@@ -417,6 +417,13 @@ describe("§14.8.9 E-PROTECT-004 is STRUCTURAL — the source-text evasions are 
     return all.some((d) => d.code === "E-PROTECT-004");
   };
   const SELECT = `?{\`SELECT * FROM users WHERE id = \${id}\`}.get()`;
+  // How MANY E-PROTECT-004s a program produces — a cycle must fire ONCE, not
+  // once per member, and "fires at all" cannot distinguish those.
+  const fireCount = (body) => {
+    const { result } = compileSource(protectProgram(body));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    return all.filter((d) => d.code === "E-PROTECT-004").length;
+  };
 
   test("THE LEAK: `new globalThis.Response(...)` (the one-keystroke bypass)", () => {
     expect(fires(
@@ -552,6 +559,174 @@ describe("§14.8.9 E-PROTECT-004 is STRUCTURAL — the source-text evasions are 
       + `      function b(id) {\n        return a(id)\n      }\n`
       + `      export server function serveUser(id) {\n        let u = a(id)\n        return u\n      }`,
     )).toBe(false);
+  });
+
+
+  // ---- B1: A CALL CYCLE MUST NOT DISABLE THE GATE -------------------------
+  //
+  // The innermost-root filter was `closure(f).some(b => b !== f && raw.has(b))`.
+  // On `a -> b -> a` that classifies BOTH as "not innermost" (each because of
+  // the other), drops both, and drops every enclosing caller with them.
+  // MEASURED: adding one back-edge took the gate from exit 1 to exit 0.
+  //
+  // ⚠ The pre-existing "MUTUAL recursion terminates" test above does NOT cover
+  // this: its cycle contains no raw egress, so neither half ever fires and the
+  // filter is never exercised. These are the tests that would have caught it.
+
+  test("B1: a call CYCLE between the query holder and the egress holder FIRES", () => {
+    expect(fires(
+      `      function a(id) {\n        let u = ${SELECT}\n        let x = b(id)\n        return u\n      }\n`
+      + `      function b(id) {\n        let u = a(id)\n        return new globalThis.Response(JSON.stringify(u))\n      }\n`
+      + `      export server function serveUser(id) {\n        return b(id)\n      }`,
+    )).toBe(true);
+  });
+
+  test("B1: the SAME program without the back-edge fires identically (the edge is not what makes it a leak)", () => {
+    expect(fires(
+      `      function a(id) {\n        let u = ${SELECT}\n        return u\n      }\n`
+      + `      function b(id) {\n        let u = a(id)\n        return new globalThis.Response(JSON.stringify(u))\n      }\n`
+      + `      export server function serveUser(id) {\n        return b(id)\n      }`,
+    )).toBe(true);
+  });
+
+  test("B1: a cycle fires EXACTLY ONCE, not once per cycle member", () => {
+    expect(fireCount(
+      `      function a(id) {\n        let u = ${SELECT}\n        let x = b(id)\n        return u\n      }\n`
+      + `      function b(id) {\n        let u = a(id)\n        return new globalThis.Response(JSON.stringify(u))\n      }\n`
+      + `      export server function serveUser(id) {\n        return b(id)\n      }`,
+    )).toBe(1);
+  });
+
+  test("B1: a cycle with NO raw egress still stays clean (no fail-closed over-fire)", () => {
+    expect(fires(
+      `      function a(id) {\n        let u = ${SELECT}\n        let x = b(id)\n        return u\n      }\n`
+      + `      function b(id) {\n        return a(id)\n      }\n`
+      + `      export server function serveUser(id) {\n        return b(id)\n      }`,
+    )).toBe(false);
+  });
+
+  test("B1: a genuine outer caller still defers to the inner root (one diagnostic, not two)", () => {
+    expect(fireCount(
+      `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
+      + `      function serve(id) {\n        let u = fetchUser(id)\n        return new globalThis.Response(JSON.stringify(u))\n      }\n`
+      + `      export server function outer(id) {\n        return serve(id)\n      }`,
+    )).toBe(1);
+  });
+
+  // ---- B2: EVERY `asIs` POSITION THE OLD SOURCE-TEXT REGEX COVERED ---------
+  //
+  // The structural check read `n.typeAnnotation` ONLY, so a function RETURN type
+  // (`returnTypeAnnotation`) silently stopped being an egress. MEASURED as a
+  // regression against main d604df09: main exit 1, the branch exit 0.
+  //
+  // The enumeration below is MEASURED, not assumed — a probe walked a real AST
+  // spelling `asIs` in every position the grammar allows and reported which
+  // field carried it. One test per position, so a future narrowing that drops
+  // any single position fails here.
+
+  test("B2: `asIs` on the RETURN type (`-> asIs`) is a raw egress — the regressed position", () => {
+    expect(fires(
+      `      export server function getUser(id) -> asIs {\n        let u = ${SELECT}\n        return u\n      }`,
+    )).toBe(true);
+  });
+
+  test("B2: `asIs` on a LET annotation is a raw egress", () => {
+    expect(fires(
+      `      export server function getUser(id) {\n        let u: asIs = ${SELECT}\n        return u\n      }`,
+    )).toBe(true);
+  });
+
+  test("B2: `asIs` on a CONST annotation is a raw egress", () => {
+    expect(fires(
+      `      export server function getUser(id) {\n        const u: asIs = ${SELECT}\n        return u\n      }`,
+    )).toBe(true);
+  });
+
+  test("B2: `asIs` on a PARAM annotation is a raw egress", () => {
+    expect(fires(
+      `      export server function getUser(id, sink: asIs) {\n        let u = ${SELECT}\n        return u\n      }`,
+    )).toBe(true);
+  });
+
+  test("B2: `asIs[]` (array suffix) still matches the token, not a substring", () => {
+    expect(fires(
+      `      export server function getUser(id) {\n        let u: asIs[] = ${SELECT}\n        return u\n      }`,
+    )).toBe(true);
+  });
+
+  test("B2: `asIs` reaches across a CALL like every other egress kind", () => {
+    expect(fires(
+      `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
+      + `      export server function getUser(id) -> asIs {\n        return fetchUser(id)\n      }`,
+    )).toBe(true);
+  });
+
+  test("B2 NEGATIVE: an identifier merely CONTAINING `asIs` is not an annotation", () => {
+    // `notAsIsReally` must not match, and neither must a plain typed binding.
+    expect(fires(
+      `      export server function getUser(id) {\n        let notAsIsReally: string = "x"\n        let u = ${SELECT}\n        return u\n      }`,
+    )).toBe(false);
+  });
+
+  test("B2 NEGATIVE: `asIs` in a COMMENT is not an egress (the source-text regex fired here; the structural check must not)", () => {
+    expect(fires(
+      `      export server function getUser(id) {\n        // returns asIs one day\n        let u = ${SELECT}\n        return u\n      }`,
+    )).toBe(false);
+  });
+
+  // ---- B3: `reveal()` IS PATH-SCOPED, NOT FILE-SCOPED ---------------------
+  //
+  // `revealed` was unioned across the ENTIRE closure, so a reveal on a totally
+  // unrelated value in an unrelated sibling suppressed the gate for a protected
+  // query elsewhere — re-creating at call-graph scope the unconditional
+  // off-switch this gate's own header says was removed at body scope.
+  // The scope is now query-holder + egress-holder only.
+
+  test("B3: a `reveal` on an UNRELATED value in an unrelated sibling does NOT suppress", () => {
+    expect(fires(
+      `      function other(v) {\n        return v.reveal("passwordHash")\n      }\n`
+      + `      export server function serveUser(id) {\n        let junk = other(id)\n        let u = ${SELECT}\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("B3: removing that unrelated reveal changes nothing — it was never the reason", () => {
+    expect(fires(
+      `      function other(v) {\n        return v\n      }\n`
+      + `      export server function serveUser(id) {\n        let junk = other(id)\n        let u = ${SELECT}\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("B3: a reveal in the QUERY-holder still suppresses (factoring the fetch into a helper)", () => {
+    expect(fires(
+      `      function fetchUser(id) {\n        let u = ${SELECT}\n        return u.reveal("passwordHash")\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    )).toBe(false);
+  });
+
+  test("B3: a reveal in the EGRESS-holder still suppresses (revealing at the boundary)", () => {
+    expect(fires(
+      `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new globalThis.Response(JSON.stringify(u.reveal("passwordHash")))\n      }`,
+    )).toBe(false);
+  });
+
+  test("B3: a reveal on a MIDDLE function that neither queries nor egresses FAILS CLOSED (documented bound)", () => {
+    // The call graph cannot tell "mid reveals the row that leaks" from "mid
+    // reveals something unrelated" without value-flow. §14.8.9 is fail-closed,
+    // so this is a loud, reversible false positive by design: the author moves
+    // the reveal to the fetch or to the boundary.
+    expect(fires(
+      `      function fetchUser(id) {\n        return ${SELECT}\n      }\n`
+      + `      function mid(v) {\n        return v.reveal("passwordHash")\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = mid(fetchUser(id))\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
+  });
+
+  test("B3: revealing the WRONG column across a call does not suppress", () => {
+    expect(fires(
+      `      function fetchUser(id) {\n        let u = ${SELECT}\n        return u.reveal("name")\n      }\n`
+      + `      export server function serveUser(id) {\n        let u = fetchUser(id)\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    )).toBe(true);
   });
 
   // ---- the cross-call NEGATIVE controls (the gate must not over-fire) --------
