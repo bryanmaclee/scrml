@@ -41,4 +41,15 @@ describe("stripRedundantCode — print-time self-prefix removal", () => {
     expect(stripRedundantCode("E-X", undefined)).toBe(undefined);
     expect(stripRedundantCode("E-X", null)).toBe(null);
   });
+
+  test("strips a self-prefixed W- WARNING code (the dev.js warning-loop path)", () => {
+    // g-dev-warn-loop-double-prints-self-prefixed-code (S349-peter): the error/lint
+    // formatters stripped, but dev.js's non-fatal-warning loop (dev.js:469) printed
+    // `w.message` raw while still prepending `[${w.code}]`, so self-prefixed W-*
+    // warnings (W-PROGRAM-001, W-CONST-AT-DEPRECATED, …) double-printed their code
+    // AND the redundant prefix ate the 120-char slice. The warning loop now routes
+    // through this helper like the other three sites.
+    expect(stripRedundantCode("W-PROGRAM-001", "W-PROGRAM-001: No <program> root element found."))
+      .toBe("No <program> root element found.");
+  });
 });
