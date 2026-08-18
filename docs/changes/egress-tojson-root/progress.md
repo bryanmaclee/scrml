@@ -240,3 +240,182 @@ pre-existing on main, and fixing it inside a security branch is exactly the wron
   source. Cross-file would need import resolution the codegen pass does not carry; indirect calls
   need value-flow. Neither is required by §14.8.9's text and both are the fail-closed direction to
   leave open (they under-approximate the gate, they do not weaken the redaction floor).
+
+## 2026-08-18 — FIX ROUND 1 (S239 adversarial pass, 7 findings)
+
+All three PA-reproduced blockers reproduced on THIS tree before any code changed. Every one held.
+
+### Blocker reproduction, base `8c8c29cf` vs main `d604df09`
+
+| case | shape | MAIN | BRANCH `8c8c29cf` | verdict |
+|---|---|---|---|---|
+| K | `a` holds SELECT + calls `b`; `b` calls `a` + raw `Response`; `handle` calls `b` | 0 silent | **0 SILENT** | **B1 CONFIRMED** |
+| K2 | same, back-edge `b -> a` REMOVED | 0 silent | 1 FIRES | the edge is the whole difference |
+| L | `export server function getUser(id) -> asIs` + protected SELECT | **1 FIRES** | **0 SILENT** | **B2 CONFIRMED — regression vs main** |
+| M | unrelated `other(v) { return v.reveal("passwordHash") }` + SELECT + raw Response | 0 silent | **0 SILENT** | **B3 CONFIRMED** |
+| M2 | same with `other` returning `v` unchanged | 0 silent | 1 FIRES | the unrelated reveal is the whole difference |
+
+### B1 — a call cycle disabled the gate entirely
+
+Root cause exactly as the PA stated. `closure(f).some(b => b !== f && raw.has(b))` classifies both
+members of a cycle as "not innermost" (each because of the other), drops both, and drops every
+enclosing caller with them.
+
+Fix: **strict containment.** `R'` suppresses `R` only when `R'` is reachable from `R` AND `R` is not
+reachable from `R'`. Cycle members can no longer suppress each other, so a cycle FIRES. To keep one
+leak path at one diagnostic, mutually-reachable survivors elect a single deterministic
+representative (first in `fnNodes` order — the emitter's own order). Verified: K fires with exactly
+**1** diagnostic, reported on `a`.
+
+The PA was right that the existing `MUTUAL recursion terminates` test could not have caught this —
+its cycle contains no raw egress, so neither half ever fires and the filter is never exercised. Four
+new tests, including a `fireCount === 1` assertion and a cycle-with-no-egress negative control.
+
+### B2 — the enumeration the PA asked for (MEASURED, not assumed)
+
+I did not reason about which fields exist. A temporary probe walked a REAL AST of a program spelling
+`asIs` in every position the grammar allows and printed the carrying field:
+
+| position | source spelling | node kind | field | covered before? |
+|---|---|---|---|---|
+| function return type | `function f() -> asIs` | `function-decl` | `returnTypeAnnotation` | **NO — the regression** |
+| let annotation | `let u: asIs = …` | `let-decl` | `typeAnnotation` | yes |
+| const annotation | `const u: asIs = …` | `const-decl` | `typeAnnotation` | yes |
+| param annotation | `function f(sink: asIs)` | param entry | `typeAnnotation` | yes |
+| array/union suffix | `let u: asIs[]` | `let-decl` | `typeAnnotation` (`"asIs[]"`) | yes |
+| — | any of the above | `function-decl` | `raw` (the fn SOURCE SLICE) | **deliberately excluded** |
+
+`raw` carries the literal text `asIs` for every spelling because it is the function's source slice.
+Matching it would re-introduce the source-text co-occurrence regex dpa-030 D2b removed and would fire
+on `asIs` in a comment or a string literal. Two negative-control tests pin that.
+
+Fix matches the **convention**: any node property whose key ends in `Annotation`. Hand-listing
+`{typeAnnotation, returnTypeAnnotation}` is the fail-OPEN shape this file's own invariant-52 note
+warns about, and `returnTypeAnnotation` is exactly what a two-name list missed. Verified the node
+field set ending in `Annotation` is exactly those two at this revision (`synthReturnTypeAnnotation`
+is a LOCAL in ast-builder that lands as `returnTypeAnnotation`), so the suffix test is equivalent
+today and stays correct when a position is added. Nine tests, one per position plus the two
+negatives. Case N (all five positions in one file) now fires 5 diagnostics, `p1`..`p5` — identical to
+main.
+
+### B3 — reveal is now path-scoped
+
+The PA is right to raise this above MEDIUM, and right that the tension I flagged is real. The
+resolution is to scope it, not drop it.
+
+`reveal("col")` is honoured from the **query holder** and the **egress holder** only. That is the
+tightest scope that still covers both natural factorings — the reveal at the fetch
+(`return u.reveal("pw")` in the helper) and the reveal at the send
+(`JSON.stringify(u.reveal("pw"))` at the boundary). Both are tested.
+
+**Stated bound, tested and documented in source:** a reveal on a MIDDLE function that neither
+queries nor egresses is NOT honoured and **fails closed**. The call graph cannot distinguish "mid
+reveals the row that leaks" from "mid reveals something unrelated" without value-flow analysis, and
+per the PA's constraint the unprovable case fails closed. The author moves the reveal to either end.
+
+Intraprocedural semantics are unchanged: there query-holder == egress-holder == the body, so
+`detectProtectedRawEgress` and both conformance protect cases are untouched.
+
+### R4 — RELAYED, then VERIFIED BY EXECUTION, then fixed
+
+Not taken on trust. Extracted `_scrml_read_json_body` from a real emitted artifact and ran it:
+
+```
+happy path ok                         = true
+malformed -> envelope                 = true
+locked body -> envelope (no throw)    = NO — UNCAUGHT TypeError: ReadableStream is locked
+disturbed body -> envelope (no throw) = NO — UNCAUGHT TypeError: ReadableStream is locked
+```
+
+CONFIRMED. `getReader()` sat outside the `try`, so a locked/disturbed body bypassed the
+compiler-owned 400 envelope §61.3 exists to guarantee. Moved inside the `try`. Re-executed against a
+FRESHLY emitted artifact: both now `YES status 400`, happy and malformed paths unchanged. Three
+executed regression tests added to `json-body-guard.test.js`.
+
+### R5 — REPRODUCED, deliberately NOT changed
+
+A param named `Response` does build-block valid source (`new Response(u)` on a param that is not the
+global). But **main fires identically** — this is NOT a regression I introduced, it is pre-existing
+behaviour, and it over-fires in the fail-CLOSED direction.
+
+Not fixing it is a deliberate call, and here is the cost: the fix would add a new SUPPRESSION path to
+a confidentiality gate, in the same round that found three fail-opens in this exact gate. It also has
+a fail-open tail of its own — once a param named `Response` shadows the global, `serveUser(id,
+globalThis.Response)` passes the real constructor in and the gate goes silent. That deserves its own
+scoping and its own adversarial pass, not a drive-by in a fix round. **Surfaced for PA triage.**
+
+### R6 — REPRODUCED as claimed: drift hazard, no live defect
+
+`emit-server.ts:3140` derives `resolveParamName` while the `resolve` binding at :3125 is hard-coded.
+Additionally `requestParamName` at :3129 tests `typeof handleParams[0] === 'string'`, but params are
+OBJECTS (`{name, …}`), so that test is always false and it always falls back to the literal
+`'request'` — the derivation there is already inert. Both are harmless because `isHandleEscapeHatch`
+pins the signature to exactly `(request, resolve)`. NOT changed: it is inside the `handle()` emission
+path the brief fenced off, and there is no live defect.
+
+### R7 — taken, because it fell out of B1's rework as the PA allowed
+
+The B1/B3 rework initially made this WORSE: scoping reveal per (query-holder, egress-holder) pair put
+an AST walk (`findProtectedQuery`) in the inner loop, i.e. O(roots x egress x query) walks. Fixed
+properly rather than left: per-body reveals, raw-egress and protected-query SITES are each walked
+ONCE and reused; the pairing loop is now a pure list scan with no AST walk. `findProtectedQuery`
+delegates to the same two helpers the interprocedural path uses, so the intraprocedural and
+interprocedural entries share one implementation of the coverage rule and cannot drift.
+
+### Verification at `171039fa`
+
+Full 17-shape A/B matrix, both compilers — every leak shape fires, every legitimate factoring and
+negative control stays silent:
+
+| case | MAIN | FIX1 | | case | MAIN | FIX1 |
+|---|---|---|---|---|---|---|
+| A inline `globalThis.Response` | 0 | **1** | | K cycle (B1) | 0 | **1** |
+| B inline + spread | 0 | **1** | | K2 cycle, no back-edge | 0 | **1** |
+| C SQL in callee + spread | 0 | **1** | | L `-> asIs` return (B2) | 1 | **1** |
+| D SQL in callee, no spread | 0 | **1** | | M unrelated reveal (B3) | 0 | **1** |
+| E egress in callee | 0 | **1** | | M2 reveal removed | 0 | **1** |
+| F reveal in query-holder | 0 | 0 | | N all 5 `asIs` positions | 1 | **1** |
+| G protect, no raw egress | 0 | 0 | | P reveal at egress-holder | 0 | 0 |
+| H raw 403, no query | 0 | 0 | | Q cycle, no egress | 0 | 0 |
+| | | | | R5 param shadow (pre-existing) | 1 | 1 |
+
+- `g-sql-row-protect-leak.test.js` — **89 pass / 0 fail** (was 70; +19).
+- `json-body-guard.test.js` — **15 pass / 0 fail** (+3 executed R4 tests).
+- Conformance — **883/883**. Neither protect case needed an expected.json change.
+- Full suite — **30084 pass / 216 skip / 1 todo / 53 fail / 30354 tests**; failing NAME SET
+  byte-identical to the `a112c92f` baseline (`diff` empty). **Zero new failures.**
+
+### Corpus emit differential (same absolute path both sides, `a112c92f` -> `171039fa`)
+
+```
+VERDICT: 222 DIFFERENCE(S)  over 1906 sources, 7383 artifacts
+  compile-failure delta     0 newly failing / 0 newly passing
+  diagnostic changes        0 code / 1 text-only
+  artifact content diffs    221 of 7383
+  syntax delta (effective)  0 new / 0 fixed
+  load-context changes      0
+  bare server-fn sites      base 145 / head 145 (delta 0)
+```
+
+- **221 of 221 are `*.server.js`. ZERO `*.client.js` changed** — the wire path is still
+  byte-identical across the whole corpus, and the gate got strictly STRONGER in this round.
+- **`0 newly failing`** — three fail-opens closed and the corpus still rejects nothing.
+- Byte deltas cluster at −186 / +344 / +530: the `toJSON` deletion and two comment blocks. Diffed an
+  artifact to confirm there is no behavioural JS beyond the intended changes.
+- The **1 text-only diagnostic change** is `samples/gauntlet-r13/react-auth-dashboard.scrml`, and it
+  is fully explained: a `W-CG-UNDEFINED-INTERPOLATION` message cites `server line 147` on base and
+  `server line 154` on head, because the R4 comment lengthened the emitted body guard by 7 lines.
+  Same codes, same exit code, same message text otherwise.
+
+### One self-inflicted break, caught by the gate and fixed properly
+
+The first R4 comment used the literal token `ReadableStream`, which is emitted into every
+`server.js`, and `server-function-sse.test.js` asserts a non-SSE handler's output does NOT contain
+that token (its proxy for "no streaming machinery"). The pre-commit gate caught it. I reworded the
+COMMENT rather than loosening the assertion: a streaming-isolation check should not be weakened to
+accommodate prose, least of all in a security fix round.
+
+### Standing rules honoured
+
+No `--no-verify`. No `core.hooksPath` override. Did not touch the `handle()` undefined-callee defect
+or `docs/known-gaps.md`.
