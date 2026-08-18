@@ -1925,3 +1925,94 @@ pole reaching for it should be named as re-litigation of a ruled question.
 Do NOT build. Do NOT ratify (RUN-not-RATIFY). Do NOT evaluate the specific inbound library beyond the
 recorded rejection above — it is prior art, not a candidate. Do NOT reason from corpus counts. Do NOT
 re-open `scrml:format`.
+
+---
+
+## dpa-033 — `reveal` is spec'd VALUE-scoped; the static raw-egress gate cannot compute value-scope. What is the conformant approximation?
+
+```
+id:        dpa-033
+status:    banked
+rung:      R1-or-R2 — see THE REFRAME. Banked R2 (language-surface) and then DOWNGRADED by
+           the Rule 4 governing-sentence gate: most of it is a BUG, not a ruling. What
+           remains for the operator is one bounded question, stated at the end.
+requested: S350-bryan — the S239 re-review of `egress-tojson-root` found a FAIL-OPEN in
+           E-PROTECT-004's declassification handling; three fix rounds proved it unfixable
+           by location-keyed analysis.
+banked:    S350 2026-08-18
+routes-to: scrml PA
+```
+
+### ⚑ THE REFRAME — read this before anything else. This was banked as a semantic NARROWING of a ratified primitive. It is not.
+
+The PA and the dispatched agent both framed this as *"narrowing `reveal` is a semantic change to a ratified primitive, hence an operator ruling."* **Both were wrong, and the Rule 4 governing-sentence gate is what caught it.** Neither had read §14.8.9's declassification paragraph; the PA had quoted only the `E-PROTECT-004` catalog row at `SPEC.md:19284`.
+
+`SPEC.md:8506-8513`, verbatim:
+
+> **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the client **iff** it is explicitly declassified via the field-level `reveal` construct **at the value**:
+> ```scrml
+> return u.reveal("passwordHash")   // admits the passwordHash column past the egress sink — here only
+> ```
+> `reveal("col")` stamps the named column's provenance descriptor as **declassified-at-this-value**; the serializer admits a protected-origin column **only** when its descriptor bears a `reveal` stamp **at the sink**.
+
+Four independent phrases — *at the value* · *here only* · *declassified-at-this-value* · *at the sink* — all specifying **value-scoped** declassification. **The implementation's body-scoped (and, on the branch, closure-scoped) `revealed` union is the NON-CONFORMANT state.** Tightening it is **conformance restoration toward an already-normative sentence**, which base §8 classifies as a BUG FIX, not a widening and not an amendment.
+
+**Migration is measured, not assumed: `.reveal(` occurs in exactly TWO `.scrml` files corpus-wide** — `conformance/cases/protect/reveal-suppresses-e004/case.scrml` and `.../reveal-client-visible-runtime/case.scrml`. Both are dedicated cases for this exact mechanism. **Zero adopter, sample, or example usage.**
+
+### Established by execution S350 — do NOT re-derive
+
+The fail-open, PA-reproduced at branch `eb170a84` (exit 0, zero diagnostics, `passwordHash` at HTTP 200):
+
+```scrml
+export server function leak(id) {
+  let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+  let b = ?{`SELECT * FROM users WHERE id = 2`}.get()
+  let x = a.reveal("passwordHash")
+  return new globalThis.Response(JSON.stringify(b), { status: 200 })
+}
+```
+
+**Three shapes, three mechanisms — binding identity does not rescue it:**
+
+| | shape | binding identity |
+|---|---|---|
+| H1 | two sites, two bindings | would fix |
+| **H1b** | `let b = a`; reveal `a`, egress `b` | **fixes it BACKWARDS** |
+| H1c | one site in a callee, two runtime values | **no location to key on, ever** |
+
+**H1b is decisive and it is a SEMANTIC fact, PA-verified against the shipped helper:** `_scrml_protect_reveal` does `const next = { ...value }` and returns `next`, leaving the receiver tagged. So `a.reveal("pw")` does **not** declassify `a` — keying declassification on the receiver binding would mark `a` and every alias declassified, which is the opposite of the primitive's meaning.
+
+**General statement:** `reveal` is a VALUE-level operation; every fact a codegen pass can compute is LOCATION-level.
+
+### Why this is NOT simply "go implement the spec"
+
+§14.8.9's declassification model is **runtime**: the descriptor rides the value, and the serializer checks the stamp *at the sink*. On the **compiler-owned** egress path that already works and is already value-scoped — `_scrml_protect_redact` reads `d.revealed` off the value itself.
+
+**The gap is only on RAW egress**, where by definition there is no compiler-owned sink to check the descriptor at. There the compiler must decide **statically**, and §14.8.9 says only *"declassify explicitly with `reveal` or project the column out"* — it does **not** specify how a static check should approximate value-scope.
+
+So the real question is narrow:
+
+> **Given §14.8.9 mandates value-scoped declassification, and the static raw-egress gate provably cannot compute value-scope, what static approximation is conformant?**
+
+### The approaches
+
+**(a) Honour `reveal` only where it is syntactically part of the egressed expression.** `return new Response(JSON.stringify(u.reveal("pw")))` admits; a reveal anywhere else does not. Closes H1/H1b/H1c. **Cost, measured by the agent:** breaks two documented spellings — the cross-call helper-reveals-and-returns factoring, and the `?{}.reveal("col")` chain this file already supports. Rescuing those needs a per-function "returns only declassified values" summary — **new interprocedural analysis, not built.**
+
+**(b) Detection cross-call ON, declassification cross-call OFF.** The agent's proposal. Rests on the asymmetry that is the sharpest thing in this item: cross-call **detection** over-approximates SAFELY (a false pairing costs a false positive — that is finding M3); cross-call **declassification** over-approximates into a **FAIL-OPEN**. Reveal is then honoured only in the egress-holder body.
+
+**(c) Fail closed with no static reveal path on raw egress at all.** Raw egress + protected column = always `E-PROTECT-004`; the only remedies are "project the column out" or "return it through the compiler-emitted response". Maximally simple and maximally conformant to the fail-closed policy — and it makes `reveal` purely a runtime/compiler-sink construct, which is what §14.8.9's own mechanism describes.
+
+**PA recommendation: (b), with (c) as the honest fallback if (b)'s bound cannot be stated crisply.** (b) preserves both documented factorings the corpus cases pin while closing every reproduced fail-open. (a) is strictly worse than (b) — same closure, more breakage.
+
+### ⚑ The ONE thing that is genuinely the operator's
+
+Every option above **removes a currently-working spelling** on the raw-egress path. That is `newly-rejecting` — reversible, migration measured at the two conformance cases — so it does not need a ratification under base §8. **But it changes what an adopter can write**, and the operator has ruled twice this month that a mandate an adopter cannot opt out of is itself the defect (S347 D1 `formFor`). The question:
+
+> **Is `reveal`-on-raw-egress a spelling scrml keeps at all, or does raw egress simply become a place where protected columns cannot go?**
+
+Everything else here is a bug fix the PA can dispatch on its own authority.
+
+### Blocked work
+
+`egress-tojson-root` Unit 2 (the interprocedural `E-PROTECT-004`) is HELD on this item. Unit 1 (delete the `toJSON` hook) is clean, verified, and independent — see delta-log [1555] for why the stack still cannot land (the cluster-level `globalThis`-allowlist break, M4).
+
