@@ -8539,6 +8539,38 @@ The real argon2id implementation and the credential-handling path reach the brow
 Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §9 in the §1/§5 convention — **its expectations invert when it closes**, so the pin becomes the regression guard rather than needing a rewrite.
 <!-- @gap id=g-destructured-param-default-ships-server-only-stdlib-to-browser sev=HIGH status=open locus=compiler/src/route-inference.ts(the Trigger-3 top-level scan root — `fnNode.params` is a sibling of `body` and is never walked; the nested `function-decl` branch already handles its twin) prov=rationale:PA-reproduced-on-main-exit-0-zero-server-js-argon2id-in-the-shipped-runtime-and-the-nested-twin-already-escalates-so-the-gap-is-the-root-not-the-pattern -->
 
+### g-soft-nav-head-sync-drops-stylesheet-links — `_scrml_nav_sync_head()` syncs only title/description/canonical, so EVERY in-site soft-nav click renders the destination page wearing the PREVIOUS page's stylesheet — `NEW S350-bryan (reported by scrml-site); HIGH; open`
+
+<!-- @gap id=g-soft-nav-head-sync-drops-stylesheet-links sev=HIGH status=open locus=compiler/src/runtime-template.js:_scrml_nav_sync_head(PA-VERIFIED AT HEAD by reading the function: it syncs `<title>`, `meta[name=description]`, `link[rel=canonical]` and nothing else; the swap is `_scrml_nav_apply_html`) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+
+**Reported by scrml-site 2026-08-18; PA-VERIFIED IN OUR OWN SOURCE AT HEAD `d604df09`** (the report cites S287 `50478f0e`, the ref scrml.dev is pinned to — the defect is live on `main` too, not only on the pinned ref).
+
+`_scrml_nav_sync_head(doc)` reconciles exactly three head nodes across a soft navigation — `<title>`, `<meta name="description">`, `<link rel="canonical">`. Its own comment names the gap (*"Fuller head-diffing (arbitrary meta/link/preload) is a noted follow-on"*). **`<link rel="stylesheet">` is never touched:** the outgoing page's sheet stays attached and the incoming page's sheet is never fetched.
+
+**Why this is HIGH rather than cosmetic: the compiler emits ONE STYLESHEET PER PAGE** carrying that page's Tailwind utility subset (11-12 KB each on scrml.dev). So the destination arrives with none of the utilities its markup depends on — not a degraded theme, an unstyled document.
+
+Reporter measured **7 of 7 navigations carrying stale CSS** in Chromium on the live site: `/` → `/showcase` renders the dissector as bare text; `/reference/elements/auth` → `/` leaves the reference sidebar stuck on the landing page; `/` → any reference page loses the sidebar entirely. **A hard reload always renders correctly, which is exactly what makes it read to a user as intermittent** (*"navigate away, come back later, the layout comes in broken"*).
+
+**The fix is not a naive attribute copy.** Stylesheet hrefs are emitted RELATIVE and at differing depth — `/` ships `app.<hash>.css`, `/reference/` ships `../app.<hash>.css`, `/reference/elements/auth` ships `../../app.<hash>.css` — so they must be resolved against the TARGET url. Reporter's suggested shape, worth following: resolve against the fetched doc's URL → append any sheet not present and **await its `load` before swapping the outlet** (otherwise the swap flashes unstyled) → remove sheets the new document does not reference, *after* the swap.
+
+**Distinct from** the S313 `<template>`/lift-anchor regression already open with them — reporter checked, and this one is independent and older.
+
+**Workaround live on scrml.dev right now, and it is OURS to retire:** they applied `hard` (§20.8.3) to all **551** internal `<a>`, opting every link out of soft nav, plus two gate assertions. They have committed to reverting the sweep the day this lands and asked to be pinged on this inbox. **Ping them.**
+
+**⚑ THEIR GATE LESSON, worth more than the bug** (recorded verbatim in intent): their `wiki-verify` asserted that a `window` stamp SURVIVED an in-site click — i.e. that soft navigation *happened* — and never asserted what the reader then saw. **The gate was validating the exact mechanism that was breaking the page, and reported 6/6 green while `/showcase` collapsed to unstyled text.** It also clicked a link that soft-navigates under `scrml dev` but 301s into a hard nav on static hosting, so it measured different behaviour than production. Their conclusion: *"gate the artifact, not the dev server."* This is the §8 hollow-gate family with a new member — a gate whose assertion is mechanism-shaped rather than outcome-shaped goes green precisely when the mechanism misbehaves.
+
+### g-soft-nav-redirect-leaves-orphan-history-entry — a soft nav to a redirecting URL pushes history BEFORE fetching, then hard-navigates on the redirect, so one click burns two entries and the first Back appears to do nothing — `NEW S350-bryan (reported by scrml-site); MED; open`
+
+<!-- @gap id=g-soft-nav-redirect-leaves-orphan-history-entry sev=MED status=open locus=compiler/src/runtime-template.js:2713,2724,2752(PA-VERIFIED AT HEAD: `history.pushState` at :2713/:2724 in `_scrml_navigate_soft`, and the redirect fallthrough `if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }` at :2752 runs AFTER it) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+
+**Reported by scrml-site 2026-08-18; PA-VERIFIED IN OUR SOURCE AT HEAD.** `_scrml_navigate_soft()` pushes the history entry, *then* fetches, then discovers `res.redirected` and falls through to a full `_scrml_navigate(res.url)`. The pushed entry is orphaned — it names a URL whose document was never loaded — so the first Back press appears to do nothing.
+
+Reporter measured `history.length` **5 → 7 on a single click**; the first Back stayed on `/reference/` and only the second reached `/`. Triggered by any directory index without a trailing slash on static hosting (`/reference`, `/learn`, `/about`, `/articles`).
+
+**Suggested shape (reporter):** push AFTER the fetch resolves, or `replaceState` the redirect target onto the entry already pushed.
+
+Filed separately from [[g-soft-nav-head-sync-drops-stylesheet-links]] because it is true independent of that fix and has its own locus, though both are in the soft-nav path and a single arc should take them together.
+
 ### g-ws-message-door-has-no-body-ceiling-d4-census-missed-it — the `<channel>` server WebSocket `message(ws, raw)` handler `JSON.parse`s an adopter-supplied frame with NO scrml size ceiling, so the dpa-030 D4 body-size fix closes three of FOUR ingress doors — `NEW S350-bryan; HIGH; open`
 
 <!-- @gap id=g-ws-message-door-has-no-body-ceiling-d4-census-missed-it sev=HIGH status=open locus=compiler/src/codegen/emit-channel.ts:1107(the emitted `message(ws, raw)` handler; `JSON.parse(raw)` at :1109 with no length/byte guard — PA-verified by grep on BOTH main d604df09 and the held branch 45fc29b5) prov=rationale:routed-to-the-PA-by-S349-peter-as-dpa-030-OQ-2-and-PA-CONFIRMED-on-the-branch-peter-could-not-inspect -->
