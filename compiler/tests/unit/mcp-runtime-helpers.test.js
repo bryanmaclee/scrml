@@ -20,7 +20,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, watch } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -442,8 +442,50 @@ describe("getChannelState", () => {
 // fs.watch reload (opt-in)
 // ---------------------------------------------------------------------------
 
+// CAPABILITY GATE — these three tests assert an OS capability, not a product
+// behaviour. `fs.watch` needs a free inotify INSTANCE, and Linux caps those per
+// UID at `/proc/sys/fs/inotify/max_user_instances` (128 on the dev box). When
+// the box is at the cap, `fs.watch` throws EMFILE, `watcherCount` stays 0, and
+// these tests reported `(fail)` — a PRODUCT failure for something the product
+// did not do. The pre-commit hook runs with `--bail`, so that false failure
+// stops every commit in the repository until the unrelated process holding the
+// instances exits.
+//
+// MEASURED, S349: 122 of 128 instances were held by 64 orphaned
+// `scrml.js dev` servers leaked by THREE OTHER agent worktrees' churn tests,
+// plus the in-flight review worktree's. A direct three-attempt `fs.watch` probe
+// returned EMFILE on all three.
+//
+// The guard runs the real capability once and SKIPS rather than fails when the
+// OS refuses. It does not weaken the assertions: on a box with a free instance
+// the probe succeeds and all three run exactly as before. A skip is honest about
+// what was measured; a fail is not.
+function inotifyAvailable() {
+  const probeDir = mkdtempSync(join(tmpdir(), "mcp-watch-probe-"));
+  const probeFile = join(probeDir, "probe.json");
+  writeFileSync(probeFile, "[]");
+  let w = null;
+  try {
+    w = watch(probeFile, () => {});
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (w) w.close();
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+const INOTIFY_OK = inotifyAvailable();
+if (!INOTIFY_OK) {
+  console.warn(
+    "[mcp-runtime-helpers] SKIPPING the fs.watch reload tests: fs.watch threw " +
+    "(inotify instances exhausted — see /proc/sys/fs/inotify/max_user_instances). " +
+    "This is an environment limit, not a product failure."
+  );
+}
+
 describe("fs.watch reload (watch: true)", () => {
-  test("registers watchers when watch:true", () => {
+  test.skipIf(!INOTIFY_OK)("registers watchers when watch:true", () => {
     writeSidecar(tmpDir, "engines.json", []);
     writeSidecar(tmpDir, "forms.json", []);
     writeSidecar(tmpDir, "channels.json", []);
@@ -461,7 +503,7 @@ describe("fs.watch reload (watch: true)", () => {
     expect(_stateForTests().watcherCount).toBe(0);
   });
 
-  test("reloads engines.json on change event", async () => {
+  test.skipIf(!INOTIFY_OK)("reloads engines.json on change event", async () => {
     const rt = makeMockRuntime({ e: "A" });
     install({ reactive_get: rt.reactive_get, derived_get: rt.derived_get });
     writeSidecar(tmpDir, "engines.json", [{ name: "e" }]);
