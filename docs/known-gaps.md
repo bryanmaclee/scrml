@@ -8539,6 +8539,76 @@ The real argon2id implementation and the credential-handling path reach the brow
 Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §9 in the §1/§5 convention — **its expectations invert when it closes**, so the pin becomes the regression guard rather than needing a rewrite.
 <!-- @gap id=g-destructured-param-default-ships-server-only-stdlib-to-browser sev=HIGH status=open locus=compiler/src/route-inference.ts(the Trigger-3 top-level scan root — `fnNode.params` is a sibling of `body` and is never walked; the nested `function-decl` branch already handles its twin) prov=rationale:PA-reproduced-on-main-exit-0-zero-server-js-argon2id-in-the-shipped-runtime-and-the-nested-twin-already-escalates-so-the-gap-is-the-root-not-the-pattern -->
 
+### g-handle-middleware-call-to-escalated-fn-emits-undefined-reference — a `handle()` middleware body that CALLS a function route inference escalated into its own route handler emits a bare, undefined reference, so every request through the middleware throws `ReferenceError` at exit 0 — `NEW S350-bryan; HIGH; open`
+
+<!-- @gap id=g-handle-middleware-call-to-escalated-fn-emits-undefined-reference sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:3100(the `handle()` escape-hatch body is emitted verbatim into the middleware IIFE; the callee was separately lifted to a route handler by compiler/src/route-inference.ts:4430 `middleware-handle` — PA-located-verify: BOTH loci are located-not-traced, the PA reproduced the SYMPTOM by execution but did not trace which pass owns the missing binding) prov=rationale:PA-reproduced-by-execution-on-main-d604df09-and-on-branch-45fc29b5-identically-so-it-is-pre-existing-not-branch-introduced -->
+
+**PA-reproduced BY EXECUTION on `main` `d604df09` AND on branch `45fc29b5` — identical on both, so this is PRE-EXISTING, not introduced by the dpa-030 security cluster.**
+
+```scrml
+<program db="./app.db">
+  <schema>?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}</schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function fetchUser(id) {
+        return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+      }
+      function handle(request, resolve) {
+        let u = fetchUser(1)
+        return new globalThis.Response(JSON.stringify({...u}), { status: 200 })
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>
+```
+
+| | result |
+|---|---|
+| compile exit code | **0** |
+| diagnostics | **zero** |
+| emitted middleware body | `let u = fetchUser(1);` — and **no `fetchUser` binding exists anywhere in the module** |
+| driving every mounted route | `POST /_scrml/__ri_route_fetchUser_1` → **`ReferenceError: fetchUser is not defined`** |
+
+`fetchUser` is escalated by route inference into `_scrml_handler_fetchUser_1` + `__ri_route_fetchUser_1`; the `handle()` body is then emitted verbatim still calling the ORIGINAL name, which no longer names anything in the emitted module. The other three routes return 200 — only the middleware-wrapped one throws.
+
+**Blast radius is the whole pipeline, not one route.** `handle()` is an onion-model interceptor (§40.3) wrapping routed requests, so a single unresolved callee in its body takes down every request that routes through it. Exit 0, zero diagnostics.
+
+**Verified by EXECUTION, not by grep** — the emitted module was imported and every route in its own `routes` export was driven; the absence of the binding was confirmed by the throw, not by a failed search (the absence-of-evidence trap).
+
+**Distinct from** [[g-protect-tag-tojson-hook-dropped-by-object-spread]] — that is a confidentiality defect on the same `handle()` surface; this is a plain miscompile and fails LOUD at runtime rather than shipping a secret. They were found in the same repro and share the `handle()`-calls-an-escalated-fn shape, so a fix for either should check the other.
+
+**NOT investigated:** whether the same shape breaks from a non-`handle()` server function calling an escalated sibling, and whether the callee being `export`ed changes the outcome. Both are one compile each.
+
+### g-template-literal-in-param-default-truncated-defeats-trigger-3-escalation — a template literal in a `function` parameter default is truncated at its first interpolation, dropping the interpolation AND the function body, so a server-only binding referenced there never escalates and argon2id ships to the browser — `NEW S349-bryan; HIGH; open`
+
+<!-- @gap id=g-template-literal-in-param-default-truncated-defeats-trigger-3-escalation sev=HIGH status=open locus=compiler/src/tokenizer.ts(the template-literal reader — PA-located-verify: the SYMPTOM is reproduced by execution but the tokenizer line was NOT traced; the consumer that receives the already-truncated text is route-inference.ts:3846 `fnDeclParamDefaultRoots`, which reads `params[i].defaultValue`) prov=rationale:PA-reproduced-on-main-e38ccc1a-by-execution-exit-0-zero-server-js-and-argon2id-present-in-the-script-src-the-emitted-HTML-loads -->
+
+**PA-reproduced by execution on `main` `e38ccc1a`.** Not relayed — compiled, then checked the `<script src=>` files the emitted HTML actually loads.
+
+```scrml
+import { hashPassword } from 'scrml:auth'
+function f(h = `a ${hashPassword} b`) { return h }
+```
+
+| | result |
+|---|---|
+| exit code | **0** |
+| `.server.js` emitted | **none** |
+| `argon2id` in a `<script src=>` the HTML loads | **YES** (`scrml-runtime.*.js`) |
+
+**Same class as the S347 comment defect, and this one is the security-relevant member.** `readBlockComment`/`readLineComment` produced a COMMENT token whose `.text` was not its own source lexeme; the operator ruled *"not seeing comments is a non-starter for any serious language"* and the root fix is in flight. The template-literal reader has the same lossy-lexeme property, except a truncated template **defeats §12.2 Trigger 3 escalation**, which is a confidentiality boundary rather than a cosmetic one.
+
+**Two independent symptoms from one root:**
+1. **Security** — the interpolated binding is invisible to the Trigger-3 scan, so the function is not escalated and the server-only module ships to the client. Exit 0, zero diagnostics.
+2. **General miscompile (RELAYED, not PA-reproduced)** — the emitted default is reported as `` h = `a ` `` with the function body dropped entirely, so `` function greet(msg = `hello ${1 + 1} world`) `` returns `"hello "`. Independent of any import; verify before relying on it.
+
+**Scope note.** On `main` the *plain* shape (`h = hashPassword`, no template) also fails to escalate — §12.2 Trigger 3's parameter-default limb is not implemented on `main` at all. That plain case is covered by [[g-destructured-param-default-ships-server-only-stdlib-to-browser]] and is being closed by the in-flight `dtr-r7` arc. **This entry is for the residual the arc does NOT close**: the dtr-r7 S239 pass confirmed the template shape still leaks on the branch AND on a post-rebase preview, because the defect is at the token layer, below `route-inference.ts`.
+
+**Distinct from** [[g-template-interp-regex-swallows-following-source]] (a regex-with-quote inside `${}` making the tokenizer run PAST the template's end) — that is an over-read; this is an under-read. They may share a root; nobody has checked.
+
+**Fix direction:** make the template token round-trip its own lexeme (`tok.text === source.slice(span.start, span.end)`), exactly as the COMMENT fix does, then sweep the consumers that reconstruct source from tokens. Operator approved folding this into the `comment-token-faithfulness` arc at S349 on the FORK-RULE root-beats-position row: comments and templates are two positions, the unfaithful-lexeme token is the root.
+
 ### G-EXPORT-LET-POSITION-HAS-NO-NORMATIVE-HOME-AND-THE-ENFORCEMENT-IS-NOT-WHERE-THE-CORPUS-SAYS — `NEW S347; MED; open`
 
 **PA-measured S347.** `export let` occurs **ZERO times in the 37,152-line SPEC**. The operator position against it is long-standing and was ratified in full at S347 (four reasons, user-voice) — but neither the position nor its actual enforcement shape is written anywhere normative.

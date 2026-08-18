@@ -48,6 +48,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | ~~dpa-030 (prior row)~~ | *Banked S347 2026-08-16.* ⚑ *Re-banked at S346 in the hand-off, the wrap and user-voice — but never written HERE, so it did not exist to the dPA and `dpa-debt` read `0 UNRUN` correctly. The §10 obligation/probe mismatch again, fourth-plus instance; found at S347 boot when bryan said he was about to fire the dPA.* **Successor to the WITHDRAWN dpa-029 Q3.** Q3 offered "(a) host-escape by design vs (b) native" — but the host-escape it named is RUNTIME-BROKEN, so (a) was never a live option and the fork was invalid as framed. **Whether uploads exist is SETTLED, not a question** (bryan S346: *"We have NO upload path?! Really?!"*). The only open axis is the SHAPE: a `File`/multipart PARAMETER on the server-fn / `<endpoint>` contract adopters already write, vs a dedicated `<upload>` primitive. PA lean = the parameter (LIMIT wins, FORK RULE row 1; dpa-029 panel 5/7), **recorded, not ruled**. | S346 bryan — reverse-ouroboros correction; banked S347; bryan rules; return leg = a comment on #471 |
 | dpa-031 | **COMPLETE (ADVISORY) dPA 2026-08-16 — awaiting bryan.** ★★ **The gap was ALREADY FILLED and §51.0.A named the wrong thing as the filler.** scrml HAS a free-shaped, TYPED, FAIL-CLOSED shared store today — top-level cell + cross-file component ambient read, compiled AND executed in a real DOM (8 live `_scrml_effect` subs; a leaf 3 files deep re-renders on every write; missing ambient cell = `E-STATE-UNDECLARED` at COMPILE time). §15.13.4 is written over `@var` GENERICALLY, not over engine cells — so both adjectives in "free-shaped / **untyped** global store" are inaccurate. **Meanwhile the substitute §51.0.A names DOES NOT WORK CROSS-FILE and was never exercised end-to-end: D1** inert unexpanded `<engineVar />`, green compile, 0 diagnostics, renders NOTHING (**PA-CONFIRMED by execution S347** — arm text 0× in the importer, 1× in the definer) · **D2** engine var absent from the module-registry footer · **D3** `initial=.Variant(payload)` drops the payload → `TypeError` surfacing as *nothing happening*. **Three HIGH defects sat under a ratified `final` for ~169 sessions.** The rule that actually binds is unwritten anywhere: **a shared cell must be declared in the ENTRY file** (cells not exportable, §21.2). Prop-drilling friction **MEASURED, not asserted: 4.55× identifier repetition** (91 vs 20) for byte-identical output. **Direction (advisory): do NOT widen, no store primitive** — fix D1/D2/D3, rewrite §51.0.A's justification to the real rule, bank cell-exportability as a MODULE-SYSTEM question. **S316/#388 `export let` rejection UNAFFECTED.** Honest null offered and DECLINED on evidence. | **RATIFIED S347 2026-08-16** (bryan: *"your rec"*) — do NOT widen, no store primitive; file D1/D2/D3; rewrite §51.0.A's justification to the real (unwritten) entry-file rule; leave `final` alone until the defects are fixed. S346 reverse-ouroboros arc → audit node `free-shaped-global-store-not-built`; banked S347; **RUN 2026-08-16**; bryan rules; 7 defects to file (3 HIGH) |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
+| dpa-032 | **COMPLETE (ADVISORY) dPA 2026-08-17 — awaiting PA/bryan ratification.** **Recommendation: B — the SUBSTRATE, not a message surface.** ⚑ **The honest null is DEAD, and not on scope:** `<html lang="en"` is hardcoded at `codegen/index.ts:2261` with NO author surface — a French page ships `lang="en"`, so a correct two-language app is impossible at any adopter effort. ⚑ **The by-construction guarantee the bank asked for ALREADY EXISTS:** a missing translation is `E-TYPE-020` TODAY because it IS a match arm (`const <greeting> = match (@locale){…}`), browser-verified reactive. ⚑ **TWO BANK FRAMINGS CORRECTED:** code-default bodies are the *easiest* locus for a message lookup (a bare run is CODE, SPEC:1195), not the hardest; and a general message table is **NOT** an extension of §41.12 (closed 15-variant `ValidationError` key space). ⚑ **Structural result:** `E-STRUCT-FUNCTION-FIELD`'s own prescription (*"model the behavior as data, an enum tag the consumer matches on"*) independently derives ICU MessageFormat — the axiom SELECTS the encoding, it does not obstruct i18n. **4 UNFILED DEFECTS ROUTED** (see §6): (a) annotated struct-literal completeness entirely UNCHECKED — general, browser-verified to blank the UI — suspected highest severity; (b) a reactive read via a plain `function` call emits ZERO effects (green compile, browser-dead) — route-to-PA; (c) `@`-sigil in a backtick template literal → `E-CODEGEN-INVALID-LOGIC`; (d) §20.4's *"compiler SHALL inject `route`"* unimplemented + its diagnostic misdirects to a form §20.4 forbids. **R2-TERMINAL — no R3** (B and C are nested, not orthogonal). ⚑ **PANEL GAP CLOSED:** the forged `i18n-message-catalog-expert` went live LATER IN THE SAME SESSION and was polled **adversarially** (told to attack the two arguments that beat C, and not to manufacture a C case). **It ranked B anyway — 3/3 now** — and supplied the two sharpest LIMITS on B's claims (presence-vs-translatedness; the §5.3 generator's TMS ceiling — fuzzy invalidation needs the previous source string persisted, which a pure derived emit cannot hold). **Split is 2-1 FOR an ambient `@locale`.** Harness note amending dpa-027: neither *next boot only* nor *next roster refresh* is right — the roster refreshed mid-session but not at the next turn boundary. `E-VALIDATOR-INLINE-DYNAMIC` is confirmed an **unpaid cost** and this DD does not discharge it (§7). ⚑ **THE BANK'S PRIOR-ART PREMISE IS REFUTED (§0.6/§8.5, 14 systems surveyed).** **Flutter `gen_l10n` does NOT fail the build on a missing key and does not even warn** — it gap-fills, emitting the template-locale ENGLISH literal into the generated `AppLocalizationsEs` via `logger.printStatus`; Flutter's own hermetic test asserts generation SUCCEEDS with an untranslated key. Paraglide JS does the identical thing → **inherent to codegen, not a Flutter accident.** Of 14 systems, **exactly ONE** has a real missing-translation build gate: **Android lint `MissingTranslation`** (`Severity: Error`, at the DECLARATION site, first-class opt-outs — if you ever ratify a gate, it owes an opt-out in the same diff). **Structural reason: a fallback chain and a build-time exhaustiveness check are MUTUALLY ANNIHILATING** (Lingui `--strict` exits 0 whenever `fallbackLocales` is set). **scrml has no app-content fallback chain — which is exactly why its `E-TYPE-020` route holds a gate the field mostly cannot, and why C built as the bank imagined it would ANNIHILATE that gate.** ⚑ **BUT THE CLAIM IS NARROWER THAN §0.2 FIRST SAID** (domain voice): `E-TYPE-020` proves arm **PRESENCE, not TRANSLATEDNESS** — paste the English into `.Ja` and you get a clean build + an untranslated string. **State it as: missing locale arm = build failure; untranslated arm = undetected.** ⚑ **§7 REVERSED on late prior art:** gettext's manual documents scrml's EXACT constraint for scrml's exact reason (*the `gettext` call must precede argument substitution*), so `E-VALIDATOR-INLINE-DYNAMIC` is **SOUND and only its beneficiary is missing** — the domain voice's third option (**downgrade to a warning now, re-promote in the extractor's landing diff**) is the one to rule on first. Nothing in the prior art is `[EXEC]`; tiers marked per claim. PRIOR BANK (S349 2026-08-17): App-content i18n: native compile-time message surface, or host/runtime boundary by design? Triggered by an unsolicited inbound proposal for a runtime DOM-scanning translation library — **rejected at intake on four grounds (unmediated egress sink · second uncontrolled DOM writer vs writer-ownership Axiom ① · retrofit-not-by-construction · SEO inversion), with an explicit SCOPE LIMIT so it does not decide build-time or authoring-aid proposals.** ⚑ **PA-verified S349 by grep: scrml's ONLY i18n surface is diagnostics/labels** (§41.12 `registerMessages` · §55.10 4-level chain · §41.16 `registerLabels`); 7 `i18n` mentions in 37,152 SPEC lines, every one about validator messages; **ZERO entries in `known-gaps.md`, ZERO here** — genuinely unfiled. ⚑ **The sharpest fact: `E-VALIDATOR-INLINE-DYNAMIC` (SPEC.md:19554) REJECTS a form TODAY to protect "i18n tooling extraction" that does not exist** — a cost already paid for an unbuilt pipeline. Discriminator = the S322 test: a missing locale should be a compile error the way a missing `<match>` arm is (by construction), not a runtime fallback chain (retrofit). Prior art to study: **Flutter `gen_l10n`** (codegen → missing key fails at build), not the JS-framework field alone. apps-test ALREADY YES — do not re-poll. | S349 bryan bank → **RUN 2026-08-17 (dPA)**; advisory, awaiting ratify/reject/re-frame |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -1768,3 +1769,159 @@ premise flips"* · *"Verify the substitute, not just the thing being removed."*
 (happy-dom, chunks run in document order) — 10 probes, incl. a same-file control isolating D1 and a direct
 reproduction of D3's two throws. **RUN-not-RATIFY honored** — no SPEC edit, no insight landed, no compiler
 source touched, item NOT flipped to `ratified`.
+
+---
+
+## dpa-032 — App-content i18n: does scrml grow a NATIVE compile-time message surface, or is translation a host/runtime boundary by design?
+
+```
+id:        dpa-032
+status:    complete # banked → running → complete → ratified(by PA)
+artifact:  scrml-support/docs/deep-dives/app-content-i18n-dpa-032-2026-08-17.md
+fixtures:  scrml-support/docs/deep-dives/dpa-032-i18n-fixtures/ (f1-f10; f5/f6/f7 RUN in chromium)
+verdict:   B — the SUBSTRATE, not the surface. The null is dead on `<html lang="en"`
+           (hardcoded, no author surface); the by-construction guarantee already
+           exists as E-TYPE-020 over a locale enum. 4 unfiled defects routed.
+rung:      R2 minimum (language-surface: a new primitive or an extension of §41.12; USER rules)
+           → escalate to R3 if ≥2 approaches survive on DIFFERENT axes
+           ⇒ RESOLVED R2-TERMINAL (dPA 2026-08-17): two approaches survive (B, and C as a
+             deferred successor) but they are NESTED, not orthogonal — C is B plus a catalog,
+             and no voice argued C-without-B. The live disagreement is B's SIZE, which is a
+             ruling, not a debate. NOTE the framing premise "an extension of §41.12" is
+             MEASURED FALSE (closed 15-variant key space) — see the artifact §0.4.
+requested: S349 — an unsolicited inbound integration proposal for a runtime DOM-scanning i18n
+           library surfaced that scrml has NO app-content i18n story at all. The proposal is
+           REJECTED (see "Recorded rejection" below); the GAP it exposed is real and unfiled.
+banked:    S349 2026-08-17
+routes-to: scrml PA
+```
+
+### ⚑ SCOPE-LOCK — what is and is not being asked
+
+**NOT asked: "should scrml integrate a third-party runtime translation library?"** No — ruled at intake,
+reasoning recorded below precisely so it does not leak into adjacent questions.
+**NOT asked: "should scrml re-implement ICU MessageFormat?"** Almost certainly no.
+**NOT asked: "is `scrml:format`'s Intl surface good?"** It is fine and is not on trial.
+
+**Asked: can an adopter ship a scrml app in two languages today — and if the answer is awkward or
+impossible, what is the scrml-SHAPED surface?** Specifically: does it EXTEND the §41.12
+`registerMessages` mechanism that already exists, or does it need its own primitive, or is app-content
+translation correctly outside the compiler's remit?
+
+### Established S349 by PA grep — do NOT re-derive
+
+1. **scrml's ONLY i18n surface is diagnostics and labels.** §41.12 `scrml:data registerMessages`
+   (project-level error-message registration), the §55.10 four-level message-resolution chain, and
+   §41.16 `registerLabels` for `tableFor`. **Seven** occurrences of `i18n`/`internationali*` in the
+   37,152-line SPEC — every one of them about validator messages.
+2. **App-content i18n does not exist.** Zero entries in `docs/known-gaps.md`; zero in this file before
+   this item. Genuinely unfiled, not deferred.
+3. **⚑ THE SPEC HAS ALREADY PAID A COST FOR AN i18n PIPELINE THAT WAS NEVER BUILT.** `§55.10` /
+   `E-VALIDATOR-INLINE-DYNAMIC` REJECTS a form — a dynamic inline validator message — with this
+   normative justification, quoted verbatim from `SPEC.md:19554`:
+
+   > *"Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages
+   > must be statically discoverable)."*
+
+   A live rejection, enforced today, whose stated purpose is to protect **extraction tooling that does
+   not exist**. That is the governing sentence this DD must reckon with: either the answer justifies
+   that cost, or the cost is unpaid and the rejection is owed a re-examination of its own.
+
+### The two tests (S346, standing)
+
+- **`apps-test` — ALREADY ANSWERED, YES. Do not spend a poll re-establishing it.** Multi-language
+  shipping is universal in the application field: Rails i18n, Django, next-intl, vue-i18n,
+  svelte-i18n, Flutter `intl`/`gen_l10n`, Angular i18n, ICU MessageFormat, Project Fluent, gettext.
+- **`scrml-test` — THE JOB. Answer it by COMPILING, not by reading the SPEC.**
+
+### The shapes to author and COMPILE (report the emitted shape, not an impression)
+
+For each: what does an adopter write **today**, does it compile, and what does it cost?
+
+- a static UI string in plain markup, and the same string inside a `<match>` arm and an `<engine>`
+  state-child body (those are §4.18 **code-default** bodies where display text is a `"..."` literal —
+  does a message key even fit there, or does the body mode fight it?)
+- an interpolated message with a value, and with TWO values in a different order per language (the
+  argument-reordering case is why MessageFormat exists)
+- **pluralization** (0 / 1 / N, and the languages with more than two plural forms) — the hard case
+- locale as **reactive state**: switching language without a reload, and what that does to the
+  reactive graph
+- **SSR**: which locale does the server render, how does it learn it, and how does that compose with
+  §52.15.5's auth-scoped prerender omission
+- **routing**: `/en/...` vs `/fr/...` vs a cookie/header — this reaches §12 route inference
+- date / number / currency: how much is ALREADY covered by `scrml:format`'s Intl surface (measure it;
+  the overlap may be larger than assumed)
+- a message catalog as a **file** — where does it live, what parses it, and is it typed
+
+### ⚑ THE DISCRIMINATOR — by construction, or by retrofit (S322)
+
+The re-examination test applies directly and is the sharpest question here:
+
+**A missing translation should be a COMPILE ERROR the way a missing `<match>` arm is.** Exhaustiveness
+over a locale set is the same shape as exhaustiveness over a variant set, and `<match>` holds because
+the arm set is checked **at the declaration** — by construction, and it has generated no bug family. A
+runtime fallback chain that silently serves the base language when a key is missing is the **retrofit**
+shape, and it is the shape that produces one gap per position.
+
+Weigh every candidate on that axis first. **Flutter's `gen_l10n` is the closest prior art to study** —
+it codegens a typed accessor from message files, so a missing key fails at build. Poll it properly
+rather than treating the JS-framework field as the whole prior art.
+
+### Recorded rejection — the runtime DOM-scanning class, and its SCOPE LIMIT
+
+The proposal that triggered this item is the **runtime DOM-scanning** approach: a script that scans the
+rendered DOM, extracts text nodes, sends them to a translation endpoint, and rewrites the DOM in place,
+with a MutationObserver to catch dynamic updates. Public prior art in this class:
+[`translate.js`](https://github.com/xnx3/translate) (MIT). **Rejected at intake, on four grounds:**
+
+1. **It is an unmediated egress sink.** Rendered page text — which can carry `protect=`-tagged columns
+   (§14.8.9) and tenant-scoped rows (§14.8.10) — is POSTed off-origin by default. The compile-time
+   `EgressSink × ConfidentialityAxis` coverage type exists so that every compiler-emitted client-egress
+   sink is mediated; this one is invisible to it by construction.
+2. **It puts a second uncontrolled writer on DOM surfaces the reactive runtime owns.**
+   `E-ATTR-WRITER-CONFLICT` (writer-ownership Axiom ①, live at `compiler/src/codegen/emit-html.ts`)
+   makes contended wholesale ownership of a DOM surface a compile error. ⚠ **PA INFERENCE from the emit
+   architecture, NOT measured** — that an external MutationObserver would in fact be clobbered by
+   `_scrml_effect` re-renders and race `_scrml_reconcile_list` is untested. Cheap to settle; settle it
+   if the DD leans on it.
+3. **It is retrofit, not by construction** — a post-hoc pass over emitted output, changing what it
+   means, with no access to the tree that produced it. The §13.2 auto-await shape exactly.
+4. **The SEO claim is inverted.** "Crawlers see unmodified source" means the translated pages are not
+   indexable; one language gets indexed.
+
+**⚑ SCOPE LIMIT — the whole reason this is recorded rather than merely decided.** These four are about a
+**runtime DOM-REWRITING mechanism**. They do **NOT** decide:
+- whether a **build-time** translation step is acceptable (it faces none of the four);
+- whether **machine translation as an AUTHORING AID** — filling a catalog a human then reviews — is
+  acceptable (it faces none of the four);
+- whether an **adopter** may use such a library in their own app. That is their call; scrml has no
+  business forbidding it, and nothing here should become a compiler-enforced refusal.
+
+Anyone citing this rejection against a build-time or authoring-aid proposal is citing it out of scope.
+
+### ⚑ FORBIDDEN REASONING (S346, standing)
+
+**"The corpus shows zero i18n usage" is INADMISSIBLE.** The corpus is what we wrote to demonstrate a
+language growing from nothing; it is evidence about the authors, not about adopters, and it cannot
+contain a construct the language does not offer. Corpus-zero is a **BLAST-RADIUS instrument only**. Any
+pole reaching for it should be named as re-litigation of a ruled question.
+
+### Evidence the DD owes
+
+- The **governing sentence** for each fork, quoted with its §ref — or the explicit *"searched §X, §Y,
+  §Z — none found."* Note §41.12 + §55.10 already exist and already reach for i18n; a new primitive must
+  argue why it is not an extension of them.
+- **Compiled** adopter code for every shape above — today's awkward-but-legal route AND the proposal.
+- Whether the `E-VALIDATOR-INLINE-DYNAMIC` cost (item 3 above) is justified by the answer, or becomes an
+  unpaid cost owed a separate re-examination.
+- **Direction-of-change** classification; any NEW normative section owes a `prov=` field (Rule 4b).
+- Where the locale-set exhaustiveness check would live, and whether it can hold **at the declaration**.
+- **The honest null is a first-class outcome**: *"app-content i18n is correctly a userland concern;
+  §41.12 covers exactly what the compiler owns, and the surface should simply say so"* would be a
+  complete and valuable answer — but it must then explain the §55.10 rejection.
+
+### Anti-goals
+
+Do NOT build. Do NOT ratify (RUN-not-RATIFY). Do NOT evaluate the specific inbound library beyond the
+recorded rejection above — it is prior art, not a candidate. Do NOT reason from corpus counts. Do NOT
+re-open `scrml:format`.
