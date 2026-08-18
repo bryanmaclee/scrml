@@ -123,3 +123,120 @@ nil.
 
 - NEXT: `bun scripts/corpus-emit-differential.ts` base-vs-head (the standing pre-land gate for
   `compiler/src/codegen/` per primary.map.md), then the full `bun run test`.
+
+## 2026-08-18 — full suite + corpus emit differential
+
+### Full suite: ZERO new failures (name sets byte-identical)
+
+Ran `bun run test` on BOTH sides in this same worktree (checkout base, run, checkout head, run) so
+the environment is held fixed:
+
+| | pass | skip | todo | fail | tests |
+|---|---|---|---|---|---|
+| base `a112c92f` | 30053 | 216 | 1 | **53** | 30323 |
+| head `540fdba2` | 30062 | 216 | 1 | **53** | 30332 |
+
+`diff` of the sorted `(fail) <name>` sets is **EMPTY** — the same 53 tests fail on both sides, and
+not one of them is protect-related. They live in `browser/browser-navigate-cross-chunk`,
+`browser/browser-navigate-soft-nav`, `browser/browser-transitions`, `self-host/bs`,
+`unit/a5-2-parser-support`, `unit/esm-script-tag-module-format`. **PRE-EXISTING — not mine.**
+(+9 tests, +9 passes = the net new cross-call coverage.)
+
+### Corpus emit differential — and the instrument had to be proved first
+
+`bun scripts/corpus-emit-differential.ts` (the standing pre-land gate for `compiler/src/codegen/`
+per primary.map.md's Task-Shape Routing). **My first run was invalid and I nearly reported it.**
+
+- Run 1 captured base from a `git archive` export in the scratchpad and head from the worktree.
+  Verdict: `NOT A VALID COMPARISON`, **1070** differing artifacts, all `*.client.js`, every one at
+  IDENTICAL byte length. Two defects in MY harness, not in the code:
+  1. `git rev-parse` fails in a `git archive` export -> the tool correctly flagged
+     `[INCOMPARABLE] a side's revision is "<unknown>"`.
+  2. The 1070 were a red herring with a real cause: the emitted chunk-scope id is **path-derived**.
+     Diffing one file showed `// --- chunk cell scope (01fu57yg) ---` vs `(000h8maz)` and nothing
+     else. Two different `--compiler-root` absolute paths => 1070 spurious diffs.
+- **Determinism control before trusting any reading:** captured head TWICE from the same path and
+  self-diffed -> `VERDICT: NO DIFFERENCES`, 0 of 7383. The instrument is sound; the inputs were not.
+- Run 2, both sides captured from the SAME absolute path (checkout base in the worktree, capture;
+  checkout head, capture):
+
+```
+VERDICT: 55 DIFFERENCE(S)  over 1906 common sources, 7383 compared artifacts
+  compile-failure delta     0 newly failing / 0 newly passing
+  diagnostic changes        0 code / 0 text-only
+  artifact set delta        0 added / 0 removed
+  artifact content diffs    55 of 7383 compared
+  syntax delta (effective)  0 new / 0 fixed / 0 message-changed
+  load-context changes      0
+  bare server-fn sites      base 145 / head 145 (delta 0)
+```
+
+Breakdown of the 55, measured not eyeballed:
+- **55 of 55 are `*.server.js`. ZERO `*.client.js` changed.**
+- **55 of 55 shrink by exactly −186 bytes** (the deleted `_scrml_protect_mark` + `toJSON` install,
+  net of the new comment lines).
+
+**This is the Unit 1 proof the brief asked for: the deletion is INERT ON THE WIRE PATH.** Client
+output is byte-identical across all 1906 corpus sources; only server-internal bytes move, uniformly.
+
+**And it is the Unit 2 blast-radius measurement: `0 newly failing`.** The newly-rejecting direction
+rejects NOTHING in a 1906-source corpus. Combined with 883/883 conformance, the measured migration
+cost of Unit 2 is ZERO files.
+
+### SPEC check (Rule 4) — no amendment owed
+
+Read §14.8.9 in full (`compiler/SPEC.md:8450-8560`) plus the `E-PROTECT-004` catalog row
+(`SPEC.md:19284`). **Neither carries a within-function-body qualifier.** The catalog row says a
+protected-origin column that "reaches a compiler-unanalyzable egress path ... SHALL fail closed";
+the prose says "An egress path the compiler cannot analyze ... that carries a protected-origin
+column SHALL fail closed". So **Unit 2 is a COMPLIANCE FIX, not a widening** — the intraprocedural
+behaviour was the SPEC-noncompliant state. No SPEC edit made, and therefore no Rule 4b
+`> **Provenance:**` line is owed.
+
+Unit 1 is likewise a compliance restoration: §14.8.9 describes a DESCRIPTOR that "propagates
+through every compiler-emitted construction step — `{...row}` spread, helper return, `.map` /
+iteration" and is "read at the single sink". That is the Symbol descriptor, which the executed
+probe confirms survives every shallow copy. A value-level serialization hook appears nowhere in
+§14.8.9; it was an unmandated addition, and it lacked the one property the SPEC names.
+
+### The `handle()` masking defect — VERIFIED on this tree, and NARROWED
+
+The PA's mid-dispatch finding (`g-handle-middleware-call-to-escalated-fn-emits-undefined-reference`)
+reproduces here. In main's emitted artifact for the cross-call shape, `case.server.js:197` is
+`let u = fetchUser(1);` and there are **ZERO definitions of `fetchUser` in the module** — only the
+escalated route handler `_scrml_handler_fetchUser_1`.
+
+**REFINEMENT the PA did not have — the discriminator is `handle()`, not callee escalation.** Two
+controls:
+
+| probe | caller | callee | peer callable emitted? |
+|---|---|---|---|
+| I | `server function listUsers` | plain `function fetchUser` | **YES** — `// Issue #1: in-process peer callable for server function "fetchUser"` |
+| J | `function handle` | `server function fetchUser` | **NO** — bare `fetchUser(1)`, undefined |
+
+So the callee's declaration form is irrelevant; the peer callable is emitted for a server-fn caller
+and NOT for a `handle()` caller, even when the callee is an explicit `server function`. Whoever
+fixes this should look at the caller-side call-site collection that drives peer-callable emission,
+not at callee escalation.
+
+**SEQUENCING CONSTRAINT — recorded in source, not just here.** The leak Unit 2 closes is currently
+MASKED (not absent) by this defect: the cross-call shapes throw a ReferenceError before they can
+ship a column. **Fixing the undefined-callee defect WITHOUT Unit 2 in place would UNMASK a
+confidentiality leak.** Unit 2 is a prerequisite for that fix, not an alternative to it. This is
+written into the `detectProtectedRawEgressAcrossFile` header comment in
+`compiler/src/codegen/protect-egress.ts` so it is found by anyone touching the `handle()` call path
+(co-location: if a thing does a thing, look at the thing). NOT fixed here — out of scope,
+pre-existing on main, and fixing it inside a security branch is exactly the wrong place.
+
+### NOT done, deliberately
+
+- Did NOT fix `g-handle-middleware-call-to-escalated-fn-emits-undefined-reference` (brief: file-or-
+  reference only).
+- Did NOT edit `docs/known-gaps.md` — it is a PA-owned shared doc and is already modified on main;
+  a wholesale file-delta would clobber the PA's session version. The sequencing constraint is in
+  source + here instead. **PA: the known-gaps entry is yours to author.**
+- Did NOT amend SPEC (see the Rule 4 check above — nothing to amend).
+- Did NOT extend the closure across FILES or through indirect calls. Both bounds are stated in
+  source. Cross-file would need import resolution the codegen pass does not carry; indirect calls
+  need value-flow. Neither is required by §14.8.9's text and both are the fail-closed direction to
+  leave open (they under-approximate the gate, they do not weaken the redaction floor).
