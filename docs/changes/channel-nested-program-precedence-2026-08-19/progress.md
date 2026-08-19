@@ -240,3 +240,34 @@ apply). Once the inotify pool is freed, the code half lands with:
 +17 pass == exactly the 17 new §B19.14 tests. The 2 failures are the same two pre-existing
 EMFILE-caused `fs.watch` tests in both runs. ZERO new failures.
 Conformance: 883/883 before -> 884/884 after.
+
+## 2026-08-19 — final state
+
+Working tree holds the complete, verified change (6 files, 7 diffs). All of it is captured in
+`code-half.patch.txt`, which is COMMITTED and PUSHED, so nothing is at risk from a worktree sweep.
+
+    M compiler/SPEC-INDEX.md          (regenerated)
+    M compiler/SPEC.md                (§38.1 invariant 1a + qualifying clause)
+    M compiler/src/symbol-table.ts    (the fix + contract notes)
+    M compiler/tests/unit/channel-placement-shared-b19.test.js  (§B19.14, 17 tests)
+    M docs/FACTS.md                   (regenerated)
+    ? conformance/cases/channel/in-nested-program-inside-page/  (new case, 2 files)
+
+Final green: §B19.14 52 pass / 0 fail in the B19 file; conformance 884/884.
+`fs.watch` re-probed at wrap: still `EMFILE`. Code commit remains operator-gated.
+
+DEFERRED, surfaced not fixed:
+1. `compiler/tests/unit/mcp-runtime-helpers.test.js` asserts `watcherCount === 3` and
+   `getCurrentVariant("e2")` unconditionally, with no guard for an environment where `fs.watch` is
+   unavailable. Because `_startWatcher` swallows the throw by design, the test cannot distinguish
+   "watcher registration is broken" from "the OS refused a watcher" — so it turns a machine-level
+   resource condition into a suite-wide `--bail` stop that blocks every code commit on the machine.
+   That is arguably a test-robustness bug, but fixing it is outside this brief and a guard could
+   mask a real regression, so it is surfaced rather than changed.
+2. The 84 leaked `scrml dev` throwaway-fixture servers are a test-teardown leak in whatever spawns
+   `/tmp/scrml-dev-throw-*`. They accumulate across dispatches and will re-block the machine.
+3. §38 preamble (`SPEC.md:21076`), §38.2's normative list (`SPEC.md:21164`) and §40.8
+   (`SPEC.md:22814`) still carry the FLAT "Channels SHALL NOT live inside `<page>`" sentence. The
+   new §38.1 invariant 1a states explicitly that all three are read subject to it, but the
+   mechanical restatement sync was NOT performed: the dispatch bars edits to any SPEC section other
+   than §38.1 while sibling agents are live. Hand to a follow-up.
