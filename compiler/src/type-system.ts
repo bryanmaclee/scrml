@@ -24975,7 +24975,11 @@ function checkLifecycleFieldAccess(
    */
   function handleResetTextMatches(bareText: string): Array<{ start: number; end: number }> {
     const spans: Array<{ start: number; end: number }> = [];
-    const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+    // Negative lookbehind (not `\b`): a post-dot method call `obj.reset(@x)` is
+    // real code, not a reset keyword — `\b` matched after the `.` and registered
+    // a bogus lifecycle revert (g-reset-call-re-post-dot-hazard). `reset` is a
+    // RESERVED IDENTIFIER (§6.8.2), so a member-position `reset` is never a reset.
+    const RESET_CALL_RE = /(?<![A-Za-z0-9_$.])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
     let m: RegExpExecArray | null;
     while ((m = RESET_CALL_RE.exec(bareText)) !== null) {
       const cell = m[1];
@@ -25101,8 +25105,20 @@ function checkLifecycleFieldAccess(
         // Covers cases where the parser didn't structurally produce a reset-expr
         // (e.g., escape-hatch raw text). Whitespace-tolerant; matches V5-strict
         // canonical shapes.
+        // A member-position `reset` (`obj.reset(...)`) is an ordinary method
+        // call, NOT the reserved `reset` keyword (§6.8.2) — it must never revert
+        // a cell's lifecycle (g-reset-call-re-post-dot-hazard). The receiver info
+        // is in the AST here, so gate structurally: statementText renders the
+        // receiver's `.` with surrounding spaces (`logger . reset ( @u )`), which
+        // the fallback regex's immediate-`.` lookbehind cannot see, so a purely
+        // textual guard is insufficient.
+        const en = exprNode as { kind?: string; callee?: { kind?: string; property?: unknown } } | undefined;
+        const calleeProp = en?.callee?.property as { name?: string } | string | undefined;
+        const calleePropName = typeof calleeProp === "string" ? calleeProp : calleeProp?.name;
+        const isMemberResetCall =
+          en?.kind === "call" && en.callee?.kind === "member" && calleePropName === "reset";
         const bareText = statementText(stmt);
-        if (bareText && /\breset\s*\(/.test(bareText)) {
+        if (!isMemberResetCall && bareText && /(?<![A-Za-z0-9_$.])reset\s*\(/.test(bareText)) {
           resetSpans = handleResetTextMatches(bareText);
         }
       }
@@ -25950,7 +25966,7 @@ function checkLifecycleBindingAccess(
   // `transition(@u.field)` and `transition(@u.field.deeper)`. The captured
   // group still binds the ROOT identifier (which keys into the bindings
   // map); the optional `(?:\s*\.\s*<ident>)*` trailing path is consumed but
-  // not captured. Mirrors the RESET_CALL_RE pattern at line 14589 which
+  // not captured. Mirrors the RESET_CALL_RE pattern defined just below which
   // already accepts the dotted-path form. SPEC §14.12.6 — transition()
   // operates on the binding's lifecycle; whether the argument is the bare
   // root or a dotted-path member, the binding-side state advance is the
@@ -25970,8 +25986,10 @@ function checkLifecycleBindingAccess(
   // Whitespace-tolerant: `reset(@state)`, `reset(  @state  )`, `reset(@u . field)`.
   // The pattern intentionally allows whitespace inside the dotted path so
   // synthetic AST text from the parser (which may insert whitespace around
-  // `.` tokens) still matches.
-  const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+  // `.` tokens) still matches. Negative lookbehind (not `\b`) so a post-dot
+  // method call `obj.reset(@x)` is not read as a reset (g-reset-call-re-post-
+  // dot-hazard) — `reset` is a RESERVED IDENTIFIER (§6.8.2), never a member.
+  const RESET_CALL_RE = /(?<![A-Za-z0-9_$.])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
 
   // Detect `<bindingName>.<fieldName>` field access. Bind-scoped — only tracked
   // bindings count.
@@ -26042,15 +26060,18 @@ function checkLifecycleBindingAccess(
       return t === "not" ? "pre" : "post";
     }
     // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
+    // Mask string-literal contents first: a variant spelling inside a string
+    // (`= ".Published"`) is not a variant value and must not seed the state.
+    const tv = maskStringLiteralSpans(t);
     const postName = spec.postVariantName;
     const preName = spec.preVariantName;
     if (postName) {
       const postRe = new RegExp(`(?:^|\\.)\\s*${escapeRe(postName)}\\b`);
-      if (postRe.test(t)) return "post";
+      if (postRe.test(tv)) return "post";
     }
     if (preName) {
       const preRe = new RegExp(`(?:^|\\.)\\s*${escapeRe(preName)}\\b`);
-      if (preRe.test(t)) return "pre";
+      if (preRe.test(tv)) return "pre";
     }
     return null;
   }
@@ -26110,6 +26131,13 @@ function checkLifecycleBindingAccess(
   ): void {
     if (!text) return;
 
+    // Scan over a string-literal-masked copy so a `reset(...)` / `transition(...)`
+    // / `@x.field` SPELLING inside a string literal cannot launder or false-fire
+    // the lifecycle guards (g-transition-and-field-access-regex-raw-text-launder).
+    // Length is preserved, so all match indices (resetSpans, writePositions) stay
+    // aligned with the original `text`.
+    const scanText = maskStringLiteralSpans(text);
+
     // Q6-narrow (S134) — Pass 0: discover `reset(@<cell>)` / `reset(@<cell>.<f>...)`
     // calls. Applies the per-cell pre-computed reset-value classification from
     // `resetValueStates` to update `localStates`. Also records the matched
@@ -26131,7 +26159,7 @@ function checkLifecycleBindingAccess(
     const resetSpans: Array<{ start: number; end: number }> = [];
     RESET_CALL_RE.lastIndex = 0;
     let rm: RegExpExecArray | null;
-    while ((rm = RESET_CALL_RE.exec(text)) !== null) {
+    while ((rm = RESET_CALL_RE.exec(scanText)) !== null) {
       const cellName = rm[1];
       // const fieldPath = rm[2]; // currently unused at this tracker level —
       // the multi-level field reset is handled by the struct-field tracker;
@@ -26153,7 +26181,7 @@ function checkLifecycleBindingAccess(
     // Pass 1: discover transition() calls — advance state.
     TRANSITION_CALL_RE.lastIndex = 0;
     let tm: RegExpExecArray | null;
-    while ((tm = TRANSITION_CALL_RE.exec(text)) !== null) {
+    while ((tm = TRANSITION_CALL_RE.exec(scanText)) !== null) {
       const argName = tm[1];
       if (localStates.has(argName)) {
         localStates.set(argName, "post");
@@ -26165,14 +26193,14 @@ function checkLifecycleBindingAccess(
     const writePositions = new Set<number>();
     FIELD_WRITE_RE.lastIndex = 0;
     let wm: RegExpExecArray | null;
-    while ((wm = FIELD_WRITE_RE.exec(text)) !== null) {
+    while ((wm = FIELD_WRITE_RE.exec(scanText)) !== null) {
       writePositions.add(wm.index);
     }
 
     // Pass 3: detect field accesses; fire on pre-transition reads + variant-not-transitioned reads.
     FIELD_ACCESS_RE.lastIndex = 0;
     let am: RegExpExecArray | null;
-    while ((am = FIELD_ACCESS_RE.exec(text)) !== null) {
+    while ((am = FIELD_ACCESS_RE.exec(scanText)) !== null) {
       const binding = am[1];
       const field = am[2];
       if (writePositions.has(am.index)) continue; // skip LHS-of-write
@@ -26972,17 +27000,87 @@ function classifyResetValueAgainstSpec(
   function esc(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
+  const tv = maskStringLiteralSpans(t);
   const postName = spec.postVariantName;
   const preName = spec.preVariantName;
   if (postName) {
     const postRe = new RegExp(`(?:^|\\.)\\s*${esc(postName)}\\b`);
-    if (postRe.test(t)) return "post";
+    if (postRe.test(tv)) return "post";
   }
   if (preName) {
     const preRe = new RegExp(`(?:^|\\.)\\s*${esc(preName)}\\b`);
-    if (preRe.test(t)) return "pre";
+    if (preRe.test(tv)) return "pre";
   }
   return null;
+}
+
+/**
+ * Mask the CONTENTS of string and template literals with spaces, preserving
+ * length and quote/backtick positions, so the lifecycle text-scans below
+ * (variant-name / `transition(...)` / `@x.field` / `reset(...)` regexes) never
+ * treat a variant, transition, member, or reset SPELLING that appears inside a
+ * string literal as program code. Template-literal `${...}` interpolations are
+ * REAL expressions and are kept intact — but strings nested inside them are
+ * themselves masked (recursively). Length is preserved so downstream match
+ * indices stay aligned with the original text (span-suppression relies on it).
+ *
+ * Closes the S338 / Rule-7 raw-text-launder class on `type-system.ts`:
+ *   - g-variant-name-matches-source-text-unanchored (HIGH) — `= ".Published"`
+ *     no longer seeds a cell "post" off a variant spelling inside a string;
+ *   - g-transition-and-field-access-regex-raw-text-launder (MED) — a
+ *     `transition(...)` / `@x.field` spelling inside a string no longer
+ *     launders or false-fires the presence guard.
+ * (The sibling LOW, g-reset-call-re-post-dot-hazard, additionally needs the
+ * negative-lookbehind on RESET_CALL_RE so `obj.reset(@x)` is not read as a
+ * reset — a post-dot method call is real code, not maskable.)
+ */
+function maskStringLiteralSpans(text: string): string {
+  if (!text || !/["'`]/.test(text)) return text;
+  const out = text.split("");
+  const n = text.length;
+
+  // Positioned just AFTER an opening quote at `start`; mask the string body,
+  // recursing into any `${...}` (template only) to keep interpolated code
+  // intact. Returns the index just after the closing quote (or n if unterminated).
+  function maskString(start: number, quote: string): number {
+    let i = start;
+    while (i < n) {
+      const c = text[i];
+      if (c === "\\") { out[i] = " "; if (i + 1 < n) out[i + 1] = " "; i += 2; continue; }
+      if (c === quote) return i + 1;
+      if (quote === "`" && c === "$" && text[i + 1] === "{") {
+        i = scanCode(i + 2); // `${` and its body stay intact; nested strings masked within
+        continue;
+      }
+      out[i] = " ";
+      i++;
+    }
+    return i;
+  }
+
+  // Positioned just after `${`; walk the interpolation's real code (left intact),
+  // masking any nested string literals, until the matching `}`. Returns the index
+  // just after that `}` (or n).
+  function scanCode(start: number): number {
+    let i = start;
+    let depth = 1;
+    while (i < n) {
+      const c = text[i];
+      if (c === '"' || c === "'" || c === "`") { i = maskString(i + 1, c); continue; }
+      if (c === "{") { depth++; i++; continue; }
+      if (c === "}") { depth--; i++; if (depth === 0) return i; continue; }
+      i++;
+    }
+    return i;
+  }
+
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") { i = maskString(i + 1, c); continue; }
+    i++;
+  }
+  return out.join("");
 }
 
 /**
@@ -27027,15 +27125,16 @@ function isInitOfPostType(
     return t !== "not";
   }
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
+  const tv = maskStringLiteralSpans(t);
   const postName = spec.postVariantName;
   const preName = spec.preVariantName;
   if (postName) {
     const postRe = new RegExp(`(?:^|\\.)\\s*${postName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-    if (postRe.test(t)) return true;
+    if (postRe.test(tv)) return true;
   }
   if (preName) {
     const preRe = new RegExp(`(?:^|\\.)\\s*${preName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-    if (preRe.test(t)) return false;
+    if (preRe.test(tv)) return false;
   }
   return false;
 }
