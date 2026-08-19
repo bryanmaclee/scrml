@@ -1,7 +1,124 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S350-bryan.      -->
-<!-- Mechanical stream: handOffs/delta-log.md [1547]-[1576].       -->
+<!-- hand-off.md — live session state. WRAPPED at S352-bryan.       -->
+<!-- Mechanical stream: handOffs/delta-log.md [1577]-[1588].        -->
+<!-- Body below the S352 block is S350/S351 WRAPs (history).        -->
 <!-- ============================================================= -->
+
+# scrml — Session 352 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-19. `/boot`, Profile A, solo. **Ten PRs merged (#564-#573).**
+
+**Read this framing first: the session's output was CONVERSION, not construction.** Very little code
+landed. What changed is that a queue of *blocked deliberations* became a queue of *buildable arcs* —
+six operator rulings, four advisories drained, and both blockers on the held security cluster cleared.
+**Almost nothing on the pickup list below existed as startable this morning.**
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⭐ THE BOARD IS NOW BUILDABLE — five arcs, all newly unblocked, none started
+
+| arc | unblocked by | first move |
+|---|---|---|
+| **raw-egress structural fix** | dpa-033 ruled + M4 resolved — BOTH cleared S352 | land (c): delete the `reveal` suppressor from the raw-egress gate (subtractive, ~−80 LOC, zero adopter migration) |
+| **(d) sink-level lowering** | follows (c) | `JSON.stringify(_scrml_protect_redact(x))` at mediatable raw sinks; (c) stays the floor beneath it |
+| **i18n substrate B** | dpa-032 ruled | author-settable `lang` (one line, `codegen/index.ts:2261`) · declared locale set · `Intl.PluralRules` · locale as formatter default · locale as route dimension |
+| **dpa-035 replacement sequence** | dpa-035 ruled | `--minify` for real (a shipped flag that is a documented NO-OP) → runtime tree-shaking → `I-SSR-EACH-CLIENT-RENDERED` → dead-rule elimination in `#{}` |
+| **dpa-029 Q1 re-surface** | after the raw-egress fix lands | re-ask (a)-vs-(b) against a now-SOUND `handle()`; `Egress<Bytes>` is deferred, NOT rejected |
+
+**Sequencing that is already ruled, do not re-derive:** the raw-egress fix comes FIRST (dpa-029 Q1),
+`--minify` before the fold-adjacent work (dpa-035), and the four routed dpa-030 defects land before the
+`File` primitive (S347).
+
+### 2. ⚠️ TWO FIX ROUNDS INCOMPLETE — both pushed and safe, neither landable
+
+Both agents stalled repeatedly at a 600s watchdog. **All work is on origin; nothing is at risk.**
+
+- **`soft-nav-head-sync` @ `70c14838`** (origin). Items 1-2 DONE: the park mechanism was settled in real
+  Chromium and the fix is committed (+88 L in `runtime-template.js`). **Item 3 is the one that matters
+  and is NOT done** — a chunk-delay dimension in the browser test that must FAIL against the unfixed
+  runtime and PASS after. The existing 558-line suite *structurally cannot see* the defect (its
+  `cssDelayMs` knob delays only stylesheets; there is no chunk delay anywhere in the file; the no-flash
+  assertion samples only from the moment destination content becomes visible, and the defect lives
+  entirely before that). Also outstanding: the silent-404 diagnostic, and a suite + gzip measurement.
+  ⚑ **This fix merges CLEAN onto current main** (only conflict is generated `docs/FACTS.md`).
+- **`runtime-size-and-probes` @ `083ce19e`** (origin). F1/F2/F3/F5/F9 fixed with two-sided bite proofs
+  logged. **PA-VERIFIED both HIGHs myself** — F2 now resolves the canonical queue and *names it* in the
+  output; F1 prints `⛔ COULD NOT ENUMERATE` instead of a confident tick. Remaining: run `boot.ts`,
+  final verify, land. The `authority-needed:` mandate it depends on is ALREADY APPLIED to
+  `../scrml-support/dpa-scrml.md`.
+
+### 3. ⭐ OWED OUTWARD — scrml-site is still working around us
+
+scrml.dev runs `hard` on **all 551 internal `<a>`** purely to work around the soft-nav defect, and
+committed to reverting the day it lands. **The ping is owed the moment `soft-nav-head-sync` lands.**
+An ack was already delivered at S350 (`scrml-site` `6f30344`); this is the follow-through.
+
+### 4. Two dPA advisories left, and one should NOT be ruled as-is
+
+- **dpa-024** — §§1-3/Q5 only (Q4 was ruled + landed S337). Its structural claim is now
+  **independently re-verified** (128 in-place AST decoration fields vs its 127 nine days ago;
+  conformance 883/883). **Rulable.**
+- **dpa-034 (editions)** — a ONE-WAY door, and **2 of its 5 panel seats never went live**
+  (`rust-edition-expert`, `haskell-language-pragma-expert` — `Agent type not found`, twice). One
+  unasked question is whether scrml even HAS a unit that could carry an edition; if it does not,
+  editions may be structurally unavailable for reasons unrelated to the population argument — which
+  would BE the missing language-design answer. **On dpa-019 a late-live voice was the highest-impact
+  contribution and would have flipped the verdict. Re-poll before ruling.**
+- ⚑ Also carried: dpa-035's own panel gap — the critical-rendering-path voice was forged this session
+  and could not be polled. Both are the same next-boot roster constraint.
+
+### 5. The two artifacts that changed how the board reads
+
+- **The 16 KB gate now measures the shape that ships** (#571). The old assertion measured a five-line
+  counter button and is the ONLY gzip assertion in the tree. **Do not re-open hold-vs-raise** — that
+  fork was DISSOLVED, and `delta-log [759]` shows it had *already* been ruled HOLD by bryan long ago
+  and never recorded. The new ratchet is lowerable-only; raising it needs an explicit ruling.
+- **`git gc` works again** after six sessions. The repo-wide failure is closed additively (blob
+  restored from the verified salvage, cache-tree rebuilt to the same tree it always named).
+
+---
+
+## ⚑ MISSES (mine, recorded because they will recur)
+
+1. **★ I dispatched without re-asserting the working root, and the worktree was cut from the wrong
+   repository.** I committed a user-voice entry in `scrml-support`, my shell CWD stayed there, and
+   `isolation: worktree` provisions from the Bash CWD. I have `cd <scrml> && pwd` before every
+   worktree dispatch written down as a rule. Cost: one wasted dispatch. It cost nothing worse only
+   because the agent aborted at startup check 1 rather than falling back to writing into the main
+   checkout. **The rule is not "remember" — it is that the assert must be the LAST thing before the
+   dispatch, in the same turn.**
+2. **★ I ratified dpa-033 into the prose block and not the authoritative TABLE row**, so `dpa-debt.ts`
+   — which anchors on column 3 — still read it ADVISORY. That is finding F5 of the probes review
+   (*one file, two reading surfaces*) committed by me **within the hour of reading it**. Caught only
+   because I ran the probe before adding the next item rather than after.
+3. **★ I corrected ONE instance of a stale figure and called it corrected.** The `127 B margin` was in
+   three places; an agent found a fourth with a hyphenated spelling a plain grep misses.
+   **Correcting *an* instance is not correcting *the number*.**
+4. **My first bite probe used repetitive filler and slipped through silently** — it gzips to nothing.
+   Not a gate defect (the ratchet gates shipped bytes, correctly), but I nearly reported a
+   non-reproduction as a finding. Re-ran with high-entropy content and it bit.
+5. Five agent stalls at the 600s watchdog. **The mitigation that works is narrow-scope + commit-and-push
+   after EVERY item** — the resumed agents kept everything; the batching ones lost hours. One root cause
+   identified: the pre-commit hook runs ~2 min, the agent's shell times out, the watchdog counts it as
+   no progress. **Check `git log -1` before retrying a timed-out commit; it usually landed.**
+
+## 🧷 STATE
+
+- **main** `d042fa35` + the wrap PR. Coherence 0/0. Cloud `gate` green.
+- Gaps: **HIGH 46 · MED 151 · LOW 69 · NOMINAL 1**. dPA: **35 queued · 0 UNRUN · 2 ADVISORY**.
+- **Review floor: drained TWICE** — the second time it caught this session's own eight PRs, which is
+  the probe doing exactly its job on its author.
+- `ruling-debt` **1 OWED → 0**. `inbox-stranded` still reports 2 stranded July messages (pre-existing;
+  the probe is not landed yet — it lives on `runtime-size-and-probes`).
+- **Worktrees 66 → 61.** Two RETAINED deliberately (the two unlanded fix rounds). ⚑ **~59 are
+  pre-existing from prior sessions and are accumulating** — S343 retained many deliberately, so a sweep
+  needs its own dry-run pass, but it is now the largest untended mechanical debt.
+- Delta-log `[1577]`-`[1588]`. Salvage from this session: `EXEC-FINDINGS.md` (426 L) + the probes
+  agent's in-progress work, both in the session scratchpad.
+
+---
 
 # scrml — Session 350 (bryan · ASUS-Vivobook) — WRAP
 
