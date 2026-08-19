@@ -10009,11 +10009,17 @@ function walkChannelPlacement(
   errors: SYMDiagnostic[],
   filePath: string,
   visited: WeakSet<object>,
+  /**
+   * The name of the nearest enclosing NESTED `<program name=>` (§4.12), or
+   * `null` when there is none. See the E-CHANNEL-INSIDE-NESTED-PROGRAM fire
+   * below for why `name=` — not merely "nested" — is the discriminator.
+   */
+  nestedProgramName: string | null = null,
 ): void {
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      walkChannelPlacement(n, programDepth, pageDepth, fileHasProgram, errors, filePath, visited);
+      walkChannelPlacement(n, programDepth, pageDepth, fileHasProgram, errors, filePath, visited, nestedProgramName);
     }
     return;
   }
@@ -10031,7 +10037,18 @@ function walkChannelPlacement(
   // for one node. The inside-page message already names the canonical
   // placement (sibling of `<page>`, inside `<program>`), so also firing
   // E-CHANNEL-OUTSIDE-PROGRAM would be two diagnostics for one mistake.
-  if (isChannelMarkup && pageDepth >= 1) {
+  if (isChannelMarkup && nestedProgramName !== null) {
+    // §4.12 + §38.1 — a `<channel>` inside a NESTED `<program name=>`.
+    //
+    // Ordered FIRST, ahead of the `<page>` check, because it names the reason
+    // the declaration cannot be built at all: a nested `<program>` is a
+    // SEPARATE COMPILATION UNIT (§4.12.1), and `codegen/index.ts`
+    // (`extractWorkerPrograms`) removes the whole subtree from the tree before
+    // server emission. Nothing downstream ever emits the channel's server
+    // WebSocket upgrade route. Sending the author to the `<page>` remedy would
+    // send them to the wrong fix.
+    fireChannelInsideNestedProgram(node, nestedProgramName, errors, filePath);
+  } else if (isChannelMarkup && pageDepth >= 1) {
     // §38.1 invariant 1 + §38.2 normative: "A `<channel>` inside `<page>`
     // SHALL emit `E-CHANNEL-INSIDE-PAGE`" — channels are app-scope
     // shared-state vehicles, not per-route declarations.
@@ -10059,9 +10076,30 @@ function walkChannelPlacement(
   const childProgramDepth = tag === "program" ? programDepth + 1 : programDepth;
   const childPageDepth = tag === "page" ? pageDepth + 1 : pageDepth;
 
+  // The nearest enclosing NESTED `<program name=>`, threaded to children.
+  //
+  // The discriminator is the `name=` ATTRIBUTE, not nesting alone, and it is
+  // empirical rather than aesthetic: `extractWorkerPrograms`
+  // (`compiler/src/codegen/index.ts`) claims a nested `<program>` if and only
+  // if it carries `name=`. A §4.12.6 SCOPED-DB context (`<program db=>` with
+  // no `name=`) is NOT extracted — its `<channel>` stays in the tree, the
+  // server mounts the route, the client dials it, and the pair works. Only the
+  // `name=`d shapes (inline worker §4.12.4, WASM module, foreign sidecar
+  // §4.12.5, and a `route=` nested program) lose the subtree, so only they are
+  // refused here.
+  //
+  // `programDepth >= 1` excludes the ROOT `<program>`: SPEC §4.12.2 already
+  // forbids `name=` there ("it is the implicit root"), and a channel under the
+  // root is canonical placement.
+  const childNestedProgramName =
+    tag === "program" && programDepth >= 1
+      ? (nestedProgramAttrName(node) ?? nestedProgramName)
+      : nestedProgramName;
+
   const descend = (kids: any) =>
     walkChannelPlacement(
       kids, childProgramDepth, childPageDepth, fileHasProgram, errors, filePath, visited,
+      childNestedProgramName,
     );
 
   if (Array.isArray(node.children)) descend(node.children);
@@ -10260,6 +10298,87 @@ function fireChannelInsidePage(
   errors.push({
     code: "E-CHANNEL-INSIDE-PAGE",
     message: `${preamble}${remedy} (SPEC §38.1 + §38.2 + §34.)`,
+    span: channelSpanOf(channelNode, filePath),
+    severity: "error",
+  });
+}
+
+/**
+ * The `name=` value of a `<program>` markup node, for the nested-program
+ * channel-placement check. Mirrors `channelNameOf` but also accepts the
+ * `variable-ref` form, because `extractWorkerPrograms`
+ * (`compiler/src/codegen/index.ts`) accepts BOTH a `string-literal` and a
+ * `variable-ref` `name=` when it claims a nested `<program>` — the walker must
+ * agree with the extractor exactly, or a channel is refused in a shape that
+ * still compiles (or, worse, admitted in one that does not).
+ *
+ * Returns `null` when there is no `name=` attribute at all. An attribute
+ * present but unresolvable to a label still returns a placeholder, because
+ * PRESENCE — not resolvability — is what drives the extraction.
+ */
+function nestedProgramAttrName(programNode: any): string | null {
+  const attrs: any[] = programNode.attrs ?? programNode.attributes ?? [];
+  const nameAttr = attrs.find?.((a: any) => a && a.name === "name");
+  if (!nameAttr) return null;
+  const v = nameAttr.value;
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object") {
+    if (v.kind === "string-literal" && typeof v.value === "string") return v.value;
+    if (v.kind === "variable-ref" && typeof v.name === "string") return v.name.replace(/^@/, "");
+  }
+  return "<nested>";
+}
+
+/**
+ * Fire `E-CHANNEL-INSIDE-NESTED-PROGRAM` — a `<channel>` declared inside a
+ * NESTED `<program name=>` (§4.12).
+ *
+ * **What it prevents, concretely.** Before this fire, the shape compiled
+ * exit-0 and shipped a client that dialled a WebSocket route no server ever
+ * mounted. The mechanism is a stale analysis snapshot, not a missing emitter:
+ * `analyzeAll` (`compiler/src/codegen/index.ts`) caches `channelNodes` BEFORE
+ * the worker-extraction pre-pass runs, and that cache holds direct object
+ * references to nodes the splice then removes. The CLIENT emitter reads the
+ * stale cache and emits the connection; the SERVER emitter walks the LIVE
+ * post-splice tree and emits nothing. Because the client sets
+ * `_ws.onclose = () => setTimeout(_connect, 2000)`, the runtime symptom is a
+ * silent infinite 2-second reconnect loop against a route that does not exist.
+ *
+ * **Severity is `error`, deliberately.** There is no reading of the current
+ * output under which it is what the author wanted — no server route, no client
+ * state, and (for the §4.12.4 worker shape) no worker-side channel code either,
+ * since `generateWorkerJs` handles only function declarations and the
+ * `when message` hook. A warning on an otherwise exit-0 build would be missed.
+ * Refusing is also the reversible direction: if a future ruling admits channels
+ * in some nested execution context (§4.12.2 lists `route=` as valid nested and
+ * calls it "a server endpoint", so the server-side case is genuinely open),
+ * relaxing an error is cheap; un-shipping a silently-broken artifact is not.
+ */
+function fireChannelInsideNestedProgram(
+  channelNode: any,
+  nestedProgramName: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const channelLabel = channelLabelOf(channelNode);
+  errors.push({
+    code: "E-CHANNEL-INSIDE-NESTED-PROGRAM",
+    message:
+      `E-CHANNEL-INSIDE-NESTED-PROGRAM: ${channelLabel} is declared inside the ` +
+      `nested \`<program name="${nestedProgramName}">\`. A nested \`<program>\` is a ` +
+      `SEPARATE COMPILATION UNIT (SPEC §4.12.1) — the compiler extracts the whole ` +
+      `subtree before server emission, so this channel's server-side WebSocket ` +
+      `route is never emitted and the client would reconnect forever against a ` +
+      `route that does not exist. ` +
+      `Fix: move the \`<channel>\` declaration OUT of \`<program name="${nestedProgramName}">\` ` +
+      `into the top-level \`<program>\` body. Channel state stays reachable by ` +
+      `canonical \`@\` access from anywhere in that program, so the use sites do ` +
+      `not change. If the nested program itself needs the data, pass it across the ` +
+      `message-passing boundary that execution context already defines (§4.12.8) — ` +
+      `nested programs share NO state with their parent by design (§4.12.1). ` +
+      `(A \`<program db=>\` scoped-DB context with no \`name=\` is NOT extracted and ` +
+      `may hold a \`<channel>\` — only \`name=\`d nested programs are affected.) ` +
+      `(SPEC §4.12 + §38.1 + §34.)`,
     span: channelSpanOf(channelNode, filePath),
     severity: "error",
   });

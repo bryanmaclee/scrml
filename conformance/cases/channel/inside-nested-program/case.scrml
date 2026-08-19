@@ -1,0 +1,15 @@
+<program db="postgres://localhost/app">
+
+  <channel name="canonical-feed">
+    <messages> = []
+  </channel>
+
+  <program name="worker">
+    <channel name="nested-feed">
+      <items> = []
+    </channel>
+  </program>
+
+  <p>${@messages}</p>
+
+</program>
