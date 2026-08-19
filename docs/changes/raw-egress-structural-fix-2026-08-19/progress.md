@@ -215,3 +215,297 @@ Corroborating targeted runs, all on the final tree:
 reference the old case name `protect/reveal-suppresses-e004`. They are historical progress records
 and PA-owned shared docs, so an agent rewriting them is the wrong move — surfaced instead.
 `handOffs/dpa-queue.md` and `handOffs/delta-log.md` also cite it, likewise left alone.
+
+## 2026-08-19 — ROUND 3: the S239 adversarial pass's two blockers closed, plus H2/M2/M3/M4/L1/L2/L3/L5
+
+Branch `raw-egress-r3-work`, cut from `origin/feat/raw-egress-structural-fix-land`
+(tip `6ca6e468`). Every claim below was measured by COMPILING the shape and, where
+a leak is asserted, EXECUTING the emitted handler — never read off the code.
+
+**Method note.** The reproduction harness extracts the shipped `_scrml_protect_*`
+helper block and the handler tail VERBATIM from the emitted `.server.js` (plus any
+local helpers the body calls), evals them with a stubbed `_scrml_sql` returning
+`{id:1, name:"ada", passwordHash:"$argon2id$SECRET"}`, and prints
+`await resp.text()`. "The secret ships" below always means that string appeared in
+an executed response body, not that a grep matched.
+
+### ⛔ H1 — the depth cap was a silent fail-OPEN, and a REGRESSION vs `main`. CLOSED.
+
+The comment above `if (… || depth > MAX_DEPTH) return;` named the hazard exactly
+and the next line implemented it. Two compounding problems, both confirmed:
+`depth` counts EDGES (an array costs two — the container and each element), so 512
+internal levels is ~250 SOURCE levels, not 512; and `main`'s source-text regex had
+NO depth limit, so `main` failed CLOSED at any nesting while this branch failed
+OPEN above the cap.
+
+Bite proof, shape
+`let deep = [[[…new Response(JSON.stringify(u))…]]]; return deep.flat(Infinity)[0]`
+in a `protect="passwordHash"` app:
+
+| nestings | `6ca6e468` | this branch |
+|---|---|---|
+| 250 | E-PROTECT-004 fires | fires (message unchanged) |
+| 255 | **silent**, `scrml compile` exit **0**, "Compiled 1 file" | fires, exit **1**, "FAILED — 1 error" |
+| 500 | silent | fires |
+
+Executed at 255 on `6ca6e468`:
+`STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}`.
+
+**Fix is behavioural, not numeric.** Exceeding the cap sets a `truncated` flag and
+forces a POSITIVE result, checked BEFORE the `protectedQuery === null` early return
+— the truncation may be what hid the query. Raising the number cannot fix this;
+any finite cap has a boundary, so the boundary BEHAVIOUR is what has to be right.
+The cap stays 512 as a call-stack resource bound (measured max over the 1878-body
+corpus: 37) and is hoisted to `RAW_EGRESS_MAX_DEPTH` with the contract stated once.
+A second message form under the same code carries the truncation case: no SELECT
+is named, and the resolution is "reduce the nesting", not "project a column out".
+
+Regression test: 4 new, two-sided — under-the-cap fires on the merits with the
+ordinary message; past-the-cap fires with the truncation message; deeper-still
+fires; a deep body WITHIN the cap and with no raw egress stays silent (no
+cap-manufactured false positive). Red half: `compiler/src` stashed to `6ca6e468`
+→ 46 pass / **2 fail**, exactly the two past-the-cap tests.
+
+Commit `fca83b7e`.
+
+### ⛔ M1 — §14.8.9 contradicted itself inside the amended section. CLOSED.
+
+Three corrections, `compiler/SPEC.md`:
+
+1. The Diagnostics bullet for `E-PROTECT-004` still ended "…and it is not
+   `reveal`-declassified" — exactly what the new paragraph seven lines above
+   declares non-conformant and what the §34 row already replaced with "Fail-closed
+   **unconditionally**". Struck; the bullet now states the unconditional rule with
+   its one-line reason.
+2. The Diagnostics preamble "(named now; emitted when the floor build lands…)" was
+   stale for BOTH codes. Replaced with a LIVE statement plus per-code emitter
+   provenance, named by SYMBOL per the §34 census's own no-hardcoded-line-numbers
+   rule.
+3. The §34 row for `I-PROTECT-STRIP-001` carried the same stale claim; given an
+   emitter note in the shape `6ca6e468` established for `E-PROTECT-004`
+   (`generateServerJs`, draining `drainProtectInfosFromRewriter`).
+
+Also folded the H1 consequence into both §14.8.9 and the §34 row so the SPEC and
+the shipped behaviour agree.
+
+`bun scripts/s34-census.ts --check-new --base origin/main` →
+**"§34.0 gate: 2 new/changed §34 row(s), all well-formed — PASS"**.
+
+Commit `6d908c4b`.
+
+### H2 — computed-member evasion. FIXED (not merely disclosed).
+
+Reason for fixing rather than disclosing: a bracket with a string-literal key is
+STATICALLY RESOLVABLE — the key's value sits on the `lit` node the parser already
+built — so reading it is the tree's own answer, not a source re-scan. The §14.8.9
+SHALL is on the CONSTRUCT, not on a spelling, and a gate that reads one spelling
+and not the other is one keystroke from a leak.
+
+Root cause is slightly different from the review's description: `a["b"]` is not a
+"computed member". `types/ast.ts` declares `MemberExpr.property` a plain string and
+routes computed access to `IndexExpr`, so `terminalName` saw a node kind it did not
+handle at all.
+
+| spelling | `6d908c4b` | now |
+|---|---|---|
+| `new Response(...)` | FIRES | FIRES |
+| `new globalThis.Response(...)` | FIRES | FIRES |
+| `new globalThis["Response"](...)` | **silent** | FIRES |
+| `new globalThis['Response'](...)` | **silent** | FIRES |
+| `new window["Response"](...)` | **silent** | FIRES |
+| `new globalThis["foo"]["Response"](...)` | **silent** | FIRES |
+| `globalThis["Response"].json(...)` | **silent** | FIRES |
+| `Response["json"](...)` | **silent** | FIRES |
+| `let k = "Response"; new globalThis[k](...)` | silent | silent (RESIDUAL, documented) |
+
+Executed on the bracket form pre-fix:
+`STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}`.
+Red half 50 pass / **6 fail** → 56 pass / 0 fail. New conformance case
+`protect/raw-egress-computed-response`. The
+`protect-raw-egress-globalthis-response` rationale's "Any aliasing receiver …
+reaches the same conclusion" was false for the bracket forms and is corrected.
+
+Commit `48de10dd`.
+
+### M2 — cross-function helper. FIXED (not merely disclosed).
+
+Reason for fixing: it is the most idiomatic shape of the lot, and the per-body unit
+was a boundary the author could cross by pressing Extract Function. Three shapes,
+all executed pre-fix, all answering
+`{"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}` at exit 0 with zero
+diagnostics:
+
+- SELECT in the callee, `new Response` in the caller (the row RETURNS into the egress);
+- SELECT in the caller, `new Response` in the callee (the row is PASSED IN);
+- a two-hop callee chain.
+
+**Rule: reachability, not file scope.** `detectProtectedRawEgress` is replaced by
+`collectRawEgressFacts` (per body: protected SELECT, egress kinds, bare-identifier
+callees, truncation) + `detectProtectedRawEgressAcrossFns`, which for each fn F
+takes reach(F) = F plus every fn F transitively calls IN THIS FILE, and fires when
+reach(F) holds BOTH. Forward reachability alone covers both flow directions because
+it is evaluated at every function. Two fns with no call path share no data path and
+stay silent — pinned by a CONTROL test (an unrelated protected query plus an
+unrelated §40.3.5 `403` does not fire), which is what stops this becoming "any
+protect= app with any manual Response". Mutual recursion terminates on the visited
+set (pinned). The diagnostic names the call path (`getUser` -> `loadUser` -> `raw`).
+
+Red half 58 pass / **4 fail** → 62 pass / 0 fail. New conformance case
+`protect/raw-egress-cross-function`.
+
+**Blast radius, measured:** all 75 `protect=`-bearing `.scrml` in `samples/`,
+`examples/`, `stdlib/`, `docs/` and `conformance/`, compiled base-vs-head with
+per-file per-code diagnostic counts — **0 diffs** for this change alone.
+
+Commit `5fba6b41` (with L5).
+
+### M3 — the residual disclosure misstated `main`. CORRECTED.
+
+Verified by checking out `origin/main`'s `compiler/src` into this worktree and
+compiling all three spellings:
+
+| spelling | `origin/main` | this branch |
+|---|---|---|
+| `let R = Response` | **E-SCOPE-001 — does not compile** | silent (leak) |
+| `let R = globalThis.Response` | silent | silent |
+| `let k = "Response"; globalThis[k]` | silent | silent |
+
+So the CLASS carries forward, but for the one spelling the paragraph named it is a
+**WIDENING**: this branch adds `Response` to `LOGIC_SCOPE_GLOBAL_ALLOWLIST` for
+§40.3.5, which is what makes that program compile at all. The residual paragraph in
+`protect-egress.ts` is rewritten as three numbered bounds with that parity table
+stated in words, and pinned by a test asserting BOTH that the gate is silent AND
+that E-SCOPE-001 no longer fires.
+
+### M4 — the passthrough guard on ONE arm only. FIXED.
+
+The baseline-CSRF arm (`!authMiddlewareEntry && isStateMutating && _webAppShape` —
+i.e. no `auth=`, no `protect=`, state-mutating; the majority shape for a small app)
+emitted NO `instanceof Response` guard.
+
+| | guard count | executed 403 path |
+|---|---|---|
+| baseline arm, `5fba6b41` | **0** | `STATUS 200 BODY: "{}"` — the DENY became a SUCCESS |
+| baseline arm, now | 1 | `STATUS 403 BODY: "Forbidden"` |
+| `auth="required"` arm | 1 (both) | 403 (already covered) |
+
+Placement is doubly ordered and both orderings are load-bearing: AFTER the
+`_envelope` COMMIT (an early return must not strand an open transaction), BEFORE the
+JSON envelope (which would already have destroyed the `Response`). Red half 18 pass
+/ **2 fail** → 20 pass / 0 fail; the third new test (a NORMAL return still enveloped
+as 200 JSON with the baseline `Set-Cookie` intact) passes on both sides
+deliberately — it is the guard against the guard.
+
+**Blast radius, measured over 1906 corpus sources** (`examples/ samples/ stdlib/
+conformance/ docs/readme-snippets`, recursive), comparing diagnostic-code counts AND
+the emitted server/client LINE ARRAYS: 0 diagnostic deltas; 159 artifact halves
+differ, **all of them by the guard line alone**, +257 guard lines; 0 anything else.
+257 is also the population answer for how wide this fail-open was.
+
+Commit `9319975f`.
+
+### L5 — the span-less `continue`. FIXED.
+
+A FAIL-CLOSED gate went silent on a fn node whose only defect was missing position
+metadata. Now falls back to a file-anchored span (the shape `I-PROTECT-STRIP-001`
+already uses). Latent rather than active (0 span-less fn nodes measured across the
+protect-active corpus), but not a hole to leave in a security gate. Landed with M2
+in `5fba6b41`.
+
+### L1 / L2 / L3 — three stale claims this arc made false. CORRECTED.
+
+- **L1** `emit-server.ts` — "no corpus source reaches it today (a plain body naming
+  `Response` build-blocks on E-SCOPE-001)" stopped being true in the same arc that
+  wrote it. Rewritten: the guard is LOAD-BEARING, with the reason and a
+  do-not-weaken-or-reorder note.
+- **L2** `type-system.ts` — the exclusion of `Request` was justified with "it is a
+  parameter binding", which conflates the lowercase `request` parameter (never
+  consults the allowlist) with the capitalized `Request` CONSTRUCTOR (which the
+  allowlist is exactly the arbiter of). Behaviour unchanged; the reason is now the
+  real one — no §40.3 example CONSTRUCTS a `Request`.
+- **L3** `docs/known-gaps.md`
+  `g-handle-globalthis-response-ships-protected-columns` — `open` → **`narrowed`**,
+  with the three halves adjudicated individually: (b) the per-body source-text regex
+  CLOSED, (c) §40.3.5's own example failing E-SCOPE-001 CLOSED, (a) the
+  `instanceof Response` passthrough DELIBERATELY UNCHANGED (a `Response` is opaque to
+  the redactor; the fix is upstream — the gate build-blocks the row — and removing
+  the passthrough would be a regression in the other direction). The stale locus
+  claim "`Response` is not [allowlisted]" is replaced. Only that entry is touched.
+
+Commit `51ae0793`.
+
+### FULL-BRANCH DIFFERENTIAL — `origin/main` -> HEAD, 1906 corpus sources
+
+Diagnostic-code-set deltas: **9**, and every one is intended.
+
+```
+conformance/cases/protect/raw-egress-computed-response      +E-PROTECT-004
+conformance/cases/protect/raw-egress-cross-function         -E-SCOPE-001 +E-PROTECT-004
+conformance/cases/protect/raw-egress-e004                   -E-SCOPE-001
+conformance/cases/protect/raw-egress-foreign-inline-level1  +E-PROTECT-004
+conformance/cases/protect/raw-egress-globalthis-response    +E-PROTECT-004
+conformance/cases/protect/reveal-cross-value-no-suppress    -E-SCOPE-001 +E-PROTECT-004
+conformance/cases/protect/reveal-does-not-suppress-e004     -E-SCOPE-001 +E-PROTECT-004
+samples/gauntlet-r13/react-auth-dashboard.scrml             -E-SCOPE-001
+samples/gauntlet-r14/react-auth-dashboard.scrml             -E-SCOPE-001
+```
+
+Seven are this branch's own conformance cases. The two real adopter sources lose an
+error and gain none (the §40.3.5 conformance restoration); their other pre-existing
+errors are unchanged. **No adopter / sample / example / stdlib source gains a
+diagnostic.**
+
+Artifact deltas: 159 halves, **all by the guard line alone** (+257 lines, the M4
+fix); **0** artifact halves differ for any other reason. (The prior round recorded
+"artifact content diffs 0"; the 159 here are M4's intended emission and nothing
+else.)
+
+### TEST STATE (final tree)
+
+- `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance`
+  → **22433 pass · 0 fail · 70 skip · 1 todo** across 1231 files (165 s).
+- `bun conformance/run.ts` → **889/889** (887 at round start; +2 new cases).
+- `g-sql-row-protect-leak.test.js` → 62/62 (was 44).
+- `authed-server-fn-response-http.test.js` → 20/20 (was 17).
+- `bun scripts/s34-census.ts --check-new --base origin/main` → PASS.
+
+The inotify-exhaustion env failures recorded in the previous round did NOT recur —
+the full pre-commit hook ran clean on all five commits this round.
+
+### RESIDUAL HANDED BACK (for the PA — known-gaps is PA-owned except the L3 entry)
+
+1. **The syntactic-resolution bound**, now the whole of what
+   `g-handle-globalthis-response-ships-protected-columns` still covers. Callee AND
+   call-edge resolution are syntactic: `let R = Response`, `let k = "Response";
+   globalThis[k]`, `let f = loadUser; f(id)`, a CROSS-FILE helper, and
+   `obj.method()` all still slip the gate. Closing them needs the name resolver /
+   constant propagation. Each is pinned by a passing `RESIDUAL (documented)` test so
+   closing one turns a test red and forces the bound paragraph to move with it.
+   `let R = Response` is a WIDENING vs `main`, not a carry-forward.
+2. **The value-scoped `reveal` EXIT at a raw egress is still absent.** §14.8.9 admits
+   a protected column only when its descriptor bears a `reveal` stamp AT THE SINK,
+   and a raw egress has no compiler-emitted serializer to read it — so the gate is a
+   floor with NO exit. Restoring an ergonomic exit means LOWERING a mediatable raw
+   sink so the floor runs there, not widening `reveal`. Separate arc; unchanged from
+   the previous round.
+3. **A FAILED build still writes `dist/` artifacts.** Observed while proving H1:
+   `scrml compile` on a file with an `E-PROTECT-004` exits 1, prints
+   "FAILED — 1 error", and still emits `app.server.js` / `app.client.js` /
+   `app.html`. Verified identical for a SHALLOW E-PROTECT-004, so it is PRE-EXISTING
+   CLI behaviour for any CG error, not introduced here and not in this brief's scope
+   — but for a fail-closed security gate "the build failed" and "the leaking
+   artifact is on disk" being simultaneously true is worth a ruling. NOT filed in
+   `docs/known-gaps.md` (PA-owned); recorded here.
+4. **`E-TENANT-RAW-EGRESS` (§14.8.10) is still the source-text scan this round
+   deleted.** Verified by reading the code, not relayed: `detectTenantRawEgress`
+   in `compiler/src/codegen/tenant-egress.ts` takes `fnSource: string` and calls
+   itself the "mirror of §14.8.9's `detectProtectedRawEgress`". It still carries
+   the exact four predicates this round removed on the protect side — the
+   backtick-SQL regex for the query, the level-0-only `_{` opener test, the
+   `new\s+Response` / `Response\s*\.\s*json` pair for the manual `Response`, and
+   the bare `asIs` token test — plus a per-body unit. So
+   `new globalThis.Response(...)`, `new globalThis["Response"](...)`, `_={ … }=`,
+   a token inside a comment or a string literal, and the helper split are all
+   PRESUMPTIVELY open on the tenant twin. Explicitly OUT of this brief's scope,
+   and NOT empirically leak-tested here (only the code path was verified) —
+   flagged as the obvious next dispatch.
