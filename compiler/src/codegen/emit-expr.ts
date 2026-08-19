@@ -203,6 +203,50 @@ export function setCurrentUserAmbientActive(on: boolean): void {
   setRewriteCurrentUserAmbientActive(!!on);
 }
 
+// g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — the file's
+// registered-`<request>` id set, established ONCE per file at the client-codegen
+// entry (`generateClientJs`) via `collectRequestIds(fileAST)`. This is the single
+// source of truth for the request-ref escape-hatch reparse gate.
+//
+// WHY a module-level fallback: `collectRequestIds(fileAST)` is a per-file quantity,
+// but historically it was recomputed and hand-threaded per call-site by 3+
+// independent mechanisms (EmitExprContext.requestIds, emit-lift's
+// `_scrml_lift_request_ids_stack` pushed only by emitIfStmt/emitForStmt, and
+// emit-each's `_eachRequestIds`) that did NOT cover every path — so a `<#id>`
+// request ref reached through a Tier-0 `while`/`do…while` lift body, or an
+// `<each>` reached from a lift body, carried an EMPTY `requestIds`, skipped the
+// reparse, stayed on the string-fallback path, and mis-routed to the tree-shaken
+// `_scrml_input_state_registry` → hard ReferenceError at mount (#511/#512 reopened
+// this family twice by patching individual positions). Rather than add a 4th, 5th…
+// per-path thread, `reparseRequestRefEscapeHatch` falls back to THIS set whenever
+// the hand-threaded `requestIds` is empty/undefined. Cleared (→ null) at the end
+// of `generateClientJs` so nothing leaks across files.
+let _currentFileRequestIds: Set<string> | null = null;
+
+/**
+ * Establish (or clear, with `null`) the per-file registered-`<request>` id set.
+ * Called ONCE per file by `generateClientJs` before the emit-* passes run, and
+ * cleared after them. See `_currentFileRequestIds` above.
+ */
+export function setCurrentFileRequestIds(ids: Set<string> | null): void {
+  _currentFileRequestIds = ids;
+}
+
+/**
+ * The EFFECTIVE registered-`<request>` id set for a routing decision: prefer the
+ * hand-threaded `ctx.requestIds` when it is non-empty, else fall back to the
+ * single per-file source of truth (`_currentFileRequestIds`, established by
+ * `generateClientJs`). Every `<#id>` request-vs-input-state routing seam consults
+ * THIS so a ref reached through a control-flow position whose bespoke threading
+ * never carried the set (while/do-while lift bodies, `<each>` reached from a lift
+ * body) still routes to `_scrml_request_<id>` instead of the tree-shaken
+ * `_scrml_input_state_registry`. The set only ever holds real registered ids, so
+ * a non-request `<#id>` is never captured (the §GATE holds by construction).
+ */
+function effectiveRequestIdsFromCtx(ctx: EmitExprContext): Set<string> | null {
+  return ctx.requestIds && ctx.requestIds.size > 0 ? ctx.requestIds : _currentFileRequestIds;
+}
+
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -790,14 +834,24 @@ export function reparseRequestRefEscapeHatch(
   requestIds: Set<string> | undefined,
   gateToRegisteredRequests: boolean,
 ): ExprNode | null | undefined {
+  // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — the EFFECTIVE
+  // registered-request set: prefer the hand-threaded `requestIds` when it is
+  // non-empty, else fall back to the single per-file source of truth established
+  // by `generateClientJs` (`setCurrentFileRequestIds`). This is what closes the
+  // while/do-while-lift + each-in-lift paths whose bespoke threading never carried
+  // the set — WITHOUT adding a 4th per-path thread. The set only ever holds real
+  // registered request-ids, so the §GATE (a non-request `<#id>` is left on its
+  // pre-fix path) still holds by construction via `rawReferencesRegisteredRequest`.
+  const effectiveRequestIds: Set<string> | undefined =
+    requestIds !== undefined && requestIds.size > 0 ? requestIds : _currentFileRequestIds ?? undefined;
   if (
     (!node || (node as any).kind === "escape-hatch") &&
     typeof raw === "string" &&
     raw.includes("<#") &&
     (!gateToRegisteredRequests ||
-      (requestIds !== undefined &&
-        requestIds.size > 0 &&
-        rawReferencesRegisteredRequest(raw, requestIds)))
+      (effectiveRequestIds !== undefined &&
+        effectiveRequestIds.size > 0 &&
+        rawReferencesRegisteredRequest(raw, effectiveRequestIds)))
   ) {
     try {
       const reparsed = parseExprToNode(raw, label, 0) as ExprNode | null;
@@ -1038,8 +1092,11 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     const m = name.match(/^_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*)_$/);
     if (m) {
       // §6.7.7 — a request id routes to the reactive `_scrml_request_<id>`
-      // object (same routing as the structured `emitInputStateRef` seam).
-      if (ctx.requestIds && ctx.requestIds.has(m[1])) {
+      // object (same routing as the structured `emitInputStateRef` seam). Uses
+      // the EFFECTIVE set (ctx else per-file fallback) so a lift-nested / each-in-
+      // lift text interp still routes (g-request-ref-nested-in-lift-misroute).
+      const _eff = effectiveRequestIdsFromCtx(ctx);
+      if (_eff && _eff.has(m[1])) {
         return `_scrml_request_${m[1]}`;
       }
       return `_scrml_input_state_registry.get(${JSON.stringify(m[1])})`;
@@ -3878,7 +3935,11 @@ function emitInputStateRef(node: InputStateRefExpr, ctx: EmitExprContext): strin
   // registry returns `undefined` → a `.loading`/`.data` access throws. Route to
   // the request state object. Non-request ids keep the §36 registry lowering
   // (render-once non-reactive by design, §36.6).
-  if (ctx.requestIds && ctx.requestIds.has(node.name)) {
+  // Uses the EFFECTIVE set (ctx else per-file fallback) so a `<#id>` request ref
+  // reached through a lift-nested / each-in-lift structured node still routes
+  // (g-request-ref-nested-in-lift-misroute CONVERGENCE).
+  const eff = effectiveRequestIdsFromCtx(ctx);
+  if (eff && eff.has(node.name)) {
     return `_scrml_request_${node.name}`;
   }
   return `_scrml_input_state_registry.get("${node.name}")`;

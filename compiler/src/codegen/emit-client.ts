@@ -6,7 +6,8 @@ import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTop
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, type RequestBodyCell } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, type RequestBodyCell } from "./reactive-deps.ts";
+import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
@@ -2016,6 +2017,16 @@ export function generateClientJs(ctx: CompileContext): string {
   setVariantFieldsForFile(fields, collisions);
   setVariantFieldsForRewriter(fields, collisions);
 
+  // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
+  // the file's registered-`<request>` id set ONCE, here at the per-file client-
+  // codegen entry, as the single source of truth for the request-ref escape-hatch
+  // reparse gate. This is the memoization deferred at emit-bindings.ts:744-750:
+  // instead of every downstream mechanism (emit-lift's id-stack, emit-each's
+  // `_eachRequestIds`, EmitExprContext.requestIds) having to re-thread this
+  // per-file set through every control-flow position, `reparseRequestRefEscapeHatch`
+  // falls back to this set whenever the hand-threaded set is empty. Cleared below.
+  setCurrentFileRequestIds(fileAST ? collectRequestIds(fileAST) : new Set<string>());
+
   lines.push("// Generated client-side JS for scrml");
   lines.push("// This file is executable browser JavaScript.");
   lines.push("");
@@ -3850,6 +3861,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // S95 Bug 2: also release the rewriter's mirror.
   setVariantFieldsForFile(null, null);
   setVariantFieldsForRewriter(null, null);
+  // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
+  // registered-request id set so it cannot leak into the next file's emission.
+  setCurrentFileRequestIds(null);
 
   return clientCode;
 }
