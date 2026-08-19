@@ -86,11 +86,21 @@ function run(cmd: string, argv: string[], cwd = ROOT, timeout = 60_000): Run {
 }
 
 // ── identity ──────────────────────────────────────────────────────────────────
-// git config user.name -> lowercase -> first token. bryan maclee -> bryan ; pjoliver11 -> pjoliver11.
+// Slug aliases: a git user.name whose first token is NOT itself the pa-profile
+// slug. Peter commits under his real name ("Peter" / "Peter Oliver") but his
+// personal layer is `pa-profile-pjoliver11.md` (GitHub `pjoliver11`), so the
+// bare first-token "peter" resolves to a nonexistent `pa-profile-peter.md` and
+// the boot gate can't find his profile OR his voice ledger (read-set items 7 +
+// 6b FAIL). Alias it here — keeps his real-name commit authorship intact.
+// Additive / no-op for bryan/ryan/anyone whose first token IS their slug.
+const SLUG_ALIAS: Record<string, string> = { peter: "pjoliver11" };
+
+// git config user.name -> lowercase -> first token -> alias. bryan maclee -> bryan ; pjoliver11 -> pjoliver11 ; peter -> pjoliver11.
 function resolveWho(): string {
   const r = run("git", ["config", "user.name"]);
   const name = (r.ok ? r.out : "bryan").toLowerCase().trim();
-  return name.split(/\s+/)[0] || "bryan";
+  const token = name.split(/\s+/)[0] || "bryan";
+  return SLUG_ALIAS[token] ?? token;
 }
 
 // ── repo sync (fetch + behind/ahead/dirty) ─────────────────────────────────────
