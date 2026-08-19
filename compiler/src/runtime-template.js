@@ -2921,6 +2921,28 @@ function _scrml_nav_sync_head_el(doc, selector, tag, keyAttr, valueAttr) {
 // unstyled frame, a stuck nav costs the whole page.
 var _SCRML_NAV_SHEET_TIMEOUT_MS = 3000;
 
+// The media value a PARKED stylesheet wears. It matches no media type in any
+// context, so the sheet is still fetched and still fires "load", but none of its
+// rules apply until _scrml_nav_arm_sheets restores the real value.
+//
+// "not all", NOT the more familiar "print" async-CSS idiom: "print" MATCHES
+// during print preview / window.print(), which would leak a half-navigated
+// destination's stylesheet into the reader's printout.
+//
+// MEASURED IN CHROMIUM 146, not assumed. A media="not all" link IS fetched (it
+// appears in the network log), DOES fire "load" at the server's real latency —
+// so the _SCRML_NAV_SHEET_TIMEOUT_MS budget settles on time — applies nothing
+// while parked, and applies synchronously the instant the attribute is restored.
+//
+// link.disabled = true was measured as the alternative and REJECTED TWICE OVER:
+// it never fires "load" at all (which would strand EVERY cross-chunk swap behind
+// the full 3 s sheet budget, trading a paint defect for a 3 s stall), and because
+// the HTML disabled setter is a no-op while the element's associated CSS style
+// sheet is null, setting disabled = false at swap time never applies the sheet
+// either — the destination would render permanently unstyled, which is the exact
+// defect this whole section exists to remove.
+var _SCRML_NAV_PARKED_MEDIA = "not all";
+
 // \`rel\` is a SPACE-SEPARATED TOKEN LIST. \`rel="alternate stylesheet"\` is an
 // author-selectable alternate that is disabled by default, so it is NOT the
 // page's sheet and must not be adopted as one.
@@ -3008,6 +3030,12 @@ function _scrml_nav_has_sheet(href) {
 // subscribe function: the caller hands it the swap, and the swap runs once the
 // sheets are in the CSSOM.
 //
+// ATTACHED IS NOT APPLIED. Every link goes in PARKED (_SCRML_NAV_PARKED_MEDIA)
+// and is un-parked inside the swap by _scrml_nav_arm_sheets. Fetching early and
+// painting early are two different things, and only the first one is wanted —
+// see the header on _scrml_nav_arm_sheets for the defect that conflating them
+// produced.
+//
 // WAITING IS LOAD-BEARING. Swapping first and letting the sheet arrive after
 // trades an unstyled PAGE for an unstyled FLASH — a different visible defect,
 // not a fix. Waiting is bounded by _SCRML_NAV_SHEET_TIMEOUT_MS, and an \`error\`
@@ -3036,7 +3064,12 @@ function _scrml_nav_attach_sheets(wanted) {
       if (_scrml_nav_has_sheet(wanted[i].href)) continue;   // already attached
       var link = document.createElement("link");
       link.setAttribute("rel", "stylesheet");
-      if (wanted[i].media) link.setAttribute("media", wanted[i].media);
+      // PARKED — fetches now, paints only at swap time (_scrml_nav_arm_sheets).
+      // The sheet's REAL media is stashed on the element so arm can restore it;
+      // an empty stash means "this sheet had no media attribute", which arm
+      // restores by REMOVING the attribute rather than writing media="all".
+      link.setAttribute("media", _SCRML_NAV_PARKED_MEDIA);
+      link.setAttribute("data-scrml-parked", wanted[i].media || "");
       link.addEventListener("load", settleOne);
       link.addEventListener("error", settleOne);
       link.setAttribute("data-scrml-sheet", "");   // claimed — prunable later
@@ -3052,6 +3085,53 @@ function _scrml_nav_attach_sheets(wanted) {
   for (var j = 0; j < fresh.length; j++) document.head.appendChild(fresh[j]);
 
   return function (cb) { if (ready) cb(); else waiting.push(cb); };
+}
+
+// Make the destination's parked sheets PAINT. Called from INSIDE the swap, in
+// the same synchronous task as the markup replacement, so no frame ever shows
+// one page's markup wearing the other page's rules.
+//
+// WHY THIS EXISTS. _scrml_nav_attach_sheets deliberately starts the fetches
+// EARLY, in parallel with any cross-chunk route script, and that parallelism is
+// what buys the no-unstyled-flash property — it must not be given up. But
+// "attached" used to also mean "painting", and on a CROSS-CHUNK nav the swap
+// sits behind the chunk load: the DESTINATION's rules were live against the
+// SOURCE page's markup for the whole chunk window, up to
+// _SCRML_NAV_CHUNK_TIMEOUT_MS (10 s). The reader watched the page they were
+// still reading get repainted in the next page's colours. Measured: the window
+// tracks chunk latency 1:1 (0 ms -> 11 ms, 1500 ms -> 1498 ms, 4000 ms ->
+// 3992 ms) and it is a real paint, not merely a computed-style artifact.
+// Parking separates the two concerns — fetch starts early, paint happens here.
+//
+// A same-chunk nav never showed the window (the swap is already gated only on
+// the sheets), so this is specifically the gap where the CHUNK is the slow leg.
+//
+// RESOLVED BY HREF FROM THE LIVE HEAD, not from the list attach() just built.
+// A nav superseded before its swap leaves its sheets parked indefinitely; the
+// NEXT nav wanting the same href skips re-attaching it (_scrml_nav_has_sheet
+// already sees it) and, if arm only knew about its own freshly-built links,
+// would never un-park it — a permanently unstyled destination. Scanning the
+// live head makes any later nav that wants the sheet adopt the orphan. A parked
+// orphan that no later nav wants is still claimed, so _scrml_nav_prune_sheets
+// retires it on the normal path and nothing accumulates.
+function _scrml_nav_arm_sheets(wanted) {
+  if (!_scrml_nav_head_queryable()) return;
+  var nodes = document.head.querySelectorAll("link[data-scrml-parked]");
+  for (var i = 0; i < nodes.length; i++) {
+    var raw = nodes[i].getAttribute("href");
+    if (!raw) continue;
+    var abs;
+    try { abs = new URL(raw, _scrml_nav_sheet_base).href; }
+    catch (e) { continue; }            // unresolvable — leave it parked, never guess
+    for (var j = 0; j < wanted.length; j++) {
+      if (wanted[j].href !== abs) continue;
+      var real = nodes[i].getAttribute("data-scrml-parked") || "";
+      if (real) nodes[i].setAttribute("media", real);
+      else nodes[i].removeAttribute("media");
+      nodes[i].removeAttribute("data-scrml-parked");
+      break;
+    }
+  }
 }
 
 // Drop the sheets the incoming document does not reference.
@@ -3267,6 +3347,12 @@ function _scrml_nav_apply_html(html, path, restore, token, push) {
     // Tear down the OUTGOING region's reactive effects/subscriptions/timers
     // before replacing it (finding #2 — no leak).
     _scrml_teardown_region(liveOutlet);
+    // Un-park the destination's stylesheets HERE, between the teardown and the
+    // markup assignment: same synchronous task, so the browser cannot paint
+    // between them and the incoming rules never meet the outgoing markup. They
+    // were fetched back at attach time, so this is a CSSOM flip and not a
+    // network round trip — the parallel-fetch win is kept in full.
+    _scrml_nav_arm_sheets(wantSheets);
     liveOutlet.innerHTML = newHtml;
     // Re-hydrate the swapped-in region (seed + scoped re-wiring incl. reactive
     // display) without re-booting the shell (finding #1). For a cross-chunk nav
