@@ -78,7 +78,16 @@ function givenGuardsFor(src) {
 }
 
 // Wrap a `${...}` logic body containing a presence guard in a minimal program.
-const PROGRAM = (body) => `<program name="P">
+//
+// NOTE: no `name=` on this top-level `<program>`. SPEC §4.12.2 — "The top-level
+// `<program>` MUST NOT have a `name=` attribute (it is the implicit root)". The
+// fixture carried `name="P"` until the §4.12.4 worker-artifact fix, at which
+// point `codegen/index.ts:extractWorkerPrograms` treated the WHOLE document as
+// an inline worker: it spliced the entire body out, emitted a blank `<body>`,
+// and made the §E byte-identity comparison a comparison of two empty bundles.
+// The named form emits no diagnostic today (surfaced separately); dropping the
+// attribute makes §E compare the real `given`-lowered client output it claims to.
+const PROGRAM = (body) => `<program>
 \${
   let x: string | not = "a"
   let y: string | not = "b"
