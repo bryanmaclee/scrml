@@ -48,6 +48,10 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | ~~dpa-030 (prior row)~~ | *Banked S347 2026-08-16.* ⚑ *Re-banked at S346 in the hand-off, the wrap and user-voice — but never written HERE, so it did not exist to the dPA and `dpa-debt` read `0 UNRUN` correctly. The §10 obligation/probe mismatch again, fourth-plus instance; found at S347 boot when bryan said he was about to fire the dPA.* **Successor to the WITHDRAWN dpa-029 Q3.** Q3 offered "(a) host-escape by design vs (b) native" — but the host-escape it named is RUNTIME-BROKEN, so (a) was never a live option and the fork was invalid as framed. **Whether uploads exist is SETTLED, not a question** (bryan S346: *"We have NO upload path?! Really?!"*). The only open axis is the SHAPE: a `File`/multipart PARAMETER on the server-fn / `<endpoint>` contract adopters already write, vs a dedicated `<upload>` primitive. PA lean = the parameter (LIMIT wins, FORK RULE row 1; dpa-029 panel 5/7), **recorded, not ruled**. | S346 bryan — reverse-ouroboros correction; banked S347; bryan rules; return leg = a comment on #471 |
 | dpa-031 | **COMPLETE (ADVISORY) dPA 2026-08-16 — awaiting bryan.** ★★ **The gap was ALREADY FILLED and §51.0.A named the wrong thing as the filler.** scrml HAS a free-shaped, TYPED, FAIL-CLOSED shared store today — top-level cell + cross-file component ambient read, compiled AND executed in a real DOM (8 live `_scrml_effect` subs; a leaf 3 files deep re-renders on every write; missing ambient cell = `E-STATE-UNDECLARED` at COMPILE time). §15.13.4 is written over `@var` GENERICALLY, not over engine cells — so both adjectives in "free-shaped / **untyped** global store" are inaccurate. **Meanwhile the substitute §51.0.A names DOES NOT WORK CROSS-FILE and was never exercised end-to-end: D1** inert unexpanded `<engineVar />`, green compile, 0 diagnostics, renders NOTHING (**PA-CONFIRMED by execution S347** — arm text 0× in the importer, 1× in the definer) · **D2** engine var absent from the module-registry footer · **D3** `initial=.Variant(payload)` drops the payload → `TypeError` surfacing as *nothing happening*. **Three HIGH defects sat under a ratified `final` for ~169 sessions.** The rule that actually binds is unwritten anywhere: **a shared cell must be declared in the ENTRY file** (cells not exportable, §21.2). Prop-drilling friction **MEASURED, not asserted: 4.55× identifier repetition** (91 vs 20) for byte-identical output. **Direction (advisory): do NOT widen, no store primitive** — fix D1/D2/D3, rewrite §51.0.A's justification to the real rule, bank cell-exportability as a MODULE-SYSTEM question. **S316/#388 `export let` rejection UNAFFECTED.** Honest null offered and DECLINED on evidence. | **RATIFIED S347 2026-08-16** (bryan: *"your rec"*) — do NOT widen, no store primitive; file D1/D2/D3; rewrite §51.0.A's justification to the real (unwritten) entry-file rule; leave `final` alone until the defects are fixed. S346 reverse-ouroboros arc → audit node `free-shaped-global-store-not-built`; banked S347; **RUN 2026-08-16**; bryan rules; 7 defects to file (3 HIGH) |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
+| dpa-032 | **COMPLETE (ADVISORY) dPA 2026-08-17 — awaiting PA/bryan ratification.** **Recommendation: B — the SUBSTRATE, not a message surface.** ⚑ **The honest null is DEAD, and not on scope:** `<html lang="en"` is hardcoded at `codegen/index.ts:2261` with NO author surface — a French page ships `lang="en"`, so a correct two-language app is impossible at any adopter effort. ⚑ **The by-construction guarantee the bank asked for ALREADY EXISTS:** a missing translation is `E-TYPE-020` TODAY because it IS a match arm (`const <greeting> = match (@locale){…}`), browser-verified reactive. ⚑ **TWO BANK FRAMINGS CORRECTED:** code-default bodies are the *easiest* locus for a message lookup (a bare run is CODE, SPEC:1195), not the hardest; and a general message table is **NOT** an extension of §41.12 (closed 15-variant `ValidationError` key space). ⚑ **Structural result:** `E-STRUCT-FUNCTION-FIELD`'s own prescription (*"model the behavior as data, an enum tag the consumer matches on"*) independently derives ICU MessageFormat — the axiom SELECTS the encoding, it does not obstruct i18n. **4 UNFILED DEFECTS ROUTED** (see §6): (a) annotated struct-literal completeness entirely UNCHECKED — general, browser-verified to blank the UI — suspected highest severity; (b) a reactive read via a plain `function` call emits ZERO effects (green compile, browser-dead) — route-to-PA; (c) `@`-sigil in a backtick template literal → `E-CODEGEN-INVALID-LOGIC`; (d) §20.4's *"compiler SHALL inject `route`"* unimplemented + its diagnostic misdirects to a form §20.4 forbids. **R2-TERMINAL — no R3** (B and C are nested, not orthogonal). ⚑ **PANEL GAP CLOSED:** the forged `i18n-message-catalog-expert` went live LATER IN THE SAME SESSION and was polled **adversarially** (told to attack the two arguments that beat C, and not to manufacture a C case). **It ranked B anyway — 3/3 now** — and supplied the two sharpest LIMITS on B's claims (presence-vs-translatedness; the §5.3 generator's TMS ceiling — fuzzy invalidation needs the previous source string persisted, which a pure derived emit cannot hold). **Split is 2-1 FOR an ambient `@locale`.** Harness note amending dpa-027: neither *next boot only* nor *next roster refresh* is right — the roster refreshed mid-session but not at the next turn boundary. `E-VALIDATOR-INLINE-DYNAMIC` is confirmed an **unpaid cost** and this DD does not discharge it (§7). ⚑ **THE BANK'S PRIOR-ART PREMISE IS REFUTED (§0.6/§8.5, 14 systems surveyed).** **Flutter `gen_l10n` does NOT fail the build on a missing key and does not even warn** — it gap-fills, emitting the template-locale ENGLISH literal into the generated `AppLocalizationsEs` via `logger.printStatus`; Flutter's own hermetic test asserts generation SUCCEEDS with an untranslated key. Paraglide JS does the identical thing → **inherent to codegen, not a Flutter accident.** Of 14 systems, **exactly ONE** has a real missing-translation build gate: **Android lint `MissingTranslation`** (`Severity: Error`, at the DECLARATION site, first-class opt-outs — if you ever ratify a gate, it owes an opt-out in the same diff). **Structural reason: a fallback chain and a build-time exhaustiveness check are MUTUALLY ANNIHILATING** (Lingui `--strict` exits 0 whenever `fallbackLocales` is set). **scrml has no app-content fallback chain — which is exactly why its `E-TYPE-020` route holds a gate the field mostly cannot, and why C built as the bank imagined it would ANNIHILATE that gate.** ⚑ **BUT THE CLAIM IS NARROWER THAN §0.2 FIRST SAID** (domain voice): `E-TYPE-020` proves arm **PRESENCE, not TRANSLATEDNESS** — paste the English into `.Ja` and you get a clean build + an untranslated string. **State it as: missing locale arm = build failure; untranslated arm = undetected.** ⚑ **§7 REVERSED on late prior art:** gettext's manual documents scrml's EXACT constraint for scrml's exact reason (*the `gettext` call must precede argument substitution*), so `E-VALIDATOR-INLINE-DYNAMIC` is **SOUND and only its beneficiary is missing** — the domain voice's third option (**downgrade to a warning now, re-promote in the extractor's landing diff**) is the one to rule on first. Nothing in the prior art is `[EXEC]`; tiers marked per claim. PRIOR BANK (S349 2026-08-17): App-content i18n: native compile-time message surface, or host/runtime boundary by design? Triggered by an unsolicited inbound proposal for a runtime DOM-scanning translation library — **rejected at intake on four grounds (unmediated egress sink · second uncontrolled DOM writer vs writer-ownership Axiom ① · retrofit-not-by-construction · SEO inversion), with an explicit SCOPE LIMIT so it does not decide build-time or authoring-aid proposals.** ⚑ **PA-verified S349 by grep: scrml's ONLY i18n surface is diagnostics/labels** (§41.12 `registerMessages` · §55.10 4-level chain · §41.16 `registerLabels`); 7 `i18n` mentions in 37,152 SPEC lines, every one about validator messages; **ZERO entries in `known-gaps.md`, ZERO here** — genuinely unfiled. ⚑ **The sharpest fact: `E-VALIDATOR-INLINE-DYNAMIC` (SPEC.md:19554) REJECTS a form TODAY to protect "i18n tooling extraction" that does not exist** — a cost already paid for an unbuilt pipeline. Discriminator = the S322 test: a missing locale should be a compile error the way a missing `<match>` arm is (by construction), not a runtime fallback chain (retrofit). Prior art to study: **Flutter `gen_l10n`** (codegen → missing key fails at build), not the JS-framework field alone. apps-test ALREADY YES — do not re-poll. | S349 bryan bank → **RUN 2026-08-17 (dPA)**; advisory, awaiting ratify/reject/re-frame |
+
+| dpa-033 | **COMPLETE (ADVISORY) dPA 2026-08-19 — awaiting PA/bryan ratification.** ★★ **THE PA RECOMMENDATION (b) IS REFUTED ON THE FACTS — it does not close the reproduced fail-open.** Three poles independently found it: the repro's query, reveal and raw egress are all in ONE BODY, so restricting *cross-call* declassification never touches the reproduced breach. **The residual defect is name-keyed vs value-keyed, NOT intra- vs inter-procedural** — the approach set was drawn on the wrong axis. ★★ **(a) IS UNSOUND — NEW shape H1d, `[EXEC]`-compiled at `eb170a84`, exit 0 / zero diagnostics:** `JSON.stringify({mine: a.reveal("passwordHash"), other: b})` satisfies (a)'s own admission criterion and still ships `b.passwordHash` — the coverage rule `site.cols.some(c => !revealed.has(c))` is a NAME-keyed set membership. Textbook occlusion (Sabelfeld & Sands). ★★ **THE REFRAME: the runtime ALREADY implements §14.8.9 correctly** — `[EXEC]` on the shipped helpers: value-scoped, per-column, **alias-proof (it gets H1b RIGHT)**, zero static reasoning. These are not problems scrml failed to solve; they are questions the machine answers correctly on every path except the one where nothing calls `_scrml_protect_redact`. **Value-scope needs approximating only on a sink you REFUSE to mediate — and there the only conformant approximation is refusal.** ★★ **SPEC-VS-IMPL: the `.reveal(` suppressor is an IMPL ADDITION, not a spec grant** — `SPEC.md:8522` + the catalog row at `19284` mandate an unconditional **SHALL fail closed**; neither names `reveal` as an admit path on raw egress. So **(c) is the only option owing no conformance argument**, and (c) IS conformant ("sole admit path" is a necessary condition on admission, not a guarantee every route offers one). ★ **FOURTH OPTION (d) — sink-level lowering**, absent from the bank: emit `JSON.stringify(_scrml_protect_redact(x))` at mediatable raw sinks. ⚑ **NOT the deleted `toJSON` hook** — that was VALUE-level and direction-blind ([1545]: *a value cannot know why it is being serialized*); (d) is SINK-level, so both rejection grounds fail against it. *An expert with no knowledge of this arc re-derived the deleted hook independently — corroboration that the mechanism is attractive and that [1545]'s reason is the load-bearing insight.* ★ **RECOMMENDATION: land (c) as the sound floor NOW** (subtractive, net ≈ −80 LOC, ~1-2 d, **zero adopter migration** — `[EXEC]`: `.reveal(` in exactly 2 `.scrml`, both conformance cases), **then (d)** as the ergonomic restoration with (c) remaining the floor. **Do NOT ship (b) as this item's answer.** Type route = correct long-run model but 15-30 d monomorphic / 40-80 d polymorphic vs zero adopters; its own advocate conceded the ROI. ★ **OPERATOR ANSWER: split by MEDIATABILITY** — `reveal` stays a value construct everywhere, stops being a static suppressor anywhere. **5 DEFECTS ROUTED: (D1 NEW)** dynamic `reveal(colName)` falls through to ordinary call emission and **no runtime `reveal` method exists** → `TypeError` at runtime, **exit 0 at compile** · **(D2 main-only)** the suppressor is a LEXEME test — `.reveal(` in a **comment or string literal** disables the gate for the whole function · **(D3 NEW)** `conformance/cases/protect/reveal-suppresses-e004/` asserts `notCodes: [E-PROTECT-004]` — **a green test pinning a leak** · **(D4 NEW)** the emitted handler **double-wraps** an authored `Response` → body degrades to `{}`, **masking** the HTTP-level leak (a masked leak is a latent leak) · **(D5)** `tenant-egress.ts:391` is a **byte-identical twin** of main's regex gate, same hole. ⚑ **UNMODELLED DIMENSION routed to PA:** §14.8.9 has **no constraint on WHO may write a `reveal`** — robust declassification; in a codebase where agents author server fns, a name-keyed check makes an inserted reveal CHEAPER, because it launders every sibling value for free. ⚑ **A dPA self-correction is recorded in the artifact:** an initial probe appeared to show the repro leaked via a `globalThis.Response` detection hole rather than reveal-scope — **true of `main`, ALREADY FIXED on the branch**; the repro ran on the branch, so **the item's premise STANDS**. → `scrml-support/docs/deep-dives/reveal-value-scope-raw-egress-dpa-033-2026-08-19.md` | S350 bryan bank → **RUN 2026-08-19 (dPA)**; 5-pole LIVE poll; advisory, awaiting ratify/reject/re-frame |
+| dpa-034 | **COMPLETE (ADVISORY) dPA 2026-08-19 — awaiting bryan (ONE-WAY door, his ruling).** ★★ **THE PA'S REPLACEMENT PREMISE FAILS: `-std=` / `go 1.x` IS coexistence machinery.** Two poles refuted it on independent evidence. **Go 1.22's loop-var change is gated per-package off the module's `go` line — `cmd/compile` carries BOTH semantics and selects per package, in one build, one binary.** *"A single compiler holding N rule-sets and selecting among them per compilation unit is what 'editions' IS. Go has it, has almost none of it, and doesn't call it that."* **C++ `-std=` likewise IS editions** (one binary, all standards, flag-gated) — *"a labeling move, not a design move"*; and **Go's real mechanism is not `-std=` at all** but the compatibility promise, **a STRONGER discipline than scrml promises, not a cheaper mechanism**. Corroboration: **GODEBUG** (permanent never-removed runtime-behaviour knobs) was built *after* the promise proved insufficient, and **GOEXPERIMENT** staged `loopvar` a full cycle first. **So the recommendation cannot be ratified as written.** ★★ **A NON-POPULATION ARGUMENT DOES EXIST, but earns a SMALLER claim:** (1) **conformance-suite singularity** — the BUILT 69-case pre-commit-gated suite operationally IS the spec, defining conformance as ONE predicate; editions force it parameterized · (2) **the interaction matrix** — N rule-sets = N languages compiler/checker/formatter/LSP carry forever. Both population-independent. (3) legibility is *solved, not eliminated* by crate metadata — carries nothing alone. **But these support *"no editions in the 1.0 surface as built"*, NOT *"EVER"* — the word EVER was never earned by anything except the inadmissible premise.** ★★ **3/3 POLES CONVERGED, FROM THREE UNRELATED DIRECTIONS, ON A DOOR THAT WAS NOT BANKED: the real unexamined claim is `remove-only-at-a-MAJOR`.** Go: *deprecation terminates in permanent deprecated-but-working; there is deliberately no Go 2.0 — "no editions" is cheap for Go BECAUSE Go pairs it with near-total non-removal; keeping true-removal while claiming Go's cover is claiming Go's PR while reserving the power Go renounced.* Simplicity: *a deprecation cycle with true removal **schedules a synchronized cliff** and borrows the word "transition"; it doesn't eliminate coexistence complexity, it RELOCATES it off the compiler's books onto every adopter, uncoordinated and unamortized — simple for the compiler author, not the user.* Unison: *forced deletion imports the NAME-addressed assumption that content-addressing exists to reject; **"no editions" and "true removal at a major" are logically independent claims.*** ★ **ONE-WAY-DOOR CLAIM OVERSTATED:** Rust shipped 1.0 in 2015 and added editions in 2018 — rustc is not a different compiler, it carries a bounded FRONT-END delta never allowed to fork the type/borrow checker or codegen. **True for DEEP changes, not a door at all for shallow ones.** Unison concedes content-addressing gives **ZERO** dividend on grammar (it solves coexisting DEFINITIONS, not RULE-SETS). ★ **RECOMMENDATION: strike "EVER" from §62.8** (→ *"no editions in the 1.0 surface as built"*; nothing built changes) · **strike the population premise from D1 AND D4** · **re-earn D1 on suite-singularity + interaction-matrix, NOT on `-std=`** · record the reopening condition (*is this a front-end-only delta?*) · re-ground the deprecation WINDOW on a non-population signal · **open `remove-only-at-a-MAJOR` as its own question** (no-regret: decouple deprecation from DELETION using chunks.json/§47 — retain the chunk, stop resolving the name; **needs no second grammar, so the one-way door is untouched**). ⚑ **TRIPWIRE, cheap, check before ratifying:** *the moment `[language] version=` is read by the compiler to select between two behaviours for the same syntax — not merely as a manifest field — it HAS become an edition mechanism regardless of its name.* ⚑ **META-FINDING (simplicity-defender, against its own reflex):** *"this is re-earning shopping for a premise… treating 'I found AN argument' as license to re-stamp the original totalizing conclusion is exactly motivated reasoning. The honest procedure is to **downgrade certainty to match what's earned**."* ⚑ **PANEL GAP, DISCLOSED: 3 of 5 poles ran.** `rust-edition-expert` + `haskell-language-pragma-expert` were staged at batch start but did **not** go live this session ("agent type not found", two attempts ~40 min apart) — live at the NEXT dPA boot. **Two questions are UNANSWERED: (i) the crate-boundary interop question — does scrml even HAVE a unit that could carry an edition? If not, editions may be structurally unavailable for reasons unrelated to population, which would BE the missing language-design argument** · (ii) the GHC2021 evidence. **Re-poll both before ratifying** (dpa-019 precedent: a late-live voice was the highest-impact contribution and would have flipped the verdict). → `scrml-support/docs/deep-dives/d1-no-editions-earned-or-assumed-dpa-034-2026-08-19.md` | S350 re-bank (audit R5) → **RUN 2026-08-19 (dPA)**; 3-of-5-pole LIVE poll; advisory, **bryan rules** |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -1768,3 +1772,359 @@ premise flips"* · *"Verify the substitute, not just the thing being removed."*
 (happy-dom, chunks run in document order) — 10 probes, incl. a same-file control isolating D1 and a direct
 reproduction of D3's two throws. **RUN-not-RATIFY honored** — no SPEC edit, no insight landed, no compiler
 source touched, item NOT flipped to `ratified`.
+
+---
+
+## dpa-032 — App-content i18n: does scrml grow a NATIVE compile-time message surface, or is translation a host/runtime boundary by design?
+
+```
+id:        dpa-032
+status:    complete # banked → running → complete → ratified(by PA)
+artifact:  scrml-support/docs/deep-dives/app-content-i18n-dpa-032-2026-08-17.md
+fixtures:  scrml-support/docs/deep-dives/dpa-032-i18n-fixtures/ (f1-f10; f5/f6/f7 RUN in chromium)
+verdict:   B — the SUBSTRATE, not the surface. The null is dead on `<html lang="en"`
+           (hardcoded, no author surface); the by-construction guarantee already
+           exists as E-TYPE-020 over a locale enum. 4 unfiled defects routed.
+rung:      R2 minimum (language-surface: a new primitive or an extension of §41.12; USER rules)
+           → escalate to R3 if ≥2 approaches survive on DIFFERENT axes
+           ⇒ RESOLVED R2-TERMINAL (dPA 2026-08-17): two approaches survive (B, and C as a
+             deferred successor) but they are NESTED, not orthogonal — C is B plus a catalog,
+             and no voice argued C-without-B. The live disagreement is B's SIZE, which is a
+             ruling, not a debate. NOTE the framing premise "an extension of §41.12" is
+             MEASURED FALSE (closed 15-variant key space) — see the artifact §0.4.
+requested: S349 — an unsolicited inbound integration proposal for a runtime DOM-scanning i18n
+           library surfaced that scrml has NO app-content i18n story at all. The proposal is
+           REJECTED (see "Recorded rejection" below); the GAP it exposed is real and unfiled.
+banked:    S349 2026-08-17
+routes-to: scrml PA
+```
+
+### ⚑ SCOPE-LOCK — what is and is not being asked
+
+**NOT asked: "should scrml integrate a third-party runtime translation library?"** No — ruled at intake,
+reasoning recorded below precisely so it does not leak into adjacent questions.
+**NOT asked: "should scrml re-implement ICU MessageFormat?"** Almost certainly no.
+**NOT asked: "is `scrml:format`'s Intl surface good?"** It is fine and is not on trial.
+
+**Asked: can an adopter ship a scrml app in two languages today — and if the answer is awkward or
+impossible, what is the scrml-SHAPED surface?** Specifically: does it EXTEND the §41.12
+`registerMessages` mechanism that already exists, or does it need its own primitive, or is app-content
+translation correctly outside the compiler's remit?
+
+### Established S349 by PA grep — do NOT re-derive
+
+1. **scrml's ONLY i18n surface is diagnostics and labels.** §41.12 `scrml:data registerMessages`
+   (project-level error-message registration), the §55.10 four-level message-resolution chain, and
+   §41.16 `registerLabels` for `tableFor`. **Seven** occurrences of `i18n`/`internationali*` in the
+   37,152-line SPEC — every one of them about validator messages.
+2. **App-content i18n does not exist.** Zero entries in `docs/known-gaps.md`; zero in this file before
+   this item. Genuinely unfiled, not deferred.
+3. **⚑ THE SPEC HAS ALREADY PAID A COST FOR AN i18n PIPELINE THAT WAS NEVER BUILT.** `§55.10` /
+   `E-VALIDATOR-INLINE-DYNAMIC` REJECTS a form — a dynamic inline validator message — with this
+   normative justification, quoted verbatim from `SPEC.md:19554`:
+
+   > *"Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages
+   > must be statically discoverable)."*
+
+   A live rejection, enforced today, whose stated purpose is to protect **extraction tooling that does
+   not exist**. That is the governing sentence this DD must reckon with: either the answer justifies
+   that cost, or the cost is unpaid and the rejection is owed a re-examination of its own.
+
+### The two tests (S346, standing)
+
+- **`apps-test` — ALREADY ANSWERED, YES. Do not spend a poll re-establishing it.** Multi-language
+  shipping is universal in the application field: Rails i18n, Django, next-intl, vue-i18n,
+  svelte-i18n, Flutter `intl`/`gen_l10n`, Angular i18n, ICU MessageFormat, Project Fluent, gettext.
+- **`scrml-test` — THE JOB. Answer it by COMPILING, not by reading the SPEC.**
+
+### The shapes to author and COMPILE (report the emitted shape, not an impression)
+
+For each: what does an adopter write **today**, does it compile, and what does it cost?
+
+- a static UI string in plain markup, and the same string inside a `<match>` arm and an `<engine>`
+  state-child body (those are §4.18 **code-default** bodies where display text is a `"..."` literal —
+  does a message key even fit there, or does the body mode fight it?)
+- an interpolated message with a value, and with TWO values in a different order per language (the
+  argument-reordering case is why MessageFormat exists)
+- **pluralization** (0 / 1 / N, and the languages with more than two plural forms) — the hard case
+- locale as **reactive state**: switching language without a reload, and what that does to the
+  reactive graph
+- **SSR**: which locale does the server render, how does it learn it, and how does that compose with
+  §52.15.5's auth-scoped prerender omission
+- **routing**: `/en/...` vs `/fr/...` vs a cookie/header — this reaches §12 route inference
+- date / number / currency: how much is ALREADY covered by `scrml:format`'s Intl surface (measure it;
+  the overlap may be larger than assumed)
+- a message catalog as a **file** — where does it live, what parses it, and is it typed
+
+### ⚑ THE DISCRIMINATOR — by construction, or by retrofit (S322)
+
+The re-examination test applies directly and is the sharpest question here:
+
+**A missing translation should be a COMPILE ERROR the way a missing `<match>` arm is.** Exhaustiveness
+over a locale set is the same shape as exhaustiveness over a variant set, and `<match>` holds because
+the arm set is checked **at the declaration** — by construction, and it has generated no bug family. A
+runtime fallback chain that silently serves the base language when a key is missing is the **retrofit**
+shape, and it is the shape that produces one gap per position.
+
+Weigh every candidate on that axis first. **Flutter's `gen_l10n` is the closest prior art to study** —
+it codegens a typed accessor from message files, so a missing key fails at build. Poll it properly
+rather than treating the JS-framework field as the whole prior art.
+
+### Recorded rejection — the runtime DOM-scanning class, and its SCOPE LIMIT
+
+The proposal that triggered this item is the **runtime DOM-scanning** approach: a script that scans the
+rendered DOM, extracts text nodes, sends them to a translation endpoint, and rewrites the DOM in place,
+with a MutationObserver to catch dynamic updates. Public prior art in this class:
+[`translate.js`](https://github.com/xnx3/translate) (MIT). **Rejected at intake, on four grounds:**
+
+1. **It is an unmediated egress sink.** Rendered page text — which can carry `protect=`-tagged columns
+   (§14.8.9) and tenant-scoped rows (§14.8.10) — is POSTed off-origin by default. The compile-time
+   `EgressSink × ConfidentialityAxis` coverage type exists so that every compiler-emitted client-egress
+   sink is mediated; this one is invisible to it by construction.
+2. **It puts a second uncontrolled writer on DOM surfaces the reactive runtime owns.**
+   `E-ATTR-WRITER-CONFLICT` (writer-ownership Axiom ①, live at `compiler/src/codegen/emit-html.ts`)
+   makes contended wholesale ownership of a DOM surface a compile error. ⚠ **PA INFERENCE from the emit
+   architecture, NOT measured** — that an external MutationObserver would in fact be clobbered by
+   `_scrml_effect` re-renders and race `_scrml_reconcile_list` is untested. Cheap to settle; settle it
+   if the DD leans on it.
+3. **It is retrofit, not by construction** — a post-hoc pass over emitted output, changing what it
+   means, with no access to the tree that produced it. The §13.2 auto-await shape exactly.
+4. **The SEO claim is inverted.** "Crawlers see unmodified source" means the translated pages are not
+   indexable; one language gets indexed.
+
+**⚑ SCOPE LIMIT — the whole reason this is recorded rather than merely decided.** These four are about a
+**runtime DOM-REWRITING mechanism**. They do **NOT** decide:
+- whether a **build-time** translation step is acceptable (it faces none of the four);
+- whether **machine translation as an AUTHORING AID** — filling a catalog a human then reviews — is
+  acceptable (it faces none of the four);
+- whether an **adopter** may use such a library in their own app. That is their call; scrml has no
+  business forbidding it, and nothing here should become a compiler-enforced refusal.
+
+Anyone citing this rejection against a build-time or authoring-aid proposal is citing it out of scope.
+
+### ⚑ FORBIDDEN REASONING (S346, standing)
+
+**"The corpus shows zero i18n usage" is INADMISSIBLE.** The corpus is what we wrote to demonstrate a
+language growing from nothing; it is evidence about the authors, not about adopters, and it cannot
+contain a construct the language does not offer. Corpus-zero is a **BLAST-RADIUS instrument only**. Any
+pole reaching for it should be named as re-litigation of a ruled question.
+
+### Evidence the DD owes
+
+- The **governing sentence** for each fork, quoted with its §ref — or the explicit *"searched §X, §Y,
+  §Z — none found."* Note §41.12 + §55.10 already exist and already reach for i18n; a new primitive must
+  argue why it is not an extension of them.
+- **Compiled** adopter code for every shape above — today's awkward-but-legal route AND the proposal.
+- Whether the `E-VALIDATOR-INLINE-DYNAMIC` cost (item 3 above) is justified by the answer, or becomes an
+  unpaid cost owed a separate re-examination.
+- **Direction-of-change** classification; any NEW normative section owes a `prov=` field (Rule 4b).
+- Where the locale-set exhaustiveness check would live, and whether it can hold **at the declaration**.
+- **The honest null is a first-class outcome**: *"app-content i18n is correctly a userland concern;
+  §41.12 covers exactly what the compiler owns, and the surface should simply say so"* would be a
+  complete and valuable answer — but it must then explain the §55.10 rejection.
+
+### Anti-goals
+
+Do NOT build. Do NOT ratify (RUN-not-RATIFY). Do NOT evaluate the specific inbound library beyond the
+recorded rejection above — it is prior art, not a candidate. Do NOT reason from corpus counts. Do NOT
+re-open `scrml:format`.
+
+---
+
+## dpa-033 — `reveal` is spec'd VALUE-scoped; the static raw-egress gate cannot compute value-scope. What is the conformant approximation?
+
+```
+id:        dpa-033
+status:    complete   # banked -> running -> complete -> ratified(by PA) · COMPLETE dPA 2026-08-19 (ADVISORY) → DD written, insight CANDIDATE staged, 5 defects routed, NOT ratified.
+artifact:  scrml-support/docs/deep-dives/reveal-value-scope-raw-egress-dpa-033-2026-08-19.md
+verdict:   PA rec (b) REFUTED ON THE FACTS — it does not close the reproduced fail-open (the repro is
+           single-body; (b) narrows cross-call). (a) is UNSOUND — new shape H1d, [EXEC]-compiled exit 0,
+           satisfies (a)'s own admission criterion and still leaks. The runtime ALREADY implements
+           §14.8.9 correctly (value-scoped, alias-proof); the gap exists only where nothing calls
+           _scrml_protect_redact. The `.reveal(` suppressor is an IMPL ADDITION over a spec that mandates
+           an unconditional SHALL-fail-closed. RECOMMENDATION: land (c) as the sound floor now
+           (subtractive, ~1-2 d, zero adopter migration), then NEW option (d) sink-level lowering as the
+           ergonomic restoration. 5 defects routed (3 NEW). WHO-dimension of declassification unmodelled.
+rung:      R1-or-R2 — see THE REFRAME. Banked R2 (language-surface) and then DOWNGRADED by
+           the Rule 4 governing-sentence gate: most of it is a BUG, not a ruling. What
+           remains for the operator is one bounded question, stated at the end.
+requested: S350-bryan — the S239 re-review of `egress-tojson-root` found a FAIL-OPEN in
+           E-PROTECT-004's declassification handling; three fix rounds proved it unfixable
+           by location-keyed analysis.
+banked:    S350 2026-08-18
+routes-to: scrml PA
+```
+
+### ⚑ THE REFRAME — read this before anything else. This was banked as a semantic NARROWING of a ratified primitive. It is not.
+
+The PA and the dispatched agent both framed this as *"narrowing `reveal` is a semantic change to a ratified primitive, hence an operator ruling."* **Both were wrong, and the Rule 4 governing-sentence gate is what caught it.** Neither had read §14.8.9's declassification paragraph; the PA had quoted only the `E-PROTECT-004` catalog row at `SPEC.md:19284`.
+
+`SPEC.md:8506-8513`, verbatim:
+
+> **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the client **iff** it is explicitly declassified via the field-level `reveal` construct **at the value**:
+> ```scrml
+> return u.reveal("passwordHash")   // admits the passwordHash column past the egress sink — here only
+> ```
+> `reveal("col")` stamps the named column's provenance descriptor as **declassified-at-this-value**; the serializer admits a protected-origin column **only** when its descriptor bears a `reveal` stamp **at the sink**.
+
+Four independent phrases — *at the value* · *here only* · *declassified-at-this-value* · *at the sink* — all specifying **value-scoped** declassification. **The implementation's body-scoped (and, on the branch, closure-scoped) `revealed` union is the NON-CONFORMANT state.** Tightening it is **conformance restoration toward an already-normative sentence**, which base §8 classifies as a BUG FIX, not a widening and not an amendment.
+
+**Migration is measured, not assumed: `.reveal(` occurs in exactly TWO `.scrml` files corpus-wide** — `conformance/cases/protect/reveal-suppresses-e004/case.scrml` and `.../reveal-client-visible-runtime/case.scrml`. Both are dedicated cases for this exact mechanism. **Zero adopter, sample, or example usage.**
+
+### Established by execution S350 — do NOT re-derive
+
+The fail-open, PA-reproduced at branch `eb170a84` (exit 0, zero diagnostics, `passwordHash` at HTTP 200):
+
+```scrml
+export server function leak(id) {
+  let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+  let b = ?{`SELECT * FROM users WHERE id = 2`}.get()
+  let x = a.reveal("passwordHash")
+  return new globalThis.Response(JSON.stringify(b), { status: 200 })
+}
+```
+
+**Three shapes, three mechanisms — binding identity does not rescue it:**
+
+| | shape | binding identity |
+|---|---|---|
+| H1 | two sites, two bindings | would fix |
+| **H1b** | `let b = a`; reveal `a`, egress `b` | **fixes it BACKWARDS** |
+| H1c | one site in a callee, two runtime values | **no location to key on, ever** |
+
+**H1b is decisive and it is a SEMANTIC fact, PA-verified against the shipped helper:** `_scrml_protect_reveal` does `const next = { ...value }` and returns `next`, leaving the receiver tagged. So `a.reveal("pw")` does **not** declassify `a` — keying declassification on the receiver binding would mark `a` and every alias declassified, which is the opposite of the primitive's meaning.
+
+**General statement:** `reveal` is a VALUE-level operation; every fact a codegen pass can compute is LOCATION-level.
+
+### Why this is NOT simply "go implement the spec"
+
+§14.8.9's declassification model is **runtime**: the descriptor rides the value, and the serializer checks the stamp *at the sink*. On the **compiler-owned** egress path that already works and is already value-scoped — `_scrml_protect_redact` reads `d.revealed` off the value itself.
+
+**The gap is only on RAW egress**, where by definition there is no compiler-owned sink to check the descriptor at. There the compiler must decide **statically**, and §14.8.9 says only *"declassify explicitly with `reveal` or project the column out"* — it does **not** specify how a static check should approximate value-scope.
+
+So the real question is narrow:
+
+> **Given §14.8.9 mandates value-scoped declassification, and the static raw-egress gate provably cannot compute value-scope, what static approximation is conformant?**
+
+### The approaches
+
+**(a) Honour `reveal` only where it is syntactically part of the egressed expression.** `return new Response(JSON.stringify(u.reveal("pw")))` admits; a reveal anywhere else does not. Closes H1/H1b/H1c. **Cost, measured by the agent:** breaks two documented spellings — the cross-call helper-reveals-and-returns factoring, and the `?{}.reveal("col")` chain this file already supports. Rescuing those needs a per-function "returns only declassified values" summary — **new interprocedural analysis, not built.**
+
+**(b) Detection cross-call ON, declassification cross-call OFF.** The agent's proposal. Rests on the asymmetry that is the sharpest thing in this item: cross-call **detection** over-approximates SAFELY (a false pairing costs a false positive — that is finding M3); cross-call **declassification** over-approximates into a **FAIL-OPEN**. Reveal is then honoured only in the egress-holder body.
+
+**(c) Fail closed with no static reveal path on raw egress at all.** Raw egress + protected column = always `E-PROTECT-004`; the only remedies are "project the column out" or "return it through the compiler-emitted response". Maximally simple and maximally conformant to the fail-closed policy — and it makes `reveal` purely a runtime/compiler-sink construct, which is what §14.8.9's own mechanism describes.
+
+**PA recommendation: (b), with (c) as the honest fallback if (b)'s bound cannot be stated crisply.** (b) preserves both documented factorings the corpus cases pin while closing every reproduced fail-open. (a) is strictly worse than (b) — same closure, more breakage.
+
+### ⚑ The ONE thing that is genuinely the operator's
+
+Every option above **removes a currently-working spelling** on the raw-egress path. That is `newly-rejecting` — reversible, migration measured at the two conformance cases — so it does not need a ratification under base §8. **But it changes what an adopter can write**, and the operator has ruled twice this month that a mandate an adopter cannot opt out of is itself the defect (S347 D1 `formFor`). The question:
+
+> **Is `reveal`-on-raw-egress a spelling scrml keeps at all, or does raw egress simply become a place where protected columns cannot go?**
+
+Everything else here is a bug fix the PA can dispatch on its own authority.
+
+### Blocked work
+
+`egress-tojson-root` Unit 2 (the interprocedural `E-PROTECT-004`) is HELD on this item. Unit 1 (delete the `toJSON` hook) is clean, verified, and independent — see delta-log [1555] for why the stack still cannot land (the cluster-level `globalThis`-allowlist break, M4).
+
+---
+
+## dpa-034 — `d1-no-editions`: was "no editions, EVER" EARNED, or only assumed from a corpus that could not have shown otherwise?
+
+```
+id:        dpa-034
+status:    complete   # banked -> running -> complete -> ratified(by PA) · COMPLETE dPA 2026-08-19 (ADVISORY) → DD written, insight CANDIDATE staged, NOT ratified. PANEL GAP disclosed (3 of 5 poles).
+artifact:  scrml-support/docs/deep-dives/d1-no-editions-earned-or-assumed-dpa-034-2026-08-19.md
+verdict:   The PA's replacement premise FAILS — `-std=` / `go 1.x` IS coexistence machinery (Go 1.22's
+           loop-var change is gated per-package off the module's `go` line; cmd/compile carries both
+           semantics), so it is not a "genuine middle". A non-population argument DOES exist
+           (conformance-suite singularity + interaction matrix) but earns only "no editions in the 1.0
+           surface as built" — the word EVER was never earned. 3/3 poles converged, from unrelated
+           directions, that the real unexamined door is TRUE REMOVAL AT A MAJOR, which is logically
+           independent of editions. One-way-door claim overstated (Rust: 1.0 in 2015, editions in 2018).
+           ⚑ Re-poll rust-edition-expert + haskell-language-pragma-expert at next boot before ratifying.
+rung:      R2 minimum — language-architecture, ONE-WAY door. USER rules.
+artifact:  scrml-support/docs/audits/sliding-doors-corpus-zero-2026-08-16/rulings-pending/R5-d1-no-editions.md
+source:    the sliding-doors audit's OWN #1 recommendation (GRAPH.md "Next": *"Bring bryan R5 —
+           one decision, in depth, S346 cadence"*). Written up S348-peter into the audit tree.
+banked:    S350 2026-08-19 — into THIS file, the only one the dPA drains
+routes-to: bryan (one-way language-architecture door — his ruling, not the PA's)
+```
+
+### ⚑ WHY THIS IS BEING RE-BANKED — it is the reason it matters
+
+**Decided worth-asking three days ago and never delivered.** The audit ranked it **the single decision
+to bring bryan first among the not-yet-biting**, wrote it up in full, and filed it under
+`audits/.../rulings-pending/`. It occurs **ZERO times in this file** — the only artifact the dPA drains
+— so it was never going to run and never reached bryan. Fourth instance of that shape found at S350
+(delta-log [1562]). **The analysis may already be done: READ THE ARTIFACT before re-deriving anything.**
+
+### The question
+
+**NOT on trial:** the language/compiler semver axis-separation (§62.1-62.4). Load-bearing, stays.
+
+**On trial:** was **"no editions, ever"** (§62.8) earned by a *language-design* argument, or only by the
+**"two friends" population premise** — drawn from a corpus that by construction could not have shown
+multi-author demand?
+
+### Why it ranks where it does
+
+- **ONE-WAY.** Permitting editions later is an accepting change; refusing now is not cheaply reversible
+  once the deprecation machine, the `scrml.toml [language]` pin, and the 1.0-freeze/multi-impl story
+  are all built on a single rule-set.
+- **Highest-degree not-yet-biting node** in the graph, in a **cycle** with `241 deprecation-window-one-minor`.
+- **It calcifies with every deprecation that lands** under the single-rule-set assumption — waiting has
+  a running cost.
+- **Guard-4 circularity, the sharp part:** D1 and D4 **both terminate at "two friends"** — one premise
+  holding up two doors, and the S346 reverse-ouroboros ruling made that premise **inadmissible** for
+  whether a capability should exist.
+
+⚑ **CORRECTION — the audit's headline argument is MEASURABLY FALSE, and the PA propagated it into this
+entry before checking.** The audit (and this entry's first draft) claimed **adopter #471 FALSIFIES** the
+two-friends premise. **PA-verified by execution S350:** `gh issue list --state all` returns **three
+authors all time — `pjoliver11` (34), `rjantz3` (15), `bryanmaclee` (9, the owner)** — and **#471 was
+authored by `pjoliver11`. "#471" and "Peter" are the SAME PERSON.** Two non-owner authors. **The
+population IS two friends; the premise is CONFIRMED, not falsified.**
+
+**This does NOT save the premise — it changes why it must be struck.** Strike it for being **the WRONG
+KIND of reason** (S346 reverse-ouroboros: a user count measures the project's REACH, never whether a
+capability is RIGHT), **not** for being out of date. Ruling on "the premise is stale" would be ruling on
+a false fact. **Four artifacts propagated the falsification claim and one command refuted it** — the §1
+laundering trace, and the PA was the fourth hop.
+
+### PA recommendation — WITHDRAWN IN PART (S350, by the dpa-034 deep-dive)
+
+The S348 rec was *"keep no-editions, but RE-EARN it on the Go / C++ `-std=` argument."* **The second
+half is self-undermining and is withdrawn: Go's per-module semantics and C++'s `-std=` ARE coexistence
+mechanisms** — they pay exactly the price §62.8 attributes to Rust and refuses. They argue the OPPOSITE
+case. The conclusion may still survive; that route to it does not.
+
+**Two further findings that reshape the ruling — see the artifact:**
+- **The axis in this entry is not the one the SPEC leaves open.** The rulable question is narrower and
+  concrete: ***does `[language] version = "1.0"` mean anything when the compiler is 2.0?*** §62.6 says
+  *"compile under the pinned rules"* and never mentions a MAJOR; §62.3's anchor table says a removal
+  makes the adopter program **"breaks."** Both normative, neither cross-referenced.
+- **The strike has almost no target.** §62.8 was already laundered of the premise at authoring time
+  (*"not warranted here"*). Of 14 occurrences **exactly ONE is normative — `SPEC.md:36381`, §63.3
+  rule 3** — which is **D4's door, not D1's.** The circularity is real but ASYMMETRIC.
+
+### ⚑ Read before ruling: §62 IS 100% UNBUILT, and the no-editions lifecycle ALREADY RAN AND WORKED
+
+**PA-relayed from the deep-dive, which verified both by execution:** `scrml.toml` is never parsed (it is
+only a project-root marker), the manifest emitter has no `language` field, and both reserved version-gate
+codes are absent — **this entire mechanism is spec-ahead.** And separately: `<machine>` removal already
+exercised the no-editions lifecycle **end to end** — it hard-errors `E-DEPRECATED-001`, `scrml migrate`
+repairs it in one pass, and the migrated file compiles. Nobody in the founding dossier had run it.
+
+**A third approach exists that is nowhere in the record:** a **bounded, expiring window** (the Dart
+shape) — the only middle that covers A's one verified weakness (there is no codemod story for a
+*semantic redefinition*, which §62.3 puts in the MAJOR row) without B's permanent cost.
+
+**Artifact:** `scrml-support/docs/deep-dives/language-editions-dpa-034-2026-08-19.md` (942 lines).
+
+### Do NOT re-derive
+
+The compile-probe already measured the door's width: D1.5's pin and D4's machine both assume no
+coexistence. **Only the ruling remains.**
+

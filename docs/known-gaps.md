@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 45 |
-| MED | 154 |
-| LOW | 68 |
+| HIGH | 48 |
+| MED | 156 |
+| LOW | 70 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -8553,6 +8553,142 @@ The real argon2id implementation and the credential-handling path reach the brow
 
 Pinned as an executed gap at `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §9 in the §1/§5 convention — **its expectations invert when it closes**, so the pin becomes the regression guard rather than needing a rewrite.
 <!-- @gap id=g-destructured-param-default-ships-server-only-stdlib-to-browser sev=HIGH status=open locus=compiler/src/route-inference.ts(the Trigger-3 top-level scan root — `fnNode.params` is a sibling of `body` and is never walked; the nested `function-decl` branch already handles its twin) prov=rationale:PA-reproduced-on-main-exit-0-zero-server-js-argon2id-in-the-shipped-runtime-and-the-nested-twin-already-escalates-so-the-gap-is-the-root-not-the-pattern -->
+
+### g-soft-nav-head-sync-drops-stylesheet-links — `_scrml_nav_sync_head()` syncs only title/description/canonical, so EVERY in-site soft-nav click renders the destination page wearing the PREVIOUS page's stylesheet — `NEW S350-bryan (reported by scrml-site); HIGH; open`
+
+<!-- @gap id=g-soft-nav-head-sync-drops-stylesheet-links sev=HIGH status=open locus=compiler/src/runtime-template.js:_scrml_nav_sync_head(PA-VERIFIED AT HEAD by reading the function: it syncs `<title>`, `meta[name=description]`, `link[rel=canonical]` and nothing else; the swap is `_scrml_nav_apply_html`) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+
+**Reported by scrml-site 2026-08-18; PA-VERIFIED IN OUR OWN SOURCE AT HEAD `d604df09`** (the report cites S287 `50478f0e`, the ref scrml.dev is pinned to — the defect is live on `main` too, not only on the pinned ref).
+
+`_scrml_nav_sync_head(doc)` reconciles exactly three head nodes across a soft navigation — `<title>`, `<meta name="description">`, `<link rel="canonical">`. Its own comment names the gap (*"Fuller head-diffing (arbitrary meta/link/preload) is a noted follow-on"*). **`<link rel="stylesheet">` is never touched:** the outgoing page's sheet stays attached and the incoming page's sheet is never fetched.
+
+**Why this is HIGH rather than cosmetic: the compiler emits ONE STYLESHEET PER PAGE** carrying that page's Tailwind utility subset (11-12 KB each on scrml.dev). So the destination arrives with none of the utilities its markup depends on — not a degraded theme, an unstyled document.
+
+Reporter measured **7 of 7 navigations carrying stale CSS** in Chromium on the live site: `/` → `/showcase` renders the dissector as bare text; `/reference/elements/auth` → `/` leaves the reference sidebar stuck on the landing page; `/` → any reference page loses the sidebar entirely. **A hard reload always renders correctly, which is exactly what makes it read to a user as intermittent** (*"navigate away, come back later, the layout comes in broken"*).
+
+**The fix is not a naive attribute copy.** Stylesheet hrefs are emitted RELATIVE and at differing depth — `/` ships `app.<hash>.css`, `/reference/` ships `../app.<hash>.css`, `/reference/elements/auth` ships `../../app.<hash>.css` — so they must be resolved against the TARGET url. Reporter's suggested shape, worth following: resolve against the fetched doc's URL → append any sheet not present and **await its `load` before swapping the outlet** (otherwise the swap flashes unstyled) → remove sheets the new document does not reference, *after* the swap.
+
+**Distinct from** the S313 `<template>`/lift-anchor regression already open with them — reporter checked, and this one is independent and older.
+
+**Workaround live on scrml.dev right now, and it is OURS to retire:** they applied `hard` (§20.8.3) to all **551** internal `<a>`, opting every link out of soft nav, plus two gate assertions. They have committed to reverting the sweep the day this lands and asked to be pinged on this inbox. **Ping them.**
+
+**⚑ THEIR GATE LESSON, worth more than the bug** (recorded verbatim in intent): their `wiki-verify` asserted that a `window` stamp SURVIVED an in-site click — i.e. that soft navigation *happened* — and never asserted what the reader then saw. **The gate was validating the exact mechanism that was breaking the page, and reported 6/6 green while `/showcase` collapsed to unstyled text.** It also clicked a link that soft-navigates under `scrml dev` but 301s into a hard nav on static hosting, so it measured different behaviour than production. Their conclusion: *"gate the artifact, not the dev server."* This is the §8 hollow-gate family with a new member — a gate whose assertion is mechanism-shaped rather than outcome-shaped goes green precisely when the mechanism misbehaves.
+
+### g-soft-nav-redirect-leaves-orphan-history-entry — a soft nav to a redirecting URL pushes history BEFORE fetching, then hard-navigates on the redirect, so one click burns two entries and the first Back appears to do nothing — `NEW S350-bryan (reported by scrml-site); MED; open`
+
+<!-- @gap id=g-soft-nav-redirect-leaves-orphan-history-entry sev=MED status=open locus=compiler/src/runtime-template.js:2713,2724,2752(PA-VERIFIED AT HEAD: `history.pushState` at :2713/:2724 in `_scrml_navigate_soft`, and the redirect fallthrough `if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }` at :2752 runs AFTER it) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+
+**Reported by scrml-site 2026-08-18; PA-VERIFIED IN OUR SOURCE AT HEAD.** `_scrml_navigate_soft()` pushes the history entry, *then* fetches, then discovers `res.redirected` and falls through to a full `_scrml_navigate(res.url)`. The pushed entry is orphaned — it names a URL whose document was never loaded — so the first Back press appears to do nothing.
+
+Reporter measured `history.length` **5 → 7 on a single click**; the first Back stayed on `/reference/` and only the second reached `/`. Triggered by any directory index without a trailing slash on static hosting (`/reference`, `/learn`, `/about`, `/articles`).
+
+**Suggested shape (reporter):** push AFTER the fetch resolves, or `replaceState` the redirect target onto the entry already pushed.
+
+Filed separately from [[g-soft-nav-head-sync-drops-stylesheet-links]] because it is true independent of that fix and has its own locus, though both are in the soft-nav path and a single arc should take them together.
+
+### g-ws-message-door-has-no-body-ceiling-d4-census-missed-it — the `<channel>` server WebSocket `message(ws, raw)` handler `JSON.parse`s an adopter-supplied frame with NO scrml size ceiling, so the dpa-030 D4 body-size fix closes three of FOUR ingress doors — `NEW S350-bryan; HIGH; open`
+
+<!-- @gap id=g-ws-message-door-has-no-body-ceiling-d4-census-missed-it sev=HIGH status=open locus=compiler/src/codegen/emit-channel.ts:1107(the emitted `message(ws, raw)` handler; `JSON.parse(raw)` at :1109 with no length/byte guard — PA-verified by grep on BOTH main d604df09 and the held branch 45fc29b5) prov=rationale:routed-to-the-PA-by-S349-peter-as-dpa-030-OQ-2-and-PA-CONFIRMED-on-the-branch-peter-could-not-inspect -->
+
+**PA-CONFIRMED on the artifact the reporter could not reach.** S349-peter routed this as dpa-030 OQ-2 and recorded the limit of their own evidence verbatim: *"I could not inspect `45fc29b5` directly — bryan's held branches are on his own remote."* The PA has that branch. Checked, and the finding holds.
+
+| | main `d604df09` | held branch `45fc29b5` |
+|---|---|---|
+| `maxPayloadLength` occurrences in `compiler/src` | **0** | **0** |
+| a length / byte / size guard in the emitted `message(ws, raw)` | **none** | **none** |
+
+`emit-channel.ts:1107` emits `message(ws, raw) {` and `:1109` `const d = JSON.parse(raw);`, binding the decoded payload to the channel's `onserver:message` handler param (§38.6.1). The dpa-030 **D4** fix added a bounded, fail-closed read to the **three `emit-server.ts` HTTP prologues** — its census enumerated those three and stopped. This is the fourth door.
+
+**Severity reasoning, stated so nobody over- or under-reacts.** Unlike the three HTTP prologues — which had *no* bound at all before D4 — this door does inherit Bun's default `websocket.maxPayloadLength` of 16 MB. So it is bounded, just not by anything **scrml declares or an adopter can see**, and 16 MB per frame with no frame-rate bound is still a remote resource-exhaustion vector on an unauthenticated surface. Filed HIGH because it is the same class D4 treats as HIGH and because the class is currently reported as closed when it is not.
+
+**What is actually wrong is the CLAIM, not just the code.** D4 asserts it closes the unbounded-ingress class. It closes three quarters of it. Whatever narrows this door should also narrow D4's own text in the same landing (§2 same-landing discipline) — otherwise the ledger keeps a closed-looking entry over an open door.
+
+**Pre-existing on main — NOT introduced by the security cluster.** Landing that cluster does not regress this; it simply does not finish it. That distinction is why this is an incompleteness to sequence, not a reason to hold the cluster.
+
+**Where the ceiling should live is NOT yet a language surface.** `server-body-guard.ts`'s own header flags this deliberately: a `<program maxBodySize="…">` attribute is the obvious ergonomic home and is a LANGUAGE-SURFACE addition needing ratification (Rule 4). Do not invent it while closing this door; feed the existing compiler-owned constant.
+
+**⚑ FILING-CHANNEL NOTE.** This sat in `handOffs/incoming/` as a routed memo and **never reached this ledger** — zero occurrences of `maxPayloadLength` here before this entry. The obligation was named in one artifact and every probe read another (base §10, the contract's most-repeated failure). It survived only because the PA chased a memo it had already archived to `read/`.
+
+### g-handle-middleware-call-to-escalated-fn-emits-undefined-reference — a `handle()` middleware body that CALLS a function route inference escalated into its own route handler emits a bare, undefined reference, so every request through the middleware throws `ReferenceError` at exit 0 — `NEW S350-bryan; HIGH; open`
+
+<!-- @gap id=g-handle-middleware-call-to-escalated-fn-emits-undefined-reference sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:3100(the `handle()` escape-hatch body is emitted verbatim into the middleware IIFE; the callee was separately lifted to a route handler by compiler/src/route-inference.ts:4430 `middleware-handle` — PA-located-verify: BOTH loci are located-not-traced, the PA reproduced the SYMPTOM by execution but did not trace which pass owns the missing binding) prov=rationale:PA-reproduced-by-execution-on-main-d604df09-and-on-branch-45fc29b5-identically-so-it-is-pre-existing-not-branch-introduced -->
+
+**PA-reproduced BY EXECUTION on `main` `d604df09` AND on branch `45fc29b5` — identical on both, so this is PRE-EXISTING, not introduced by the dpa-030 security cluster.**
+
+```scrml
+<program db="./app.db">
+  <schema>?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}</schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function fetchUser(id) {
+        return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+      }
+      function handle(request, resolve) {
+        let u = fetchUser(1)
+        return new globalThis.Response(JSON.stringify({...u}), { status: 200 })
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>
+```
+
+| | result |
+|---|---|
+| compile exit code | **0** |
+| diagnostics | **zero** |
+| emitted middleware body | `let u = fetchUser(1);` — and **no `fetchUser` binding exists anywhere in the module** |
+| driving every mounted route | `POST /_scrml/__ri_route_fetchUser_1` → **`ReferenceError: fetchUser is not defined`** |
+
+`fetchUser` is escalated by route inference into `_scrml_handler_fetchUser_1` + `__ri_route_fetchUser_1`; the `handle()` body is then emitted verbatim still calling the ORIGINAL name, which no longer names anything in the emitted module. The other three routes return 200 — only the middleware-wrapped one throws.
+
+**Blast radius is the whole pipeline, not one route.** `handle()` is an onion-model interceptor (§40.3) wrapping routed requests, so a single unresolved callee in its body takes down every request that routes through it. Exit 0, zero diagnostics.
+
+**Verified by EXECUTION, not by grep** — the emitted module was imported and every route in its own `routes` export was driven; the absence of the binding was confirmed by the throw, not by a failed search (the absence-of-evidence trap).
+
+**Distinct from** [[g-protect-tag-tojson-hook-dropped-by-object-spread]] — that is a confidentiality defect on the same `handle()` surface; this is a plain miscompile and fails LOUD at runtime rather than shipping a secret. They were found in the same repro and share the `handle()`-calls-an-escalated-fn shape, so a fix for either should check the other.
+
+**BOTH DIRECTIONS OF THE CALL BOUNDARY FAIL — PA-executed, second shape added S350.** It is not specific to the callee doing the SQL:
+
+| shape | result |
+|---|---|
+| SQL in the callee, raw `Response` in `handle()` | `ReferenceError: fetchUser is not defined` |
+| SQL in `handle()`, raw `Response` in the callee (with a SEEDED `app.db` so the query actually runs) | `ReferenceError: wrap is not defined` |
+
+So **`handle()` cannot call ANY same-file user function.** Every callee is escalated into its own `_scrml_handler_<name>_N` route while the emitted `handle()` body still calls the original bare name.
+
+⚑ **SEQUENCING HAZARD — THIS BUG IS CURRENTLY LOAD-BEARING. DO NOT FIX IT ALONE.** `E-PROTECT-004` is INTRAPROCEDURAL (PA-measured S350): it fires on a protected SELECT + a raw egress in the SAME body and goes silent across a call hop. That cross-call confidentiality gap is real, but today it is **UNREACHABLE via `handle()` — because every cross-call shape throws before it can ship a column.** Fixing this ReferenceError WITHOUT first extending `E-PROTECT-004` across the call boundary would **UNMASK a live confidentiality leak**. State it as *masked, not absent*. Same shape as the S343 "the over-fire masks the lambda-param miscompile" finding — a bug whose removal makes a worse bug live. The gate extension is tracked as Unit 2 of the `egress-tojson-root` arc and is a **prerequisite** for closing this entry.
+
+**NOT investigated:** whether the same shape breaks from a non-`handle()` server function calling an escalated sibling, and whether the callee being `export`ed changes the outcome. Both are one compile each.
+
+### g-template-literal-in-param-default-truncated-defeats-trigger-3-escalation — a template literal in a `function` parameter default is truncated at its first interpolation, dropping the interpolation AND the function body, so a server-only binding referenced there never escalates and argon2id ships to the browser — `NEW S349-bryan; HIGH; open`
+
+<!-- @gap id=g-template-literal-in-param-default-truncated-defeats-trigger-3-escalation sev=HIGH status=open locus=compiler/src/tokenizer.ts(the template-literal reader — PA-located-verify: the SYMPTOM is reproduced by execution but the tokenizer line was NOT traced; the consumer that receives the already-truncated text is route-inference.ts:3846 `fnDeclParamDefaultRoots`, which reads `params[i].defaultValue`) prov=rationale:PA-reproduced-on-main-e38ccc1a-by-execution-exit-0-zero-server-js-and-argon2id-present-in-the-script-src-the-emitted-HTML-loads -->
+
+**PA-reproduced by execution on `main` `e38ccc1a`.** Not relayed — compiled, then checked the `<script src=>` files the emitted HTML actually loads.
+
+```scrml
+import { hashPassword } from 'scrml:auth'
+function f(h = `a ${hashPassword} b`) { return h }
+```
+
+| | result |
+|---|---|
+| exit code | **0** |
+| `.server.js` emitted | **none** |
+| `argon2id` in a `<script src=>` the HTML loads | **YES** (`scrml-runtime.*.js`) |
+
+**Same class as the S347 comment defect, and this one is the security-relevant member.** `readBlockComment`/`readLineComment` produced a COMMENT token whose `.text` was not its own source lexeme; the operator ruled *"not seeing comments is a non-starter for any serious language"* and the root fix is in flight. The template-literal reader has the same lossy-lexeme property, except a truncated template **defeats §12.2 Trigger 3 escalation**, which is a confidentiality boundary rather than a cosmetic one.
+
+**Two independent symptoms from one root:**
+1. **Security** — the interpolated binding is invisible to the Trigger-3 scan, so the function is not escalated and the server-only module ships to the client. Exit 0, zero diagnostics.
+2. **General miscompile (RELAYED, not PA-reproduced)** — the emitted default is reported as `` h = `a ` `` with the function body dropped entirely, so `` function greet(msg = `hello ${1 + 1} world`) `` returns `"hello "`. Independent of any import; verify before relying on it.
+
+**Scope note.** On `main` the *plain* shape (`h = hashPassword`, no template) also fails to escalate — §12.2 Trigger 3's parameter-default limb is not implemented on `main` at all. That plain case is covered by [[g-destructured-param-default-ships-server-only-stdlib-to-browser]] and is being closed by the in-flight `dtr-r7` arc. **This entry is for the residual the arc does NOT close**: the dtr-r7 S239 pass confirmed the template shape still leaks on the branch AND on a post-rebase preview, because the defect is at the token layer, below `route-inference.ts`.
+
+**Distinct from** [[g-template-interp-regex-swallows-following-source]] (a regex-with-quote inside `${}` making the tokenizer run PAST the template's end) — that is an over-read; this is an under-read. They may share a root; nobody has checked.
+
+**Fix direction:** make the template token round-trip its own lexeme (`tok.text === source.slice(span.start, span.end)`), exactly as the COMMENT fix does, then sweep the consumers that reconstruct source from tokens. Operator approved folding this into the `comment-token-faithfulness` arc at S349 on the FORK-RULE root-beats-position row: comments and templates are two positions, the unfaithful-lexeme token is the root.
 
 ### G-EXPORT-LET-POSITION-HAS-NO-NORMATIVE-HOME-AND-THE-ENFORCEMENT-IS-NOT-WHERE-THE-CORPUS-SAYS — `NEW S347; MED; open`
 
