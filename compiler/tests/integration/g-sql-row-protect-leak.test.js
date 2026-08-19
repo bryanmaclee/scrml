@@ -358,9 +358,92 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
   });
 
-  test("a `reveal` declassification suppresses the raw-egress gate", () => {
+  // dpa-033 (c), S352 — the `reveal` suppressor is DELETED. §14.8.9 scopes
+  // declassification to the VALUE ("at the value" / "declassified-at-this-value"
+  // / "at the sink" / "here only", SPEC.md:8506-8513); a body-wide suppressor
+  // admitted a value bearing no stamp. The raw-egress gate is now a floor with
+  // NO exit — sink-level lowering (the value-scoped exit) is a separate arc.
+  // provenance: ruling:user-voice-scrml.md S352
+  test("a `reveal` on the RETURNED value does NOT suppress the raw-egress gate (dpa-033 c)", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u.reveal("passwordHash")))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  // The defect the deletion closes: the suppressor was body-wide, so a reveal on
+  // a COMPLETELY DIFFERENT query's row silenced the gate for the actually-
+  // returned, never-revealed row. Pre-fix this compiled with no E-PROTECT-004.
+  test("a `reveal` on a DIFFERENT query's row does not silence the returned row's gate", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n        let other = ?{\`SELECT * FROM users WHERE id = 999\`}.get()\n        let decoy = other.reveal("passwordHash")\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  // dpa-029 Q1, S352 — the detector resolves the constructor callee through its
+  // MEMBER CHAIN, so an aliasing spelling reaches the same conclusion as the bare
+  // one. Pre-fix `/\bnew\s+Response\b/` missed this: the file compiled at exit 0
+  // with ZERO diagnostics, and the emitted handler's `instanceof Response`
+  // passthrough returned the manual response BEFORE `_scrml_protect_redact`, so
+  // `{"id":1,"name":"ada","passwordHash":"…"}` shipped to the client.
+  test("`new globalThis.Response(...)` fires E-PROTECT-004 (member-chain callee)", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  test("`new window.Response(...)` fires E-PROTECT-004 (any aliasing receiver)", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new window.Response(JSON.stringify(u))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  // The foreign-block egress kind is a NODE KIND, so every opener level answers
+  // the same. Pre-fix `/(^|[^A-Za-z0-9_$])_\{/` matched only the LEVEL-0 opener,
+  // so the canonical `_={ … }=` form SPEC §23.2.4a's own worked example uses
+  // walked past the gate at exit 0.
+  test("a level-1 `_={ … }=` foreign block fires E-PROTECT-004", () => {
+    const src = `<program lang="ts">
+
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+  </schema>
+
+  <db src="app.db" protect="passwordHash" tables="users">
+
+    \${
+      function getUser(id) {
+        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()
+        let out = _={ in: { u }
+          JSON.stringify(u)
+        }=
+        return out
+      }
+    }
+
+  </db>
+
+  <div><p>hi</p></div>
+</program>`;
+    const { result } = compileSource(src);
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  // The other direction of the same root cause: a source-text regex fires on a
+  // token that is not code. Pre-fix this REJECTED valid source (E-PROTECT-004 on
+  // a `new Response` living only in a comment and a string literal) — invariant
+  // 55's canonical failure mode, and a fail-CLOSED false positive.
+  test("`new Response` in a COMMENT and a STRING does NOT fire E-PROTECT-004", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n        // a comment naming new Response and asIs must not fire the gate\n        let label = "new Response / asIs"\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return { name: u.name, label: label }\n      }`,
     ));
     const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
@@ -369,6 +452,18 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
   test("no raw egress + protected query -> NO E-PROTECT-004 (the floor strips)", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+
+  // Population guard: a raw egress with NO protected query must stay silent —
+  // the gate is a CO-OCCURRENCE test, and widening it to "any manual Response"
+  // would reject every §40.3.5 early-return in an app that happens to declare a
+  // `protect=` column elsewhere.
+  test("a manual `Response` with NO protected query -> NO E-PROTECT-004", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getName(id) {\n        let u = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u))\n      }`,
     ));
     const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);

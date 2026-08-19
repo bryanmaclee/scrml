@@ -7273,6 +7273,27 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   "requestAnimationFrame", "cancelAnimationFrame",
   "performance", "crypto", "alert", "confirm", "prompt",
   "URL", "URLSearchParams", "Buffer", "process",
+  // §40.3.5 (the `#### 39.3.5` heading — a numbering drift; it sits under
+  // `### 40.3`) — "Early Return from `handle()`". Its worked example is scrml
+  // source in a `${ }` logic context returning a BARE `new Response("Forbidden",
+  // { status: 403 })`, and the normative statement beneath it reads "The response
+  // returned by `handle()` SHALL be the final response. This is intentional and
+  // valid." §14.8.9's closed-world paragraph independently enumerates "a manual
+  // `Response` / `handle()` body (§40)" as an egress kind E-PROTECT-004 must
+  // recognise — which presupposes the form is authorable.
+  //
+  // Without this entry a bare `new Response(...)` fired `E-SCOPE-001: Undeclared
+  // identifier `Response``, so the documented form did not compile — and the
+  // workaround an author reaches for (`new globalThis.Response(...)`) was, until
+  // the structural detector landed, the one spelling that SILENCED the §14.8.9
+  // raw-egress gate. The compiler steered authors onto the leak.
+  //
+  // Deliberately NARROW: only `Response`. `Request` is a parameter binding from
+  // the `handle(request, resolve)` signature, not a bare global, and `Headers` /
+  // `FormData` / `Blob` are named nowhere in §40.3 — admitting them would be a
+  // widening, not a conformance restoration, and needs its own ruling.
+  // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1)
+  "Response",
   // Language keywords that may surface as idents after expression parsing
   "this", "self", "super", "event", "arguments",
   // scrml-specific — meta / compiler / SQL / error-context built-ins.

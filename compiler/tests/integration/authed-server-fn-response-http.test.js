@@ -701,20 +701,32 @@ describe("emission shape — every server-fn route handler terminates in a Respo
 // adopter's deliberate 403 / 404 / redirect would be re-emitted as a 200 with
 // an empty-object body. A DENY silently becoming a SUCCESS.
 //
-// HONEST SCOPE. This shape is NOT reachable from clean scrml source today: a
-// body naming `Response` build-blocks on `E-SCOPE-001` (asserted below, so the
-// day that gate changes these tests say so), and the `_{}` escape-hatch forms
-// fail earlier still. But codegen EMITS the handler regardless of the
-// downstream diagnostic, so the emitted code path is real and executable — and
-// §14.8.9/§14.8.10 already model a manual-`Response`/`handle()` body as a live
-// server-fn egress kind, so the shape is anticipated rather than hypothetical.
-// A fail-OPEN shape is the exact category this change exists to remove, so it
-// is guarded and pinned rather than left to the upstream gate alone.
+// SCOPE — UPDATED S352, AND THE UPDATE IS THE POINT. This block used to record
+// that the shape was NOT reachable from clean scrml source, because a body
+// naming `Response` build-blocked on `E-SCOPE-001`, and it said: "If this ever
+// stops firing, the shape becomes adopter-reachable and the passthrough guard
+// below stops being belt-and-braces and becomes load-bearing."
+//
+// That day is here. `Response` is now in `LOGIC_SCOPE_GLOBAL_ALLOWLIST`
+// (type-system.ts) because SPEC §40.3.5's own worked example returns a bare
+// `new Response("Forbidden", { status: 403 })` and the normative statement under
+// it reads "This is intentional and valid" — the compiler was rejecting source
+// the SPEC documents. So the shape below now COMPILES CLEAN, and
+// `if (_scrml_result instanceof Response) return _scrml_result;` is
+// **LOAD-BEARING**, not belt-and-braces: it is the only thing standing between
+// an adopter's deliberate 403 and a fail-OPEN 200 `{}`.
+//
+// Do not weaken or reorder that guard. The EXECUTED test at the bottom of this
+// block is now the primary evidence for a live adopter path, not a defensive
+// probe of an unreachable one.
+//
+// (§14.8.9/§14.8.10 still model a manual `Response` as an UN-ANALYZABLE egress:
+// being in scope makes it authorable, not redactable. A protected-origin column
+// reaching it fires `E-PROTECT-004` — see g-sql-row-protect-leak.test.js.)
+// provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1)
 // ---------------------------------------------------------------------------
 describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
-  // A server fn that hand-builds a 403. `Response` is not a declared scrml
-  // identifier, so this reports E-SCOPE-001 — but codegen still emits the
-  // handler, which is what we execute.
+  // A server fn that hand-builds a 403 — the §40.3.5 early-return shape.
   const BODY_BUILDS_RESPONSE = `<program auth="required">
   \${
     export server function deny() {
@@ -724,11 +736,13 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
   <button onclick=deny()>D</button>
 </program>`;
 
-  test("the shape still build-blocks on E-SCOPE-001 (pins the upstream gate)", () => {
+  test("the shape is ADOPTER-REACHABLE — no E-SCOPE-001 on a bare `Response` (§40.3.5)", () => {
     const { errors } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-gate");
-    // If this ever stops firing, the shape becomes adopter-reachable and the
-    // passthrough guard below stops being belt-and-braces and becomes load-bearing.
-    expect(errors.map((e) => e.code)).toContain("E-SCOPE-001");
+    // The inverse of what this test asserted before S352. `Response` resolving is
+    // what makes the passthrough guard below load-bearing; if E-SCOPE-001 ever
+    // comes back here, SPEC §40.3.5's worked example has stopped compiling.
+    expect(errors.map((e) => e.code)).not.toContain("E-SCOPE-001");
+    expect(errors).toEqual([]);
   });
 
   test("the guard is emitted ahead of the envelope, in that order", () => {
@@ -746,9 +760,8 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
     if (domPolluted()) return;
 
     const { serverJsPath } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-run");
-    // The compile reported E-SCOPE-001 but the artifact was still written; we
-    // execute the emitted handler, which is the code an adopter would run if the
-    // upstream gate ever admitted this shape.
+    // The compile is CLEAN as of S352 (§40.3.5), so this executes the code an
+    // adopter actually runs — not a hypothetical behind a build block.
     expect(existsSync(serverJsPath)).toBe(true);
     const { mod, server, stop } = await serveBundle(serverJsPath);
     try {

@@ -1,0 +1,17 @@
+<program db="./app.db" lang="ts">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let out = _={ in: { u }
+          JSON.stringify(u)
+        }=
+        return out
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

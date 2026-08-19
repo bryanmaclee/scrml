@@ -4,7 +4,8 @@
  * This module owns the FLOOR (the load-bearing structural redaction) for
  * `protect=` columns: a column whose resolved source `(table, column)` origin
  * is a protected field SHALL NOT cross the wire to the client unless it is
- * explicitly declassified with `reveal("col")`.
+ * explicitly declassified with `reveal("col")` AT THAT VALUE (SPEC.md:8506-8513
+ * — "at the value", "declassified-at-this-value", "at the sink", "here only").
  *
  * The mechanism is "tag at query-lowering, read at the egress sink":
  *
@@ -251,6 +252,51 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
 }
 
 /**
+ * Resolve an expression node to the terminal NAME it denotes, walking a member
+ * chain to its last property. This is what makes the raw-egress gate spelling-
+ * independent:
+ *
+ *   `Response`                  -> "Response"   (ident)
+ *   `globalThis.Response`       -> "Response"   (member, property)
+ *   `window.Response`           -> "Response"
+ *   `globalThis.foo.Response`   -> "Response"
+ *
+ * Returns null for a shape with no static terminal name (a call result, an index
+ * with a computed key, a literal). A null answer is a NON-match, which is safe
+ * here only because the caller treats "no recognised egress" as "the compiler
+ * owns this sink" — see the population note on `detectProtectedRawEgress`.
+ */
+function terminalName(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as { kind?: string; name?: string; property?: string };
+  if (n.kind === "ident" && typeof n.name === "string") return n.name;
+  if (n.kind === "member" && typeof n.property === "string") return n.property;
+  return null;
+}
+
+/**
+ * The receiver of a member expression, resolved through its own chain:
+ * `Response.json` -> "Response"; `globalThis.Response.json` -> "Response".
+ */
+function memberReceiverName(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as { kind?: string; object?: unknown };
+  if (n.kind !== "member") return null;
+  return terminalName(n.object);
+}
+
+/** Does a type-annotation FIELD denote the `asIs` escape type (§14.1.1)? */
+function annotationIsAsIs(annotation: unknown): boolean {
+  // `typeAnnotation` / `returnTypeAnnotation` are declared `string` on the AST
+  // (types/ast.ts) — the tree stores a type EXPRESSION in string form, so a
+  // token test on that FIELD reads a structured value. It is not a re-scan of
+  // source text: a comment or a string literal spelling `asIs` cannot reach here
+  // (invariant 55 — the field is the tree's own answer).
+  if (typeof annotation !== "string") return false;
+  return /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(annotation);
+}
+
+/**
  * §14.8.9 fail-closed gate (E-PROTECT-004) — detect a protected-origin value
  * reaching a RAW / compiler-UNANALYZABLE egress within a single server-function
  * body, where the structural redaction floor cannot guarantee the strip:
@@ -262,42 +308,137 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
  *
  * Returns the offending query + egress kind (→ E-PROTECT-004), or null. The
  * closed-world precondition of §14.8.9 rests on every egress being compiler-
- * emitted and descriptor-preserving; this gate enforces it fail-closed. It scans
- * the fn's SOURCE slice (a manual `Response` / `_{}` / `asIs` is AUTHORED, never
- * compiler-emitted, so a source scan distinguishes it from the codegen's own
- * `new Response(...)` serializer). Conservative: co-occurrence of a protected
- * query and a raw egress in the same body fires (the floor never silently ships
- * a protected column through a path it cannot redact). A `reveal(...)` anywhere
- * in the body SUPPRESSES the gate — the author explicitly declassified (§14.8.9
- * "declassify explicitly with `reveal` or project the column out").
+ * emitted and descriptor-preserving; this gate enforces it fail-closed.
+ * Conservative: co-occurrence of a protected query and a raw egress in the same
+ * body fires (the floor never silently ships a protected column through a path
+ * it cannot redact).
+ *
+ * **This is a STRUCTURAL analysis over the parsed function tree, not a scan of
+ * the function's source slice (ruling dpa-029 Q1, S352; invariant 55).** The
+ * source-text form it replaces was wrong in four measured ways, every one a
+ * direct consequence of asking the text a question the tree already answered:
+ *
+ *   1. `/\bnew\s+Response\b/` missed `new globalThis.Response(...)` — the
+ *      emitted handler's `instanceof Response` passthrough then returned the
+ *      manual response BEFORE `_scrml_protect_redact`, and the protected column
+ *      shipped at exit 0 with zero diagnostics.
+ *   2. `/(^|[^A-Za-z0-9_$])_\{/` matched only the LEVEL-0 foreign opener. The
+ *      opener grammar is `_` + N `=` + `{`, so the canonical `_={ … }=` form
+ *      SPEC §23.2.4a's own worked example uses walked straight past the gate.
+ *   3. `/\basIs\b/` matched the token inside a comment or a string literal.
+ *   4. `/\?\{`([^`]*)`\}/` read the SQL out of the text rather than off the
+ *      `sql` node the parser had already built.
+ *
+ * The resolution is by NODE KIND and by CALLEE, and the callee resolves through
+ * its member chain, so every MEMBER-CHAIN spelling of a constructor reaches the
+ * same conclusion as the bare one.
+ *
+ * **Residual bound — stated so it is not over-claimed.** Callee resolution is
+ * SYNTACTIC, not binding-aware: a local rebinding (`const R = Response; new R()`)
+ * still reads as `R` and is not recognised. Closing that needs the name resolver,
+ * not a wider callee test, and the source-text form it replaces had the identical
+ * hole — this is carried forward, not introduced. Likewise only `Response.json`
+ * is treated as a static factory egress: `Response.redirect` / `Response.error`
+ * carry no caller-supplied body, so no protected column can ride them.
+ *
+ * **Declassification is NOT handled here (ruling dpa-033 (c), S352).** §14.8.9
+ * scopes `reveal` to the VALUE — "explicitly declassified via the field-level
+ * `reveal` construct **at the value**" (SPEC.md:8506-8507), "stamps the named
+ * column's provenance descriptor as **declassified-at-this-value**" and "the
+ * serializer admits a protected-origin column **only** when its descriptor bears
+ * a `reveal` stamp **at the sink**" (SPEC.md:8511-8513), with the worked example
+ * commented "**here only**" (SPEC.md:8509). A body-wide suppressor admitted a
+ * value that bears no stamp at all — a `.reveal()` on a DIFFERENT query's row
+ * silenced the gate for the actually-returned, never-revealed row. This gate is
+ * therefore a floor with no exit; the value-scoped exit is sink-level lowering,
+ * a separate later arc.
+ *
+ * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
  */
 export function detectProtectedRawEgress(
-  fnSource: string,
+  fnNode: unknown,
   ctx: ProtectContext,
 ): { query: string; egressKind: string } | null {
-  if (!fnSource) return null;
-  // Is a protected-origin `?{}` SELECT present in this body?
+  if (!fnNode || typeof fnNode !== "object") return null;
+
   let protectedQuery: string | null = null;
-  const sqlRe = /\?\{`([^`]*)`\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = sqlRe.exec(fnSource)) !== null) {
-    if (resolveProtectedOutputColumns(m[1], ctx) !== null) {
-      protectedQuery = m[1].trim().replace(/\s+/g, " ").slice(0, 60);
-      break;
+  let sawForeign = false;
+  let sawResponse = false;
+  let sawAsIs = false;
+
+  // Generic structural walk — the `astReadsCurrentUserAmbient` precedent
+  // (emit-server.ts): identity `seen` set against a cyclic tree, a depth cap,
+  // and `span` skipped (a span carries no semantics and holds a `filePath`
+  // string that would otherwise be walked on every node).
+  //
+  // The cap is 512, matching `collectDerivedCellDecls` (route-inference.ts:3740)
+  // rather than the 64 of the emit-server sibling walks: like that one and unlike
+  // those, THIS walk descends ESTree expression trees, which nest one level per
+  // term. The cap must sit far above any real depth, because truncating a
+  // FAIL-CLOSED check is a fail-OPEN — a body deep enough to hit the cap would
+  // silently escape the gate. (The measured max for the sibling walk is 37.)
+  const MAX_DEPTH = 512;
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown, depth: number): void => {
+    if (!node || typeof node !== "object" || depth > MAX_DEPTH) return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, depth + 1);
+      return;
     }
-  }
-  if (!protectedQuery) return null;
-  // Explicit declassification anywhere in the body suppresses the gate.
-  if (/\.\s*reveal\s*\(/.test(fnSource)) return null;
-  // Is there a raw / unredactable egress in the same body?
-  let egressKind: string | null = null;
-  if (/(^|[^A-Za-z0-9_$])_\{/.test(fnSource)) {
-    egressKind = "a `_{}` foreign-code block (§23)";
-  } else if (/\bnew\s+Response\b/.test(fnSource) || /\bResponse\s*\.\s*json\b/.test(fnSource)) {
-    egressKind = "a manual `Response` / `handle()` body (§40)";
-  } else if (/\basIs\b/.test(fnSource)) {
-    egressKind = "an `asIs`-typed value (§14.1.1)";
-  }
+
+    const n = node as Record<string, unknown>;
+
+    // --- the protected-origin `?{}` SELECT ---------------------------------
+    // A `?{}` is a `sql` node wherever it sits; the let/const/return attachment
+    // forms carry it as `sqlNode`, which the generic recursion below reaches.
+    if (n.kind === "sql" && typeof n.query === "string" && protectedQuery === null) {
+      if (resolveProtectedOutputColumns(n.query, ctx) !== null) {
+        protectedQuery = n.query.trim().replace(/\s+/g, " ").slice(0, 60);
+      }
+    }
+
+    // --- egress kind 1: a `_{}` foreign-code block (§23) --------------------
+    // Node kind, so EVERY opener level (`_{`, `_={`, `_=={`, …) is one answer.
+    if (n.kind === "foreign") sawForeign = true;
+
+    // --- egress kind 2: a manual `Response` (§40) ---------------------------
+    // `new <chain>.Response(...)` — the callee resolves through its member chain.
+    if (n.kind === "new" && terminalName(n.callee) === "Response") sawResponse = true;
+    // `<chain>.Response.json(...)` — a static factory call on the same receiver.
+    if (
+      n.kind === "call" &&
+      terminalName(n.callee) === "json" &&
+      memberReceiverName(n.callee) === "Response"
+    ) {
+      sawResponse = true;
+    }
+
+    // --- egress kind 3: an `asIs`-typed value (§14.1.1) ---------------------
+    if (annotationIsAsIs(n.typeAnnotation) || annotationIsAsIs(n.returnTypeAnnotation)) {
+      sawAsIs = true;
+    }
+
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      visit(n[key], depth + 1);
+    }
+  };
+  visit(fnNode, 0);
+
+  if (protectedQuery === null) return null;
+
+  // Priority is fixed rather than traversal-ordered, so the reported kind does
+  // not depend on where in the body each construct happens to sit.
+  const egressKind = sawForeign
+    ? "a `_{}` foreign-code block (§23)"
+    : sawResponse
+      ? "a manual `Response` / `handle()` body (§40)"
+      : sawAsIs
+        ? "an `asIs`-typed value (§14.1.1)"
+        : null;
   if (!egressKind) return null;
   return { query: protectedQuery, egressKind };
 }
