@@ -2929,6 +2929,17 @@ function _scrml_nav_is_sheet(el) {
   return rel.indexOf(" stylesheet ") >= 0 && rel.indexOf(" alternate ") < 0;
 }
 
+// Is there a real, QUERYABLE <head> to reconcile against? A host that stubs the
+// DOM (an SSR shim, a headless eval of this runtime, a conformance harness)
+// hands over a \`head\` object with no \`querySelectorAll\`. Reaching through it
+// would throw at TOP-LEVEL INIT and take the whole bundle down — not merely
+// disable soft nav. (Caught by conf-NAV-CROSS-CHUNK's stub-DOM eval.)
+function _scrml_nav_head_queryable() {
+  return typeof document !== "undefined"
+    && !!document.head
+    && typeof document.head.querySelectorAll === "function";
+}
+
 // The target document's stylesheet set, resolved to ABSOLUTE urls against the
 // TARGET page's url.
 //
@@ -2963,15 +2974,21 @@ function _scrml_nav_sheet_urls(doc, path) {
   return out;
 }
 
-// Every stylesheet currently in the live <head>, paired with its ABSOLUTE url.
+// Stylesheets currently in the live <head>, paired with their ABSOLUTE url.
 // Resolved against _scrml_nav_sheet_base rather than window.location — see the
 // comment on that variable for why location is the wrong base here.
-function _scrml_nav_live_sheets() {
+//
+// ownedOnly=true narrows the result to sheets THIS ENGINE claimed (see
+// _scrml_nav_claim_boot_sheets). Pruning uses the narrow view; the
+// already-attached check uses the wide one, so a sheet an author attached
+// themselves is never fetched twice AND never removed.
+function _scrml_nav_live_sheets(ownedOnly) {
   var out = [];
-  if (typeof document === "undefined" || !document.head) return out;
+  if (!_scrml_nav_head_queryable()) return out;
   var nodes = document.head.querySelectorAll("link[rel]");
   for (var i = 0; i < nodes.length; i++) {
     if (!_scrml_nav_is_sheet(nodes[i])) continue;
+    if (ownedOnly && !nodes[i].hasAttribute("data-scrml-sheet")) continue;
     var raw = nodes[i].getAttribute("href");
     if (!raw) continue;
     try { out.push({ el: nodes[i], href: new URL(raw, _scrml_nav_sheet_base).href }); }
@@ -2981,7 +2998,7 @@ function _scrml_nav_live_sheets() {
 }
 
 function _scrml_nav_has_sheet(href) {
-  var live = _scrml_nav_live_sheets();
+  var live = _scrml_nav_live_sheets(false);
   for (var i = 0; i < live.length; i++) { if (live[i].href === href) return true; }
   return false;
 }
@@ -3014,7 +3031,7 @@ function _scrml_nav_attach_sheets(wanted) {
   // Build every link BEFORE appending any of them, so \`pending\` is complete
   // before the first load event can fire and settle the count prematurely.
   var fresh = [];
-  if (typeof document !== "undefined" && document.head) {
+  if (_scrml_nav_head_queryable()) {
     for (var i = 0; i < wanted.length; i++) {
       if (_scrml_nav_has_sheet(wanted[i].href)) continue;   // already attached
       var link = document.createElement("link");
@@ -3022,6 +3039,7 @@ function _scrml_nav_attach_sheets(wanted) {
       if (wanted[i].media) link.setAttribute("media", wanted[i].media);
       link.addEventListener("load", settleOne);
       link.addEventListener("error", settleOne);
+      link.setAttribute("data-scrml-sheet", "");   // claimed — prunable later
       // Absolute, and set LAST — assigning href is what starts the fetch.
       link.setAttribute("href", wanted[i].href);
       fresh.push(link);
@@ -3041,8 +3059,17 @@ function _scrml_nav_attach_sheets(wanted) {
 // AFTER THE SWAP, NEVER BEFORE: removing the outgoing page's sheet while its
 // markup is still on screen repaints it unstyled for a frame — the same defect
 // this whole section exists to remove, just one frame long.
+//
+// CLAIMED SHEETS ONLY. A <program> shell is PERSISTENT across soft navigations
+// and its author mutations survive the swap (§20.8.6, §20.8.8 item 5), so a
+// <link rel="stylesheet"> that author code injected at runtime is shell state,
+// not route state, and the engine has no business removing it. Pruning
+// everything would match a hard reload — but a hard reload is exactly what soft
+// nav is not. The failure modes are asymmetric: pruning too little leaves a
+// stale sheet, which is visible and debuggable; pruning too much silently
+// deletes someone's styling with no diagnostic at all.
 function _scrml_nav_prune_sheets(wanted) {
-  var live = _scrml_nav_live_sheets();
+  var live = _scrml_nav_live_sheets(true);
   for (var i = 0; i < live.length; i++) {
     var keep = false;
     for (var j = 0; j < wanted.length; j++) {
@@ -3051,6 +3078,20 @@ function _scrml_nav_prune_sheets(wanted) {
     if (!keep && live[i].el.parentNode) live[i].el.parentNode.removeChild(live[i].el);
   }
 }
+
+// Claim the stylesheets the INITIAL SSR document shipped, so the first soft
+// navigation can retire the ones its destination does not reference. Runs once,
+// at script-evaluation time: the runtime's <script> sits at the end of <body>,
+// so <head> is fully parsed by now. Anything an author adds afterwards is
+// unclaimed and therefore permanent — see _scrml_nav_prune_sheets.
+function _scrml_nav_claim_boot_sheets() {
+  if (!_scrml_nav_head_queryable()) return;
+  var nodes = document.head.querySelectorAll("link[rel]");
+  for (var i = 0; i < nodes.length; i++) {
+    if (_scrml_nav_is_sheet(nodes[i])) nodes[i].setAttribute("data-scrml-sheet", "");
+  }
+}
+_scrml_nav_claim_boot_sheets();
 
 // navigate-wave1c — how long to wait for a cross-chunk route script to load
 // before giving up and hard-navigating (§20.8.2 / §20.8.7).

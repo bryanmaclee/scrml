@@ -81,6 +81,9 @@ const LEARN_TEXT = "rgb(22, 22, 22)";
 const AUTH_TEXT  = "rgb(33, 33, 33)";
 const SHELL_TEXT = "rgb(44, 44, 44)";   // from app.css — the sheet at two depths
 const HOME_ONLY_SHELL_BG = "rgb(99, 99, 99)";  // index.css paints a SHELL element
+// Served by the test host (NOT by the compiler) — stands in for a stylesheet an
+// adopter's own shell code injects at runtime.
+const AUTHOR_THEME_TEXT = "rgb(55, 55, 55)";
 const AUTH_ONLY_SHELL_BG = "rgb(77, 77, 77)";  // auth.css  paints a SHELL element
 
 const SHELL_SRC = `<program>
@@ -205,6 +208,11 @@ function startServer() {
       const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
       requestLog.push(path);
       if (path === "/learn/") { res.writeHead(301, { location: "/learn" }); res.end(); return; }
+      if (path === "/author-theme.css") {
+        res.writeHead(200, { "content-type": "text/css" });
+        res.end(`#shell-h1 { color: ${AUTHOR_THEME_TEXT} !important; }`);
+        return;
+      }
       let file = join(DIST, path);
       if (path === "/" || path.endsWith("/")) file = join(DIST, path, "index.html");
       else if (!existsSync(file) || statSync(file).isDirectory()) {
@@ -455,6 +463,33 @@ describe("§20.8.2 — a soft-navigated page renders with ITS OWN stylesheet", (
     expect(bgOf("#shell-h1")).not.toBe(HOME_ONLY_SHELL_BG);
     expect(colourOf("#body-p")).toBe(LEARN_TEXT);
     expect(colourOf("#shell-h1")).toBe(SHELL_TEXT);
+  }, 30000);
+
+  test("a stylesheet the AUTHOR injected keeps applying across a soft nav", async () => {
+    await hardLoad("/");
+
+    // Shell-level author state: a <program> shell is persistent across soft
+    // navigations and its author mutations survive the swap (SPEC 20.8.6 /
+    // 20.8.8 item 5). A theme sheet injected by shell code is shell state, so
+    // retiring the outgoing ROUTE's sheet must not take it with it.
+    const authored = document.createElement("link");
+    authored.setAttribute("rel", "stylesheet");
+    authored.setAttribute("href", BASE + "/author-theme.css");
+    const loaded = new Promise((res) => {
+      authored.addEventListener("load", res);
+      authored.addEventListener("error", res);
+      setTimeout(res, 4000);
+    });
+    document.head.appendChild(authored);
+    await loaded;
+    expect(colourOf("#shell-h1")).toBe(AUTHOR_THEME_TEXT);
+
+    click("lk-learn");
+    await waitFor(() => bodyText() === "LEARN_CONTENT", "the learn route to swap in");
+
+    // The reader still sees the author's theme.
+    expect(colourOf("#shell-h1")).toBe(AUTHOR_THEME_TEXT);
+    expect(colourOf("#body-p")).toBe(LEARN_TEXT);
   }, 30000);
 
   test("navigating back and forth repeatedly neither unstyles the page nor accumulates sheets", async () => {
