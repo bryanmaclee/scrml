@@ -6763,6 +6763,41 @@ The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = 
 
 **The real discriminator is the §7.2 extension set.** §7.2 names four scrml extensions to `logic-content`; inside a mount body **three of the four fail**: `lift` (§10) ❌ · markup-as-expression (§7.4) ❌ · `?{}` SQL (§8) ❌ · `@variable` (§6) ✅ — plus `!{}` error arms (§19, absent from §7.2's stale list) ❌. All four failures are `E-CODEGEN-INVALID-LOGIC`, fail-CLOSED. So: **the mount body's string pipeline lowers plain JS and `@`, but none of the scrml extensions that require real lowering.** Scope (c)'s acceptance test to that set — a fix closing `!{}` alone and leaving `?{}`/`lift`/markup-as-expr failing is the pa-base §5 shape (correct at that site, incomplete, passing its own new tests because the untouched paths have no coverage either). Pin both conformance halves (codes + runtime) — §62.2 makes the corpus the contract and this is a freeze surface.
 
+### g-when-message-parent-handler-drops-all-but-the-first-statement — a parent-side `when message from <#w>` handler silently emits ONLY its first statement; 2 statements produce no diagnostic at all — `NEW S354-bryan (adversarial pass on the nested-program artifact fix; PA-briefed, agent-EXECUTED both trees); HIGH; open`
+<!-- @gap id=g-when-message-parent-handler-drops-all-but-the-first-statement sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts:3772 prov=empirical:S354-adversarial-executed-both-trees -->
+`emit-logic.ts:3772` emits the parent-side handler via `emitExprField(node.bodyExpr, …)`, and `bodyExpr` is `safeParseExprToNode(bodyRaw)` — which parses **one** statement.
+
+```scrml
+when message from <#w> (d) {
+  @out = d.r
+  @cnt = @cnt + 1        // silently dropped
+}
+```
+
+Emitted identically on both trees:
+
+```js
+_scrml_worker_w.onmessage = function(event) { const d = event.data; _scrml_cs_reactive_set("out", d.r); };
+```
+
+**Two statements → NO warning at all.** Three statements → a bare `console.warn` from `expression-parser.ts:3007` ("statement boundary not detected — trailing content would be silently dropped"), which is not a compiler diagnostic and does not fail the build.
+
+**⚑ Why this is filed with urgency:** the nested-program arc's commit `d100ef4e` is titled *"make `when message` bodies reconstruct faithfully"* and closes exactly this class **on the worker side only**. A reader — human or agent — will reasonably conclude both sides are closed. They are not. The parent side is the half an adopter writes first.
+
+### g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client — `analyzeAll` caches `FileAnalysis` fields BEFORE the nested-`<program>` extraction splice; `fnNodes` and `cssBlocks` are stale and LEAK worker-only code into the client bundle — `NEW S354-bryan (adversarial pass; 2 of 7 fields confirmed leaking by execution, 3 UNVERIFIED); HIGH; open`
+<!-- @gap id=g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client sev=HIGH status=open locus=compiler/src/codegen/index.ts prov=empirical:S354-adversarial-executed-both-trees -->
+`analyzeAll` runs **before** `extractWorkerPrograms` and caches its node collections **by object reference**. When the pre-pass splices a nested `<program name=>` subtree out, every cached field still points at the removed nodes. The S354 nested-program arc fixed `channelNodes`; the class is wider.
+
+| field | consumer | verdict |
+|---|---|---|
+| `channelNodes` | `emit-reactive-wiring.ts:928` | fixed by the S354 arc |
+| `fnNodes` | `emit-functions.ts:537` | **STALE, LEAKS** — a `function` inside a nested `<program name=>` is emitted into the **client** bundle. On `examples/13-worker.scrml` the whole `sieve` body ships in `13-worker.client.js`. |
+| `cssBlocks` | `codegen/index.ts:1952` | **STALE, LEAKS** — `#{ .ghostclass{…} }` inside a worker program lands in `<base>.css`. |
+| `markupNodes` · `topLevelLogic` | `emit-bindings.ts:756` · `index.ts:2155` | probed, no observed leak |
+| `cssBridges` · `testGroups` · `usage` | — | **UNVERIFIED** (`usage` over-inclusion only reduces elision — the sound direction) |
+
+**The structural fix is ordering the extraction pre-pass BEFORE `analyzeAll`**, not refreshing fields one at a time — every per-field patch leaves the next one latent. Pre-existing on both trees; the S354 arc makes it visible rather than causing it. Cross-ref [[g-nested-program-emits-artifacts-it-never-produces]].
+
 ### g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate — `detectTenantRawEgress` carries ALL THREE defects the §14.8.9 gate was just fixed for, on the tenant-ROW isolation floor — `NEW S353-bryan (found while briefing the raw-egress fix; PA-VERIFIED by reading + the sibling's reproduction); HIGH; open`
 <!-- @gap id=g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts:371 prov=ruling:user-voice-scrml.md-S353 -->
 `detectTenantRawEgress` (`tenant-egress.ts`, the §14.8.10 fail-closed gate) is a **byte-identical twin** of `detectProtectedRawEgress` and carries every defect the S353 raw-egress arc fixed in the §14.8.9 sibling — on the **tenant-ROW isolation floor**, where the failure mode is cross-tenant row leakage rather than column leakage.
@@ -6771,6 +6806,27 @@ The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = 
 1. **`globalThis.Response` bypasses it.** Same `/\bnew\s+Response\b/` test — a member-chain spelling does not match. Same trap-closes-on-itself dynamic: bare `Response` fired `E-SCOPE-001` until the sibling fix admitted it, so the workaround an author reached for was the spelling that silenced the gate.
 2. **The suppressor is BODY-WIDE, not value-scoped.** `if (/\.\s*acrossTenants\s*\(/.test(fnSource)) return null;` — an `.acrossTenants()` on ANY value anywhere in the body suppresses the gate for every other value in it, exactly as `.reveal(` did for §14.8.9.
 3. **It is a source-text regex in a post-AST stage** — a **Rule 7** instance (S338), and the root cause of both defects above.
+
+**⚑ UPGRADED read-verified → EXECUTED (S354-bryan, adversarial pass on the §14.8.9 round-3 fix).** All three predicted defects are now reproduced by running the emitted handler, not by reading. On an `assets` table with `tenant_id` and NO `protect=`, this compiles **exit 0, zero diagnostics**:
+
+```scrml
+function f() {
+  let rows = ?{`SELECT id, name FROM assets`}.all()
+  return new globalThis.Response(JSON.stringify(rows))
+}
+```
+
+Executed, caller pinned to `tenantA`:
+
+```
+CONTROL (compiler-emitted path): [{"id":1,"name":"A-asset"}]
+EVASION (globalThis.Response):   [{"id":1,"name":"A-asset","tenant_id":"tenantA"},
+                                  {"id":2,"name":"B-SECRET-asset","tenant_id":"tenantB"}]
+```
+
+`emit-server.ts:126`'s `instanceof Response` passthrough returns the manual Response **before** `_scrml_tenant_redact` — the §12.5 mechanism the protect side closed at round 3. Also executed-silent: `new globalThis["Response"](…)` and the cross-function shape (query in a helper, `new Response` in the caller). Also **build-breaking FALSE POSITIVES**, the mirror failure: `// this returns asIs data eventually` in a comment and `let label = "asIs"` in a string each fire `E-TENANT-RAW-EGRESS`. Two further holes found in the same pass: `emit-server.ts:1954` still `continue`s on a span-less fn node (the hole round 3 closed on the protect arm), and the whole §14.8.10 block is gated on `if (_src)` (`emit-server.ts:1890`) so a FileAST without `_sourceText` silently disables `E-TENANT-WRITE`/`AGG`/`RAW-EGRESS` — that last is UNVERIFIED as CLI-reachable.
+
+⚑ **Bookkeeping note for whoever fixes this:** the round-3 adversarial pass reported this gap as "filed nowhere" (`grep` → 0 hits). That grep ran in a worktree based on `6ca6e468`, which predates #577 landing this entry on `main` — a stale-base read, not a missing entry. The finding is real; the "unfiled" half is not.
 
 **Why this is filed HIGH and separately:** the raw-egress brief scoped §14.8.9 only, so the sibling fix does NOT reach this file. The two gates were written as a matched pair and must be fixed as one — the structural detector, the member-chain callee resolution and the value-scoped suppression the S353 arc built are all directly reusable here. Landing the §14.8.9 fix alone leaves the tenant floor with a known, reproduced bypass and creates a false impression that the class is closed.
 
