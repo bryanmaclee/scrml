@@ -90,10 +90,21 @@ export function validateEmittedArtifact(art: EmitArtifact): CGError | null {
       `  This is a compiler defect (codegen produced malformed output). Please report it. ` +
       `No codegen output artifacts were written (vendored stdlib shims may already be staged).`;
 
+    // The parse failure is at a position in the EMITTED JS, which the compiler
+    // cannot map back to a `.scrml` SOURCE position: source-map provenance is
+    // opt-in and OFF for a normal compile/dev (the `#scrmlmap#` sentinels are
+    // only emitted under `sourceMap:true`), so no generated→source bridge
+    // exists here (adopter #519). Filling the CGSpan's SOURCE fields
+    // (`line`/`col`/`start`/`end`) with the emitted coordinate is the bug that
+    // issue reports: a formatter then prints `portal.scrml:1723:8`, reading as
+    // "your source is wrong HERE" while pointing into an artifact that is never
+    // written to disk. So anchor the diagnostic at the source FILE only, omit
+    // the unavailable source coordinate, and keep the emitted position in the
+    // message body + under explicit `emitted*` fields for tooling that wants it.
     return new CGError(
       "E-CODEGEN-INVALID-LOGIC",
       message,
-      { file: art.sourceFile, start: pos, end: pos, line, col },
+      { file: art.sourceFile, emittedByte: pos, emittedLine: line, emittedColumn: col },
       "error",
     );
   }

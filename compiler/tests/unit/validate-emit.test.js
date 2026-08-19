@@ -78,9 +78,17 @@ describe("validate-emit (Approach A) — single artifact", () => {
     expect(err.message).toMatch(/byte \d+, line \d+, column \d+/);
     // Frames it as a compiler defect (the adopter cannot fix emitted JS).
     expect(err.message).toContain("compiler defect");
-    // span carries the parse position.
-    expect(typeof err.span.start).toBe("number");
-    expect(typeof err.span.line).toBe("number");
+    // #519 — the span carries the EMITTED position under explicit `emitted*`
+    // fields, and does NOT populate the CGSpan SOURCE fields (`line`/`col`)
+    // with an emitted coordinate: the gate cannot map emitted→source, so a
+    // source line/col is unavailable. Anchoring at the source FILE is honest;
+    // presenting an emitted `:line:col` as a source position is the bug.
+    expect(typeof err.span.emittedLine).toBe("number");
+    expect(typeof err.span.emittedColumn).toBe("number");
+    expect(typeof err.span.emittedByte).toBe("number");
+    expect(err.span.file).toBe("drivers.scrml");
+    expect(err.span.line).toBeUndefined();
+    expect(err.span.col).toBeUndefined();
   });
 
   test("a leaked unlowered `server {` block fragment is rejected", () => {
