@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 48 |
-| MED | 156 |
+| HIGH | 50 |
+| MED | 157 |
 | LOW | 70 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -6687,6 +6687,34 @@ The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = 
 2. **`match` does NOT break** — it compiles and emits a real variant dispatch. The sentence *"Any construct the string rewriter cannot handle (`!{}`, `match`, `lift`) breaks inside a mount block"* above is **FALSE on `match`**.
 
 **The real discriminator is the §7.2 extension set.** §7.2 names four scrml extensions to `logic-content`; inside a mount body **three of the four fail**: `lift` (§10) ❌ · markup-as-expression (§7.4) ❌ · `?{}` SQL (§8) ❌ · `@variable` (§6) ✅ — plus `!{}` error arms (§19, absent from §7.2's stale list) ❌. All four failures are `E-CODEGEN-INVALID-LOGIC`, fail-CLOSED. So: **the mount body's string pipeline lowers plain JS and `@`, but none of the scrml extensions that require real lowering.** Scope (c)'s acceptance test to that set — a fix closing `!{}` alone and leaving `?{}`/`lift`/markup-as-expr failing is the pa-base §5 shape (correct at that site, incomplete, passing its own new tests because the untouched paths have no coverage either). Pin both conformance halves (codes + runtime) — §62.2 makes the corpus the contract and this is a freeze surface.
+
+### g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate — `detectTenantRawEgress` carries ALL THREE defects the §14.8.9 gate was just fixed for, on the tenant-ROW isolation floor — `NEW S353-bryan (found while briefing the raw-egress fix; PA-VERIFIED by reading + the sibling's reproduction); HIGH; open`
+<!-- @gap id=g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts:371 prov=ruling:user-voice-scrml.md-S353 -->
+`detectTenantRawEgress` (`tenant-egress.ts`, the §14.8.10 fail-closed gate) is a **byte-identical twin** of `detectProtectedRawEgress` and carries every defect the S353 raw-egress arc fixed in the §14.8.9 sibling — on the **tenant-ROW isolation floor**, where the failure mode is cross-tenant row leakage rather than column leakage.
+
+**Verified by reading the source at S353** (the sibling's three defects were verified by EXECUTION on the same day, on identical code):
+1. **`globalThis.Response` bypasses it.** Same `/\bnew\s+Response\b/` test — a member-chain spelling does not match. Same trap-closes-on-itself dynamic: bare `Response` fired `E-SCOPE-001` until the sibling fix admitted it, so the workaround an author reached for was the spelling that silenced the gate.
+2. **The suppressor is BODY-WIDE, not value-scoped.** `if (/\.\s*acrossTenants\s*\(/.test(fnSource)) return null;` — an `.acrossTenants()` on ANY value anywhere in the body suppresses the gate for every other value in it, exactly as `.reveal(` did for §14.8.9.
+3. **It is a source-text regex in a post-AST stage** — a **Rule 7** instance (S338), and the root cause of both defects above.
+
+**Why this is filed HIGH and separately:** the raw-egress brief scoped §14.8.9 only, so the sibling fix does NOT reach this file. The two gates were written as a matched pair and must be fixed as one — the structural detector, the member-chain callee resolution and the value-scoped suppression the S353 arc built are all directly reusable here. Landing the §14.8.9 fix alone leaves the tenant floor with a known, reproduced bypass and creates a false impression that the class is closed.
+
+**Ruling status: NONE NEEDED.** §14.8.10 is the row-level twin of §14.8.9 and owns only the isolation INVARIANT; tightening a gate to match its own normative sentence is conformance restoration (base §8, toward-the-contract), the same classification the sibling landed under. Blast radius should be measured before the fix, not assumed.
+
+### g-dev-watcher-tests-leak-server-processes-until-inotify-is-exhausted — the dev-watcher tests orphan `scrml dev` servers that accumulate until `fs.watch` returns EMFILE machine-wide, making the pre-commit gate un-passable for every agent — `NEW S353-bryan (PA-VERIFIED by execution: 89 orphans, fs.watch 0 of 3 handles, EMFILE); HIGH; open`
+<!-- @gap id=g-dev-watcher-tests-leak-server-processes-until-inotify-is-exhausted sev=HIGH status=open locus=searched:compiler/tests/unit/mcp-runtime-helpers.test.js,compiler/src/commands/dev.js prov=rationale:reproduced-by-execution-S353 -->
+The dev-watcher test tier spawns `scrml dev <fixture> --port 0` servers and **does not reap them**. They survive the test run, the agent, and the session.
+
+**PA-MEASURED at S353, by execution:**
+- **89** orphaned `scrml.js dev /tmp/scrml-dev-*` processes alive simultaneously; oldest **1d 7h**.
+- Origins: `agent-a3748d68a1d807f9c` 32 · `agent-a117e5e0c117af323` 20 · another session's scratchpad 16 · the MAIN checkout 8 · `review-s352-softnav-b` 4 · **plus 8 from two agents that were live at the time — the leak is ongoing, not historical.**
+- `/proc/sys/fs/inotify/max_user_instances` = **128**. A direct probe (`fs.watch` × 3 on `/tmp`) returned **0 of 3 handles, EMFILE**.
+
+**Why this is HIGH rather than test-hygiene:** `compiler/tests/unit/mcp-runtime-helpers.test.js` `fs.watch reload` asserts `watcherCount > 0`, which cannot hold once the cap is exhausted. That test is in the pre-commit `--bail` scope, so **the commit gate becomes un-passable for every agent on the machine** — and `--no-verify` is correctly forbidden. Two S353 dispatches hit it independently; one could not commit its source at all and had to anchor 17 files of verified, green work as an inert `.txt` patch.
+
+**It also reads exactly like a code regression and is not one.** The failing test and its subject are byte-identical to `main`, CI on main is green, and the same landing shows a NO-DIFFERENCES corpus differential. A session that does not measure the inotify budget will attribute this to its own change.
+
+**Fix directions:** reap in the test tier's teardown (the obvious one — track spawned PIDs and `SIGTERM` them); OR have `scrml dev` exit when its parent dies; OR make the watcher test tolerate an exhausted budget and report it as an ENV gap rather than a failure. The first is the root fix; the third alone would hide the leak. **A reap script exists** at `docs/changes/raw-egress-structural-fix-2026-08-19/reap-orphaned-dev-servers.sh.txt` (dry-run by default, `--apply` to fire) — that is remediation, not the fix.
 
 ### g-module-scope-server-call-no-autoawait — a bare top-level `${}` server call has GH #237's identical fail-open defect, unfixed — `NEW S295 (lane 2); MED; RULING-GATED`
 <!-- @gap id=g-module-scope-server-call-no-autoawait sev=MED status=ruling-gated -->
