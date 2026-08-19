@@ -130,3 +130,42 @@ tool classifier (correctly) blocked reaping the orphans. The work is therefore a
 this machine can commit a code change until those processes are reaped.**
 
 **Next / deferred** — see the report.
+
+## 2026-08-19 — adversarial self-review: two real findings, both closed
+
+**1. Depth cap was a latent fail-OPEN.** The walk was capped at 128, copied from the
+`astReadsCurrentUserAmbient` siblings (which use 64). But those walk markup/statement nesting only;
+THIS walk descends ESTree expression trees, which nest one level per term — the same reason
+`collectDerivedCellDecls` (route-inference.ts:3740) uses **512** with an explicit S337 note. On a
+fail-CLOSED check, silently truncating the walk is a fail-OPEN: a body deep enough to hit the cap
+escapes the gate with no diagnostic. Raised to 512 to match the security-walk precedent.
+
+**2. A test elsewhere pinned the bug I fixed — and its author had predicted this exact moment.**
+`compiler/tests/integration/authed-server-fn-response-http.test.js` asserted
+*"the shape still build-blocks on E-SCOPE-001 (pins the upstream gate)"*, with the comment:
+*"If this ever stops firing, the shape becomes adopter-reachable and the passthrough guard below
+stops being belt-and-braces and becomes load-bearing."* That day is today. Verified by compiling:
+`export server function deny() { return new Response("no", { status: 403 }) }` under
+`auth="required"` now compiles **CLEAN**.
+
+Consequence, and it is the substantive one: `if (_scrml_result instanceof Response) return
+_scrml_result;` is now **LOAD-BEARING**. It is the only thing between an adopter's deliberate 403 and
+a fail-OPEN 200 `{}` (a `Response` has no enumerable own properties, so enveloping it yields `"{}"` —
+a DENY silently becoming a SUCCESS). The block's assertion is inverted and its scope comment rewritten
+to say so; the EXECUTED test that proves the 403 survives is now primary evidence for a live adopter
+path rather than a probe of an unreachable one. 17/17 pass.
+
+**Residual bound documented rather than over-claimed:** callee resolution is SYNTACTIC. A local
+rebinding (`const R = Response; new R()`) is not recognised — closing that needs the name resolver,
+and the source-text form had the identical hole, so it is carried forward, not introduced. Only
+`Response.json` is treated as a static-factory egress; `Response.redirect` / `Response.error` carry no
+caller-supplied body.
+
+**Test state**
+
+- `compiler/tests/integration` + `compiler/tests/conformance` (post-all-edits): **4800 pass / 0 fail /
+  50 skip** across 329 files.
+- Full pre-commit scope: **28785 pass / 3 fail / 86 skip / 1 todo** across 1245 files. Of the 3: one
+  was the `authed-server-fn-response-http` pin, fixed after that run started (re-verified 17/17); the
+  other two are the pre-existing `fs.watch reload` env failures, present in the `3b5eed44` baseline.
+  **Net new failures: 0.**
