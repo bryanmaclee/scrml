@@ -1,0 +1,459 @@
+diff --git a/compiler/src/codegen/emit-server.ts b/compiler/src/codegen/emit-server.ts
+index 508d57ec..e829957a 100644
+--- a/compiler/src/codegen/emit-server.ts
++++ b/compiler/src/codegen/emit-server.ts
+@@ -1804,36 +1804,46 @@ export function generateServerJs(
+     return e;
+   };
+ 
+-  // §14.8.9 fail-closed gate — E-PROTECT-004. Scan each server-fn SOURCE for a
+-  // protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress (`_{}`
+-  // / manual `Response` / `asIs`) where origin-keyed structural redaction cannot
+-  // be guaranteed. The compiler never silently ships a protected column through
+-  // a path it cannot redact. (Gated on protect-active; a `reveal` declassifies.)
++  // §14.8.9 fail-closed gate — E-PROTECT-004. Walk each server fn's PARSED TREE
++  // for a protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress
++  // (`_{}` / manual `Response` / `asIs`) where origin-keyed structural redaction
++  // cannot be guaranteed. The compiler never silently ships a protected column
++  // through a path it cannot redact. (Gated on protect-active.)
++  //
++  // The detector takes the fn NODE, not a slice of `_sourceText` — the source
++  // scan it replaces missed `new globalThis.Response(...)` and every foreign
++  // opener above level 0, and fired on tokens inside comments and string
++  // literals (ruling dpa-029 Q1, S352; invariant 55). Detection no longer
++  // depends on `_sourceText` being threaded onto the FileAST at all.
++  //
++  // There is deliberately NO `reveal` suppressor: §14.8.9 scopes declassification
++  // to the VALUE (SPEC.md:8506-8513), and a body-wide suppressor admitted a value
++  // bearing no stamp (ruling dpa-033 (c), S352).
++  //
++  // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
+   if (_protectActive) {
+-    const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
+-    if (_src) {
+-      const _seenEProtect = new Set<string>();
+-      for (const fn of fnNodes) {
+-        const _sp = (fn as { span?: { start?: number; end?: number } }).span;
+-        if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
+-        const _fnSrc = _src.slice(_sp.start, _sp.end);
+-        const _leak = detectProtectedRawEgress(_fnSrc, _protectCtx);
+-        if (_leak) {
+-          const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
+-          const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
+-          if (_seenEProtect.has(_dedupKey)) continue;
+-          _seenEProtect.add(_dedupKey);
+-          errors.push(new CGError(
+-            "E-PROTECT-004",
+-            `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
+-            `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
+-            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: declassify ` +
+-            `explicitly at the value with \`reveal("col")\`, project the protected column out of the SELECT, or return the ` +
+-            `row through the normal compiler-emitted response (not a manual \`Response\` / \`_{}\` / \`asIs\`).`,
+-            (_sp as any),
+-            "error",
+-          ));
+-        }
++    const _seenEProtect = new Set<string>();
++    for (const fn of fnNodes) {
++      const _sp = (fn as { span?: { start?: number; end?: number } }).span;
++      if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
++      const _leak = detectProtectedRawEgress(fn, _protectCtx);
++      if (_leak) {
++        const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
++        const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
++        if (_seenEProtect.has(_dedupKey)) continue;
++        _seenEProtect.add(_dedupKey);
++        errors.push(new CGError(
++          "E-PROTECT-004",
++          `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
++          `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
++          `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: project the ` +
++          `protected column out of the SELECT, or return the row through the normal compiler-emitted response (not a ` +
++          `manual \`Response\` / \`_{}\` / \`asIs\`) — the floor redacts there, and \`reveal("col")\` declassifies at that ` +
++          `sink. \`reveal\` does NOT admit a value past THIS gate: §14.8.9 scopes declassification to the value at the ` +
++          `sink, and the compiler cannot see into a raw egress to check the stamp.`,
++          (_sp as any),
++          "error",
++        ));
+       }
+     }
+   }
+diff --git a/compiler/src/codegen/protect-egress.ts b/compiler/src/codegen/protect-egress.ts
+index 23e8fd4c..0a3683f0 100644
+--- a/compiler/src/codegen/protect-egress.ts
++++ b/compiler/src/codegen/protect-egress.ts
+@@ -4,7 +4,8 @@
+  * This module owns the FLOOR (the load-bearing structural redaction) for
+  * `protect=` columns: a column whose resolved source `(table, column)` origin
+  * is a protected field SHALL NOT cross the wire to the client unless it is
+- * explicitly declassified with `reveal("col")`.
++ * explicitly declassified with `reveal("col")` AT THAT VALUE (SPEC.md:8506-8513
++ * — "at the value", "declassified-at-this-value", "at the sink", "here only").
+  *
+  * The mechanism is "tag at query-lowering, read at the egress sink":
+  *
+@@ -250,6 +251,51 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
+   return `_scrml_protect_tag(${inner}, ${colsArg})`;
+ }
+ 
++/**
++ * Resolve an expression node to the terminal NAME it denotes, walking a member
++ * chain to its last property. This is what makes the raw-egress gate spelling-
++ * independent:
++ *
++ *   `Response`                  -> "Response"   (ident)
++ *   `globalThis.Response`       -> "Response"   (member, property)
++ *   `window.Response`           -> "Response"
++ *   `globalThis.foo.Response`   -> "Response"
++ *
++ * Returns null for a shape with no static terminal name (a call result, an index
++ * with a computed key, a literal). A null answer is a NON-match, which is safe
++ * here only because the caller treats "no recognised egress" as "the compiler
++ * owns this sink" — see the population note on `detectProtectedRawEgress`.
++ */
++function terminalName(node: unknown): string | null {
++  if (!node || typeof node !== "object") return null;
++  const n = node as { kind?: string; name?: string; property?: string };
++  if (n.kind === "ident" && typeof n.name === "string") return n.name;
++  if (n.kind === "member" && typeof n.property === "string") return n.property;
++  return null;
++}
++
++/**
++ * The receiver of a member expression, resolved through its own chain:
++ * `Response.json` -> "Response"; `globalThis.Response.json` -> "Response".
++ */
++function memberReceiverName(node: unknown): string | null {
++  if (!node || typeof node !== "object") return null;
++  const n = node as { kind?: string; object?: unknown };
++  if (n.kind !== "member") return null;
++  return terminalName(n.object);
++}
++
++/** Does a type-annotation FIELD denote the `asIs` escape type (§14.1.1)? */
++function annotationIsAsIs(annotation: unknown): boolean {
++  // `typeAnnotation` / `returnTypeAnnotation` are declared `string` on the AST
++  // (types/ast.ts) — the tree stores a type EXPRESSION in string form, so a
++  // token test on that FIELD reads a structured value. It is not a re-scan of
++  // source text: a comment or a string literal spelling `asIs` cannot reach here
++  // (invariant 55 — the field is the tree's own answer).
++  if (typeof annotation !== "string") return false;
++  return /(^|[^A-Za-z0-9_$])asIs([^A-Za-z0-9_$]|$)/.test(annotation);
++}
++
+ /**
+  * §14.8.9 fail-closed gate (E-PROTECT-004) — detect a protected-origin value
+  * reaching a RAW / compiler-UNANALYZABLE egress within a single server-function
+@@ -262,42 +308,121 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
+  *
+  * Returns the offending query + egress kind (→ E-PROTECT-004), or null. The
+  * closed-world precondition of §14.8.9 rests on every egress being compiler-
+- * emitted and descriptor-preserving; this gate enforces it fail-closed. It scans
+- * the fn's SOURCE slice (a manual `Response` / `_{}` / `asIs` is AUTHORED, never
+- * compiler-emitted, so a source scan distinguishes it from the codegen's own
+- * `new Response(...)` serializer). Conservative: co-occurrence of a protected
+- * query and a raw egress in the same body fires (the floor never silently ships
+- * a protected column through a path it cannot redact). A `reveal(...)` anywhere
+- * in the body SUPPRESSES the gate — the author explicitly declassified (§14.8.9
+- * "declassify explicitly with `reveal` or project the column out").
++ * emitted and descriptor-preserving; this gate enforces it fail-closed.
++ * Conservative: co-occurrence of a protected query and a raw egress in the same
++ * body fires (the floor never silently ships a protected column through a path
++ * it cannot redact).
++ *
++ * **This is a STRUCTURAL analysis over the parsed function tree, not a scan of
++ * the function's source slice (ruling dpa-029 Q1, S352; invariant 55).** The
++ * source-text form it replaces was wrong in four measured ways, every one a
++ * direct consequence of asking the text a question the tree already answered:
++ *
++ *   1. `/\bnew\s+Response\b/` missed `new globalThis.Response(...)` — the
++ *      emitted handler's `instanceof Response` passthrough then returned the
++ *      manual response BEFORE `_scrml_protect_redact`, and the protected column
++ *      shipped at exit 0 with zero diagnostics.
++ *   2. `/(^|[^A-Za-z0-9_$])_\{/` matched only the LEVEL-0 foreign opener. The
++ *      opener grammar is `_` + N `=` + `{`, so the canonical `_={ … }=` form
++ *      SPEC §23.2.4a's own worked example uses walked straight past the gate.
++ *   3. `/\basIs\b/` matched the token inside a comment or a string literal.
++ *   4. `/\?\{`([^`]*)`\}/` read the SQL out of the text rather than off the
++ *      `sql` node the parser had already built.
++ *
++ * The resolution is by NODE KIND and by CALLEE, and the callee resolves through
++ * its member chain, so every aliasing spelling of a constructor reaches the same
++ * conclusion as the bare one.
++ *
++ * **Declassification is NOT handled here (ruling dpa-033 (c), S352).** §14.8.9
++ * scopes `reveal` to the VALUE — "explicitly declassified via the field-level
++ * `reveal` construct **at the value**" (SPEC.md:8506-8507), "stamps the named
++ * column's provenance descriptor as **declassified-at-this-value**" and "the
++ * serializer admits a protected-origin column **only** when its descriptor bears
++ * a `reveal` stamp **at the sink**" (SPEC.md:8511-8513), with the worked example
++ * commented "**here only**" (SPEC.md:8509). A body-wide suppressor admitted a
++ * value that bears no stamp at all — a `.reveal()` on a DIFFERENT query's row
++ * silenced the gate for the actually-returned, never-revealed row. This gate is
++ * therefore a floor with no exit; the value-scoped exit is sink-level lowering,
++ * a separate later arc.
++ *
++ * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
+  */
+ export function detectProtectedRawEgress(
+-  fnSource: string,
++  fnNode: unknown,
+   ctx: ProtectContext,
+ ): { query: string; egressKind: string } | null {
+-  if (!fnSource) return null;
+-  // Is a protected-origin `?{}` SELECT present in this body?
++  if (!fnNode || typeof fnNode !== "object") return null;
++
+   let protectedQuery: string | null = null;
+-  const sqlRe = /\?\{`([^`]*)`\}/g;
+-  let m: RegExpExecArray | null;
+-  while ((m = sqlRe.exec(fnSource)) !== null) {
+-    if (resolveProtectedOutputColumns(m[1], ctx) !== null) {
+-      protectedQuery = m[1].trim().replace(/\s+/g, " ").slice(0, 60);
+-      break;
++  let sawForeign = false;
++  let sawResponse = false;
++  let sawAsIs = false;
++
++  // Generic structural walk — the `astReadsCurrentUserAmbient` precedent
++  // (emit-server.ts): identity `seen` set against a cyclic tree, a depth cap,
++  // and `span` skipped (a span carries no semantics and holds a `filePath`
++  // string that would otherwise be walked on every node).
++  const seen = new WeakSet<object>();
++  const visit = (node: unknown, depth: number): void => {
++    if (!node || typeof node !== "object" || depth > 128) return;
++    if (seen.has(node as object)) return;
++    seen.add(node as object);
++
++    if (Array.isArray(node)) {
++      for (const child of node) visit(child, depth + 1);
++      return;
+     }
+-  }
+-  if (!protectedQuery) return null;
+-  // Explicit declassification anywhere in the body suppresses the gate.
+-  if (/\.\s*reveal\s*\(/.test(fnSource)) return null;
+-  // Is there a raw / unredactable egress in the same body?
+-  let egressKind: string | null = null;
+-  if (/(^|[^A-Za-z0-9_$])_\{/.test(fnSource)) {
+-    egressKind = "a `_{}` foreign-code block (§23)";
+-  } else if (/\bnew\s+Response\b/.test(fnSource) || /\bResponse\s*\.\s*json\b/.test(fnSource)) {
+-    egressKind = "a manual `Response` / `handle()` body (§40)";
+-  } else if (/\basIs\b/.test(fnSource)) {
+-    egressKind = "an `asIs`-typed value (§14.1.1)";
+-  }
++
++    const n = node as Record<string, unknown>;
++
++    // --- the protected-origin `?{}` SELECT ---------------------------------
++    // A `?{}` is a `sql` node wherever it sits; the let/const/return attachment
++    // forms carry it as `sqlNode`, which the generic recursion below reaches.
++    if (n.kind === "sql" && typeof n.query === "string" && protectedQuery === null) {
++      if (resolveProtectedOutputColumns(n.query, ctx) !== null) {
++        protectedQuery = n.query.trim().replace(/\s+/g, " ").slice(0, 60);
++      }
++    }
++
++    // --- egress kind 1: a `_{}` foreign-code block (§23) --------------------
++    // Node kind, so EVERY opener level (`_{`, `_={`, `_=={`, …) is one answer.
++    if (n.kind === "foreign") sawForeign = true;
++
++    // --- egress kind 2: a manual `Response` (§40) ---------------------------
++    // `new <chain>.Response(...)` — the callee resolves through its member chain.
++    if (n.kind === "new" && terminalName(n.callee) === "Response") sawResponse = true;
++    // `<chain>.Response.json(...)` — a static factory call on the same receiver.
++    if (
++      n.kind === "call" &&
++      terminalName(n.callee) === "json" &&
++      memberReceiverName(n.callee) === "Response"
++    ) {
++      sawResponse = true;
++    }
++
++    // --- egress kind 3: an `asIs`-typed value (§14.1.1) ---------------------
++    if (annotationIsAsIs(n.typeAnnotation) || annotationIsAsIs(n.returnTypeAnnotation)) {
++      sawAsIs = true;
++    }
++
++    for (const key of Object.keys(n)) {
++      if (key === "span") continue;
++      visit(n[key], depth + 1);
++    }
++  };
++  visit(fnNode, 0);
++
++  if (protectedQuery === null) return null;
++
++  // Priority is fixed rather than traversal-ordered, so the reported kind does
++  // not depend on where in the body each construct happens to sit.
++  const egressKind = sawForeign
++    ? "a `_{}` foreign-code block (§23)"
++    : sawResponse
++      ? "a manual `Response` / `handle()` body (§40)"
++      : sawAsIs
++        ? "an `asIs`-typed value (§14.1.1)"
++        : null;
+   if (!egressKind) return null;
+   return { query: protectedQuery, egressKind };
+ }
+diff --git a/compiler/tests/integration/g-sql-row-protect-leak.test.js b/compiler/tests/integration/g-sql-row-protect-leak.test.js
+index ea66d70e..70fffd37 100644
+--- a/compiler/tests/integration/g-sql-row-protect-leak.test.js
++++ b/compiler/tests/integration/g-sql-row-protect-leak.test.js
+@@ -358,11 +358,94 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
+     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+   });
+ 
+-  test("a `reveal` declassification suppresses the raw-egress gate", () => {
++  // dpa-033 (c), S352 — the `reveal` suppressor is DELETED. §14.8.9 scopes
++  // declassification to the VALUE ("at the value" / "declassified-at-this-value"
++  // / "at the sink" / "here only", SPEC.md:8506-8513); a body-wide suppressor
++  // admitted a value bearing no stamp. The raw-egress gate is now a floor with
++  // NO exit — sink-level lowering (the value-scoped exit) is a separate arc.
++  // provenance: ruling:user-voice-scrml.md S352
++  test("a `reveal` on the RETURNED value does NOT suppress the raw-egress gate (dpa-033 c)", () => {
+     const { result } = compileSource(protectProgram(
+       `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u.reveal("passwordHash")))\n      }`,
+     ));
+     const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
++    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
++  });
++
++  // The defect the deletion closes: the suppressor was body-wide, so a reveal on
++  // a COMPLETELY DIFFERENT query's row silenced the gate for the actually-
++  // returned, never-revealed row. Pre-fix this compiled with no E-PROTECT-004.
++  test("a `reveal` on a DIFFERENT query's row does not silence the returned row's gate", () => {
++    const { result } = compileSource(protectProgram(
++      `      function getUser(id) {\n        let other = ?{\`SELECT * FROM users WHERE id = 999\`}.get()\n        let decoy = other.reveal("passwordHash")\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u))\n      }`,
++    ));
++    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
++    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
++  });
++
++  // dpa-029 Q1, S352 — the detector resolves the constructor callee through its
++  // MEMBER CHAIN, so an aliasing spelling reaches the same conclusion as the bare
++  // one. Pre-fix `/\bnew\s+Response\b/` missed this: the file compiled at exit 0
++  // with ZERO diagnostics, and the emitted handler's `instanceof Response`
++  // passthrough returned the manual response BEFORE `_scrml_protect_redact`, so
++  // `{"id":1,"name":"ada","passwordHash":"…"}` shipped to the client.
++  test("`new globalThis.Response(...)` fires E-PROTECT-004 (member-chain callee)", () => {
++    const { result } = compileSource(protectProgram(
++      `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new globalThis.Response(JSON.stringify(u))\n      }`,
++    ));
++    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
++    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
++  });
++
++  test("`new window.Response(...)` fires E-PROTECT-004 (any aliasing receiver)", () => {
++    const { result } = compileSource(protectProgram(
++      `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return new window.Response(JSON.stringify(u))\n      }`,
++    ));
++    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
++    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
++  });
++
++  // The foreign-block egress kind is a NODE KIND, so every opener level answers
++  // the same. Pre-fix `/(^|[^A-Za-z0-9_$])_\{/` matched only the LEVEL-0 opener,
++  // so the canonical `_={ … }=` form SPEC §23.2.4a's own worked example uses
++  // walked past the gate at exit 0.
++  test("a level-1 `_={ … }=` foreign block fires E-PROTECT-004", () => {
++    const src = `<program lang="ts">
++
++  <schema>
++    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
++  </schema>
++
++  <db src="app.db" protect="passwordHash" tables="users">
++
++    \${
++      function getUser(id) {
++        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()
++        let out = _={ in: { u }
++          JSON.stringify(u)
++        }=
++        return out
++      }
++    }
++
++  </db>
++
++  <div><p>hi</p></div>
++</program>`;
++    const { result } = compileSource(src);
++    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
++    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
++  });
++
++  // The other direction of the same root cause: a source-text regex fires on a
++  // token that is not code. Pre-fix this REJECTED valid source (E-PROTECT-004 on
++  // a `new Response` living only in a comment and a string literal) — invariant
++  // 55's canonical failure mode, and a fail-CLOSED false positive.
++  test("`new Response` in a COMMENT and a STRING does NOT fire E-PROTECT-004", () => {
++    const { result } = compileSource(protectProgram(
++      `      function getUser(id) {\n        // a comment naming new Response and asIs must not fire the gate\n        let label = "new Response / asIs"\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return { name: u.name, label: label }\n      }`,
++    ));
++    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+   });
+ 
+@@ -373,6 +456,18 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
+     const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+   });
++
++  // Population guard: a raw egress with NO protected query must stay silent —
++  // the gate is a CO-OCCURRENCE test, and widening it to "any manual Response"
++  // would reject every §40.3.5 early-return in an app that happens to declare a
++  // `protect=` column elsewhere.
++  test("a manual `Response` with NO protected query -> NO E-PROTECT-004", () => {
++    const { result } = compileSource(protectProgram(
++      `      function getName(id) {\n        let u = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u))\n      }`,
++    ));
++    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
++    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
++  });
+ });
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/conformance/cases/protect/reveal-suppresses-e004/case.scrml b/conformance/cases/protect/reveal-does-not-suppress-e004/case.scrml
+similarity index 100%
+rename from conformance/cases/protect/reveal-suppresses-e004/case.scrml
+rename to conformance/cases/protect/reveal-does-not-suppress-e004/case.scrml
+diff --git a/conformance/cases/protect/reveal-does-not-suppress-e004/expected.json b/conformance/cases/protect/reveal-does-not-suppress-e004/expected.json
+new file mode 100644
+index 00000000..0c9ef68d
+--- /dev/null
++++ b/conformance/cases/protect/reveal-does-not-suppress-e004/expected.json
+@@ -0,0 +1,13 @@
++{
++  "id": "protect-reveal-does-not-suppress-e004",
++  "description": "§14.8.9 declassification is VALUE-scoped, so it cannot suppress a gate at a sink the compiler refuses to mediate. Wrapping the protected row in u.reveal(\"passwordHash\") at a RAW egress (a manual `new Response(...)`) does NOT suppress E-PROTECT-004 — the raw-egress gate is a floor with no exit. Re-authored at S352 from `protect-reveal-suppresses-e004`, which asserted the inverse (dpa-033 D3: a green test pinning a leak). Its sibling `protect-reveal-client-visible-runtime` is the contrast case: at a COMPILER-EMITTED sink, reveal does admit the named column.",
++  "language-version": "1.0",
++  "spec": "§14.8.9",
++  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
++  "rationale": "§14.8.9 scopes declassification to the VALUE in four phrases: a protected-origin column reaches the client iff it is 'explicitly declassified via the field-level `reveal` construct AT THE VALUE' (SPEC.md:8506-8507); reveal 'stamps the named column's provenance descriptor as DECLASSIFIED-AT-THIS-VALUE' and 'the serializer admits a protected-origin column ONLY when its descriptor bears a `reveal` stamp AT THE SINK' (SPEC.md:8511-8513); the worked example is commented 'here only' (SPEC.md:8509). A raw egress is precisely a sink the compiler cannot introspect, so it cannot check the stamp — and the closed-world precondition at SPEC.md:8518-8524 mandates an unconditional SHALL fail closed there, naming no reveal exception. The prior body-wide suppressor was therefore the NON-CONFORMANT state: a `.reveal()` on a DIFFERENT query's row silenced the gate for the actually-returned, never-revealed row. Deleting it is conformance restoration, not an amendment. The value-scoped exit at a mediatable raw sink is dpa-033 (d), a separate later arc. provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c)).",
++  "expect": {
++    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
++    "notCodes": [],
++    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
++  }
++}
+diff --git a/conformance/cases/protect/reveal-suppresses-e004/expected.json b/conformance/cases/protect/reveal-suppresses-e004/expected.json
+deleted file mode 100644
+index 5e0f8afe..00000000
+--- a/conformance/cases/protect/reveal-suppresses-e004/expected.json
++++ /dev/null
+@@ -1,13 +0,0 @@
+-{
+-  "id": "protect-reveal-suppresses-e004",
+-  "description": "§14.8.9 declassification — reveal(\"col\") is the sole admit path. Wrapping the protected row in u.reveal(\"passwordHash\") at a raw egress SUPPRESSES the E-PROTECT-004 fail-closed gate (the column is explicitly declassified-at-this-value). The strip machinery still engages (I-PROTECT-STRIP-001), but the reveal admits the named column past the sink.",
+-  "language-version": "1.0",
+-  "spec": "§14.8.9",
+-  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+-  "rationale": "§14.8.9: reveal(\"col\") stamps the column's provenance descriptor as declassified; the sink admits a protected-origin column only when its descriptor bears a reveal stamp. It is the ONLY re-admit path and is greppable in source and emitted handler — so the raw-egress gate that would otherwise fire E-PROTECT-004 is suppressed.",
+-  "expect": {
+-    "codes": [],
+-    "notCodes": ["E-PROTECT-004"],
+-    "severity": { "I-PROTECT-STRIP-001": "info" }
+-  }
+-}
