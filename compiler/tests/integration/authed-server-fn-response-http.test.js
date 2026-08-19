@@ -780,4 +780,82 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
       expect(res.status).not.toBe(200);
     } finally { stop(); }
   });
+
+  // -------------------------------------------------------------------------
+  // M4 (S353 adversarial round 3) — the guard was emitted on ONE arm only.
+  //
+  // The block above says the guard "is the only thing standing between an
+  // adopter's deliberate 403 and a fail-OPEN 200 {}", and then exercised only
+  // `auth="required"` — the NON-baseline arm. The baseline-CSRF arm
+  // (`!authMiddlewareEntry && isStateMutating && _webAppShape`, i.e. a
+  // state-mutating fn in an app with no `auth=` and no `protect=`) emitted NO
+  // guard at all, so on that arm the sentence was false.
+  //
+  // Measured before the fix, by executing the emitted baseline handler tail
+  // verbatim with the body's 403 as the IIFE result:
+  //   STATUS 200 BODY: "{}"        <- the DENY became a SUCCESS
+  // and the emitted module contained ZERO occurrences of the guard, against 1
+  // for the same source under `auth="required"`.
+  //
+  // Pre-existed via `globalThis.Response`, so the fix is a widening of the guard
+  // rather than a new one — but "no auth=" is the majority shape for a small
+  // app, so this was the arm most adopters take.
+  const BASELINE_BUILDS_RESPONSE = `<program>
+<db src="./items.db" tables="items">
+  \${
+    server function addItem(name) {
+      if (name == "") {
+        return new Response("Forbidden", { status: 403 })
+      }
+      ?{\`INSERT INTO items (name) VALUES (\${name})\`}.run()
+      return "ok"
+    }
+  }
+  <button onclick=addItem("x")>Add</button>
+</>
+</program>`;
+
+  test("the BASELINE-CSRF arm emits the guard too (it is not an auth-only guard)", () => {
+    const { serverJs } = compile(BASELINE_BUILDS_RESPONSE, "resp-passthrough-baseline-emit");
+    // The arm is identified by its own `Set-Cookie: scrml_csrf=` envelope.
+    expect(serverJs).toContain('"Set-Cookie": `scrml_csrf=');
+    expect(serverJs).toContain("if (_scrml_result instanceof Response) return _scrml_result;");
+    // …and ahead of the envelope, same ordering requirement as the other arm.
+    const guardIdx = serverJs.indexOf("if (_scrml_result instanceof Response) return _scrml_result;");
+    const envIdx = serverJs.indexOf("return new Response(JSON.stringify(", guardIdx);
+    expect(guardIdx).toBeGreaterThanOrEqual(0);
+    expect(envIdx).toBeGreaterThan(guardIdx);
+  });
+
+  test("EXECUTED on the BASELINE arm: the body's 403 survives the envelope", async () => {
+    if (domPolluted()) return;
+
+    const { serverJsPath } = compile(BASELINE_BUILDS_RESPONSE, "resp-passthrough-baseline-run");
+    expect(existsSync(serverJsPath)).toBe(true);
+    const { mod, server, stop } = await serveBundle(serverJsPath);
+    try {
+      // `name: ""` steers the body into its deliberate 403.
+      const { res } = await baselinePost(server, routeFor(mod, "addItem").path, { name: "" });
+      expect(res).toBeInstanceOf(Response);
+      expect(res.status).toBe(403);
+      expect(await res.clone().text()).toBe("Forbidden");
+      // The fail-open shape this closes, named explicitly so a regression reads
+      // as what it is.
+      expect(await res.clone().text()).not.toBe("{}");
+    } finally { stop(); }
+  });
+
+  test("EXECUTED on the BASELINE arm: a NORMAL return is still enveloped as 200 JSON", async () => {
+    if (domPolluted()) return;
+
+    const { serverJsPath } = compile(BASELINE_BUILDS_RESPONSE, "resp-passthrough-baseline-ok");
+    const { mod, server, stop } = await serveBundle(serverJsPath);
+    try {
+      const { res } = await baselinePost(server, routeFor(mod, "addItem").path, { name: "beta" });
+      expect(await expectJsonResponse(res)).toBe("ok");
+      // The baseline arm's own double-submit cookie is still on the 200 — the
+      // guard must not have short-circuited the ordinary path.
+      expect(readSetCookie(res, "scrml_csrf")).toBeTruthy();
+    } finally { stop(); }
+  });
 });
