@@ -778,3 +778,350 @@ describe("§B19.13 E-CHANNEL-INSIDE-PAGE does not disturb canonical shapes", () 
     expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §B19.14 — the `<program>` RESET: a nested `<program>` is a FRESH placement
+//           scope (S353 ruling — reversed placement precedence).
+//           gap: g-channel-in-nested-program-inside-page-ordering
+//           prov=ruling:user-voice-scrml.md-S353
+// ---------------------------------------------------------------------------
+//
+// **The defect this pins.** Before S353 `walkChannelPlacement` tested a FLAT
+// `pageDepth >= 1` first, so `<page>` > nested `<program>` > `<channel>` fired
+// E-CHANNEL-INSIDE-PAGE **even at `programDepth >= 1`** — the channel was
+// literally inside a `<program>` and was refused for being inside a `<page>`.
+// The general sentence beat the specific one. RULED: reverse the precedence.
+//
+// **The governing sentences.** Two say the shape is a violation; one says it
+// is legal, and the specific one wins:
+//
+//   AGAINST (general) — §38 preamble (SPEC.md:21076) and §40.8 (SPEC.md:22814),
+//     both flat: "Channels SHALL NOT live inside `<page>`."
+//   FOR, and RULED to win (specific) — §4.12.1 (SPEC.md:724): "A `<program>`
+//     nested inside another `<program>` SHALL be subject to the same grammar
+//     rules as a top-level `<program>`", and (SPEC.md:718): "A nested
+//     `<program>` SHALL be a separate compilation unit."
+//
+// If the nested `<program>` is its own compilation unit under top-level
+// grammar, the enclosing `<page>` is as invisible to the placement check as
+// the parent's bindings are under §4.12.1 shared-nothing isolation. SPEC draws
+// the same line from the other side at §58 (SPEC.md:35548): "A `<page>` (§40.8)
+// is not a separate compilation unit — it shares the application `<program>`
+// scope."
+//
+// **Direction of change: newly-accepting, TOWARD THE CONTRACT (pa-base §8)** —
+// it ships only because §4.12.1 already declares the nested form legal. Not a
+// widening. Measured blast radius at the ruling: 2362 `.scrml` walked, 53
+// `<channel>` nodes, ZERO nested-`<program>`-inside-`<page>` channels.
+//
+// Both arms are pinned below: the nested-`<program>` shape ACCEPTED, and a
+// genuinely page-nested channel (no intervening `<program>`) still REJECTED.
+
+describe("§B19.14 nested `<program>` resets pageDepth (S353 precedence reversal)", () => {
+  // --- ACCEPT arm --------------------------------------------------------
+
+  test("ENTRY-FILE: `<program>` > `<page>` > nested `<program>` > `<channel>` — ACCEPTED", () => {
+    // The ruled shape. programDepth 2, pageDepth 0 after the reset. Pre-S353
+    // this fired E-CHANNEL-INSIDE-PAGE at programDepth 2.
+    const source = `<program>
+<page>
+<program name="worker">
+<channel name="wchat">
+\${ <messages> = [] }
+</>
+</program>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("ROUTE-FILE: top-level `<page>` > nested `<program>` > `<channel>` — ACCEPTED", () => {
+    // The route-file half. `fileHasProgram` is TRUE here (the worker program
+    // counts), and the channel sits at programDepth 1, so neither arm fires.
+    const source = `<page auth="required">
+<program name="worker">
+<channel name="wchat">
+\${ <messages> = [] }
+</>
+</program>
+</page>`;
+    const { sym } = compileSym(source, "pages/driver/messages.scrml");
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("the reset is an ANCESTOR reset — intermediate markup between `<page>` and the nested `<program>`", () => {
+    const source = `<program>
+<page>
+<div>
+<section>
+<program name="worker">
+<channel name="deep">
+\${ <m> = [] }
+</>
+</program>
+</section>
+</div>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("intermediate markup INSIDE the nested `<program>` too — still ACCEPTED", () => {
+    const source = `<program>
+<page>
+<program name="worker">
+<div>
+<channel name="deep">
+\${ <m> = [] }
+</>
+</div>
+</program>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+  });
+
+  test("TWO channels in one nested `<program>` — both accepted, zero diagnostics", () => {
+    const source = `<program>
+<page>
+<program name="worker">
+<channel name="a">
+\${ <x> = 0 }
+</>
+<channel name="b">
+\${ <y> = 0 }
+</>
+</program>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  // --- REJECT arm (the other half of the bite) ---------------------------
+
+  test("CONTROL — remove the intervening `<program>` and the SAME file still REJECTS", () => {
+    // The minimal-pair control for the ENTRY-FILE accept case above. The ONLY
+    // difference is the deleted nested `<program>` wrapper. If this ever stops
+    // firing, the reset has been widened from "a nested `<program>` opens a
+    // fresh scope" to "`<page>` no longer fences channels" — a different, and
+    // unruled, change.
+    const source = `<program>
+<page>
+<channel name="wchat">
+\${ <messages> = [] }
+</>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const fires = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fires).toHaveLength(1);
+    expect(fires[0].severity).toBe("error");
+  });
+
+  test("CONTROL — route-file minimal pair: no nested `<program>`, still REJECTS", () => {
+    const source = `<page auth="required">
+<channel name="wchat">
+\${ <messages> = [] }
+</>
+</page>`;
+    const { sym } = compileSym(source, "pages/driver/messages.scrml");
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(1);
+  });
+
+  test("a `<page>` INSIDE the fresh scope RE-ARMS the counter — `<program>` > `<page>` > `<program>` > `<page>` > `<channel>` REJECTS", () => {
+    // The reset opens a fresh scope; it does not disable the check. Inside its
+    // own compilation unit this channel IS page-nested, and §38.1 governs the
+    // nested unit exactly as it governs a top-level one (§4.12.1 same-grammar).
+    const source = `<program>
+<page>
+<program name="worker">
+<page>
+<channel name="deep">
+\${ <m> = [] }
+</>
+</page>
+</program>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(1);
+  });
+
+  test("MIXED file — one page-nested channel REJECTS while its nested-`<program>` sibling is ACCEPTED", () => {
+    // Proves the reset is scoped to the subtree it opens and does not leak
+    // sideways to a sibling still under the same `<page>`.
+    const source = `<program>
+<page>
+<channel name="bad">
+\${ <x> = 0 }
+</>
+<program name="worker">
+<channel name="good">
+\${ <y> = 0 }
+</>
+</program>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const fires = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fires).toHaveLength(1);
+    expect(fires[0].message).toContain('name="bad"');
+    expect(fires[0].message).not.toContain('name="good"');
+  });
+
+  test("the reset does not leak to a LATER sibling `<page>` subtree", () => {
+    // Depth is threaded down the recursion, never stored, so a reset in one
+    // subtree must not survive into the next — this pins that.
+    const source = `<program>
+<page>
+<program name="worker">
+<channel name="good">
+\${ <y> = 0 }
+</>
+</program>
+</page>
+<page>
+<channel name="bad">
+\${ <x> = 0 }
+</>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const fires = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fires).toHaveLength(1);
+    expect(fires[0].message).toContain('name="bad"');
+  });
+
+  // --- the `fileHasProgram` pre-scan stays PER-FILE ----------------------
+  //
+  // The adjacent hole the ruling forces: once a nested `<program>` is a fresh
+  // placement scope, does `E-CHANNEL-OUTSIDE-PROGRAM`'s `fileHasProgram`
+  // pre-scan need to be per-SCOPE? It does NOT, and the reason is structural:
+  // arm (b) is guarded by `programDepth === 0`, so every node that consumes
+  // `fileHasProgram` has NO `<program>` ancestor — for such a node the
+  // innermost enclosing compilation unit IS the file, and the per-scope and
+  // per-file questions are the same question over the same subtree.
+  // Symmetrically, the reset can never promote a node INTO arm (b): every node
+  // it touches was reached by descending a `<program>`, hence has
+  // `programDepth >= 1`. These tests pin both halves so the conclusion is not
+  // left "undecided by accident" — the failure mode that produced the original
+  // E-CHANNEL-INSIDE-PAGE gap.
+
+  test("PRE-SCAN — file-top `<channel>` still fires OUTSIDE-PROGRAM when the file's ONLY `<program>` is one nested inside a `<page>`", () => {
+    // The sharp shape for the per-scope question, and it is deliberately sharp:
+    // there is NO top-level `<program>` here, so the pre-scan's answer hinges
+    // entirely on whether it counts a `<program>` reached THROUGH a `<page>`.
+    // Per-FILE says yes and the channel fires; a "count only top-level
+    // `<program>`s" per-scope pre-scan would say no and go silent, which would
+    // silently re-admit the canonical-violation shape this code exists for.
+    // The reset touched nothing here: it only rewrites pageDepth for nodes at
+    // programDepth >= 1, and this channel is at programDepth 0.
+    const source = `<page>
+<program name="worker">
+\${ <x> = 0 }
+</program>
+</page>
+<channel name="top">
+\${ <m> = [] }
+</>`;
+    const { sym } = compileSym(source, "pages/x.scrml");
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(1);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+  });
+
+  test("PRE-SCAN — same shape WITH a top-level `<program>` also still fires OUTSIDE-PROGRAM", () => {
+    const source = `<program>
+<page>
+<program name="worker">
+\${ <x> = 0 }
+</program>
+</page>
+</program>
+<channel name="top">
+\${ <m> = [] }
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(1);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+  });
+
+  test("PRE-SCAN — the PURE-CHANNEL-FILE dispensation is undisturbed by the reset", () => {
+    // No `<program>` anywhere => fileHasProgram false => silent. The reset
+    // cannot reach this file at all (there is no `<program>` to descend).
+    const source = `<channel name="only">
+\${ <m> = [] }
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+  });
+
+  test("PRE-SCAN — a channel nested in a `<program>` never reaches arm (b), so the per-file pre-scan is irrelevant to it", () => {
+    // The structural argument, executed: programDepth >= 1 means arm (b) is
+    // unreachable regardless of what `fileHasProgram` says. Both a file WITH a
+    // top-level program and one without produce zero placement codes.
+    const withTopLevel = `<program>
+<page>
+<program name="worker">
+<channel name="c">
+\${ <m> = [] }
+</>
+</program>
+</page>
+</program>`;
+    const withoutTopLevel = `<page>
+<program name="worker">
+<channel name="c">
+\${ <m> = [] }
+</>
+</program>
+</page>`;
+    for (const source of [withTopLevel, withoutTopLevel]) {
+      const { sym } = compileSym(source);
+      expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+      expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    }
+  });
+
+  // --- regression: the pre-S353 canonical shapes are all untouched -------
+
+  test("REGRESSION — canonical sibling placement is untouched with a nested `<program>` present in the file", () => {
+    const source = `<program>
+<channel name="chat" topic="lobby">
+\${ <messages> = [] }
+</>
+<page>
+<program name="worker">
+\${ <w> = 0 }
+</program>
+<h1>Chat</h1>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("REGRESSION — a nested `<program>` with no `<page>` above it was ALREADY accepted and still is", () => {
+    // pageDepth was 0 here before the reset too, so this is a control on the
+    // reset being a no-op at depth 0 rather than a behaviour change.
+    const source = `<program>
+<program name="worker">
+<channel name="wchat">
+\${ <m> = [] }
+</>
+</program>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+});
