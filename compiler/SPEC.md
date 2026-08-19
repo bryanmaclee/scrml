@@ -36290,26 +36290,146 @@ axis (arriving vs leaving). (The corpus schema splits the per-case tier from the
 suite-semver: `suite-version: "1.0.0"` + `tier: in | deprecated | future` — a
 `deprecated`-tier form is *part of* the 1.0 suite, so the two are orthogonal.)
 
-### 62.8 No editions
+### 62.8 No editions in the 1.0 surface as built
 
-scrml deliberately does NOT adopt Rust-style editions (coexisting rule-sets). The
-deprecation cycle (§63) handles transitions with **one rule-set per language version** and
-no coexistence machinery: `deprecated`-tier forms ride MINORs accepted-with-`W-`lint; their
-removal is the MAJOR event. Rust's edition-coexistence price (rustc carries every edition's
-rule-set forever) buys "never split a global ecosystem" — worth it for a global ecosystem,
-not warranted here. scrml takes the *axis separation* (the load-bearing idea) and the
-*deprecation cycle* (Go-style: deprecate → warn → remove-at-MAJOR), and explicitly declines
-editions.
+**Amended 2026-08-19 (S353) — the conclusion held; its REASON changed, for the third time.**
+
+> **Provenance:** `ruling:user-voice-scrml.md S353` — bryan, *"your rec on all three"*, ratifying
+> verbatim: *"The conclusion stands: no Rust-style editions. What is ratified alongside it is that
+> the conclusion's REASON changes — for the third time — and the artifacts must say so."*
+> Supporting: `dd:scrml-support/docs/deep-dives/d1-no-editions-round2-panel-gap-closed-dpa-034-2026-08-19.md`
+> (5/5 poles; the panel gap the round-1 artifact disclosed, closed) ·
+> `dd:scrml-support/docs/deep-dives/d1-no-editions-earned-or-assumed-dpa-034-2026-08-19.md` (round 1) ·
+> `dd:scrml-support/docs/deep-dives/language-editions-dpa-034-2026-08-19.md` (the concurrent second take).
+>
+> **supersedes:** `ruling:docs/changes/language-version-and-deprecation-lifecycle-2026-07-01/RULING.md`
+> **D1 item 4** — the S234 population premise, struck in this same landing; and the two replacement
+> premises offered after it, both refuted by live poles. All three are quoted verbatim under *"What
+> this section no longer claims"* below, because a reason deleted without being recorded gets
+> re-derived.
+>
+> **Direction-of-change: `inert`.** No source form's acceptance or meaning moves. §62 is Nominal /
+> spec-ahead in full and this subsection has never had an implementation: the two §62.6 version-gate
+> codes have **zero** fire sites, `scrml.toml` is read by nothing (it appears in the compiler only as
+> a project-root marker filename, `compiler/src/codegen/chunk-namespace.ts:96`), and the §62.4
+> `language` manifest field is not in the emitted `ChunksManifest` shape.
+
+scrml does NOT adopt Rust-style editions — coexisting rule-sets, where the *same* syntax compiles to
+*different* behaviour depending on a per-unit pin — **in the 1.0 surface as built**. The deprecation
+cycle (§63) handles transitions with **one rule-set per language version** and no coexistence
+machinery: `deprecated`-tier forms ride MINORs accepted-with-`W-`lint; their removal is the MAJOR
+event. scrml takes the *axis separation* (§62.1 — the load-bearing idea) and the *deprecation cycle*
+(Go-style: deprecate → warn → remove-at-MAJOR), and declines editions.
+
+**The claim is present-tense and scoped on purpose.** It states what is true of the 1.0 surface as
+built; it is not a permanent structural declination, and it is falsifiable — see *"What would reopen
+this"* below. Even Rust conditions its edition cadence on what is true now (RFC 3501 permits the
+Leadership Council to skip an edition or stabilize an empty one). A permanent claim would be the
+outlier, not the norm.
+
+**Why — and every reason below is independent of how many people write scrml.** That independence is
+the point of restating them: a premise about population size measures *blast radius*, never whether a
+capability *should exist*, so it can never be the reason a capability is declined.
+
+1. **There is no unit boundary at which two independently-versioned, already-committed rule-sets
+   could meet.** This is the load-bearing fact. §41.4 is normative that *"npm-style bare specifiers
+   … SHALL be a compile error (E-IMPORT-005). scrml has no npm integration."* There is no registry,
+   no name-to-version resolution anywhere in the language, and therefore no independently-versioned
+   unit. An edition's expensive guarantee exists so that a *sealed* artifact — compiled under rules
+   committed at some earlier time, under someone else's pin — can link against fresh code. scrml
+   never produces one: every unit reaching a build is **source**, and no unit carries a version of its
+   own for another unit's rules to disagree with. The thing the guarantee protects never comes into
+   existence. Note the discipline this reason has that
+   its predecessors lacked — it survives scrml *gaining* separate or incremental compilation for
+   unrelated performance reasons.
+2. **Conformance is ONE predicate, and the conformance suite operationally IS the spec.** §62.2
+   defines the language as the set of `(source → required-codes + required-runtime-effect)` tuples
+   the corpus pins, and that corpus is BUILT and pre-commit-gated — not an aspiration this section
+   can trade against. *"Does implementation X conform?"* is today a single yes/no over a single
+   corpus. Editions make it **parameterized**: conformance becomes a function of the pin, every case
+   acquires a rule-set axis, and the §62.5 1.0-final gate (*"impl #1 passes 100% of the 1.0 corpus"*)
+   stops naming one measurable thing. The multi-implementation invariant (§62.1 — a second compiler
+   is correct *iff* it passes the suite) degrades in exact proportion.
+3. **N rule-sets is N languages, and the whole toolchain carries every one of them forever.** Not the
+   compiler alone: the type checker, the formatter, and most acutely the **language server** must
+   each know the full active rule-set for the unit in front of them before they can be correct about
+   anything. This is the cost that lands first, and it is the one the surveyed prior art actually
+   measured — in Haskell's lived experience the dominant cost of granular language variation fell on
+   satellite tooling and pedagogy (per-extension lint rules, extension-aware formatters, an LSP that
+   must resolve the active extension set per file), not on the core type-checker, which additivity
+   discipline mostly protected. scrml ships an LSP and a live cockpit, so that is where an analogous
+   cost would land here. Onboarding pays too: *"which scrml am I reading?"* is a question a scrml
+   reader never has to ask today, and every rule-set added is one more answer they would have to
+   work out before the source in front of them means anything.
+
+**The honest cost, recorded rather than smoothed over.** `vendor:` (§41.4) is BUILT — third-party
+scrml *source* genuinely enters a project today and the resolved path carries no version segment. So
+*"someone else wrote this and you now own the migration at a MAJOR"* is a real cost a scrml adopter
+pays, and this section does not pretend otherwise. It is **not** a case for an interop guarantee:
+vendored source is re-compiled under the consumer's pin like any other source, so it never becomes
+the sealed artifact reason 1 is about.
+
+**What would reopen this — the recorded condition: *is this a front-end-only delta?*** Rust shipped
+1.0 in 2015 and added editions in 2018, so a retrofit is demonstrably possible. What made it possible
+is that everything edition-sensitive (keyword reservation, macro hygiene, module-path resolution,
+prelude contents) resolves during AST→HIR lowering, while coherence/orphan rules, trait resolution,
+memory layout and the borrow checker were **never allowed to fork**. The one-way-door framing is
+therefore true for DEEP changes and is not a door at all for shallow ones. The test for any future
+proposal is whether the delta can be absorbed entirely before the rule-set-unaware stages, leaving
+whole-program properties unforked. scrml's single-compilation-unit model makes that *cheaper* to
+preserve than it was for Rust, not harder.
+
+**⚑ The standing tripwire.** *The moment `[language] version=` (§62.6) is read by the compiler to
+select between two behaviours for the same syntax — not merely as a manifest field — it HAS become an
+edition mechanism regardless of its name.* (Quoted verbatim as ratified. The gloss that follows is
+this section's own reading and does not narrow the instrument.) Distinguish the two shapes: a **subset / ceiling** gate restricts a window on one
+monotonically-growing accepted-form set (Babel `target=`, ESLint `ecmaVersion` — not edition
+machinery); a **divergent rule-set** carries two genuinely different behaviours and selects between
+them per unit (this is an edition). The tell is that a divergent rule-set needs a *rewriting*
+migration tool — if the old rules were a strict subset of the new, a ceiling check would suffice and
+no rewrite could ever be necessary. §62.6 as specified is the subset shape by its own worked example,
+so the tripwire is **unfired**; it is a forward test, not a finding.
+
+**OPEN — not decided here.** Whether scrml should ever exercise *true removal at a MAJOR* is a
+**separate, unratified question**, deliberately left open by this amendment. *"No editions"* and
+*"true removal at a MAJOR"* are logically independent claims, and §63's timing rule (§63.3, *"Remove
+only at a MAJOR"*) is untouched by this landing: nothing here ratifies, narrows, or pre-empts it.
+Where the paragraphs above describe removal as the MAJOR event, they restate §63's existing machinery
+and answer nothing.
+
+**What this section no longer claims — the struck reasons, verbatim, so they are not re-derived.**
+
+| struck reason | verbatim | why it is inadmissible |
+|---|---|---|
+| the **population** premise (S234, the original) | *"Rust's edition-coexistence price (rustc carries every edition's rule-set forever) buys 'never split a global ecosystem' — worth it for a global ecosystem, not warranted here."* | Ecosystem size is **blast-radius** evidence only — it measures who is affected, never whether a capability should exist (`ruling:user-voice-scrml.md S346`, the reverse-ouroboros ruling). Struck as the wrong KIND of reason, **not** as a false one: the premise was measured TRUE and re-verified at this landing (`gh issue list --state all` → three authors all time: `pjoliver11` 34, `rjantz3` 15, `bryanmaclee` 9), so striking it for staleness would rule on a false fact. |
+| the **`-std=` / `go 1.x`** premise (offered as the replacement; refuted round 1) | that Go's `go` directive and C++ `-std=` are a "genuine middle" — a version pin that is not coexistence machinery | Refuted. Go 1.22's loop-variable change is gated **per package** off the module's `go` line; `cmd/compile` carries BOTH semantics and selects between them in one build, one binary. That IS an edition. C++ `-std=` likewise — a labeling move, not a design move. |
+| the **"no separate compilation"** premise (offered second; refuted round 2) | that editions are unnecessary because scrml compiles a whole-program closure with no separately-compiled units | Refuted by two independent poles. GHC runs a per-file rule-set boundary *inside* whole-closure-from-source compilation, with no registry and no separate compilation. The absence of separate compilation is a true fact about scrml that explains why per-unit knobs would be **cheap to build** — it does no work toward showing they are **unnecessary**. The surviving fact is reason 1. |
 
 ### 62.9 Cross-references
 
 §47.5 (the `chunks.json` `compiler` field — the `language`-field sibling) · §63 (the
 deprecation lifecycle — consumes this section's version events; the `deprecated`/`future`
 tiers) · §22.13 `[capabilities]` + §58.4 `[story]` (the `scrml.toml` sibling tables
-`[language]` joins) · §34 (the two reserved version-gate codes, land-with-impl) ·
-`conformance/README.md` (the executable contract). Prior art: Rust editions · ECMAScript +
-test262 · Go modules `go` directive · WebAssembly reference-interpreter + testsuite · C++
-`-std=`/`__cplusplus`.
+`[language]` joins) · §34 (the two reserved version-gate codes, land-with-impl) · §41.4
+(the protocol-prefix table + *"scrml has no npm integration"* — the normative anchor §62.8
+reason 1 rests on, and the `vendor:` prefix §62.8 records the honest cost of) · §21.7 (the
+whole-program import closure — why every unit reaching a build is re-compiled source, never
+a sealed artifact) · `conformance/README.md` (the executable contract).
+
+Prior art: Rust editions · ECMAScript + test262 · Go modules `go` directive · WebAssembly
+reference-interpreter + testsuite · C++ `-std=`/`__cplusplus`. **⚠ Read this list as
+*surveyed*, not as *endorsed-as-non-edition* (S353).** Three of the five ARE coexistence
+machinery under §62.8's own definition — Rust editions by construction, Go's `go` directive
+since 1.22 (the loop-variable change is gated per package; `cmd/compile` carries both
+semantics in one binary), and C++ `-std=` (weakest of the three: no interop guarantee,
+ODR-fragile across translation units). §62.6 cites the same three as its adopter-pin
+precedent; that citation is about the *manifest seam*, not about adopting their semantics.
+
+Design provenance (the dpa-034 arc, 2026-08-19): `scrml-support/docs/deep-dives/`
+`d1-no-editions-round2-panel-gap-closed-dpa-034-2026-08-19.md` (the authority — 5/5 poles) ·
+`d1-no-editions-earned-or-assumed-dpa-034-2026-08-19.md` (round 1) ·
+`language-editions-dpa-034-2026-08-19.md` (the concurrent second take). Ruling:
+`user-voice-scrml.md` S353.
 
 ---
 
@@ -36377,9 +36497,30 @@ it never got pulled. §63.7 corrects them.)
 2. **Remove only at a MAJOR.** A reserved-E flips to firing only at a major language-version
    event. The major boundary is the sole place forms leave the language.
 3. **Minimum one released minor in-window.** A form must ship as SOFT-DEPRECATED (W-lint
-   visible) in at least one released minor before a major may remove it (PEP-387's "≥2
-   releases" shrunk to scrml-scale — two friends + a frozen language do not need Python's
-   audience margin).
+   visible) in at least one released minor before a major may remove it — one release, not
+   PEP-387's two, because scrml's window is clocked by **version events and a corpus-clean
+   gate** (item 4) rather than by elapsed calendar time, so a second release adds no
+   information the gate has not already checked.
+   > ⚑ **This minimum does NOT guarantee that every consumer sees the W-lint, and must not be
+   > defended on that ground.** §62.6 defeats that reading from both sides: an *unpinned* adopter
+   > defaults to *"the compiler's highest fully-conformant language version"*, so one that upgrades
+   > after the major never compiles under the intervening minor at all; and a *pinned* adopter
+   > compiles under the pinned rules, so a pin below the deprecating minor never sees the W-lint
+   > either. Item 4 removes the elapsed-time requirement that would otherwise force a window they
+   > had to pass through. What actually protects the adopter at the boundary is §63.4's **hard
+   > gate** — a form MUST NOT be scheduled or removed without a verified-landed `scrml fix` rule —
+   > together with item 4's corpus-clean condition. The W-lint's job is to put the deprecation
+   > *in the contract* for at least one version event; the codemod's job is to make the removal
+   > survivable for the adopters who never read it.
+   > **Provenance:** `ruling:user-voice-scrml.md S353` — struck the population premise this
+   > clause carried, in the same landing as its §62.8 and D1/D4 twins.
+   > **supersedes:** the S234 wording *"(PEP-387's "≥2 releases" shrunk to scrml-scale — two
+   > friends + a frozen language do not need Python's audience margin)"*. Struck for being the
+   > **wrong KIND of reason**, not a false one: ecosystem size is blast-radius evidence only —
+   > it measures who is affected, never whether a capability should exist
+   > (`ruling:user-voice-scrml.md S346`). The **window length is unchanged**; only its
+   > justification moves from audience size to the event clock the section already specifies.
+   > **Direction-of-change: `inert`** — no form's acceptance, meaning, or deprecation window moves.
 4. **The clock is events + corpus-clean, NOT a calendar.** No elapsed-time requirement. A
    deprecation advances when a major event is being cut AND the `--fix` gate is satisfied AND
    the corpus is clean — otherwise it stays soft.
