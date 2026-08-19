@@ -123,6 +123,15 @@ describe("validate-emit gate — invalid emission fires E-CODEGEN-INVALID-LOGIC"
       // in the message body (asserted above), not in the source-location slot.
       expect(fires[0].line).toBeUndefined();
       expect(fires[0].column).toBeUndefined();
+      // #519 (S351 review-floor finding) — the SOURCE `.scrml` file IS carried
+      // on the flat `.file` field (the diagnostic anchors at the file, since the
+      // source line/col are unavailable). The `build`/`dev` terminal formatters
+      // must read `.file` to surface it — they previously read only
+      // `.filePath` / `.span?.file` and silently dropped it, rendering the emit
+      // gate error with NO path at all on those two surfaces, the opposite of
+      // #519's intent. This pins the contract those formatters now depend on.
+      expect(fires[0].file).toBeTruthy();
+      expect(fires[0].file.endsWith(".scrml")).toBe(true);
     } else {
       // Fix-wave closed the surface: the gate must NOT false-positive on the
       // now-clean reference app, and output lands normally.
