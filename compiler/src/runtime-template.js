@@ -2646,6 +2646,23 @@ var _scrml_nav_popstate_wired = false;
 // in-page #hash popstate (same pathname) from a real route change (finding #8).
 var _scrml_nav_pathname = (typeof window !== "undefined" && window.location) ? window.location.pathname : "";
 
+// The base the LIVE <head>'s relative hrefs were emitted against — the url of
+// the document that was hard-loaded to start this shell session. Captured ONCE
+// at module init, and deliberately never updated.
+//
+// It exists because history.pushState MOVES THE DOCUMENT BASE URL. The head's
+// <link href="app.css"> is a relative attribute, so reading link.href (or
+// resolving against window.location) re-resolves it against whatever url the
+// last soft nav pushed: live on "/" with "app.css", push "/reference/auth", and
+// the very same element now reports ".../reference/app.css". Every sheet THIS
+// engine appends carries an ABSOLUTE href, so it resolves identically under any
+// base — which is why pinning the base to the initial document is sufficient
+// and stays correct for the life of the shell.
+var _scrml_nav_sheet_base =
+  (typeof document !== "undefined" && document.baseURI)
+    ? document.baseURI
+    : ((typeof window !== "undefined" && window.location) ? window.location.href : "");
+
 function _scrml_nav_outlet() {
   return (typeof document !== "undefined")
     ? document.querySelector("[data-scrml-outlet]")
@@ -2684,7 +2701,9 @@ function _scrml_nav_ensure_popstate() {
     }
     _scrml_nav_pathname = newPathname;
     var restore = (ev.state && ev.state.__scrml_scroll) ? ev.state.__scrml_scroll : null;
-    _scrml_nav_fetch_and_swap(window.location.pathname + window.location.search, restore);
+    // push === false — back/forward already moved the history entry; pushing
+    // here would append a duplicate instead of returning to the prior page.
+    _scrml_nav_fetch_and_swap(window.location.pathname + window.location.search, restore, false);
   });
 }
 
@@ -2718,20 +2737,43 @@ function _scrml_navigate_soft(path) {
     }
   }
 
-  // Save the current entry's scroll before we leave it, then push the target.
-  _scrml_nav_save_scroll();
-  try {
-    history.pushState({ __scrml_soft: true }, "", path);
-  } catch (e) { _scrml_navigate(path); return; }
-  _scrml_nav_pathname = _scrml_nav_pathname_of(path);
+  // NOTE: the history entry is pushed at COMMIT time, inside the swap, NOT here
+  // — see _scrml_nav_commit_entry and §20.8.8 item 1.
+  //
+  // A fresh navigation scrolls to top / #hash (restore === null) and OWNS a
+  // history entry (push === true); popstate passes false, the browser having
+  // already moved the entry itself.
+  _scrml_nav_fetch_and_swap(path, null, true);
+}
 
-  // A fresh navigation scrolls to top / #hash (restore === null).
-  _scrml_nav_fetch_and_swap(path, null);
+// §20.8.8 item 1 (the commit gate) — take the history entry. Called as the LAST
+// thing before the DOM changes, so a navigation that never commits leaves no
+// trace of itself in the session history.
+//
+// This USED to run at click time, before the fetch. Every hard-nav fallback
+// downstream of that push — a non-OK or redirected response, a transport
+// failure, an unparseable document, a target with no outlet, a chunk that will
+// not load — then hard-navigated on TOP of an entry naming a url whose document
+// was never loaded. The user's first Back appeared to do nothing, because it
+// went to a phantom. Measured on a plain directory-index redirect (\`/reference\`
+// -> \`/reference/\`): history.length 5 -> 7 on a SINGLE click.
+//
+// Returns false if the push itself failed (a sandboxed frame), which the caller
+// answers with a hard navigation exactly as the click-time push used to.
+function _scrml_nav_commit_entry(path) {
+  // Persist the OUTGOING entry's scroll while it is still the current entry
+  // (§20.8.5(2)) — the outgoing page has not been touched yet at this point.
+  _scrml_nav_save_scroll();
+  try { history.pushState({ __scrml_soft: true }, "", path); }
+  catch (e) { return false; }
+  _scrml_nav_pathname = _scrml_nav_pathname_of(path);
+  return true;
 }
 
 // Fetch the target route's SSR HTML and swap it in. Shared by pushState navs
-// (restore === null) and popstate (restore === saved [x, y]).
-function _scrml_nav_fetch_and_swap(path, restore) {
+// (restore === null, push === true) and popstate (restore === saved [x, y],
+// push === false — the browser already owns the entry).
+function _scrml_nav_fetch_and_swap(path, restore, push) {
   // Abort a superseded in-flight fetch — last-nav-wins (§20.8.5(4)).
   if (_scrml_nav_controller) { try { _scrml_nav_controller.abort(); } catch (e) { /* already settled */ } }
   var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
@@ -2754,7 +2796,7 @@ function _scrml_nav_fetch_and_swap(path, restore) {
     })
     .then(function (html) {
       if (html == null || myToken !== _scrml_nav_token) return;
-      _scrml_nav_apply_html(html, path, restore, myToken);
+      _scrml_nav_apply_html(html, path, restore, myToken, push);
     })
     .catch(function (err) {
       if (err && err.name === "AbortError") return;      // superseded — expected
@@ -2862,6 +2904,152 @@ function _scrml_nav_sync_head_el(doc, selector, tag, keyAttr, valueAttr) {
     }
     if (live) live.setAttribute(valueAttr, src.getAttribute(valueAttr) || "");
   } catch (e) { /* non-fatal */ }
+}
+
+// ---------------------------------------------------------------------------
+// §20.8 head sync — <link rel="stylesheet">.
+//
+// The compiler emits ONE STYLESHEET PER PAGE (that page's utility subset), so a
+// soft nav that swaps the outlet without swapping the sheet renders the incoming
+// markup with NONE of the rules it needs — an unstyled document, not a degraded
+// one. Reported against scrml.dev, where every in-site click landed on a page of
+// unstyled text and only a hard reload recovered.
+// ---------------------------------------------------------------------------
+
+// How long to wait for an incoming stylesheet before swapping anyway. A sheet
+// that 404s or hangs SHALL NOT strand the navigation: a late sheet costs one
+// unstyled frame, a stuck nav costs the whole page.
+var _SCRML_NAV_SHEET_TIMEOUT_MS = 3000;
+
+// \`rel\` is a SPACE-SEPARATED TOKEN LIST. \`rel="alternate stylesheet"\` is an
+// author-selectable alternate that is disabled by default, so it is NOT the
+// page's sheet and must not be adopted as one.
+function _scrml_nav_is_sheet(el) {
+  var rel = " " + String(el.getAttribute("rel") || "").toLowerCase() + " ";
+  return rel.indexOf(" stylesheet ") >= 0 && rel.indexOf(" alternate ") < 0;
+}
+
+// The target document's stylesheet set, resolved to ABSOLUTE urls against the
+// TARGET page's url.
+//
+// THIS RESOLUTION IS THE WHOLE FIX. The hrefs are emitted RELATIVE and at
+// DIFFERING DEPTH — codegen prefixes the shell sheet with \`upToRoot\`, so "/"
+// ships \`app.css\` while "/reference/auth" ships \`../app.css\` FOR THE SAME FILE.
+// Copying the attribute verbatim resolves it against the LIVE page instead of
+// the target and silently 404s in both directions (\`auth.css\` becomes
+// "/auth.css" going down; \`learn.css\` becomes "/reference/learn.css" coming
+// back up). Resolving against the target also makes the have/want comparison
+// correct, since \`app.css\` and \`../app.css\` are one resource under two
+// spellings and a string compare would re-append it on every navigation.
+function _scrml_nav_sheet_urls(doc, path) {
+  var out = [];
+  if (!doc || typeof doc.querySelectorAll !== "function") return out;
+  var pageUrl;
+  try { pageUrl = new URL(path, window.location.href).href; }
+  catch (e) { pageUrl = _scrml_nav_sheet_base; }
+  var nodes = doc.querySelectorAll("link[rel]");
+  var seen = {};
+  for (var i = 0; i < nodes.length; i++) {
+    if (!_scrml_nav_is_sheet(nodes[i])) continue;
+    var raw = nodes[i].getAttribute("href");
+    if (!raw) continue;
+    var abs;
+    try { abs = new URL(raw, pageUrl).href; }
+    catch (e) { continue; }              // unresolvable href — skip, never guess
+    if (seen[abs]) continue;
+    seen[abs] = true;
+    out.push({ href: abs, media: nodes[i].getAttribute("media") || "" });
+  }
+  return out;
+}
+
+// Every stylesheet currently in the live <head>, paired with its ABSOLUTE url.
+// Resolved against _scrml_nav_sheet_base rather than window.location — see the
+// comment on that variable for why location is the wrong base here.
+function _scrml_nav_live_sheets() {
+  var out = [];
+  if (typeof document === "undefined" || !document.head) return out;
+  var nodes = document.head.querySelectorAll("link[rel]");
+  for (var i = 0; i < nodes.length; i++) {
+    if (!_scrml_nav_is_sheet(nodes[i])) continue;
+    var raw = nodes[i].getAttribute("href");
+    if (!raw) continue;
+    try { out.push({ el: nodes[i], href: new URL(raw, _scrml_nav_sheet_base).href }); }
+    catch (e) { /* unresolvable — leave the element alone rather than drop it */ }
+  }
+  return out;
+}
+
+function _scrml_nav_has_sheet(href) {
+  var live = _scrml_nav_live_sheets();
+  for (var i = 0; i < live.length; i++) { if (live[i].href === href) return true; }
+  return false;
+}
+
+// Attach every target sheet the live document is missing and START the fetches
+// immediately (in parallel with any cross-chunk script load). Returns a
+// subscribe function: the caller hands it the swap, and the swap runs once the
+// sheets are in the CSSOM.
+//
+// WAITING IS LOAD-BEARING. Swapping first and letting the sheet arrive after
+// trades an unstyled PAGE for an unstyled FLASH — a different visible defect,
+// not a fix. Waiting is bounded by _SCRML_NAV_SHEET_TIMEOUT_MS, and an \`error\`
+// (404) settles the same as a \`load\` so a missing sheet degrades to unstyled
+// rather than hanging the navigation.
+function _scrml_nav_attach_sheets(wanted) {
+  var waiting = [];
+  var ready = false;
+  var pending = 0;
+
+  function finish() {
+    if (ready) return;
+    ready = true;
+    for (var k = 0; k < waiting.length; k++) {
+      try { waiting[k](); } catch (e) { /* a throwing swap must not wedge the rest */ }
+    }
+    waiting.length = 0;
+  }
+  function settleOne() { if (--pending <= 0) finish(); }
+
+  // Build every link BEFORE appending any of them, so \`pending\` is complete
+  // before the first load event can fire and settle the count prematurely.
+  var fresh = [];
+  if (typeof document !== "undefined" && document.head) {
+    for (var i = 0; i < wanted.length; i++) {
+      if (_scrml_nav_has_sheet(wanted[i].href)) continue;   // already attached
+      var link = document.createElement("link");
+      link.setAttribute("rel", "stylesheet");
+      if (wanted[i].media) link.setAttribute("media", wanted[i].media);
+      link.addEventListener("load", settleOne);
+      link.addEventListener("error", settleOne);
+      // Absolute, and set LAST — assigning href is what starts the fetch.
+      link.setAttribute("href", wanted[i].href);
+      fresh.push(link);
+    }
+  }
+
+  pending = fresh.length;
+  if (pending === 0) { finish(); return function (cb) { cb(); }; }
+  setTimeout(finish, _SCRML_NAV_SHEET_TIMEOUT_MS);
+  for (var j = 0; j < fresh.length; j++) document.head.appendChild(fresh[j]);
+
+  return function (cb) { if (ready) cb(); else waiting.push(cb); };
+}
+
+// Drop the sheets the incoming document does not reference.
+//
+// AFTER THE SWAP, NEVER BEFORE: removing the outgoing page's sheet while its
+// markup is still on screen repaints it unstyled for a frame — the same defect
+// this whole section exists to remove, just one frame long.
+function _scrml_nav_prune_sheets(wanted) {
+  var live = _scrml_nav_live_sheets();
+  for (var i = 0; i < live.length; i++) {
+    var keep = false;
+    for (var j = 0; j < wanted.length; j++) {
+      if (wanted[j].href === live[i].href) { keep = true; break; }
+    }
+    if (!keep && live[i].el.parentNode) live[i].el.parentNode.removeChild(live[i].el);
+  }
 }
 
 // navigate-wave1c — how long to wait for a cross-chunk route script to load
@@ -2997,7 +3185,7 @@ function _scrml_nav_load_chunks(urls, token, onDone, path) {
 // Parse the fetched HTML, extract the target outlet subtree + seed, load any
 // missing route chunk(s) (Wave-1c), and swap the live outlet's children
 // (View-Transition-wrapped where available).
-function _scrml_nav_apply_html(html, path, restore, token) {
+function _scrml_nav_apply_html(html, path, restore, token, push) {
   var liveOutlet = _scrml_nav_outlet();
   if (!liveOutlet) return;
   var doc;
@@ -3015,6 +3203,12 @@ function _scrml_nav_apply_html(html, path, restore, token) {
   // Sync <title> + description + canonical (§20.8 head sync, finding #9).
   _scrml_nav_sync_head(doc);
 
+  // Start fetching the target's stylesheets NOW — in parallel with any
+  // cross-chunk script load below, not after it. \`sheetsReady(cb)\` runs cb once
+  // they are in the CSSOM (or the budget elapsed).
+  var wantSheets = _scrml_nav_sheet_urls(doc, path);
+  var sheetsReady = _scrml_nav_attach_sheets(wantSheets);
+
   var newHtml = fetchedOutlet.innerHTML;
   // The swap — deferred behind a cross-chunk load when needed (Wave-1c).
   var swap = function () {
@@ -3025,6 +3219,10 @@ function _scrml_nav_apply_html(html, path, restore, token) {
     // guards the cross-chunk case: a chunk that finishes loading after a newer
     // nav must not swap.
     if (typeof token === "number" && token !== _scrml_nav_token) return;
+    // §20.8.8 item 1 — the navigation commits HERE, and not before: we hold a
+    // parsed document with an outlet, every chunk it needs, and every
+    // stylesheet it references. Only now does it earn a history entry.
+    if (push && !_scrml_nav_commit_entry(path)) { _scrml_navigate(path); return; }
     // Tear down the OUTGOING region's reactive effects/subscriptions/timers
     // before replacing it (finding #2 — no leak).
     _scrml_teardown_region(liveOutlet);
@@ -3036,15 +3234,22 @@ function _scrml_nav_apply_html(html, path, restore, token) {
     _scrml_rehydrate_region(liveOutlet);
     _scrml_nav_focus(liveOutlet);   // §20.8.5(3)
     _scrml_nav_scroll(restore);     // §20.8.5(2)
+    // Retire the sheets the incoming document does not reference — AFTER the
+    // swap, so the outgoing markup is never on screen without its own styles.
+    _scrml_nav_prune_sheets(wantSheets);
   };
 
   var runSwap = function () {
-    // View Transitions where available; instant swap otherwise (§20.8.5(7)).
-    if (typeof document.startViewTransition === "function") {
-      try { document.startViewTransition(swap); } catch (e) { swap(); }
-    } else {
-      swap();
-    }
+    // Gate the swap on the incoming stylesheets (§20.8 head sync) — swapping
+    // ahead of them shows the reader a frame of unstyled content.
+    sheetsReady(function () {
+      // View Transitions where available; instant swap otherwise (§20.8.5(7)).
+      if (typeof document.startViewTransition === "function") {
+        try { document.startViewTransition(swap); } catch (e) { swap(); }
+      } else {
+        swap();
+      }
+    });
   };
 
   // Wave-1c — the target references route client chunk(s) not yet loaded (a
