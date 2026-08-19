@@ -4085,6 +4085,25 @@ export function generateServerJs(
       if (_envelope) {
         lines.push(`  await _scrml_sql.unsafe("COMMIT");`);
       }
+      // A body that already produced a `Response` OWNS the response — pass it
+      // through untouched instead of enveloping it. The SAME guard the
+      // non-baseline arm emits (see the long note at its emit site); it was
+      // missing HERE, so a §40.3.5 `return new Response("Forbidden", { status:
+      // 403 })` in a state-mutating fn with no `auth=` was re-emitted as
+      // `200 {}` — `JSON.stringify` of a `Response` is `"{}"`, so a DENY became
+      // a SUCCESS. MEASURED by executing the emitted baseline handler with the
+      // body's 403 as the result: `STATUS 200 BODY: "{}"`.
+      //
+      // Pre-existed via `globalThis.Response`, so closing it is a WIDENING of
+      // the guard rather than the introduction of a new one — but the shape is
+      // now plainly adopter-reachable (`Response` is allowlisted for §40.3.5),
+      // and this arm is the one an app with NO `auth=` takes, which is the
+      // majority shape for a small app.
+      //
+      // Placed AFTER the `_envelope` COMMIT (an early return must not strand an
+      // open transaction) and BEFORE the JSON envelope (which would otherwise
+      // have already destroyed the `Response`). Both orderings are load-bearing.
+      lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
       // M-7C-D-12 Track 2 (§57 Wire Format): when the declared return type
       // is `T | not` (absence is a legitimate variant), wrap the success
       // result through `_scrml_wire_encode` so scrml-absence serializes as
