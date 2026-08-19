@@ -1,8 +1,84 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. PICKUP updated at S349-peter. -->
-<!-- Body below the PICKUP is S347-bryan + S348-peter WRAPs (history). -->
-<!-- Mechanical stream: handOffs/delta-log.md [1537]-[1541].         -->
+<!-- hand-off.md — live session state. PICKUP updated at S351-peter. -->
+<!-- Body below the PICKUP is S349/S347/S348 WRAPs (history).        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1543]-[1546].         -->
 <!-- ============================================================= -->
+
+# scrml — Session 351 (peter · Windows clone) — WRAP
+
+**Date:** 2026-08-18. `/boot` Profile A, re-hydrated after a mid-session machine lockup. Three
+Peter-lane PRs merged to `main`, each through independent S239 satellite review before landing:
+**#560** (emit-gate #519, issue closed) · **#561** (boot-gate identity alias) · **#562** (HIGH
+request-ref lift misroute). Board is clean; every land is disjoint from bryan's held security/freeze
+lane. ⚠ **S350-bryan board header still LIVE** (possibly stale — 3h at wrap); nothing here touched his
+surface.
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⭐ Peter-lane — board CLEAN; pick the next HIGH adopter/codegen gap
+
+No open Peter-lane PR. `bun scripts/threads.ts --open` + `docs/known-gaps.md` (`sev=HIGH status=open`)
+for the menu; rank by real aM usage (`grep ../assetManagement`, the standing rule). Strong candidates
+already scoped this session (aM-usage ranked, all pure-compute/inert):
+- **`g-request-ref-mixed-string-attr-in-lift-misroute` (MED, NEW)** — the natural follow-on to #562: a
+  mixed literal+`${…}` attribute string in a lift takes the string-fallback `rewrite.ts` path that never
+  consults the request-id set → same registry misroute. Distinct seam (PA-verified pre-existing). Fix
+  direction: route the `${…}` segments through the parsed-node emitter (now converged) or teach the
+  string-fallback to consult the per-file set. **Reproduce-first** (the gap-direction durable).
+- **`g-lambda-param-renamed-to-fetch-stub-when-a-server-fn-shares-its-name` (HIGH)** — name-mangler
+  collision emits an undeclared identifier. Narrower aM surface (needs the name collision).
+- **`g-dev-compile-throw-fail-open` (HIGH)** — `scrml dev` keeps serving the last-good bundle when a
+  compile THROWS (the #518 short-circuit covers only the RETURN path). Usage-independent; your #517/#518
+  dev.js build-integrity lane.
+
+Standing discipline for any pick: reproduce-first → satellite build (worktree iso) → PA-verify the CLASS
+(not just the repro) + §GATE → S239 → land on green → close with SHA. Lane-check every fix for a hidden
+language decision (route to bryan if newly-rejecting/accepting/semantics-changed).
+
+### 2. Carry-forward — bryan's lane (S347/S350), UNCHANGED, STILL OPEN
+
+- **Three held branches owing their S239 pass:** `comment-token-faithfulness` `215984b9` · the D2/D3/D4
+  security cluster `45fc29b5` · `dtr-r7` `152dfa47` (DO-NOT-LAND until comment-tokens land, re-review at
+  the NEW sha).
+- **The OQ-2 / D4-gap memo** (`handOffs/incoming/S349-peter-dpa030-OQ-verification-for-bryan.md`) — when
+  D4's S239 pass runs on `45fc29b5`, confirm it bounds the `<channel>` server WS `message()` door too
+  (`maxPayloadLength` appears ZERO times in the repo). Still bryan's live lane.
+- **Operator queue:** dpa-029 Q1 (banked `scrml-support/docs/rulings-pending/dpa-029-Q1-egress-envelope.md`)
+  · dpa-022 · dpa-024 (do NOT rule 022/024 cold — stale premises). D1 SPEC amendment (ruled S347).
+
+### 3. State
+
+- **main** `662ff57e`, coherence 0/0 (after this wrap's continuity PR merges). **scrml-support** synced.
+- **Review floor: 0 OWED (166/166)** — markers recorded for #555–#558 + #560/#561/#562.
+- **Gaps this session: +3** — `g-emit-gate-source-anchor-synthetic-artifact-and-cli-truncation` (LOW) ·
+  `g-request-ref-mixed-string-attr-in-lift-misroute` (MED) · `g-request-id-threading-not-fully-consolidated-and-clear-unguarded` (LOW). `g-request-ref-nested-in-lift-misroute` (HIGH) → **resolved**.
+- **Worktrees:** the #562 worktree removed (landed); one NON-session worktree retained (`agent-ad7fea65…`).
+- **Maps:** not refreshed — three small localized fixes (emit-expr routing, boot tooling, cli formatters);
+  refresh deferred (no structural change). Note if the next arc touches routing broadly.
+
+## WHAT LANDED THIS SESSION (S351-peter)
+
+- **#560** emit-gate #519 (`a6a90df6`, issue closed) — 3 S239 rounds; build/dev restored to read `.file`;
+  dead `emitted*` fields dropped; broader items filed ([1543]).
+- **#561** boot-gate `peter→pjoliver11` slug alias (`8968edba`) — boot gate now ✓ PASS ([1544]).
+- **#562** HIGH request-ref lift misroute (`662ff57e`) — CONVERGENCE to a single per-file request-id set
+  unioned into all 3 emit-expr routing seams; PA-verified 8/8 positions + GATE; satellite corrected the
+  PA's stated root ([1545]).
+- Review floor 0 OWED + 3 gaps filed ([1546]).
+
+## ⚑ METHOD NOTES (recorded because they recur)
+
+- **The satellite corrected my stated root on #562** — I briefed "all routing funnels through
+  `reparseRequestRefEscapeHatch`"; it doesn't (the parsed-node path via `emitIdent`/`emitInputStateRef`
+  never hits the reparse), so patching only the reparse gate did not fix the repro. The agent reproduced,
+  found it, and converged all three seams. Findings-are-claims cuts toward the PA's own briefs too — a
+  dispatch brief's stated locus is a hypothesis the satellite must be free to falsify.
+- **Convergence over enumeration paid** — #562's family had reopened 3× (#511/#512) via per-position
+  patches; the single-source-of-truth fix (+ the S239 union-hardening so a partial set can't bypass it)
+  is the structural close. The same shape recurred inside #560 (3 review rounds circling one substrate →
+  ship the contained core, file the broader seam).
+
+---
 
 # scrml — Session 349 (peter · Windows clone) — WRAP
 
