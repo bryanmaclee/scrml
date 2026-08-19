@@ -36337,9 +36337,9 @@ capability *should exist*, so it can never be the reason a capability is decline
    no name-to-version resolution anywhere in the language, and therefore no independently-versioned
    unit. An edition's expensive guarantee exists so that a *sealed* artifact — compiled under rules
    committed at some earlier time, under someone else's pin — can link against fresh code. scrml
-   never produces one: every unit reaching a build is **source**, swept into the same whole-program
-   fixpoint closure (§21.7) and re-parsed under the consumer's single live pin on every compile. The
-   thing the guarantee protects never comes into existence. Note the discipline this reason has that
+   never produces one: every unit reaching a build is **source**, and no unit carries a version of its
+   own for another unit's rules to disagree with. The thing the guarantee protects never comes into
+   existence. Note the discipline this reason has that
    its predecessors lacked — it survives scrml *gaining* separate or incremental compilation for
    unrelated performance reasons.
 2. **Conformance is ONE predicate, and the conformance suite operationally IS the spec.** §62.2
@@ -36380,9 +36380,9 @@ whole-program properties unforked. scrml's single-compilation-unit model makes t
 preserve than it was for Rust, not harder.
 
 **⚑ The standing tripwire.** *The moment `[language] version=` (§62.6) is read by the compiler to
-select between two behaviours for the SAME syntax — not merely as a manifest field, and not merely as
-a ceiling on which sanctioned forms are offered — it HAS become an edition mechanism regardless of
-what it is called.* Distinguish the two shapes: a **subset / ceiling** gate restricts a window on one
+select between two behaviours for the same syntax — not merely as a manifest field — it HAS become an
+edition mechanism regardless of its name.* (Quoted verbatim as ratified. The gloss that follows is
+this section's own reading and does not narrow the instrument.) Distinguish the two shapes: a **subset / ceiling** gate restricts a window on one
 monotonically-growing accepted-form set (Babel `target=`, ESLint `ecmaVersion` — not edition
 machinery); a **divergent rule-set** carries two genuinely different behaviours and selects between
 them per unit (this is an edition). The tell is that a divergent rule-set needs a *rewriting*
@@ -36499,8 +36499,19 @@ it never got pulled. §63.7 corrects them.)
 3. **Minimum one released minor in-window.** A form must ship as SOFT-DEPRECATED (W-lint
    visible) in at least one released minor before a major may remove it — one release, not
    PEP-387's two, because scrml's window is clocked by **version events and a corpus-clean
-   gate** (item 4) rather than by elapsed calendar time, and a single event-clocked minor
-   already guarantees every consumer recompiles against the W-lint before the form can leave.
+   gate** (item 4) rather than by elapsed calendar time, so a second release adds no
+   information the gate has not already checked.
+   > ⚑ **This minimum does NOT guarantee that every consumer sees the W-lint, and must not be
+   > defended on that ground.** §62.6 defeats that reading from both sides: an *unpinned* adopter
+   > defaults to *"the compiler's highest fully-conformant language version"*, so one that upgrades
+   > after the major never compiles under the intervening minor at all; and a *pinned* adopter
+   > compiles under the pinned rules, so a pin below the deprecating minor never sees the W-lint
+   > either. Item 4 removes the elapsed-time requirement that would otherwise force a window they
+   > had to pass through. What actually protects the adopter at the boundary is §63.4's **hard
+   > gate** — a form MUST NOT be scheduled or removed without a verified-landed `scrml fix` rule —
+   > together with item 4's corpus-clean condition. The W-lint's job is to put the deprecation
+   > *in the contract* for at least one version event; the codemod's job is to make the removal
+   > survivable for the adopters who never read it.
    > **Provenance:** `ruling:user-voice-scrml.md S353` — struck the population premise this
    > clause carried, in the same landing as its §62.8 and D1/D4 twins.
    > **supersedes:** the S234 wording *"(PEP-387's "≥2 releases" shrunk to scrml-scale — two

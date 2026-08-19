@@ -21,7 +21,7 @@
 - `compiler/SPEC.md` §62.8 rewritten + retitled `62.8 No editions in the 1.0 surface as built`. Amendment banner + Rule-4b `Provenance:` (`ruling:user-voice-scrml.md S353` + three `dd:` pointers) + the BACKWARD half `supersedes:` (RULING.md D1 item 4) + `Direction-of-change: inert`.
 - §62.9 cross-refs extended: §41.4 + §21.7 added (the anchors §62.8's reason 1 rests on); prior-art list annotated *surveyed, not endorsed-as-non-edition*; dpa-034 design-provenance block appended.
 - §62.6, §63, §63.3 UNTOUCHED (brief boundary). `remove-only-at-a-MAJOR` left explicitly OPEN in §62.8's own prose.
-- `compiler/SPEC-INDEX.md` regenerated (`bun scripts/regen-spec-index.ts`) — CI-gated totals 37,152 -> 37,271; the §62 row's UNGATED authored prose hand-updated so it does not rot (the generator only fixes ranges/totals).
+- `compiler/SPEC-INDEX.md` regenerated (`bun scripts/regen-spec-index.ts`) — CI-gated totals 37,152 -> 37,282 (this note said 37,271; the committed value was 37,282, and S354's corrections moved it again to 37,293 — regenerated, both gates re-checked); the §62 row's UNGATED authored prose hand-updated so it does not rot (the generator only fixes ranges/totals).
 
 ## 2026-08-19 — RULING.md amendment
 - Amendment banner added after the header block: provenance, supersedes, `inert`, the rule being applied, and a four-row table quoting EVERY struck clause verbatim (record, not laundering).
@@ -63,6 +63,20 @@ Independent verification of one further relayed premise (the S350 population mea
 1. **⚑ `compiler/SPEC.md:36499-36502` (§63.3 item 3) STILL CARRIES THE POPULATION PREMISE, verbatim:**
    *"(PEP-387's "≥2 releases" shrunk to scrml-scale — two friends + a frozen language do not need Python's audience margin)."*
    This is the SPEC twin of the RULING.md D4 item 3 clause struck in this landing. **The brief's hard boundary — "any SPEC section other than §62.8/§62.9" is OUT — forbade touching it**, so it stands. Net effect: the RULING no longer carries the premise and the NORMATIVE text still does, which is the wrong way round. It is a one-clause edit and it needs its own authorization. Note it is a §63 clause, so it is entangled with the separately-opened `remove-only-at-a-MAJOR` question and should probably ride that landing.
+   > ⚑ **SUPERSEDED — S354-bryan, 2026-08-19.** The PA took that authorization and rewrote §63.3
+   > item 3 **in this same commit**, so the "it stands" above was already false when this file
+   > was committed; the note is left in place because the sequence is the point. The PA's
+   > replacement then failed its own adversarial pass: it substituted the population premise with
+   > *"a single event-clocked minor already guarantees every consumer recompiles against the
+   > W-lint before the form can leave"* — **false under §62.6 from both sides** (an *unpinned*
+   > adopter defaults to the compiler's highest conformant version and can skip the minor
+   > entirely; a *pinned* adopter compiles under the pin and never sees a later minor's W-lint),
+   > with item 4 removing the elapsed-time requirement that would have forced a window. Corrected
+   > at S354 to name §63.4's hard `scrml fix` gate as the actual adopter protection.
+   > **The lesson is the scope boundary, not the clause:** this PR existed to replace reasoning
+   > that was the wrong KIND of reason, and the un-reviewed text that replaced it was the wrong
+   > FACT. The agent's fenced scope got a panel; the PA's late addition got nothing until the
+   > S239 pass caught it.
 2. **Round-2 recommendation #5 NOT landed** — state §62.6 as *forward-gating only* and have it disclaim any promise about surviving a MAJOR's removals, resolving the §62.6-vs-§62.3 contradiction that BOTH late voices independently identified as the genuine tripwire. §62.6 was explicitly OUT of scope. Still owed; cheap; independent of the ruling.
 3. **`remove-only-at-a-MAJOR`** — the PA is opening it as its own deliberation. Not decided, not implied. §63.3 untouched, and §62.8 says so in its own prose.
 4. **Not touched, by design:** `handOffs/dpa-queue.md` (PA-owned, unmerged change in flight) · `master-list.md:41`, `docs/changelog.md`, `handOffs/delta-log.md`, `handOffs/hand-off-237.md` — all carry "no editions" as a record of the **S234** landing, which is faithful history, and all are PA-owned maintained-tier docs.
