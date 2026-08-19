@@ -2,6 +2,43 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S350 (bryan · ASUS-Vivobook) — 2026-08-17/19 — recovery boot, four arcs held, and a delivery bottleneck named
+
+**Booted as the recovery successor to S349-bryan, which died unwrapped.** Recovered two fix-round
+branches, one of them (161 lines + a 341-line test) **unpushed on a single disk**. S351-peter ran
+concurrently and landed #560/#561/#562/#563; this session merges rather than replaces that work.
+
+⭐ **The session's real output is a diagnosis, not a landing: the bottleneck is DELIVERY.** Five
+instances in one day of finished work that no probe read — Peter's dpa-030 OQ-2, scrml-site's
+HIGH-severity soft-nav report (committed to a branch, invisible to every `main` checkout), the PA's
+own dpa-033, and **two ruling artifacts including the sliding-doors audit's own #1 recommendation,
+which sat three days**. bryan asked whether he had ever seen the audit's results; he had not, and they
+exist and are good (324 sites → ~37 decisions, ranked). Two bite-proven probes now exist for the class.
+
+⭐ **Soft-nav fixed with a red-before-green proof** — 7 of 9 tests fail against the unfixed runtime,
+10/10 with it, driven through a real click with `getComputedStyle` on what the reader sees, on the
+reporter's own shape (the same file shipping `app.css` and `../app.css`). scrml.dev has been rendering
+every in-site click with the previous page's stylesheet.
+
+⭐ **The egress arc closed three fail-opens and stopped at a fourth that is structurally unfixable** —
+`reveal` is a VALUE-level operation and every fact the pass can compute is LOCATION-level. Two S239
+rounds returned DO-NOT-LAND; a green suite, clean conformance, and a clean corpus differential had all
+said ship.
+
+⭐ **Two Rule-4 gate payoffs, both dissolving a "ruling" into a bug fix or a false premise.** §14.8.9
+already mandates value-scoped declassification, so tightening it is conformance restoration, not an
+amendment. And `#471` and `Peter` are the same GitHub account — the two-friends premise four artifacts
+called falsified is **confirmed**.
+
+⭐ **The 16 KB runtime budget is measured against the wrong artifact.** The gate's fixture has no
+`<outlet>`, so it never assembles the chunk the soft-nav engine lives in. The shell runtime scrml.dev
+ships is 1.72× the budget already. Name-shortening buys 245 B; **comment-stripping buys 9,843 B**, and
+49.1% of the shipped core runtime is compiler-maintainer prose.
+
+**Held, pushed, not landed:** `soft-nav-head-sync` (owes S239) · `egress-tojson-root` (owes dpa-033)
+· `comment-token-fix-r1` (DO-NOT-LAND, HIGH regression) · `runtime-size-and-probes`.
+**Six dPA advisories await ratification.** Gaps HIGH 46 · MED 150 · LOW 69.
+
 ## S351 — 2026-08-18 (peter · Windows clone) — three adopter/lane fixes landed: emit-gate source location (#519), a HIGH request-ref misroute, and the boot-gate identity alias
 
 Continuation of S351 after a mid-session machine lockup (re-hydrated via `/boot`). Three PRs merged to `main`, each run through independent S239 satellite review before landing. Every land is Peter-lane (adopter codegen + lane tooling), disjoint from bryan's held security/freeze work.
