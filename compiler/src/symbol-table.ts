@@ -9450,9 +9450,10 @@ function walkValidateResetTargets(
 //
 //   1. `walkChannelPlacement` — walk markup tree carrying a
 //      `programDepth` counter (count of `<program>` ancestors), a
-//      `pageDepth` counter (count of `<page>` ancestors) AND the
-//      `fileHasProgram` boolean. Two mutually-exclusive fires, checked
-//      most-specific-first:
+//      `pageDepth` counter (count of `<page>` ancestors SINCE THE INNERMOST
+//      ENCLOSING `<program>` — a `<program>` descent RESETS it to 0, S353
+//      ruling) AND the `fileHasProgram` boolean. Two mutually-exclusive
+//      fires, checked most-specific-first:
 //        (a) `<channel>` at pageDepth >= 1 fires `E-CHANNEL-INSIDE-PAGE`
 //            (unconditional — the PURE-CHANNEL-FILE dispensation is
 //            file-top-only and does not reach a page-nested channel);
@@ -9467,6 +9468,21 @@ function walkValidateResetTargets(
 //      descends into `node.children` (markup children) and `node.body`
 //      (logic blocks; channels never appear inside logic, but recursion
 //      is cheap).
+//
+//      **S353 — WHY THE PRE-SCAN STAYS PER-FILE AND NOT PER-SCOPE.** The
+//      obvious follow-on to a per-scope `pageDepth` is a per-scope
+//      `fileHasProgram`. It is NOT needed, and the reason is structural
+//      rather than empirical: arm (b) is guarded by `programDepth === 0`,
+//      so the only nodes that can reach it have NO `<program>` ancestor
+//      at all. For such a node the innermost enclosing compilation unit
+//      IS the file, so "does my scope contain a `<program>`" and "does
+//      the FILE contain a `<program>`" are the same question over the
+//      same subtree — the pre-scan already answers the per-scope form.
+//      Symmetrically, the `<program>` reset can never promote a node INTO
+//      arm (b): every node it touches was reached by descending a
+//      `<program>` and therefore has `programDepth >= 1`. The two arms
+//      are separated by a predicate the reset cannot cross. Pinned by the
+//      §B19.14 "pre-scan stays per-file" tests.
 //
 //   2. `walkSharedModifier` — generic AST walker visiting every
 //      `state-decl` (including compound `children` arrays). Fires
@@ -9503,6 +9519,17 @@ function walkValidateResetTargets(
  * counter — see `walkChannelPlacement`. The dispensation above does NOT reach
  * this shape: it admits a `<channel>` at FILE TOP in a program-less module
  * file, and a channel nested inside `<page>` is not at file top.
+ *
+ * **S353 — `pageDepth` is PER-COMPILATION-UNIT, `fileHasProgram` is PER-FILE,
+ * and that asymmetry is deliberate.** A `<program>` descent resets `pageDepth`
+ * (§4.12.1 separate-compilation-unit; see `walkChannelPlacement`), but the
+ * `hasProgramElement` pre-scan below stays per-FILE. It is not an oversight:
+ * `E-CHANNEL-OUTSIDE-PROGRAM` is gated on `programDepth === 0`, so every node
+ * that consumes `fileHasProgram` has no `<program>` ancestor and its enclosing
+ * compilation unit is the file itself — per-scope and per-file coincide
+ * exactly over the reachable set. Making the pre-scan per-scope would compute
+ * a different value only for nodes the arm cannot reach.
+ * prov=ruling:user-voice-scrml.md-S353
  */
 function walkValidateChannels(
   ast: any,
@@ -9973,18 +10000,32 @@ function _hasProgramElementInner(nodes: any, visited: WeakSet<object>): boolean 
  * accepts module-file top-level placement; channels reuse that precedent.
  *
  * **`<page>` inside-fire — LIVE (wired S299).** `pageDepth` is the count of
- * `<page>` ancestors traversed to reach the current node. A `<channel>` at
- * `pageDepth >= 1` fires `E-CHANNEL-INSIDE-PAGE` (§38.1 invariant 1, §38.2,
- * §38 preamble: "Channels SHALL NOT live inside `<page>`"). This supersedes
- * the Wave-1 note that deferred the fire-site pending `<page>` parser support
- * — `<page>` has been parsed as a structural markup element since well before
- * S299, so the deferral no longer applies.
+ * `<page>` ancestors traversed to reach the current node **since the innermost
+ * enclosing `<program>`** — a `<program>` descent RESETS it (see below). A
+ * `<channel>` at `pageDepth >= 1` fires `E-CHANNEL-INSIDE-PAGE` (§38.1
+ * invariant 1, §38.2, §38 preamble: "Channels SHALL NOT live inside
+ * `<page>`"). This supersedes the Wave-1 note that deferred the fire-site
+ * pending `<page>` parser support — `<page>` has been parsed as a structural
+ * markup element since well before S299, so the deferral no longer applies.
+ *
+ * **S353 ruling — the `<program>` reset (reversed placement precedence).**
+ * `pageDepth` is scoped to the innermost enclosing `<program>`, not to the
+ * file. A `<channel>` inside a nested `<program>` that itself sits inside a
+ * `<page>` is CANONICAL, not a violation: §4.12.1 (SPEC.md:718/:724) makes a
+ * nested `<program>` a separate compilation unit subject to top-level grammar,
+ * so its enclosing `<page>` is invisible to the placement check exactly as the
+ * parent's bindings are under shared-nothing isolation. Before this ruling the
+ * flat `pageDepth >= 1` test won and the shape fired `E-CHANNEL-INSIDE-PAGE`
+ * even at `programDepth >= 1` — the more general sentence beating the more
+ * specific one. See `g-channel-in-nested-program-inside-page-ordering`.
+ * prov=ruling:user-voice-scrml.md-S353
  *
  * The two placement codes are mutually exclusive, most-specific-first: a
- * `<channel>` with a `<page>` ancestor reports E-CHANNEL-INSIDE-PAGE only,
- * never both codes for one node. The inside-page fire is unconditional on
- * `fileHasProgram` — the PURE-CHANNEL-FILE dispensation is a FILE-TOP
- * dispensation and does not reach a channel nested inside `<page>`.
+ * `<channel>` with a `<page>` ancestor **in its own compilation unit** reports
+ * E-CHANNEL-INSIDE-PAGE only, never both codes for one node. The inside-page
+ * fire is unconditional on `fileHasProgram` — the PURE-CHANNEL-FILE
+ * dispensation is a FILE-TOP dispensation and does not reach a channel nested
+ * inside `<page>`.
  *
  * `component-def` nodes are component declarations whose `defChildren`
  * array holds sibling logic-body nodes (per B17 finding). Channel
@@ -10053,11 +10094,48 @@ function walkChannelPlacement(
   }
 
   // Compute child-side depths. `programDepth` increments ONLY when descending
-  // through a `<program>` markup node; `pageDepth` ONLY through a `<page>`.
-  // Other markup and component-def are neutral for both — only the
-  // `<program>` / `<page>` ancestor signals matter for v0.3 placement.
+  // through a `<program>` markup node; `pageDepth` increments ONLY through a
+  // `<page>` — and RESETS TO ZERO through a `<program>`. Other markup and
+  // component-def are neutral for both — only the `<program>` / `<page>`
+  // ancestor signals matter for v0.3 placement.
+  //
+  // **THE `<program>` RESET (S353 ruling — reversed placement precedence).**
+  // Descending into a `<program>` opens a FRESH PLACEMENT SCOPE and discards
+  // every enclosing `<page>`. §4.12.1 (SPEC.md:718): "A nested `<program>`
+  // SHALL be a separate compilation unit. The compiler SHALL compile nested
+  // `<program>` elements independently." And (SPEC.md:724): "A `<program>`
+  // nested inside another `<program>` SHALL be subject to the same grammar
+  // rules as a top-level `<program>`." If the nested `<program>` is its own
+  // compilation unit governed by top-level grammar, an enclosing `<page>` is
+  // as invisible to the placement check as the parent's bindings are under
+  // §4.12.1 shared-nothing isolation — so `<page>` > `<program>` > `<channel>`
+  // is a channel at the top of ITS OWN unit, i.e. canonical placement, NOT a
+  // page-nested channel. SPEC draws the same line from the other side at
+  // §58 (SPEC.md:35548): "A `<page>` (§40.8) is not a separate compilation
+  // unit — it shares the application `<program>` scope."
+  //
+  // The reset is deliberately UNCONDITIONAL on nesting depth (it fires for any
+  // `<program>` descent, not only a `<program>`-inside-`<program>` one). At
+  // depth 0 it is a no-op — `pageDepth` is already 0 there — so the only shapes
+  // it moves are ones with a `<program>` reached at `pageDepth >= 1`, which is
+  // exactly the ruled population. A `<page>` INSIDE the fresh scope re-arms the
+  // counter normally, so `<program>` > `<page>` > `<program>` > `<page>` >
+  // `<channel>` still fires: the channel is page-nested within its own unit.
+  //
+  // ⚠ This reset CANNOT reach the `E-CHANNEL-OUTSIDE-PROGRAM` arm. That arm
+  // requires `programDepth === 0`, and every node whose `pageDepth` this reset
+  // touches was reached by descending a `<program>`, hence has
+  // `programDepth >= 1`. The reset can only move a node from INSIDE-PAGE to no
+  // fire — never from one code to the other. See the `fileHasProgram` note on
+  // `walkValidateChannels` for why the pre-scan stays per-FILE.
+  //
+  // prov=ruling:user-voice-scrml.md-S353 · gap
+  // g-channel-in-nested-program-inside-page-ordering
   const childProgramDepth = tag === "program" ? programDepth + 1 : programDepth;
-  const childPageDepth = tag === "page" ? pageDepth + 1 : pageDepth;
+  const childPageDepth =
+    tag === "program" ? 0
+    : tag === "page" ? pageDepth + 1
+    : pageDepth;
 
   const descend = (kids: any) =>
     walkChannelPlacement(

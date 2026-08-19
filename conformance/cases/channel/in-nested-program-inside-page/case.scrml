@@ -1,0 +1,16 @@
+<program db="postgres://localhost/app">
+
+  <page>
+
+    <program name="worker">
+      <channel name="worker-feed">
+        <messages> = []
+      </channel>
+
+      <p>${@messages}</p>
+    </program>
+
+    <p>page body</p>
+  </page>
+
+</program>

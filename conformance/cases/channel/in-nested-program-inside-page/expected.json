@@ -1,0 +1,11 @@
+{
+  "id": "channel-in-nested-program-inside-page",
+  "description": "§4.12.1 + §38.1 — a `<channel>` inside a NESTED `<program>` that itself sits inside a `<page>` is CANONICAL placement, not a violation. A nested `<program>` is a separate compilation unit subject to top-level grammar, so it opens a FRESH placement scope and the enclosing `<page>` is invisible to the channel-placement check. Ruled S353 (`prov=ruling:user-voice-scrml.md-S353`, gap g-channel-in-nested-program-inside-page-ordering): before the ruling the walker tested a flat `pageDepth >= 1` FIRST and fired E-CHANNEL-INSIDE-PAGE on this shape even though `programDepth >= 1` — the more general sentence beating the more specific one. Contrast `channel/inside-page`, which is the same file with the nested `<program>` wrapper REMOVED and which still REJECTS: the minimal pair is what keeps this from reading as `<page>` no longer fencing channels.",
+  "language-version": "1.0",
+  "spec": "§4.12.1, §38.1, §38.2",
+  "rationale": "§4.12.1 normative: \"A nested `<program>` SHALL be a separate compilation unit. The compiler SHALL compile nested `<program>` elements independently.\" And: \"A `<program>` nested inside another `<program>` SHALL be subject to the same grammar rules as a top-level `<program>` (§4.1, §4.2, §4.3, §4.11).\" If the nested `<program>` is its own compilation unit governed by top-level grammar, then §38.1's inside-`<program>` placement rule is satisfied for a channel declared directly in its body, and the enclosing `<page>` is as invisible to the placement check as the parent's bindings are under §4.12.1 shared-nothing isolation. SPEC draws the same line from the other side at §58: \"A `<page>` (§40.8) is not a separate compilation unit — it shares the application `<program>` scope.\" Direction of change is newly-accepting under the TOWARD-THE-CONTRACT limb (pa-base §8) because §4.12.1 already declares the nested form legal — a conformance fix, not a widening. No runtime half: the case asserts a compile-time placement verdict only.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-INSIDE-PAGE", "E-CHANNEL-OUTSIDE-PROGRAM"]
+  }
+}
