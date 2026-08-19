@@ -78,14 +78,13 @@ describe("validate-emit (Approach A) — single artifact", () => {
     expect(err.message).toMatch(/byte \d+, line \d+, column \d+/);
     // Frames it as a compiler defect (the adopter cannot fix emitted JS).
     expect(err.message).toContain("compiler defect");
-    // #519 — the span carries the EMITTED position under explicit `emitted*`
-    // fields, and does NOT populate the CGSpan SOURCE fields (`line`/`col`)
-    // with an emitted coordinate: the gate cannot map emitted→source, so a
-    // source line/col is unavailable. Anchoring at the source FILE is honest;
-    // presenting an emitted `:line:col` as a source position is the bug.
-    expect(typeof err.span.emittedLine).toBe("number");
-    expect(typeof err.span.emittedColumn).toBe("number");
-    expect(typeof err.span.emittedByte).toBe("number");
+    // #519 — the span anchors at the source FILE only and does NOT populate the
+    // CGSpan SOURCE fields (`line`/`col`) with an emitted coordinate: the gate
+    // cannot map emitted→source, so a source line/col is unavailable. The
+    // emitted position lives in the message body (asserted above) — the honest
+    // carrier; there are no structured `emitted*` fields (S351 review-floor:
+    // nothing read them). Presenting an emitted `:line:col` as a source position
+    // is the bug.
     expect(err.span.file).toBe("drivers.scrml");
     expect(err.span.line).toBeUndefined();
     expect(err.span.col).toBeUndefined();

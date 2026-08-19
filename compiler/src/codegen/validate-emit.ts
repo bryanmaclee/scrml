@@ -100,11 +100,13 @@ export function validateEmittedArtifact(art: EmitArtifact): CGError | null {
     // "your source is wrong HERE" while pointing into an artifact that is never
     // written to disk. So anchor the diagnostic at the source FILE only, omit
     // the unavailable source coordinate, and keep the emitted position in the
-    // message body + under explicit `emitted*` fields for tooling that wants it.
+    // message body — the honest carrier. No structured `emitted*` span fields:
+    // api.js does not forward them to `result.errors` and nothing reads them
+    // (S351 review-floor — dead duplicated state, dropped).
     return new CGError(
       "E-CODEGEN-INVALID-LOGIC",
       message,
-      { file: art.sourceFile, emittedByte: pos, emittedLine: line, emittedColumn: col },
+      { file: art.sourceFile },
       "error",
     );
   }
