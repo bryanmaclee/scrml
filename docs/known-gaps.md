@@ -1400,6 +1400,8 @@ Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacin
 
 ---
 
+**⚑ FIRST, A DOC-CURRENCY CORRECTION THE FORK ITSELF NEEDS: this fork was ANSWERED once already and this entry never recorded it.** `handOffs/delta-log.md` **[759] rule · "gzip budget = HOLD 16 KB (bryan)"** — option (a), operator-ruled. It was decided on the strength of *"Re-measure confirmed base unchanged (16,257, 0 drift)"* (the stale figure corrected above) with the caveat *"54 B margin < ~200 B whitespace-noise band"* (the unpinned-compressor artifact diagnosed below). So the entry has been presenting a settled question as live, on numbers that were wrong, for several sessions. **The S353 ruling does not overturn [759] — it honours it:** 16,384 B is still asserted, as a `<` gate, on the counter shape, and that assertion is untouched. What S353 adds is that HOLD was being applied to a shape nobody deploys.
+
 **⚑ S353 RULING — THE FORK IS DISSOLVED, NOT ANSWERED.** Neither (a) nor (b): the question "hold 16 KB or raise it?" presupposes that 16,384 B is a *budget on the shipped shape*, and it is not — it is a `<` gate on `SPA_COUNTER`, which has no `<program>`, no `<outlet/>`, no routes, no engine and no SSR. You cannot hold a line you were never standing on, and raising it concedes bytes on a shape that was already 1.59× past it. **The ruling: keep the counter assertion exactly as it is, and measure the shipped shape and ratchet it.**
 
 **Measured at `36ed3d05`, both figures reproduced independently:**
