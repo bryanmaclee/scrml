@@ -73,8 +73,12 @@ describe("§C Worker instantiation in client JS", () => {
       derivedNames: new Set(),
       usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
     });
-    expect(js).toContain('new Worker("calc.worker.js")');
-    expect(js).toContain('new Worker("doubler.worker.js")');
+    // `<sourceBase>.<workerName>.worker.js` — the fixture's fileAST.filePath is
+    // `test.scrml`. The source-base prefix keeps two sibling pages that each
+    // declare a same-named worker from colliding on one dist path (E-CG-015);
+    // `api.js` writes each bundle at exactly this name.
+    expect(js).toContain('new Worker("test.calc.worker.js")');
+    expect(js).toContain('new Worker("test.doubler.worker.js")');
     expect(js).toContain("_scrml_worker_calc.send = function(data)");
     expect(js).toContain("_scrml_worker_doubler.send = function(data)");
     expect(js).toContain("new Promise");

@@ -90,7 +90,11 @@ describe("§A Inline worker round-trip (§4.12.4)", () => {
   test("parent client JS has worker instantiation", () => {
     const { cgOut } = fullPipeline(src);
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(getOutput(cgOut).clientJs ?? ""));
-    expect(clientJs).toContain('new Worker("doubler.worker.js")');
+    // `<sourceBase>.<workerName>.worker.js` — the harness compiles `test.scrml`,
+    // so `test.doubler.worker.js`. The source-base prefix keeps two sibling
+    // pages that each declare a `doubler` worker from colliding on one dist path
+    // (E-CG-015); `api.js` writes the bundle at exactly this name.
+    expect(clientJs).toContain('new Worker("test.doubler.worker.js")');
     expect(clientJs).toContain("_scrml_worker_doubler.send");
   });
 });
@@ -168,7 +172,7 @@ describe("§D <#name>.send() in expressions (§4.12.4)", () => {
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? ""));
     // Worker instantiation + Promise wrapper should be in client JS
     expect(clientJs).toContain("_scrml_worker_doubler");
-    expect(clientJs).toContain('new Worker("doubler.worker.js")');
+    expect(clientJs).toContain('new Worker("test.doubler.worker.js")');
     expect(clientJs).toContain("postMessage(data)");
   });
 });

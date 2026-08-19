@@ -2387,10 +2387,26 @@ export function generateClientJs(ctx: CompileContext): string {
   }
 
   // §4.12.4: Worker instantiation — new Worker() + Promise-based .send()
+  //
+  // The bundle filename is `<sourceBase>.<workerName>.worker.js`, mirroring
+  // every sibling artifact (`<base>.client.js`, `<base>.server.js`,
+  // `<base>.css`). The source-base prefix is load-bearing, not cosmetic: two
+  // sibling pages that each declare a generically-named `<program name="doubler">`
+  // would otherwise both compute to `dist/doubler.worker.js` and hard-fail on
+  // E-CG-015 (conflicting output paths) — a legal program refusing to build.
+  // SPEC §4.12.4 says only "the nested program is compiled as a separate worker
+  // bundle" and does not name the file, so the convention is ours to pick.
+  //
+  // `api.js` writes the bundle at exactly this name via `writeOutput(filePath,
+  // ".<workerName>.worker.js", …)`, and rewrites this specifier to the hashed
+  // name under `--content-hash-assets`. The two MUST stay in lockstep;
+  // `compiler/tests/integration/nested-program-worker-artifact-emission.test.js`
+  // pins "every `new Worker(...)` ref names a file that exists on disk".
   if (workerNames && workerNames.length > 0) {
+    const workerFileBase = basename(filePath, ".scrml");
     lines.push("// --- worker instantiation (compiler-generated, §4.12.4) ---");
     for (const name of workerNames) {
-      lines.push(`const _scrml_worker_${name} = new Worker("${name}.worker.js");`);
+      lines.push(`const _scrml_worker_${name} = new Worker("${workerFileBase}.${name}.worker.js");`);
       lines.push(`_scrml_worker_${name}.send = function(data) {`);
       lines.push(`  return new Promise(function(resolve) {`);
       lines.push(`    _scrml_worker_${name}.onmessage = function(e) { resolve(e.data); };`);

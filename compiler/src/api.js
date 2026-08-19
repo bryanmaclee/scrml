@@ -3065,6 +3065,11 @@ export function compileScrml(options = {}) {
       const assetHashMap = new Map();       // distRelPosix(unhashed) -> distRelPosix(hashed)
       const finalClientByFile = new Map();  // filePath -> { contents, hash }
       const cssHashByFile = new Map();       // filePath -> hash
+      // §4.12.4 — filePath -> Map<workerName, hash>. Only populated under
+      // `hashAssets`; the unhashed path needs no lookup (the emitted
+      // `new Worker("<base>.<name>.worker.js")` specifier is already the
+      // on-disk name).
+      const workerHashByFile = new Map();
       const toPosixRel = (abs) => relative(outputDir, abs).split(/[\\/]/).join("/");
       const insertHashBeforeExt = (nameWithExt, hash) => {
         const i = nameWithExt.lastIndexOf(".");
@@ -3090,11 +3095,103 @@ export function compileScrml(options = {}) {
         while (i < from.length && i < to.length && from[i] === to[i]) i++;
         return [...from.slice(i).map(() => ".."), ...to.slice(i)].join("/");
       };
+
+      // -------------------------------------------------------------------
+      // §4.12.4 inline-worker bundles (g-nested-program-emits-artifacts-it-
+      // never-produces).
+      //
+      // `runCG` has always produced these (`CgFileOutput.workerBundles`) and
+      // `emit-client.ts` has always emitted a `new Worker(...)` referring to
+      // them — but nothing ever WROTE the file, so the reference 404'd on every
+      // build. These three helpers close that: one artifact-name convention,
+      // shared by the hash pre-pass, the ref rewrite, and the write loop.
+      //
+      // Name: `<sourceBase>.<workerName>.worker.js`, matching every sibling
+      // artifact. `emit-client.ts` emits the identical specifier; the two MUST
+      // stay in lockstep.
+      // -------------------------------------------------------------------
+      const workerSuffix = (workerName, hash) =>
+        hash ? `.${workerName}.worker.${hash}.js` : `.${workerName}.worker.js`;
+
+      // Which outputs actually get their worker bundles written.
+      //
+      // A LIBRARY-mode output (§21.5) carries `workerBundles` too, but
+      // `codegen/index.ts` builds its CompileContext with `workerNames: []`, so
+      // its `libraryJs` contains no `new Worker(...)` at all. Writing those
+      // bundles would emit an artifact nothing references — the exact inverse of
+      // the bug being fixed here, and no better. Gate on the presence of the
+      // referring artifact instead: `clientJs` is emitted with
+      // `workerNames: fileWorkerNames`, so `clientJs` present ⟺ the refs exist.
+      //
+      // (That a library-shaped file's nested worker is generated but never wired
+      // is a SEPARATE gap. This change deliberately leaves it exactly as inert as
+      // it was rather than silently half-implementing it — see progress.md
+      // RESIDUALS.)
+      const writesWorkerBundles = (output) =>
+        Boolean(output.clientJs) && Boolean(output.workerBundles) && output.workerBundles.size > 0;
+
+      // Final on-disk bytes for a worker bundle. Worker JS is browser-loaded, so
+      // it gets the same `scrml:NAME` specifier rewrite every other browser
+      // artifact gets. A no-op today (`generateWorkerJs` emits only function
+      // declarations plus the `when message` hook, never an import), but the
+      // rule is "every JS the browser loads", not "every JS we currently know
+      // has imports".
+      const finalWorkerJs = (filePath, workerName, js) => {
+        const { targetDir } = pathFor(filePath, workerSuffix(workerName, null));
+        return rewriteStdlibImports(js, targetDir, outputDir, bundledStdlib);
+      };
+
+      // Rewrite `new Worker("<base>.<name>.worker.js")` specifiers in a client
+      // bundle to their content-hashed names. Same coordinate space as the HTML
+      // and chunk-import rewrites: resolve the ref against the referring
+      // bundle's own dist dir, look it up in `assetHashMap`, re-relativize.
+      //
+      // Ordering is load-bearing and DIFFERENT from `rewriteChunkImportRefs`:
+      // this runs BEFORE the client bundle's own hash is computed, so
+      // `fnv1aHash(bytes-on-disk)` still equals the hash in the client bundle's
+      // own filename (adopter-#82 CRITICAL #3). A worker bundle's bytes never
+      // depend on the client bundle, so its hash is always computable first —
+      // there is no cycle to force the late-rewrite compromise.
+      const rewriteWorkerRefs = (js, clientFilePath) => {
+        if (!hashAssets || !js) return js;
+        const { targetDir } = pathFor(clientFilePath, ".client.js");
+        const clientDir = toPosixRel(targetDir); // "" at dist root, "customer" nested
+        return js.replace(
+          /(new Worker\(")([^"]+?\.worker\.js)("\))/g,
+          (m, pre, ref, post) => {
+            if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//") || ref.startsWith("/")) {
+              return m; // scheme-qualified, protocol-relative, or root-absolute
+            }
+            const resolved = posixNormalize(clientDir ? `${clientDir}/${ref}` : ref);
+            const hashed = assetHashMap.get(resolved);
+            if (!hashed) return m;
+            return `${pre}${posixRelFrom(clientDir, hashed)}${post}`;
+          },
+        );
+      };
+
       if (hashAssets) {
         for (const [filePath, output] of cgResult.outputs) {
+          // Workers FIRST — the client bundle below rewrites its `new Worker(...)`
+          // refs from `assetHashMap`, and that must be populated before the
+          // client's own hash is taken over the rewritten bytes.
+          if (writesWorkerBundles(output)) {
+            const perWorker = new Map();
+            for (const [workerName, workerJs] of output.workerBundles) {
+              const { fullPath } = pathFor(filePath, workerSuffix(workerName, null));
+              const hash = fnv1aHash(finalWorkerJs(filePath, workerName, workerJs));
+              perWorker.set(workerName, hash);
+              const relUn = toPosixRel(fullPath);
+              const relHashed = insertHashBeforeExt(relUn, hash);
+              assetHashMap.set(relUn, relHashed);
+              hashedAssets.add(relHashed); // immutable-cache-header membership
+            }
+            workerHashByFile.set(filePath, perWorker);
+          }
           if (output.clientJs) {
             const { targetDir, fullPath } = pathFor(filePath, ".client.js");
-            const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+            let c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+            c = rewriteWorkerRefs(c, filePath);
             const hash = fnv1aHash(c);
             finalClientByFile.set(filePath, { contents: c, hash });
             const relUn = toPosixRel(fullPath);
@@ -3244,6 +3341,27 @@ export function compileScrml(options = {}) {
           } else {
             const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
+          }
+        }
+        // §4.12.4 — inline-worker bundles. `emit-client.ts` emitted
+        // `new Worker("<base>.<name>.worker.js")` for each of these long before
+        // anything wrote the file; this is the write that stops the reference
+        // dangling (g-nested-program-emits-artifacts-it-never-produces).
+        //
+        // The §23.4 SIDECAR carve-out (`codegen/index.ts`: a nested <program>
+        // with `port=` and no `mode="wasm"`) never registers a worker, so it
+        // reaches here with no `workerBundles` entry and still emits neither a
+        // reference nor a file. That carve-out is preserved by construction —
+        // this loop writes exactly the bundles codegen produced, no more.
+        if (writesWorkerBundles(output)) {
+          for (const [workerName, workerJs] of output.workerBundles) {
+            const hash = hashAssets ? workerHashByFile.get(filePath)?.get(workerName) : null;
+            const suffix = workerSuffix(workerName, hash ?? null);
+            if (writeOutput(filePath, suffix, finalWorkerJs(filePath, workerName, workerJs))) {
+              fileCount++;
+              const { base } = pathFor(filePath, suffix);
+              if (verbose) log(`  [CG] Wrote worker bundle: ${base}${suffix}`);
+            }
           }
         }
         if (output.html) {
