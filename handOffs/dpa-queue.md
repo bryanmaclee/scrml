@@ -1935,7 +1935,27 @@ re-open `scrml:format`.
 
 ```
 id:        dpa-033
-status:    complete   # banked -> running -> complete -> ratified(by PA) · COMPLETE dPA 2026-08-19 (ADVISORY) → DD written, insight CANDIDATE staged, 5 defects routed, NOT ratified.
+status:    ratified  # banked -> running -> complete -> ratified · RATIFIED BY bryan S352 2026-08-19.
+ruling:    **(c) as the sound floor NOW, then (d) sink-level lowering as the restored exit.** bryan,
+           S352, selecting the surfaced fork: *"Floor now, exit restored after"* — which per the
+           S276/S130 durable adopts the FULL surfaced text. Concretely: (1) delete the `reveal`
+           suppressor from the raw-egress gate (subtractive ~-80 LOC, 1-2 d, zero adopter migration,
+           removes a mechanism the SPEC never granted); (2) THEN build (d) sink-level lowering
+           (~3-6 d) — where `JSON.stringify(x)` sits syntactically inside `new Response(...)`, emit
+           `JSON.stringify(_scrml_protect_redact(x))`, a location-level decision about a SINK with
+           the descriptor answering the value question at runtime per §14.8.9; (3) (c) REMAINS the
+           floor for sinks (d) cannot see. The sequence never passes through a state where the exit
+           is a fail-open. NOT taken: the type/provenance route (15-30 d mono / 40-80 d poly) — the
+           correct long-run model, but not against zero adopter usage with the leak live on main.
+           Composes with the S347 D1 ruling (*a mandate an adopter cannot opt out of is itself the
+           defect*): under (a)/(b) the adopter's opt-out IS `reveal("col")` and it is unreliable —
+           *"a trap dressed as an escape hatch"* — so (c)+(d) RESTORES a reliable exit rather than
+           removing one. Full record: `../scrml-support/user-voice-scrml.md` S352.
+unblocks:  `egress-tojson-root` Unit 2 (the interprocedural E-PROTECT-004), HELD on this item.
+           ⚑ The stack has a SECOND blocker still open — **M4**, the `globalThis.` allowlist
+           (`type-system.ts:7415`): it is newly-rejecting and leaves `TextEncoder`/`TextDecoder`/
+           `ReadableStream`/`AbortController`/`Uint8Array`/`structuredClone`/`Bun` with no legal
+           spelling. That is its own operator call — see delta-log [1560].
 artifact:  scrml-support/docs/deep-dives/reveal-value-scope-raw-egress-dpa-033-2026-08-19.md
 verdict:   PA rec (b) REFUTED ON THE FACTS — it does not close the reproduced fail-open (the repro is
            single-body; (b) narrows cross-call). (a) is UNSOUND — new shape H1d, [EXEC]-compiled exit 0,
