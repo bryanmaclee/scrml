@@ -203,24 +203,25 @@ export function setCurrentUserAmbientActive(on: boolean): void {
   setRewriteCurrentUserAmbientActive(!!on);
 }
 
-// g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — the file's
+// g-request-ref-nested-in-lift-misroute (CONVERGENCE, S351-peter) — the file's
 // registered-`<request>` id set, established ONCE per file at the client-codegen
 // entry (`generateClientJs`) via `collectRequestIds(fileAST)`. This is the single
 // source of truth for the request-ref escape-hatch reparse gate.
 //
-// WHY a module-level fallback: `collectRequestIds(fileAST)` is a per-file quantity,
-// but historically it was recomputed and hand-threaded per call-site by 3+
-// independent mechanisms (EmitExprContext.requestIds, emit-lift's
+// WHY a module-level source of truth: `collectRequestIds(fileAST)` is a per-file
+// quantity, but historically it was recomputed and hand-threaded per call-site by
+// 3+ independent mechanisms (EmitExprContext.requestIds, emit-lift's
 // `_scrml_lift_request_ids_stack` pushed only by emitIfStmt/emitForStmt, and
 // emit-each's `_eachRequestIds`) that did NOT cover every path — so a `<#id>`
 // request ref reached through a Tier-0 `while`/`do…while` lift body, or an
 // `<each>` reached from a lift body, carried an EMPTY `requestIds`, skipped the
 // reparse, stayed on the string-fallback path, and mis-routed to the tree-shaken
 // `_scrml_input_state_registry` → hard ReferenceError at mount (#511/#512 reopened
-// this family twice by patching individual positions). Rather than add a 4th, 5th…
-// per-path thread, `reparseRequestRefEscapeHatch` falls back to THIS set whenever
-// the hand-threaded `requestIds` is empty/undefined. Cleared (→ null) at the end
-// of `generateClientJs` so nothing leaks across files.
+// this family twice by patching individual positions). Every routing seam consults
+// this via `effectiveRequestIds` — the UNION with any hand-threaded set, so a
+// partial or empty threaded set can never bypass the per-file set and silently
+// reopen the misroute. Cleared (→ null) at the end of `generateClientJs` so
+// nothing leaks across files.
 let _currentFileRequestIds: Set<string> | null = null;
 
 /**
@@ -233,18 +234,29 @@ export function setCurrentFileRequestIds(ids: Set<string> | null): void {
 }
 
 /**
- * The EFFECTIVE registered-`<request>` id set for a routing decision: prefer the
- * hand-threaded `ctx.requestIds` when it is non-empty, else fall back to the
- * single per-file source of truth (`_currentFileRequestIds`, established by
- * `generateClientJs`). Every `<#id>` request-vs-input-state routing seam consults
- * THIS so a ref reached through a control-flow position whose bespoke threading
- * never carried the set (while/do-while lift bodies, `<each>` reached from a lift
- * body) still routes to `_scrml_request_<id>` instead of the tree-shaken
- * `_scrml_input_state_registry`. The set only ever holds real registered ids, so
- * a non-request `<#id>` is never captured (the §GATE holds by construction).
+ * The EFFECTIVE registered-`<request>` id set for a routing decision: the UNION of
+ * any hand-threaded set with the single per-file source of truth
+ * (`_currentFileRequestIds`, established by `generateClientJs`). A union — NOT
+ * prefer-then-fallback — so a partial or empty threaded set can never bypass the
+ * per-file set and reopen the misroute (the whole point of the convergence). The
+ * set only ever holds real registered ids, so a non-request `<#id>` is never
+ * captured (the §GATE holds by construction). Returns `undefined` only when BOTH
+ * sources are absent/empty. This is the ONE place the fallback rule lives — every
+ * seam (the reparse gate, `emitIdent`, `emitInputStateRef`) routes through it.
  */
-function effectiveRequestIdsFromCtx(ctx: EmitExprContext): Set<string> | null {
-  return ctx.requestIds && ctx.requestIds.size > 0 ? ctx.requestIds : _currentFileRequestIds;
+export function effectiveRequestIds(threaded: Set<string> | undefined): Set<string> | undefined {
+  const file = _currentFileRequestIds;
+  const fileEmpty = !file || file.size === 0;
+  const threadedEmpty = !threaded || threaded.size === 0;
+  if (fileEmpty) return threadedEmpty ? undefined : threaded;
+  if (threadedEmpty) return file;
+  const union = new Set<string>(file);
+  for (const id of threaded) union.add(id);
+  return union;
+}
+
+function effectiveRequestIdsFromCtx(ctx: EmitExprContext): Set<string> | undefined {
+  return effectiveRequestIds(ctx.requestIds);
 }
 
 
@@ -834,24 +846,21 @@ export function reparseRequestRefEscapeHatch(
   requestIds: Set<string> | undefined,
   gateToRegisteredRequests: boolean,
 ): ExprNode | null | undefined {
-  // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — the EFFECTIVE
-  // registered-request set: prefer the hand-threaded `requestIds` when it is
-  // non-empty, else fall back to the single per-file source of truth established
-  // by `generateClientJs` (`setCurrentFileRequestIds`). This is what closes the
-  // while/do-while-lift + each-in-lift paths whose bespoke threading never carried
-  // the set — WITHOUT adding a 4th per-path thread. The set only ever holds real
-  // registered request-ids, so the §GATE (a non-request `<#id>` is left on its
-  // pre-fix path) still holds by construction via `rawReferencesRegisteredRequest`.
-  const effectiveRequestIds: Set<string> | undefined =
-    requestIds !== undefined && requestIds.size > 0 ? requestIds : _currentFileRequestIds ?? undefined;
+  // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — route through the single
+  // `effectiveRequestIds` helper (the UNION of the hand-threaded set with the
+  // per-file source of truth), so the while/do-while-lift + each-in-lift paths
+  // whose bespoke threading never carried the set still reparse. The set only ever
+  // holds real registered request-ids, so the §GATE (a non-request `<#id>` left on
+  // its pre-fix path) holds by construction via `rawReferencesRegisteredRequest`.
+  const effIds = effectiveRequestIds(requestIds);
   if (
     (!node || (node as any).kind === "escape-hatch") &&
     typeof raw === "string" &&
     raw.includes("<#") &&
     (!gateToRegisteredRequests ||
-      (effectiveRequestIds !== undefined &&
-        effectiveRequestIds.size > 0 &&
-        rawReferencesRegisteredRequest(raw, effectiveRequestIds)))
+      (effIds !== undefined &&
+        effIds.size > 0 &&
+        rawReferencesRegisteredRequest(raw, effIds)))
   ) {
     try {
       const reparsed = parseExprToNode(raw, label, 0) as ExprNode | null;
