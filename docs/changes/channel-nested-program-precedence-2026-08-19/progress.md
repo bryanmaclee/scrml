@@ -44,3 +44,61 @@ Supporting sentence found while reading (not in the BRIEF), SPEC.md:35548 — §
 shares the application `<program>` scope — so a per-`<program>` build story does not extend to it."
 This is SPEC drawing the same distinction the ruling rests on, from the opposite side: `<page>`
 shares the `<program>` scope; a nested `<program>` does NOT.
+
+## 2026-08-19 — locus verification (PA-LOCATED-VERIFY)
+
+**HELD.** `compiler/src/symbol-table.ts`, `walkChannelPlacement`. The BRIEF's contract-note range
+`:9416`-`:9451` is exact. The fire pair is at `:10035` / `:10045`:
+
+    if (isChannelMarkup && pageDepth >= 1)                            -> fireChannelInsidePage(...)
+    else if (isChannelMarkup && programDepth === 0 && fileHasProgram) -> fireChannelOutsideProgram(...)
+
+Depth computation at `:10057`-`:10058`:
+
+    const childProgramDepth = tag === "program" ? programDepth + 1 : programDepth;
+    const childPageDepth    = tag === "page"    ? pageDepth + 1    : pageDepth;
+
+`hasProgramElement` (`:9918`) is a STRUCTURAL AST walk, not a source-text regex — invariant 55 does
+NOT apply.
+
+## 2026-08-19 — pre-fix empirical probe (execute, don't grep)
+
+Ran a 7-case probe through `splitBlocks` -> `buildAST` -> `runSYM`. Verbatim pre-fix results:
+
+| case | shape | pre-fix SYM |
+|---|---|---|
+| A | `<program>` > `<page>` > `<program name=w>` > `<channel>` | **E-CHANNEL-INSIDE-PAGE** (the ruled-wrong fire) |
+| B | `<page>` > `<program name=w>` > `<channel>` (route file)   | **E-CHANNEL-INSIDE-PAGE** |
+| C | `<program>` > `<page>` > `<channel>` (genuine page-nested) | E-CHANNEL-INSIDE-PAGE (must STAY) |
+| D | `<program>` > `<channel>` sibling of `<page>` (canonical)  | (none) |
+| E | `<program>` > `<page>` > `<program w>` > `<page>` > `<channel>` | E-CHANNEL-INSIDE-PAGE (must STAY: page inside the fresh scope) |
+| F | `<program>` > `<program w>` > `<channel>` (no page)        | (none) — already accepted |
+| G | file-top `<channel>` + a program-in-page elsewhere         | E-CHANNEL-OUTSIDE-PROGRAM |
+
+TAB parses A/B/E without error — the nested-`<program>`-inside-`<page>` shape is genuinely
+constructible, so this is a live mis-fire, not a shape the parser rejects first.
+
+## 2026-08-19 — migration measurement (MY OWN NUMBER, not the BRIEF's)
+
+Walked EVERY `.scrml` in the worktree (skipping node_modules/.git/dist/.claude), building the real
+AST and classifying every `<channel>` by the walker's own ancestor semantics.
+
+    .scrml files walked : 2362   (== `git ls-files '*.scrml' | wc -l` = 2362, exact)
+      parsed ok         : 2362
+      parse failed      : 0
+    <channel> nodes     : 53
+
+    PLACEMENT POPULATIONS          pre-fix -> post-fix
+      REJECT E-CHANNEL-INSIDE-PAGE      1 -> 1
+      REJECT E-CHANNEL-OUTSIDE-PROGRAM  1 -> 1
+      ACCEPT canonical (in <program>)  41 -> 41
+      ACCEPT dispensed (PURE-CHANNEL)  10 -> 10
+
+The BRIEF's S239 figure was 2260 files / 0 page-nested channels. **My number is 2362 files and
+ONE page-nested channel** — and it is `conformance/cases/channel/inside-page/case.scrml`, the
+deliberate NEGATIVE fixture for the diagnostic itself. Zero in adopter / example / sample / stdlib
+code. That fixture is `<program>` > `<page>` > `<channel>` with NO intervening `<program>`, so it
+is the arm that must keep rejecting; it is unmoved by the fix.
+
+**Nested-`<program>`-inside-`<page>` channels in the corpus: ZERO.** Blast radius of the
+newly-accepting direction is zero, measured, not assumed.
