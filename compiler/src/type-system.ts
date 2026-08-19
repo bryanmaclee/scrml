@@ -7288,10 +7288,18 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // the structural detector landed, the one spelling that SILENCED the §14.8.9
   // raw-egress gate. The compiler steered authors onto the leak.
   //
-  // Deliberately NARROW: only `Response`. `Request` is a parameter binding from
-  // the `handle(request, resolve)` signature, not a bare global, and `Headers` /
-  // `FormData` / `Blob` are named nowhere in §40.3 — admitting them would be a
-  // widening, not a conformance restoration, and needs its own ruling.
+  // Deliberately NARROW: only `Response`, because only `Response` is CONSTRUCTED
+  // by a §40.3 worked example.
+  //
+  // `Request` is excluded, and the reason is NOT "it is a parameter binding" —
+  // that conflates two different names. The lowercase `request` in
+  // `handle(request, resolve)` is a parameter and never consults this list at
+  // all; the capitalized `Request` is the global CONSTRUCTOR, a distinct name
+  // that this list is exactly the arbiter of. It is left out because no §40.3
+  // example constructs one from adopter logic — the request ARRIVES, it is not
+  // built — so admitting it would be a widening, not a conformance restoration.
+  // Same for `Headers` / `FormData` / `Blob`, named nowhere in §40.3. Each needs
+  // its own ruling.
   // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1)
   "Response",
   // Language keywords that may surface as idents after expression parsing
