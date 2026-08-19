@@ -214,3 +214,49 @@ redden for free.
 
 All four `runtime-template.js` mutations were reverted with
 `git checkout --`; `git status --short` is clean after each.
+
+## 2026-08-19 — Item 7: full-suite name-set comparison
+
+`bun run test` (the full tree, browser tier included).
+
+| | pass | skip | todo | fail | files |
+|---|---|---|---|---|---|
+| BEFORE (`36ed3d05`, run 2) | 30,033 | 216 | 1 | 53 | 1,365 |
+| AFTER  | 30,041 | 216 | 1 | 53 | 1,366 |
+
+`+8 pass` = the ratchet file's 8 tests. `+1 file` = the ratchet file.
+
+**Failure NAME SET: IDENTICAL.** 52 unique names before, 52 after, `diff`
+clean in both directions — zero new failures, zero that vanished.
+
+⚑ **The full-tree baseline is FLAKY and this matters for anyone reading a
+raw count.** Two back-to-back `bun run test` runs on the *same* commit
+`36ed3d05` with no edits between them gave **55 fail** and then **53 fail**.
+The name set was captured from the 53-fail run, so the comparison above is
+set-vs-set on identical runs. A count-only comparison would have been
+meaningless here — the count moves on its own by ±2. All 53 are browser-tier
+(happy-dom global-state leakage, dev-watcher timing); none is size-related.
+
+**The pre-commit tier — the one that actually gates commits — is fully
+green, before and after:**
+
+```
+bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js
+ 28770 pass / 86 skip / 1 todo / 0 fail   (BEFORE, 269.81s)
+```
+
+The 53 browser-tier failures are excluded by the hook, which is why they do
+not block commits.
+
+## 2026-08-19 — Pre-existing, surfaced not fixed
+
+- **`docs/FACTS.md` `@generated:facts-table` is STALE at `36ed3d05`, before
+  any change of mine.** Verified by reverting `compiler/tests/` to the base
+  commit and re-running `bun scripts/facts.ts --check` — still STALE. The
+  pre-push gate blocks on it, so it is regenerated in this branch's final
+  commit as gate-satisfaction, but the staleness was inherited.
+- **16 heading/marker status drifts in `docs/known-gaps.md`** reported by
+  `bun scripts/state.ts --check` (WARN-only, not gated). All pre-existing;
+  none is `g-spa-runtime-gzip-budget-knife-edge`.
+- **The stale 127 B figure also lives OUTSIDE `docs/known-gaps.md`** — see
+  the report's DEFERRED_ITEMS. Not touched: item 6 scoped to that one file.
