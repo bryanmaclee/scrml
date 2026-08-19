@@ -161,7 +161,20 @@ function gapMarkersFrom(text: string) {
   // Fail loudly on a marker that exists but does not parse. A dropped marker is
   // strictly worse than an unknown status: the entry vanishes from the count
   // with nothing to indicate it was ever there.
-  const markerCount = (text.match(/<!--\s*@gap\s+id=(?!<)/g) || []).length;
+  // g-state-malformed-crosscheck-assumes-id-first — count every @gap marker
+  // carrying a REAL id (not the doc's own `id=<...>` format example), regardless
+  // of attribute ORDER, so it stays consistent with the order-independent
+  // `markerRe`/attr-bag parse above. The previous `id=`-first regex missed a
+  // marker whose `sev=`/`status=` preceded `id=`, making tokens.length exceed
+  // this count and tripping a FALSE malformed error on a well-formed file.
+  const markerCount = (text.match(/<!--\s*@gap\s+[\s\S]*?-->/g) || []).filter((mk) => {
+    const bag = mk.replace(/^<!--\s*@gap\s+/, "").replace(/\s*-->$/, "").trim();
+    for (const pair of bag.split(/\s+/)) {
+      const eq = pair.indexOf("=");
+      if (eq > 0 && pair.slice(0, eq) === "id") return !pair.slice(eq + 1).startsWith("<");
+    }
+    return false; // no id attr → skipped by the parse loop too (not counted)
+  }).length;
   if (malformed.length > 0 || tokens.length !== markerCount) {
     const lines = malformed.map((t) => `    ${t}`).join("\n");
     throw new Error(

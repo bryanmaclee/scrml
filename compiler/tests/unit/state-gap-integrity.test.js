@@ -90,3 +90,25 @@ describe("state.ts §3 — heading/marker status drift is detected (not silent)"
     expect(headingMarkerDrift(text).length).toBe(0);
   });
 });
+
+describe("state.ts §4 — the malformed cross-check is attribute-ORDER-independent (g-state-malformed-crosscheck-assumes-id-first)", () => {
+  test("a well-formed marker with sev=/status= BEFORE id= parses (does not trip a false 'dropped marker' throw)", () => {
+    const text = [
+      "<!-- @gap id=g-normal sev=MED status=open -->",
+      "<!-- @gap sev=HIGH status=open id=g-idlater -->", // id NOT first — the exact shape the id-first count regex missed
+    ].join("\n");
+    // Pre-fix: markerRe caught g-idlater (→ token) but the `id=`-first count regex
+    // did not, so tokens.length !== markerCount and parseGapMarkers threw. Post-fix
+    // the count is order-independent, so both parse cleanly.
+    const ids = parseGapMarkers(text).map((t) => t.id).sort();
+    expect(ids).toEqual(["g-idlater", "g-normal"]);
+  });
+
+  test("the doc's own `id=<placeholder>` format example is still excluded from the count", () => {
+    const text = [
+      "<!-- @gap id=<stable-id> sev=MED status=open -->", // format example, not an entry
+      "<!-- @gap sev=MED status=open id=g-real -->",       // real, id-later
+    ].join("\n");
+    expect(parseGapMarkers(text).map((t) => t.id)).toEqual(["g-real"]);
+  });
+});
