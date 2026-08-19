@@ -102,3 +102,141 @@ is the arm that must keep rejecting; it is unmoved by the fix.
 
 **Nested-`<program>`-inside-`<page>` channels in the corpus: ZERO.** Blast radius of the
 newly-accepting direction is zero, measured, not assumed.
+
+## 2026-08-19 — fix implemented
+
+`compiler/src/symbol-table.ts`, `walkChannelPlacement`, one behavioural line:
+
+    const childPageDepth =
+      tag === "program" ? 0
+      : tag === "page" ? pageDepth + 1
+      : pageDepth;
+
+Post-fix probe (same 7 cases as the pre-fix run above):
+
+| case | pre-fix | post-fix |
+|---|---|---|
+| A `<program>` > `<page>` > `<program w>` > `<channel>` | E-CHANNEL-INSIDE-PAGE | **(none)** |
+| B `<page>` > `<program w>` > `<channel>`               | E-CHANNEL-INSIDE-PAGE | **(none)** |
+| C `<program>` > `<page>` > `<channel>`                 | E-CHANNEL-INSIDE-PAGE | E-CHANNEL-INSIDE-PAGE |
+| D canonical sibling                                    | (none) | (none) |
+| E re-page inside nested program                        | E-CHANNEL-INSIDE-PAGE | E-CHANNEL-INSIDE-PAGE |
+| F nested program, no page                              | (none) | (none) |
+| G file-top channel                                     | E-CHANNEL-OUTSIDE-PROGRAM | E-CHANNEL-OUTSIDE-PROGRAM |
+
+## 2026-08-19 — the `fileHasProgram` adjacent hole: ALREADY CORRECT, and why
+
+The pre-scan does NOT need to become per-scope. The argument is structural, not empirical:
+
+1. Arm (b) is guarded by `programDepth === 0`. Every node that can consume `fileHasProgram`
+   therefore has NO `<program>` ancestor, so its innermost enclosing compilation unit IS the file.
+   "Does my scope contain a `<program>`" and "does the FILE contain a `<program>`" are the same
+   question over the same subtree for exactly the reachable set.
+2. Symmetrically the reset can never promote a node INTO arm (b): every node whose `pageDepth` the
+   reset rewrites was reached by descending a `<program>`, hence has `programDepth >= 1`. The two
+   arms are separated by a predicate the reset cannot cross.
+
+Not left to assertion — pinned by four §B19.14 PRE-SCAN tests, one of which (the file whose ONLY
+`<program>` is nested inside a `<page>`) is the sole test in the entire B19 suite that catches
+adversarial mutant 3.
+
+## 2026-08-19 — bite proofs
+
+**ACCEPT arm — 8 of the new tests FAIL against the pre-fix compiler.** Verbatim excerpt:
+
+    error: expect(received).toHaveLength(expected)
+    Expected length: 0
+    Received length: 1
+    (fail) §B19.14 ... > ENTRY-FILE: `<program>` > `<page>` > nested `<program>` > `<channel>` — ACCEPTED
+    (fail) §B19.14 ... > ROUTE-FILE: top-level `<page>` > nested `<program>` > `<channel>` — ACCEPTED
+    (fail) §B19.14 ... > the reset is an ANCESTOR reset — intermediate markup ...
+    (fail) §B19.14 ... > intermediate markup INSIDE the nested `<program>` too — still ACCEPTED
+    (fail) §B19.14 ... > TWO channels in one nested `<program>` — both accepted, zero diagnostics
+    (fail) §B19.14 ... > MIXED file — one page-nested channel REJECTS while its sibling is ACCEPTED
+    (fail) §B19.14 ... > the reset does not leak to a LATER sibling `<page>` subtree
+    (fail) §B19.14 ... > PRE-SCAN — a channel nested in a `<program>` never reaches arm (b) ...
+     43 pass / 8 fail   (pre-fix)   ->   52 pass / 0 fail   (post-fix)
+
+**REJECT arm — cannot bite a fix by construction** (it pins behaviour that must NOT change), so it
+was proven against FOUR adversarial mutants instead:
+
+| mutant | what it gets wrong | caught by |
+|---|---|---|
+| 1 — accept any channel at `programDepth >= 1` (the over-wide reading of "reverse the precedence") | drops the `<page>` fence entirely | 4 new + 6 existing §B19.12 |
+| 2 — `childPageDepth = 0` unconditionally (page counter deleted) | same, plus route files | 5 new |
+| 3 — pre-scan made "per-scope" by not descending `<page>` | re-admits the canonical-violation shape silently | **exactly 1 new test, and NOTHING else in the suite** |
+| 4 — `&& fileHasProgram` dropped from arm (b) | kills the PURE-CHANNEL-FILE dispensation | 1 new |
+| 5 — reset INVERTED (`<program>` arms instead of clears) | fires on canonical placement | 2 new |
+
+Every one of the 17 new tests bites at least one wrong implementation, except one deliberate cheap
+companion ("same shape WITH a top-level `<program>`") kept as a complement to the sharp case.
+
+**Conformance** `channel/in-nested-program-inside-page`. Pre-fix, verbatim:
+
+    FAIL  channel/in-nested-program-inside-page
+            forbidden codes present: ["E-CHANNEL-INSIDE-PAGE"]
+            emitted: ["E-CHANNEL-INSIDE-PAGE"]
+    conformance (impl#1): 883/884 cases pass, 1 FAILED
+
+Post-fix: `PASS`, `conformance (impl#1): 884/884 cases pass`.
+
+## 2026-08-19 — population counts
+
+- **Newly ACCEPTS:** the nested-`<program>` placement site — `<page>` > `<program>` > `<channel>`,
+  at any `<page>`/`<program>` nesting depth and behind any intermediate markup. Corpus instances: 0.
+- **Still REJECTS:** `E-CHANNEL-INSIDE-PAGE` on 1 corpus site (the conformance reject fixture) and
+  every genuinely page-nested shape; `E-CHANNEL-OUTSIDE-PROGRAM` on 1 corpus site.
+- **Unchanged ACCEPTS:** 41 canonical in-`<program>` + 10 PURE-CHANNEL-FILE dispensed.
+- Pre-fix -> post-fix over all 53 corpus channels: 1->1 / 1->1 / 41->41 / 10->10. Zero corpus delta.
+
+## 2026-08-19 — SPEC §38.1 amendment
+
+Added invariant **1a** (nested-`<program>` placement scope) + a qualifying clause on invariant 1,
+with inline Rule 4b provenance. **Confined to §38.1** per the dispatch bar (10 insertions, 1
+deletion, all inside §38.1).
+
+## 2026-08-19 — BLOCKER: pre-commit hook cannot pass (ENVIRONMENT, not the change)
+
+`git commit` of the code half is REFUSED by the pre-commit hook. Cause verified BY EXECUTION of the
+hook's own command, not inferred:
+
+    $ bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance \
+        compiler/tests/*.test.js --bail
+    (fail) fs.watch reload (watch: true) > registers watchers when watch:true
+
+That test is PRE-EXISTING RED on this machine at the unmodified base commit (measured at session
+start, before any edit). Root cause, measured:
+
+    $ bun -e '... fs.watch("/tmp/wtest.txt") ...'
+    fs.watch THREW: EMFILE: too many open files
+
+    /proc/sys/fs/inotify/max_user_instances = 128
+    in use system-wide                       = 123
+    held by leaked `scrml dev` test servers  = 76   (84 processes, aged 1h20m .. 31h)
+
+The leaked processes are `compiler/bin/scrml.js dev /tmp/scrml-dev-throw-*` servers spawned by
+PRIOR dispatches' tests (e.g. worktree `agent-a3748d68a1d807f9c`) that never tore them down. They
+exhaust the per-user inotify instance pool, so `_startWatcher` (`compiler/runtime/stdlib/mcp.js:211`)
+throws and swallows, `_watchers` stays empty, and the assertion `watcherCount === 3` sees 0.
+
+Remediation attempted and DENIED: reaping the >2h-old leaked servers was blocked by the tool
+classifier. Not worked around. `--no-verify` and a `core.hooksPath` override are both forbidden by
+the dispatch brief and neither is authorized.
+
+**Nothing is lost.** The complete code half is committed as
+`docs/changes/channel-nested-program-precedence-2026-08-19/code-half.patch.txt` (570 lines, verified to
+apply). Once the inotify pool is freed, the code half lands with:
+
+    git apply docs/changes/channel-nested-program-precedence-2026-08-19/code-half.patch.txt  # if unstaged
+    git add compiler/src/symbol-table.ts compiler/tests/unit/channel-placement-shared-b19.test.js \
+            conformance/cases/channel/in-nested-program-inside-page/
+    git commit   # hook will now pass
+
+## 2026-08-19 — test baselines (gate subset, no --bail)
+
+    BEFORE : 28776 pass / 86 skip / 1 todo / 2 fail
+    AFTER  : 28793 pass / 86 skip / 1 todo / 2 fail
+
++17 pass == exactly the 17 new §B19.14 tests. The 2 failures are the same two pre-existing
+EMFILE-caused `fs.watch` tests in both runs. ZERO new failures.
+Conformance: 883/883 before -> 884/884 after.
