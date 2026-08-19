@@ -260,28 +260,56 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
  *   `globalThis.Response`       -> "Response"   (member, property)
  *   `window.Response`           -> "Response"
  *   `globalThis.foo.Response`   -> "Response"
+ *   `globalThis["Response"]`    -> "Response"   (index, STATIC string key)
+ *   `window["foo"]["Response"]` -> "Response"
  *
- * Returns null for a shape with no static terminal name (a call result, an index
- * with a computed key, a literal). A null answer is a NON-match, which is safe
- * here only because the caller treats "no recognised egress" as "the compiler
- * owns this sink" — see the population note on `detectProtectedRawEgress`.
+ * `a["b"]` denotes exactly the property `a.b` denotes, so it has to answer the
+ * same: a bracket with a string-literal key is statically resolvable, and a gate
+ * that reads one spelling and not the other is a spelling trick away from a
+ * leak. (Measured before this was closed: `new globalThis["Response"](...)` over
+ * a protected row compiled at exit 0 with zero diagnostics and the executed
+ * handler answered `{"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}`.)
+ *
+ * Returns null for a shape with no static terminal name: a call result, a
+ * literal, or an index whose key is genuinely DYNAMIC (`a[k]`, `a[cond ? x : y]`
+ * — the key's value is not in the tree). A null answer is a NON-match, which is
+ * safe here only because the caller treats "no recognised egress" as "the
+ * compiler owns this sink" — see the population note on
+ * `detectProtectedRawEgress`.
  */
 function terminalName(node: unknown): string | null {
   if (!node || typeof node !== "object") return null;
-  const n = node as { kind?: string; name?: string; property?: string };
+  const n = node as { kind?: string; name?: string; property?: string; index?: unknown };
   if (n.kind === "ident" && typeof n.name === "string") return n.name;
   if (n.kind === "member" && typeof n.property === "string") return n.property;
+  if (n.kind === "index") return staticIndexKey(n.index);
   return null;
 }
 
 /**
- * The receiver of a member expression, resolved through its own chain:
- * `Response.json` -> "Response"; `globalThis.Response.json` -> "Response".
+ * The STATIC string key of an `expr[key]` index, or null when the key is not a
+ * string the tree already carries. A double-quoted string and a static backtick
+ * template are both literal `kind: "lit"` nodes with the interpreted `value` on
+ * them (`types/ast.ts` LitExpr), so this reads the tree's own answer — it is not
+ * a re-scan of source text (invariant 55).
+ */
+function staticIndexKey(index: unknown): string | null {
+  if (!index || typeof index !== "object") return null;
+  const i = index as { kind?: string; litType?: string; value?: unknown };
+  if (i.kind !== "lit") return null;
+  if (i.litType !== "string" && i.litType !== "template") return null;
+  return typeof i.value === "string" ? i.value : null;
+}
+
+/**
+ * The receiver of a property access, resolved through its own chain:
+ * `Response.json` -> "Response"; `globalThis.Response.json` -> "Response";
+ * `Response["json"]` -> "Response"; `globalThis["Response"].json` -> "Response".
  */
 function memberReceiverName(node: unknown): string | null {
   if (!node || typeof node !== "object") return null;
   const n = node as { kind?: string; object?: unknown };
-  if (n.kind !== "member") return null;
+  if (n.kind !== "member" && n.kind !== "index") return null;
   return terminalName(n.object);
 }
 
@@ -338,13 +366,36 @@ function annotationIsAsIs(annotation: unknown): boolean {
  * its member chain, so every MEMBER-CHAIN spelling of a constructor reaches the
  * same conclusion as the bare one.
  *
- * **Residual bound — stated so it is not over-claimed.** Callee resolution is
- * SYNTACTIC, not binding-aware: a local rebinding (`const R = Response; new R()`)
- * still reads as `R` and is not recognised. Closing that needs the name resolver,
- * not a wider callee test, and the source-text form it replaces had the identical
- * hole — this is carried forward, not introduced. Likewise only `Response.json`
- * is treated as a static factory egress: `Response.redirect` / `Response.error`
- * carry no caller-supplied body, so no protected column can ride them.
+ * **Residual bound — stated so it is not over-claimed.** Every bound below was
+ * measured by compiling the shape and EXECUTING the emitted handler, not read
+ * off the code.
+ *
+ *   1. **Callee resolution is SYNTACTIC, not binding-aware.** A name that is not
+ *      in the tree is not resolved: a local rebinding (`let R = Response;
+ *      new R()`) and a dynamic bracket key (`let k = "Response";
+ *      globalThis[k]`) both read as themselves. Closing either needs the name
+ *      resolver / constant propagation, not a wider callee test.
+ *
+ *      Parity with the source-text form this replaces, stated precisely because
+ *      an earlier revision of this comment overstated it: `let R =
+ *      globalThis.Response` and `globalThis[k]` are silent on `origin/main` too
+ *      — carried forward. `let R = Response` is NOT: on `origin/main` that
+ *      program fails `E-SCOPE-001` (`Response` is absent from
+ *      `LOGIC_SCOPE_GLOBAL_ALLOWLIST` there) and does not compile at all. This
+ *      branch allowlists `Response` for §40.3.5, which makes that spelling
+ *      reachable. For that one spelling this is a WIDENING of the residual, not
+ *      a carry-forward, and it is pinned as such in
+ *      `g-sql-row-protect-leak.test.js`.
+ *
+ *   2. **Detection is PER FUNCTION BODY.** A protected `?{}` in one function
+ *      reaching a raw egress in another — the ordinary `let u = loadUser(id)`
+ *      helper split — is invisible to a per-body co-occurrence test. This is the
+ *      most idiomatic of the residual shapes and it carries forward from the
+ *      source-text form, which was equally per-body. Executed leak, measured.
+ *
+ *   3. **Only `Response.json` is a static-factory egress.** `Response.redirect`
+ *      / `Response.error` carry no caller-supplied body, so no protected column
+ *      can ride them.
  *
  * **Declassification is NOT handled here (ruling dpa-033 (c), S352).** §14.8.9
  * scopes `reveal` to the VALUE — "explicitly declassified via the field-level

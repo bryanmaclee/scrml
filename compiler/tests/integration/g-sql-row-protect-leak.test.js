@@ -405,6 +405,69 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
   });
 
+  // -------------------------------------------------------------------------
+  // H2 (S353 adversarial round 3) — a BRACKET with a static string key denotes
+  // exactly the property the dot form denotes, so it has to answer the same.
+  // `a["b"]` parses to an INDEX node (`types/ast.ts`: MemberExpr.property is a
+  // plain string; computed access is IndexExpr), which `terminalName` did not
+  // resolve, so every bracket spelling was a non-match.
+  //
+  // Measured before the fix: each of these compiled at exit 0 with zero
+  // diagnostics, and the emitted handler, executed verbatim against a stubbed
+  // `_scrml_sql`, answered
+  //   STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+  const bracketShapes = {
+    'new globalThis["Response"](...)': `return new globalThis["Response"](JSON.stringify(u))`,
+    "new globalThis['Response'](...)": `return new globalThis['Response'](JSON.stringify(u))`,
+    'new window["Response"](...)': `return new window["Response"](JSON.stringify(u))`,
+    'new globalThis["foo"]["Response"](...)': `return new globalThis["foo"]["Response"](JSON.stringify(u))`,
+    'globalThis["Response"].json(...)': `return globalThis["Response"].json(u)`,
+    'Response["json"](...)': `return Response["json"](u)`,
+  };
+  for (const [label, ret] of Object.entries(bracketShapes)) {
+    test(`\`${label}\` fires E-PROTECT-004 (static bracket key resolves)`, () => {
+      const { result } = compileSource(protectProgram(
+        `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        ${ret}\n      }`,
+      ));
+      const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+      expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+    });
+  }
+
+  // The DOCUMENTED RESIDUAL, pinned so it is visible rather than assumed closed.
+  // Callee resolution is SYNTACTIC: a key whose value is not in the tree
+  // (`globalThis[k]`) and a local rebinding (`let R = Response; new R()`) are
+  // both unresolved, and both need the name resolver / constant propagation, not
+  // a wider callee test. If a later arc closes either, THESE TESTS GO RED — that
+  // is the point: the residual paragraph in `protect-egress.ts` must be updated
+  // in the same change.
+  //
+  // NOT parity with `main` for the rebinding spelling: on `origin/main`
+  // `let R = Response` fails E-SCOPE-001 (`Response` is not allowlisted there),
+  // so that program does not compile at all. This branch allowlists `Response`
+  // for §40.3.5, which makes the spelling reachable — a WIDENING of this
+  // residual, not a carry-forward. The `let R = globalThis.Response` and
+  // `globalThis[k]` spellings ARE carry-forwards (verified: silent on
+  // `origin/main` too).
+  test("RESIDUAL (documented): a dynamic bracket key `globalThis[k]` is not resolved", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        let k = "Response"\n        return new globalThis[k](JSON.stringify(u))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+
+  test("RESIDUAL (documented, WIDENED by this branch): a local rebinding `let R = Response` is not resolved", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        let R = Response\n        return new R(JSON.stringify(u))\n      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    // ...and it no longer build-blocks either, which is the widening: on
+    // `origin/main` this same source fails E-SCOPE-001.
+    expect(all.some((d) => d.code === "E-SCOPE-001")).toBe(false);
+  });
+
   // The foreign-block egress kind is a NODE KIND, so every opener level answers
   // the same. Pre-fix `/(^|[^A-Za-z0-9_$])_\{/` matched only the LEVEL-0 opener,
   // so the canonical `_={ … }=` form SPEC §23.2.4a's own worked example uses
