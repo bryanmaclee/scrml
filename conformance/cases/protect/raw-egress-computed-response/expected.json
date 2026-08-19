@@ -1,0 +1,13 @@
+{
+  "id": "protect-raw-egress-computed-response",
+  "description": "§14.8.9 raw-egress fail-closed — a BRACKET access with a static string key denotes exactly the property the dot form denotes, so `new globalThis[\"Response\"](...)` fires E-PROTECT-004 identically to `new globalThis.Response(...)` and to a bare `new Response(...)`. Pins the fix for a measured fail-open in the structural detector's FIRST cut: `a[\"b\"]` parses to an INDEX node (types/ast.ts — `MemberExpr.property` is a plain string, computed access is `IndexExpr`), which the callee resolver did not resolve, so this exact file compiled at exit 0 with ZERO diagnostics and the emitted handler, executed, answered `{\"id\":1,\"name\":\"ada\",\"passwordHash\":\"$argon2id$SECRET\"}`. The bracket forms `window[\"Response\"]`, `globalThis[\"foo\"][\"Response\"]`, `globalThis[\"Response\"].json(...)` and `Response[\"json\"](...)` all reach the same conclusion.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9's closed-world precondition (SPEC.md:8519-8525) puts the SHALL on the CONSTRUCT — 'a manual `Response` / `handle()` body (§40)' — not on a spelling of it, so a detector that recognises one surface form and not another under-enforces the normative rule. A bracket with a string-literal key is STATICALLY RESOLVABLE: the key's value is on the `lit` node the parser already built, so reading it is the tree's own answer, not a re-scan of source text (invariant 55). The residual is the genuinely dynamic key (`let k = \"Response\"; globalThis[k]`), whose value is not in the tree — that needs the name resolver / constant propagation, and it is stated as a bound in `detectProtectedRawEgress` rather than claimed closed. provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": ["E-SCOPE-001"],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}
