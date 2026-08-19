@@ -169,3 +169,49 @@ caller-supplied body.
   was the `authed-server-fn-response-http` pin, fixed after that run started (re-verified 17/17); the
   other two are the pre-existing `fs.watch reload` env failures, present in the `3b5eed44` baseline.
   **Net new failures: 0.**
+
+## 2026-08-19 — FINAL state + landing instructions
+
+**Final test sweep (full pre-commit scope, post-all-edits, clean tree):**
+**28786 pass · 2 fail · 86 skip · 1 todo** across 1245 files (385 s).
+Both failures are `fs.watch reload (watch: true)` — the pre-existing inotify-exhaustion env
+failures, present verbatim in the `3b5eed44` baseline. **Net new failures: 0.**
+
+Corroborating targeted runs, all on the final tree:
+`compiler/tests/integration` + `compiler/tests/conformance` → 4800 pass / 0 fail / 50 skip ·
+`g-sql-row-protect-leak.test.js` → 44/44 · `authed-server-fn-response-http.test.js` → 17/17 ·
+`bun conformance/run.ts` → 887/887.
+
+## LANDING INSTRUCTIONS (the code is NOT committed as code — see the blocker)
+
+1. Apply the patch:
+   `git apply docs/changes/raw-egress-structural-fix-2026-08-19/wip-source.patch.txt`
+   It carries **17 file changes**: `compiler/SPEC.md`, `compiler/src/codegen/protect-egress.ts`,
+   `compiler/src/codegen/emit-server.ts`, `compiler/src/type-system.ts`,
+   `compiler/tests/integration/g-sql-row-protect-leak.test.js`,
+   `compiler/tests/integration/authed-server-fn-response-http.test.js`, and the
+   `conformance/cases/protect/` set (1 rename + 4 new).
+
+2. **Reap the orphaned dev servers first, or the pre-commit gate cannot run.** They are
+   `bun … scrml.js dev /tmp/scrml-dev-*/entry.scrml --port 0` processes, ~76 of them, aged up to
+   1d6h, all reparented, holding the per-user inotify instance cap. A dry-run lister is at
+   `.tmp/repro/reap-orphaned-dev-servers.sh` (scoped to `scrml.js dev /tmp/scrml-dev-` + `--port 0`
+   + age ≥ 30 min; SIGTERM). Confirm with:
+   `bun -e 'const {watch}=require("fs"); try{watch("/tmp").close();console.log("OK")}catch(e){console.log(e.code)}'`
+   — `EMFILE` means still exhausted.
+
+3. **Regenerate `docs/FACTS.md` AFTER committing the content** (the pre-push gate blocks otherwise,
+   and the gate's own note says regenerate after the last content commit):
+   `bun scripts/facts.ts --write`
+   Expected movement: specification lines **37,152 → 37,169** · conformance cases **883 → 887** ·
+   `compiler/src` **240,680 → 241,277 lines across 188 files**.
+
+4. Nothing else is owed. The corpus differential, R26, population counts and both-direction bite
+   proofs are all recorded above and were run on this exact tree.
+
+## Not touched deliberately (PA-owned / historical)
+
+`spa-lists/ss60.progress.md` and `handOffs/incoming/read/ss60-spa-reintegration-2026-07-03.md` both
+reference the old case name `protect/reveal-suppresses-e004`. They are historical progress records
+and PA-owned shared docs, so an agent rewriting them is the wrong move — surfaced instead.
+`handOffs/dpa-queue.md` and `handOffs/delta-log.md` also cite it, likewise left alone.

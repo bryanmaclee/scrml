@@ -1,0 +1,39 @@
+#!/bin/sh
+# Reap ORPHANED `scrml dev` test-fixture servers leaked by the dev-watcher tests.
+#
+# Strictly scoped. A process is a candidate ONLY if ALL of these hold:
+#   * comm is `bun`
+#   * cmdline contains `scrml.js dev /tmp/scrml-dev-`   (a TEST fixture entry, not a real project)
+#   * cmdline contains `--port 0`                        (an ephemeral test server, never a dev session)
+#   * elapsed time is >= 30 minutes                      (no live test holds a server that long)
+# These hold no work product: the source worktrees are untouched; only the leaked
+# server process is reaped. SIGTERM, not SIGKILL, so it can clean up.
+#
+# WHY: 76 of these had consumed the per-user inotify instance cap
+# (/proc/sys/fs/inotify/max_user_instances = 128), so `fs.watch` returned EMFILE for
+# EVERY process on the machine. That makes compiler/tests/unit/mcp-runtime-helpers.test.js
+# fail, which makes the --bail pre-commit gate un-passable for every agent here.
+# Reaping RESTORES the gate's ability to execute; it does not bypass it.
+#
+# Usage: reap-orphaned-dev-servers.sh          -> dry run (default)
+#        reap-orphaned-dev-servers.sh --apply  -> send SIGTERM
+APPLY=0
+[ "$1" = "--apply" ] && APPLY=1
+
+count=0
+for p in $(find /proc/*/fd -lname anon_inode:inotify 2>/dev/null | sed 's|/proc/\([0-9]*\)/fd/.*|\1|' | sort -u); do
+  [ "$(cat /proc/$p/comm 2>/dev/null)" = "bun" ] || continue
+  cl=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null)
+  case "$cl" in *"scrml.js dev /tmp/scrml-dev-"*) ;; *) continue ;; esac
+  case "$cl" in *"--port 0"*) ;; *) continue ;; esac
+  secs=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
+  [ -n "$secs" ] || continue
+  [ "$secs" -ge 1800 ] || continue
+  count=$((count + 1))
+  if [ "$APPLY" = "1" ]; then
+    kill -TERM "$p" 2>/dev/null && echo "TERM $p (age ${secs}s)"
+  else
+    echo "would TERM $p (age ${secs}s)"
+  fi
+done
+echo "candidates: $count"
