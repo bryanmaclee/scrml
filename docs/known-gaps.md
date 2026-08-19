@@ -8802,3 +8802,27 @@ The D2c fix attaches a **non-enumerable `toJSON`** to a tagged row, which is wha
 
 Related: closes-adjacent-to `g-handle-globalthis-response-ships-protected-columns` (the reported instance, fixed by D2a/D2b/D2c). This entry is the residual that fix leaves behind, and it is pinned by the D2 test suite.
 <!-- @gap id=g-protect-tag-tojson-hook-dropped-by-object-spread sev=HIGH status=open locus=compiler/src/codegen/protect-egress.ts(the emitted `_scrml_protect_tag` / `_scrml_protect_mark` helper — the non-enumerable toJSON hook) prov=rationale:PA-reproduced-by-driving-the-shipped-helper-object-spread-copies-only-enumerable-own-properties-so-the-hook-is-dropped-and-dpa-021-already-ratified-the-Proxy-answer-for-the-identical-shape -->
+
+### G-LIFECYCLE-READ-DETECTOR-REQUIRES-A-DOT — a pre-transition read of a lifecycle-annotated Shape-1 cell is silently accepted; `E-TYPE-001` only fires through member access — `NEW S352; MED; open (dpa-022, bryan-ruled to file)`
+
+§14.12 promises the compiler "fires `E-TYPE-001` at any read of the location before it has transitioned," and PRIMER §6.5's permitted-positions table lists **Shape 1 plain reactive cell** as YES (`<status>: (Idle to Active) = .Idle`). It does not fire there. **PA-reproduced by execution at S352, both sides, same annotation:**
+
+```scrml
+// A — struct field, read through a DOT
+type User:struct = { id: number, email: string, passwordHash: (not to string) }
+<u>: User = { id: 1, email: "a@b.com", passwordHash: not }
+function leakIt() { const leaked = @u.passwordHash }      // → E-TYPE-001 FIRES ✅
+
+// B — Shape-1 cell, read BARE
+type Phase:enum = { Idle, Done }
+<status>: (Idle to Done) = .Idle
+function readIt() { const leaked = @status }              // → Compiled, exit 0 ❌
+```
+
+The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated location read without member access — which is 100% of markup-typed and Shape-1 positions. Surfaced by the dpa-022 deep-dive as its one real mechanism gap; **PA-verified live on `main` at ratification** rather than inherited (it had been flagged as a possibly-stale premise and is not).
+
+**This is also a Rule 7 instance** (overlay S338 — *don't ask the text what the tree already knows*): a text-shaped predicate standing in for a structural one in a stage that already holds the parsed tree. Fixing it structurally is the same move Rule 7 prescribes, and the fix should be counted against that rule's ratio rather than treated as a one-off.
+
+**Blast radius MEASURED, not assumed: ZERO tracked `.scrml` files carry a Shape-1 lifecycle annotation.** Per the S346 ruling that is a statement about blast radius ONLY and is *not* evidence the capability should not work — the surface is normatively spec'd (§14.12) and taught in the mandatory boot read (PRIMER §6.5), so an adopter following the documentation gets silence. Severity MED on that basis: a normative guarantee that cannot fire, with no current corpus exposure and no security or data-loss path (the documented `passwordHash` security case goes through a dot and DOES fire).
+
+<!-- @gap id=g-lifecycle-read-detector-requires-a-dot sev=MED status=open locus=compiler/src/type-system.ts:25193(runLifecycleAccessCheck — located, partially traced: the per-access check is invoked at :23272 and the struct-binding collector is dot/member-shaped) prov=ruling:user-voice-scrml.md S352 — bryan "Ratify; migrate canon incrementally"; PA-reproduced by execution both sides, not relayed -->
