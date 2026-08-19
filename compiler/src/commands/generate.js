@@ -149,7 +149,10 @@ function findProgramRoot(cwd) {
   function scan(dir, depth) {
     if (depth > 4) return null;
     let entries;
-    try { entries = readdirSync(dir); } catch { return null; }
+    // Sort so the first `.scrml` with a `<program>` is chosen deterministically
+    // across OS / filesystem readdir order (g-residual-order-bearing-readdir):
+    // the auth-scaffold root hint must not depend on which file the FS lists first.
+    try { entries = readdirSync(dir).sort(); } catch { return null; }
     for (const name of entries) {
       if (name.startsWith(".") && name !== "." ) continue;
       if (SKIP_DIRS.has(name)) continue;

@@ -938,7 +938,10 @@ export function buildServeConfig(opts, serveDir) {
         // multi-input dev mode where there is no single unambiguous entry,
         // and the common single-file case when the entry candidate is absent.
         try {
-          const entries = readdirSync(serveDir);
+          // Sort so the "first .html" is deterministic across OS / filesystem
+          // readdir order (g-residual-order-bearing-readdir): two machines must
+          // pick the SAME fallback entry, not whatever the FS returns first.
+          const entries = readdirSync(serveDir).sort();
           const htmlFile = entries.find(e => e.endsWith(".html"));
           if (htmlFile) {
             const fallbackPath = join(serveDir, htmlFile);
@@ -961,6 +964,31 @@ export function buildServeConfig(opts, serveDir) {
   }
 
   return config;
+}
+
+/**
+ * Parent-death decision for the dev server's orphan guard
+ * (g-dev-watcher-tests-leak-server-processes). Returns true when the process
+ * that launched this `scrml dev` (its ppid at start, `launchPpid`) is gone, so
+ * the server should shut down rather than orphan its fs.watch handles.
+ *
+ * Two portable signals:
+ *   - `process.ppid !== launchPpid` — on Linux a child whose parent dies is
+ *     reparented (to init / a subreaper), so ppid changes; a direct, race-free tell.
+ *   - `process.kill(launchPpid, 0)` throws when that pid no longer exists — a
+ *     zero-signal existence probe that works on Linux AND Windows.
+ *
+ * @param {number} launchPpid — `process.ppid` captured at server start
+ * @returns {boolean}
+ */
+export function launchingProcessGone(launchPpid) {
+  if (process.ppid !== launchPpid) return true;
+  try {
+    process.kill(launchPpid, 0);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -1002,6 +1030,31 @@ export async function runDev(args) {
   // `localhost:0`. Harnesses (and humans) read the real port back from here.
   console.log(`[dev] Serving ${serveDir} at http://localhost:${server.port}`);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
+
+  // Parent-death guard (g-dev-watcher-tests-leak-server-processes): when `scrml
+  // dev` is spawned by a test harness or agent that is later FORCE-killed
+  // (SIGKILL — no chance to run its reaper), this child would otherwise survive
+  // as an orphan, holding its fs.watch (inotify) handles. Enough orphans exhaust
+  // the machine's inotify budget (EMFILE) and then NO dev server or watcher test
+  // can start — the machine-wide failure #577 measured (89 orphans → 0 handles).
+  // Poll the launching process and exit when it is gone or we have been
+  // reparented away from it. Cross-OS: `process.kill(pid, 0)` sends no signal but
+  // throws when the pid no longer exists (Linux + Windows); `process.ppid`
+  // changing catches the Linux reparent-to-init case directly. Gated to a
+  // NON-INTERACTIVE stdin so a human's terminal `scrml dev` — whose parent shell
+  // is its rightful owner — is never affected.
+  if (!process.stdin.isTTY) {
+    const launchPpid = process.ppid;
+    const parentDeathTimer = setInterval(() => {
+      if (!launchingProcessGone(launchPpid)) return;
+      console.error("[dev] launching process is gone — shutting down so the watcher is not orphaned");
+      clearInterval(parentDeathTimer);
+      try { server.stop(true); } catch { /* already stopped */ }
+      process.exit(0);
+    }, 2000);
+    // Do not keep the event loop alive on the guard's account alone.
+    parentDeathTimer.unref?.();
+  }
 
   // BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01), reworked S346
   // (g-dev-watcher-dies-on-delete-rename-permanent-500): watch each DISTINCT
