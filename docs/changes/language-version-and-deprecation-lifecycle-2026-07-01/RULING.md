@@ -7,11 +7,44 @@
 
 ---
 
+## ⚑ AMENDED 2026-08-19 (S353, dpa-034) — the POPULATION PREMISE is STRUCK from D1 and D4
+
+> **Provenance:** `ruling:user-voice-scrml.md S353` — bryan, *"your rec on all three"*, ratifying verbatim: *"**Strike the population premise from D1 AND D4.** It is the reasoning ruled INADMISSIBLE at S346 (corpus-zero / ecosystem-size is blast-radius evidence only)."*
+> **supersedes:** the four population-premise clauses of this RULING, quoted verbatim in the table below. Deliberation: `scrml-support/docs/deep-dives/d1-no-editions-round2-panel-gap-closed-dpa-034-2026-08-19.md` (5/5 poles) + its round-1 parent + `language-editions-dpa-034-2026-08-19.md`.
+> **Direction-of-change: `inert`.** Every ratified CONCLUSION in this document is UNCHANGED. What is struck is reasoning, not rulings — nothing here re-opens Fork 1, the tier anchors, the 1.0-final gate, or any residual fork.
+
+**The rule being applied.** A count of how many people write scrml measures **blast radius** — who is affected by a change. It is never evidence about whether a capability *should exist*. Deciding a language question on it is the reverse ouroboros the S346 ruling named, and it is inadmissible regardless of which way it points.
+
+**Struck as the wrong KIND of reason, NOT as a false one.** The population premise was independently measured **TRUE** at S350 (`gh issue list --state all` → three authors all time; the author of adopter issue #471 is one of the two non-owners). Striking it for staleness would rule on a false fact. It is struck because a true statement about reach cannot answer a question about design.
+
+| # | where | struck verbatim | replaced by |
+|---|---|---|---|
+| 1 | **D1 item 4** ("No editions") | *"YAGNI for two friends;"* … *"Rust's edition-coexistence price buys 'never split a global ecosystem' — not worth it here."* | Three population-INDEPENDENT reasons, now normative in **SPEC §62.8**: no registry / no independently-versioned units (§41.4) · conformance is ONE predicate over a BUILT, gated corpus (§62.2) · N rule-sets = N languages the compiler, checker, formatter and **LSP** carry forever. See the D1 item-4 rewrite below. |
+| 2 | **D1 Fork C** (unpinned-source default) | *"(Go-style, zero ceremony for two friends)"* | *"(Go-style, zero ceremony)"* — the ruling (C1) is unchanged; only the population clause is removed. |
+| 3 | **D4 item 3** (timing rule) | *"(PEP-387's "≥2 releases" shrunk to scrml-scale)"* | *"(PEP-387's "≥2 releases", shortened — scrml's release cadence is version-EVENT-driven, not calendar-driven, so the in-window guarantee is carried by the corpus-clean clock in the same item rather than by a release count)"* — the ≥1-released-MINOR rule itself is unchanged. |
+| 4 | **§0** (Fork 1 rationale, source 2) | *"+ the D4-LEAN "light windows — two friends, no multi-year ceremony""* | Dropped. Source 2 stands on the user's own directly-quoted voice — *"I don't want to do any more work on migration efforts"* — which is operator intent, not a population count. Sources 1 and 3 are untouched. |
+
+**⚑ TWO FURTHER PREMISES ARE ALSO DEAD — do NOT reinstate either as the replacement.** After the population premise was first challenged, two substitutes were offered and both were refuted by live expert poles:
+
+- **`-std=` / `go 1.x` as a "genuine middle"** — REFUTED (round 1). Go 1.22's loop-variable change is gated **per package** off the module's `go` line; `cmd/compile` carries BOTH semantics and selects between them in one build, one binary. That is what an edition IS. C++ `-std=` likewise — *"a labeling move, not a design move."*
+- **"no separate compilation"** — REFUTED (round 2, by BOTH late voices independently). GHC runs a per-file rule-set boundary *inside* whole-closure-from-source compilation, with no registry and no separate compilation. The absence of separate compilation explains why per-unit knobs would be **cheap to build**; it does no work toward showing they are **unnecessary**. The surviving load-bearing fact is **no registry / no independently-versioned units** (`compiler/SPEC.md:23341`, §41.4).
+
+**Two round-2 findings recorded here so they are not mis-cited later** (both re-verified by execution at this landing):
+
+- The *"tripwire already tripped"* claim is **REFUTED**. §62.6 is a subset/ceiling gate, not a divergent rule-set — and it is **100% unbuilt**: `E-LANGUAGE-VERSION-TOO-NEW` has **zero** fire sites (the string exists only in SPEC + hand-off prose), and `scrml.toml` is parsed nowhere — it appears in the compiler solely as a project-root marker filename (`compiler/src/codegen/chunk-namespace.ts:96`), with no TOML parser invoked anywhere in `compiler/src`. D1 item 5's behaviours below are therefore still **entirely spec-ahead**.
+- The chunk-retention instrument is **INERT** for decoupling deprecation from deletion. `chunks.json` has **zero read sites in `compiler/src/`** — it is write-only there (`compiler/src/api.js:3363-3369`); the one reader in the tree is the shipped MCP topology stdlib at runtime (`compiler/runtime/stdlib/mcp.js:147`), not a compile input. So retaining a chunk retains compiled **output**, never the ability to compile the **form**.
+
+**⚑ STANDING TRIPWIRE, carried forward:** *the moment `[language] version=` (D1 item 5 / §62.6) is read by the compiler to select between two behaviours for the same syntax — not merely as a manifest field — it HAS become an edition mechanism regardless of its name.*
+
+**NOT decided here, and deliberately left open:** whether scrml should ever exercise **true removal at a MAJOR**. That is a separate question, opened at S353 as its own deliberation. *"No editions"* and *"true removal at a MAJOR"* are logically independent claims. **D4 item 3 and SPEC §63.3 are untouched by this amendment** — nothing above narrows, pre-empts, or ratifies them.
+
+---
+
 ## 0. THE LOAD-BEARING AXIS — Fork 1 (D4): permanent-soft freeze
 
 **RATIFIED: (b) permanent-soft.** scrml-language-1.0 ships with the full deprecation stage-machine present but **ZERO scheduled removals** — every existing deprecation is SOFT-DEPRECATED/unscheduled. The removal half of the machine is *latent, documented machinery*; the first real removal waits for a concrete pain signal that may be years out or never. A removing-major (language-2.0 that actually deletes forms) is NOT pre-scheduled.
 
-**Why this is the ruling, not a silent PA call:** it converges three independent sources — (1) both dives lean (b); (2) the user's own prior voice ("I don't want to do any more work on migration efforts" + the D4-LEAN "light windows — two friends, no multi-year ceremony"); (3) the user explicitly named this axis and said "your lean." It is the user's stated intent operationalized, not a fresh axiom minted by the PA.
+**Why this is the ruling, not a silent PA call:** it converges three independent sources — (1) both dives lean (b); (2) the user's own prior voice ("I don't want to do any more work on migration efforts"); (3) the user explicitly named this axis and said "your lean." It is the user's stated intent operationalized, not a fresh axiom minted by the PA. *(S353: the D4-LEAN's population clause struck from source 2 — see the amendment banner. Source 2 stands on directly-quoted operator intent; sources 1 and 3 are untouched and the ruling is unchanged.)*
 
 **Consequence (the discipline-forward payoff):** language-1.0 is **frozen with no pending breaking changes** — because *nothing is scheduled to break*. This satisfies the §4 discipline-forward invariant ("never knowingly ship V1 with a pending breaking change") by construction. Reversible: if a concrete removal signal ever arrives, a Stage-2 schedule can be minted then via a deliberate version-event (the machine supports it; it just isn't armed at 1.0).
 
@@ -29,7 +62,12 @@
 
 3. **Compilers declare via `chunks.json`** — add a **`language`** field beside the existing `compiler` field. `compiler` = which impl produced this build (`scrml-0.7.1`); `language` = which frozen contract it conforms to (`"1.0-rc"` today). Single-sourced from the build's resolved language version; informational/provenance, **NOT a content-address hash input** (same posture as `compiler` per §47.5 / §40.9.8). Two impls at different `compiler` strings carrying the same `language` = the multi-impl invariant made observable.
 
-4. **No editions** (D1 LEAN). YAGNI for two friends; the deprecation cycle (D4) handles transitions with ONE rule-set per language version and no coexistence machinery. Rust's edition-coexistence price buys "never split a global ecosystem" — not worth it here. Takes the *axis-separation* (load-bearing) + the *deprecation cycle* (Go-style), declines editions.
+4. **No editions in the 1.0 surface as built** (D1 LEAN; **REASON AMENDED S353 — see the amendment banner above; the conclusion is unchanged**). The deprecation cycle (D4) handles transitions with ONE rule-set per language version and no coexistence machinery. Takes the *axis-separation* (load-bearing) + the *deprecation cycle* (Go-style), declines editions. **The three grounds, all independent of how many people write scrml** (normative text: SPEC §62.8):
+   - **No unit boundary where two independently-versioned, already-committed rule-sets could meet.** §41.4 is normative that npm-style bare specifiers are `E-IMPORT-005` and *"scrml has no npm integration"* — no registry, no name-to-version resolution, therefore no independently-versioned unit. Every unit reaching a build is source, re-parsed under the consumer's single live pin inside the §21.7 whole-program closure; the sealed artifact an edition's guarantee exists to protect is never produced. Survives scrml later gaining separate or incremental compilation.
+   - **Conformance is ONE predicate.** The corpus (§62.2) is BUILT and pre-commit-gated and operationally IS the spec. Editions make conformance a *function of the pin*, and the §62.5 1.0-final gate stops naming one measurable thing.
+   - **N rule-sets is N languages, carried forever by the whole toolchain** — compiler, checker, formatter, and most acutely the **LSP**, which must resolve the active rule-set per unit before it can be correct about anything. Haskell's measured cost of granular language variation landed on satellite tooling and pedagogy, not the core type-checker; scrml ships an LSP and a live cockpit.
+   - **Recorded reopening condition:** *is this a front-end-only delta?* Rust retrofitted editions in 2018 onto a 2015 1.0 because everything edition-sensitive resolves before HIR and the borrow checker was never allowed to fork. The one-way-door claim is true for DEEP changes and is not a door at all for shallow ones.
+   - **The honest cost, not smoothed over:** `vendor:` is BUILT, so third-party scrml *source* enters projects today with no version segment in the path — *"someone else wrote this and you now own the migration at a MAJOR"* is a real adopter cost. It is not a case for an interop guarantee.
 
 5. **Adopters pin via `scrml.toml [language] version`** — sibling of the existing `[story]` (§58.4) + `[capabilities]` (§22.13) tables, read pre-parse. Behaviour:
    - **Newer-compiler-than-source:** compile under the PINNED rules; gate newer-only forms with an honest "this form requires language-1.1; this source targets 1.0" diagnostic (Go's rule verbatim). Because no editions, "compile under older rules" is simple: don't offer newer forms, keep accepting the `deprecated`-tier forms 1.0 accepted.
@@ -45,7 +83,7 @@
 ### D1 residual forks — resolved
 - **FORK A** (per-case schema): **A1** — split `expected.json`'s overloaded `"language-version"` into `suite-version: "1.0.0"` + `tier: in | deprecated | future`. Clean for D2; a `deprecated`-tier form is *part of* the 1.0 suite, so the two axes must not be conflated.
 - **FORK B** (mis-authored-case bump boundary): **B1** — PATCH if the fix restores already-normative spec AND no shipped compiler relied on the wrong assertion; MAJOR only if the wrong assertion was adopter-observable in a released compiler.
-- **FORK C** (unpinned-source default): **C1** — default to the compiler's highest fully-conformant language version (Go-style, zero ceremony for two friends); `[language] version` is the opt-in reproducibility pin, not mandatory.
+- **FORK C** (unpinned-source default): **C1** — default to the compiler's highest fully-conformant language version (Go-style, zero ceremony); `[language] version` is the opt-in reproducibility pin, not mandatory. *(S353: the population clause struck — see the amendment banner. The ruling is unchanged.)*
 - **FORK D** (1.0-final gate): the 3-part gate above, single-impl-conformance sufficient to freeze.
 - **FORK E** (pre-release suffix): **E1** — mirror the compiler: `1.0-rc.N` then `1.0` (reuse the `-alpha.N`/`-beta.N`/stable muscle memory).
 - **FORK F** (2-part vs 3-part semver): **F1** — three-part `MAJOR.MINOR.PATCH`; the PATCH tier is real (coverage-hole closures during hardening). Migrate the corpus `"1.0"` → `"1.0.0"`.
@@ -58,7 +96,7 @@
 
 2. **The well-formedness invariant (the anti-pattern killer).** A deprecation is well-formed only if, at Stage-1 landing, it **co-lands** {a `W-`lint that parses-IDENTICALLY (same AST/JS/runtime)} + {a reserved `E-`code NAMED in §34} + {a `--fix` rule OR a designer-card waiver}. **It MUST NOT name a removal version at Stage-1 landing.** Scheduling (Stage 2) is a separate, later, deliberate version-event act. → This makes "planned for v0.3.0 / in P3" *structurally impossible* — the removal-version string is simply not allowed at Stage 1.
 
-3. **Timing rule** (tied to D1 version-events): deprecate in any MINOR (additive — only adds a non-fatal W-lint); remove ONLY at a MAJOR (the sole place forms leave the language); ≥1 released MINOR in-window before a MAJOR may remove (PEP-387's "≥2 releases" shrunk to scrml-scale); the clock is **version-events + corpus-clean, NOT a calendar**; a Stage-2 schedule is reversible-to-Stage-1 until the event fires.
+3. **Timing rule** (tied to D1 version-events): deprecate in any MINOR (additive — only adds a non-fatal W-lint); remove ONLY at a MAJOR (the sole place forms leave the language); ≥1 released MINOR in-window before a MAJOR may remove (PEP-387's "≥2 releases", shortened — scrml's release cadence is version-EVENT-driven rather than calendar-driven, so the in-window guarantee is carried by the corpus-clean clock below rather than by a release count); the clock is **version-events + corpus-clean, NOT a calendar**; a Stage-2 schedule is reversible-to-Stage-1 until the event fires. *(S353: the population clause struck — see the amendment banner. The ≥1-released-MINOR rule is unchanged, and whether true removal is ever exercised is the separately-opened question.)*
 
 4. **`--fix` gate** (Fork 5 of the dive's §5): `--fix` is a **SHOULD** at deprecation, a **HARD GATE (verified-LANDED, not spec'd)** at scheduling/removal. A reserved-E MUST NOT be scheduled/fired for a form with no verified-landed codemod (removing a codemod-less form = hand-migration on every adopter site = exactly the friction the split dissolves). Only escape: an explicit **designer-card** waiver (rare/zero-corpus/trivial-hand-migration), recorded as a version-event decision. Live consequence: `g-server-keyword-drift` + `W-STATE-BLOCK-BARE-WRITE-DECL` are correctly BLOCKED from scheduling (no landed `--fix`).
 
