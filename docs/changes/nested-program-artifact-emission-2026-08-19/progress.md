@@ -483,3 +483,151 @@ descending order of how much they worry me.
 `docs/known-gaps.md`, `handOffs/delta-log.md`, `handOffs/dpa-queue.md`,
 `master-list.md`, `hand-off.md` — **not touched** (PA-owned). Everything I would
 have written there is in RESIDUALS above.
+
+---
+
+## Item 1 follow-on — the defect writing the bundles EXPOSED
+
+Found by executing the flagship example, not by reading. This is the reason
+"execute, don't grep" is in the brief: items 1 and 2 were green, the full gate
+was green, and `examples/13-worker.scrml` still shipped a worker bundle that
+could not load.
+
+### What executing found
+
+```
+$ scrml compile examples/13-worker.scrml -o dist/     # after item 1
+$ node --check dist/13-worker.primes.worker.js
+dist/13-worker.primes.worker.js:23
+  const result = sieve ( data . limit )  Send result back to parent.
+                                         ^^^^
+SyntaxError
+```
+
+Two distinct defects in ONE place — `ast-builder.js`'s `when message` body
+reconstruction, which builds `bodyRaw` by joining the token stream with `" "`:
+
+1. **Comment leak.** A COMMENT token's `.text` is the comment CONTENT with the
+   leading `//` ALREADY STRIPPED by the tokenizer. Joining it puts the comment's
+   WORDS back as executable code.
+2. **Statement collapse.** Joining with `" "` puts every statement on ONE LINE,
+   with no separator. `const r = sieve(data.limit)` followed by `send({…})`
+   emitted as `const result = sieve ( data . limit ) self.postMessage( { … } )`.
+
+Defect 1 has an **exact in-repo precedent**: S184 `lifecycle-field-comment-leak`,
+same file (~line 5218), same one-line remedy. This loop already carried the
+STRING half of the S184-era fixes (the re-quoting branch); the COMMENT half was
+simply never applied here.
+
+Defect 2 is why only SINGLE-STATEMENT handlers ever worked. `when-002-message-handler.scrml`
+(one statement) parsed; `examples/13-worker.scrml` (two) did not. That is the
+whole reason this survived: the only worker fixture in the test suite has a
+one-statement body.
+
+### Why I fixed it rather than only surfacing it
+
+It is outside the brief's two items, and I would normally stop and surface. Three
+things decided it the other way:
+
+- **Item 1 makes it reachable.** Before, the bundle was generated and discarded,
+  so the defect could not bite. Shipping item 1 without this ships a file that
+  throws on load. Landing a fix that converts a 404 into a SyntaxError is not a
+  fix.
+- **It is the same defect, not a new one.** Both halves are "the `bodyRaw`
+  reconstruction is not faithful to the source", in one loop, and one half was
+  already ruled on and fixed 8,000 lines up in the same file.
+- **`validateEmit` defaults to TRUE** (`api.js:870` — the in-file comment at
+  ~2841 saying "FLAG-GATED, default OFF" is STALE). Once worker bundles are in
+  the gate's artifact set, an unparseable bundle ABORTS the whole write. So the
+  alternatives were: fix it, or leave the flagship example unbuildable, or leave
+  worker bundles outside the gate and ship broken JS. Only the first is right.
+
+### The fix
+
+- Skip COMMENT tokens (contribute nothing, advance) — the S184 remedy.
+- Preserve source line breaks: tokens carry `span.line`, so push a `"\n"` into
+  the join wherever the source advanced a line. A body already on one line is
+  **byte-identical**, so nothing that worked changes.
+- Add worker bundles to the emitted-JS parse gate's artifact set (`api.js`). A
+  new emitted-JS artifact class must be in the gate that enforces §2.2.1, or the
+  invariant has a hole exactly the size of the new artifact. Gated on `clientJs`
+  for the same reason the write is.
+
+### Two-sided bite proof
+
+**RED** (stash `ast-builder.js` only, keep the tests):
+
+```
+(fail) a MULTI-STATEMENT `when message` body ... > the written bundle PARSES (statements are separated, comment text is gone)
+(fail) a MULTI-STATEMENT `when message` body ... > the written bundle EXECUTES: two statements, correct result
+ 8 pass
+ 2 fail
+```
+
+**GREEN: 10 pass / 0 fail.**
+
+### Executed, not grepped — the flagship example, end to end
+
+```
+$ scrml compile examples/13-worker.scrml -o dist/
+Compiled 1 file in 154.9ms
+$ node --check dist/13-worker.primes.worker.js && echo PARSES
+PARSES
+$ bun run-primes.js dist/13-worker.primes.worker.js     # real Worker, postMessage {limit:30}
+WORKER REPLY: {"limit":30,"primes":[2,3,5,7,11,13,17,19,23,29],"count":10}
+SIEVE CORRECT
+```
+
+The §4.12.4 inline-worker example now works end to end for the first time:
+written, parses, loads in a real Worker, and computes the right answer.
+
+### Corpus check
+
+All 32 top-level examples compiled. **31 ok, 1 fail** —
+`examples/09-error-handling.scrml`, which fails with 4 errors (`E-ERROR-009`) on
+the PRE-fix tree as well. Pre-existing, unrelated, not touched.
+
+`bun run pretest` recompiles all 13 compilation-test samples clean.
+
+---
+
+## Verification summary (FINAL)
+
+| | base `9f6130d0` | final |
+|---|---|---|
+| `bun test compiler/tests/{unit,integration,conformance}` | 22400 pass / 0 fail | **22421 pass / 70 skip / 1 todo / 0 fail** |
+| `bun conformance/run.ts` | 883/883 | **885/885** |
+| `bun scripts/s34-census.ts --check-new` | PASS (no new rows) | **PASS (2 new rows, both well-formed)** |
+| `examples/*.scrml` | 31 ok / 1 pre-existing fail | **31 ok / 1 pre-existing fail** |
+| `bun run pretest` | clean | **clean** |
+
+The base figure is derived, not separately measured: the first instrumented
+full-gate run measured 22406 pass + 2 fail = 22408 total INCLUDING the 8 tests
+that did not exist on base, and both failures were tests that passed on base —
+so base = 22400 pass / 0 fail.
+
+---
+
+## RESIDUALS — updated
+
+Items 1-3 and 5-6 below are unchanged from the list above. Item 7 (emit-worker
+readability) is partially addressed and restated. Item 4 is unchanged and is now
+the one I would fix next.
+
+- **RESIDUAL 7 (restated).** The token-join still emits token-SPACED JS:
+  `self.postMessage( { limit : data . limit , … } )`, and continuation lines
+  carry a leading space. It PARSES and RUNS correctly now, but it does not meet
+  the readable-output bar. The structurally right fix is for `emit-worker.ts` to
+  lower the PARSED body (`whenMessage.bodyExpr`, which the AST already carries)
+  instead of re-emitting a token join at all. That would retire the whole
+  `bodyRaw` reconstruction class — comment leak, statement collapse, and spacing
+  — in one move. I did not do it here: it is a real piece of codegen work with
+  its own surface, and the minimal faithful-reconstruction fix was enough to stop
+  shipping invalid JS.
+
+- **NEW RESIDUAL 9.** `api.js:~2841` documents the emitted-JS parse gate as
+  "FLAG-GATED, default OFF". It is **default ON** (`api.js:870`,
+  `validateEmit = true`). A stale comment on a gate that aborts every write is
+  worth correcting; I left it rather than touch an unrelated line in a commit
+  this size, but it cost me a wrong inference mid-dispatch and would cost the
+  next reader the same.

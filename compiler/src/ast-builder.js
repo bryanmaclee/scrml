@@ -13590,6 +13590,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         // Parse body: `{ ... }`
         const bodyParts = [];
+        // Source LINE of the last token contributed to `bodyParts`.
+        //
+        // `bodyRaw` is reconstructed by joining the token stream, and joining
+        // with " " alone COLLAPSES EVERY STATEMENT ONTO ONE LINE. A `when
+        // message` body with two or more statements then emitted, verbatim:
+        //
+        //   const result = sieve ( data . limit ) self.postMessage( { … } )
+        //
+        // — two statements with no separator, i.e. a SyntaxError. Single-
+        // statement bodies happened to survive, which is why this went
+        // unnoticed; `examples/13-worker.scrml` (the flagship §4.12.4 worker
+        // example) did not. It was invisible while worker bundles were
+        // generated-and-then-discarded; writing them
+        // (g-nested-program-emits-artifacts-it-never-produces) made it
+        // reachable.
+        //
+        // Tokens carry `span.line`, so the source's own statement boundaries
+        // are recoverable exactly: emit a newline into the join wherever the
+        // source had one. A body already on a single line is byte-identical.
+        let prevLine = -1;
         if (peek().text === "{") {
           consume(); // consume `{`
           let depth = 1;
@@ -13602,6 +13622,37 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               if (depth === 0) { lastTok = consume(); break; }
             }
             lastTok = consume();
+            // Same defect + same remedy as S184 (lifecycle-field-comment-leak,
+            // ~line 5218 of this file): a COMMENT token's `.text` is the comment
+            // CONTENT with the leading `//` / `/*` glyph ALREADY STRIPPED by the
+            // tokenizer (readLineComment / readBlockComment). Joining it into
+            // `bodyRaw` therefore leaks the comment's WORDS back as executable
+            // code. In a `when message` body that produced a worker bundle that
+            // does not parse:
+            //
+            //   when message(data) {
+            //     const result = sieve(data.limit)
+            //     // Send result back to parent.
+            //     send({ ... })
+            //   }
+            //
+            // emitted `const result = sieve ( data . limit )  Send result back
+            // to parent.` — a SyntaxError. `examples/13-worker.scrml` was a live
+            // instance. It was invisible until the §4.12.4 worker bundles began
+            // being WRITTEN (g-nested-program-emits-artifacts-it-never-produces);
+            // before that the file was generated and discarded.
+            //
+            // This loop already carries the STRING half of the S184-era fixes
+            // (re-quoting below); the COMMENT half was simply never applied here.
+            // Consume the token to advance, contribute nothing — exactly what
+            // the tokenizer's own token-walk helpers do (tokenizer.ts ~995).
+            if (lastTok.kind === "COMMENT") {
+              prevLine = lastTok.span?.line ?? prevLine;
+              continue;
+            }
+            const curLine = lastTok.span?.line ?? prevLine;
+            if (prevLine !== -1 && curLine > prevLine) bodyParts.push("\n");
+            prevLine = curLine;
             if (lastTok.kind === "STRING") {
               // A4: preserve backtick templates so `${...}` interpolations
 

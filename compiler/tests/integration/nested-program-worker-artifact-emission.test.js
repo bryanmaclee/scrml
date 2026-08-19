@@ -264,6 +264,93 @@ describe("§4.12.4 worker bundles are WRITTEN, not just generated", () => {
   });
 });
 
+describe("§4.12.4 a MULTI-STATEMENT `when message` body emits valid, working JS", () => {
+  // Writing the bundles made a pre-existing `ast-builder.js` defect reachable:
+  // `bodyRaw` was reconstructed by joining the token stream with " ", which
+  //   (a) COLLAPSED EVERY STATEMENT ONTO ONE LINE, so a two-statement handler
+  //       emitted `const r = sieve ( data . limit ) self.postMessage( … )` —
+  //       two statements, no separator, a SyntaxError; and
+  //   (b) contributed a COMMENT token's text with its `//` already stripped by
+  //       the tokenizer, so `// Send result back to parent.` came through as
+  //       bare executable words. (Same defect + same remedy as S184
+  //       `lifecycle-field-comment-leak`, ~line 5218 of the same file; this
+  //       loop had the STRING half of that fix but never the COMMENT half.)
+  //
+  // Single-statement handlers survived both, which is why it went unnoticed —
+  // and why the fixtures above are not enough. `examples/13-worker.scrml`, the
+  // flagship §4.12.4 example, hit both.
+  //
+  // Worker bundles are now also in the emitted-JS parse gate's artifact set
+  // (SPEC §2.2.1, `validateEmit`, default ON), so a future regression here
+  // aborts the write instead of shipping a bundle that will not load.
+  const MULTI_STATEMENT_HANDLER = `<program>
+
+<program name="primes">
+    \${
+        function double(n: number) -> number {
+            return n * 2
+        }
+
+        when message(data) {
+            const doubled = double(data.value)
+            // Send the result back to the parent — this comment must NOT
+            // survive into the emitted JS as executable text.
+            send({ value: data.value, doubled: doubled })
+        }
+    }
+</>
+
+\${
+  <out> = not
+  function go() { <#primes>.send({ value: 21 }) }
+  when message from <#primes> (d) { @out = d.doubled }
+}
+
+<div><button onclick=go()>Go</></>
+
+</program>
+`;
+
+  test("the written bundle PARSES (statements are separated, comment text is gone)", () => {
+    const app = writeApp("multi-stmt", { "app.scrml": MULTI_STATEMENT_HANDLER });
+    const outDir = join(app.root, "dist");
+    const result = compileScrml({
+      inputFiles: [app.files["app.scrml"]],
+      outputDir: outDir,
+      write: true,
+      log: () => {},
+    });
+    // The emitted-JS parse gate is ON by default (api.js) and now covers worker
+    // bundles, so an unparseable bundle surfaces here rather than on disk.
+    expect(result.errors.map((e) => e.code)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+
+    const workerJs = readFileSync(join(outDir, "app.primes.worker.js"), "utf8");
+    // The comment's WORDS must not appear as code.
+    expect(workerJs).not.toContain("Send the result back to the parent");
+    // Independent parse check on the exact bytes on disk.
+    expect(() => new Function(workerJs)).not.toThrow();
+  });
+
+  test("the written bundle EXECUTES: two statements, correct result", () => {
+    const app = writeApp("multi-stmt-exec", { "app.scrml": MULTI_STATEMENT_HANDLER });
+    const outDir = join(app.root, "dist");
+    compileScrml({
+      inputFiles: [app.files["app.scrml"]],
+      outputDir: outDir,
+      write: true,
+      log: () => {},
+    });
+    const workerJs = readFileSync(join(outDir, "app.primes.worker.js"), "utf8");
+
+    const posted = [];
+    const shim = { onmessage: null, postMessage: (v) => posted.push(v) };
+    new Function("self", `${workerJs}\nreturn self;`)(shim);
+    shim.onmessage({ data: { value: 21 } });
+    // Both statements ran: the local `const doubled` AND the reply.
+    expect(posted).toEqual([{ value: 21, doubled: 42 }]);
+  });
+});
+
 describe("§4.12.4 worker bundles under --content-hash-assets", () => {
   test("worker file is content-hashed and the client ref is rewritten to match", () => {
     const app = writeApp("hashed", { "app.scrml": WORKER_APP });
