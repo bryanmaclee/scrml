@@ -1,0 +1,17 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id) {
+        let other = ?{`SELECT * FROM users WHERE id = 2`}.get()
+        let decoy = other.reveal("passwordHash")
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        return u
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>

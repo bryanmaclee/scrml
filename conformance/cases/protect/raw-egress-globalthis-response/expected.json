@@ -1,0 +1,13 @@
+{
+  "id": "protect-raw-egress-globalthis-response",
+  "description": "§14.8.9 raw-egress fail-closed — the gate resolves a constructor callee through its MEMBER CHAIN, so `new globalThis.Response(...)` is recognised identically to a bare `new Response(...)` and fires E-PROTECT-004. Pins the fix for a measured fail-open: the source-text detector this replaced tested `/\\bnew\\s+Response\\b/`, which a member chain does not match, so this exact file compiled at exit 0 with ZERO diagnostics and the emitted handler shipped `{\"id\":1,\"name\":\"ada\",\"passwordHash\":\"…\"}` to the client. Any aliasing receiver (`window.Response`, `globalThis.foo.Response`) reaches the same conclusion.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 closed-world precondition (SPEC.md:8519-8525): an egress path the compiler cannot analyze — including 'a manual `Response` / `handle()` body (§40)' — carrying a protected-origin column SHALL fail closed with E-PROTECT-004. The SHALL is on the CONSTRUCT, not on a spelling, so a detector keyed to one surface form under-enforces the normative rule. The leak is real rather than theoretical because the emitted handler's `instanceof Response` passthrough (§12.5) deliberately returns a manual Response BEFORE `_scrml_protect_redact` runs — so a manual Response that the gate misses is never redacted by anything. provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": ["E-SCOPE-001"],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}

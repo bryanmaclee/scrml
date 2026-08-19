@@ -1804,36 +1804,46 @@ export function generateServerJs(
     return e;
   };
 
-  // §14.8.9 fail-closed gate — E-PROTECT-004. Scan each server-fn SOURCE for a
-  // protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress (`_{}`
-  // / manual `Response` / `asIs`) where origin-keyed structural redaction cannot
-  // be guaranteed. The compiler never silently ships a protected column through
-  // a path it cannot redact. (Gated on protect-active; a `reveal` declassifies.)
+  // §14.8.9 fail-closed gate — E-PROTECT-004. Walk each server fn's PARSED TREE
+  // for a protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress
+  // (`_{}` / manual `Response` / `asIs`) where origin-keyed structural redaction
+  // cannot be guaranteed. The compiler never silently ships a protected column
+  // through a path it cannot redact. (Gated on protect-active.)
+  //
+  // The detector takes the fn NODE, not a slice of `_sourceText` — the source
+  // scan it replaces missed `new globalThis.Response(...)` and every foreign
+  // opener above level 0, and fired on tokens inside comments and string
+  // literals (ruling dpa-029 Q1, S352; invariant 55). Detection no longer
+  // depends on `_sourceText` being threaded onto the FileAST at all.
+  //
+  // There is deliberately NO `reveal` suppressor: §14.8.9 scopes declassification
+  // to the VALUE (SPEC.md:8506-8513), and a body-wide suppressor admitted a value
+  // bearing no stamp (ruling dpa-033 (c), S352).
+  //
+  // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
   if (_protectActive) {
-    const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
-    if (_src) {
-      const _seenEProtect = new Set<string>();
-      for (const fn of fnNodes) {
-        const _sp = (fn as { span?: { start?: number; end?: number } }).span;
-        if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
-        const _fnSrc = _src.slice(_sp.start, _sp.end);
-        const _leak = detectProtectedRawEgress(_fnSrc, _protectCtx);
-        if (_leak) {
-          const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
-          const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
-          if (_seenEProtect.has(_dedupKey)) continue;
-          _seenEProtect.add(_dedupKey);
-          errors.push(new CGError(
-            "E-PROTECT-004",
-            `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
-            `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
-            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: declassify ` +
-            `explicitly at the value with \`reveal("col")\`, project the protected column out of the SELECT, or return the ` +
-            `row through the normal compiler-emitted response (not a manual \`Response\` / \`_{}\` / \`asIs\`).`,
-            (_sp as any),
-            "error",
-          ));
-        }
+    const _seenEProtect = new Set<string>();
+    for (const fn of fnNodes) {
+      const _sp = (fn as { span?: { start?: number; end?: number } }).span;
+      if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
+      const _leak = detectProtectedRawEgress(fn, _protectCtx);
+      if (_leak) {
+        const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
+        const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
+        if (_seenEProtect.has(_dedupKey)) continue;
+        _seenEProtect.add(_dedupKey);
+        errors.push(new CGError(
+          "E-PROTECT-004",
+          `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
+          `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
+          `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: project the ` +
+          `protected column out of the SELECT, or return the row through the normal compiler-emitted response (not a ` +
+          `manual \`Response\` / \`_{}\` / \`asIs\`) — the floor redacts there, and \`reveal("col")\` declassifies at that ` +
+          `sink. \`reveal\` does NOT admit a value past THIS gate: §14.8.9 scopes declassification to the value at the ` +
+          `sink, and the compiler cannot see into a raw egress to check the stamp.`,
+          (_sp as any),
+          "error",
+        ));
       }
     }
   }

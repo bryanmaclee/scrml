@@ -1,0 +1,13 @@
+{
+  "id": "protect-reveal-does-not-suppress-e004",
+  "description": "§14.8.9 declassification is VALUE-scoped, so it cannot suppress a gate at a sink the compiler refuses to mediate. Wrapping the protected row in u.reveal(\"passwordHash\") at a RAW egress (a manual `new Response(...)`) does NOT suppress E-PROTECT-004 — the raw-egress gate is a floor with no exit. Re-authored at S352 from `protect-reveal-suppresses-e004`, which asserted the inverse (dpa-033 D3: a green test pinning a leak). Its sibling `protect-reveal-client-visible-runtime` is the contrast case: at a COMPILER-EMITTED sink, reveal does admit the named column.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 scopes declassification to the VALUE in four phrases: a protected-origin column reaches the client iff it is 'explicitly declassified via the field-level `reveal` construct AT THE VALUE' (SPEC.md:8506-8507); reveal 'stamps the named column's provenance descriptor as DECLASSIFIED-AT-THIS-VALUE' and 'the serializer admits a protected-origin column ONLY when its descriptor bears a `reveal` stamp AT THE SINK' (SPEC.md:8511-8513); the worked example is commented 'here only' (SPEC.md:8509). A raw egress is precisely a sink the compiler cannot introspect, so it cannot check the stamp — and the closed-world precondition at SPEC.md:8518-8524 mandates an unconditional SHALL fail closed there, naming no reveal exception. The prior body-wide suppressor was therefore the NON-CONFORMANT state: a `.reveal()` on a DIFFERENT query's row silenced the gate for the actually-returned, never-revealed row. Deleting it is conformance restoration, not an amendment. The value-scoped exit at a mediatable raw sink is dpa-033 (d), a separate later arc. provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c)).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}

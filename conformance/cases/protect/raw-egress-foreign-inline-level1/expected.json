@@ -1,0 +1,13 @@
+{
+  "id": "protect-raw-egress-foreign-inline-level1",
+  "description": "§14.8.9 raw-egress fail-closed — a protected row reaching a LEVEL-1 `_={ … }=` inline foreign block (the §23.2.4a canonical form) fires E-PROTECT-004. Pins the fix for a second measured fail-open: the source-text detector this replaced tested `/(^|[^A-Za-z0-9_$])_\\{/`, which matches only the LEVEL-0 `_{` opener, while the opener grammar is `_` + N `=` + `{`. So the very form SPEC §23.2.4a's own worked example uses walked past the gate at exit 0. Detection is now by NODE KIND (`kind === \"foreign\"`), which answers identically at every opener level.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 closed-world precondition (SPEC.md:8519-8525) names 'a `_{}` foreign-code block (§23)' as an egress the compiler cannot analyze; the interior is opaque BY CONSTRUCTION, which is precisely why the SHALL is unconditional. The leak here is concrete: the emitted slice runs `JSON.stringify(u)` on the tagged row, yielding a plain STRING of independent identity, and `_scrml_protect_redact` returns a non-object unchanged — so the protected column crosses the wire fully intact. provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}
