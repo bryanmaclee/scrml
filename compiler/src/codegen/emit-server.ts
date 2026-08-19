@@ -4381,12 +4381,18 @@ export function generateServerJs(
       // an adopter's deliberate `403`/`404`/redirect would be re-emitted as a
       // 200 with an empty-object body — a DENY silently becoming a SUCCESS.
       // MEASURED with the guard removed: the 403 came back 200.
-      // That is a fail-OPEN shape, which is the one kind this whole change
-      // exists to remove, so it is guarded even though no corpus source reaches
-      // it today (a plain body naming `Response` build-blocks on E-SCOPE-001).
-      // §14.8.9/§14.8.10 already model a manual-`Response` / `handle()` body as
-      // a live server-fn egress kind, so the shape is anticipated, not
-      // hypothetical.
+      //
+      // This guard is LOAD-BEARING, not belt-and-braces. The note here used to
+      // say "no corpus source reaches it today (a plain body naming `Response`
+      // build-blocks on E-SCOPE-001)" — that stopped being true in this same
+      // arc, when `Response` was added to `LOGIC_SCOPE_GLOBAL_ALLOWLIST` because
+      // SPEC §40.3.5's own worked example returns a bare
+      // `new Response("Forbidden", { status: 403 })` under the normative
+      // sentence "This is intentional and valid". The shape is now ordinary
+      // adopter source, and §14.8.9/§14.8.10 model a manual-`Response` /
+      // `handle()` body as a live server-fn egress kind. Do not weaken or
+      // reorder it. (The baseline-CSRF arm above carries the identical guard —
+      // it was missing there, and a §40.3.5 403 came back `200 {}`.)
       //
       // Placed BEFORE the redact deliberately: a `Response` is an opaque stream
       // handle, not a row set — `_scrml_protect_redact` cannot inspect or strip

@@ -7297,9 +7297,18 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // form did not compile — and the workaround an author reached for
   // (`new globalThis.Response(...)`) was, until the structural detector landed,
   // the one spelling that SILENCED the §14.8.9 raw-egress gate. The compiler
-  // steered authors onto the leak. The S352 ruling admitted `Response` alone and
-  // called `Request`/`Headers` a widening needing its own ruling; #590 (S355)
-  // is that ruling, and it landed first — the trio below is the current state.
+  // steered authors onto the leak.
+  //
+  // ONE DISTINCTION WORTH KEEPING, because it was got wrong once: `Request` is
+  // NOT excluded-or-included on the grounds that "it is a parameter binding" —
+  // that conflates two different names. The lowercase `request` in
+  // `handle(request, resolve)` is a parameter and never consults this list at
+  // all; the capitalized `Request` is the global CONSTRUCTOR, a distinct name
+  // that this list is exactly the arbiter of. The S352 ruling admitted
+  // `Response` alone on the narrow "only what §40.3 CONSTRUCTS" test and called
+  // `Request` / `Headers` a widening needing its own ruling; #590 (S355) is that
+  // ruling — adopter #471's document-workflow path constructs all three — and it
+  // landed first, so the trio below is the current state.
   // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1); issue #471 / #590
   "Response", "Request", "Headers",
   // Language keywords that may surface as idents after expression parsing
