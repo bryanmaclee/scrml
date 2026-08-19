@@ -286,3 +286,90 @@ its own before/after corpus diff.
 with no `<outlet>` matches neither: the emitted `app.client.js` calls `_scrml_navigate_soft` and the
 assembled runtime does not define it → **`ReferenceError` on click.** Reproduced by compiling and
 inspecting both artifacts. Out of scope here; surfaced in entry 1.
+
+---
+
+## 2026-08-19 — entry 4 — fix round: the park-mechanism question, SETTLED BY EXECUTION
+
+**Worktree** `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aad6a8d1780913ffc`
+**Base** `f4529dd5` (fetched `origin/soft-nav-head-sync`, `reset --hard FETCH_HEAD`).
+Startup gates green: `bun install` 217 pkgs, `bun run pretest` 13 samples.
+Existing browser test at base: **10 pass / 0 fail / 34 expect()** — the number to hold.
+
+### The defect being fixed (D3)
+
+`_scrml_nav_attach_sheets` appends the destination's `<link rel=stylesheet>` into the LIVE
+`document.head` at the top of `_scrml_nav_apply_html`. The swap — which is also what prunes the
+outgoing sheets — sits behind BOTH `sheetsReady` AND `_scrml_nav_load_chunks`. On a **cross-chunk**
+nav the destination's CSS is therefore live against the SOURCE page's DOM for the whole chunk-load
+window (bounded by `_SCRML_NAV_CHUNK_TIMEOUT_MS` = 10 s).
+
+The early attach is load-bearing and must NOT be moved after the chunk load — the parallel fetch is
+what buys the no-unstyled-flash property. So: attach so it **FETCHES but does not APPLY**, then
+apply at swap time.
+
+### ⛔ THE MECHANISM IS NOT A COIN-FLIP. The brief offered `media="not all"` and `link.disabled = true` as two standard options. Only ONE of them works, and the other fails catastrophically.
+
+**happy-dom cannot adjudicate this at all** — it does not model `media` and does not implement
+`disabled`. Probe, happy-dom 20.8.9:
+
+```
+A) media='not all': load= true err= false sheet= true color= rgb(9, 9, 9)   <- APPLIED ANYWAY
+C0) 'disabled' in link? false                                                <- not even an IDL prop
+```
+
+A `media="not all"` sheet still paints in happy-dom, and `link.disabled` is a plain expando there.
+So the browser tier is structurally blind to "parked vs applied" via `getComputedStyle`, and the
+mechanism had to be settled in **real Chromium** (puppeteer 24.40, headless, 600 ms CSS delay):
+
+```
+A_colour_right_after_attach       : "rgb(0, 0, 0)"     <- parked: does NOT apply
+A_load_event                      : "load"             <- FIRES
+A_load_ms                         : 614                <- == the server's 600 ms delay: really fetched
+A_colour_after_load_still_parked  : "rgb(0, 0, 0)"     <- still does not apply after load
+A_sheet_object_present            : true
+A_colour_after_unpark             : "rgb(9, 9, 9)"     <- applies INSTANTLY on un-park
+
+B_disabled_is_idl_prop            : true
+B_colour_right_after_attach       : "rgb(0, 0, 0)"
+B_disabled_reads_back_preload     : true
+B_load_event                      : "TIMEOUT"          <- *** load NEVER FIRES ***
+B_load_ms                         : 5000
+B_colour_after_load               : "rgb(0, 0, 0)"
+B_disabled_reads_back_postload    : true
+B_colour_after_unpark             : "rgb(0, 0, 0)"     <- *** NEVER APPLIES, EVER ***
+
+CSS requests Chromium actually made: [ "a.css", "b.css" ]   <- both DID fetch
+```
+
+**Verdict: `media="not all"`. `link.disabled` is disqualified twice over.**
+
+1. **It deadlocks the swap.** `load` never fires on a link disabled before insertion, and
+   `_scrml_nav_attach_sheets` settles `sheetsReady` off `load`/`error`. Every cross-chunk nav
+   would sit out the full `_SCRML_NAV_SHEET_TIMEOUT_MS` (3 s) before swapping. That trades a
+   paint defect for a 3-second stall — strictly worse than the bug.
+2. **It never un-parks.** `B_colour_after_unpark` is still `rgb(0,0,0)`. Per HTML §4.2.4 the
+   `disabled` setter is a **no-op while the associated CSS style sheet is null**, and Chromium
+   never associates a sheet for a link disabled at insertion. So `disabled = false` at swap time
+   restores nothing and the destination renders **permanently unstyled** — precisely the defect
+   this whole change exists to remove.
+
+`media="not all"` satisfies every constraint: fetch happens (b.css/a.css both in the request log),
+`load` fires so `sheetsReady` settles on time, nothing applies while parked, and un-parking is
+synchronous and instant.
+
+Chosen spelling is `not all` rather than the more common `print`: `print` MATCHES during print
+preview / `window.print()`, which would leak the destination's CSS into the reader's printout
+mid-navigation. `not all` matches no media type in any context.
+
+### Consequence for the test tier — recorded here because it shapes item 3
+
+Since happy-dom ignores `media`, the new during-window assertion **cannot** be a
+`getComputedStyle` read (the bar the rest of this file holds). It has to be a DOM predicate —
+"is any engine-attached sheet in a state where it WOULD paint right now" — with the mechanism
+check written mechanism-agnostically (media AND disabled), and the shim boundary stated in the
+file the way SHIM 1/2/3 already are. Real-Chromium is where the pixel claim gets made.
+
+### NEXT
+item 2 — implement the park/arm pair. item 3 — chunk-delay dimension + red-before-green proof.
+item 4 — D4, the silently-swallowed 404 sheet. item 5 — full suite + baseline + gzip delta.
