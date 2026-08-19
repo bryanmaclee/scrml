@@ -66,6 +66,9 @@ import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
+// Used to REFRESH the pre-splice `analysis.channelNodes` snapshot after the
+// §4.12.4 worker-extraction pre-pass mutates the tree (see the refresh site).
+import { collectChannelNodes } from "./emit-channel.ts";
 import { generateTestJs } from "./emit-test.ts";
 import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
@@ -1383,6 +1386,13 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     const workerDefs = new Map<string, WorkerDef>();
+    // TRUE once `extractWorkerPrograms` has removed ANY nested `<program>` node
+    // from the tree. Distinct from `workerDefs.size > 0`: the §23.4 SIDECAR
+    // branch splices WITHOUT registering a worker, and that splice invalidates
+    // the pre-splice analysis snapshot just as much as a worker's does. Gating
+    // the refresh on `workerDefs.size` missed exactly that case — a `<channel>`
+    // inside a `lang=`+`port=` sidecar kept its stale client dial.
+    let treeMutatedByExtraction = false;
 
     function extractWorkerPrograms(parentChildren: any[]): void {
       for (let i = parentChildren.length - 1; i >= 0; i--) {
@@ -1416,6 +1426,7 @@ export function runCG(input: CgInput): CgOutput {
                 : (typeof modeAttr?.value === "string" ? modeAttr.value : null);
               if (hasPort && modeVal !== "wasm") {
                 parentChildren.splice(i, 1);
+                treeMutatedByExtraction = true;
                 continue;
               }
               const children: any[] = node.children ?? [];
@@ -1433,6 +1444,7 @@ export function runCG(input: CgInput): CgOutput {
               }
               workerDefs.set(workerName, { name: workerName, children, whenMessage });
               parentChildren.splice(i, 1);
+              treeMutatedByExtraction = true;
               continue;
             }
           }
@@ -1499,6 +1511,40 @@ export function runCG(input: CgInput): CgOutput {
         ));
       }
       workerBundlesPerFile.set(filePath, bundles);
+    }
+
+    if (treeMutatedByExtraction) {
+      // STALE-SNAPSHOT REFRESH (§38 / §4.12).
+      //
+      // `analyzeAll` runs ABOVE this pre-pass, so `analysis.channelNodes` is a
+      // snapshot of the tree BEFORE `extractWorkerPrograms` mutated it — and it
+      // holds direct object references, so a `<channel>` inside a spliced-out
+      // nested `<program>` survives in the cache even though the node is gone
+      // from the tree. The two channel emitters then disagreed:
+      //
+      //   client (emit-reactive-wiring.ts) reads `ctx.analysis.channelNodes`
+      //          -> STALE  -> emitted a `new WebSocket(.../_scrml_ws/<nested>)`
+      //   server (emit-server.ts)         takes the `collectChannelNodes(...)`
+      //          fallback (index.ts calls `generateServerJs` on the LEGACY
+      //          positional signature, so its `ctxForCache` is null)
+      //          -> LIVE   -> emitted no route
+      //
+      // Net: a client that dialled a route no server mounted, and (because
+      // `_ws.onclose` re-arms `setTimeout(_connect, 2000)`) reconnected against
+      // it forever, silently. Measured on the repro:
+      //   [PROBE] server ctxForCache=NULL analysis=n/a liveWalk=1
+      //   [PROBE] client analysis=PRESENT analysis.channelNodes=2 liveWalk=1
+      //
+      // SYM refuses this shape outright (E-CHANNEL-INSIDE-NESTED-PROGRAM), so a
+      // GREEN build can no longer contain it. This refresh is the second half of
+      // failing closed: `scrml build` writes its dist even on a failed build
+      // (pre-existing, general to every fatal error), so without it the failure
+      // still leaves a dangling dial in the bytes on disk. Re-collecting from the
+      // LIVE post-splice tree makes both emitters read one view.
+      const staleAnalysis = fileAnalyses.get(filePath);
+      if (staleAnalysis) {
+        staleAnalysis.channelNodes = collectChannelNodes(nodes) as object[];
+      }
     }
 
     // §4.12.6: DB scope annotation — tag children of <program db="..."> with _dbScope.

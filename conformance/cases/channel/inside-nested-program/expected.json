@@ -1,0 +1,12 @@
+{
+  "id": "channel-inside-nested-program",
+  "description": "§4.12 + §38.1 — a `<channel>` inside a NESTED `<program name=>` fires E-CHANNEL-INSIDE-NESTED-PROGRAM. Regression pin for g-nested-program-emits-artifacts-it-never-produces: pre-fix this shape compiled EXIT 0 and shipped a client that dialled `/_scrml_ws/nested_feed` against a route no server ever mounted, reconnecting silently every 2 seconds forever. The mechanism was a stale analysis snapshot — `analyzeAll` caches `channelNodes` by object reference BEFORE the §4.12.4 worker-extraction pre-pass splices the nested subtree out, so the CLIENT emitter (reading the cache) emitted the connection while the SERVER emitter (walking the live post-splice tree) emitted no route. The canonical sibling `<channel name=\"canonical-feed\">` directly under the top-level `<program>` is unaffected and must NOT draw a placement diagnostic.",
+  "language-version": "1.0",
+  "spec": "§4.12, §4.12.1, §4.12.9, §38.1, §38.2, §34",
+  "rationale": "§38.1 invariant 1 and the §38.2 normative list both state: \"A `<channel>` inside a NESTED `<program name=>` (§4.12) SHALL emit E-CHANNEL-INSIDE-NESTED-PROGRAM.\" §4.12.1 is the reason: \"A nested `<program>` SHALL be a separate compilation unit\" — the compiler extracts the subtree before server emission, so the channel's server-side WebSocket upgrade route is never emitted, and the §4.12.4 worker bundle carries no channel code either (a worker bundle compiles only function declarations and the `when message` hook). Emitting the client half alone is a connection to a route that does not exist. No runtime half: the source is REJECTED at compile time. Contrast `channel/inside-scoped-db-program` (the §4.12.6 shape that is NOT extracted and does NOT fire) and `channel/inside-page` / `channel/outside-program` (the other two placement violations).",
+  "expect": {
+    "codes": ["E-CHANNEL-INSIDE-NESTED-PROGRAM"],
+    "severity": { "E-CHANNEL-INSIDE-NESTED-PROGRAM": "error" },
+    "notCodes": ["E-CHANNEL-OUTSIDE-PROGRAM", "E-CHANNEL-INSIDE-PAGE"]
+  }
+}
