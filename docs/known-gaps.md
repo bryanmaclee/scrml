@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 47 |
-| MED | 151 |
+| MED | 150 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -6260,8 +6260,9 @@ The group derived cell projects only the field VALUES; `isValid`/`errors`/`touch
 
 **RESOLVED S299 (Peter) — approach (1), no ruling needed.** The canonical addressing was already decided at Bug 61 (S140): expression-position `@<compound>.<synthProp>` collapses to the dotted synth cell `_scrml_reactive_get("f.isValid")` via `emitMember` (emit-expr.ts), gated by `ctx.synthCellKeys.has(dotted)`. The two emitters did NOT disagree by design — the collapse simply never received `synthCellKeys` in the function-body emit contexts. Fix: thread `ctx.synthCellKeys` into (a) `scheduleStatements`→`emitOpts` (plain `function` bodies), (b) the two CPS opts (failable/async bodies), and (c) `fnOpts` (the `fn`-shorthand + return-typed `function` branch that bypasses scheduleStatements — caught by adversarial under-fire review of the first cut). Covers compound-level + per-field, all four synth props, and every function-shaped body. Over-fire guard (a plain cell with a synth-named field) preserved by the membership gate. Regression: `compiler/tests/unit/i262-synth-read-in-function-body.test.js` (codes-half; runtime-half proven by construction — the emitted accessor+key are byte-identical to the already-working binding path). **Residual (distinct root cause, filed separately):** [[g-synth-read-in-statement-bodied-on-mount-not-collapsed]].
 
-### g-synth-read-in-statement-bodied-on-mount-not-collapsed — a §55 synth read (`@f.isValid`) inside a STATEMENT-bodied `on mount { if (…) … }` emits member access on the compound value, not the dotted cell — `NEW S299 (Peter, adversarial-review spinoff of GH #262); MED; open`
-<!-- @gap id=g-synth-read-in-statement-bodied-on-mount-not-collapsed sev=MED status=open -->
+### g-synth-read-in-statement-bodied-on-mount-not-collapsed — a §55 synth read (`@f.isValid`) inside a STATEMENT-bodied `on mount { if (…) … }` emits member access on the compound value, not the dotted cell — `NEW S299 (Peter, adversarial-review spinoff of GH #262); MED; resolved (fixed by #291; stale-open, reconciled S354-peter)`
+<!-- @gap id=g-synth-read-in-statement-bodied-on-mount-not-collapsed sev=MED status=resolved -->
+**⚑ RESOLVED — fixed by PR #291 (`ebb6ca6f`); gap was STALE-open.** The statement-bodied `on mount` synth-collapse landed at both loci — `emitExprField` and the escape-hatch `emitExpr` fallback — via `collapseSynthSurfaceRefsInRaw` (emit-expr.ts, the comment at :3984 names this gap as the locus). Verified S354-peter (reconciliation sweep): regression `conf-compound-rollup-read-bug-61.test.js` (S299 block, the exact `on mount { if (@form.isValid) }` shape) asserts the fixed `_scrml_reactive_get("form.isValid")` signature + the over-fire guard, 18/0 on HEAD. Flipped as bookkeeping.
 **PA-REPRODUCED on `d0763cff`.** Same symptom class as GH #262 (synth read → member access on the compound VALUE → `undefined`, fails closed, silent) but a **DISTINCT root cause** — not the `synthCellKeys`-threading defect the #262 fix closed. `on mount { … }` desugars to a single `bare-expr` whose `exprNode = safeParseExprToNode(body)` (ast-builder.js:9800); when the body is a STATEMENT (`if`/`for`/`while`/`match`) it does not parse as an expression, so the `bare-expr` `exprNode` fast path (emit-logic.ts:~1590) is skipped and the body is lowered by the **raw-string heuristic rewriter** (emit-logic.ts:~1588), which never routes reads through `emitMember` and so performs no synth collapse.
 
 ```
