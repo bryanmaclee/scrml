@@ -314,6 +314,19 @@ function allProbes(): Probe[] {
     // comments, no known-gaps entry, no dpa-queue item. pa-base §10: an obligation and its probe
     // must resolve to the same artifact — issue-debt.ts reads the two HOME artifacts and says OWED.
     runProbe("issue-debt", "Adopter issues (owed a home)", "bun", ["scripts/issue-debt.ts"]),
+    // S351: pa-base §10 already says a drop is not delivered until committed AND pushed, and tells
+    // the receiver to list the inbox from the VCS's view. Both of those still miss a message that is
+    // committed and pushed ON A BRANCH THAT IS NOT MAIN — it is tracked, so `git status` is silent,
+    // and it is not in this working tree, so `ls` is silent. A HIGH-severity scrml-site bug report
+    // sat that way, "archived to read/" on a continuity branch that never landed. Same §10 shape:
+    // a channel the probe does not read does not exist to the PA.
+    runProbe("inbox-stranded", "Inbox messages stranded on a branch", "bun", ["scripts/inbox-stranded.ts"]),
+    // S351: the complement to `dpa` above. That probe asks "is everything IN the queue disposed?";
+    // this asks "is everything that needs disposing in the QUEUE?" The dPA drains dpa-queue.md and
+    // nothing else, so a ruling banked in `rulings-pending/` never runs. Two existed when this was
+    // written, in two different directories — which is why the probe detects on front matter as well
+    // as on path.
+    runProbe("ruling-debt", "Rulings banked outside the drain path", "bun", ["scripts/ruling-debt.ts"]),
     runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "bryanmaclee/scrml", "--state", "open"], 45_000),
     runProbe("prs", "Open PRs", "gh", ["pr", "list"], 45_000),
     runProbe("runs", "CI runs (main, last 3)", "gh", ["run", "list", "--branch", "main", "--limit", "3"], 45_000),
