@@ -1,0 +1,13 @@
+{
+  "id": "protect-raw-egress-cross-function",
+  "description": "§14.8.9 raw-egress fail-closed — the gate is resolved across the file's FUNCTION SET, not per body: a protected `?{}` in a helper reaching a manual `Response` in its caller fires E-PROTECT-004. Pins the fix for the most idiomatic of the measured fail-opens — pressing `Extract Function` on a body that already fired the gate silenced it. This exact file compiled at exit 0 with ZERO diagnostics, and the emitted handler plus its helper, executed against a stubbed `_scrml_sql`, answered `{\"id\":1,\"name\":\"ada\",\"passwordHash\":\"$argon2id$SECRET\"}`. The mirror (SELECT in the caller, `Response` in the helper) and a two-hop chain leaked identically; all three now fire, and the diagnostic names the call path.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9's closed-world precondition (SPEC.md:8519-8525) makes the fail-closed SHALL a property of the EGRESS PATH, not of a lexical function body. A per-body co-occurrence test therefore treated a call boundary as a security boundary, which it is not — data crosses it in both directions (a return value flows callee->caller, an argument flows caller->callee). The rule is reachability, not file scope: for each function F, F fires when F plus its transitive CALLEES hold both a protected SELECT and a raw egress, so two functions with no call path between them share no data path and stay silent (pinned by a control case in the source test — an unrelated protected query plus an unrelated §40.3.5 403 does not fire). Blast radius measured base-vs-head over all 75 `protect=`-bearing corpus sources: diagnostic-code delta ZERO outside this branch's own conformance cases. provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": ["E-SCOPE-001"],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}
