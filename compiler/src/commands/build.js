@@ -741,7 +741,10 @@ export async function runBuild(args) {
     console.error(`\nBuild failed with ${result.errors.length} error(s):`);
     for (const e of result.errors) {
       // Bug 3 fix (S107) — same shape as dev.js error formatter; surface path:line:col.
-      const rel = e.filePath || e.span?.file || "";
+      // #519 — also read the flat `file` field: the emit gate (E-CODEGEN-INVALID-LOGIC)
+      // stamps the SOURCE file on `.file` (no `.filePath`, no `.span`), so without this
+      // the gate error renders with NO path here — the opposite of #519's intent.
+      const rel = e.filePath || e.file || e.span?.file || "";
       const line = e.line ?? e.span?.line;
       const col = e.column ?? e.col ?? e.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
@@ -753,7 +756,8 @@ export async function runBuild(args) {
   if (result.warnings.length > 0) {
     for (const w of result.warnings) {
       // Bug 3 fix (S107) — warnings also get path:line:col.
-      const rel = w.filePath || w.span?.file || "";
+      // #519 — mirror the error formatter: read the flat `file` field too.
+      const rel = w.filePath || w.file || w.span?.file || "";
       const line = w.line ?? w.span?.line;
       const col = w.column ?? w.col ?? w.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";

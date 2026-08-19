@@ -485,7 +485,10 @@ function runOnce(opts, gatheredOut) {
       // stamps `filePath` (and `span.file`) on per-file stage outputs (BS / TAB)
       // so this formatter can read them. Falls through both shapes — direct
       // `e.line` (used by some later stages) and `e.span.line` (used by BS).
-      const rel = e.filePath || e.span?.file || "";
+      // #519 — also read the flat `file` field: the emit gate (E-CODEGEN-INVALID-LOGIC)
+      // stamps the SOURCE file on `.file` (no `.filePath`, no `.span`), so without this
+      // the gate error renders with NO path here — the opposite of #519's intent.
+      const rel = e.filePath || e.file || e.span?.file || "";
       const line = e.line ?? e.span?.line;
       const col = e.column ?? e.col ?? e.span?.col;
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";

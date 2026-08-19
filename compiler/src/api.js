@@ -2922,8 +2922,13 @@ export function compileScrml(options = {}) {
             code: ge.code,
             message: ge.message,
             file: ge.span?.file ?? "",
-            line: ge.span?.line ?? 1,
-            column: ge.span?.col ?? 1,
+            // The emit gate has NO `.scrml` source line/col — it fails at an
+            // EMITTED-JS position it cannot map back to source (#519). Forward
+            // them as undefined (NOT the old `?? 1` default) so the CLI
+            // formatters omit the misleading `:<emittedLine>:<emittedCol>`
+            // suffix; the emitted position + snippet stay in the message body.
+            line: ge.span?.line,
+            column: ge.span?.col,
             severity: "error",
           });
         }
