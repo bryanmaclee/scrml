@@ -605,6 +605,126 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M2 (S353 adversarial round 3) — the gate resolves ACROSS the file's function
+// set, not per body. `Extract Function` is not a security boundary.
+//
+// All three leak shapes below were measured by EXECUTING the emitted handler
+// (extracted verbatim from the emitted .server.js, with the called helpers, and
+// a stubbed `_scrml_sql`). Pre-fix each compiled at exit 0 with zero diagnostics
+// and answered
+//   STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+//
+// The rule: for each fn F, reach(F) = F plus every fn F transitively CALLS in
+// this file; F fires when reach(F) holds BOTH a protected SELECT and a raw
+// egress. Forward reachability alone covers both flow directions because it is
+// evaluated at every function — see `detectProtectedRawEgressAcrossFns`.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2)", () => {
+  const codesOf = (result) =>
+    [...(result.warnings ?? []), ...(result.errors ?? [])];
+
+  test("SELECT in the callee, `new Response` in the caller (the row RETURNS into the egress)", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let u = loadUser(id)\n` +
+      `        return new Response(JSON.stringify(u))\n` +
+      `      }`,
+    ));
+    const hit = codesOf(result).find((d) => d.code === "E-PROTECT-004");
+    expect(hit).toBeDefined();
+    // The diagnostic names the call path, because the author has to look in two
+    // places and the message should say which two.
+    expect(hit.message).toContain("`getUser` -> `loadUser`");
+  });
+
+  test("SELECT in the caller, `new Response` in the callee (the row is PASSED IN)", () => {
+    const { result } = compileSource(protectProgram(
+      `      function ship(u) {\n` +
+      `        return new Response(JSON.stringify(u))\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        return ship(u)\n` +
+      `      }`,
+    ));
+    const hit = codesOf(result).find((d) => d.code === "E-PROTECT-004");
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain("`getUser` -> `ship`");
+  });
+
+  test("a TWO-HOP callee chain is reached transitively", () => {
+    const { result } = compileSource(protectProgram(
+      `      function raw(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      function loadUser(id) {\n` +
+      `        return raw(id)\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        return new Response(JSON.stringify(loadUser(id)))\n` +
+      `      }`,
+    ));
+    const hit = codesOf(result).find((d) => d.code === "E-PROTECT-004");
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain("`getUser` -> `loadUser` -> `raw`");
+  });
+
+  // The false-positive guard, and the reason the rule is REACHABILITY and not
+  // "anywhere in the file": two functions with no call path between them share
+  // no data path. Widening to file scope would reject every §40.3.5 `403`
+  // early-return in an app that declares a `protect=` column anywhere.
+  test("CONTROL — an unrelated protected query and an unrelated `403` do NOT fire", () => {
+    const { result } = compileSource(protectProgram(
+      `      function unrelatedQuery(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        return { name: u.name }\n` +
+      `      }\n` +
+      `      export server function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }`,
+    ));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+
+  // Mutual recursion must terminate the reachability walk (the visited set).
+  test("mutually recursive helpers terminate and still fire", () => {
+    const { result } = compileSource(protectProgram(
+      `      function ping(id) {\n` +
+      `        return pong(id)\n` +
+      `      }\n` +
+      `      function pong(id) {\n` +
+      `        if (id > 0) { return ping(id - 1) }\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        return new Response(JSON.stringify(ping(id)))\n` +
+      `      }`,
+    ));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  // The bound, pinned: the call graph is by BARE-IDENTIFIER callee, so a call
+  // through a value contributes no edge. Documented in
+  // `detectProtectedRawEgressAcrossFns`; if a later arc closes it, THIS GOES RED
+  // and the bound paragraph must be updated in the same change.
+  test("RESIDUAL (documented): a call through a value contributes no call edge", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let f = loadUser\n` +
+      `        return new Response(JSON.stringify(f(id)))\n` +
+      `      }`,
+    ));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // LAYER 3b — channel `broadcast()` (§38) + SSE `server function*` (§37) egress
 // sinks. These are ADDITIONAL compiler-emitted client-egress serializers; the
 // floor redacts at them identically to the server-fn return.

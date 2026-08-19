@@ -325,26 +325,71 @@ function annotationIsAsIs(annotation: unknown): boolean {
 }
 
 /**
- * §14.8.9 fail-closed gate (E-PROTECT-004) — detect a protected-origin value
- * reaching a RAW / compiler-UNANALYZABLE egress within a single server-function
- * body, where the structural redaction floor cannot guarantee the strip:
+ * The structural walk's depth cap.
+ *
+ * This is a RESOURCE bound (JS call-stack depth), NOT a correctness one:
+ * exceeding it does not truncate the answer, it FAILS CLOSED (`truncated`).
+ * That distinction is the whole point — silently truncating a fail-CLOSED check
+ * is a fail-OPEN, and raising the number cannot fix it, because ANY finite cap
+ * has a boundary. What has to be right is the BEHAVIOUR at the boundary.
+ *
+ * `depth` counts EDGES, and an array costs two (the container, then each
+ * element), so 512 internal levels is ≈250 levels of source nesting, not 512.
+ * The measured max over the 1878-body corpus is 37, so a real body never reaches
+ * the cap; when a synthetic one does, the compiler says it could not analyse the
+ * body rather than passing it. Measured on this exact walk before the cap was
+ * made fail-closed: a protected row reaching `new Response(...)` under 250
+ * nested array literals fired E-PROTECT-004 and under 255 did NOT — compiling at
+ * exit 0, zero diagnostics, and the executed handler shipped the secret.
+ */
+const RAW_EGRESS_MAX_DEPTH = 512;
+
+/**
+ * What one function BODY carries, as read off its parsed tree. Deliberately raw
+ * facts rather than a verdict: the verdict is a whole-file question, because a
+ * protected SELECT and the raw egress it reaches need not sit in the same body
+ * (see `detectProtectedRawEgressAcrossFns`).
+ */
+export interface RawEgressFacts {
+  /** The first protected-origin `?{}` SELECT in this body (normalized, capped
+   *  at 60 chars for the message), or null. */
+  protectedQuery: string | null;
+  /** A `_{}` foreign-code block (§23) — opaque interior. */
+  sawForeign: boolean;
+  /** A manual `Response` / `handle()` body (§40). */
+  sawResponse: boolean;
+  /** An `asIs`-typed value (§14.1.1). */
+  sawAsIs: boolean;
+  /** Bare-identifier callee names invoked from this body — the intra-file call
+   *  graph's out-edges. */
+  calls: string[];
+  /** The walk hit `RAW_EGRESS_MAX_DEPTH`: every field above is UNKNOWN rather
+   *  than "no", and the gate fails CLOSED on this body. */
+  truncated: boolean;
+}
+
+/**
+ * §14.8.9 fail-closed gate (E-PROTECT-004), body half — read the facts a single
+ * server-function body carries about a protected-origin value reaching a RAW /
+ * compiler-UNANALYZABLE egress, where the structural redaction floor cannot
+ * guarantee the strip:
  *   - a `_{}` foreign-code block (§23) — opaque interior;
  *   - a manual `Response` / `handle()` body (§40) — the floor's redact passes a
  *     `Response` instance through untouched (it cannot introspect a serialized
  *     body), so a row manually serialized there would LEAK;
  *   - an `asIs`-typed value (§14.1.1) — escapes the type system.
  *
- * Returns the offending query + egress kind (→ E-PROTECT-004), or null. The
- * closed-world precondition of §14.8.9 rests on every egress being compiler-
- * emitted and descriptor-preserving; this gate enforces it fail-closed.
- * Conservative: co-occurrence of a protected query and a raw egress in the same
- * body fires (the floor never silently ships a protected column through a path
- * it cannot redact).
+ * The closed-world precondition of §14.8.9 rests on every egress being compiler-
+ * emitted and descriptor-preserving; the gate enforces it fail-closed.
+ * Conservative BY DESIGN: co-occurrence of a protected query and a raw egress
+ * within one call-reachable set fires (the floor never silently ships a
+ * protected column through a path it cannot redact). It does not prove the row
+ * reaches the egress; it declines to prove that it does not.
  *
- * A body the walk cannot traverse in full (nesting past `MAX_DEPTH`) returns
- * `truncated: true` and a null `query`: an un-walked subtree is itself an
- * egress the compiler cannot analyse, so it fires rather than passing. See the
- * cap comment inside — the boundary BEHAVIOUR is the load-bearing part.
+ * A body the walk cannot traverse in full (nesting past `RAW_EGRESS_MAX_DEPTH`)
+ * comes back `truncated`, and the caller fires on it unconditionally: an
+ * un-walked subtree is itself an egress the compiler cannot analyse. See the cap
+ * constant — the boundary BEHAVIOUR is the load-bearing part.
  *
  * **This is a STRUCTURAL analysis over the parsed function tree, not a scan of
  * the function's source slice (ruling dpa-029 Q1, S352; invariant 55).** The
@@ -387,11 +432,13 @@ function annotationIsAsIs(annotation: unknown): boolean {
  *      a carry-forward, and it is pinned as such in
  *      `g-sql-row-protect-leak.test.js`.
  *
- *   2. **Detection is PER FUNCTION BODY.** A protected `?{}` in one function
- *      reaching a raw egress in another — the ordinary `let u = loadUser(id)`
- *      helper split — is invisible to a per-body co-occurrence test. This is the
- *      most idiomatic of the residual shapes and it carries forward from the
- *      source-text form, which was equally per-body. Executed leak, measured.
+ *   2. **The call graph is INTRA-FILE and by BARE-IDENTIFIER callee.** The
+ *      cross-function shape itself is CLOSED (see
+ *      `detectProtectedRawEgressAcrossFns`), but its edges are syntactic: a
+ *      cross-FILE import, a call through a value (`handlers[k]()`), and a call
+ *      on a member (`obj.method()`) contribute no edge, so a protected SELECT
+ *      reachable only through one of those is still invisible. Same syntactic
+ *      bound as (1), same fix (the name resolver).
  *
  *   3. **Only `Response.json` is a static-factory egress.** `Response.redirect`
  *      / `Response.error` carry no caller-supplied body, so no protected column
@@ -411,16 +458,19 @@ function annotationIsAsIs(annotation: unknown): boolean {
  *
  * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
  */
-export function detectProtectedRawEgress(
+export function collectRawEgressFacts(
   fnNode: unknown,
   ctx: ProtectContext,
-): { query: string | null; egressKind: string; truncated?: true } | null {
-  if (!fnNode || typeof fnNode !== "object") return null;
+): RawEgressFacts {
+  if (!fnNode || typeof fnNode !== "object") {
+    return { protectedQuery: null, sawForeign: false, sawResponse: false, sawAsIs: false, calls: [], truncated: false };
+  }
 
   let protectedQuery: string | null = null;
   let sawForeign = false;
   let sawResponse = false;
   let sawAsIs = false;
+  const calls = new Set<string>();
 
   // Generic structural walk — the `astReadsCurrentUserAmbient` precedent
   // (emit-server.ts): identity `seen` set against a cyclic tree, a depth cap,
@@ -442,12 +492,11 @@ export function detectProtectedRawEgress(
   // this fix: a protected row reaching `new Response(...)` under 250 nested
   // array literals fired E-PROTECT-004 and under 255 did NOT — compiling at
   // exit 0, zero diagnostics, secret shipped.
-  const MAX_DEPTH = 512;
   let truncated = false;
   const seen = new WeakSet<object>();
   const visit = (node: unknown, depth: number): void => {
     if (!node || typeof node !== "object") return;
-    if (depth > MAX_DEPTH) {
+    if (depth > RAW_EGRESS_MAX_DEPTH) {
       truncated = true;
       return;
     }
@@ -491,6 +540,16 @@ export function detectProtectedRawEgress(
       sawAsIs = true;
     }
 
+    // --- the intra-file call graph edge ------------------------------------
+    // A BARE-IDENTIFIER callee only. `obj.method()` is a call on a value, not on
+    // a file-level function declaration, and the caller resolves these names
+    // against the file's own `function-decl` set — so an unresolved name simply
+    // contributes no edge.
+    if (n.kind === "call") {
+      const callee = n.callee as { kind?: string; name?: string } | undefined;
+      if (callee && callee.kind === "ident" && typeof callee.name === "string") calls.add(callee.name);
+    }
+
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
       visit(n[key], depth + 1);
@@ -498,35 +557,174 @@ export function detectProtectedRawEgress(
   };
   visit(fnNode, 0);
 
-  // --- FAIL CLOSED on an unanalyzable body -------------------------------
-  // The walk stopped short of the whole tree, so "no protected query here" and
-  // "no raw egress here" are both UNKNOWN, not "no": the un-walked subtree could
-  // hold either or both. §14.8.9's floor never ships a protected column through
-  // a path it cannot analyse, and an un-walked subtree is exactly such a path,
-  // so the gate reports rather than returns silently. This is checked BEFORE the
-  // `protectedQuery === null` early return, because the query itself may be the
-  // thing the truncation hid.
-  if (truncated) {
-    return {
-      query: protectedQuery,
-      egressKind:
-        `a body the compiler could not analyse in full — its nesting exceeds the ` +
-        `§14.8.9 structural-analysis depth cap (${MAX_DEPTH} tree levels)`,
-      truncated: true,
-    };
+  return { protectedQuery, sawForeign, sawResponse, sawAsIs, calls: [...calls], truncated };
+}
+
+/**
+ * The human-readable egress kind a body carries, or null for none. The priority
+ * is FIXED rather than traversal-ordered, so the reported kind does not depend
+ * on where in the body each construct happens to sit.
+ */
+function egressKindOf(facts: RawEgressFacts): string | null {
+  if (facts.sawForeign) return "a `_{}` foreign-code block (§23)";
+  if (facts.sawResponse) return "a manual `Response` / `handle()` body (§40)";
+  if (facts.sawAsIs) return "an `asIs`-typed value (§14.1.1)";
+  return null;
+}
+
+/** The `MAX_DEPTH` message fragment, shared by the truncation detection. */
+const TRUNCATED_EGRESS_KIND =
+  "a body the compiler could not analyse in full — its nesting exceeds the " +
+  `§14.8.9 structural-analysis depth cap (${RAW_EGRESS_MAX_DEPTH} tree levels)`;
+
+/**
+ * One E-PROTECT-004 detection, resolved against the whole file's function set.
+ */
+export interface ProtectedRawEgressDetection {
+  /** The `function-decl` node the diagnostic is reported ON. */
+  fn: unknown;
+  /** The offending protected SELECT (normalized, truncated), or null when the
+   *  detection is a truncated (unanalyzable) body with no resolved query. */
+  query: string | null;
+  /** Human-readable egress kind for the message. */
+  egressKind: string;
+  /** Set when the detection is the fail-closed answer for an un-walkable body. */
+  truncated?: true;
+  /** The call path `fn -> … -> <the fn that holds the protected SELECT>`, when
+   *  the SELECT is not in `fn`'s own body. */
+  queryVia?: string[];
+  /** The call path `fn -> … -> <the fn that holds the raw egress>`, when the
+   *  egress is not in `fn`'s own body. */
+  egressVia?: string[];
+}
+
+/**
+ * §14.8.9 fail-closed gate, resolved ACROSS the file's function set.
+ *
+ * The per-body test this widens (co-occurrence of a protected `?{}` and a raw
+ * egress in ONE function) missed the most ordinary shape an adopter writes:
+ *
+ * ```scrml
+ * function loadUser(id) { return ?{`SELECT * FROM users WHERE id = ${id}`}.get() }
+ * export server function getUser(id) {
+ *   let u = loadUser(id)
+ *   return new Response(JSON.stringify(u))          // ships passwordHash
+ * }
+ * ```
+ *
+ * Measured, by executing the emitted handler against a stubbed `_scrml_sql`:
+ * that program, and its mirror (query in the caller, `new Response` in the
+ * helper), and a two-hop chain, ALL answered
+ * `{"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}` at exit 0 with zero
+ * diagnostics. Splitting a function in two is not a security boundary, so the
+ * gate must not treat it as one.
+ *
+ * The rule: for each function `F`, let `reach(F)` = `F` plus every function `F`
+ * transitively CALLS within this file. `F` fires when `reach(F)` contains BOTH a
+ * protected SELECT and a raw egress. Forward reachability alone covers both flow
+ * directions, because it is evaluated at every function:
+ *
+ *   - SELECT in a callee, egress in `F`   — the row RETURNS into `F`'s egress;
+ *   - SELECT in `F`, egress in a callee   — the row is PASSED IN as an argument;
+ *   - both in callees of a common `F`     — the row moves callee → `F` → callee.
+ *
+ * and two functions with no call path between them share no data path, so they
+ * do not fire (verified: an unrelated protected query plus an unrelated §40.3.5
+ * `403` in the same file stays silent).
+ *
+ * This stays a CO-OCCURRENCE test, exactly as conservative as the per-body form
+ * — it does not prove the protected row reaches the egress, it declines to prove
+ * it does not. Widening the unit from "one body" to "one call-reachable set" is
+ * what makes the conservatism honest: the old unit was a boundary the author
+ * could cross by pressing Extract Function.
+ *
+ * **Bound.** The call graph is INTRA-FILE and by BARE-IDENTIFIER callee:
+ * a cross-file import, a call through a value (`handlers[k]()`), and a call on a
+ * member (`obj.method()`) contribute no edge. Those are the same syntactic bound
+ * as the callee resolution above, and closing them needs the name resolver.
+ *
+ * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
+ */
+export function detectProtectedRawEgressAcrossFns(
+  fnNodes: readonly unknown[],
+  ctx: ProtectContext,
+): ProtectedRawEgressDetection[] {
+  const nodes = fnNodes.filter((f) => f && typeof f === "object");
+  const facts = nodes.map((f) => collectRawEgressFacts(f, ctx));
+  const nameOf = (f: unknown): string => (f as { name?: string }).name ?? "<anonymous>";
+
+  // name -> index. First declaration wins on a duplicate name (the emitter's own
+  // resolution order); a name with no declaration contributes no edge.
+  const indexByName = new Map<string, number>();
+  nodes.forEach((f, i) => {
+    const n = nameOf(f);
+    if (!indexByName.has(n)) indexByName.set(n, i);
+  });
+
+  /**
+   * BFS over the call edges from `root`, returning for each reached index the
+   * call PATH that reached it (so the diagnostic can name `f -> g -> h` rather
+   * than just `h`). Recursion / mutual recursion terminates on the visited set.
+   */
+  const reachFrom = (root: number): Map<number, string[]> => {
+    const paths = new Map<number, string[]>([[root, [nameOf(nodes[root])]]]);
+    const queue = [root];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      const curPath = paths.get(cur)!;
+      for (const calleeName of facts[cur].calls) {
+        const next = indexByName.get(calleeName);
+        if (next === undefined || paths.has(next)) continue;
+        paths.set(next, [...curPath, calleeName]);
+        queue.push(next);
+      }
+    }
+    return paths;
+  };
+
+  const out: ProtectedRawEgressDetection[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    // FAIL CLOSED on an unanalyzable body, before anything else: the walk
+    // stopped short of the whole tree, so "no protected query here", "no raw
+    // egress here" AND "no call edges here" are all UNKNOWN, not "no".
+    if (facts[i].truncated) {
+      out.push({ fn: nodes[i], query: facts[i].protectedQuery, egressKind: TRUNCATED_EGRESS_KIND, truncated: true });
+      continue;
+    }
+
+    const reached = reachFrom(i);
+
+    // The protected SELECT: prefer this body's own, else the shortest reached.
+    let query = facts[i].protectedQuery;
+    let queryVia: string[] | undefined;
+    if (query === null) {
+      for (const [idx, path] of reached) {
+        if (idx !== i && facts[idx].protectedQuery !== null) {
+          query = facts[idx].protectedQuery;
+          queryVia = path;
+          break;
+        }
+      }
+    }
+    if (query === null) continue;
+
+    // The raw egress: same preference order.
+    let egressKind = egressKindOf(facts[i]);
+    let egressVia: string[] | undefined;
+    if (egressKind === null) {
+      for (const [idx, path] of reached) {
+        if (idx === i) continue;
+        const k = egressKindOf(facts[idx]);
+        if (k !== null) {
+          egressKind = k;
+          egressVia = path;
+          break;
+        }
+      }
+    }
+    if (egressKind === null) continue;
+
+    out.push({ fn: nodes[i], query, egressKind, queryVia, egressVia });
   }
-
-  if (protectedQuery === null) return null;
-
-  // Priority is fixed rather than traversal-ordered, so the reported kind does
-  // not depend on where in the body each construct happens to sit.
-  const egressKind = sawForeign
-    ? "a `_{}` foreign-code block (§23)"
-    : sawResponse
-      ? "a manual `Response` / `handle()` body (§40)"
-      : sawAsIs
-        ? "an `asIs`-typed value (§14.1.1)"
-        : null;
-  if (!egressKind) return null;
-  return { query: protectedQuery, egressKind };
+  return out;
 }
