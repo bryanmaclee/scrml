@@ -6612,6 +6612,36 @@ Reported by scrml-site's error-code probe harness (one minimal reproducer per §
 
 **Remediation-message correction (S239 finding 1).** The first cut emitted one remedy — *"move it to be a direct child of `<program>`, a SIBLING of the `<page>` declarations … no other change is needed"* — which is wrong in every clause for the DOMINANT multi-page shape: a route file (`pages/chat.scrml`) is a top-level `<page>` with **no `<program>` in the file at all**, so there is no `<program>` to become a child of, the `<page>` has no siblings, and the fix necessarily edits a different file. The message now branches on the `fileHasProgram` signal the walker already had: the in-`<program>` branch keeps the local-move remedy (and the "use sites do not change" claim, which is true only there); the route-file branch states explicitly that the fix CROSSES FILES and gives both remedies — the entry file's `<program>` body, or a PURE-CHANNEL-FILE module (§38.12.6) with a copy-pasteable `import` + mount snippet derived from the ACTUAL channel name (kebab names camel-cased for the alias, matching `examples/23-trucking-dispatch/pages/driver/messages.scrml:25`).
 
+### g-nested-program-emits-artifacts-it-never-produces — a nested `<program>` emits a `new Worker(...)` reference and channel CLIENT connections, but neither the worker file nor the channel's SERVER route is ever produced — `NEW S354-bryan (S239 adversarial pass on the g-channel-in-nested-program-inside-page-ordering landing); HIGH; open`
+<!-- @gap id=g-nested-program-emits-artifacts-it-never-produces sev=HIGH status=open locus=compiler/src/codegen/emit-channel.ts prov=empirical:S354-bryan-reproduced -->
+**PRE-EXISTING and independent of the placement ruling — PA-reproduced by execution on BOTH `main` and the fix branch, not relayed from the review.** A nested `<program>` compiles to references it never backs with artifacts. Two instances in one emit:
+
+1. **The worker file is never written.** `<program name="worker">` emits `new Worker("worker.worker.js")` into the client bundle; no `worker.worker.js` appears in the output directory. Verified on `main` (control, no `<page>` involved) and on the fix branch.
+2. **A `<channel>` inside the nested `<program>` gets a CLIENT connection and no SERVER route.** The client dials `/_scrml_ws/nested_feed`; the server emits only `_scrml_route_ws_canonical_feed` for the top-level sibling and nothing for the nested one. The emitted client sets `_ws.onclose = () => { _reconn = setTimeout(_connect, 2000); }`, so the runtime failure mode is a **silent infinite 2-second reconnect loop** against a route that does not exist. Exit 0, zero errors, zero warnings naming it.
+
+**Reproducer (the control — no `<page>`, so it compiles on `main` today):**
+
+```
+<program db="postgres://localhost/app">
+  <channel name="canonical-feed">
+    <messages> = []
+  </channel>
+  <program name="worker">
+    <channel name="nested-feed">
+      <items> = []
+    </channel>
+  </program>
+</program>
+```
+
+`bun run compiler/src/cli.js compile nopage.scrml` → **Compiled, exit 0**. Emitted: `nopage.client.js` (dials BOTH `/_scrml_ws/canonical_feed` and `/_scrml_ws/nested_feed`, plus `new Worker("worker.worker.js")`), `nopage.server.js` (routes ONLY `canonical_feed`), and no worker file.
+
+**⚑ Why this is filed now, and why it blocks a landing it did not cause.** `E-CHANNEL-INSIDE-PAGE` was doing more than placement hygiene: it was the only thing keeping authors out of this codegen path for the `<page>` → nested `<program>` → `<channel>` shape. The S353-ruled fix for [[g-channel-in-nested-program-inside-page-ordering]] is **correct on its own terms** — the depth-tracking change is minimal, correctly scoped, and its 15 new tests were verified two-sided (8 of 15 fail against the unfixed base). But landing it alone converts a **loud, accurate build error into a silently broken artifact**, which is strictly worse for an adopter than the rejection it removes. Worse, the sibling diagnostic `E-CHANNEL-OUTSIDE-PROGRAM` then *steers authors into it*: for a route file whose only `<program>` is page-nested, its remediation says "move it inside `<program>`" — and doing so produces the broken artifact above.
+
+**Blast radius: 0 corpus instances** (the S299/S353 re-measurement walked all 2260 `.scrml` and found 0 page-nested channels of any kind), and the no-`<page>` shape is equally unexercised. **Nothing is broken in the corpus today** — which is exactly why holding the placement fix costs nothing while landing it alone does.
+
+**Owed:** emit the server half for nested-`<program>` channels and the worker artifact itself — or, if nested-`<program>` codegen is deliberately unbuilt, say so with a diagnostic instead of emitting dangling references. §4.12.1 declares a nested `<program>` "a separate compilation unit"; today that unit is referenced and never compiled. Cross-ref [[g-channel-in-nested-program-inside-page-ordering]] (the placement ruling this blocks).
+
 ### g-channel-in-nested-program-inside-page-ordering — a `<channel>` inside a NESTED `<program>` inside a `<page>` is rejected even though the channel IS inside a `<program>` — `NEW S299 (S239 adversarial pass on the g-channel-inside-page-never-fires landing); LOW; RULING-GATED`
 <!-- @gap id=g-channel-in-nested-program-inside-page-ordering sev=LOW status=open locus=compiler/src/symbol-table.ts prov=ruling:user-voice-scrml.md-S353 -->
 **⚑ RULED S353-bryan — option (b), reverse the precedence.** Reset `pageDepth` when descending into a nested `<program>`, treating it as a fresh placement scope. **§4.12.1 is the more specific normative sentence and it wins:** a nested `<program>` "SHALL be subject to the same grammar rules as a top-level `<program>`" (`:724`) and "SHALL be a separate compilation unit" (`:718`) — so the enclosing `<page>` is as invisible to the placement check as the parent's bindings are under §4.12.1 shared-nothing isolation. **The FORK RULE genuinely split** (limit-over-widen / fail-closed / reversibility all favoured keeping the rejection; **root-over-position favoured (b)** — hardcoding the exception patches a position while the compilation-unit boundary is the actual rule), which is why it was surfaced rather than PA-decided. Root won. **Blast radius MEASURED zero** (0 page-nested channels across all 2260 `.scrml`), so the ruling is free and was taken on correctness, not cost. **Owed by the build:** a test pinning the ordering (none exists today, either way) AND the adjacent question this ruling forces — should `E-CHANNEL-OUTSIDE-PROGRAM`'s `fileHasProgram` pre-scan be nested-`<program>`-aware? Status flipped ruling-gated → open: the ruling is delivered, the build is not.
