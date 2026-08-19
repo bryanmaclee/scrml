@@ -7287,6 +7287,20 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // names; adding them here would pre-empt that lane. The E-SCOPE-001 scope
   // check is orthogonal to the §14.8.9 E-PROTECT-004 confidentiality floor —
   // a protected-origin column reaching a manual `Response` STILL fails closed.
+  //
+  // `Response` specifically is also a §40.3.5 conformance restoration, ruled
+  // independently: that section's own worked example ("Early Return from
+  // `handle()`") is scrml source in a `${ }` logic context returning a BARE
+  // `new Response("Forbidden", { status: 403 })`, and the normative statement
+  // beneath it reads "The response returned by `handle()` SHALL be the final
+  // response. This is intentional and valid." Without the entry the documented
+  // form did not compile — and the workaround an author reached for
+  // (`new globalThis.Response(...)`) was, until the structural detector landed,
+  // the one spelling that SILENCED the §14.8.9 raw-egress gate. The compiler
+  // steered authors onto the leak. The S352 ruling admitted `Response` alone and
+  // called `Request`/`Headers` a widening needing its own ruling; #590 (S355)
+  // is that ruling, and it landed first — the trio below is the current state.
+  // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1); issue #471 / #590
   "Response", "Request", "Headers",
   // Language keywords that may surface as idents after expression parsing
   "this", "self", "super", "event", "arguments",

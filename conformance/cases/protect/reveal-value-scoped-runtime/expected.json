@@ -1,0 +1,22 @@
+{
+  "id": "protect-reveal-value-scoped-runtime",
+  "description": "§14.8.9 declassification is VALUE-scoped — the RUNTIME half (adapter-gated). A server fn reveals passwordHash on ONE row (`WHERE id = 2`) and returns a DIFFERENT row (`WHERE id = 1`) through the normal compiler-emitted response. The E-ADAPTER server-eval path runs the real emitted handler, so `_scrml_protect_redact` executes at the egress sink and reads the returned row's OWN descriptor — which bears no reveal stamp. The client-bound cell @user therefore observes {id, name} with passwordHash ABSENT. This is the runtime counterpart to `protect-reveal-cross-value-no-suppress`: that case proves the compile-time gate is not silenced across values; this one proves the runtime floor is not either. Together they show value-scoping holds at both ends, which is exactly what a body-wide static suppressor assumed away.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: reveal 'stamps the named column's provenance descriptor as declassified-at-this-value; the serializer admits a protected-origin column only when ITS descriptor bears a `reveal` stamp at the sink' (SPEC.md:8511-8513). `_scrml_protect_reveal` returns a NEW object carrying the stamp and leaves the original's descriptor untouched, so the stamp travels with the value and with nothing else. The contrast with `protect-reveal-client-visible-runtime` is the point: there the revealed value IS the returned one and passwordHash is present; here it is a sibling and passwordHash is absent. Same mechanism, opposite observable, decided purely by which value crosses the sink. auth=\"none\" declassifies the AUTH scope while the column-redaction floor stays engaged (the two axes are orthogonal and stack). provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c)).",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": ["E-PROTECT-004"],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" },
+        { "id": 2, "name": "Bob", "passwordHash": "SECRET_HASH_BOB" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": { "id": 1, "name": "Alice" } }
+  }
+}

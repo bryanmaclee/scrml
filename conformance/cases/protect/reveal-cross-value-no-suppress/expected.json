@@ -1,0 +1,13 @@
+{
+  "id": "protect-reveal-cross-value-no-suppress",
+  "description": "§14.8.9 declassification is VALUE-scoped — a `reveal(\"passwordHash\")` applied to a COMPLETELY DIFFERENT query's row (`WHERE id = 999`) does not silence the raw-egress gate for the row actually returned (`WHERE id = ${id}`), which was never revealed. E-PROTECT-004 fires. Pins the fix for the third measured fail-open: the deleted suppressor was a body-wide lexeme test (`/\\.\\s*reveal\\s*\\(/` over the function's source slice), so ANY reveal anywhere in the body disarmed the gate for every value in it.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 scopes declassification to the value: reveal is applied 'at the value' (SPEC.md:8506-8507), it 'stamps the named column's provenance descriptor as declassified-at-this-value', and 'the serializer admits a protected-origin column only when its descriptor bears a `reveal` stamp at the sink' (SPEC.md:8511-8513); the worked example is commented 'here only' (SPEC.md:8509). A body-wide suppressor violates every one of those four phrases at once — the returned row `u` bears no stamp, and the stamped value `decoy` is not the one that crosses the wire. This is the shape that makes the defect a security bug rather than an ergonomic one: an inserted reveal launders every sibling value in the function for free. provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c)).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": ["E-SCOPE-001"],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}
