@@ -250,13 +250,40 @@ not block commits.
 
 ## 2026-08-19 — Pre-existing, surfaced not fixed
 
-- **`docs/FACTS.md` `@generated:facts-table` is STALE at `36ed3d05`, before
-  any change of mine.** Verified by reverting `compiler/tests/` to the base
-  commit and re-running `bun scripts/facts.ts --check` — still STALE. The
-  pre-push gate blocks on it, so it is regenerated in this branch's final
-  commit as gate-satisfaction, but the staleness was inherited.
 - **16 heading/marker status drifts in `docs/known-gaps.md`** reported by
   `bun scripts/state.ts --check` (WARN-only, not gated). All pre-existing;
   none is `g-spa-runtime-gzip-budget-knife-edge`.
 - **The stale 127 B figure also lives OUTSIDE `docs/known-gaps.md`** — see
   the report's DEFERRED_ITEMS. Not touched: item 6 scoped to that one file.
+
+## 2026-08-19 — ⚑ A claim I made and then falsified myself
+
+I recorded above that `docs/FACTS.md` was stale at base, "before any change
+of mine". **That was wrong, and the probe that produced it was invalid.**
+
+The probe ran `git checkout 36ed3d05 -- compiler/tests/` and re-checked.
+But `git checkout <commit> -- <path>` restores files that exist in that
+commit; it does **not delete** a file absent from it. So
+`runtime-size-ratchet.test.js` was still sitting on disk throughout the
+"base" check, and the check was measuring my own change.
+
+Re-run correctly, by moving the new file out of the tree entirely:
+
+```
+=== FACTS check with MY file removed:
+  PASS  @generated:facts-table (docs/FACTS.md)
+  PASS  @generated:facts-lists (docs/FACTS.md)
+
+PASS — all derived facts current.
+```
+
+**`docs/FACTS.md` was CURRENT at `36ed3d05`.** The single line the
+regeneration changes is `test files | 1,350` → `1,351` — exactly the one
+file this branch adds. The regeneration is a normal consequence of adding a
+test file, not the inheriting of someone else's debt, and the pre-push gate
+was doing precisely its job.
+
+Recorded rather than quietly edited out: the failure mode is a probe whose
+mechanism does not do what its name suggests, and the tell was that the
+regenerated diff was `+1 test file` — my own contribution — which should
+have been the first thing I reconciled against the "pre-existing" story.
