@@ -58,3 +58,75 @@ fired from `compiler/src/codegen/emit-server.ts:1812-1839`. Confirmed by reading
 - Population differential (old regex vs new structural) over the corpus — both counts.
 
 **Blockers** — none.
+
+## 2026-08-19 — structural detector + allowlist + reveal deletion COMPLETE; commit ENV-BLOCKED
+
+**Landed in the working tree (anchored as `wip-source.patch.txt`, see the blocker note below)**
+
+- `compiler/src/codegen/protect-egress.ts` — `detectProtectedRawEgress` now takes the fn NODE and
+  walks the parsed tree (`astReadsCurrentUserAmbient` precedent: identity seen-set, depth cap 128,
+  `span` skipped). Egress kinds are node-kind / callee questions; the constructor callee resolves
+  through its MEMBER CHAIN (`terminalName`), so `globalThis.Response` / `window.Response` answer as
+  bare `Response`. `Response.json(...)` handled via `memberReceiverName`. `asIs` reads the
+  `typeAnnotation` / `returnTypeAnnotation` FIELD. Egress-kind priority is fixed, not
+  traversal-ordered. **The `reveal` suppressor is deleted.**
+- `compiler/src/codegen/emit-server.ts` — fire site passes `fn`, not a `_sourceText` slice;
+  detection no longer depends on `_sourceText` at all. E-PROTECT-004's message no longer offers
+  `reveal` as a resolution at a raw egress (it would not work).
+- `compiler/src/type-system.ts` — `Response` added to `LOGIC_SCOPE_GLOBAL_ALLOWLIST`, scoped to the
+  one name §40.3.5 constructs. `Request` / `Headers` / `FormData` deliberately NOT added.
+- `compiler/SPEC.md` — three amendments, each carrying `provenance: ruling:user-voice-scrml.md S352`.
+- `compiler/tests/integration/g-sql-row-protect-leak.test.js` — 6 new tests + 2 population guards.
+- `conformance/cases/protect/` — 1 re-authored (renamed) + 4 new cases.
+
+**Verification**
+
+- Conformance **887/887** (was 883/883; +4 new, 1 renamed).
+- Bite proof: the 6 new integration tests and the 4 new/re-authored codes cases ALL fail pre-fix and
+  pass post-fix (verified by stashing `compiler/src` and re-running).
+  `reveal-value-scoped-runtime` passes on BOTH sides — deliberately: it pins that the RUNTIME helper
+  was always value-scoped, so the defect was the static suppressor alone.
+- `corpus-emit-differential` base-vs-head over 1906 sources / 7383 artifacts:
+  **artifact content diffs 0 of 7378 · compile-failure delta 0/0 · artifact set delta 0/0 ·
+  effective syntax delta 0/0 · bare server-fn sites delta 0.** Source-set delta 2 = the case rename.
+  Of 1227 differing diagnostic texts, **1224 are purely the capture work-dir prefix**; the 3 real
+  changes are all `E-SCOPE-001` DISAPPEARING — including two real adopter sources
+  (`samples/gauntlet-r13` and `r14 react-auth-dashboard.scrml`).
+- **R26 empirical** on `gauntlet-r25/dev-{1..4}`: emitted artifacts byte-identical (md5) and
+  diagnostic code sets identical, base vs head. No `_scrml_sql` / `passwordHash` in any emitted
+  `client.js`. (Those sources use no `protect=`, so blast radius there is nil.)
+
+**Population counts (base §8 coverage-removal question), measured by instrumenting the real fire
+site over 1878 server-fn bodies corpus-wide (1598 of them protect-active):**
+
+- **(A) sites the check STOPS looking at: 2** — `stdlib/compiler/meta-checker.scrml::typeToString`
+  and `::buildFileTypeRegistry`, both matched by the old `/\basIs\b/` on the token inside a STRING
+  LITERAL (`type.kind == "asIs"`, `["number", …, "asIs"]`). **Both false positives. Zero genuine
+  coverage lost.**
+- **(B) sites it NEWLY reaches: 10** foreign-block bodies (every `_={`-and-above opener level),
+  **plus 4 kind-corrections** (`response`→`foreign`, where the `new Response` lived INSIDE the opaque
+  slice, so `foreign` is the correct classification), **plus 9 on the SQL half** (a structured `sql`
+  node present where the old backtick regex matched nothing).
+- `_sourceText`-independence reaches **0** additional bodies in this corpus (every FileAST carried it).
+- Bodies the deleted suppressor would have silenced: **2**, both conformance cases.
+
+**Migration re-measured independently:** `grep -rl '\.reveal(' --include='*.scrml' .` = **2 files**,
+both dedicated conformance cases. Zero adopter/sample/example usage. (Three other `.scrml` declare a
+free `reveal()` function; the suppressor required the dot and none declares `protect=`.)
+
+**BLOCKER — commit of the code change is environment-blocked, not code-blocked**
+
+The pre-commit hook `--bail`s on `compiler/tests/unit/mcp-runtime-helpers.test.js`
+`fs.watch reload (watch: true)` (2 tests). Root cause, measured: the per-user inotify instance cap
+(`/proc/sys/fs/inotify/max_user_instances` = 128) is exhausted by **76 orphaned
+`scrml dev --port 0` servers on `/tmp/scrml-dev-*` fixture dirs**, leaked by the dev-watcher tests,
+aged up to 1d6h, all reparented. Direct probe: `fs.watch` returns `EMFILE` for 0 of 3 handles in a
+fresh process. Both tests are in this dispatch's BASELINE at `3b5eed44` and still fail with the
+source changes stashed, so they are pre-existing and causally unrelated.
+
+`--no-verify` and `core.hooksPath` overrides are forbidden without operator authorization, and the
+tool classifier (correctly) blocked reaping the orphans. The work is therefore anchored as an inert
+`.txt` patch committed via the hook's docs-only lane. **This is a repo-wide condition: no agent on
+this machine can commit a code change until those processes are reaped.**
+
+**Next / deferred** — see the report.

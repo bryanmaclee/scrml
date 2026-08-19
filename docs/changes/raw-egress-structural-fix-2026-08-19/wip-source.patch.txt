@@ -1,3 +1,53 @@
+diff --git a/compiler/SPEC.md b/compiler/SPEC.md
+index b88f512b..c618a5d7 100644
+--- a/compiler/SPEC.md
++++ b/compiler/SPEC.md
+@@ -8520,9 +8520,25 @@ width-contract (it operates on the value before serialization; it does not widen
+ compiler-emitted and descriptor-preserving. An egress path the compiler cannot analyze — a `_{}`
+ foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value
+ (§14.1.1) — that carries a protected-origin column SHALL **fail closed**: `E-PROTECT-004` (the row
+-cannot be proven redacted at an un-analyzable egress; declassify explicitly with `reveal` or
+-project the column out). The compiler never silently ships a protected-origin column through a path
+-it cannot redact.
++cannot be proven redacted at an un-analyzable egress; project the column out of the SELECT, or
++return the row through a compiler-emitted egress — where the floor redacts and `reveal` declassifies
++at that sink). The compiler never silently ships a protected-origin column through a path it cannot
++redact.
++
++**`reveal` is NOT an admit path at a raw egress, and the fail-closed SHALL above is unconditional.**
++This follows from the value-scoping stated two paragraphs up: `reveal("col")` stamps a descriptor
++*at the value*, and "the serializer admits a protected-origin column **only** when its descriptor
++bears a `reveal` stamp **at the sink**." A raw egress is precisely a sink the compiler does not emit
++and cannot introspect, so there is no serializer there to read the stamp — the admission condition
++can never be evaluated, and an unevaluable condition cannot license admission. A *body-wide*
++suppressor (any `reveal` anywhere in the function silencing the gate) is therefore non-conformant
++twice over: it admits a value bearing no stamp at all, and it lets a `reveal` on one query's row
++silence the gate for a different, never-revealed row that is the one actually returned. Restoring an
++ergonomic exit is a separate question — it requires LOWERING a mediatable raw sink so the floor runs
++there (at which point the ordinary at-the-sink rule applies unchanged), not widening `reveal`.
++(Amended 2026-08-19 (S352) — change-id `raw-egress-structural-fix-2026-08-19`; corrects a resolution
++hint that named `reveal` at an un-analyzable egress, which the at-the-sink rule cannot support.
++**provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c))**.)
+ 
+ **Diagnostics** (named now; emitted when the floor build lands, per the §60 / §61 / §26.8
+ named-codes-land-with-impl precedent — Rule 4):
+@@ -19281,7 +19297,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
+ | W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `<db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
+ | E-SQL-ROW-CONTRACT-MISMATCH | §14.8.8 | A SQL-projection-row value (a Tranche-1 typed `?{ SELECT ... }` row, or its per-item element) is passed to a component prop whose declared type is a developer-authored `:struct` contract, and the row does NOT structurally width-subtype into that contract: either (a) the contract requires a field the row does not project (`missing`), or (b) the row projects the field but its type is not assignable to the contract's declared type (`incompatible`). One diagnostic fires PER unsatisfied field, naming the field + the contract type. BOUNDED: this is the ONLY structural-subtyping path — it applies solely when the SOURCE is a SQL-projection row (`<sql-row>` provenance) and the TARGET is a declared `:struct` prop contract. General struct-to-struct assignment stays NOMINAL (§14.8.1) and never triggers this code. EXTRA columns in the row are allowed (width-subtyping). (Catalog addition: typed-sql-row Tranche 2 — Shape C, ratified S175; emitted at `compiler/src/type-system.ts` `checkPropContract` via `checkSqlRowWidthSubtype`; the call-site descriptor is recorded by `compiler/src/component-expander.ts` as `__propContractChecks`.) | Error |
+ | ~~E-PROTECT-002~~ | §11.3.3 | **Retired 2026-08-01 (S310) — fold-orphan.** §11 is *"State Objects and `protect=` (Reserved — Folded)"*; its content moved to §6 / §52 / §14.8.9, and this row was left pointing into the dissolved §11.3.3. Searched §11.3.3, §52, §14.8.9 and the whole SPEC — **no normative definition survives anywhere**; the code appeared ONLY in this index row and has no emitter. The behaviour it named (protected-field access reachable client-side) is owned by the LIVE §14.8.9 protect-floor **E-PROTECT-004** (protected-origin column resolved through the SQL FROM/JOIN alias map) plus §12.2 server-placement inference. Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
+-| E-PROTECT-004 | §14.8.9 | A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) reaches a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, where origin-keyed structural redaction (§14.8.9) cannot be guaranteed, and the column is not `reveal`-declassified. Fail-closed: the compiler will not ship a protected column through a path it cannot redact. Resolution: declassify explicitly with `value.reveal("col")`, or project the column out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. (Catalog addition S230 dpa-017; named now, fires when the §14.8.9 floor build lands per Rule 4 / §60/§61/§26.8 precedent.) | Error |
++| E-PROTECT-004 | §14.8.9 | A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) reaches a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, where origin-keyed structural redaction (§14.8.9) cannot be guaranteed. Fail-closed **unconditionally**: the compiler will not ship a protected column through a path it cannot redact. Resolution: project the column out of the SELECT, or return the row through a compiler-emitted egress (where the floor redacts and `value.reveal("col")` declassifies at that sink). **`reveal` does NOT suppress this code** — §14.8.9 admits a protected-origin column only when its descriptor bears a `reveal` stamp AT THE SINK, and a raw egress has no compiler-emitted serializer to read the stamp, so the admission condition is unevaluable there. Detection is STRUCTURAL (over the parsed function tree, by node kind and by callee resolved through its member chain), so `new globalThis.Response(...)` and every foreign-block opener level (`_{`, `_={`, …) are recognised identically to the bare spellings, and a token inside a comment or string literal is not. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. (Catalog addition S230 dpa-017; named now, fires when the §14.8.9 floor build lands per Rule 4 / §60/§61/§26.8 precedent. Amended 2026-08-19 (S352), change-id `raw-egress-structural-fix-2026-08-19` — **provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))**.) | Error |
+ | I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands.) | Info |
+ | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
+ | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
+@@ -22664,6 +22680,7 @@ ${ function handle(request, resolve) {
+ 
+ - When `handle()` returns without calling `resolve()`, the route handler SHALL NOT run. The response returned by `handle()` SHALL be the final response. This is intentional and valid.
+ - The "exactly once" rule for `resolve()` (E-MW-003) applies only to execution paths that DO call `resolve()`. A branch that returns early without calling `resolve()` is valid.
++- **`Response` SHALL be in scope as a bare identifier in scrml logic.** The worked example above constructs one directly, so the name must resolve; a compiler that raises an undeclared-identifier diagnostic (`E-SCOPE-001`) on `new Response(...)` rejects source this subsection documents as valid. The admission is deliberately narrow — `Response` only. `request` is a parameter binding supplied by the `handle(request, resolve)` signature (§40.3.2), not a global, and no other host HTTP name (`Headers`, `FormData`, `Blob`, …) is named by this section; admitting those would be a widening rather than a conformance restoration and is not granted here. A manual `Response` remains an *un-analyzable egress* for §14.8.9 purposes — being in scope makes it authorable, not redactable, and `E-PROTECT-004` still fires when a protected-origin column reaches it. (Added 2026-08-19 (S352) — change-id `raw-egress-structural-fix-2026-08-19`. **provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1)**.)
+ 
+ ### 40.4 `handle()` and Compiler-Auto Middleware Interaction
+ 
 diff --git a/compiler/src/codegen/emit-server.ts b/compiler/src/codegen/emit-server.ts
 index 508d57ec..e829957a 100644
 --- a/compiler/src/codegen/emit-server.ts
@@ -296,6 +346,38 @@ index 23e8fd4c..0a3683f0 100644
    if (!egressKind) return null;
    return { query: protectedQuery, egressKind };
  }
+diff --git a/compiler/src/type-system.ts b/compiler/src/type-system.ts
+index 287fdee3..2fbfc9df 100644
+--- a/compiler/src/type-system.ts
++++ b/compiler/src/type-system.ts
+@@ -7273,6 +7273,27 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
+   "requestAnimationFrame", "cancelAnimationFrame",
+   "performance", "crypto", "alert", "confirm", "prompt",
+   "URL", "URLSearchParams", "Buffer", "process",
++  // §40.3.5 (the `#### 39.3.5` heading — a numbering drift; it sits under
++  // `### 40.3`) — "Early Return from `handle()`". Its worked example is scrml
++  // source in a `${ }` logic context returning a BARE `new Response("Forbidden",
++  // { status: 403 })`, and the normative statement beneath it reads "The response
++  // returned by `handle()` SHALL be the final response. This is intentional and
++  // valid." §14.8.9's closed-world paragraph independently enumerates "a manual
++  // `Response` / `handle()` body (§40)" as an egress kind E-PROTECT-004 must
++  // recognise — which presupposes the form is authorable.
++  //
++  // Without this entry a bare `new Response(...)` fired `E-SCOPE-001: Undeclared
++  // identifier `Response``, so the documented form did not compile — and the
++  // workaround an author reaches for (`new globalThis.Response(...)`) was, until
++  // the structural detector landed, the one spelling that SILENCED the §14.8.9
++  // raw-egress gate. The compiler steered authors onto the leak.
++  //
++  // Deliberately NARROW: only `Response`. `Request` is a parameter binding from
++  // the `handle(request, resolve)` signature, not a bare global, and `Headers` /
++  // `FormData` / `Blob` are named nowhere in §40.3 — admitting them would be a
++  // widening, not a conformance restoration, and needs its own ruling.
++  // provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1)
++  "Response",
+   // Language keywords that may surface as idents after expression parsing
+   "this", "self", "super", "event", "arguments",
+   // scrml-specific — meta / compiler / SQL / error-context built-ins.
 diff --git a/compiler/tests/integration/g-sql-row-protect-leak.test.js b/compiler/tests/integration/g-sql-row-protect-leak.test.js
 index ea66d70e..70fffd37 100644
 --- a/compiler/tests/integration/g-sql-row-protect-leak.test.js
@@ -415,6 +497,128 @@ index ea66d70e..70fffd37 100644
  });
  
  // ---------------------------------------------------------------------------
+diff --git a/conformance/cases/protect/raw-egress-foreign-inline-level1/case.scrml b/conformance/cases/protect/raw-egress-foreign-inline-level1/case.scrml
+new file mode 100644
+index 00000000..10d8ac66
+--- /dev/null
++++ b/conformance/cases/protect/raw-egress-foreign-inline-level1/case.scrml
+@@ -0,0 +1,17 @@
++<program db="./app.db" lang="ts">
++  <schema>
++    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
++  </schema>
++  <db src="app.db" protect="passwordHash" tables="users">
++    ${
++      function getUser(id) {
++        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
++        let out = _={ in: { u }
++          JSON.stringify(u)
++        }=
++        return out
++      }
++    }
++  </db>
++  <div><p>hi</p></div>
++</program>
+diff --git a/conformance/cases/protect/raw-egress-foreign-inline-level1/expected.json b/conformance/cases/protect/raw-egress-foreign-inline-level1/expected.json
+new file mode 100644
+index 00000000..796101ed
+--- /dev/null
++++ b/conformance/cases/protect/raw-egress-foreign-inline-level1/expected.json
+@@ -0,0 +1,13 @@
++{
++  "id": "protect-raw-egress-foreign-inline-level1",
++  "description": "§14.8.9 raw-egress fail-closed — a protected row reaching a LEVEL-1 `_={ … }=` inline foreign block (the §23.2.4a canonical form) fires E-PROTECT-004. Pins the fix for a second measured fail-open: the source-text detector this replaced tested `/(^|[^A-Za-z0-9_$])_\\{/`, which matches only the LEVEL-0 `_{` opener, while the opener grammar is `_` + N `=` + `{`. So the very form SPEC §23.2.4a's own worked example uses walked past the gate at exit 0. Detection is now by NODE KIND (`kind === \"foreign\"`), which answers identically at every opener level.",
++  "language-version": "1.0",
++  "spec": "§14.8.9",
++  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
++  "rationale": "§14.8.9 closed-world precondition (SPEC.md:8519-8525) names 'a `_{}` foreign-code block (§23)' as an egress the compiler cannot analyze; the interior is opaque BY CONSTRUCTION, which is precisely why the SHALL is unconditional. The leak here is concrete: the emitted slice runs `JSON.stringify(u)` on the tagged row, yielding a plain STRING of independent identity, and `_scrml_protect_redact` returns a non-object unchanged — so the protected column crosses the wire fully intact. provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1).",
++  "expect": {
++    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
++    "notCodes": [],
++    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
++  }
++}
+diff --git a/conformance/cases/protect/raw-egress-globalthis-response/case.scrml b/conformance/cases/protect/raw-egress-globalthis-response/case.scrml
+new file mode 100644
+index 00000000..725f09f1
+--- /dev/null
++++ b/conformance/cases/protect/raw-egress-globalthis-response/case.scrml
+@@ -0,0 +1,14 @@
++<program db="./app.db">
++  <schema>
++    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
++  </schema>
++  <db src="app.db" protect="passwordHash" tables="users">
++    ${
++      function getUser(id) {
++        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
++        return new globalThis.Response(JSON.stringify(u))
++      }
++    }
++  </db>
++  <div><p>hi</p></div>
++</program>
+diff --git a/conformance/cases/protect/raw-egress-globalthis-response/expected.json b/conformance/cases/protect/raw-egress-globalthis-response/expected.json
+new file mode 100644
+index 00000000..1b4e07d6
+--- /dev/null
++++ b/conformance/cases/protect/raw-egress-globalthis-response/expected.json
+@@ -0,0 +1,13 @@
++{
++  "id": "protect-raw-egress-globalthis-response",
++  "description": "§14.8.9 raw-egress fail-closed — the gate resolves a constructor callee through its MEMBER CHAIN, so `new globalThis.Response(...)` is recognised identically to a bare `new Response(...)` and fires E-PROTECT-004. Pins the fix for a measured fail-open: the source-text detector this replaced tested `/\\bnew\\s+Response\\b/`, which a member chain does not match, so this exact file compiled at exit 0 with ZERO diagnostics and the emitted handler shipped `{\"id\":1,\"name\":\"ada\",\"passwordHash\":\"…\"}` to the client. Any aliasing receiver (`window.Response`, `globalThis.foo.Response`) reaches the same conclusion.",
++  "language-version": "1.0",
++  "spec": "§14.8.9",
++  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
++  "rationale": "§14.8.9 closed-world precondition (SPEC.md:8519-8525): an egress path the compiler cannot analyze — including 'a manual `Response` / `handle()` body (§40)' — carrying a protected-origin column SHALL fail closed with E-PROTECT-004. The SHALL is on the CONSTRUCT, not on a spelling, so a detector keyed to one surface form under-enforces the normative rule. The leak is real rather than theoretical because the emitted handler's `instanceof Response` passthrough (§12.5) deliberately returns a manual Response BEFORE `_scrml_protect_redact` runs — so a manual Response that the gate misses is never redacted by anything. provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1).",
++  "expect": {
++    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
++    "notCodes": ["E-SCOPE-001"],
++    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
++  }
++}
+diff --git a/conformance/cases/protect/reveal-cross-value-no-suppress/case.scrml b/conformance/cases/protect/reveal-cross-value-no-suppress/case.scrml
+new file mode 100644
+index 00000000..7d9398f3
+--- /dev/null
++++ b/conformance/cases/protect/reveal-cross-value-no-suppress/case.scrml
+@@ -0,0 +1,16 @@
++<program db="./app.db">
++  <schema>
++    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
++  </schema>
++  <db src="app.db" protect="passwordHash" tables="users">
++    ${
++      function getUser(id) {
++        let other = ?{`SELECT * FROM users WHERE id = 999`}.get()
++        let decoy = other.reveal("passwordHash")
++        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
++        return new Response(JSON.stringify(u))
++      }
++    }
++  </db>
++  <div><p>hi</p></div>
++</program>
+diff --git a/conformance/cases/protect/reveal-cross-value-no-suppress/expected.json b/conformance/cases/protect/reveal-cross-value-no-suppress/expected.json
+new file mode 100644
+index 00000000..0223a5d5
+--- /dev/null
++++ b/conformance/cases/protect/reveal-cross-value-no-suppress/expected.json
+@@ -0,0 +1,13 @@
++{
++  "id": "protect-reveal-cross-value-no-suppress",
++  "description": "§14.8.9 declassification is VALUE-scoped — a `reveal(\"passwordHash\")` applied to a COMPLETELY DIFFERENT query's row (`WHERE id = 999`) does not silence the raw-egress gate for the row actually returned (`WHERE id = ${id}`), which was never revealed. E-PROTECT-004 fires. Pins the fix for the third measured fail-open: the deleted suppressor was a body-wide lexeme test (`/\\.\\s*reveal\\s*\\(/` over the function's source slice), so ANY reveal anywhere in the body disarmed the gate for every value in it.",
++  "language-version": "1.0",
++  "spec": "§14.8.9",
++  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
++  "rationale": "§14.8.9 scopes declassification to the value: reveal is applied 'at the value' (SPEC.md:8506-8507), it 'stamps the named column's provenance descriptor as declassified-at-this-value', and 'the serializer admits a protected-origin column only when its descriptor bears a `reveal` stamp at the sink' (SPEC.md:8511-8513); the worked example is commented 'here only' (SPEC.md:8509). A body-wide suppressor violates every one of those four phrases at once — the returned row `u` bears no stamp, and the stamped value `decoy` is not the one that crosses the wire. This is the shape that makes the defect a security bug rather than an ergonomic one: an inserted reveal launders every sibling value in the function for free. provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c)).",
++  "expect": {
++    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
++    "notCodes": ["E-SCOPE-001"],
++    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
++  }
++}
 diff --git a/conformance/cases/protect/reveal-suppresses-e004/case.scrml b/conformance/cases/protect/reveal-does-not-suppress-e004/case.scrml
 similarity index 100%
 rename from conformance/cases/protect/reveal-suppresses-e004/case.scrml
@@ -457,3 +661,54 @@ index 5e0f8afe..00000000
 -    "severity": { "I-PROTECT-STRIP-001": "info" }
 -  }
 -}
+diff --git a/conformance/cases/protect/reveal-value-scoped-runtime/case.scrml b/conformance/cases/protect/reveal-value-scoped-runtime/case.scrml
+new file mode 100644
+index 00000000..bdf63d85
+--- /dev/null
++++ b/conformance/cases/protect/reveal-value-scoped-runtime/case.scrml
+@@ -0,0 +1,17 @@
++<program auth="none" db="app.db">
++  <schema>
++    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
++  </schema>
++  <db src="app.db" protect="passwordHash" tables="users">
++    ${
++      function getUser(id) {
++        let other = ?{`SELECT * FROM users WHERE id = 2`}.get()
++        let decoy = other.reveal("passwordHash")
++        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
++        return u
++      }
++    }
++  </db>
++  <user> = not
++  <button id="load" onclick=${ @user = getUser(1) }>load</button>
++</program>
+diff --git a/conformance/cases/protect/reveal-value-scoped-runtime/expected.json b/conformance/cases/protect/reveal-value-scoped-runtime/expected.json
+new file mode 100644
+index 00000000..a743082d
+--- /dev/null
++++ b/conformance/cases/protect/reveal-value-scoped-runtime/expected.json
+@@ -0,0 +1,22 @@
++{
++  "id": "protect-reveal-value-scoped-runtime",
++  "description": "§14.8.9 declassification is VALUE-scoped — the RUNTIME half (adapter-gated). A server fn reveals passwordHash on ONE row (`WHERE id = 2`) and returns a DIFFERENT row (`WHERE id = 1`) through the normal compiler-emitted response. The E-ADAPTER server-eval path runs the real emitted handler, so `_scrml_protect_redact` executes at the egress sink and reads the returned row's OWN descriptor — which bears no reveal stamp. The client-bound cell @user therefore observes {id, name} with passwordHash ABSENT. This is the runtime counterpart to `protect-reveal-cross-value-no-suppress`: that case proves the compile-time gate is not silenced across values; this one proves the runtime floor is not either. Together they show value-scoping holds at both ends, which is exactly what a body-wide static suppressor assumed away.",
++  "language-version": "1.0",
++  "spec": "§14.8.9",
++  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
++  "rationale": "§14.8.9: reveal 'stamps the named column's provenance descriptor as declassified-at-this-value; the serializer admits a protected-origin column only when ITS descriptor bears a `reveal` stamp at the sink' (SPEC.md:8511-8513). `_scrml_protect_reveal` returns a NEW object carrying the stamp and leaves the original's descriptor untouched, so the stamp travels with the value and with nothing else. The contrast with `protect-reveal-client-visible-runtime` is the point: there the revealed value IS the returned one and passwordHash is present; here it is a sibling and passwordHash is absent. Same mechanism, opposite observable, decided purely by which value crosses the sink. auth=\"none\" declassifies the AUTH scope while the column-redaction floor stays engaged (the two axes are orthogonal and stack). provenance: ruling:user-voice-scrml.md S352 (dpa-033 (c)).",
++  "expect": {
++    "codes": ["I-PROTECT-STRIP-001"],
++    "notCodes": ["E-PROTECT-004"],
++    "notCodePrefixes": ["E-"],
++    "severity": { "I-PROTECT-STRIP-001": "info" },
++    "serverDb": {
++      "users": [
++        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" },
++        { "id": 2, "name": "Bob", "passwordHash": "SECRET_HASH_BOB" }
++      ]
++    },
++    "input": [{ "click": "#load" }, { "wait": "settle" }],
++    "state": { "user": { "id": 1, "name": "Alice" } }
++  }
++}
