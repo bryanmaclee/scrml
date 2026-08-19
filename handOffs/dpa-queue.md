@@ -2016,3 +2016,58 @@ Everything else here is a bug fix the PA can dispatch on its own authority.
 
 `egress-tojson-root` Unit 2 (the interprocedural `E-PROTECT-004`) is HELD on this item. Unit 1 (delete the `toJSON` hook) is clean, verified, and independent — see delta-log [1555] for why the stack still cannot land (the cluster-level `globalThis`-allowlist break, M4).
 
+---
+
+## dpa-034 — `d1-no-editions`: was "no editions, EVER" EARNED, or only assumed from a corpus that could not have shown otherwise?
+
+```
+id:        dpa-034
+status:    banked
+rung:      R2 minimum — language-architecture, ONE-WAY door. USER rules.
+artifact:  scrml-support/docs/audits/sliding-doors-corpus-zero-2026-08-16/rulings-pending/R5-d1-no-editions.md
+source:    the sliding-doors audit's OWN #1 recommendation (GRAPH.md "Next": *"Bring bryan R5 —
+           one decision, in depth, S346 cadence"*). Written up S348-peter into the audit tree.
+banked:    S350 2026-08-19 — into THIS file, the only one the dPA drains
+routes-to: bryan (one-way language-architecture door — his ruling, not the PA's)
+```
+
+### ⚑ WHY THIS IS BEING RE-BANKED — it is the reason it matters
+
+**Decided worth-asking three days ago and never delivered.** The audit ranked it **the single decision
+to bring bryan first among the not-yet-biting**, wrote it up in full, and filed it under
+`audits/.../rulings-pending/`. It occurs **ZERO times in this file** — the only artifact the dPA drains
+— so it was never going to run and never reached bryan. Fourth instance of that shape found at S350
+(delta-log [1562]). **The analysis may already be done: READ THE ARTIFACT before re-deriving anything.**
+
+### The question
+
+**NOT on trial:** the language/compiler semver axis-separation (§62.1-62.4). Load-bearing, stays.
+
+**On trial:** was **"no editions, ever"** (§62.8) earned by a *language-design* argument, or only by the
+**"two friends" population premise** — drawn from a corpus that by construction could not have shown
+multi-author demand?
+
+### Why it ranks where it does
+
+- **ONE-WAY.** Permitting editions later is an accepting change; refusing now is not cheaply reversible
+  once the deprecation machine, the `scrml.toml [language]` pin, and the 1.0-freeze/multi-impl story
+  are all built on a single rule-set.
+- **Highest-degree not-yet-biting node** in the graph, in a **cycle** with `241 deprecation-window-one-minor`.
+- **It calcifies with every deprecation that lands** under the single-rule-set assumption — waiting has
+  a running cost.
+- **Guard-4 circularity, the sharp part:** D1 and D4 **both terminate at "two friends"** — one premise
+  holding up two doors, and the S346 reverse-ouroboros ruling made that premise **inadmissible** for
+  whether a capability should exist. Adopter #471 is cited as falsifying it.
+
+### PA recommendation (carried from S348, unchanged)
+
+**Keep no-editions — but RE-EARN it on the Go / C++ `-std=` argument, and STRIKE the population premise
+from both doors.** The conclusion may well survive; the recorded *reason* does not, and under Rule 4b a
+rule whose provenance is a falsified premise is exactly the shape that gets re-cited for things it never
+covered.
+
+### Do NOT re-derive
+
+The compile-probe already measured the door's width: D1.5's pin and D4's machine both assume no
+coexistence. **Only the ruling remains.**
+
