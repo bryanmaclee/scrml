@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 47 |
-| MED | 154 |
-| LOW | 70 |
+| MED | 151 |
+| LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -494,8 +494,9 @@ gate earning its cost on its first real run.
 
 **⚠ RE-CHARACTERISED S345-bryan (S342 arc audit, `handOffs/s342-arc-audit/g263.md`, quoting the g-263 branch's measurement): the locus is WRONG and the symptom is UNDER-stated.** This is NOT the #263/#358 export-const machinery: `STDLIB_ROOT` is a plain (non-export) top-level `const`, emitted by `emitReactiveWiring`'s top-level logic walk. Symptom evidence as measured: bun `vm.Script` parses the bundle OK, node `vm.Script` parse FAILS, and EXECUTION fails under BOTH — while the emitted HTML loads it as `<script src="module-resolver.client.js">` with no `type="module"`. Two further defects in the SAME emission, neither in the original text: (1) the initializer is DOUBLED (`new URL(resolve ( dirname ( new URL ( import . meta . url ) …`) — the same const-init `import.meta.url` mangling class routed to bryan in #520, cross-ref `g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname`; (2) the `const` is emitted AFTER the `_scrml_meta_effect` call that reads it (TDZ), while `resolve`/`dirname` are bound only INSIDE that effect's async body — so the reference is dangling regardless of `import.meta`. Fixing it needs a build-side classification rule, which is a design question, not a patch.
 
-### g-gap-markers-duplicate-id-conflicting-status-double-counted — one ledger entry may carry TWO `@gap` markers with conflicting `status=`, and `state.ts` counts markers not entries, so the entry is counted twice — `--check` passes — `NEW S322-bryan (surfaced while substantiating #419's count delta during the review-floor drain); MED; open`
-<!-- @gap id=g-gap-markers-duplicate-id-conflicting-status-double-counted sev=MED status=open locus=scripts/state.ts prov=rationale:the-counter-has-a-fail-loud-guard-for-an-unknown-status-but-none-for-a-duplicated-id-so-the-same-entry-can-be-both-open-and-resolved -->
+### g-gap-markers-duplicate-id-conflicting-status-double-counted — one ledger entry may carry TWO `@gap` markers with conflicting `status=`, and `state.ts` counts markers not entries, so the entry is counted twice — `--check` passes — `NEW S322-bryan (surfaced while substantiating #419's count delta during the review-floor drain); MED; resolved (fixed+tested at S334; stale-open)`
+<!-- @gap id=g-gap-markers-duplicate-id-conflicting-status-double-counted sev=MED status=resolved locus=scripts/state.ts prov=rationale:the-counter-has-a-fail-loud-guard-for-an-unknown-status-but-none-for-a-duplicated-id-so-the-same-entry-can-be-both-open-and-resolved -->
+**⚑ RESOLVED — fixed + unit-tested at S334; gap was STALE-open.** `gapCountsFromTokens` (state.ts) dedups markers by id before counting and throws loud on a same-id pair with conflicting sev/status; `state-gap-integrity.test.js §1` pins both the collapse and the conflict-throw. Verified S354-peter, flipped as bookkeeping.
 
 **Measured, not inferred.** 585 `@gap` markers resolve to **583 unique ids**. The two duplicates each
 carry *conflicting* status, both `sev=MED`:
@@ -1890,8 +1891,9 @@ precedent) with the honest note that no operator ratified it.
 estimated ~4 lines. That converts the best-verified work of the session into canon instead of leaving it
 as a comment one refactor from deletion.
 
-### g-known-gaps-heading-and-marker-status-can-disagree-silently — `state.ts` parses the `@gap` MARKER while `grep` returns the HEADING, so the two drift apart and every gate passes — `NEW S326-bryan (wrap-6c maps non-compliance); MED; open`
-<!-- @gap id=g-known-gaps-heading-and-marker-status-can-disagree-silently sev=MED status=open locus=scripts/state.ts(parses the marker; no heading/marker agreement assertion)+docs/known-gaps.md(the drifted headings) prov=rationale:46-measured-disagreements-none-of-which-any-gate-could-see -->
+### g-known-gaps-heading-and-marker-status-can-disagree-silently — `state.ts` parses the `@gap` MARKER while `grep` returns the HEADING, so the two drift apart and every gate passes — `NEW S326-bryan (wrap-6c maps non-compliance); MED; resolved (detector added+tested at S334; stale-open)`
+<!-- @gap id=g-known-gaps-heading-and-marker-status-can-disagree-silently sev=MED status=resolved locus=scripts/state.ts(parses the marker; no heading/marker agreement assertion)+docs/known-gaps.md(the drifted headings) prov=rationale:46-measured-disagreements-none-of-which-any-gate-could-see -->
+**⚑ RESOLVED — detector added + unit-tested at S334; gap was STALE-open.** `headingMarkerDrift()` (state.ts) now surfaces any `### ` heading whose structured status tail disagrees with its `@gap` marker, reported by the state report (`state-gap-integrity.test.js §2` pins it). WARN-only by deliberate design (doc hygiene, not a currency gate that would block CI). The silent-disagreement the gap named is now surfaced. Verified S354-peter.
 
 `scripts/state.ts` reads `status=` off the `@gap` marker. The `### ` heading carries its own
 human-readable `; SEV; status` tail, **and nothing checks that the two agree.** So the §0 rollup and its
@@ -8351,8 +8353,9 @@ Whoever registers `<title>` must add the `.value`-vs-`.textContent` discriminati
 
 A flat-declaration `#{}` block pushes an inline `style="…"` that is **not** an `attrs` entry, so an author `style=` on the same element yields two `style` attributes. Invalid HTML; a conformant parser (verified: real Chromium) **drops the second**, while happy-dom **merges** them — so the repo's browser harness cannot see this class. Surfaced while measuring #450's D1; independent of `show=` and survives its revert.
 
-### g-maps-staleness-probe-has-no-ancestry-check — the only machine guard on map currency counts commits against a watermark that may not be on the branch at all — `NEW S328-bryan (found by the wrap-6c maps pass, correcting the PA's own brief); MED; open`
-<!-- @gap id=g-maps-staleness-probe-has-no-ancestry-check sev=MED status=open locus=scripts/state.ts:458-470(mapsStaleness) prov=rationale:a-count-against-a-non-ancestor-watermark-is-a-well-formed-number-answering-a-different-question -->
+### g-maps-staleness-probe-has-no-ancestry-check — the only machine guard on map currency counts commits against a watermark that may not be on the branch at all — `NEW S328-bryan (found by the wrap-6c maps pass, correcting the PA's own brief); MED; resolved (fixed at S334; stale-open)`
+<!-- @gap id=g-maps-staleness-probe-has-no-ancestry-check sev=MED status=resolved locus=scripts/state.ts(mapsStaleness; ~:532 now) prov=rationale:a-count-against-a-non-ancestor-watermark-is-a-well-formed-number-answering-a-different-question -->
+**⚑ RESOLVED — fixed at S334; gap was STALE-open.** `mapsStaleness()` now guards with `git merge-base --is-ancestor <watermark> HEAD` and reports "diverged/rebased — behind-count unavailable" instead of a meaningless inflated count when the watermark is not an ancestor. Verified S354-peter by reading the guard on HEAD.
 
 `mapsStaleness()` runs `git rev-list --count <watermark>..HEAD` and reports the result as "commits since
 the maps were built". **It never checks that `<watermark>` is an ancestor of HEAD.** Under this repo's
@@ -8391,8 +8394,9 @@ Carried from the S334 census (found incidentally during census-1). A `=` in a ba
 
 Latent (no in-scope PR touches those trees alone today), but the moment one does, a real-code PR recorded `carve-out` is excluded from the code-bearing health signal AND never printed by name — the exact evasion the S331 refinement was built to detect. bryan's instrument; noted, not fixed. Fix = extend the whitelist (or invert to a docs/known-non-code blacklist).
 
-### g-state-malformed-crosscheck-assumes-id-first — `scripts/state.ts`'s malformed-`@gap` cross-check hardcodes `id=` immediately after `@gap`, so a well-formed marker with `id=` not first parses fine yet trips the check and throws a nonsensical "-1 marker(s) did not parse" — `NEW S335-peter (#485 review dormant finding); LOW; open`
-<!-- @gap id=g-state-malformed-crosscheck-assumes-id-first sev=LOW status=open locus=scripts/state.ts(the malformed cross-check regex assumes the id attribute is first) prov=rationale:review-floor-pass-on-485-parseGapMarkers-is-order-independent-S307-but-the-crosscheck-is-not-dormant-because-known-gaps-always-writes-id-first -->
+### g-state-malformed-crosscheck-assumes-id-first — `scripts/state.ts`'s malformed-`@gap` cross-check hardcodes `id=` immediately after `@gap`, so a well-formed marker with `id=` not first parses fine yet trips the check and throws a nonsensical "-1 marker(s) did not parse" — `NEW S335-peter (#485 review dormant finding); LOW; resolved S354-peter`
+<!-- @gap id=g-state-malformed-crosscheck-assumes-id-first sev=LOW status=resolved locus=scripts/state.ts(the malformed cross-check regex assumes the id attribute is first) prov=rationale:review-floor-pass-on-485-parseGapMarkers-is-order-independent-S307-but-the-crosscheck-is-not-dormant-because-known-gaps-always-writes-id-first -->
+**⚑ RESOLVED S354-peter — the one genuinely-live gap of the state.ts ledger cluster.** The `markerCount` cross-check regex hardcoded `@gap id=` (id-first) while `markerRe` + the attr-bag parse are order-independent, so a well-formed `id`-later marker inflated `tokens.length` past `markerCount` and threw a false "dropped marker" error. Fixed: `markerCount` now counts every `@gap` marker carrying a real (non-`<placeholder>`) id regardless of attribute order, consistent with the parse. Regression test in `state-gap-integrity.test.js §4` (id-later marker parses; `id=<placeholder>` still excluded).
 
 Dormant — `known-gaps.md` always writes `id=` first, so the production run is clean (exit 0). My own tooling (#485 substrate); one-line fix (make the cross-check order-independent like `parseGapMarkers`) deferred to a future `state.ts` pass.
 
