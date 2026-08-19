@@ -116,6 +116,24 @@ describe("validate-emit gate — invalid emission fires E-CODEGEN-INVALID-LOGIC"
       // The diagnostic names an artifact + a byte/line/column offset.
       expect(fires[0].message).toMatch(/byte \d+, line \d+, column \d+/);
       expect(fires[0].message).toContain(".client.js");
+      // #519 — the flattened compile error carries NO source `line`/`column`:
+      // the emit gate fails at an EMITTED-JS position with no `.scrml` source
+      // mapping, so the CLI must not render `<file>:<emittedLine>:<emittedCol>`
+      // as if the adopter's source were wrong there. The emitted position lives
+      // in the message body (asserted above), not in the source-location slot.
+      expect(fires[0].line).toBeUndefined();
+      expect(fires[0].column).toBeUndefined();
+      // #519 (S351 review-floor finding) — the source file IS carried on the
+      // flat `.file` field (the diagnostic anchors at the file, since the source
+      // line/col are unavailable). The `build`/`dev` terminal formatters must
+      // read `.file` to surface it — they previously read only `.filePath` /
+      // `.span?.file` and silently dropped it, rendering the emit gate error
+      // with NO path at all on those two surfaces, the opposite of #519's intent.
+      // This pins the contract those formatters now depend on. (Not asserting a
+      // `.scrml` suffix: synthetic artifacts — the runtime bundle / per-route
+      // chunks — legitimately anchor at a generated `.js` name; that broader
+      // case is tracked in g-emit-gate-source-anchor-synthetic-artifact-and-cli-truncation.)
+      expect(fires[0].file).toBeTruthy();
     } else {
       // Fix-wave closed the surface: the gate must NOT false-positive on the
       // now-clean reference app, and output lands normally.
