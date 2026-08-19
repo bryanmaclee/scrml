@@ -1829,21 +1829,30 @@ export function generateServerJs(
       const _leak = detectProtectedRawEgress(fn, _protectCtx);
       if (_leak) {
         const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
-        const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
+        const _dedupKey = `${_fnName}::${_leak.query ?? "<unanalyzable>"}::${_leak.egressKind}`;
         if (_seenEProtect.has(_dedupKey)) continue;
         _seenEProtect.add(_dedupKey);
-        errors.push(new CGError(
-          "E-PROTECT-004",
-          `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
-          `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
-          `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: project the ` +
-          `protected column out of the SELECT, or return the row through the normal compiler-emitted response (not a ` +
-          `manual \`Response\` / \`_{}\` / \`asIs\`) — the floor redacts there, and \`reveal("col")\` declassifies at that ` +
-          `sink. \`reveal\` does NOT admit a value past THIS gate: §14.8.9 scopes declassification to the value at the ` +
-          `sink, and the compiler cannot see into a raw egress to check the stamp.`,
-          (_sp as any),
-          "error",
-        ));
+        // Two message forms, one code. The ordinary form names the offending
+        // SELECT and the egress it reaches. The `truncated` form is the
+        // fail-CLOSED answer for a body the structural walk could not traverse
+        // in full: there is no query to name (the truncation may be what hid
+        // it), and the resolution is to reduce the nesting so the gate can see
+        // the body, NOT to project a column out.
+        const _msg = _leak.truncated
+          ? `E-PROTECT-004: server function \`${_fnName}\` reaches ${_leak.egressKind}. The app declares ` +
+            `\`protect=\` columns, and §14.8.9 admits a protected-origin column only through an egress the ` +
+            `compiler can redact — a body it cannot walk in full is not such an egress, so the gate fails ` +
+            `CLOSED here rather than passing an unexamined body. Resolution: reduce the expression nesting in ` +
+            `this function (extract sub-expressions into named bindings) so the structural analysis can reach ` +
+            `the whole body.`
+          : `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
+            `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
+            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: project the ` +
+            `protected column out of the SELECT, or return the row through the normal compiler-emitted response (not a ` +
+            `manual \`Response\` / \`_{}\` / \`asIs\`) — the floor redacts there, and \`reveal("col")\` declassifies at that ` +
+            `sink. \`reveal\` does NOT admit a value past THIS gate: §14.8.9 scopes declassification to the value at the ` +
+            `sink, and the compiler cannot see into a raw egress to check the stamp.`;
+        errors.push(new CGError("E-PROTECT-004", _msg, (_sp as any), "error"));
       }
     }
   }

@@ -313,6 +313,11 @@ function annotationIsAsIs(annotation: unknown): boolean {
  * body fires (the floor never silently ships a protected column through a path
  * it cannot redact).
  *
+ * A body the walk cannot traverse in full (nesting past `MAX_DEPTH`) returns
+ * `truncated: true` and a null `query`: an un-walked subtree is itself an
+ * egress the compiler cannot analyse, so it fires rather than passing. See the
+ * cap comment inside — the boundary BEHAVIOUR is the load-bearing part.
+ *
  * **This is a STRUCTURAL analysis over the parsed function tree, not a scan of
  * the function's source slice (ruling dpa-029 Q1, S352; invariant 55).** The
  * source-text form it replaces was wrong in four measured ways, every one a
@@ -358,7 +363,7 @@ function annotationIsAsIs(annotation: unknown): boolean {
 export function detectProtectedRawEgress(
   fnNode: unknown,
   ctx: ProtectContext,
-): { query: string; egressKind: string } | null {
+): { query: string | null; egressKind: string; truncated?: true } | null {
   if (!fnNode || typeof fnNode !== "object") return null;
 
   let protectedQuery: string | null = null;
@@ -371,16 +376,30 @@ export function detectProtectedRawEgress(
   // and `span` skipped (a span carries no semantics and holds a `filePath`
   // string that would otherwise be walked on every node).
   //
-  // The cap is 512, matching `collectDerivedCellDecls` (route-inference.ts:3740)
-  // rather than the 64 of the emit-server sibling walks: like that one and unlike
-  // those, THIS walk descends ESTree expression trees, which nest one level per
-  // term. The cap must sit far above any real depth, because truncating a
-  // FAIL-CLOSED check is a fail-OPEN — a body deep enough to hit the cap would
-  // silently escape the gate. (The measured max for the sibling walk is 37.)
+  // The cap is a RESOURCE bound (JS call-stack depth), NOT a correctness one:
+  // exceeding it does not truncate the answer, it FAILS CLOSED (see the
+  // `truncated` handling after the walk). That distinction is the whole point —
+  // silently truncating a fail-CLOSED check is a fail-OPEN, and raising the
+  // number cannot fix it, because ANY finite cap has a boundary. What has to be
+  // right is the BEHAVIOUR at the boundary.
+  //
+  // `depth` counts EDGES, and an array costs two (the container, then each
+  // element), so 512 internal levels is ≈250 levels of source nesting, not 512.
+  // The measured max over the 1878-body corpus is 37, so a real body never
+  // reaches the cap; when a synthetic one does, the compiler says it could not
+  // analyse the body rather than passing it. Measured on this exact walk before
+  // this fix: a protected row reaching `new Response(...)` under 250 nested
+  // array literals fired E-PROTECT-004 and under 255 did NOT — compiling at
+  // exit 0, zero diagnostics, secret shipped.
   const MAX_DEPTH = 512;
+  let truncated = false;
   const seen = new WeakSet<object>();
   const visit = (node: unknown, depth: number): void => {
-    if (!node || typeof node !== "object" || depth > MAX_DEPTH) return;
+    if (!node || typeof node !== "object") return;
+    if (depth > MAX_DEPTH) {
+      truncated = true;
+      return;
+    }
     if (seen.has(node as object)) return;
     seen.add(node as object);
 
@@ -427,6 +446,24 @@ export function detectProtectedRawEgress(
     }
   };
   visit(fnNode, 0);
+
+  // --- FAIL CLOSED on an unanalyzable body -------------------------------
+  // The walk stopped short of the whole tree, so "no protected query here" and
+  // "no raw egress here" are both UNKNOWN, not "no": the un-walked subtree could
+  // hold either or both. §14.8.9's floor never ships a protected column through
+  // a path it cannot analyse, and an un-walked subtree is exactly such a path,
+  // so the gate reports rather than returns silently. This is checked BEFORE the
+  // `protectedQuery === null` early return, because the query itself may be the
+  // thing the truncation hid.
+  if (truncated) {
+    return {
+      query: protectedQuery,
+      egressKind:
+        `a body the compiler could not analyse in full — its nesting exceeds the ` +
+        `§14.8.9 structural-analysis depth cap (${MAX_DEPTH} tree levels)`,
+      truncated: true,
+    };
+  }
 
   if (protectedQuery === null) return null;
 

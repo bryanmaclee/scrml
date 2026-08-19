@@ -457,6 +457,77 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
   });
 
+  // -------------------------------------------------------------------------
+  // H1 (S353 adversarial round 3) — the depth cap must FAIL CLOSED.
+  //
+  // The structural walk carries a `MAX_DEPTH` cap for call-stack safety. A cap
+  // on a fail-CLOSED check is only safe if EXCEEDING it reports rather than
+  // returns: silently truncating the walk is a fail-OPEN.
+  //
+  // Measured on this exact shape before the fix: 250 nested array literals fired
+  // E-PROTECT-004 and 255 did NOT — `scrml compile` exited 0 ("Compiled 1 file")
+  // with zero diagnostics, and the emitted handler, executed verbatim against a
+  // stubbed `_scrml_sql`, answered
+  //   STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+  // That made this branch strictly WORSE than the source-text scan it replaces,
+  // which had no depth limit at all and so failed CLOSED at any nesting.
+  //
+  // Raising the number does not fix this: ANY finite cap has a boundary, so the
+  // boundary BEHAVIOUR is what these two tests pin — under the cap the gate
+  // answers on the merits, past it the gate refuses to answer at all.
+  const nestedRawEgressProgram = (n) => protectProgram(
+    `      function getUser(id) {\n` +
+    `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+    `        let deep = ${"[".repeat(n)}new Response(JSON.stringify(u))${"]".repeat(n)}\n` +
+    `        return deep.flat(Infinity)[0]\n` +
+    `      }`,
+  );
+
+  test("a raw egress UNDER the depth cap fires on the merits (250 nestings)", () => {
+    const { result } = compileSource(nestedRawEgressProgram(250));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    const hit = all.find((d) => d.code === "E-PROTECT-004");
+    expect(hit).toBeDefined();
+    // The ordinary form: it names the offending SELECT and the egress kind.
+    expect(hit.message).toContain("SELECT * FROM users");
+    expect(hit.message).toContain("a manual `Response`");
+    expect(hit.message).not.toContain("depth cap");
+  });
+
+  test("a raw egress PAST the depth cap still fires — truncation fails CLOSED (255 nestings)", () => {
+    const { result } = compileSource(nestedRawEgressProgram(255));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    const hit = all.find((d) => d.code === "E-PROTECT-004");
+    // Pre-fix this was `undefined` and the secret shipped at exit 0.
+    expect(hit).toBeDefined();
+    // The truncation form: no SELECT is named (the truncation may be what hid
+    // it), and the resolution is to reduce nesting, not to project a column out.
+    expect(hit.message).toContain("could not analyse in full");
+    expect(hit.message).toContain("depth cap");
+    expect(hit.message).toContain("fails CLOSED");
+  });
+
+  test("a DEEPER body past the cap fires too — the cap is not a one-off boundary (500 nestings)", () => {
+    const { result } = compileSource(nestedRawEgressProgram(500));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  // The other side of the cap change: it must not manufacture a diagnostic on a
+  // body the walk DOES reach in full. A nesting depth well inside the cap with
+  // no raw egress at all stays silent (the floor redacts at the normal sink).
+  test("a deep body WITHIN the cap and with no raw egress stays silent", () => {
+    const { result } = compileSource(protectProgram(
+      `      function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        let deep = ${"[".repeat(120)}u.name${"]".repeat(120)}\n` +
+      `        return deep.flat(Infinity)[0]\n` +
+      `      }`,
+    ));
+    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+
   // Population guard: a raw egress with NO protected query must stay silent —
   // the gate is a CO-OCCURRENCE test, and widening it to "any manual Response"
   // would reject every §40.3.5 early-return in an app that happens to declare a
