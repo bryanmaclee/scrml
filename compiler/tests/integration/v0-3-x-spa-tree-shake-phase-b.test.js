@@ -143,6 +143,32 @@ describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
     // Pre-fix TodoMVC shared runtime was 38,681 B gzip. SPA counter
     // assembles fewer chunks; expect well under 16 KB.
     expect(gzip.length).toBeLessThan(16 * 1024);
+    // ⚑ SCOPE OF THIS ASSERTION — read before citing it as "the size gate".
+    // (Added BELOW the expect on purpose: this file is cited as ":145" from
+    // docs/known-gaps.md, handOffs/delta-log.md and handOffs/dpa-queue.md,
+    // so nothing may be inserted above it.)
+    //
+    // 16,384 B is an ASPIRATION for the whole client runtime, and this line
+    // asserts it only for the COUNTER shape — `SPA_COUNTER` has no
+    // `<program>`, no `<outlet/>`, no routes, no engine and no SSR, so it
+    // never assembles the soft-nav chunk. Measured at `36ed3d05`:
+    //
+    //     SPA_COUNTER (this fixture)          54,773 B raw / 15,495 B gzip -9
+    //     `<program>` + `<outlet/>`, 4 lines  82,744 B raw / 26,012 B gzip -9
+    //
+    // The shell shape is 1.59x the aspiration — 9,628 B over — and always
+    // has been. This assertion is therefore NOT a gate on the shape that
+    // ships, and re-pointing it at that shape would make it red from its
+    // first commit for reasons no change caused. The ruling (S352) was to
+    // leave this line exactly as it is and add a separate no-regression
+    // RATCHET on the shell shape:
+    //
+    //     compiler/tests/integration/runtime-size-ratchet.test.js
+    //
+    // That file also pins its compressor; this one uses the zlib default,
+    // which is worth ~38 B here and ~141 B on the shell. Do not compare
+    // numbers across the two files without accounting for it.
+    // See docs/known-gaps.md → `g-spa-runtime-gzip-budget-knife-edge`.
   });
 
   test("SPA shape excludes prefetch + mount + vendor-ref + wire chunks from runtime", () => {
