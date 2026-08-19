@@ -2905,6 +2905,26 @@ export function compileScrml(options = {}) {
           const c = rewriteStdlibImports(output.clientJs, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
         }
+        // §4.12.4 — inline-worker bundles are BROWSER-LOADED JS, so the
+        // emitted-JS parse invariant covers them like every sibling artifact.
+        // Gated on `clientJs` for the same reason the WRITE is (a library-mode
+        // output carries `workerBundles` but emits no `new Worker(...)`, so
+        // those bundles are never written and there is nothing to validate).
+        //
+        // This matters more than it looks: `ast-builder.js` builds a
+        // `when message` body by JOINING THE TOKEN STREAM, which drops the `//`
+        // of a line comment while keeping the comment's WORDS — so a worker
+        // whose handler contains a comment emits JS that does not parse
+        // (`examples/13-worker.scrml` is a live instance). That defect was
+        // unreachable while the bundles were never written; now that they are,
+        // the gate is what surfaces it instead of shipping it. See the
+        // change-id progress.md RESIDUAL for the ast-builder fix.
+        if (output.clientJs && output.workerBundles) {
+          for (const [workerName, workerJs] of output.workerBundles) {
+            const w = rewriteStdlibImports(workerJs, outputDir, outputDir, bundledStdlib);
+            pushArtifact(filePath, `${base}.${workerName}.worker.js`, w);
+          }
+        }
       }
       if (mode !== "library" && cgResult.runtimeJs && cgResult.runtimeFilename) {
         pushArtifact(cgResult.runtimeFilename, cgResult.runtimeFilename, cgResult.runtimeJs);
