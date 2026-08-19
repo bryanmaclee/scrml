@@ -54,3 +54,35 @@ VERDICT: NO DIFFERENCES  over 1906 common sources of 1906 base / 1906 head enume
 Both directions covered by construction: the gate reports newly-failing AND newly-passing, added AND removed artifacts, new AND fixed syntax failures. Structural corroboration: `git diff --stat` touches **zero** executable files — `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `RULING.md`, `progress.md`, `BRIEF.md`. No compiler source, no conformance case, no stdlib.
 
 Independent verification of one further relayed premise (the S350 population measurement, cited in the amendment as *measured TRUE*): re-run here — `gh issue list --state all` -> `pjoliver11` 34 · `rjantz3` 15 · `bryanmaclee` 9 (owner); `gh issue view 471` -> author `pjoliver11`. **REPRODUCES exactly.**
+
+## 2026-08-19 — one more relayed claim verified before it stayed in normative prose
+§62.8's *"RFC 3501 permits the Leadership Council to skip an edition or stabilize an empty one"* was relayed from the round-2 artifact (`rust-edition-expert`), not measured. Checked against the source: RFC 3501 (`rust-lang.github.io/rfcs/3501-edition-2024.html`) states editions are on a three-year cadence and **the Leadership Council decides what to do when an edition lacks sufficient changes — options explicitly including skipping the edition completely, delaying to a subsequent year, or stabilizing the edition without any specific changes.** **CONFIRMED.** Kept as written.
+
+## 2026-08-19 — DEFERRED, and one of them is loud
+
+1. **⚑ `compiler/SPEC.md:36499-36502` (§63.3 item 3) STILL CARRIES THE POPULATION PREMISE, verbatim:**
+   *"(PEP-387's "≥2 releases" shrunk to scrml-scale — two friends + a frozen language do not need Python's audience margin)."*
+   This is the SPEC twin of the RULING.md D4 item 3 clause struck in this landing. **The brief's hard boundary — "any SPEC section other than §62.8/§62.9" is OUT — forbade touching it**, so it stands. Net effect: the RULING no longer carries the premise and the NORMATIVE text still does, which is the wrong way round. It is a one-clause edit and it needs its own authorization. Note it is a §63 clause, so it is entangled with the separately-opened `remove-only-at-a-MAJOR` question and should probably ride that landing.
+2. **Round-2 recommendation #5 NOT landed** — state §62.6 as *forward-gating only* and have it disclaim any promise about surviving a MAJOR's removals, resolving the §62.6-vs-§62.3 contradiction that BOTH late voices independently identified as the genuine tripwire. §62.6 was explicitly OUT of scope. Still owed; cheap; independent of the ruling.
+3. **`remove-only-at-a-MAJOR`** — the PA is opening it as its own deliberation. Not decided, not implied. §63.3 untouched, and §62.8 says so in its own prose.
+4. **Not touched, by design:** `handOffs/dpa-queue.md` (PA-owned, unmerged change in flight) · `master-list.md:41`, `docs/changelog.md`, `handOffs/delta-log.md`, `handOffs/hand-off-237.md` — all carry "no editions" as a record of the **S234** landing, which is faithful history, and all are PA-owned maintained-tier docs.
+
+## 2026-08-19 — full suite: 2 failures, ENVIRONMENT, root-caused (not a regression)
+`bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js`
+-> **28,776 pass · 86 skip · 1 todo · 2 fail** · 128,287 expects · 28,865 tests / 1,245 files. Run twice, same two names both times (`bun run pretest` executed between runs; it changed nothing).
+
+The two:
+```
+(fail) fs.watch reload (watch: true) > registers watchers when watch:true
+(fail) fs.watch reload (watch: true) > reloads engines.json on change event
+```
+Both in `compiler/tests/unit/mcp-runtime-helpers.test.js`.
+
+**ROOT CAUSE — inotify instance exhaustion, measured:** `/proc/sys/fs/inotify/max_user_instances` = **128**; instances currently held by this user = **122** (`find /proc/*/fd -lname anon_inode:inotify | wc -l`). Five concurrent `bun test` suites (sibling agents) plus several worktrees plus editors. The first test asserts `watcherCount > 0` after `loadSidecars(dir, { watch: true })`; with no instances left, `fs.watch` registers nothing and the second test's 200 ms event never arrives. **Both are `fs.watch` liveness assertions, not assertions about anything this landing touched.**
+
+**Not attributable to this change, three ways:**
+1. `git diff origin/main -- compiler/tests/unit/mcp-runtime-helpers.test.js compiler/runtime/stdlib/mcp.js` is **EMPTY** — the test AND its subject are byte-identical to `origin/main`.
+2. The test file contains **zero** references to `SPEC`, `FACTS`, or any `.md` — it cannot read a single file this landing modified.
+3. The whole landing is `.md`-only; the corpus emit differential over 1,906 sources reports NO DIFFERENCES.
+
+CI corroborates: `gh run list --branch main` is `success` on the CI workflow, and CI's `unit` tier does run this file — it passes on an unloaded runner. **Worth surfacing to the PA:** concurrent agent suites on one box can exhaust `max_user_instances` (128) and turn any `fs.watch` test red for reasons that look like a code regression.
