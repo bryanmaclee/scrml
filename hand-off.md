@@ -1,8 +1,69 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S352-bryan.       -->
-<!-- Mechanical stream: handOffs/delta-log.md [1577]-[1588].        -->
-<!-- Body below the S352 block is S350/S351 WRAPs (history).        -->
+<!-- hand-off.md — live session state. WRAPPED at S354-peter.       -->
+<!-- Mechanical stream: handOffs/delta-log.md [1592]-[1597].        -->
+<!-- Body below the S354 block is the S352 WRAP + older (history).  -->
+<!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
 <!-- ============================================================= -->
+
+# scrml — Session 354 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-19. `/boot` Profile A, solo. **Four PRs merged (#582–#585) + review floor drained.**
+A disjoint EXECUTION lane running alongside bryan's still-open S352/S353 deliberation board.
+
+**Framing:** execution + hygiene, not deliberation. Three fix-bundles + a ledger reconciliation, and the
+throughline is that **repro-on-HEAD caught stale/misfiled gaps in every bundle** — but the reconciliation
+sweep proved that stale-gap debt is BOUNDED (clustered in two already-fixed pockets), not systemic.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+**Two live lanes — pick by who boots.**
+
+### A. bryan's lane — THE BUILDABLE BOARD (still UNSTARTED, carried from S352/S353)
+None of this was touched by S354 (disjoint). Full detail in the **S352 WRAP block below** (unchanged). Summary:
+- **raw-egress structural fix (c)→(d)** · **i18n substrate B** · **dpa-035 replacement sequence**
+  (`--minify` for real → runtime tree-shaking → `I-SSR-EACH-CLIENT-RENDERED` → dead-rule elim) ·
+  **dpa-029 Q1 re-surface** after raw-egress lands. Sequencing already ruled — do not re-derive.
+- **Two held fix rounds** (pushed, not landable): `soft-nav-head-sync` `70c14838` (item-3 chunk-delay test
+  owed) · `runtime-size-and-probes` `083ce19e` (tail verify + land; carries `ruling-debt.ts`).
+- **Owed outward:** the scrml-site ping the moment `soft-nav-head-sync` lands (they run `hard` on 551 links).
+- If bryan boots: this is your pickup. If peter boots: STAY OFF this lane (collision) — take §B.
+
+### B. peter's lane — disjoint follow-ups from S354 (small)
+- **Deferred (LOW):** `g-residual-order-bearing-readdir…`'s **self-host DCL leg** — add `{ once: true }` to the
+  `DOMContentLoaded` emit in `compiler/self-host/cg-parts/section-emit-wiring.js` (the open is `:1203`, the
+  close is an intricate multi-`lines.push`; find it before editing). Gap is narrowed to this one leg. Low value.
+- **Heading/marker cosmetic drift (hygiene, low priority):** 16 entries where the `### ` heading status ≠ the
+  `@gap` marker — 15 are `marker=resolved / heading=open` (marker is authoritative & already counted, so the
+  *heading text* is stale) + 1 docs gap (`G-DBAUTH-DOCS-NO-DO-NOT-MARK-USERS-EXAMPLE`, L1716, heading=resolved
+  marker=open). NOT flipped this session — each needs its marker verified before aligning the heading. Run
+  `headingMarkerDrift()` (state.ts, exported) to re-list.
+- **Ledger health:** now well-reconciled (7 gaps closed S354). Repro-on-HEAD stays mandatory, but the ledger
+  is largely trustworthy — the sweep found only 1 stale among 15 high-signal candidates.
+
+### C. Owed regardless of lane
+- **This wrap's continuity PR** (hand-off + changelog + delta-log [1592]-[1597] + the review-floor drain in
+  `docs/pr-reviews.md`) must land — it's the branch-first continuity commit.
+
+## WHAT LANDED (S354-peter)
+
+| PR | Bundle | Result |
+|---|---|---|
+| **#582** | A — type-system raw-text-launder (S338/Rule-7) | 1 HIGH + 2 MED resolved; `maskStringLiteralSpans()` + structural reset member-guard |
+| **#583** | B — dev-server | leak HIGH fixed (parent-death guard) + readdir LOW (2 legs); **2 stale gaps flipped** (fail-open HIGH + watcher-death MED, fixed by #539) |
+| **#584** | D — `state.ts` ledger-integrity | crosscheck LOW fixed (order-independent `markerCount`) + regression test; **3 stale gaps flipped** (fixed+tested S334) |
+| **#585** | reconciliation sweep | 1 verified stale gap flipped (`g-synth-read…`, fixed #291); 14 candidates confirmed legitimately-open |
+| — | review floor | #573–#577 drained → **0 OWED** |
+
+**Gap counts:** HIGH 49→47 · MED 157→150 · LOW 70→69 (7 resolved).
+**The session's lesson (thrice-earned):** repro-on-HEAD before every fix — the gap shortlist mislocates loci
+(`:14589`, `:843`), mis-states mechanisms (the leak was force-killed-parent orphans, not test-reaping), and
+carries fixed-but-never-flipped debt (#539 ×2, S334 ×3). The sweep bounded that debt: not systemic.
+
+---
+
+<!-- ================= S352 WRAP (history) ================= -->
 
 # scrml — Session 352 (bryan · ASUS-Vivobook) — WRAP
 

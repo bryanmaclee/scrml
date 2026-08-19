@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S354 — 2026-08-19 (peter · P-Tech1 Windows) — three fix-bundles + a gap-ledger reconciliation, and the lesson that repro-on-HEAD earns its keep every time
+
+A disjoint execution/hygiene lane alongside bryan's still-open S352/S353 deliberation board. Four PRs merged and the review floor drained. The throughline: **grounding every filed gap on HEAD before touching code** caught stale loci, mis-stated mechanisms, and already-landed fixes in every bundle — and a reconciliation sweep proved that stale-gap debt is bounded (two already-fixed pockets), not a repo-wide problem.
+
+- **#582 — Bundle A (type-system §14.12/§6.8.2):** closed the S338/Rule-7 raw-text-launder class — lifecycle text-scans judged raw source (string-literal contents + post-dot method names) instead of the parsed tree. New `maskStringLiteralSpans()` + a structural AST member-guard for `reset`. 1 HIGH + 2 MED resolved. (The LOW's filed locus `:14589` was dead; real `:24982`/`:25978`.)
+- **#583 — Bundle B (dev-server):** a cross-OS **parent-death guard** so a `scrml dev` orphaned by a force-killed parent self-terminates before its `fs.watch` handles exhaust the machine (the leak HIGH — whose filing mis-cited the test and the "reaping" fix). Deterministic readdir order (2 legs). Plus 2 stale-open gaps (fail-open HIGH, watcher-death MED) already fixed by #539, reconciled.
+- **#584 — Bundle D (`scripts/state.ts`):** order-independent `@gap` malformed cross-check (an `id`-later marker no longer throws a false "dropped marker"), with a regression test. Plus 3 stale-open ledger-tooling gaps already fixed+tested at S334, reconciled.
+- **#585 — gap-ledger reconciliation sweep:** a conservative satellite verified 15 source-referenced open gaps → 14 legitimately open (guard/ruling-gated/routed-to-bryan), 1 stale (`g-synth-read…`, fixed by #291) flipped. Finding: the ledger is largely accurate; stale gaps had clustered in the dev-server (#539) and tooling (S334) pockets already reconciled.
+- **Review floor:** #573–#577 drained → 0 OWED.
+- **Gap counts:** HIGH 49→47 · MED 157→150 · LOW 70→69 (7 resolved). Bryan's S352/S353 buildable board (raw-egress / i18n / dpa-035 / dpa-029-Q1) untouched and carried forward.
+
 ## S350 (bryan · ASUS-Vivobook) — 2026-08-17/19 — recovery boot, four arcs held, and a delivery bottleneck named
 
 **Booted as the recovery successor to S349-bryan, which died unwrapped.** Recovered two fix-round
