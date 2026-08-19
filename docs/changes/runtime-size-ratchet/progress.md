@@ -103,3 +103,114 @@ Cost, stated plainly: a code change that adds under 188 B gzipped
 a gate that reddens for free. Item 4 proves the ratchet still bites.
 
 **Ceiling = 26,080 (measured, `level: 9`) + 188 (band) = 26,268 B.**
+
+## 2026-08-19 — Items 2 + 5: the ratchet lands
+
+- `compiler/tests/integration/runtime-size-ratchet.test.js` — new, 8 tests.
+  Ceiling in one named constant, `SHELL_RUNTIME_GZIP_CEILING = 26080 + 188`,
+  commented LOWERABLE-ONLY. Compressor pinned in one helper, `gzipSize()`,
+  which takes a Buffer (no FNAME field can exist) at an explicit level 9.
+- `v0-3-x-spa-tree-shake-phase-b.test.js` — the aspiration recorded at the
+  assertion. The comment sits **below** the `expect`, not above: this file is
+  cited as `:145` from `docs/known-gaps.md`, `handOffs/delta-log.md` and
+  `handOffs/dpa-queue.md`, so nothing may be inserted above that line.
+  Verified after the edit: line 145 is still `expect(gzip.length)...`, and
+  the file is still 19/19.
+
+## 2026-08-19 — Item 4: the bite proof, both ways
+
+### 4a — add bytes to `compiler/src/runtime-template.js`, confirm RED
+
+33 lines / 2,769 B of ordinary English prose comment inserted into the
+always-present `core` chunk. Prose, not random bytes — random bytes are
+worst-case for gzip and would flatter the test; prose compresses ~3:1 and is
+the honest shape of a real regression.
+
+```
+########## STEP 3 — RATCHET MUST BE RED ##########
+error: CLIENT-RUNTIME SIZE REGRESSION — outlet-bearing shell shape.
+
+  measured : 27004 B gzip (level 9), 85513 B raw
+  ceiling  : 26268 B  (26,080 recorded + 188 B band)
+  over by  : 736 B
+...
+(fail) §1 client-runtime size ratchet (outlet-bearing shell) > the assembled shell runtime does not exceed the recorded ceiling [146.28ms]
+
+ 6 pass
+ 2 fail
+```
+
+2,769 B raw became 924 B gzip — 4.9× the 188 B band. The band is nowhere
+near wide enough to hide a real change.
+
+### 4b — restore, confirm GREEN
+
+```
+########## STEP 4 — RESTORE ##########
+(clean = restored)
+
+########## STEP 5 — GREEN AFTER ##########
+ 8 pass
+ 0 fail
+Ran 8 tests across 1 file. [534.00ms]
+```
+
+### 4c — the pre-existing counter assertion is untouched
+
+`v0-3-x-spa-tree-shake-phase-b.test.js` — **19 pass, 0 fail** both before and
+after. Its `expect` on line 145 is unchanged; only comments were added, and
+only below it.
+
+### 4d — ⚑ the proof that matters: a regression the counter gate CANNOT see
+
+4a landed in the `core` chunk, which both shapes assemble, so both gates went
+red. That does not prove the ratchet is worth having. So: which chunks does
+the shell assemble that the counter does not?
+
+```
+chunk            counter  shell
+  mount           no     YES   <-- SHELL ONLY
+  soft-nav(fn)    no     YES   <-- SHELL ONLY
+  soft-nav(re)    no     YES   <-- SHELL ONLY
+```
+
+The same 2,770 B prose block inserted into the SHELL-ONLY `mount` chunk:
+
+```
+########## STEP 7 — regression in a SHELL-ONLY chunk ##########
+inserted into the SHELL-ONLY 'mount' chunk: 33 lines, 2770 raw bytes
+
+--- the NEW ratchet:
+  measured : 27069 B gzip (level 9), 85514 B raw
+  ceiling  : 26268 B  (26,080 recorded + 188 B band)
+  over by  : 801 B
+(fail) §1 client-runtime size ratchet ... does not exceed the recorded ceiling
+ 7 pass
+ 1 fail
+
+--- the PRE-EXISTING counter gate, SAME regression present:
+ 19 pass
+ 0 fail
+Ran 19 tests across 2 files.
+```
+
+**801 B of shipped-runtime regression, and the only pre-existing gzip
+assertion in the tree is 19/19 green.** That is the hollow gate, demonstrated
+rather than argued — and it is now covered.
+
+### 4e — the deadband, measured rather than asserted
+
+The band's stated cost, proven rather than hand-waved: a 125 B raw insert
+passes silently.
+
+```
+inserted small block: 2 lines, 125 raw bytes
+ 8 pass
+ 0 fail
+```
+
+That is the documented and accepted price of not shipping a gate that can
+redden for free.
+
+All four `runtime-template.js` mutations were reverted with
+`git checkout --`; `git status --short` is clean after each.
