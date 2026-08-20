@@ -722,6 +722,262 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
     ));
     expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
   });
+
+  // The two residuals `docs/known-gaps.md` NAMED as pinned and were NOT (S354).
+  // The entry claimed "closing any of them turns a test red"; for these two that
+  // guarantee did not hold, so a later arc could have closed them silently and
+  // left the bound paragraph in `protect-egress.ts` stale.
+  test("RESIDUAL (documented): a call on a MEMBER contributes no call edge", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let handlers = { load: loadUser }\n` +
+      `        return new Response(JSON.stringify(handlers.load(id)))\n` +
+      `      }`,
+    ));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+
+  // The cross-FILE half of the same bound. The call graph is built from THIS
+  // file's `function-decl` set, so an imported helper contributes no edge even
+  // though the row crosses the boundary at runtime exactly as it would in-file.
+  // Both files declare the same `<db protect=...>`, so the SELECT is genuinely
+  // protected where it sits — the gate simply cannot see it from here.
+  test("RESIDUAL (documented): a CROSS-FILE helper contributes no call edge", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-protect-xfile-"));
+    const helper = join(dir, "helpers.scrml");
+    const app = join(dir, "app.scrml");
+    writeFileSync(helper, protectProgram(
+      `      export function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }`,
+    ));
+    writeFileSync(app, protectProgram(
+      `      import { loadUser } from "./helpers.scrml"\n` +
+      `      export server function getUser(id) {\n` +
+      `        return new Response(JSON.stringify(loadUser(id)))\n` +
+      `      }`,
+    ));
+    const result = compileScrml({ inputFiles: [app], write: false, validateEmit: true, log: () => {} });
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // F2 (S354, adversarial round 3) — a DUPLICATE function name resolved to the
+  // WRONG declaration, and the comment asserted the opposite.
+  //
+  // The replaced comment read "First declaration wins on a duplicate name (the
+  // emitter's own resolution order)". FALSE, measured: the emitter emits the
+  // SECOND declaration as the in-process peer while the gate resolved the edge to
+  // the FIRST. With a safe `loadUser` declared first and the protected one last,
+  // the file compiled at exit 0 with ZERO diagnostics and the executed handler
+  // answered
+  //   STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+  //
+  // The index is now a MULTIMAP: every declaration of a name contributes an edge,
+  // so whichever one the emitter picks, the gate has already looked at it. Both
+  // ORDERINGS are pinned — a fix that only re-ordered the tie-break would pass one
+  // and fail the other.
+  const DUP_SAFE =
+    `      function loadUser(id) {\n` +
+    `        return { id: id }\n` +
+    `      }\n`;
+  const DUP_PROTECTED =
+    `      function loadUser(id) {\n` +
+    `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+    `      }\n`;
+  const DUP_CALLER =
+    `      export server function getUser(id) {\n` +
+    `        let u = loadUser(id)\n` +
+    `        return new Response(JSON.stringify(u))\n` +
+    `      }\n`;
+
+  test("a duplicate `loadUser` fires when the PROTECTED declaration is LAST (the measured leak)", () => {
+    const { result } = compileSource(protectProgram(DUP_SAFE + DUP_CALLER + DUP_PROTECTED));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+
+  test("...and when it is FIRST — the edge no longer depends on declaration order", () => {
+    const { result } = compileSource(protectProgram(DUP_PROTECTED + DUP_CALLER + DUP_SAFE));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F3 (S354, adversarial round 3) — a bracket key BUILT from string literals.
+//
+// The bound both `staticIndexKey` and the `raw-egress-computed-response`
+// conformance rationale stated was "the genuinely dynamic key … whose value is
+// not in the tree". `"Resp" + "onse"` has both operands in the tree, so the key
+// was never dynamic — yet it evaded, and the leak was executed:
+//   `new globalThis["Resp" + "onse"](JSON.stringify(u))` compiled exit 0, zero
+//   diagnostics, and the emitted handler shipped the secret.
+//
+// Fixed rather than re-documented, because a fail-closed gate must not carry a
+// false bound: `staticIndexKey` folds a `+` of static string keys, recursively.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key (F3)", () => {
+  const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
+  const withReturn = (ret) => protectProgram(
+    `      export server function getUser(id) {\n` +
+    `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+    `        ${ret}\n` +
+    `      }`,
+  );
+
+  const foldedShapes = {
+    'new globalThis["Resp" + "onse"](...)': `return new globalThis["Resp" + "onse"](JSON.stringify(u))`,
+    'new globalThis["R" + "esp" + "onse"](...)': `return new globalThis["R" + "esp" + "onse"](JSON.stringify(u))`,
+    'globalThis["Resp" + "onse"].json(...)': `return globalThis["Resp" + "onse"].json(u)`,
+    'Response["js" + "on"](...)': `return Response["js" + "on"](u)`,
+  };
+  for (const [label, ret] of Object.entries(foldedShapes)) {
+    test(`\`${label}\` fires E-PROTECT-004 (the concatenation folds)`, () => {
+      const { result } = compileSource(withReturn(ret));
+      expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(true);
+    });
+  }
+
+  // The bound the fold does NOT move, pinned so the residual stays honest: an
+  // operand whose value is not in the tree leaves the whole key unresolved.
+  test("RESIDUAL (documented): a `+` with a DYNAMIC operand is still not a static key", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        let k = "onse"\n` +
+      `        return new globalThis["Resp" + k](JSON.stringify(u))\n` +
+      `      }`,
+    ));
+    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE S354 RULING — an egress whose arguments are SYNTACTICALLY ALL LITERALS is
+// not an egress. `E-PROTECT-004` fires on CO-OCCURRENCE within a call-reachable
+// set, not on flow, and that is what makes it sound; but a `Response` built
+// entirely from literals cannot carry caller data, so counting it was a defect,
+// not conservatism.
+//
+// The reproduced shape: clean on base, fired on the round-3 head.
+//
+// Full flow analysis was REJECTED on DIRECTION, not cost — it trades a precision
+// bug for a soundness bug, because every gap in a dataflow analysis is a
+// fail-OPEN. So the test is SYNTACTIC and the still-firing half below is as
+// load-bearing as the newly-silent half.
+// provenance: ruling:user-voice-scrml.md S354 (delta-log [1606])
+// ---------------------------------------------------------------------------
+describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (S354)", () => {
+  const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
+  const fires = (result) => codesOf(result).some((d) => d.code === "E-PROTECT-004");
+  const serverJsOf = (result) =>
+    (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
+
+  // --- the GREEN half: shapes that must NOT fire ---------------------------
+
+  test("THE RULING'S SHAPE: `dispatch` reaching a protected query AND a constant `deny()` is CLEAN", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }\n` +
+      `      export server function dispatch(id) {\n` +
+      `        if (id < 0) { return deny() }\n` +
+      `        let u = loadUser(id)\n` +
+      `        return { name: u.name }\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(false);
+    // ...and it is not silenced by some OTHER gate rejecting the file first: the
+    // §40.3.5 `Response` name resolves, so the deny arm genuinely compiles.
+    // (`protectProgram`'s `<program>` carries no `db=`, so E-SCHEMA-001 is a
+    // constant of every fixture in this file and is not asserted away here.)
+    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    // The row that DOES leave goes out the compiler-emitted path, where the
+    // floor redacts — this gate's silence is not what protects it.
+    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+  });
+
+  test("the same-BODY form: a protected SELECT beside a constant 403 is CLEAN", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        if (id < 0) { return new Response("Forbidden", { status: 403 }) }\n` +
+      `        return { name: u.name }\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(false);
+  });
+
+  const cleanShapes = {
+    "a bare string argument": `return new Response("nope")`,
+    "no arguments at all": `return new Response()`,
+    "an un-interpolated template": "return new Response(`Forbidden`, { status: 403 })",
+    "a nested literal array": `return new Response("x", { status: 403, headers: ["a", "b"] })`,
+    "a nested literal object": `return new Response("x", { status: 403, headers: { ct: "text/plain" } })`,
+    "an absence literal": `return new Response(not, { status: 204 })`,
+    "a number argument": `return new Response(0, { status: 200 })`,
+    "Response.json of a literal object": `return Response.json({ ok: true })`,
+  };
+  for (const [label, ret] of Object.entries(cleanShapes)) {
+    test(`CLEAN — ${label} is not an egress`, () => {
+      const { result } = compileSource(protectProgram(
+        `      export server function getUser(id) {\n` +
+        `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+        `        if (id < 0) { ${ret} }\n` +
+        `        return { name: u.name }\n` +
+        `      }`,
+      ));
+      expect(fires(result)).toBe(false);
+    });
+  }
+
+  // --- the RED half: the boundary, stated as tests -------------------------
+  //
+  // Every one of these is a shape the narrowing must NOT swallow. If any goes
+  // green, the ruling has been over-applied into the flow analysis it rejected.
+
+  const firingShapes = {
+    "JSON.stringify(row) — the canonical leak": `return new Response(JSON.stringify(u))`,
+    "a NAMED BINDING whose initializer is a literal": `let msg = "Forbidden"\n        return new Response(msg, { status: 403 })`,
+    "an INTERPOLATED template": "return new Response(`user ${u.name}`, { status: 200 })",
+    "a literal FIRST argument with a non-literal second": `return new Response("x", u)`,
+    "an object SHORTHAND property (it reads a binding)": `let status = 403\n        return new Response("x", { status })`,
+    "a literal object holding a member expression": `return new Response("x", { status: u.id })`,
+    "a literal array holding a member expression": `return new Response("x", { headers: ["ct", u.name] })`,
+    "a `+` of two string literals (an expression, not a literal)": `return new Response("For" + "bidden", { status: 403 })`,
+    "Response.json of the row": `return Response.json(u)`,
+    "a spread of a non-literal": `return new Response("x", { ...u })`,
+  };
+  for (const [label, ret] of Object.entries(firingShapes)) {
+    test(`STILL FIRES — ${label}`, () => {
+      const { result } = compileSource(protectProgram(
+        `      export server function getUser(id) {\n` +
+        `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+        `        ${ret}\n` +
+        `      }`,
+      ));
+      expect(fires(result)).toBe(true);
+    });
+  }
+
+  // The narrowing is scoped to ARGUMENT-BEARING constructions. A `_{}` foreign
+  // block and an `asIs` value have no argument list to test, so they remain
+  // egresses unconditionally — even when their visible content is all literal.
+  test("a `_{}` foreign block with an all-literal body STILL fires (no argument list to test)", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        _{ const x = 1; }\n` +
+      `        return { name: u.name }\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

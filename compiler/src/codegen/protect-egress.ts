@@ -262,6 +262,7 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
  *   `globalThis.foo.Response`   -> "Response"
  *   `globalThis["Response"]`    -> "Response"   (index, STATIC string key)
  *   `window["foo"]["Response"]` -> "Response"
+ *   `globalThis["Resp"+"onse"]` -> "Response"   (index, FOLDED static key)
  *
  * `a["b"]` denotes exactly the property `a.b` denotes, so it has to answer the
  * same: a bracket with a string-literal key is statically resolvable, and a gate
@@ -272,10 +273,11 @@ export function wrapWithProtectTag(inner: string, resolved: ProtectedColumns): s
  *
  * Returns null for a shape with no static terminal name: a call result, a
  * literal, or an index whose key is genuinely DYNAMIC (`a[k]`, `a[cond ? x : y]`
- * — the key's value is not in the tree). A null answer is a NON-match, which is
- * safe here only because the caller treats "no recognised egress" as "the
- * compiler owns this sink" — see the population note on
- * `detectProtectedRawEgress`.
+ * — the key's value is not in the tree; see `staticIndexKey` for exactly which
+ * keys ARE in the tree, including a folded `+` of string literals). A null
+ * answer is a NON-match, which is safe here only because the caller treats "no
+ * recognised egress" as "the compiler owns this sink" — see the population note
+ * on `collectRawEgressFacts` / `detectProtectedRawEgressAcrossFns`.
  */
 function terminalName(node: unknown): string | null {
   if (!node || typeof node !== "object") return null;
@@ -288,17 +290,86 @@ function terminalName(node: unknown): string | null {
 
 /**
  * The STATIC string key of an `expr[key]` index, or null when the key is not a
- * string the tree already carries. A double-quoted string and a static backtick
- * template are both literal `kind: "lit"` nodes with the interpreted `value` on
- * them (`types/ast.ts` LitExpr), so this reads the tree's own answer — it is not
- * a re-scan of source text (invariant 55).
+ * string the tree already carries. A double-quoted string and an UN-INTERPOLATED
+ * backtick template are both literal `kind: "lit"` nodes with the interpreted
+ * `value` on them (`types/ast.ts` LitExpr), so this reads the tree's own answer
+ * — it is not a re-scan of source text (invariant 55).
+ *
+ * **A `+` of static string keys folds, recursively (S354, adversarial round 3).**
+ * `globalThis["Resp" + "onse"]` denotes exactly what `globalThis["Response"]`
+ * denotes: both operands are literals sitting in the tree, so the key IS static,
+ * and a gate that answers only the un-concatenated spelling is one `+` away from
+ * a leak. Measured before this fold landed: that exact program compiled at exit 0
+ * with ZERO diagnostics on every tree, and the emitted handler, executed against
+ * a stubbed `_scrml_sql`, answered
+ * `{"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}`. The fold is
+ * STRING-only — a numeric `+` is arithmetic, not concatenation, so `a[1 + 1]`
+ * still answers null rather than the wrong string `"11"`.
+ *
+ * Returns null for a key whose value is genuinely NOT in the tree: an identifier
+ * (`a[k]`), a call result, a conditional, and an INTERPOLATED template
+ * (`` a[`Resp${x}onse`] ``, whose `value` is `""` and therefore not the key —
+ * this previously answered `""`, a non-match by accident rather than by
+ * decision). Closing any of those needs the name resolver / constant
+ * propagation, not a wider key test.
  */
 function staticIndexKey(index: unknown): string | null {
   if (!index || typeof index !== "object") return null;
-  const i = index as { kind?: string; litType?: string; value?: unknown };
-  if (i.kind !== "lit") return null;
-  if (i.litType !== "string" && i.litType !== "template") return null;
-  return typeof i.value === "string" ? i.value : null;
+  const i = index as { kind?: string; op?: string; left?: unknown; right?: unknown };
+  if (i.kind === "binary" && i.op === "+") {
+    const left = staticIndexKey(i.left);
+    if (left === null) return null;
+    const right = staticIndexKey(i.right);
+    if (right === null) return null;
+    return left + right;
+  }
+  return staticStringLiteralValue(index);
+}
+
+/**
+ * The interpreted value of a node that is a STATIC string literal, or null.
+ *
+ * Both an un-interpolated and an interpolated backtick template parse to the
+ * same node (`lit` / `litType: "template"`); the parser distinguishes them only
+ * by what it puts ON the node. `templateLitIsStatic` is that test — see it for
+ * why the discrimination is structural and which way it errs.
+ */
+function staticStringLiteralValue(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as { kind?: string; litType?: string; value?: unknown; raw?: unknown };
+  if (n.kind !== "lit") return null;
+  if (n.litType !== "string" && n.litType !== "template") return null;
+  if (typeof n.value !== "string") return null;
+  if (n.litType === "template" && !templateLitIsStatic(n)) return null;
+  return n.value;
+}
+
+/**
+ * Is this `lit` / `litType: "template"` node an UN-INTERPOLATED template?
+ *
+ * The parser gives both forms the same `kind` and `litType`
+ * (`expression-parser.ts`, `case "TemplateLiteral"`), so the discrimination has
+ * to come off the fields it does set:
+ *   - single-quasi (no `${}`): `raw` is built as "`" + cooked + "`" and `value`
+ *     IS the cooked text, so `raw === "`" + value + "`"` holds exactly;
+ *   - multi-quasi (with `${}`): `value` is `""` by construction and `raw` is the
+ *     template's own source slice, so that equality fails.
+ *
+ * The `!raw.includes("${")` conjunct closes the parser's own defensive fallback,
+ * where a multi-quasi template that could not be sliced falls back to
+ * `astringGenerate` (which still renders `${…}`) or, in the last resort, to a
+ * bare pair of backticks — a shape that would otherwise read as an empty STATIC
+ * template. It costs one false NEGATIVE: an ESCAPED dollar in a single-quasi
+ * template is genuinely static but reads as interpolated, because the parser
+ * reconstructs that node's `raw` from the cooked text and the backslash is gone
+ * by then. That is the fail-CLOSED direction (the value reads as caller-bearing,
+ * so the gate fires), which is the only direction a confidentiality floor may
+ * err in.
+ */
+function templateLitIsStatic(n: { value?: unknown; raw?: unknown }): boolean {
+  if (typeof n.value !== "string" || typeof n.raw !== "string") return false;
+  if (n.raw.includes("${")) return false;
+  return n.raw === "`" + n.value + "`";
 }
 
 /**
@@ -311,6 +382,104 @@ function memberReceiverName(node: unknown): string | null {
   const n = node as { kind?: string; object?: unknown };
   if (n.kind !== "member" && n.kind !== "index") return null;
   return terminalName(n.object);
+}
+
+/**
+ * Is this expression node SYNTACTICALLY a literal — a value written out in the
+ * source, carrying nothing the caller supplied?
+ *
+ * **This is the S354 narrowing of the EGRESS test, and its shape is the ruling.**
+ * `E-PROTECT-004` fires on CO-OCCURRENCE within a call-reachable set, not on
+ * flow, which is what makes it sound; but a `Response` whose every argument is a
+ * literal cannot carry caller data at all, so counting it as an egress is not
+ * conservatism, it is a defect. Measured: this program is clean on `main` and
+ * fired on the round-3 head —
+ *
+ * ```scrml
+ * function loadUser(id) { return ?{`SELECT * FROM users WHERE id = ${id}`}.get() }
+ * function deny()       { return new Response("Forbidden", { status: 403 }) }
+ * export server function dispatch(id) {
+ *   if (id < 0) { return deny() }
+ *   let u = loadUser(id)
+ *   return { name: u.name }        // compiler-emitted path — redacts correctly
+ * }
+ * ```
+ *
+ * `dispatch` reaches both, so round 3's rule fired — while `deny()` returns a
+ * CONSTANT and `u` leaves by the redacting path. SPEC §40.3.5's own early-return
+ * example is exactly `deny`'s body, so the gate was rejecting the shape the SPEC
+ * documents whenever any protected query sat in the same reachable set.
+ *
+ * **SYNTACTIC, and deliberately so.** A named binding is NOT a literal even when
+ * its initializer is: `new Response(SOME_CONST)` still fires, and resolving
+ * `SOME_CONST` is the flow analysis the ruling REJECTED — on direction, not cost.
+ * A dataflow gate trades this precision bug for a soundness bug, because every
+ * gap in a dataflow analysis is a fail-OPEN, and fail-closed is the only property
+ * that makes §14.8.9 worth having.
+ *
+ * What counts:
+ *   - `lit` — string / number / bool / absence, and an UN-INTERPOLATED template
+ *     (see `templateLitIsStatic`; an interpolated one is not a literal);
+ *   - `array` / `object` literals whose every element / property value is itself
+ *     literal (`{ status: 403 }`, `["a", "b"]`);
+ *   - `spread` of a literal (`[...["a"]]`), by the same rule.
+ *
+ * What does NOT, every one of them the fail-CLOSED answer:
+ *   - an identifier, member, index or call — `JSON.stringify(u)`, `SOME_CONST`,
+ *     `row.name`;
+ *   - an object SHORTHAND property (`{ status }` reads a binding);
+ *   - any operator node, including a `+` of two string literals. That fold is
+ *     available (`staticIndexKey` does it for a bracket KEY, where the question
+ *     is "which property does this denote" and answering it wrong is a fail-OPEN)
+ *     but it is deliberately NOT taken here, where the question is "may caller
+ *     data ride this argument" and the wrong answer is a fail-OPEN in the other
+ *     direction. A `+` is an expression, not a literal.
+ *
+ * provenance: ruling:user-voice-scrml.md S354 (delta-log [1606])
+ */
+function isSyntacticLiteral(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as { kind?: string; litType?: string; elements?: unknown; props?: unknown; argument?: unknown };
+  switch (n.kind) {
+    case "lit":
+      return n.litType !== "template" || templateLitIsStatic(n as { value?: unknown; raw?: unknown });
+    case "array":
+      return Array.isArray(n.elements) && n.elements.every(isSyntacticLiteral);
+    case "object":
+      return Array.isArray(n.props) && n.props.every(objectPropIsLiteral);
+    case "spread":
+      return isSyntacticLiteral(n.argument);
+    default:
+      return false;
+  }
+}
+
+/** One `{ … }` property, under the same rule. See `isSyntacticLiteral`. */
+function objectPropIsLiteral(prop: unknown): boolean {
+  if (!prop || typeof prop !== "object") return false;
+  const p = prop as { kind?: string; key?: unknown; value?: unknown; computed?: boolean; argument?: unknown };
+  if (p.kind === "prop") {
+    // A static key is a plain string on the node and carries nothing; a COMPUTED
+    // key is an expression and has to answer the same test as the value.
+    if (p.computed === true && !isSyntacticLiteral(p.key)) return false;
+    if (p.computed !== true && typeof p.key !== "string" && !isSyntacticLiteral(p.key)) return false;
+    return isSyntacticLiteral(p.value);
+  }
+  if (p.kind === "spread") return isSyntacticLiteral(p.argument);
+  // `shorthand` — `{ status }` is an identifier reference, not a literal.
+  return false;
+}
+
+/**
+ * Do ALL of a construction's arguments read as literals — i.e. can no caller
+ * value ride this egress? An argument list the walk cannot see as an array is
+ * UNKNOWN, and UNKNOWN answers false here (the construction IS an egress), which
+ * is the fail-CLOSED direction. An EMPTY list answers true: `new Response()`
+ * carries nothing.
+ */
+function argsAreAllLiterals(args: unknown): boolean {
+  if (!Array.isArray(args)) return false;
+  return args.every(isSyntacticLiteral);
 }
 
 /** Does a type-annotation FIELD denote the `asIs` escape type (§14.1.1)? */
@@ -421,6 +590,13 @@ export interface RawEgressFacts {
  *      globalThis[k]`) both read as themselves. Closing either needs the name
  *      resolver / constant propagation, not a wider callee test.
  *
+ *      A key BUILT from literals is a different case and is CLOSED, not
+ *      residual: `globalThis["Resp" + "onse"]` folds, because both operands sit
+ *      in the tree (S354 — `staticIndexKey`). Measured before that fold: it
+ *      compiled at exit 0 with zero diagnostics on every tree and the executed
+ *      handler shipped the secret. "The key's value is not in the tree" is the
+ *      bound, and a concatenation of literals does not meet it.
+ *
  *      Parity with the source-text form this replaces, stated precisely because
  *      an earlier revision of this comment overstated it: `let R =
  *      globalThis.Response` and `globalThis[k]` are silent on `origin/main` too
@@ -443,6 +619,14 @@ export interface RawEgressFacts {
  *   3. **Only `Response.json` is a static-factory egress.** `Response.redirect`
  *      / `Response.error` carry no caller-supplied body, so no protected column
  *      can ride them.
+ *
+ *   4. **A construction whose arguments are all literals is not an egress**
+ *      (S354). `new Response("Forbidden", { status: 403 })` carries nothing the
+ *      caller supplied. The test is SYNTACTIC — `new Response(SOME_CONST)` still
+ *      fires even when `SOME_CONST` is a module-level string, because resolving
+ *      the binding is the flow analysis the ruling rejected. See
+ *      `isSyntacticLiteral`. This is a PRECISION narrowing of a fail-closed gate
+ *      and the only one in this file: everything else here errs closed.
  *
  * **Declassification is NOT handled here (ruling dpa-033 (c), S352).** §14.8.9
  * scopes `reveal` to the VALUE — "explicitly declassified via the field-level
@@ -524,13 +708,27 @@ export function collectRawEgressFacts(
     if (n.kind === "foreign") sawForeign = true;
 
     // --- egress kind 2: a manual `Response` (§40) ---------------------------
-    // `new <chain>.Response(...)` — the callee resolves through its member chain.
-    if (n.kind === "new" && terminalName(n.callee) === "Response") sawResponse = true;
+    // The callee resolves through its member chain, so every spelling of the
+    // constructor answers the same. The ARGUMENTS decide whether it is an egress
+    // at all: a construction whose arguments are syntactically all literals
+    // carries nothing the caller supplied, so it cannot leak a protected row
+    // (S354 — see `isSyntacticLiteral`, which states the boundary and why the
+    // test is syntactic rather than a flow analysis).
+    //
+    // `new <chain>.Response(...)`.
+    if (
+      n.kind === "new" &&
+      terminalName(n.callee) === "Response" &&
+      !argsAreAllLiterals(n.args)
+    ) {
+      sawResponse = true;
+    }
     // `<chain>.Response.json(...)` — a static factory call on the same receiver.
     if (
       n.kind === "call" &&
       terminalName(n.callee) === "json" &&
-      memberReceiverName(n.callee) === "Response"
+      memberReceiverName(n.callee) === "Response" &&
+      !argsAreAllLiterals(n.args)
     ) {
       sawResponse = true;
     }
@@ -653,12 +851,32 @@ export function detectProtectedRawEgressAcrossFns(
   const facts = nodes.map((f) => collectRawEgressFacts(f, ctx));
   const nameOf = (f: unknown): string => (f as { name?: string }).name ?? "<anonymous>";
 
-  // name -> index. First declaration wins on a duplicate name (the emitter's own
-  // resolution order); a name with no declaration contributes no edge.
-  const indexByName = new Map<string, number>();
+  // name -> EVERY index declaring it. A MULTIMAP, not a first-wins map (S354,
+  // adversarial round 3).
+  //
+  // The comment this replaces asserted "first declaration wins on a duplicate
+  // name (the emitter's own resolution order)", and that property is FALSE.
+  // Measured: with the SAFE `loadUser` declared first and the protected one
+  // declared last, the gate resolved `getUser`'s edge to the first while the
+  // emitter emitted the SECOND as the in-process peer — the program compiled at
+  // exit 0 with zero diagnostics and the executed handler answered
+  // `{"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}`.
+  //
+  // A duplicate name is a shadowing question the call-graph edge is the wrong
+  // place to answer. Contributing an edge to EVERY declaration is the fail-CLOSED
+  // answer: whichever one the emitter picks, the gate has already looked at it.
+  // The cost is a possible over-report on a file that declares the same function
+  // name twice, which is a shape a linter should be rejecting anyway; the cost of
+  // the other answer is a shipped secret.
+  //
+  // A name with no declaration in this file still contributes no edge (the
+  // intra-file bound, stated below).
+  const indicesByName = new Map<string, number[]>();
   nodes.forEach((f, i) => {
     const n = nameOf(f);
-    if (!indexByName.has(n)) indexByName.set(n, i);
+    const bucket = indicesByName.get(n);
+    if (bucket) bucket.push(i);
+    else indicesByName.set(n, [i]);
   });
 
   /**
@@ -673,10 +891,11 @@ export function detectProtectedRawEgressAcrossFns(
       const cur = queue.shift()!;
       const curPath = paths.get(cur)!;
       for (const calleeName of facts[cur].calls) {
-        const next = indexByName.get(calleeName);
-        if (next === undefined || paths.has(next)) continue;
-        paths.set(next, [...curPath, calleeName]);
-        queue.push(next);
+        for (const next of indicesByName.get(calleeName) ?? []) {
+          if (paths.has(next)) continue;
+          paths.set(next, [...curPath, calleeName]);
+          queue.push(next);
+        }
       }
     }
     return paths;
