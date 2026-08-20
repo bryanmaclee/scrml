@@ -7273,6 +7273,21 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   "requestAnimationFrame", "cancelAnimationFrame",
   "performance", "crypto", "alert", "confirm", "prompt",
   "URL", "URLSearchParams", "Buffer", "process",
+  // §14.8.9/§14.8.10 + §39.3 — Fetch-API host constructors for a manual
+  // `Response` / `handle()` escape-hatch body (the §40 raw-egress path). A
+  // `handle(request, resolve)` body constructing `new Response(body, { headers })`
+  // — an adopter emitting a PDF/binary/redirect response (issue #471, enterprise
+  // document workflows) — named the bare host global `Response` and fired a
+  // spurious E-SCOPE-001, because these Fetch-Standard globals (present in BOTH
+  // the browser and the Bun server runtime, exactly like `fetch`/`URL` above)
+  // were never allowlisted. `Response`/`Request`/`Headers` are the response-
+  // construction trio. DELIBERATELY EXCLUDED: `File` / `FormData` / `Blob` — the
+  // file-upload arrival-shape primitive is an open dpa-030 deliberation
+  // (scrml-support), so a native scrml `File`/`FormData` surface may claim those
+  // names; adding them here would pre-empt that lane. The E-SCOPE-001 scope
+  // check is orthogonal to the §14.8.9 E-PROTECT-004 confidentiality floor —
+  // a protected-origin column reaching a manual `Response` STILL fails closed.
+  "Response", "Request", "Headers",
   // Language keywords that may surface as idents after expression parsing
   "this", "self", "super", "event", "arguments",
   // scrml-specific — meta / compiler / SQL / error-context built-ins.

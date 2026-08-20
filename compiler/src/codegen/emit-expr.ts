@@ -1260,12 +1260,25 @@ function emitObject(node: ObjectExpr, ctx: EmitExprContext): string {
   return `{${props.join(", ")}}`;
 }
 
+// A non-computed object-literal key parsed from source (e.g. `{ "content-type": v }`)
+// arrives here as a bare string with its source quotes stripped. It may be emitted
+// unquoted ONLY when it is a valid JS IdentifierName or a non-negative integer index;
+// any other key (a hyphen, a space, a leading digit) must be re-quoted or the output
+// is invalid JS — `{content-type: v}` is a SyntaxError. Surfaced by adopter #471: a
+// `handle()` body building `new Response(body, { headers: { "content-type": … } })`
+// fired E-CODEGEN-INVALID-LOGIC. Valid-identifier / integer keys are unchanged (still
+// bare), so this only ever ADDS quotes to keys that previously emitted invalid JS.
+const BARE_OBJECT_KEY = /^(?:[A-Za-z_$][A-Za-z0-9_$]*|0|[1-9][0-9]*)$/;
+function emitObjectKey(key: string): string {
+  return BARE_OBJECT_KEY.test(key) ? key : JSON.stringify(key);
+}
+
 function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
   switch (prop.kind) {
     case "prop": {
       const key = prop.computed
         ? `[${typeof prop.key === "string" ? JSON.stringify(prop.key) : emitExpr(prop.key, ctx)}]`
-        : typeof prop.key === "string" ? prop.key : emitExpr(prop.key, ctx);
+        : typeof prop.key === "string" ? emitObjectKey(prop.key) : emitExpr(prop.key, ctx);
       const val = emitExpr(prop.value, ctx);
       return `${key}: ${val}`;
     }
