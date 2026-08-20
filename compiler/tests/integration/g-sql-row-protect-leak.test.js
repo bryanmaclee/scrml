@@ -625,6 +625,22 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
 describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2)", () => {
   const codesOf = (result) =>
     [...(result.warnings ?? []), ...(result.errors ?? [])];
+  const serverJsOf = (result) =>
+    (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
+  // ANTI-VACUITY (L1). `expect(fires(result)).toBe(false)` is satisfied by a
+  // fixture that failed to compile for a reason that has nothing to do with this
+  // gate — every one of these would pass on a syntax error. So a green shape has
+  // to say three more things: the file compiled (no E-SCOPE-001 and no other
+  // fatal), the protect machinery really engaged (I-PROTECT-STRIP-001 named the
+  // stripped column), and the row really left through the redacting path
+  // (`_scrml_protect_redact` in the emitted server JS).
+  const expectCompiledAndProtecting = (result) => {
+    const codes = codesOf(result).map((d) => d.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes).toContain("I-PROTECT-STRIP-001");
+    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+  };
 
   test("SELECT in the callee, `new Response` in the caller (the row RETURNS into the egress)", () => {
     const { result } = compileSource(protectProgram(
@@ -724,6 +740,8 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
       `      }`,
     ));
     expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    // ...and the silence is the RESIDUAL, not a fixture that never compiled.
+    expectCompiledAndProtecting(result);
   });
 
   // The two residuals `docs/known-gaps.md` NAMED as pinned and were NOT (S354).
@@ -741,6 +759,8 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
       `      }`,
     ));
     expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    // ...and the silence is the RESIDUAL, not a fixture that never compiled.
+    expectCompiledAndProtecting(result);
   });
 
   // The cross-FILE half of the same bound. The call graph is built from THIS
@@ -765,6 +785,13 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
     ));
     const result = compileScrml({ inputFiles: [app], write: false, validateEmit: true, log: () => {} });
     expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    // ...and the silence is the RESIDUAL, not a fixture that never compiled. The
+    // SELECT sits in the IMPORTED file, so the strip info is raised there — what
+    // this app half has to show is that it compiled clean and emitted.
+    const codes = codesOf(result).map((d) => d.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(serverJsOf(result).length).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
@@ -877,6 +904,18 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
   const fires = (result) => codesOf(result).some((d) => d.code === "E-PROTECT-004");
   const serverJsOf = (result) =>
     (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
+  // ANTI-VACUITY (L1). `expect(fires(result)).toBe(false)` is satisfied by a
+  // fixture that failed to compile — every green shape below would pass on a
+  // syntax error, and the prose claiming they were checked by hand is not an
+  // assertion. An unpinned measurement decays; that is F6's own lesson recursed
+  // one level, so the check is pinned rather than described.
+  const expectCompiledAndProtecting = (result) => {
+    const codes = codesOf(result).map((d) => d.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes).toContain("I-PROTECT-STRIP-001");
+    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+  };
 
   // --- the GREEN half: shapes that must NOT fire ---------------------------
 
@@ -914,6 +953,7 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
       `      }`,
     ));
     expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   const cleanShapes = {
@@ -936,6 +976,7 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
         `      }`,
       ));
       expect(fires(result)).toBe(false);
+      expectCompiledAndProtecting(result);
     });
   }
 
@@ -965,6 +1006,8 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
         `      }`,
       ));
       expect(fires(result)).toBe(true);
+      // the fire is THIS gate's, not a fixture that failed to compile
+      expect(codesOf(result).map((d) => d.code)).not.toContain("E-SCOPE-001");
     });
   }
 
@@ -1021,6 +1064,14 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
         `      }`,
       ));
       expect(fires(result)).toBe(mustFire);
+      // Both halves get the anti-vacuity check. A clean entry that failed to
+      // compile would satisfy `toBe(false)` and prove nothing; a firing entry
+      // that failed to compile would still have to fire for the RIGHT reason.
+      if (mustFire) {
+        expect(codesOf(result).map((d) => d.code)).not.toContain("E-SCOPE-001");
+      } else {
+        expectCompiledAndProtecting(result);
+      }
     });
   }
 
