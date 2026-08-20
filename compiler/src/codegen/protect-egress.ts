@@ -417,6 +417,40 @@ function memberReceiverName(node: unknown): string | null {
  * gap in a dataflow analysis is a fail-OPEN, and fail-closed is the only property
  * that makes §14.8.9 worth having.
  *
+ * **RETURN POSITION ONLY (S355, round 5).** This test is TRUE OF THE
+ * CONSTRUCTION AND FALSE OF THE BINDING. A `Response` is a live, mutable handle:
+ * its headers are writable after it is built, so "every argument is a literal"
+ * says nothing about what the object carries by the time it leaves the function.
+ * Reproduced, and the fail-OPEN it opened against `origin/main`:
+ *
+ * ```scrml
+ * export server function getUser(id) {
+ *   let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+ *   let r = new Response("ok", { status: 200 })
+ *   r.headers.set("x-user", u.passwordHash)   // ships the secret in a header
+ *   return r
+ * }
+ * ```
+ *
+ * — silent at exit 0 with the narrowing applied everywhere; `E-PROTECT-004` on
+ * `origin/main`. Same for `.headers.append(...)`, for `new Response()` with no
+ * arguments, and for `Response.json({ok:true})` bound to a name.
+ *
+ * So the narrowing applies ONLY where the construction is the RETURN VALUE —
+ * `return new Response("Forbidden", { status: 403 })`, which is §40.3.5's own
+ * worked example and the ONE shape the ruling was granted for. A construction
+ * assigned to a binding stays an egress, because a binding can be mutated and
+ * the gate does not track mutation. The predicate is still PURELY SYNTACTIC (is
+ * this node the `exprNode` of a `return-stmt`?) so it does not drift toward the
+ * flow analysis the ruling rejected, and it is strictly fail-CLOSED relative to
+ * applying the narrowing everywhere.
+ *
+ * Deliberately NOT return position, every one the fail-CLOSED answer: an arrow's
+ * EXPRESSION body (`() => new Response("x")`), a construction under a ternary or
+ * a `||` inside a `return`, and a construction returned through a temporary. All
+ * three are one syntactic step away from the shape the ruling names, and none of
+ * them is that shape.
+ *
  * What counts:
  *   - `lit` — string / number / bool / absence, and an UN-INTERPOLATED template
  *     (see `templateLitIsStatic`; an interpolated one is not a literal);
@@ -620,13 +654,31 @@ export interface RawEgressFacts {
  *      / `Response.error` carry no caller-supplied body, so no protected column
  *      can ride them.
  *
- *   4. **A construction whose arguments are all literals is not an egress**
- *      (S354). `new Response("Forbidden", { status: 403 })` carries nothing the
- *      caller supplied. The test is SYNTACTIC — `new Response(SOME_CONST)` still
- *      fires even when `SOME_CONST` is a module-level string, because resolving
- *      the binding is the flow analysis the ruling rejected. See
- *      `isSyntacticLiteral`. This is a PRECISION narrowing of a fail-closed gate
- *      and the only one in this file: everything else here errs closed.
+ *   4. **A construction whose arguments are all literals, IN RETURN POSITION, is
+ *      not an egress** (S354, narrowed S355). `return new Response("Forbidden",
+ *      { status: 403 })` carries nothing the caller supplied. The test is
+ *      SYNTACTIC — `new Response(SOME_CONST)` still fires even when `SOME_CONST`
+ *      is a module-level string, because resolving the binding is the flow
+ *      analysis the ruling rejected. See `isSyntacticLiteral`. This is a
+ *      PRECISION narrowing of a fail-closed gate and the only one in this file:
+ *      everything else here errs closed.
+ *
+ *      RETURN POSITION is load-bearing. A `Response` is a live mutable handle,
+ *      so the all-literal test is true of the CONSTRUCTION and false of the
+ *      BINDING: `let r = new Response("ok"); r.headers.set("x", u.passwordHash);
+ *      return r` compiled at exit 0 with the narrowing applied everywhere, and
+ *      the executed handler shipped the secret in a header. A construction
+ *      assigned to a binding is therefore still an egress — the gate does not
+ *      track mutation, so it declines to assume there is none.
+ *
+ *      The exemption is keyed on the NODE the `return-stmt` holds. Its bound:
+ *      if the AST ever memoized one expression node into two positions — one of
+ *      them a `return`, one of them not — the `seen` guard would visit it once
+ *      and the exemption could carry to the non-return position. Measured on
+ *      this tree: identical `new Response("Forbidden", { status: 403 })` text in
+ *      a `let` and in a `return` produces TWO distinct nodes (the walk reports
+ *      both), so the aliasing does not occur; it is stated because the property
+ *      belongs to the expression parser, not to this file.
  *
  * **Declassification is NOT handled here (ruling dpa-033 (c), S352).** §14.8.9
  * scopes `reveal` to the VALUE — "explicitly declassified via the field-level
@@ -678,7 +730,12 @@ export function collectRawEgressFacts(
   // exit 0, zero diagnostics, secret shipped.
   let truncated = false;
   const seen = new WeakSet<object>();
-  const visit = (node: unknown, depth: number): void => {
+  // `isReturnValue` is TRUE for exactly one node: the `exprNode` a `return-stmt`
+  // holds, visited explicitly from the `return-stmt` branch below. Every other
+  // recursion passes FALSE. That one bit is the whole of the S355 return-position
+  // rule (see `isSyntacticLiteral`) — a construction is exempt from the
+  // all-literal narrowing only where it IS the returned value.
+  const visit = (node: unknown, depth: number, isReturnValue: boolean): void => {
     if (!node || typeof node !== "object") return;
     if (depth > RAW_EGRESS_MAX_DEPTH) {
       truncated = true;
@@ -688,7 +745,7 @@ export function collectRawEgressFacts(
     seen.add(node as object);
 
     if (Array.isArray(node)) {
-      for (const child of node) visit(child, depth + 1);
+      for (const child of node) visit(child, depth + 1, false);
       return;
     }
 
@@ -719,7 +776,7 @@ export function collectRawEgressFacts(
     if (
       n.kind === "new" &&
       terminalName(n.callee) === "Response" &&
-      !argsAreAllLiterals(n.args)
+      !(isReturnValue && argsAreAllLiterals(n.args))
     ) {
       sawResponse = true;
     }
@@ -728,7 +785,7 @@ export function collectRawEgressFacts(
       n.kind === "call" &&
       terminalName(n.callee) === "json" &&
       memberReceiverName(n.callee) === "Response" &&
-      !argsAreAllLiterals(n.args)
+      !(isReturnValue && argsAreAllLiterals(n.args))
     ) {
       sawResponse = true;
     }
@@ -748,12 +805,23 @@ export function collectRawEgressFacts(
       if (callee && callee.kind === "ident" && typeof callee.name === "string") calls.add(callee.name);
     }
 
+    // --- RETURN POSITION (S355) -------------------------------------------
+    // A `return-stmt` carries the returned expression on `exprNode` (it also
+    // carries `expr`, the same expression in STRING form, which the generic loop
+    // below skips as a non-object). Visit `exprNode` HERE, with the flag set, so
+    // the all-literal narrowing applies to a construction that IS the returned
+    // value and to nothing else. The generic loop then re-reaches the same node
+    // and the `seen` guard makes that a no-op.
+    if (n.kind === "return-stmt") {
+      visit(n.exprNode, depth + 1, true);
+    }
+
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
-      visit(n[key], depth + 1);
+      visit(n[key], depth + 1, false);
     }
   };
-  visit(fnNode, 0);
+  visit(fnNode, 0, false);
 
   return { protectedQuery, sawForeign, sawResponse, sawAsIs, calls: [...calls], truncated };
 }
