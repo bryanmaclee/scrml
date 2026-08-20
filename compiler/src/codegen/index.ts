@@ -1480,6 +1480,38 @@ export function runCG(input: CgInput): CgOutput {
             }
 
             if (kind === "foreign-sidecar" || kind === "wasm-module" || kind === "server-endpoint") {
+              // §4.12.5 SIDECAR — the carve-out is CONDITIONAL, not absolute.
+              //
+              // `nestedProgramContextIsNominal` excludes `foreign-sidecar`
+              // because §23.4 already fails the sidecar closed at the
+              // `use foreign:name { … }` site, and two errors on one unbuilt
+              // shape is two diagnostics for one mistake. That reasoning holds
+              // only when there IS a `use foreign:` to fire at. With none, the
+              // carve-out suppressed the ONLY diagnostic, and the declaration
+              // compiled to exit 0 with its markup children silently deleted.
+              //
+              // Measured, both pre-fix:
+              //   <program name="ml" lang="go" build= port= health=>   exit 0, silent
+              //   <program name="api" route="/api/v1" lang="go">        exit 0, silent
+              //
+              // The second is worse than a missing diagnostic: `lang=` outranks
+              // `route=` in the §4.12.3 precedence, so ADDING `lang=` LAUNDERED a
+              // `route=` server endpoint past the refusal it would otherwise get.
+              //
+              // Closed WITHOUT changing which codes exist (the consolidation
+              // question — whether these two codes are one concept — is with the
+              // operator and is NOT decided here). The rule is simply
+              // one-diagnostic-per-mistake, evaluated rather than assumed:
+              //   sidecar WITH    `use foreign:` -> §23.4's E-FOREIGN-SIDECAR-NOMINAL only
+              //   sidecar WITHOUT `use foreign:` -> E-NESTED-PROGRAM-CONTEXT-NOMINAL here
+              const sidecarUnclaimed =
+                kind === "foreign-sidecar" && !!name && !fileDeclaresUseForeign(nodes, name, node);
+              if (sidecarUnclaimed) {
+                fireNestedProgramContextNominal(node, kind, name);
+                parentChildren.splice(i, 1);
+                treeMutatedByExtraction = true;
+                continue;
+              }
               // The other three EXTRACTED execution contexts (§4.12.5 sidecar,
               // §4.12.3 WASM module, §4.12.2 `route=` server endpoint). None has
               // codegen in this compiler revision.
@@ -1525,6 +1557,47 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     /**
+     * Does this file declare `use foreign:<sidecarName> { … }` ANYWHERE outside
+     * the sidecar's own subtree?
+     *
+     * `ast-builder.js` tags each such use-decl with `_foreignSidecarName` at the
+     * site where it fires `E-FOREIGN-SIDECAR-NOMINAL` (§23.4), so this reads the
+     * same marker that diagnostic keys on rather than re-parsing `use foreign:`.
+     *
+     * `excludeSubtree` is the sidecar `<program>` node itself: §4.12.1 makes it a
+     * separate compilation unit, so a `use foreign:` INSIDE it is the sidecar's
+     * own import and does not claim the sidecar from the parent.
+     *
+     * Deep walk (`children` / `body` / plain object values) because a use-decl
+     * can sit at file top level, inside the parent `<program>`'s body, or inside
+     * a `${…}` logic block within it.
+     */
+    function fileDeclaresUseForeign(
+      rootNodes: any[],
+      sidecarName: string,
+      excludeSubtree: any,
+    ): boolean {
+      const seen = new WeakSet<object>();
+      function walk(value: any): boolean {
+        if (!value || typeof value !== "object") return false;
+        if (value === excludeSubtree) return false;
+        if (seen.has(value)) return false;
+        seen.add(value);
+        if (Array.isArray(value)) {
+          for (const item of value) if (walk(item)) return true;
+          return false;
+        }
+        if (value.kind === "use-decl" && value._foreignSidecarName === sidecarName) return true;
+        for (const key of Object.keys(value)) {
+          if (key === "span" || key === "parent") continue;
+          if (walk(value[key])) return true;
+        }
+        return false;
+      }
+      return walk(rootNodes);
+    }
+
+    /**
      * `E-NESTED-PROGRAM-CONTEXT-NOMINAL` (§4.12.9) — a nested `<program>` selects
      * a §4.12.3 execution context whose codegen is Nominal/spec-ahead.
      *
@@ -1545,6 +1618,37 @@ export function runCG(input: CgInput): CgOutput {
       const { label, runtime, spec } = describeNestedProgramKind(kind);
       const span = node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
       const label0 = name ? `<program name="${name}">` : "<program>";
+
+      // §4.12.5 SIDECAR with no `use foreign:` to claim it. The generic message
+      // below is written for a context the PARENT reaches by name; an unclaimed
+      // sidecar's problem is the opposite — nothing reaches it at all — so it
+      // gets its own wording. Same code; see the call site for why the §23.4
+      // carve-out is conditional rather than absolute.
+      if (kind === "foreign-sidecar") {
+        const langVal = nestedProgramAttrValue(node, "lang");
+        const alsoRoute = hasNestedProgramAttr(node, "route");
+        errors.push(new CGError(
+          "E-NESTED-PROGRAM-CONTEXT-NOMINAL",
+          `E-NESTED-PROGRAM-CONTEXT-NOMINAL: \`${label0}\` declares the §4.12.5 FOREIGN LANGUAGE ` +
+          `SIDECAR execution context (${langVal ? `\`lang="${langVal}"\`` : "`lang=`/`port=`"}), ` +
+          `whose runtime model is a subprocess reached over HTTP/socket. That codegen is ` +
+          `Nominal/spec-ahead — this compiler revision does not build it — and NOTHING IN THIS ` +
+          `FILE CLAIMS IT: there is no \`use foreign:${name ?? "name"} { … }\` declaration in the ` +
+          `parent, so §23.4's \`E-FOREIGN-SIDECAR-NOMINAL\` never fires and the declaration would ` +
+          `otherwise compile to exit 0 while its body is silently discarded. ` +
+          (alsoRoute
+            ? `NOTE: this element also carries \`route=\`. Per §4.12.3's exclusive classifier, ` +
+              `\`lang=\` selects the sidecar context and \`route=\` is inert here — adding \`lang=\` ` +
+              `does NOT turn a server endpoint into something this compiler can build. `
+            : "") +
+          `Fix: remove the nested \`<program>\`, or express the work as a server \`function\` ` +
+          `(§12), until v1.next lands the §23.4 sidecar layer. ` +
+          `(SPEC §4.12.3 + §4.12.5 + §4.12.9 + §23.4 + §34.)`,
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "error",
+        ));
+        return;
+      }
 
       // MALFORMED `mode=` — name the value, do not put words in the author's mouth.
       //

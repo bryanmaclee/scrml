@@ -219,6 +219,47 @@ const SIDECAR_WITH_PORT = `<program>
 </program>
 `;
 
+/**
+ * The two sidecar spellings above, each CLAIMED by a `use foreign:` in the
+ * parent. §23.4's carve-out is what these exercise: with a `use foreign:` present
+ * there IS a site for `E-FOREIGN-SIDECAR-NOMINAL` to fire at, so the declaration
+ * must stay quiet. Without one — the fixtures above — the declaration is the only
+ * place a diagnostic can go.
+ */
+const SIDECAR_NO_PORT_CLAIMED = `<program>
+
+<out> = not
+
+<program name="ml2" lang="go" build="go build -o ./bin/ml ./cmd/ml">
+    \${ export function predict(n: number) -> number }
+</>
+
+\${
+    use foreign:ml2 { predict }
+}
+
+<p>\${@out}</p>
+
+</program>
+`;
+
+const SIDECAR_WITH_PORT_CLAIMED = `<program>
+
+<out> = not
+
+<program name="ml" lang="go" build="go build -o ./bin/ml ./cmd/ml" port="9001" health="/health">
+    \${ export function predict(n: number) -> number }
+</>
+
+\${
+    use foreign:ml { predict }
+}
+
+<p>\${@out}</p>
+
+</program>
+`;
+
 const NAMED_SCOPED_DB = `<program db="sqlite:./primary.db">
 
 <program name="analytics" db="sqlite:./metrics.db">
@@ -282,14 +323,35 @@ describe("§4.12.5 foreign sidecar — §23.4 owns the diagnostic, both spelling
     assertWorkerArtifactsAreCoherent(o);
   });
 
-  test("the sidecar declaration does NOT also fire E-NESTED-PROGRAM-CONTEXT-NOMINAL", () => {
-    // Deliberate. §23.4 already fails the sidecar closed at the
+  test("a CLAIMED sidecar does NOT also fire E-NESTED-PROGRAM-CONTEXT-NOMINAL", () => {
+    // Deliberate, and unchanged. §23.4 already fails the sidecar closed at the
     // `use foreign:name { … }` site with the ratified E-FOREIGN-SIDECAR-NOMINAL.
     // Firing a second code at the declaration would put two errors on one
     // unbuilt shape — two diagnostics for one mistake.
-    for (const [dir, src] of [["sc-a", SIDECAR_NO_PORT], ["sc-b", SIDECAR_WITH_PORT]]) {
+    //
+    // CORRECTED S356 r3: this used to assert the absence on the two fixtures
+    // above, which declare a sidecar and NEVER `use foreign:` it. That made the
+    // carve-out UNCONDITIONAL, and an unconditional carve-out suppresses the ONLY
+    // diagnostic when there is no `use foreign:` to fire at — the shape compiled
+    // exit 0 with its body silently discarded. The rule is one-diagnostic-per-
+    // mistake, so the fixtures here now actually claim their sidecar. See
+    // `nested-program-sidecar-unclaimed.test.js` for the other half.
+    for (const [dir, src] of [["sc-a", SIDECAR_NO_PORT_CLAIMED], ["sc-b", SIDECAR_WITH_PORT_CLAIMED]]) {
       const o = build(dir, src);
+      expect(codesOf(o)).toContain("E-FOREIGN-SIDECAR-NOMINAL");
       expect(codesOf(o)).not.toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+    }
+  });
+
+  test("an UNCLAIMED sidecar IS refused at its declaration", () => {
+    // The gap the unconditional carve-out left open. Both spellings, so the
+    // `port=`-less one cannot regress back into silence.
+    for (const [dir, src] of [["sc-u-a", SIDECAR_NO_PORT], ["sc-u-b", SIDECAR_WITH_PORT]]) {
+      const o = build(dir, src);
+      expect(codesOf(o)).toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+      // Still no worker artifacts either way — the round-2 guarantee holds.
+      expect(workerRefs(o)).toEqual([]);
+      expect(o.workerFilesOnDisk).toEqual([]);
     }
   });
 

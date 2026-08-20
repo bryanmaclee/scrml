@@ -1,0 +1,13 @@
+<program>
+
+  <program name="ml" lang="go" build="go build -o ./bin/ml ./cmd/ml" port="9001" health="/health">
+    ${ export function predict(n: number) -> number }
+  </program>
+
+  ${
+    use foreign:ml { predict }
+  }
+
+  <p>hi</p>
+
+</program>
