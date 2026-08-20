@@ -1303,3 +1303,587 @@ nests in scrml".
 **Two pre-existing gaps surfaced, deliberately NOT fixed** (outside the arc, no
 nested-`<program>` artifact consequence): `type-system.ts:7917` and
 `emit-server.ts:2286`.
+
+---
+
+## Item 1 — HIGH-1, the dangling worker BINDING
+
+### Reproduction on the r2 tip — EXECUTED, not read
+
+The brief's fixture verbatim, compiled at `55c87868`:
+
+```
+Compiled 1 file in 107.2ms   exit 0, ZERO diagnostics
+client.js:19   _scrml_worker_w.send({v: _scrml_cs_reactive_get("v")});
+0 files matching *.worker.js
+node --check .../h1-page-worker.client.js   PASSES
+```
+
+`node --check` passing is the whole reason this class is invisible to
+`--validate-emit`: a dangling free identifier is legal JS until it is EVALUATED.
+So the proof has to reach the call site. happy-dom + the REAL emitted runtime +
+the real emitted HTML body + a stub `Worker` that records constructions, then
+click the button:
+
+```
+r2 tip   PROBE { buttonFound: true,  loadError: null,
+                 thrown: ["ReferenceError: _scrml_worker_w is not defined"],
+                 workerRequests: [], workerFilesOnDisk: [] }
+r3 HEAD  PROBE { buttonFound: true,  loadError: null,
+                 thrown: [],
+                 workerRequests: ["h1-page-worker.w.worker.js"],
+                 workerFilesOnDisk: ["h1-page-worker.w.worker.js"] }
+```
+
+`workerRequests` is load-bearing in the green half: without it a passing
+`thrown: []` could just mean the handler never ran.
+
+One methodology note, since round 2's own probe was where this went wrong: the
+runtime and the client bundle MUST be evaluated in ONE scope. The runtime's
+top-level `const`s are eval-local, so evaluating the two separately produces
+`ReferenceError: _scrml_reactive_set is not defined` — a FALSE positive that
+looks exactly like the real bug.
+
+### THE DISCRIMINATOR — root-nodes MEMBERSHIP, and why not the alternative
+
+The brief offered two: seed the depth to 1 when the file has no top-level
+`<program>`, or identify the root by node identity. **Neither, quite — the right
+predicate is membership of the file's ROOT NODES ARRAY**, which is the identity
+option generalised so that it is TOTAL.
+
+New module `compiler/src/program-root.ts`. A `<program>` is TOP-LEVEL iff it is a
+member of the root nodes array; every other one is NESTED, whatever encloses it.
+
+Why not depth-seeding, in order of weight:
+
+1. **It is not total.** It fixes the `<page>`-rooted file and leaves a SECOND
+   top-level `<program name="w">` sibling at depth 0 in a file that DOES have a
+   root `<program>` — still unclassified, still silent. Membership classifies
+   every `<program>` in the file, with no third state.
+2. **Depth is walk-relative; identity is not.** The counter has to be re-derived
+   correctly at each of the six sites that track it, and it was not — the same
+   off-by-one shipped in `codegen/index.ts`, `emit-html.ts` and `symbol-table.ts`
+   independently. A `Set` computed once cannot be re-derived six ways.
+3. **It matches the convention already in the tree.** Ten sites in the sweep
+   already locate the root with a top-level-array `.find` (`hasProgramRoot`,
+   `findTopLevelProgramNode`, `findRootProgram`, `entryProgramNode`, …). A
+   SECOND, differently-shaped notion of "root" is precisely the drift this arc
+   exists to stop.
+
+**And it is what SPEC says**, once the ambiguity is removed. §4.12.2: "The
+compiler SHALL NOT treat a top-level `<program name=>` as a nested execution
+context: the extraction pre-pass of §4.12.8 applies to nested `<program>`
+elements only." Round 2 wrote "top-level" without defining it, and the whole
+defect lived in that gap. §4.12.2 now defines it normatively, requires the
+classification to be TOTAL, and explicitly forbids the ancestor-count
+formulation.
+
+`programDepth` is RETAINED in `symbol-table.ts` for `E-CHANNEL-OUTSIDE-PROGRAM`,
+which genuinely IS a depth question ("does this channel have any `<program>`
+ancestor at all"). Replacing that one too would have been a different bug.
+
+### Six sites converted
+
+| site | decides |
+|---|---|
+| `codegen/index.ts` `extractWorkerPrograms` | splice / register worker / refuse |
+| `codegen/index.ts` `detectNestedDocAttrs` | `W-PROGRAM-TITLE-NESTED` |
+| `codegen/index.ts` `detectTopLevelProgramName` | dropped the `return`-after-first |
+| `codegen/emit-html.ts` | skip an extracted nested subtree |
+| `symbol-table.ts` `walkChannelPlacement` | `E-CHANNEL-INSIDE-NESTED-PROGRAM` + `<page>` scope reset |
+| `codegen/emit-theme-reset.ts` | which `<program>` owns the §65.3.4 reset |
+
+The last three were found by the sweep, not by the brief.
+
+### The three instances, measured
+
+**Instance 1 — `<page>`-rooted worker WITH `.send()`.** Above. Closed.
+
+**Instance 2 — `<page>`-rooted worker with NO `.send()`.** The brief predicted
+"worker body silently discarded, `<body>` renders an empty region". Measured, the
+mechanism was the OPPOSITE of that description and equally wrong: the subtree was
+NOT discarded, it was RETAINED and rendered INTO the parent page —
+`<span>worker body markup</span>` appeared in the emitted `<body>` — while no
+bundle was produced. Same root cause (depth 0 means not nested, so neither
+extracted nor skipped), opposite symptom. Now: bundle written, markup absent from
+the page.
+
+**Instance 3 — a SECOND top-level `<program name="w">` sibling.** Now fires
+`W-PROGRAM-TOP-LEVEL-NAME`, and is NOT extracted. Both halves are what §4.12.2
+says literally: it IS top-level (a member of the root nodes array), so `name=` is
+inert there for exactly the reason the root's is — there is no enclosing
+`<program>` that could reference it by name — and the §4.12.8 pre-pass "applies
+to nested `<program>` elements only".
+
+> **Instance 3 is IMPROVED, NOT CLOSED.** See RESIDUAL R1 below. The warning
+> fires, but the parent's `<#w>.send()` still emits a dangling
+> `_scrml_worker_w`. The arc's standing guarantee "every worker binding used is
+> declared" does NOT hold for this shape, and closing it needs a code-set
+> decision I did not take. This is the one place I am handing back an open
+> ReferenceError.
+
+### A fourth site the sweep found, which the HIGH-1 fix EXPOSED
+
+`emit-theme-reset.ts` took "the first `<program>` in a FULL-TREE walk" as the
+document root. Measured, on a `<page>`-rooted file holding a §4.12.6
+`<program db=>`:
+
+```
+BEFORE  dist/ = [client.js, css, html, runtime]     a .css the file should not have
+AFTER   dist/ = [client.js, html, runtime]
+CONTROL the identical <page> with NO nested <program>: [client.js, html, runtime]
+```
+
+§65.3.4 emits the reset `@layer` "only when the file declares a `<program>` (the
+reset is a program-level, app-wide concern)" — meaning the DOCUMENT ROOT. A
+nested execution context was standing in for a root the file does not have. The
+opt-out inverted the same way: `reset="none"` on a NESTED `<program>` suppressed
+the reset for the entire document.
+
+I found this because the HIGH-1 fix made the `.css` DISAPPEAR from the
+page-rooted-worker output, which read like a regression until the control was
+compiled. Worth recording: the disappearance was the CORRECTION.
+
+### Two-sided bite proof — `nested-program-root-discriminator.test.js`
+
+10 tests. Verified by checking the five source files out at `55c87868` and
+re-running: **8 BITE, 2 are deliberate regression guards.**
+
+| test | r2 behaviour |
+|---|---|
+| worker binding USED is DECLARED | `dangling: ["_scrml_worker_w"]`, `declared: []` |
+| bundle on disk with a real `onmessage` | 0 `new Worker` refs |
+| EXECUTED: click reaches the worker | `ReferenceError: _scrml_worker_w is not defined` |
+| nested worker with no `.send()` leaves the DOM | `<span>worker body markup</span>` rendered into the page |
+| 2nd top-level `name=` fires the warning | `[W-PROGRAM-REDUNDANT-LOGIC, W-PROGRAM-SPA-INFERRED]` only |
+| `W-PROGRAM-TITLE-NESTED` on a `<page>`-rooted nested `title=` | `[]` |
+| `E-CHANNEL-INSIDE-NESTED-PROGRAM` on a `<page>`-rooted worker | **`E-CHANNEL-INSIDE-PAGE`** — the WRONG code |
+| nested `db=` does not own the CSS reset | emits `app.css`; the control does not |
+| *(guard)* 2nd top-level is NOT extracted | held on r2, must keep holding |
+| *(guard)* the document root stays diagnostic-free | held on r2, must keep holding |
+
+The channel row is the most informative red half: on r2 the shape did not go
+undiagnosed, it was MISdiagnosed — `E-CHANNEL-INSIDE-PAGE` instead of
+`E-CHANNEL-INSIDE-NESTED-PROGRAM` — because the `<page>` placement scope was not
+reset either. Two consequences of one counter.
+
+### Corpus blast radius: ZERO, and that is not a defence
+
+All 13 nested `<program>` tags across the 2372 tracked `.scrml` sit under a
+`<program>` ROOT. Nothing exercised the `<page>`-rooted path, which is why
+nothing caught it. §40.8 route files are `<page>`-rooted BY CONSTRUCTION, so the
+first adopter to colocate a worker with a route would have hit it on their first
+click. Recorded in the test file header so the zero cannot later be read as
+evidence the shape does not matter.
+
+---
+
+## Item 3 — MEDIUM-2, the named scoped-DB context
+
+Reproduced exactly as the brief states:
+
+```
+BEFORE  <program db="mongodb://localhost/analytics">                  E-SQL-005, FAILED
+        <program name="analytics" db="mongodb://localhost/analytics">  silent, exit 0
+AFTER   both  E-SQL-005, FAILED
+```
+
+`annotateDbScopes` gated on `dbAttr && !nameAttr`. §4.12.3's table spells the row
+`Scoped DB context | name= (optional), db=` — optional, not absent.
+
+Gate now keys on the shared `classifyNestedProgram`, not on the attribute pair,
+so it cannot drift from the extraction decision: a `db=` co-occurring with
+`mode=` or `route=` classifies as THAT context and is refused, never silently
+read as a scoped DB. Pinned by a new precedence test.
+
+**A stale test had to be INVERTED, in the same commit.**
+`compiler/tests/unit/program-db-driver-resolution.test.js` §H asserted "named
+program (with name=) does NOT get `_dbScope`", rationale: *"if name= is present,
+the program is a worker, not a DB scope"* — verbatim the `name=`-keyed over-claim
+this arc corrected in round 2. The commit gate caught it; it now pins the
+corrected behaviour.
+
+**Characterised honestly, NOT over-claimed.** Restoring the annotation restores
+§44.2 driver resolution outright (proven above). The downstream `?{}` re-scoping
+has its OWN pre-existing gap: a `?{}` inside a `server function` in a scoped-DB
+subtree lowers to `_scrml_sql.unsafe(...)` on the PARENT's var. I checked whether
+that is something I broke — it is not, the ANONYMOUS form does the same:
+
+```
+diff (named server.js) (anonymous server.js)    IDENTICAL
+```
+
+So the two spellings are now at parity, and the re-scoping gap is a separate
+pre-existing defect (RESIDUAL R3), not part of this item.
+
+Mirror site surfaced, deliberately NOT fixed (pa.md defers self-host):
+`compiler/self-host/cg-parts/section-assembly.js:1968`.
+
+---
+
+## Item 4 — MEDIUM-3, the suppression that made another diagnostic LIE
+
+`collectWorkerBodyFunctionIds` keyed on `hasName`. The brief's table, reproduced
+on REAL COMPILES (not synthesised ASTs — see below for why that matters):
+
+| fixture | BEFORE | AFTER |
+|---|---|---|
+| top-level `<program>` (control) | fires | fires |
+| top-level `<program name="w">` | **SILENT** | fires |
+| nested `<program name="analytics" db=>` | **SILENT** | fires |
+| nested `<program db=>` (no `name=`) | fires | fires |
+| nested `<program name="w">` (real worker) | silent | silent |
+
+Row 2 is the one that reaches beyond its own blast radius.
+`W-PROGRAM-TOP-LEVEL-NAME` tells the author `name=` on the root "has no effect
+and is ignored"; while this suppression stood that was FALSE — the attribute had
+the very large effect of disabling `E-ROUTE-001` for every function in the file.
+**A diagnostic that lies is worse than no diagnostic.** Fixing this is what makes
+the warning true, and item 5's severity argument depends on it. The dependency is
+now written into both the code comment and the §34 row, so a future change that
+gives root-`name=` behaviour again is told to revisit the severity.
+
+Row 3 is where it bit hardest: a §4.12.6 subtree compiles INTO the parent and its
+`?{}` reaches a real database, so silencing the server-escalation analysis there
+is precisely backwards.
+
+Predicate is now the tightest one that carries the isolation argument: NESTED
+**and** classified `inline-worker`. The other extracted contexts are deliberately
+NOT suppressed — they are refused at compile time anyway, and firing is the
+fail-closed direction.
+
+### The synthetic fixture that kept a broken predicate green
+
+`route-inference.test.js` §25 has covered this suppression since Bug 2, and it
+passed against the broken predicate throughout. Cause: `makeWorkerFileAST` placed
+the worker `<program name=>` at the **ROOT of the nodes array**, alongside the
+top-level logic block — a shape no parser emits. A synthetic AST that is
+unconstructable from source cannot pin a nesting rule; it will agree with
+whatever the implementation happens to do. Helper corrected to nest the worker
+inside a document-root `<program>`, and the new coverage compiles real source.
+
+Two-sided: 5 tests, **2 bite** (rows 2 and 3), 3 are guards.
+
+---
+
+## Item 5 — MEDIUM-4, the citation that does not exist
+
+Both halves verified INDEPENDENTLY rather than relayed:
+
+```
+grep -rn 'W-STORY-ON-TOP-LEVEL' compiler/src/     2 hits, BOTH inside the
+    comment making the citation. ZERO fire sites.
+SPEC.md:35592   "`story=` on the top-level `<program>` SHALL emit
+    W-STORY-ON-TOP-LEVEL and SHALL be ignored"   — no MUST NOT anywhere.
+SPEC.md:19231   the §34 row: no emitter provenance, no spec-ahead marker.
+SPEC-INDEX §58  "Nominal section — spec-ahead-of-implementation".
+```
+
+An unimplemented code is not a precedent, and the conditions are not parallel.
+
+The verdict stays `warning`. The argument that carries it, from enumerating
+SPEC's attribute prohibitions and their §34 severities:
+
+| condition | SPEC phrasing | severity |
+|---|---|---|
+| `<page route=>` | "SHALL NOT carry"; regresses filesystem inference AND collides with nested-program `route=` | `E-PAGE-ROUTE-ATTR-FORBIDDEN` |
+| `<page>` outside the five per-route attrs | not in the allowed set | `E-PAGE-INVALID-ATTR` |
+| `onclient:*` handler declared `server function` | "SHALL NOT be declared" | `E-CHANNEL-006` |
+| documentary attrs on a nested `<program>` | "MAY be present syntactically but SHALL NOT emit any HTML" | `W-PROGRAM-TITLE-NESTED` |
+| `story=` on the top-level `<program>` | "SHALL be ignored" | `W-STORY-ON-TOP-LEVEL` |
+
+**The discriminator is INERT vs WRONG, not MUST-NOT vs not.** Every Error is a
+case where honouring the attribute would do something WRONG; every warn-and-ignore
+is one where SPEC describes the attribute as INERT.
+
+`name=` at the root settles it by itself: §4.12.2 phrases it as a genuine **MUST
+NOT** and, in the same paragraph, pairs it with "SHALL emit … and SHALL be
+ignored". A MUST-NOT-keyed rule would have to call that SPEC text
+self-contradictory; inert-vs-wrong reads it straight.
+
+Landed in the code comment, the §34 row, and the §4.12.9 row (which cross-refs
+rather than restating). The §34 row also drops its now-stale "the pre-pass is now
+depth-aware" claim and records "fires on EVERY top-level `<program name=>`".
+
+---
+
+## Item 6 — the LOW items
+
+### LOW-6 — a declaration the author did not make
+
+```
+BEFORE  `<program name="x">` declares the §4.12.3 WASM COMPUTE MODULE execution context…
+AFTER   `<program name="x">` carries `mode="native"`, which is not a recognized
+        execution mode. SPEC §4.12.2 defines `mode=` as `"wasm"` … and "omitted
+        for sidecar processes" — those are the only two spellings. …
+        Fix: drop the `mode=` attribute to declare a §4.12.4 inline worker …;
+        or correct it to `mode="wasm"` and wait for the WASM context.
+```
+
+Same code (item 7 forbids changing the code set). Gated on the VALUE, so
+`mode="wasm"` keeps the original context message — pinned by a guard test.
+
+### LOW-7 — FIVE missing, and only THREE should be registered
+
+The brief named `route=`, `port=`, `health=`. Compiling §4.12.2's table against
+the registry found `protect=` and `story=` missing the same way.
+
+**Registering all five is the obvious move and it is WRONG for two of them.** The
+commit gate caught it: `program-attrs-registry.test.js` pins
+`<program protect="x">` to `W-ATTR-001` with the comment "(S80 retired)".
+
+Applying the SAME inert-vs-wrong discriminator this round just banked for item 5:
+
+| attr | verdict | why |
+|---|---|---|
+| `route=` | REGISTER | drives `E-NESTED-PROGRAM-CONTEXT-NOMINAL`; W-ATTR-001's "no compile-time effect" is FALSE and self-contradictory |
+| `port=` | REGISTER | a live DISCRIMINATOR in `nested-program-kind.ts` — it decides whether a worker bundle is emitted at all |
+| `health=` | REGISTER | rides the §4.12.5 sidecar declaration, whose refusal §23.4 does emit |
+| `protect=` | **NOT** | RETIRED from `<program>` in S80. §38:21348: the field-level surface "remains on `<db>` and `<Type>` declarations per §6.12.1 and §52". Registering would silently reverse a ratified retirement. §4.12.2's table row is STALE SPEC that outlived S80 (RESIDUAL R2) |
+| `story=` | **NOT** | §58 is Nominal and `W-STORY-ON-TOP-LEVEL` has ZERO fire sites, so nothing reads it. W-ATTR-001 is TRUE and is the only signal the author gets. Silencing it would be fail-OPEN on an unimplemented attribute — the exact shape §4.12.3 normatively forbids |
+
+Measured:
+
+```
+BEFORE  <program name="api" route="/api/v1">    W-ATTR-001 ("no compile-time effect")
+                                            AND E-NESTED-PROGRAM-CONTEXT-NOMINAL
+                                                ("declares the SERVER ENDPOINT execution context")
+AFTER   E-NESTED-PROGRAM-CONTEXT-NOMINAL only
+```
+
+**A THIRD list exists and agrees with neither.** `ast-builder.js:19383`
+`NESTED_PROGRAM_ATTRS` has `protect`+`health` but not `route`/`story`;
+`migrate.js:1272` is a fourth spelling. Surfaced (RESIDUAL R4), not unified —
+unifying them is a separate change with its own blast radius.
+
+### LOW-8 — coverage notes, including the reviewer's correction
+
+Verified at `conformance/run.ts:203`: `notCodes` ARE checked unconditionally, so
+`foreign-sidecar-no-worker` is NOT inert — its forbidden codes bite. What the
+codes-only harness cannot observe is ARTIFACT PRESENCE, which is exactly what
+`inline-worker-emits-bundle` (`codes: []`, no runtime half) fails to verify
+despite its name. Both descriptions now say so and name the integration tests
+that carry the artifact half.
+
+---
+
+## Item 7 — the two defects, closed WITHOUT touching the code set
+
+```
+BEFORE  <program name="ml" lang="go" build= port= health=>   exit 0, ZERO diagnostics, body discarded
+        <program name="api" route="/api/v1" lang="go">        exit 0, ZERO diagnostics
+AFTER   both  E-NESTED-PROGRAM-CONTEXT-NOMINAL, FAILED
+```
+
+The second is worse than a missing diagnostic: `lang=` outranks `route=` in
+§4.12.3's exclusive precedence, so ADDING `lang=` LAUNDERED a `route=` server
+endpoint past the refusal that shape gets when spelled `route=` alone.
+
+Root cause: the §23.4 carve-out was UNCONDITIONAL. Its justification — "§23.4
+already fails the sidecar closed at the `use foreign:` site, and two errors on one
+unbuilt shape is two diagnostics for one mistake" — holds only when there IS a
+`use foreign:` to fire at. With none, the carve-out suppressed the ONLY
+diagnostic.
+
+Carve-out is now CONDITIONAL, and the invariant is stated as what it always
+should have been — **ONE DIAGNOSTIC PER UNBUILT DECLARATION, never two, never
+none**:
+
+| shape | fires |
+|---|---|
+| sidecar WITH `use foreign:` | `E-FOREIGN-SIDECAR-NOMINAL` (§23.4), only |
+| sidecar WITHOUT `use foreign:` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL`, only |
+
+All four combinations compiled and checked; the CLAIMED case still emits exactly
+one code (the double-fire guard the ratified carve-out exists for).
+
+§4.12.3's normative sentence already reads this way — it names the two
+diagnostics with an "or", expecting one of them. That "or" is now stated as
+normative in BOTH directions.
+
+**SCOPE HELD.** The consolidation question — whether the two codes are one
+concept split by fire site — is with the operator and is NOT decided here.
+Neither code is consolidated, retired or re-scoped; only the CONDITION each fires
+on was made precise. Stated explicitly in the §34 row so a later reader cannot
+mistake this for the consolidation ruling.
+
+**TWO ROUND-2 EXPECTATIONS HAD RATIFIED THE SILENCE, and both were corrected:**
+
+- `conformance/cases/nested-program/foreign-sidecar-no-worker` declares a sidecar
+  and never `use foreign:`s it, yet asserted `E-NESTED-PROGRAM-CONTEXT-NOMINAL`
+  **absent**. Now asserts it PRESENT. New sibling case `foreign-sidecar-claimed`
+  pins the other half, so the pair encodes the invariant from both sides rather
+  than as an unconditional exemption.
+- `nested-program-execution-context-gate.test.js`'s "the sidecar declaration does
+  NOT also fire …" ran on the same unclaimed fixtures. Split into a CLAIMED test
+  (with `use foreign:` fixtures added) and an UNCLAIMED test.
+
+---
+
+## VERIFICATION BAR
+
+### Execute, don't grep — HIGH-1
+
+Done, above. happy-dom + real runtime + real emitted HTML + stub `Worker`;
+`ReferenceError` on the red half, a recorded `workerRequests` entry on the green
+half. `node --check` passes on the RED output, which is the reason a static gate
+could never have caught this.
+
+### The build-mode matrix — 40 builds, FOUR guarantees, ZERO violations
+
+5 fixtures times 4 modes (flat / `contentHashAssets` / `emitPerRoute` / both)
+times 2 directory shapes (flat and `pages/`-nested).
+
+| guarantee | |
+|---|---|
+| G1 | every `new Worker("…")` names a file that EXISTS |
+| G2 | every `.worker.js` on disk IS referenced |
+| G3 | every client dial has a server route |
+| G4 | every `_scrml_worker_X` USED is DECLARED (new this round) |
+
+```
+40 builds. VIOLATIONS: 0
+```
+
+G4 is checked PER BUNDLE, not per dist, because a declaration in one chunk does
+not scope into another — a per-dist check would pass on a split that separates
+the `new Worker` from its call site.
+
+> **A blind spot in my own probe, found and fixed before reporting.** The first
+> run showed `wkr 0, ref 1` for every `contentHashAssets` row — zero worker files
+> yet a live reference, with G1 and G2 both reporting "ok". Under content hashing
+> the bundle is `<base>.<name>.worker.<hash>.js`, so a
+> `.endsWith(".worker.js")` predicate finds NOTHING and **G2 passed vacuously on
+> 20 of the 40 builds**. Predicate corrected to `/\.worker(\.[a-z0-9]+)?\.js$/`;
+> the re-run shows non-zero worker counts and genuine passes. Recorded because a
+> probe that reports less than it measured is exactly how three sessions were
+> lost earlier in this project.
+
+### Suites
+
+```
+bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance
+  22504 pass   70 skip   1 todo   0 fail
+
+bun conformance/run.ts
+  894/894 cases pass          (893 before; +1 new case foreign-sidecar-claimed)
+
+bun scripts/s34-census.ts --check-new --base origin/main
+  §34.0 gate: 8 new/changed §34 row(s), all well-formed — PASS
+  (run AFTER the last SPEC edit, per the brief's warning)
+```
+
+Baseline at branch cut was 20982 pass / 0 fail on unit+integration. No
+pre-existing failures to report — the tree was green before and after.
+
+ENV-GAP ruled out up front: `bun install` + `bun run pretest` at step 0, so the
+gitignored `samples/compilation-tests/dist/` phantom-failure class never arose.
+
+### New tests
+
+| file | tests | bite on r2 |
+|---|---|---|
+| `nested-program-root-discriminator.test.js` | 10 | 8 |
+| `nested-program-scoped-db-named.test.js` | 4 | 1 |
+| `nested-program-route-001-suppression.test.js` | 5 | 2 |
+| `nested-program-attribute-surface.test.js` | 4 | 3 |
+| `nested-program-sidecar-unclaimed.test.js` | 6 | 4 |
+
+29 new tests, 18 of which fail on the pre-fix tree. The other 11 are deliberate
+regression guards and are labelled as such in each file.
+
+---
+
+## RESIDUALS — round 3
+
+### R1 (HIGHEST) — a dangling worker binding is STILL reachable. HANDED BACK.
+
+The arc's standing guarantee **"every worker binding used is declared" holds only
+when the name RESOLVES to a nested `<program>`.** Two shapes where it does not,
+both measured on r3 HEAD:
+
+```
+A. second top-level <program name="w"> + <#w>.send() in the root program
+   W-PROGRAM-TOP-LEVEL-NAME fires (warning, so exit 0 and the dist is written)
+   `const _scrml_worker_w` declarations: 0
+   `_scrml_worker_w` usages:            1        ReferenceError on click
+
+B. a TYPO:  <#dubler>.send()  next to  <program name="doubler">
+   ZERO diagnostics, exit 0
+   declared: _scrml_worker_doubler
+   used:     _scrml_worker_doubler, _scrml_worker_dubler   ReferenceError on click
+```
+
+B is PRE-EXISTING on main and untouched by this arc; A was silent+dangling on r2
+and is now warning+dangling. **Neither is closed.**
+
+Root cause is one thing, and it is not the discriminator: `<#name>.send()` is
+lowered TEXTUALLY to `_scrml_worker_<name>.send(` very early (`tokenizer.ts:1190`,
+`ast-builder.js:570`, `codegen/rewrite.ts:772`) with **no check that any worker of
+that name was registered**. `emit-client.ts:2409` then declares bindings only for
+`ctx.workerNames`. The two sides never meet.
+
+**Why I did not close it.** The fix is a reference-site fail-closed check, and
+there is no existing code for "unresolved nested-program reference" — closing it
+means MINTING A NEW CODE (§34 row + SPEC + census). Item 7 of the brief sets the
+discipline for exactly this situation: *"If you cannot close them without touching
+the code set, stop and report rather than deciding."* I applied that here rather
+than minting unilaterally.
+
+**Recommended close, if PA rules for it:** a new error at the REFERENCE site,
+firing only when the name matches NO nested `<program>` at all. That keeps
+one-diagnostic-per-mistake — a name belonging to a Nominal context is already
+refused at its declaration, so it must NOT double-fire — and it subsumes both
+shapes plus the typo class. Roughly 30 lines next to `workerNames`, plus a §34
+row. This is the last hole in the guarantee the arc exists to establish.
+
+### R2 — §4.12.2's `protect=` row is STALE SPEC (post-S80)
+
+§4.12.2 lists `| protect= | YES | Declares protected field names for data
+isolation |`, but S80 retired `protect=` from `<program>`; §38:21348 records that
+the surface "remains on `<db>` and `<Type>` declarations per §6.12.1 and §52", and
+`program-attrs-registry.test.js` pins the `W-ATTR-001`. One of the two is wrong.
+Not mine to decide — surfaced, deliberately not implemented. (Left unregistered,
+so today's behaviour is unchanged.)
+
+### R3 — `?{}` re-scoping does not reach a `server function` body
+
+A `?{}` inside a `server function` in a §4.12.6 scoped-DB subtree lowers to
+`_scrml_sql.unsafe(...)` — the PARENT's connection — for BOTH the named and the
+anonymous spelling (verified byte-identical). §44.2 driver resolution and the
+`_dbScope` annotation are now correct for both; the downstream consumer is not.
+Pre-existing, separate from MEDIUM-2, and a data-correctness issue on its face:
+a scoped-DB context silently queries the wrong database.
+
+### R4 — four disagreeing lists of "nested-`<program>` attributes"
+
+SPEC §4.12.2's table, `attribute-registry.js`, `ast-builder.js:19383`
+`NESTED_PROGRAM_ATTRS`, and `migrate.js:1272`. No two agree. Same class as the
+`tag === "program"` sweep: one concept, several hand-maintained copies.
+
+### R5 — the sweep grep is itself the third generation of the same error
+
+`tag === "program"` finds 31 code sites; the same test is spelled four other ways
+across three IR layers, for **41** total. No single literal grep enumerates this
+population. Bank the generalisation, not the grep.
+
+### R6 (carried from round 2, unchanged) — a FAILED build still writes a complete dist
+
+Round 3 adds more refusals, and every one of them still leaves a dist on disk. The
+bytes are coherent in every case measured (the 40-build matrix), so the danger is
+narrower than it was — but "we fail closed AND write the artifacts anyway" is a
+contract nobody can rely on, and `api.js:2860`'s comment still asserts the
+opposite of what the code does. Interacts with R1: shape A exits 0, so its
+dangling-binding dist is written by DESIGN, not as a failed-build side effect.
+
+### R7 (carried, unchanged) — worker-body token spacing
+
+`self.postMessage( { result : twice ( data . value ) } )`. Parses, runs, does not
+meet the readable-output bar. Structural fix is still "lower
+`whenMessage.bodyExpr` instead of re-emitting a token join".
+
+### R8 (carried from round 2) — self-host mirror
+
+`compiler/self-host/cg-parts/section-assembly.js:1968` — the `!nameAttr` scoped-DB
+gate, and now also the root-vs-nested discriminator, are stale in the self-host
+mirror. pa.md defers self-host; surfaced only.
