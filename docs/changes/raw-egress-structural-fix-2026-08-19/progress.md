@@ -1276,3 +1276,45 @@ so there is nothing else to bring into agreement.
 
 `bun scripts/s34-census.ts --check-new --base origin/main` re-run after this, the last
 SPEC edit of the round.
+
+## Item 5 — L1: the green half's anti-vacuity evidence was PROSE. Now it is assertion.
+
+8 `cleanShapes`, 6 clean `adversarial` entries, and three residual pins asserted only
+`expect(fires(result)).toBe(false)`. **A fixture that failed to compile passes every one
+of them.** Only the first ruling test guarded. The two residual pins carried a
+`progress.md` claim that each had been checked by hand for `I-PROTECT-STRIP-001` and
+emitted server JS — true in fact, and not an assertion. This is F6's own lesson recursed
+one level: an unpinned measurement decays.
+
+Every green shape now runs a shared `expectCompiledAndProtecting(result)`:
+
+```js
+expect(codes).not.toContain("E-SCOPE-001");
+expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+expect(codes).toContain("I-PROTECT-STRIP-001");
+expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+```
+
+— the file really compiled, the protect machinery really engaged, and the row really
+left through the redacting path. The FIRING halves additionally assert no
+`E-SCOPE-001`, so a fire is this gate's and not a fixture that never compiled. The
+cross-file residual pin uses the app-half variant (its SELECT sits in the imported file,
+so the strip info is raised there): clean compile plus a non-empty emitted server JS.
+
+Covered: the 8 `cleanShapes`, both halves of the 16-entry `adversarial` matrix, the 10
+`firingShapes`, `the same-BODY form`, and all three residual pins (call-through-a-value,
+call-on-a-member, cross-FILE helper).
+
+**BITE PROOF, executed.** One `cleanShapes` fixture was deliberately made non-compiling
+in a way that leaves the gate silent — `let z = TOTALLY_UNDECLARED_IDENT` beside
+`return new Response("nope")`:
+
+```
+978 |       expect(fires(result)).toBe(false);          ← PASSED (the gate is silent)
+914 |     expect(codes).not.toContain("E-SCOPE-001");   ← FAILED
+     Received: [ …, "I-PROTECT-STRIP-001", "E-SCHEMA-001", "E-SCOPE-001" ]
+```
+
+The old assertion passed on the broken fixture and the new one caught it — which is
+exactly the vacuity L1 named. Fixture restored; the file is **135 pass / 0 fail**, with
+`expect()` calls up from **211 to 308**.
