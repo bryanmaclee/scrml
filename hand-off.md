@@ -1,18 +1,20 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S354-peter (extended).-->
-<!-- Mechanical stream: handOffs/delta-log.md [1592]-[1601].        -->
-<!-- Body below the S354 block is the S352 WRAP + older (history).  -->
+<!-- hand-off.md — live session state. WRAPPED at S355-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1602]-[1605].        -->
+<!-- Body below the S355 block is S354 + S352 + older (history).    -->
 <!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
 <!-- ============================================================= -->
 
-# scrml — Session 354 (peter · P-Tech1 Windows) — WRAP
+# scrml — Session 355 (peter · P-Tech1 Windows) — WRAP
 
-**Date:** 2026-08-19. `/boot` Profile A, solo. **Nine PRs merged (#582–#588 + wrap #586 + this continuity) + review floor drained.**
-A disjoint EXECUTION lane running alongside bryan's still-open S352/S353 deliberation board.
+**Date:** 2026-08-19. `/boot` Profile A, solo. **Four PRs merged (#590–#593) on the adopter-#471 document-workflow arc.**
+A disjoint EXECUTION + dog-food lane running alongside bryan's still-open S352/S353 deliberation board.
 
-**Framing:** execution + hygiene, not deliberation. Three fix-bundles + a ledger reconciliation, and the
-throughline is that **repro-on-HEAD caught stale/misfiled gaps in every bundle** — but the reconciliation
-sweep proved that stale-gap debt is BOUNDED (clustered in two already-fixed pockets), not systemic.
+**Framing:** dog-fooding adopter #471's document-workflow path (PDF egress + file upload) — write the
+adopter's real program, compile it, RUN the emitted server, fix the next break. Three fixes landed (Response
+scope + content-type object key, self-host DCL once, bare-numeric key) and one **HIGH dog-food find**
+(`handle()` isn't wired as the §40.3 top-level onion → custom-path interception 404s) filed + routed to bryan.
+The dog-food method is the productive vein S354's wrap predicted once mechanical bundles ran dry.
 
 ---
 
@@ -21,59 +23,58 @@ sweep proved that stale-gap debt is BOUNDED (clustered in two already-fixed pock
 **Two live lanes — pick by who boots.**
 
 ### A. bryan's lane — THE BUILDABLE BOARD (still UNSTARTED, carried from S352/S353)
-None of this was touched by S354 (disjoint). Full detail in the **S352 WRAP block below** (unchanged). Summary:
+Untouched by S354/S355 (disjoint). Full detail in the **S352 WRAP block below** (unchanged). Summary:
 - **raw-egress structural fix (c)→(d)** · **i18n substrate B** · **dpa-035 replacement sequence**
   (`--minify` for real → runtime tree-shaking → `I-SSR-EACH-CLIENT-RENDERED` → dead-rule elim) ·
   **dpa-029 Q1 re-surface** after raw-egress lands. Sequencing already ruled — do not re-derive.
 - **Two held fix rounds** (pushed, not landable): `soft-nav-head-sync` `70c14838` (item-3 chunk-delay test
   owed) · `runtime-size-and-probes` `083ce19e` (tail verify + land; carries `ruling-debt.ts`).
+- **⭐ NEW for bryan — S355 dog-food find, ROUTED-TO-BRYAN:** `g-handle-onion-applied-per-route-not-top-level-custom-paths-404`
+  (HIGH, #593). `handle()`'s body is emitted as a PER-ROUTE `_scrml_mw_wrap`, never the §40.3 top-level onion,
+  so a `handle()` intercepting a custom path (`/quote.pdf`, `/upload`) 404s at runtime; a handle()-only program
+  emits handle() as uncalled dead code. Fix is architectural (`emit-server.ts:3625` + `build.js:425` — wrap
+  top-level dispatch in the onion) **and a §40.3 semantics ruling is owed FIRST:** does custom-path interception
+  without an author `route=` fall within the onion, or is the §12.3 author-`route=` carve-out the blessed path?
+  Full repro/trace/run-proof in the gap body. Blocks adopter #471's whole host-escape delivery layer.
 - **Owed outward:** the scrml-site ping the moment `soft-nav-head-sync` lands (they run `hard` on 551 links).
 - If bryan boots: this is your pickup. If peter boots: STAY OFF this lane (collision) — take §B.
 
-### B. peter's lane — disjoint follow-ups from S354 (small)
-- **Deferred (LOW):** `g-residual-order-bearing-readdir…`'s **self-host DCL leg** — add `{ once: true }` to the
-  `DOMContentLoaded` emit in `compiler/self-host/cg-parts/section-emit-wiring.js` (the open is `:1203`, the
-  close is an intricate multi-`lines.push`; find it before editing). Gap is narrowed to this one leg. Low value.
-- **Heading/marker cosmetic drift (hygiene, low priority):** 16 entries where the `### ` heading status ≠ the
-  `@gap` marker — 15 are `marker=resolved / heading=open` (marker is authoritative & already counted, so the
-  *heading text* is stale) + 1 docs gap (`G-DBAUTH-DOCS-NO-DO-NOT-MARK-USERS-EXAMPLE`, L1716, heading=resolved
-  marker=open). NOT flipped this session — each needs its marker verified before aligning the heading. Run
-  `headingMarkerDrift()` (state.ts, exported) to re-list.
-- **One crisp code follow-up (from #588):** `new Response(...)` inside a `handle()` body still fires
-  `E-SCOPE-001` — the §40 raw-Response allowlist doesn't admit `Response` in the handle escape hatch. Adopter
-  #471 needs it (a PDF/binary body IS a raw Response). Separate gap from the now-fixed formData await; a real
-  adopter-facing HIGH-ish follow-up if you want one that's clearly in-lane.
-- **Reconciliation is DONE + the finding:** the ledger is self-consistent (high-confidence stale scans return
-  empty); stale gaps are found only by repro and are BOUNDED. **The accessible compute-lane fix-bundles are
-  largely EXHAUSTED** (this session's bundle yield fell A→3, B→2, D→1, E→1, F→0). The next productive arc is
-  likely **operator/bryan-coordinated** (the ruling-gated render-async / if-value language forks) or
-  **genuinely-new work off the ledger** — not more mechanical bundle-hunting.
-- **★ OWNERSHIP-FIRST, not just repro:** before fixing ANY bryan-filed gap, grep the heading for
-  `ROUTED-TO-BRYAN` / `prov=ruling|dd|debate` FIRST (E's #2 was a build-then-revert miss). See
-  `[[scrml-med-shortlist-gaps-stale-verify-first]]`.
-- **Low-priority hygiene (carried):** the self-host DCL `{once:true}` leg (`section-emit-wiring.js`) + the 16
-  heading/marker cosmetic drifts (run `headingMarkerDrift()` to re-list; each needs its marker verified).
+### B. peter's lane — disjoint follow-ups (small)
+- **Heading/marker cosmetic drift (16 entries) — STILL HELD on bryan's live #581.** #581 (OPEN as of this wrap)
+  edits `known-gaps.md` + `pr-reviews.md`; sweeping 16 headings there collides. **First check if #581 landed;**
+  if so, re-run `headingMarkerDrift()` (state.ts, exported — the list may shift after #581's edits) and align
+  each `### ` heading against its verified `@gap` marker (15 are `marker=resolved / heading=open` → heading text
+  stale; +1 docs gap `G-DBAUTH-DOCS-NO-DO-NOT-MARK-USERS-EXAMPLE` L1716 the other way). Each needs its marker
+  verified before flipping. Low value, but the only clean peter-lane hygiene left.
+- **Dog-food #471 is largely bryan-gated now.** The next break down that path (issue point 2: a `handle()`
+  Response carrying tenant/protected data → `E-PROTECT-004`/`E-TENANT-RAW-EGRESS`) sits behind the #593
+  handle-onion defect (routed to bryan) AND is in bryan's security-envelope lane. The mechanical compile
+  primitives on the #471 path are now fixed (formData await #588, Response scope + content-type #590,
+  bare-numeric #592); the remaining #471 work is coordinated/ruling-gated, not solo peter work.
+- **★ OWNERSHIP-FIRST + REPRO-FIRST both still bind:** before fixing ANY gap, repro on HEAD AND grep the heading
+  for `ROUTED-TO-BRYAN` / `prov=ruling|dd|debate` FIRST. See `[[scrml-med-shortlist-gaps-stale-verify-first]]`.
+- **The productive vein is DOG-FOOD:** write an adopter's real program, compile it, RUN the emitted server, fix
+  the next break — that's how the S355 HIGH surfaced. Mechanical bundle-hunting is exhausted (S354 finding).
 
 ### C. Owed regardless of lane
-- **This wrap-delta's continuity PR** (hand-off + changelog + delta-log [1598]-[1601]) — the branch-first
-  continuity commit for the #587/#588 continuation.
+- **This wrap's continuity PR** (hand-off + changelog + delta-log [1602]-[1605]) — the branch-first continuity
+  commit for S355; being pushed as part of this wrap.
 
-## WHAT LANDED (S354-peter)
+## WHAT LANDED (S355-peter)
 
-| PR | Bundle | Result |
+| PR | What | Result |
 |---|---|---|
-| **#582** | A — type-system raw-text-launder (S338/Rule-7) | 1 HIGH + 2 MED resolved; `maskStringLiteralSpans()` + structural reset member-guard |
-| **#583** | B — dev-server | leak HIGH fixed (parent-death guard) + readdir LOW (2 legs); **2 stale gaps flipped** (fail-open HIGH + watcher-death MED, fixed by #539) |
-| **#584** | D — `state.ts` ledger-integrity | crosscheck LOW fixed (order-independent `markerCount`) + regression test; **3 stale gaps flipped** (fixed+tested S334) |
-| **#585** | reconciliation sweep | 1 verified stale gap flipped (`g-synth-read…`, fixed #291); 14 candidates confirmed legitimately-open |
-| **#587** | E — implicit-cell double-write (MED) | emission-order tracker so `reset()` on a double-written implicit `@cell` restores, not increments. Bundle E collapsed to this — #2 was ROUTED-TO-BRYAN (reverted, ownership-check miss), #3/#4 screened |
-| **#588** | #471 file-upload (HIGH) | ⭐ **adopter unblock** — `handle()` bodies now auto-await `request.formData()`/`.json()`/… (scoped `injectHandleRequestAwaits`, hardened pipeline byte-identical). Operator-authorized cross into bryan's autoawait lane. + reconciled `g-match-block-arm…` (S330-stale) |
-| — | review floor | #573–#577 drained → **0 OWED** |
+| **#590** | #471 manual-`Response` egress | ⭐ **adopter unblock** — `Response`/`Request`/`Headers` allowlisted (HIGH `g-handle-new-response-fires-e-scope-001`) + `emitObjectKey` re-quotes non-identifier keys so `{ "content-type": v }` is valid (MED). Flipped the `authed-server` E-SCOPE-001 pin (its own tripwire firing as designed); passthrough security guard now load-bearing, verified. `File`/`FormData`/`Blob` held for bryan's dpa-030. |
+| **#591** | self-host DCL once (LOW) | `emitEventWiring`'s DOMContentLoaded close → `}, { once: true });`, into main-codegen parity; closes the LAST leg of `g-residual-order-bearing-readdir-and-unonced-self-host-dcl` (verified live via `build-self-host.js` cg.js concat) |
+| **#592** | bare-numeric object key (LOW) | `expression-parser.ts:2774` leaked a numeric `Literal` key as a NUMBER past `emitProp`'s string guard → E-CODEGEN-INVALID-LOGIC; stringify the literal key value, composing with #590's `emitObjectKey` |
+| **#593** | ⭐ **HIGH dog-food find, ROUTED-TO-BRYAN** | `g-handle-onion-applied-per-route-not-top-level-custom-paths-404` — `handle()` wired per-route not as the §40.3 top-level onion → custom-path interception 404s; handle()-only program = dead code. Filed with full repro/trace/run-proof + the §40.3 ruling question. Docs-only PR (no code — bryan's architectural fix). |
 
-**Gap counts:** HIGH 49→46 · MED 157→148 · LOW 70→69 (11 resolved).
-**The session's lesson (thrice-earned):** repro-on-HEAD before every fix — the gap shortlist mislocates loci
-(`:14589`, `:843`), mis-states mechanisms (the leak was force-killed-parent orphans, not test-reaping), and
-carries fixed-but-never-flipped debt (#539 ×2, S334 ×3). The sweep bounded that debt: not systemic.
+**Gap counts:** HIGH 46→47 · MED 148 · LOW 69→68 (net: 1 new open HIGH filed [#593], 3 born-resolved [#590 ×2, #592], 1 pre-existing LOW closed [#591]).
+**Gate:** cloud gate green on all 4 PRs (gate + windows PASS). Local: new tests 8/8, corpus conformance 1015/0,
+`authed-server` 17/18 (the 1 = Windows EBUSY `afterAll` teardown, Linux-green). Tracking-job baseline (dev-watcher
+×4 + R26 ×7, 11 fails) is PRE-EXISTING (identical on #580/#579), root-caused not waved.
+**The session's method (proven):** **dog-food** — write the adopter's real shape, compile it, RUN the emitted
+server. Three of four PRs trace to it; it surfaced a HIGH the shortlist never would. Mechanical bundles are done.
 
 ---
 

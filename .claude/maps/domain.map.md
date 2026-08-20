@@ -1154,9 +1154,16 @@ shape as the S276 lesson recorded against this landing: **20 tolerate-or-assert-
    is `"{}"` (no enumerable own properties) — so an adopter's deliberate `403`/`404`/redirect is
    re-emitted as a **200 with an empty-object body**. MEASURED with the guard removed: the 403 came
    back 200. **A DENY silently becoming a SUCCESS is the fail-OPEN shape this whole change exists to
-   remove**, which is why it is guarded even though **no corpus source reaches it today** (a plain body
-   naming `Response` build-blocks on `E-SCOPE-001`). §14.8.9/§14.8.10 already model a manual-`Response`
+   remove**, which is why it is guarded. §14.8.9/§14.8.10 already model a manual-`Response`
    / `handle()` body as a live server-fn egress kind, so the shape is anticipated, not hypothetical.
+   **CORRECTION (S355, `a7e99e8f` / #590) — this guard flipped from belt-and-braces to LOAD-BEARING.**
+   The sentence above used to end "...even though no corpus source reaches it today (a plain body
+   naming `Response` build-blocks on `E-SCOPE-001`)" — that framing is now FALSE. `Response`/`Request`/
+   `Headers` were added to `LOGIC_SCOPE_GLOBAL_ALLOWLIST` (`type-system.ts:7290`, adopter #471 PDF/binary
+   egress), so a plain body naming `Response` no longer build-blocks on `E-SCOPE-001` — the shape is now
+   adopter-reachable and this passthrough guard is exercised in production. The same commit flipped
+   `authed-server-fn-response-http.test.js`'s pin from asserting the E-SCOPE-001 block to asserting the
+   passthrough. `File`/`FormData`/`Blob` remain deliberately UNALLOWLISTED (open dpa-030 deliberation).
    Placement before the redact is also correct on its own terms: a `Response` is an opaque stream
    handle, not a row set — `_scrml_protect_redact` cannot inspect or strip it.
 2. **`_egressRedact` runs BEFORE `JSON.stringify`.** §14.8.9/§14.8.10 are FLOORS; serializing first and
