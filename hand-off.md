@@ -1,9 +1,123 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S355-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1602]-[1605].        -->
-<!-- Body below the S355 block is S354 + S352 + older (history).    -->
+<!-- hand-off.md — live session state. WRAPPED at S357-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1606]-[1612].        -->
+<!-- S357 RECONCILES the stranded S356-peter: S356 opened 4 PRs,     -->
+<!-- hit a red gate, ended UNwrapped (never landed, no delta-log).   -->
+<!-- Body below the S357 block is S355 + S354 + S352 + older.        -->
 <!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
 <!-- ============================================================= -->
+
+# scrml — Session 357 (peter · P-Tech1 Windows) — WRAP (recovery of stranded S356)
+
+**Date:** 2026-08-20. `/boot` Profile A, solo. **The whole session was a recovery: S356-peter had
+opened four PRs (#595–#598), hit a red cloud `gate`, and ended without landing OR wrapping** — the
+hand-off still said "S355", the delta-log stopped at `[1605]`, and the four PRs sat stranded, findable
+only via `gh pr list`. S357 root-caused the red gate (a real `main`-level infra defect), fixed it,
+and delivered the entire stranded batch.
+
+**The root cause (durable — this is the session's finding):** the cloud `gate` was red on `main`
+itself — reproducible on a docs-only PR and on a clean local `main`. **`scripts/browser-baseline.ts`
+captured the browser tier via `spawnSync` with `maxBuffer: 64 MB`, but the tier's raw output is
+~148 MB** (the 48 documented baseline failures each dump a full happy-dom node on their assertion
+diff). `spawnSync` hit ENOBUFS and killed `bun` before its `730 pass` summary printed → the `ranOk`
+guard ("no `N pass` line") fired → the gate reported **"HARNESS DID NOT RUN"** and failed.
+Deterministic, not a flake: it reddened `gate` on **every** open PR at once the moment cumulative
+dump output crossed 64 MB — days after S355 merged green. **This is the "delivery bottleneck"
+(S350's finding) at the infra level: good work couldn't land because of a gate defect, and no probe
+flagged that `main`'s own gate was red** — `review-debt` reported the OWED count but nothing computed
+"the gate is broken." Fixed in **#599** (→512 MB); verified `--check` now runs the tier fully and
+reports `PASS — name set matches the 48-entry baseline, 0 diff`, which also **proved no browser
+regression was hiding behind the overflow.**
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+**Two live lanes — pick by who boots.** (unchanged from S355 — S357 was pure recovery + hygiene,
+touched neither lane's substance.)
+
+### A. bryan's lane — THE BUILDABLE BOARD (still UNSTARTED, carried from S352/S353)
+Full detail in the **S352 WRAP block below** (unchanged). Summary: raw-egress structural fix (c)→(d) ·
+i18n substrate B · dpa-035 replacement sequence · dpa-029 Q1 re-surface · two held fix rounds
+(`soft-nav-head-sync` `70c14838`, `runtime-size-and-probes` `083ce19e`) · the S355 dog-food HIGH
+`g-handle-onion-applied-per-route-not-top-level-custom-paths-404` (#593, ROUTED-TO-BRYAN, §40.3 ruling
+owed first). **Owed outward:** the scrml-site ping when `soft-nav-head-sync` lands. If bryan boots:
+this is your pickup. If peter boots: STAY OFF this lane.
+
+### B. peter's lane — the two things S357 deliberately did NOT touch
+- **⚑ NEW — the `tracking` non-baseline failures on `main`.** While recovering the gate I found the
+  (non-blocking) `tracking` job carries failures that are NOT its documented baseline (dev-watcher ×4 +
+  R26 ×7): **`TypeError: Body is disturbed or locked`** on `auth= AND protect= together` (a §61 decode
+  test), and **`ss22 #4 — peer call ${await peer()}` SyntaxErrors** (×3). They appear on a docs-only PR,
+  so they're on `main`, not introduced by any S356/S357 branch — but they may trace to #588's auto-await
+  work (the `Body disturbed` shape = a request body read twice). **Not chased: touches auto-await
+  lowering + auth/protect semantics = bryan's lane.** First move for whoever picks it: bisect whether
+  these entered with #588, and decide if they belong in the `tracking` baseline or are a real regression.
+- **Heading/marker cosmetic drift (16) — STILL HELD on bryan's live #581** (unchanged from S355). #581
+  is OPEN and edits `known-gaps.md`; sweeping headings there collides. Re-run `headingMarkerDrift()`
+  (state.ts) after #581 lands. `state.ts --check` currently surfaces 3 as warnings (L5521/L5529/L6768,
+  heading=open marker=resolved) — informational, PASS overall.
+- **Dog-food #471** remains largely bryan-gated (the #593 handle-onion defect + the security-envelope
+  next break). The productive vein stays **dog-food** — write an adopter's real program, run it, fix
+  the next break.
+
+### C. The durable follow-up S357 opened (not blocking)
+- **The maxBuffer fix (#599) is a band-aid.** 512 MB clears the current 148 MB, but the tier's dump
+  output GROWS as baseline failures accrue; it will cross 512 MB eventually. **The durable fix is to
+  stop capturing 148 MB of happy-dom dumps** — stream `bun test` line-by-line keeping only the `(fail)`
+  markers / `error:` blocks / the `N pass` summary (the FAIL_MARKER is mid-line-glued, so preserve that
+  handling), or suppress the object dumps at the assertion source. A worthy small hardening arc for a
+  quiet slot. Filed only here (no gap — it's tooling, not compiler surface).
+
+## WHAT LANDED (S357-peter — recovering S356)
+
+| PR | what | result |
+|---|---|---|
+| **#599** | ⭐ **the gate fix** — `browser-baseline.ts` maxBuffer 64→512 MB | root cause of the red `main` gate; unblocked the whole PR queue. Verified two-sided (`--check` PASS, name-set == 48 baseline). |
+| **#595** | review-floor drain (#578–#594, 14 OWED→0) | S356's docs drain, landed as-is (carve-out). |
+| **#596** | HIGH — §14.3 lifecycle field-tracker raw-text launder class | S356's fix; **S239 satellite = CLEAN** (defect reproduced pre-fix 3/7 bite, all 4 scan sites masked, 10 adversarial class-probes, real-world fixture clean). Completes #582's masking on the parallel `checkLifecycleFieldAccess` tracker. |
+| **#597** | auto-await `request.bytes()` (#588 completion) + dev orphan-guard ESRCH-narrow | S356's fix; **S239 satellite = CLEAN** (async-method set now class-complete; over/under-match probes pass; both tests bite; regression fails all pre-existing). |
+| **#598** | S356's own wrap | **CLOSED unmerged** — it predated the gate saga and would leave the hand-off reading "S356 done"; its changelog/delta content folds into this reconciled wrap. |
+
+**Mechanics note (a mechanical anti-pattern to avoid):** S356 **bundled the review-floor drain into all
+three PRs** (#595 owned it; #596/#597 each carried a duplicate copy). After #595's drain landed, #596/#597
+would add/add-conflict on `pr-reviews.md`. Fix: rebuilt #596/#597 as **fix-only** on fresh `main` via
+cherry-pick (dropping the shared drain commit `7217f2cd`), resolved the residual #596↔#597 `known-gaps.md`
++ `FACTS.md` overlap via `state.ts`/`facts.ts` regen. **A shared docs-drain belongs in its own PR, never
+duplicated into code PRs.**
+
+**Gate/state:** cloud `gate` + `windows` green on all four merges (they merged with `tracking` red —
+`tracking` is NON-required; verified #594/#592 also merged that way). Local pre-commit suite counts in
+`docs/changelog.md` S357. Gap counts: **HIGH 47 · MED 149 · LOW 70 · Nominal 7** (recomputed on merge —
+#596 closed a HIGH, #597 a MED, both already reflected).
+
+## ⚑ MISSES / lessons (recorded because they will recur)
+1. **★ A session that cannot land its PRs must still WRAP.** S356 ended with 4 PRs open on a red gate and
+   wrote NO hand-off + NO delta-log — so S357 reverse-engineered the whole state from `gh pr list`, at the
+   cost of a full recovery session. Even a "stuck" session owes a hand-off recording *what's stranded and
+   why*. The delta-log stopping mid-flight is the tell.
+2. **★ No probe watches `main`'s own gate.** `review-debt` computed the OWED review count but nothing
+   computed "the required `gate` is red on `main`". A one-line boot probe (`gh run list --branch main` was
+   in the profile, but the PR-gate ≠ push-CI distinction hid it) would have surfaced the blocker at boot
+   instead of on investigation. Candidate hardening.
+3. **The `-q` + heredoc-to-stdin `git commit -F -` form silently aborted** (no commit, file left staged) —
+   `git commit -F <msgfile>` is the reliable form on this shell. Cost: one confused retry.
+
+## 🧷 STATE
+- **main** `3514bc40` (+ this wrap PR). Coherence 0/0. Cloud `gate` GREEN (fixed).
+- Gaps: **HIGH 47 · MED 149 · LOW 70 · Nominal 7**. Review floor: the 4 S357 merges (#595/#596/#597/#599)
+  recorded this wrap → OWED back to 0.
+- **Worktrees: only `main` + `scrml-pinned` remain** — all orphaned agent worktrees removed (6b).
+- **Local branches: pruned 33 stale (25 landed + 8 verified-safe: on-origin copies / landed wraps /
+  gap-resolved-via-#173) → only `main` + `app-pinned`.** No unlanded work lost (each verified via
+  `git cherry` patch-id or gap-status).
+- Delta-log `[1606]`-`[1612]` (S356's landed work + S357's recovery — S356 wrote none).
+- Maps: surgical fixes only (type-system.ts, scheduling.ts, dev.js, browser-baseline.ts) — no new
+  modules/entrypoints; `cloud-maps` schedule current.
+
+---
+
+<!-- ================= S355 WRAP (history) ================= -->
 
 # scrml — Session 355 (peter · P-Tech1 Windows) — WRAP
 
