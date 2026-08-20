@@ -194,6 +194,20 @@ function makeFileAST(filePath, fnNodes) {
  * @param {object[]} [topFnNodes]   — function-decl nodes at the top level (outside worker)
  * @returns {object}  — FileAST
  */
+/**
+ * A file AST holding a §4.12.4 inline worker.
+ *
+ * The worker `<program name="…">` is NESTED inside the document-root
+ * `<program>`, which is the shape real scrml produces and the shape §4.12
+ * describes ("A `<program>` element MAY appear as a direct child of another
+ * `<program>` element").
+ *
+ * It used to place the worker at the ROOT of `nodes`, alongside the top-level
+ * logic block. That is unconstructable from source, and it mattered: it made the
+ * §25 tests below pass against a `hasName`-keyed worker predicate that silently
+ * treated a TOP-LEVEL `<program name=>` — and therefore the whole document — as a
+ * worker body. A synthetic AST that no parser emits cannot pin a nesting rule.
+ */
 function makeWorkerFileAST(filePath, workerName, workerFnNodes, topFnNodes = []) {
   const workerLogicNode = {
     id: 100,
@@ -221,9 +235,21 @@ function makeWorkerFileAST(filePath, workerName, workerFnNodes, topFnNodes = [])
     span: span(0, filePath),
   };
 
+  const rootProgramNode = {
+    id: 80,
+    kind: "markup",
+    tag: "program",
+    attrs: [],
+    children: [workerMarkupNode, topLogicNode],
+    selfClosing: false,
+    closerForm: "</>",
+    isComponent: false,
+    span: span(80, filePath),
+  };
+
   return {
     filePath,
-    nodes: [workerMarkupNode, topLogicNode],
+    nodes: [rootProgramNode],
     imports: [],
     exports: [],
     components: [],

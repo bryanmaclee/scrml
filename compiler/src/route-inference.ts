@@ -84,6 +84,8 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn } from "./tool-program.ts";
+import { isInlineWorkerProgram } from "./nested-program-kind.ts";
+import { collectTopLevelPrograms } from "./program-root.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
@@ -1116,33 +1118,67 @@ export function collectFileFunctions(fileAST: FileAST): FunctionDeclNode[] {
 
 /**
  * Collect the span.start values of all function nodes that live inside a
- * nested <program name="..."> worker body.
+ * §4.12.4 INLINE WORKER body.
  *
- * Worker programs are markup nodes with tag === "program" AND a non-empty
- * `name` attribute. The root <program> has no name attribute.
+ * Functions inside a worker body cannot access protected fields or shared
+ * reactive state — a worker is a separate compilation unit with no DB handle and
+ * nothing to escalate to — so `E-ROUTE-001` is suppressed for them.
  *
- * Functions inside worker bodies cannot access protected fields or shared
- * reactive state — no DB access, no server escalation triggers are meaningful
- * there. E-ROUTE-001 is suppressed for these functions.
+ * ## The two over-claims corrected here (S356 round 3)
+ *
+ * This used to read: *"Worker programs are markup nodes with `tag === "program"`
+ * AND a non-empty `name` attribute. The root `<program>` has no name
+ * attribute."* Both halves are wrong, and together they suppressed the
+ * diagnostic across three shapes that are not workers:
+ *
+ * | fixture | E-ROUTE-001, pre-fix |
+ * |---|---|
+ * | top-level `<program>` (control) | fires |
+ * | top-level `<program name="w">` | **silent — the WHOLE DOCUMENT read as a worker body** |
+ * | nested `<program name="analytics" db="…">` | **silent** |
+ * | nested `<program db="…">` (no `name=`) | fires |
+ *
+ * 1. **`name=` does not select the worker context.** §4.12.3's normative
+ *    statement: a nested `<program>` is an inline web worker "if and only if it
+ *    carries `name=` and carries none of `lang=`, `mode=`, `route=`, `db=`,
+ *    `port=`". A §4.12.6 scoped-DB context spelled `<program name="analytics"
+ *    db="…">` is the shape where this bit hardest — that subtree compiles INTO
+ *    the parent and its `?{}` reaches a real database, so silencing the
+ *    server-escalation analysis there is precisely backwards.
+ *
+ * 2. **The root `<program>` may carry `name=`.** §4.12.2 forbids it, but
+ *    forbidding is not preventing: the compiler emits `W-PROGRAM-TOP-LEVEL-NAME`
+ *    and IGNORES the attribute. While this suppression stood, that warning's own
+ *    message — "`name=` … has no effect and is ignored" — was FALSE: the
+ *    attribute had the very large effect of disabling `E-ROUTE-001` for every
+ *    function in the file. A diagnostic that lies is worse than no diagnostic.
+ *    Fixing this is what makes the warning true, and it is the dependency
+ *    `W-PROGRAM-TOP-LEVEL-NAME`'s "inert" justification rests on.
+ *
+ * The predicate is now the tightest one that carries the isolation argument:
+ * NESTED (`program-root.ts`) **and** classified `inline-worker`
+ * (`nested-program-kind.ts`). The other extracted contexts are deliberately NOT
+ * suppressed — they are refused at compile time anyway, and firing a diagnostic
+ * is the fail-closed direction when the classification is uncertain.
  */
 function collectWorkerBodyFunctionIds(fileAST: FileAST): Set<number> {
   const nodes: ASTNode[] = fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
   const result = new Set<number>();
+  const topLevelPrograms = collectTopLevelPrograms(nodes);
 
   function visitNodes(astNodes: ASTNode[], insideWorker: boolean): void {
     for (const node of astNodes) {
       if (!node || typeof node !== "object") continue;
 
-      // Detect a named <program name="..."> markup node — this is a worker body.
+      // A §4.12.4 inline worker: NESTED (not a member of the root nodes array)
+      // and classified `inline-worker` by the shared §4.12.3 classifier.
       let enteringWorker = insideWorker;
-      if (node.kind === "markup" && (node as any).tag === "program") {
-        const attrs: any[] = (node as any).attrs ?? [];
-        const hasName = attrs.some(
-          (a: any) => a && (a.name === "name" || a.key === "name") && (a.value || a.val),
-        );
-        if (hasName) {
-          enteringWorker = true;
-        }
+      if (
+        node.kind === "markup" && (node as any).tag === "program"
+        && !topLevelPrograms.has(node as unknown as object)
+        && isInlineWorkerProgram(node)
+      ) {
+        enteringWorker = true;
       }
 
       // Collect all functions inside worker bodies.
