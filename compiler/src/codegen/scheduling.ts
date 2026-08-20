@@ -493,6 +493,13 @@ function collectAwaitSites(
   isPromiseCallee: PromiseCalleePred,
   reactiveSkip: ReactiveSkipMode,
   alwaysWrap: boolean,
+  // g-handle-request-formdata-emitted-unawaited — OPTIONAL member-call predicate.
+  // The name-based `isPromiseCallee` only matches bare-identifier callees (scrml
+  // server fns); a host-method promise like `request.formData()` is a MemberExpression
+  // callee and would never be awaited. When supplied (only by the §39.3 handle path),
+  // a matching member call is awaited too. Undefined for every existing caller, so
+  // their output is byte-identical.
+  isPromiseMemberCall?: (callee: any) => boolean,
 ): AwaitSite[] {
   const sites: AwaitSite[] = [];
 
@@ -548,7 +555,9 @@ function collectAwaitSites(
     }
     if (node.type === "CallExpression") {
       const callee = node.callee;
-      if (awaitLegal && callee && callee.type === "Identifier" && isPromiseCallee(callee.name)) {
+      const isNameCall = callee && callee.type === "Identifier" && isPromiseCallee(callee.name);
+      const isMemberCall = !!isPromiseMemberCall && callee && callee.type === "MemberExpression" && isPromiseMemberCall(callee);
+      if (awaitLegal && (isNameCall || isMemberCall)) {
         const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
         if (!alreadyAwaited && !isSkippedReactiveValue(node, parent, insideSink)) {
           sites.push({ start: node.start - P, end: node.end - P, wrap: needsWrap(node, parent) });
@@ -646,6 +655,40 @@ export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: Prom
     return code;
   }
   const sites = collectAwaitSites(program, PREFIX.length, isPromiseCallee, "sink", false);
+  return applyAwaitSites(code, sites);
+}
+
+/** The Bun/Web `Request` instance methods that return a Promise (§39.3 handle body). */
+const _REQUEST_ASYNC_METHODS = new Set(["formData", "json", "text", "arrayBuffer", "blob"]);
+
+/**
+ * g-handle-request-formdata-emitted-unawaited (§39.3, adopter #471) — inject `await`
+ * before a `<request>.formData()` / `.json()` / `.text()` / `.arrayBuffer()` / `.blob()`
+ * call in a `handle()` escape-hatch body. These Request methods return Promises; scrml
+ * has no `await` keyword (E-AWAIT-NOT-IN-SCRML), and the server-fn auto-await only awaits
+ * bare-name SCRML server-fn calls, so a host-method member call was emitted BARE:
+ * `const fd = request.formData()` leaves `fd` a Promise and `fd.get("file")` throws.
+ * Scoped to the handle body + the request PARAM + the 5 async Request methods, so it
+ * never over-awaits (the name predicate is a no-op here — server-fn awaiting is owned by
+ * the main pass); reuses the same adversarially-hardened await-site machinery (scope
+ * legality, `(await x).y` paren-wrapping). Returns the input UNCHANGED on a parse
+ * failure or when nothing classifies.
+ */
+export function injectHandleRequestAwaits(code: string, requestParamName: string): string {
+  if (!code || !requestParamName) return code;
+  const PREFIX = "(async () => {\n";
+  let program: any;
+  try {
+    program = acornParse(PREFIX + code + "\n})", { ecmaVersion: "latest" });
+  } catch {
+    return code;
+  }
+  const isRequestAsyncMethod = (callee: any): boolean =>
+    !!callee &&
+    !!callee.object && callee.object.type === "Identifier" && callee.object.name === requestParamName &&
+    !callee.computed &&
+    !!callee.property && callee.property.type === "Identifier" && _REQUEST_ASYNC_METHODS.has(callee.property.name);
+  const sites = collectAwaitSites(program, PREFIX.length, () => false, "sink", false, isRequestAsyncMethod);
   return applyAwaitSites(code, sites);
 }
 
