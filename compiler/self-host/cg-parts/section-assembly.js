@@ -1561,11 +1561,21 @@ export function generateClientJs(ctx) {
         lines.push("")
     }
 
-    // §4.12.4: Worker instantiation
+    // §4.12.4: Worker instantiation — new Worker() + Promise-based .send()
+    //
+    // The bundle filename is `<sourceBase>.<workerName>.worker.js`, mirroring
+    // every sibling artifact (`<base>.client.js`, `<base>.server.js`,
+    // `<base>.css`). The source-base prefix is load-bearing, not cosmetic: two
+    // sibling pages that each declare a generically-named `<program
+    // name="doubler">` would otherwise both compute to `dist/doubler.worker.js`
+    // and hard-fail on E-CG-015 (conflicting output paths) — a legal program
+    // refusing to build. This mirror carried the pre-rename BARE form
+    // (`<name>.worker.js`), which named a file `api.js` does not write.
     if (workerNames && workerNames.length > 0) {
+        const workerFileBase = _basename(filePath, ".scrml")
         lines.push("// --- worker instantiation (compiler-generated, §4.12.4) ---")
         for (const name of workerNames) {
-            lines.push("const _scrml_worker_" + name + " = new Worker(\"" + name + ".worker.js\");")
+            lines.push("const _scrml_worker_" + name + " = new Worker(\"" + workerFileBase + "." + name + ".worker.js\");")
             lines.push("_scrml_worker_" + name + ".send = function(data) {")
             lines.push("  return new Promise(function(resolve) {")
             lines.push("    _scrml_worker_" + name + ".onmessage = function(e) { resolve(e.data); };")
