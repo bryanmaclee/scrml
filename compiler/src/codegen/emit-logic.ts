@@ -984,8 +984,19 @@ function _emitDefaultSidecar(node: any, qualifiedName: string, opts: EmitLogicOp
 // `structuralDeclNames`, so opts alone under-skips (S239 F1). The set is
 // file-immutable, so a module fallback cannot disagree with the opts value.
 let _structuralDeclNamesForFile: Set<string> | null = null;
+// g-implicit-cell-double-write-clobbers-reset-init (§6.8) — per-file EMISSION-ORDER
+// tracker for IMPLICIT `@name` cells (no `<name>` decl). The FIRST top-level write of
+// such a name is its implicit declaration (keep its init-thunk); a SUBSEQUENT one is a
+// reassignment (skip, else the second `_scrml_init_set` clobbers the first and reset()
+// increments). Module-level like `_structuralDeclNamesForFile` so it survives the
+// control-flow re-dispatch that omits it from opts. Reset per file below.
+let _implicitInitEmittedForFile: Set<string> = new Set();
 export function setStructuralDeclNamesForFile(s: Set<string> | null): void {
   _structuralDeclNamesForFile = s;
+  // This is the per-file entry point (called once per file from emit-reactive-wiring),
+  // so it is the correct place to clear the emission-order tracker — otherwise an
+  // `@x` in one file would suppress the first `@x` init-thunk in the next.
+  _implicitInitEmittedForFile = new Set();
 }
 
 /**
@@ -1070,6 +1081,26 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
     !!_structuralDeclNames?.has(node.name)
   ) {
     return null;
+  }
+  // g-implicit-cell-double-write-clobbers-reset-init (§6.8) — the structural skip
+  // above only fires for a cell with a `<name>` decl. An IMPLICIT `@name` (no such
+  // decl) reaching here is a DECLARATION on its first top-level write and a
+  // REASSIGNMENT on any subsequent one — and only emission ORDER distinguishes
+  // them. First write: keep the thunk (e.g. an SSE bind `@latest = ticks()` must
+  // re-establish on reset). Subsequent write (`@x = 0` then `@x = @x + 1`): skip,
+  // or the second `_scrml_init_set("x", …)` clobbers the first (last-write-wins)
+  // and `reset(@x)` re-runs `current + 1` instead of restoring 0.
+  if (
+    (node as any).structuralForm === false &&
+    (node as any).shape === "plain" &&
+    (node as any).isConst !== true &&
+    !_structuralDeclNames?.has(node.name) &&
+    !node.defaultExpr
+  ) {
+    if (_implicitInitEmittedForFile.has(node.name)) {
+      return null; // subsequent implicit write — a reassignment, not a re-declaration
+    }
+    _implicitInitEmittedForFile.add(node.name); // first write — the implicit declaration
   }
   // Skip if defaultExpr present — _scrml_reset prefers default over init.
   if (node.defaultExpr) return null;

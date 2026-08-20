@@ -173,3 +173,44 @@ describe("§6.8 assignment-init-set §5 — reassignment inside a top-level cont
     expect(clientJs).toMatch(/init_set\("ticks", \(\) => 0\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §6 — an IMPLICIT cell (`@x` with no `<x>` decl) DOUBLE-written at top level
+//      (g-implicit-cell-double-write-clobbers-reset-init). The FIRST write is
+//      the implicit declaration (keep its thunk); a SUBSEQUENT write is a
+//      reassignment (skip) — only emission ORDER distinguishes them. Sibling of
+//      §1, which handles the STRUCTURALLY-declared case; the SINGLE implicit
+//      bind keeping its thunk is already pinned above (IMPLICIT_SSE_SRC).
+// ---------------------------------------------------------------------------
+
+const IMPLICIT_DBL_SRC = `<program>
+    \${ @x = 0
+    @x = @x + 1 }
+    <button onclick=reset(@x)>R</button>
+    <p>\${@x}</p>
+</program>
+`;
+
+const IMPLICIT_DBL_IF_SRC = `<program>
+    \${ @x = 0
+    if (@x < 5) { @x = 9 } }
+    <button onclick=reset(@x)>R</button>
+    <p>\${@x}</p>
+</program>
+`;
+
+describe("§6.8 assignment-init-set §6 — implicit cell double-written does not clobber the reset thunk", () => {
+  test("a SECOND top-level write of an implicit `@x` adds no second init_set (reset restores 0, not the increment)", () => {
+    const { clientJs, errors } = compileClient(IMPLICIT_DBL_SRC);
+    expect(errors).toEqual([]);
+    expect(initSetCount(clientJs, "x")).toBe(1);
+    expect(clientJs).toMatch(/init_set\("x", \(\) => 0\)/);
+  });
+
+  test("a reassignment inside a top-level if-body is also skipped (the module-level order set survives control-flow re-dispatch)", () => {
+    const { clientJs, errors } = compileClient(IMPLICIT_DBL_IF_SRC);
+    expect(errors).toEqual([]);
+    expect(initSetCount(clientJs, "x")).toBe(1);
+    expect(clientJs).toMatch(/init_set\("x", \(\) => 0\)/);
+  });
+});
