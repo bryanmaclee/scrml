@@ -509,3 +509,384 @@ the full pre-commit hook ran clean on all five commits this round.
    PRESUMPTIVELY open on the tenant twin. Explicitly OUT of this brief's scope,
    and NOT empirically leak-tested here (only the code path was verified) —
    flagged as the obvious next dispatch.
+
+---
+
+## 2026-08-20 — ROUND 4: the S354 ruling, plus F2/F3/F5/F6 from the round-3 adversarial pass
+
+Branch `raw-egress-r4-work`, cut from `origin/raw-egress-r3-work` (tip `83369e94`)
+and REBASED onto `origin/main` (`1d245134`, which carries S355-peter's #582/#590).
+Every claim below was measured by COMPILING the shape against three separate
+compilers — `origin/main`, the round-3 head, and this head — and, where a leak is
+asserted, by EXECUTING the emitted handler. Nothing here is read off the code.
+
+### THE REBASE — three conflicts, and what each was resolved to
+
+`origin/main` moved 40 commits under this branch. Eleven r3 commits replayed; the
+two pure-regeneration commits (`5a03a1fc`, `83369e94`) were **SKIPPED** and the
+derived files regenerated once, on the rebased tree, after the last content
+commit — derived numbers are regenerated, never hand-merged.
+
+**1. `compiler/src/type-system.ts` — the `LOGIC_SCOPE_GLOBAL_ALLOWLIST` entry, TWICE.**
+Both intents kept, and the fact that they CONFLICT on one axis is recorded rather
+than papered over. Round 3 admitted `Response` ALONE and wrote a rationale saying
+`Request`/`Headers` "would be a widening, not a conformance restoration, and needs
+its own ruling". **#590 (S355-peter) is that ruling and it landed first** — adopter
+#471's document-workflow path constructs all three. Resolution: main's trio
+(`"Response", "Request", "Headers"`) is the current state; r3's §40.3.5 conformance
+rationale is folded in beside main's #471 rationale; r3's narrowness CLAIM is
+retired in place with a sentence saying why, not silently deleted.
+
+One genuinely useful distinction from r3 is preserved verbatim because it was got
+wrong once already: `Request` is not excluded-or-included on the grounds that "it
+is a parameter binding". The lowercase `request` in `handle(request, resolve)` is a
+parameter and never consults the allowlist; the capitalised `Request` is the global
+CONSTRUCTOR, which the allowlist is exactly the arbiter of.
+
+**2. `compiler/tests/integration/authed-server-fn-response-http.test.js`** — both
+sides say the same thing (the `new Response(...)` shape is now adopter-reachable, so
+the passthrough guard is LOAD-BEARING); they differ only in which landing they
+credit, S352 vs S355/#590. Merged: main's honest-scope framing + r3's §40.3.5
+normative citation and its "do not weaken or reorder that guard" instruction, with
+both provenances.
+
+**3. `docs/known-gaps.md`** — main had RESOLVED `g-handle-request-formdata-emitted-unawaited`
+(S354-peter); our side carried its pre-resolution header plus the S353 UPDATE block
+for the protect entry. Resolution: main's RESOLVED entry, our S353 UPDATE block
+placed before it. ⚑ One sentence INSIDE that block was falsified while it sat on the
+branch — "`Request` / `Headers` / `FormData` deliberately not added" — and is
+corrected in the same edit rather than landed stale.
+
+`compiler/SPEC-INDEX.md` / `docs/FACTS.md` conflicted as expected and were
+regenerated, twice: once after the rebase (883→889 cases, 37,293→37,322 lines) and
+once after the S354 SPEC amendment (37,322→37,339).
+
+---
+
+### ⭐ THE RULING (S354, delta-log `[1606]`) — an ALL-LITERAL egress is not an egress
+
+`E-PROTECT-004` fired on CO-OCCURRENCE within a call-reachable set, not on flow.
+That is what makes it sound — but a `Response` built entirely from literals cannot
+carry caller data, so counting it was a DEFECT, not conservatism.
+
+**Premise verified before any code was written** (both halves, by compiling):
+
+```scrml
+function loadUser(id) { return ?{`SELECT * FROM users WHERE id = ${id}`}.get() }
+function deny()       { return new Response("Forbidden", { status: 403 }) }
+
+export server function dispatch(id) {
+  if (id < 0) { return deny() }
+  let u = loadUser(id)
+  return { name: u.name }        // compiler-emitted path — redacts correctly
+}
+```
+
+| compiler | result |
+|---|---|
+| `origin/main` (`1d245134`) | **clean**, exit 0 |
+| round-3 head (rebased, `bb24a46a`) | **`E-PROTECT-004`**, exit 1 — the false positive |
+| this head | **clean**, exit 0 |
+
+§40.3.5's own early return IS `deny`'s body, so the gate was rejecting the shape
+this specification documents whenever any protected query sat in the same
+reachable set.
+
+**Implementation.** `isSyntacticLiteral` / `objectPropIsLiteral` /
+`argsAreAllLiterals` in `protect-egress.ts`, gating BOTH `Response` egress kinds
+(`new <chain>.Response(...)` and `<chain>.Response.json(...)`) on
+`!argsAreAllLiterals(n.args)`. What counts as a literal: `lit` (string / number /
+bool / absence, and an UN-INTERPOLATED template), `array` / `object` literals whose
+every element / property value is itself literal, and a `spread` of a literal. An
+argument list the walk cannot see as an array answers "not all literals" — the
+fail-CLOSED direction. An EMPTY list answers true: `new Response()` carries nothing.
+
+**The boundary is the ruling, so the still-firing half is as load-bearing as the
+newly-silent half.** All measured on this head, all still firing:
+
+| shape | why it still fires |
+|---|---|
+| `new Response(JSON.stringify(u))` | a call, not a literal |
+| `let msg = "Forbidden"; new Response(msg, { status: 403 })` | a NAMED BINDING is not a literal even when its initializer is |
+| `` new Response(`user ${u.name}`, …) `` | an interpolated template |
+| `new Response("x", u)` | one non-literal argument is enough |
+| `let status = 403; new Response("x", { status })` | an object SHORTHAND reads a binding |
+| `new Response("x", { status: u.id })` | a member expression inside a literal object |
+| `new Response("For" + "bidden", …)` | a `+` is an expression, not a literal |
+| `Response.json(u)` | the static-factory form is gated identically |
+| `new Response("x", { ...u })` | a spread of a non-literal |
+| `_{ const x = 1; }` beside a protected SELECT | no argument list to test — foreign blocks are untouched |
+
+**Full flow analysis was REJECTED on DIRECTION, not cost**, and the code says so at
+its site: resolving `SOME_CONST` to its initializer trades a precision bug for a
+soundness bug, because every gap in a dataflow analysis is a fail-OPEN. That
+sentence is in `isSyntacticLiteral`'s doc and in the SPEC amendment, so a later
+reader cannot mistake the narrowness for an oversight.
+
+**One deliberate false NEGATIVE, stated rather than discovered later.** An escaped
+dollar in a single-quasi template (`` `a \${b}` ``) reads as INTERPOLATED, because
+the parser reconstructs that node's `raw` from the cooked text and the backslash is
+gone by then. So it reads as caller-bearing and the gate FIRES. That is the only
+direction a confidentiality floor may err in; the alternative (dropping the
+`!raw.includes("${")` conjunct) would open the parser's own astring fallback path.
+
+**SPEC.** §14.8.9's closed-world section gains a normative paragraph, "The egress
+test is on an ARGUMENT-BEARING construction", with the SHALL NOT and the syntactic
+boundary; the §34 `E-PROTECT-004` row carries the same in one sentence.
+
+Green half: `g-sql-row-protect-leak.test.js` gains 21 tests for this ruling — 10
+CLEAN shapes, 10 STILL-FIRES shapes, and the foreign-block control.
+
+---
+
+### F2 (MED) — the call edge resolved to the WRONG duplicate, and the comment claimed otherwise
+
+`protect-egress.ts` said *"First declaration wins on a duplicate name (the emitter's
+own resolution order)."* **That property is FALSE.** Reproduced and executed:
+
+```scrml
+function loadUser(id) { return { id: id } }
+export server function getUser(id) {
+  let u = loadUser(id)
+  return new Response(JSON.stringify(u))
+}
+function loadUser(id) { return ?{`SELECT * FROM users WHERE id = ${id}`}.get() }
+```
+
+Compiled exit 0, zero diagnostics on both `origin/main` and the round-3 head. The
+emitted `.server.js` names the **SECOND** declaration as the in-process peer:
+
+```js
+// Issue #1: in-process peer callable for server function "loadUser"
+async function loadUser(id) {
+  return _scrml_protect_tag((await _scrml_sql`SELECT * FROM users WHERE id = ${id}`)[0] ?? null, ["passwordHash"]);
+}
+```
+
+…while the gate had resolved `getUser`'s edge to the first. Executed against a
+stubbed `_scrml_sql` returning `{id:1,name:"ada",passwordHash:"$argon2id$SECRET"}`:
+
+```
+STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+```
+
+**Fix, fail-closed:** `indexByName` becomes the multimap `indicesByName`
+(`Map<string, number[]>`); every declaration of a name contributes an edge, so
+whichever one the emitter picks, the gate has already looked at it. The cost is a
+possible over-report on a file that declares one name twice — a shape a linter
+should reject anyway; the cost of the other answer is a shipped secret. The false
+comment is replaced by the measurement.
+
+**BOTH ORDERINGS pinned.** A fix that merely re-ordered the tie-break would pass one
+test and fail the other. Both now exit 1.
+
+---
+
+### F3 (MED) — a static CONCATENATED key evaded, so the documented bound was false
+
+`staticIndexKey` and the `raw-egress-computed-response` conformance rationale both
+said the residual is *"the genuinely dynamic key … whose value is not in the tree."*
+It was in the tree:
+
+```scrml
+return new globalThis["Resp" + "onse"](JSON.stringify(u))
+```
+
+Exit 0, zero diagnostics on `origin/main` AND on the round-3 head. Emitted verbatim
+into the handler (`new globalThis["Resp" + "onse"](JSON.stringify(u));`) and
+executed:
+
+```
+STATUS 200 BODY: {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+```
+
+**FIXED, not re-documented** — the brief's preference and the right one: a
+fail-closed gate must not carry a false bound. `staticIndexKey` folds a `+` of
+static string keys, recursively. The fold is STRING-only, so `a[1 + 1]` still
+answers null rather than the wrong key `"11"`. Four folded spellings are pinned
+(`["Resp" + "onse"]`, a three-way `["R" + "esp" + "onse"]`, the
+`globalThis["Resp"+"onse"].json` receiver form, and `Response["js" + "on"]`), and
+the bound the fold does NOT move — a `+` with a dynamic operand — is pinned as a
+residual so it stays honest.
+
+Two smaller corrections ride along, both fail-CLOSED. An INTERPOLATED template key
+previously answered `""` (a non-match by ACCIDENT, not by decision) and now answers
+null. `templateLitIsStatic` discriminates the two template forms structurally,
+because the parser gives both the same `kind` and `litType` and differs only in what
+it puts on the node.
+
+The false bound sentence is corrected at BOTH loci that stated it.
+
+---
+
+### F5 (LOW/MED) — the §34 provenance named a symbol this arc deleted
+
+Six loci named `detectProtectedRawEgress`, which round 3 renamed to
+`collectRawEgressFacts` / `detectProtectedRawEgressAcrossFns`. All six fixed:
+`compiler/SPEC.md` §14.8.9 Diagnostics and the §34 `E-PROTECT-004` row;
+`protect-egress.ts` (`terminalName`'s population note); `docs/known-gaps.md:~1048`;
+both new conformance rationales.
+
+**⚑ THE ORIGIN, RECORDED HONESTLY BECAUSE IT IS THE INTERESTING PART.** The PA wrote
+that provenance note in `6ca6e468` **specifically to fix a stale claim**, and round
+3's rename made it stale **within hours**. `--check-new` passed at every step, and
+correctly so by its own contract: its `EMITTER` regex asks only whether the row
+MENTIONS a backticked path under `compiler/` — it validates row WELL-FORMEDNESS,
+not symbol EXISTENCE. So the gate built to stop unverifiable §34 claims cannot
+catch a claim that names a symbol which no longer exists. Twice in two sessions.
+
+At `:1048` a SECOND stale claim sat beside the first and is corrected in the same
+edit: *"Currently **unreachable** (a plain body naming `Response` build-blocks on
+`E-SCOPE-001`)"* is now FALSE — `Response` is allowlisted (S355/#590, and §40.3.5's
+own worked example required it independently), so the shape is adopter-reachable and
+the `instanceof Response` passthrough guard is **load-bearing**, not
+belt-and-braces. Fixing the symbol and leaving a false reachability claim one clause
+away would have been half a fix.
+
+**RECOMMENDATION — reported, deliberately NOT built (out of brief scope).** The
+check that would have caught BOTH instances: after `--check-new` matches its
+`EMITTER` provenance regex, extract the backticked SYMBOL names in the same row
+(`the \`X\` gate in \`compiler/…\``) and assert each appears as an exported symbol
+in the file the row names. Two caveats a builder needs up front. (1) There is no
+convention today for how a row names a symbol — it is free prose — so the extractor
+needs either a convention (a `symbol:` field, or "the backticked identifier
+immediately preceding `gate`/`pass`/`emitter`") or a heuristic that will have false
+positives, and a §34 gate with false positives gets bypassed then deleted
+(`pa-base` §8). (2) It should run over ALL rows, not just diff-scoped ones — this
+defect is created by a RENAME, which touches the emitter and not the row, so a
+diff-scoped gate on `compiler/SPEC.md` sees nothing. That argues for a separate
+`--check-symbols` mode over the full catalog, reported rather than gating, at least
+until its false-positive rate is measured.
+
+---
+
+### F6 (LOW) — a coverage claim that was false
+
+`docs/known-gaps.md` (S353 UPDATE) named FIVE residuals and asserted *"closing any of
+them turns a test red"*. Counted: `g-sql-row-protect-leak.test.js` carried **three**
+`RESIDUAL (documented)` tests. The **cross-FILE helper** and **`obj.method()`** had
+no pin, so for those two the guarantee did not hold and a later arc could have
+closed them silently, leaving the bound paragraph in `protect-egress.ts` stale.
+
+Both are now pinned, and both were checked for VACUITY rather than assumed —
+a test that passes because the fixture failed to compile is not a pin:
+
+| pin | not vacuous because |
+|---|---|
+| cross-FILE helper | both files compile (one `E-SCHEMA-001` each), the server IS emitted, it contains `new Response(JSON.stringify(loadUser(`, and `I-PROTECT-STRIP-001` fires — the protect analysis is live and simply cannot see across the file boundary |
+| `obj.method()` | the server is emitted, contains `handlers.load(` AND the protected `SELECT * FROM users`, and `I-PROTECT-STRIP-001` fires |
+
+The **sixth** residual the paragraph never named — F3's concatenated static key — is
+recorded as **CLOSED**, not pinned as residual, because it was fixed.
+
+---
+
+### VERIFICATION
+
+**Three-compiler bite table** (`origin/main` `1d245134` / round-3 head `bb24a46a` /
+this head), six shapes, each compiled through the CLI; executed where a leak is
+asserted:
+
+| shape | origin/main | round-3 head | this head |
+|---|---|---|---|
+| the ruling's `deny()` shape | clean | **E-PROTECT-004** (false positive) | **clean** |
+| `new Response(JSON.stringify(u))` | clean (leak) | E-PROTECT-004 | E-PROTECT-004 |
+| named-binding argument | clean (leak) | E-PROTECT-004 | E-PROTECT-004 |
+| interpolated-template argument | clean (leak) | E-PROTECT-004 | E-PROTECT-004 |
+| **F2** duplicate declaration | clean (**LEAK**) | clean (**LEAK**) | **E-PROTECT-004** |
+| **F3** concatenated key | clean (**LEAK**) | clean (**LEAK**) | **E-PROTECT-004** |
+
+Exit codes, and what is on disk (this head vs round-3 head):
+
+```
+                  round-3 head          this head
+f2-dup-decl       exit=0 (shippable)    exit=1 (build-blocked)
+f3-concat-key     exit=0 (shippable)    exit=1 (build-blocked)
+ruling-deny       exit=1 (rejected)     exit=0 (compiles)
+```
+
+**Corpus differential.** Population enumerated with `find` (recursive), never a
+shell glob — the S282/S319 truncated-probe class — and asserted non-zero before a
+manifest is written: **81 `protect=`-bearing `.scrml`** across `samples/`,
+`examples/`, `stdlib/`, `docs/`, `conformance/` and `benchmarks/`. Per-file
+per-code diagnostic counts, three captures.
+
+- **round-3 head → this head: `0` of 81 files have a diagnostic-code delta.** Round
+  3's zero-delta-on-real-sources property is not regressed; round 4 changes nothing
+  on the corpus.
+- **`origin/main` → this head: 6 of 81**, and all six are this branch's OWN
+  conformance cases gaining `E-PROTECT-004`
+  (`raw-egress-computed-response`, `raw-egress-cross-function`,
+  `raw-egress-foreign-inline-level1`, `raw-egress-globalthis-response`,
+  `reveal-cross-value-no-suppress`, `reveal-does-not-suppress-e004`).
+  **No adopter / sample / example / stdlib source gains or loses a diagnostic.**
+
+⚑ **A probe artifact was caught and corrected mid-measurement, and it is worth
+recording.** The first `origin/main` capture reported 31 delta files, 25 of them
+`E-IMPORT-006` on real adopter sources (`examples/23-trucking-dispatch`,
+`stdlib/auth/templates/login.scrml`, `samples/compilation-tests/`). That was NOT a
+real delta: `STDLIB_ROOT` is derived from the compiler module's OWN location
+(`module-resolver.js` — `resolve(dirname(fileURLToPath(import.meta.url)), "../../stdlib")`),
+and the extracted base tree had no `stdlib/`, so every `scrml:` import failed to
+resolve under the base compiler. Symlinking `stdlib/` into the base tree and
+re-capturing gave the 6-file result above. A base-tree extraction that omits a
+directory the compiler resolves against reads exactly like a regression.
+
+**Test state (final tree).**
+
+- `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance`
+  → **22478 pass · 0 fail · 70 skip · 1 todo** across 1234 files (225 s).
+  Baseline on the rebased tree before any round-4 edit: **22448 pass · 0 fail ·
+  70 skip · 1 todo** — +30 tests, no new failures.
+- `bun conformance/run.ts` → **889/889**.
+- `g-sql-row-protect-leak.test.js` → **92/92** (was 62 on the round-3 head).
+- `authed-server-fn-response-http.test.js` → **20/20**.
+- `bun scripts/s34-census.ts --check-new --base origin/main` → **PASS** (2
+  new/changed rows, all well-formed).
+- ENV-GAP ruled out first: the fresh worktree had no `node_modules` and no
+  `samples/compilation-tests/dist/`; `bun install` + `bun run pretest` were run
+  before the baseline, so the browser half loads real artifacts.
+
+---
+
+### HANDED BACK — residual, and what ports to the tenant twin
+
+1. **The four syntactic residuals stand**, all five now pinned: `let R = Response`,
+   `globalThis[k]`, `let f = loadUser; f(id)`, the cross-FILE helper, and
+   `obj.method()`. Closing any needs the name resolver / constant propagation, not
+   a wider callee test — and each is a fail-OPEN today, so this is a real bound and
+   not a formality.
+2. **The escaped-dollar template reads as interpolated** (stated above) — a
+   fail-CLOSED false positive in a corner. Not worth a fix at the cost of reopening
+   the parser's astring fallback; recorded so it is not rediscovered as a bug.
+3. **`.claude/maps/domain.map.md:1180` still names `detectProtectedRawEgress`** — a
+   SEVENTH locus, outside this brief's six and inside PA-owned tooling. NOT edited.
+   Reported.
+4. **`docs/known-gaps.md:6710` names the same deleted symbol** while describing the
+   tenant twin. The brief scoped this round to exactly ONE known-gaps edit
+   (`:~1048`), so it is NOT edited. Reported.
+5. **Carried forward from round 3, unchanged:** `scrml compile` on a file with an
+   `E-PROTECT-004` exits 1, prints "FAILED — 1 error", and STILL writes
+   `app.server.js` / `app.client.js` / `app.html`. Re-confirmed this round on both
+   F2 and F3 (`exit=1  artifact=WRITTEN`). Pre-existing CLI behaviour for any CG
+   error, not introduced here — but for a fail-closed security gate, "the build
+   failed" and "the leaking artifact is on disk" being simultaneously true is still
+   worth a ruling.
+
+**WHICH ROUND-4 FIXES PORT TO THE TENANT TWIN** (`compiler/src/codegen/tenant-egress.ts`,
+`detectTenantRawEgress` / `E-TENANT-RAW-EGRESS`, gap
+`g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate` — NOT touched
+this round, per brief):
+
+| round-4 fix | ports? | why |
+|---|---|---|
+| **the S354 all-literal narrowing** | **YES, and it is the same DEFECT there** | the tenant gate is also a co-occurrence test; a tenant-scoped read reaching a constant `deny()` will over-report identically once the twin is made cross-function |
+| **F3 concatenated static key** | **N/A TODAY, YES AFTER** | the twin is still a SOURCE-TEXT scan with a `new\s+Response` regex, so it has no `staticIndexKey` to fix — but the moment it is made structural (the filed HIGH), it inherits the same question and should land with the fold already in |
+| **F2 duplicate-declaration multimap** | **N/A TODAY, YES AFTER** | the twin has no call graph at all (per-body unit), so there is no index to make a multimap — but a cross-function twin must not repeat the first-wins mistake |
+| **F5 symbol provenance** | **YES, DIRECTLY** | `tenant-egress.ts:371` calls itself the "mirror of §14.8.9's `detectProtectedRawEgress`" and `docs/known-gaps.md:6710` repeats it — both dangling, both out of scope here |
+| **F6 residual pins** | **YES, AS A METHOD** | whatever the twin's residual list ends up being, the "closing any turns a test red" claim needs a counted pin per residual, not an assertion |
+
+⚑ The strongest cross-round finding for whoever takes the twin: **do the S354
+narrowing in the SAME change as the structural rewrite, not after.** Round 3 shipped
+the cross-function widening without it and created a false positive on §40.3.5's own
+documented shape; the twin can skip that round trip entirely.
