@@ -1185,3 +1185,121 @@ Round-1 residuals 1-9 all still stand except where noted. New and updated:
    result : twice ( data . value ) } )` — parses, runs, does not meet the
    readable-output bar. The structural fix is still "lower `whenMessage.bodyExpr`
    instead of re-emitting a token join".
+
+---
+---
+
+# ROUND 3 — 2026-08-20
+
+## Step 0 — setup (DONE)
+
+- `pwd` = worktree root; `git rev-parse --show-toplevel` matches; tree clean.
+- `git fetch origin`; `origin/main` = `1d245134`, `origin/nested-program-r2-work` = `55c87868`.
+- **`git merge-base origin/main origin/nested-program-r2-work` = `1d245134` = `origin/main`.**
+  Main is already an ANCESTOR of r2, so `git rebase origin/main` reported
+  "up to date" and replayed nothing. The brief's ~5-min-per-commit hook-replay
+  warning did not apply this round, and there were no `FACTS.md` /
+  `SPEC-INDEX.md` conflicts to resolve.
+- Branch `nested-program-r3-work` cut from `55c87868`.
+- `bun install` (217 packages) + `bun run pretest` (13 samples ->
+  `samples/compilation-tests/dist/`) — the gitignored-artifact ENV-GAP ruled out
+  up front.
+
+---
+
+## Item 2 (RUN FIRST, per the brief) — ⭐ THE MANDATED SWEEP
+
+### The headline: the mandated grep is ITSELF incomplete — this is the same error, third generation
+
+The reviewer's process finding is correct and it is the most valuable thing in
+the report. Round 2's method was "grep for every place that tests a nested
+`<program>`'s `name`", and it missed sites because the grep that finds them is
+`tag === "program"`.
+
+**Running that grep, then auditing what it does NOT match, the same failure mode
+appears one level up.** `tag === "program"` returns 33 hits (31 code + 2 prose
+comments — `route-inference.ts:1121`, `types/ast.ts:239`), matching the
+reviewer's 31. But the codebase spells the same test four other ways:
+
+| spelling | sites | grep that finds it |
+|---|---|---|
+| `tag === "program"` | 31 code | the mandated grep |
+| `tag !== "program"` | 3 | `tag !== "program"` |
+| `(node.tag ?? "") === "program"` | 3 | `\(.*\.tag \?\? ""\) === "program"` |
+| `nodeTag === "program"` (hoisted local) | 1 | `nodeTag === "program"` |
+| `block.name === "program"` / `tagName.toLowerCase() === "program"` (pre-AST) | 3 | neither |
+
+**41 sites, not 31.** The generalisation worth banking: no single literal grep
+enumerates this population, because the discriminator is a *concept* ("is this
+node a `<program>` element") spread across five spellings and three IR layers
+(tokenizer/block-splitter, ast-builder, post-AST passes). The lasting fix is a
+shared predicate, which is what `nested-program-kind.ts` started and what this
+round extends with `program-root.ts`.
+
+### The 31 mandated sites, audited
+
+Columns: **root?** = does it need the document-root/nested discriminator ·
+**over-claim?** = does it currently key on `name=` (or a depth proxy) to decide
+something `name=` does not decide.
+
+| # | Site | Decides | root? | over-claim? | Action |
+|---|---|---|---|---|---|
+| 1 | `compute-program-config.ts:105` | auth/session config from the root `<program>` | already root-by-position (top-level array `.find`) | no | none |
+| 2 | `gauntlet-phase1-checks.js:547` `isProgramRoot()` | is the immediate PARENT a `<program>` (placement msg) | **misnamed** — it is `isProgram`, not `isProgramRoot`; nested is a legal parent too, so the behaviour is right and only the name lies | no | rename-only; not taken (cosmetic, out of scope) |
+| 3 | `gauntlet-phase1-checks.js:682` | nearest-enclosing `<program>` for `schema` entries | intentionally ANY program (closest-wins) | no | none |
+| 4 | `auth-graph.ts:690` `findProgramNode` | the root `<program>` for gate analysis | already root-by-position | no | **comment is FALSE**: "`<program>` never nests in scrml" — §4.12 is the whole nesting section. Corrected. |
+| 5 | `auth-graph.ts:1182` | is a type decl inside ANY `<program>` subtree | intentionally any | no | none |
+| 6 | `reachability/entry-points.ts:219` `findRootProgram` | entry point | already root-by-position | no | none |
+| 7 | `route-inference.ts:1138` | suppress `E-ROUTE-001` in worker bodies | **YES** | **YES — `hasName` ⇒ worker** | **MEDIUM-3. Fixed.** |
+| 8 | `tool-program.ts:37` `isProgramMarkup` | feeds `findTopLevelProgramNode` | already root-by-position (first of top-level array) | no | none |
+| 9 | `usage-analyzer.ts:441` | telemetry: `programDocAttrs`, `idempotency-store` | any program, deliberate | no | none |
+| 10 | `emit-html.ts:925` | scope boundary push | any program — §6.7.2 makes EVERY `<program>` a scope root | no | none |
+| 11 | `emit-html.ts:2340` | skip an EXTRACTED nested subtree | **YES — `programDepth >= 1`** | no (already on the shared kind predicate) | **HIGH-1 instance. Fixed.** |
+| 12 | `symbol-table.ts:10080` | `childProgramDepth` feeder | **YES** (feeds 13 + 14) | no | **HIGH-1 instance. Fixed.** |
+| 13 | `symbol-table.ts:10106` | `pageDepth` reset at a nested `<program>` | **YES — `programDepth >= 1`** | no | **HIGH-1 instance. Fixed.** |
+| 14 | `symbol-table.ts:10129` | `E-CHANNEL-INSIDE-NESTED-PROGRAM` | **YES — `programDepth >= 1`** | no (already on the shared kind predicate) | **HIGH-1 instance. Fixed.** |
+| 15 | `emit-theme-reset.ts:94` | "the" `<program>` node for `<theme>` reset | **YES** — it takes the FIRST program in a FULL-TREE walk, so in a `<page>`-rooted file a nested `<program name="w">` becomes "the program" | no | **NEW over-claim found by this sweep. Fixed.** |
+| 16 | `type-system.ts:7917` `hasProgramDbAttr` | `E-AUTH-005` server-context gate | already root-by-position | no | pre-existing gap surfaced (a `<page>`-rooted file's `db=` is invisible to it); NOT fixed — outside the arc |
+| 17 | `type-system.ts:21653` `resolveProgramLang` | top-level `lang=` for `_{}` | already root-by-position | no | none |
+| 18 | `type-system.ts:22367` | `capabilities=` closest-wins | intentionally any | no | none |
+| 19 | `emit-server.ts:817` | `_dbScope` -> server driver map | keys on the `_dbScope` ANNOTATION, not on tag shape | no | none (but see MEDIUM-2 — it was never REACHING the named form) |
+| 20 | `emit-server.ts:2286` | `session-secure=` | full walk; a nested `<program session-secure=>` outranks the root's `<page>` | no | surfaced, NOT fixed — outside the arc |
+| 21 | `ast-builder.js:19234` `hasProgramRoot` | W-PROGRAM-001 | already root-by-position | no | none |
+| 22 | `ast-builder.js:19245` | `E-MW-002` ratelimit format | already root-by-position | no | none |
+| 23 | `ast-builder.js:19503` | `W-PROGRAM-REDUNDANT-LOGIC` | any `<program>`/`<page>` — correct, §40.8 covers both | no | none |
+| 24 | `ast-builder.js:19549` | `<theme>`/`<defaults>` placement | any program — §65.9 "program-scope" reaches a nested one | no | none |
+| 25 | `ast-builder.js:19654` | `W-PROGRAM-SPA-INFERRED` | already root-by-position | no | none |
+| 26 | `codegen/index.ts:1426` | splice / register worker / refuse | **YES — `programDepth >= 1`** | no | **HIGH-1 PRIMARY. Fixed.** |
+| 27 | `codegen/index.ts:1585` `detectNestedDocAttrs` | `W-PROGRAM-TITLE-NESTED` | **YES — `depth >= 1`** | no | **NEW HIGH-1 instance found by this sweep. Fixed.** |
+| 28 | `codegen/index.ts:1673` `annotateDbScopes` | `_dbScope` + §44.2 driver | no (the root `<program db=>` legitimately gets a scope) | **YES — `dbAttr && !nameAttr`** | **MEDIUM-2. Fixed.** |
+| 29 | `codegen/index.ts:1777` | `_dbScope` consumer | keys on the annotation | no | none |
+| 30 | `codegen/index.ts:2382` | §40.7 head metadata | already root-by-position | no | none |
+| 31 | `types/ast.ts:239` | *(prose comment)* | — | — | none |
+
+### The 10 sites the mandated grep does not reach
+
+| Site | Spelling | Decides | Verdict |
+|---|---|---|---|
+| `codegen/index.ts:1556` | `tag !== "program"` | `W-PROGRAM-TOP-LEVEL-NAME` | **HIGH-1's third named instance** (the `return`-after-first). **Fixed.** |
+| `emit-html.ts:2049`, `:2819` | `tag !== "program"` | default-logic-mode / render-slot carve-outs | any program; correct |
+| `channel-watches.ts:284` | `(tag ?? "") === "program"` | §44.2 driver for channel watches | first program in a full walk — **same shape as #15**, but it reads `db=` and returns on the first HIT, so a `db=`-less nested program does not divert it. Benign today; noted. |
+| `api.js:1973` | `(tag ?? "") === "program"` | dbDriver fallback | top-level array `.find` — root-by-position; correct |
+| `symbol-table.ts:9941` | `(tag ?? "") === "program"` | `_hasProgramElement` (Insight-30 pure-channel-file dispensation) | intentionally ANY program anywhere; correct |
+| `symbol-table.ts:10734` | `nodeTag === "program"` | shell scope for `E-OUTLET-AND-MAIN` | intentionally any program (a nested one opens a new shell); correct |
+| `ast-builder.js:1236` | `block.name === "program"` | pre-AST program-root flag | block-splitter layer, root-by-position; correct |
+| `ast-builder.js:2868` | `tagName.toLowerCase() === "program"` | pre-AST opener detection | any; correct |
+| `block-splitter.js:3381` | `tf.name === "program"` | program-body detection | any; correct |
+
+### Sweep verdict
+
+**Three NEW defect sites this sweep found that the brief did not name:**
+`codegen/index.ts:1585` (`detectNestedDocAttrs`), `emit-html.ts:2340` (the
+`emit-html` half of HIGH-1), and `emit-theme-reset.ts:94` (first-program-in-walk).
+Plus `symbol-table.ts:10080/:10106/:10129` as the symbol-table half of HIGH-1.
+
+**One false comment corrected:** `auth-graph.ts:690` asserts "`<program>` never
+nests in scrml".
+
+**Two pre-existing gaps surfaced, deliberately NOT fixed** (outside the arc, no
+nested-`<program>` artifact consequence): `type-system.ts:7917` and
+`emit-server.ts:2286`.
