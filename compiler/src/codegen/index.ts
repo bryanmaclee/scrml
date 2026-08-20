@@ -63,6 +63,14 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import {
+  classifyNestedProgram,
+  describeNestedProgramKind,
+  hasNestedProgramAttr,
+  nestedProgramAttrValue,
+  nestedProgramContextIsNominal,
+  type NestedProgramKind,
+} from "../nested-program-kind.ts";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
@@ -1394,41 +1402,37 @@ export function runCG(input: CgInput): CgOutput {
     // inside a `lang=`+`port=` sidecar kept its stale client dial.
     let treeMutatedByExtraction = false;
 
-    function extractWorkerPrograms(parentChildren: any[]): void {
+    /**
+     * §4.12.3 execution-context extraction pre-pass.
+     *
+     * `programDepth` is the number of `<program>` ANCESTORS of `parentChildren`.
+     * The top-level call passes 0, so the document-root `<program>` itself is at
+     * depth 0 and can never be claimed — SPEC §4.12.2: "The top-level
+     * `<program>` MUST NOT have a `name=` attribute (it is the implicit root)."
+     * Before the depth was tracked, a root `<program name="X">` was spliced as an
+     * inline worker: the whole document body vanished, `<body>` emitted empty, and
+     * the "worker bundle" was a single comment line.
+     *
+     * Which shapes are removed, and which of those get a worker, is decided by
+     * `classifyNestedProgram` (`compiler/src/nested-program-kind.ts`) — shared
+     * with `symbol-table.ts` so the extraction decision and the
+     * `E-CHANNEL-INSIDE-NESTED-PROGRAM` refusal cannot drift apart.
+     */
+    function extractWorkerPrograms(parentChildren: any[], programDepth: number): void {
       for (let i = parentChildren.length - 1; i >= 0; i--) {
         const node = parentChildren[i];
         if (!node || typeof node !== "object") continue;
 
         if (node.kind === "markup" && node.tag === "program") {
-          const attrs: any[] = node.attributes ?? node.attrs ?? [];
-          const nameAttr = attrs.find((a: any) => a.name === "name");
-          if (nameAttr) {
-            const nameVal = nameAttr.value;
-            let workerName: string | null = null;
-            if (nameVal?.kind === "string-literal") {
-              workerName = nameVal.value;
-            } else if (nameVal?.kind === "variable-ref") {
-              workerName = (nameVal.name ?? "").replace(/^@/, "");
-            }
-            if (workerName) {
-              // §23.4 — a nested <program> declaring a `port=` (and not
-              // `mode="wasm"`) is a SIDECAR process, NOT a §4.12.4 web worker.
-              // The sidecar runtime is Nominal/spec-ahead (the `use foreign:`
-              // import already failed closed with E-FOREIGN-SIDECAR-NOMINAL);
-              // compiling it as a `new Worker("<name>.worker.js")` referencing a
-              // never-emitted bundle is the misleading client stub the fail-closed
-              // build must NOT produce. Splice it out WITHOUT registering a worker
-              // (no `new Worker`, no main-scope export hoist of `predict`).
-              const hasPort = attrs.some((a: any) => a.name === "port");
-              const modeAttr = attrs.find((a: any) => a.name === "mode");
-              const modeVal = modeAttr?.value?.kind === "string-literal"
-                ? modeAttr.value.value
-                : (typeof modeAttr?.value === "string" ? modeAttr.value : null);
-              if (hasPort && modeVal !== "wasm") {
-                parentChildren.splice(i, 1);
-                treeMutatedByExtraction = true;
-                continue;
-              }
+          // A NESTED `<program>` only — depth 0 is the document root (§4.12.2).
+          if (programDepth >= 1) {
+            const { kind, name } = classifyNestedProgram(node);
+
+            if (kind === "inline-worker" && name) {
+              // §4.12.4 — the ONE shape with a runtime behind it. Extract the
+              // subtree, register the worker; `emit-client` emits the
+              // `new Worker("<base>.<name>.worker.js")` reference and the write
+              // path puts that exact file on disk.
               const children: any[] = node.children ?? [];
               let whenMessage: any | null = null;
               for (const child of children) {
@@ -1442,17 +1446,128 @@ export function runCG(input: CgInput): CgOutput {
                 }
                 if (whenMessage) break;
               }
-              workerDefs.set(workerName, { name: workerName, children, whenMessage });
+              workerDefs.set(name, { name, children, whenMessage });
               parentChildren.splice(i, 1);
               treeMutatedByExtraction = true;
               continue;
             }
+
+            if (kind === "foreign-sidecar" || kind === "wasm-module" || kind === "server-endpoint") {
+              // The other three EXTRACTED execution contexts (§4.12.5 sidecar,
+              // §4.12.3 WASM module, §4.12.2 `route=` server endpoint). None has
+              // codegen in this compiler revision.
+              //
+              // They are spliced — their bodies are separate compilation units
+              // (§4.12.1) and must not compile into the parent — but they emit
+              // NEITHER a `new Worker(...)` reference NOR a bundle. Generalizes
+              // the §23.4 `port=` carve-out, whose own comment named the rule:
+              // a reference to a never-emitted bundle "is the misleading client
+              // stub the fail-closed build must NOT produce". The other shapes
+              // were simply missed by it.
+              //
+              // MEASURED, pre-fix: `<program name="calc" lang="rust" mode="wasm">`
+              // wrote a 25-byte `app.calc.worker.js` that loads with a 200 and
+              // never assigns `self.onmessage`, so `<#calc>.send()` returned a
+              // Promise that never resolved — a SILENT HANG where the honest
+              // outcome is a refusal.
+              if (nestedProgramContextIsNominal(kind)) {
+                fireNestedProgramContextNominal(node, kind, name);
+              }
+              parentChildren.splice(i, 1);
+              treeMutatedByExtraction = true;
+              continue;
+            }
+
+            // `scoped-db` (§4.12.6) and `plain` fall through DELIBERATELY: their
+            // subtrees stay in the tree. A scoped-DB context is not a separate
+            // runtime context at all — it re-scopes `?{}` for a subtree that
+            // still compiles into the parent, and `annotateDbScopes` (below)
+            // tags it in place. Splicing it would delete working code.
           }
+
+          if (node.children?.length > 0) {
+            extractWorkerPrograms(node.children, programDepth + 1);
+          }
+          continue;
         }
 
         if (node.kind === "markup" && (node.children?.length > 0)) {
-          extractWorkerPrograms(node.children);
+          extractWorkerPrograms(node.children, programDepth);
         }
+      }
+    }
+
+    /**
+     * `E-NESTED-PROGRAM-CONTEXT-NOMINAL` (§4.12.9) — a nested `<program>` selects
+     * a §4.12.3 execution context whose codegen is Nominal/spec-ahead.
+     *
+     * Fired HERE, next to the splice it explains, for the same reason
+     * `W-PROGRAM-TITLE-NESTED` is: it is a nested-`<program>`-attribute
+     * diagnostic about what codegen will and will not do with the element.
+     *
+     * The §4.12.5 SIDECAR shape is deliberately not routed here — §23.4 already
+     * fails it closed at the `use foreign:name { … }` site with the ratified
+     * `E-FOREIGN-SIDECAR-NOMINAL`, and two errors on one unbuilt shape is two
+     * diagnostics for one mistake.
+     */
+    function fireNestedProgramContextNominal(
+      node: any,
+      kind: NestedProgramKind,
+      name: string | null,
+    ): void {
+      const { label, runtime, spec } = describeNestedProgramKind(kind);
+      const span = node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+      const label0 = name ? `<program name="${name}">` : "<program>";
+      errors.push(new CGError(
+        "E-NESTED-PROGRAM-CONTEXT-NOMINAL",
+        `E-NESTED-PROGRAM-CONTEXT-NOMINAL: \`${label0}\` declares the ${spec} ` +
+        `${label.toUpperCase()} execution context, whose runtime model is ${runtime}. ` +
+        `That codegen is Nominal/spec-ahead — this compiler revision does not build it, ` +
+        `so the declaration would produce no runtime for the parent to reach. ` +
+        `Pre-fix the compiler mis-claimed this shape as a §4.12.4 inline web worker and ` +
+        `emitted a \`new Worker(...)\` against a stub bundle that never assigns ` +
+        `\`self.onmessage\`, so \`<#${name ?? "name"}>.send()\` returned a Promise that ` +
+        `never resolved. Refusing is the honest outcome until the ${spec} context is built. ` +
+        `Fix: remove the nested \`<program>\`, or express the work in a ${"§"}4.12.4 inline ` +
+        `worker (\`name=\` only — no \`lang=\`, no \`mode=\`, no \`route=\`, no \`db=\`), which ` +
+        `IS implemented. (SPEC §4.12.3 + §4.12.9 + §34.)`,
+        { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+        "error",
+      ));
+    }
+
+    /**
+     * `W-PROGRAM-TOP-LEVEL-NAME` (§4.12.9) — SPEC §4.12.2: "The top-level
+     * `<program>` MUST NOT have a `name=` attribute (it is the implicit root)."
+     *
+     * There was no diagnostic for that MUST NOT. Instead the extraction pre-pass
+     * claimed the root as an inline worker and annihilated the document. The
+     * depth guard above stops the annihilation; this names the violation rather
+     * than ignoring it in silence.
+     *
+     * Severity `warning`, matching the ratified `W-STORY-ON-TOP-LEVEL` precedent
+     * for the sibling condition (`story=` on the top-level `<program>` — "emits
+     * W-STORY-ON-TOP-LEVEL and is ignored"). The attribute is inert at the root:
+     * there is no parent to reference the program by name.
+     */
+    function detectTopLevelProgramName(topLevelNodes: any[]): void {
+      for (const node of topLevelNodes) {
+        if (!node || typeof node !== "object") continue;
+        if (node.kind !== "markup" || node.tag !== "program") continue;
+        const name = nestedProgramAttrValue(node, "name");
+        if (!hasNestedProgramAttr(node, "name")) return;
+        const span = node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+        errors.push(new CGError(
+          "W-PROGRAM-TOP-LEVEL-NAME",
+          `W-PROGRAM-TOP-LEVEL-NAME: \`name=${name ? `"${name}"` : ""}\` on the TOP-LEVEL ` +
+          `<program> has no effect and is ignored. SPEC §4.12.2: "The top-level <program> ` +
+          `MUST NOT have a \`name=\` attribute (it is the implicit root)" — \`name=\` exists so a ` +
+          `PARENT program can reference a nested one (\`<#name>.send()\`, \`use foreign:name\`), ` +
+          `and the root has no parent. Remove it. (SPEC §4.12.2 + §4.12.9 + §34.)`,
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "warning",
+        ));
+        return; // Only the FIRST top-level <program> is the document root.
       }
     }
 
@@ -1501,7 +1616,8 @@ export function runCG(input: CgInput): CgOutput {
     }
     detectNestedDocAttrs(nodes, 0);
 
-    extractWorkerPrograms(nodes);
+    detectTopLevelProgramName(nodes);
+    extractWorkerPrograms(nodes, /*programDepth*/ 0);
 
     if (workerDefs.size > 0) {
       const bundles = new Map<string, string>();

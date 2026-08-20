@@ -156,6 +156,10 @@ import {
 // B18 — multi-statement event-handler validation helper.
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
 import { isAuthorMainTag } from "./landmark-tag.ts";
+// §4.12.3 execution-context classification — shared with `codegen/index.ts`'s
+// `extractWorkerPrograms` so the E-CHANNEL-INSIDE-NESTED-PROGRAM refusal keys on
+// the SAME predicate that decides whether the subtree is actually removed.
+import { nestedProgramSubtreeIsExtracted } from "./nested-program-kind.ts";
 // B14 fix — `resolveModulePath` is the path-shape normalizer used by MOD when
 // it builds `exportRegistry` (keys are absolute, post-`resolveModulePath`).
 // Import-binding `sourcePath` is the LITERAL `imp.source` string — typically
@@ -10070,30 +10074,60 @@ function walkChannelPlacement(
   }
 
   // Compute child-side depths. `programDepth` increments ONLY when descending
-  // through a `<program>` markup node; `pageDepth` ONLY through a `<page>`.
-  // Other markup and component-def are neutral for both — only the
-  // `<program>` / `<page>` ancestor signals matter for v0.3 placement.
+  // through a `<program>` markup node. Other markup and component-def are
+  // neutral — only the `<program>` / `<page>` ancestor signals matter for v0.3
+  // placement.
   const childProgramDepth = tag === "program" ? programDepth + 1 : programDepth;
-  const childPageDepth = tag === "page" ? pageDepth + 1 : pageDepth;
 
-  // The nearest enclosing NESTED `<program name=>`, threaded to children.
+  // `pageDepth` increments through a `<page>` and RESETS to 0 when descending
+  // into a NESTED `<program>`.
   //
-  // The discriminator is the `name=` ATTRIBUTE, not nesting alone, and it is
-  // empirical rather than aesthetic: `extractWorkerPrograms`
-  // (`compiler/src/codegen/index.ts`) claims a nested `<program>` if and only
-  // if it carries `name=`. A §4.12.6 SCOPED-DB context (`<program db=>` with
-  // no `name=`) is NOT extracted — its `<channel>` stays in the tree, the
-  // server mounts the route, the client dials it, and the pair works. Only the
-  // `name=`d shapes (inline worker §4.12.4, WASM module, foreign sidecar
-  // §4.12.5, and a `route=` nested program) lose the subtree, so only they are
-  // refused here.
+  // **S353-bryan ruling — option (b), reverse the precedence.** A nested
+  // `<program>` is a fresh placement scope: §4.12.1 normative says it "SHALL be
+  // subject to the same grammar rules as a top-level `<program>`" and "SHALL be
+  // a separate compilation unit", so an enclosing `<page>` is as invisible to
+  // the placement check as the parent's bindings are under §4.12.1
+  // shared-nothing isolation. §4.12.1 is the more specific normative sentence
+  // and it wins over §38's flat "channels SHALL NOT live inside `<page>`".
   //
-  // `programDepth >= 1` excludes the ROOT `<program>`: SPEC §4.12.2 already
-  // forbids `name=` there ("it is the implicit root"), and a channel under the
-  // root is canonical placement.
+  // Measured, and the reason the ruling is safe rather than merely principled:
+  // `<page>` → `<program db=>` → `<channel>` already emits BOTH halves —
+  // client dial `_scrml_ws/page_feed` AND server route
+  // `_scrml_route_ws_page_feed`. The pair works; only the placement check was
+  // stopping it. Blast radius was measured at 0 corpus instances (S239, all
+  // 2260 `.scrml`), so this was taken on correctness, not cost.
+  //
+  // A channel inside an EXTRACTED nested `<program>` is still refused — by
+  // `E-CHANNEL-INSIDE-NESTED-PROGRAM` above, which is ordered first and names
+  // the real reason. The reset only changes which of the two codes an author
+  // sees, never whether a broken shape ships.
+  const childPageDepth = tag === "page"
+    ? pageDepth + 1
+    : (tag === "program" && programDepth >= 1 ? 0 : pageDepth);
+
+  // The nearest enclosing EXTRACTED nested `<program>`, threaded to children.
+  //
+  // The discriminator is "does the compiler REMOVE this subtree", not `name=`,
+  // and not nesting alone. It is empirical: `E-CHANNEL-INSIDE-NESTED-PROGRAM`
+  // exists because an extracted subtree loses its `<channel>` before server
+  // emission, so the predicate must be the extraction predicate itself.
+  // `nestedProgramSubtreeIsExtracted` (`compiler/src/nested-program-kind.ts`)
+  // is shared with `extractWorkerPrograms` in `codegen/index.ts` so the two
+  // cannot drift.
+  //
+  // Keying on `name=` instead produced a FALSE POSITIVE: a §4.12.6 SCOPED-DB
+  // context is `name=` (optional) + `db=` per the §4.12.3 table, so
+  // `<program name="analytics" db="…">` holding a `<channel>` is LEGAL — and it
+  // was refused. It is not extracted, its channel stays in the tree, the server
+  // mounts the route and the client dials it.
+  //
+  // `programDepth >= 1` excludes the ROOT `<program>`: SPEC §4.12.2 forbids
+  // `name=` there ("it is the implicit root"), a channel under the root is
+  // canonical placement, and the extraction pre-pass no longer claims the root
+  // either.
   const childNestedProgramName =
-    tag === "program" && programDepth >= 1
-      ? (nestedProgramAttrName(node) ?? nestedProgramName)
+    tag === "program" && programDepth >= 1 && nestedProgramSubtreeIsExtracted(node)
+      ? (nestedProgramAttrName(node) ?? "<nested>")
       : nestedProgramName;
 
   const descend = (kids: any) =>
@@ -10376,8 +10410,10 @@ function fireChannelInsideNestedProgram(
       `not change. If the nested program itself needs the data, pass it across the ` +
       `message-passing boundary that execution context already defines (§4.12.8) — ` +
       `nested programs share NO state with their parent by design (§4.12.1). ` +
-      `(A \`<program db=>\` scoped-DB context with no \`name=\` is NOT extracted and ` +
-      `may hold a \`<channel>\` — only \`name=\`d nested programs are affected.) ` +
+      `(A §4.12.6 scoped-DB context — \`<program db=>\`, with or without \`name=\` — is ` +
+      `NOT extracted and MAY hold a \`<channel>\`. Only the EXTRACTED execution ` +
+      `contexts are affected: §4.12.4 inline worker, §4.12.5 foreign sidecar, ` +
+      `§4.12.3 WASM module, and a §4.12.2 \`route=\` server endpoint.) ` +
       `(SPEC §4.12 + §38.1 + §34.)`,
     span: channelSpanOf(channelNode, filePath),
     severity: "error",
