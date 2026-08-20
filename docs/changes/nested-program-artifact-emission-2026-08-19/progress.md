@@ -631,3 +631,557 @@ the one I would fix next.
   worth correcting; I left it rather than touch an unrelated line in a commit
   this size, but it cost me a wrong inference mid-dispatch and would cost the
   next reader the same.
+
+---
+---
+
+# ROUND 2 — the operator ruling + the five adversarial findings
+
+Base: rebased onto `origin/main` `1d245134` (S355-peter). Branch:
+`nested-program-r2-work`.
+
+## Step 0 — rebase (DONE)
+
+Round 1 was cut from `9f6130d0`; `origin/main` had advanced to `1d245134`.
+`git rebase origin/main` replayed 6 commits.
+
+**Conflicts: `docs/FACTS.md` only, three times** (once per commit that touched
+`compiler/src`). Resolved by the rule the brief gave — never hand-merge derived
+numbers:
+
+- `ffadd957` (`chore(facts): regenerate…`) — **DROPPED** (`git rebase --skip`).
+  It was a pure regeneration commit; regenerating against the new base makes it
+  redundant, and replaying it would have been hand-merging derived numbers by
+  another name.
+- `4cc6d0a1`, `d100ef4e` — `git checkout --ours docs/FACTS.md` (ours = the new
+  base), then regenerate after the last content commit.
+
+`compiler/SPEC-INDEX.md` merged cleanly and did not conflict; it was regenerated
+anyway after the last SPEC edit.
+
+Rebased tip before round-2 work: `67342227`. That SHA is the RED baseline used
+throughout below.
+
+> **Incidental:** `git rebase` runs the repo's `post-commit` hook per replayed
+> commit, and that hook runs the full test suite + gauntlet + browser
+> validation. Each content commit took ~5 minutes to replay. Not a defect, but
+> it is why the first `git rebase` call looked like a hang.
+
+---
+
+## Item 1 — ⭐ THE RULING
+
+### Reproduction (EXECUTED — seven shapes compiled on the rebased round-1 tree)
+
+| fixture | attrs | worker bundle written | `new Worker` ref | verdict |
+|---|---|---|---|---|
+| `w-worker` | `name=` | `w-worker.doubler.worker.js` (66 B, real) | yes | CORRECT §4.12.4 |
+| `w-wasm` | `name= lang="rust" mode="wasm"` | `w-wasm.calc.worker.js` **25 B** | yes | **MISCLASSIFIED** |
+| `w-route` | `name= route="/api/v1"` | `w-route.api.worker.js` **71 B** | yes | **MISCLASSIFIED** |
+| `w-scopeddb` | `name= db=` | `w-scopeddb.analytics.worker.js` **68 B** | yes | **MISCLASSIFIED** + false-positive `E-CHANNEL-INSIDE-NESTED-PROGRAM` |
+| `w-sidecar-noport` | `name= lang="go" build=` | `w-sidecar-noport.ml2.worker.js` **24 B** | yes | **MISCLASSIFIED** (not in the brief's list) |
+| `w-sidecar` | `name= lang="go" port= health=` | none | none | correct (the §23.4 carve-out) |
+| `w-toplevel-named` | top-level `name=` | `w-toplevel-named.w.worker.js` **22 B** | yes | N5 |
+
+**FOUR shapes were misclassified, not three.** The brief enumerated `mode="wasm"`,
+`route=` and named `db=`. The fourth is the §4.12.5 sidecar spelled WITHOUT
+`port=`: the ratified §23.4 carve-out keyed on `port=` alone, so
+`<program name="ml2" lang="go" build="…">` — a legal, SPEC-shaped sidecar
+declaration missing only the optional port — was still compiled as a web worker
+and shipped a 24-byte stub. The ruling's own wording covers it ("no `lang=`"), so
+this is inside the ruling, not an extension of it. Worth noting because it is the
+shape a `port=`-keyed carve-out is structurally guaranteed to miss.
+
+Bundle contents, verbatim:
+
+```
+$ cat dist/w-wasm.calc.worker.js
+// Generated worker: calc
+```
+
+That is the whole file. It returns 200, loads, and never assigns
+`self.onmessage`.
+
+### THE FIX — one predicate, three consumers
+
+New module `compiler/src/nested-program-kind.ts`. It classifies a nested
+`<program>` by the §4.12.3 attribute combination and exports the two predicates
+the compiler actually needs:
+
+- `isInlineWorkerProgram(node)` — the ruling verbatim: `name=`, no `lang=`, no
+  `mode=`, no `route=`, no `db=` (and, retaining §23.4, no `port=`).
+- `nestedProgramSubtreeIsExtracted(node)` — true for the four contexts whose
+  subtree leaves the tree.
+
+Three consumers now share it. That is the point of the module, not a side
+effect: **the bug was two (then three) sites independently guessing at the same
+question and guessing differently.**
+
+| consumer | decides | was |
+|---|---|---|
+| `codegen/index.ts` `extractWorkerPrograms` | splice / register worker / refuse | `if (nameAttr)` |
+| `symbol-table.ts` `walkChannelPlacement` | `E-CHANNEL-INSIDE-NESTED-PROGRAM` | `nestedProgramAttrName(node) != null` |
+| `codegen/emit-html.ts` | skip the markup subtree | `if (nameAttr) return` |
+
+The third was **found by executing, not by reading** — see "the second site"
+below.
+
+### Precedence in the classifier, and why it is normative
+
+`mode=` → `lang=`/`port=` → `route=` → `db=` → `name=`-alone. Several
+context-bearing attributes co-occur legally (the SPEC's own WASM row is
+`name=` + `lang=` + `mode="wasm"`), so the order decides. `mode=` is first
+because §4.12.2 defines it as `"wasm"` for WASM modules, "omitted for sidecar
+processes" — so ANY `mode=` is a WASM-shaped declaration and a non-`"wasm"` value
+is a malformed one, never an inline worker. `port=` is retained as a sidecar
+discriminator purely for continuity with the ratified §23.4 carve-out; that makes
+the gate strictly TIGHTER than the ruling's wording, which is the fail-closed
+direction.
+
+`story=`, `protect=`, `callchar=`, `capabilities=`, `build=`, `health=` are
+deliberately NOT discriminators — they ride ON an execution context rather than
+selecting one.
+
+### What the three misclassified shapes emit instead — DECIDED, not guessed
+
+The brief asked this explicitly. Answers, one per shape:
+
+**1. Named scoped-DB (`name=` + `db=`) — no diagnostic; it now WORKS.** This
+context is IMPLEMENTED. §4.12.3's table reads `Scoped DB context | name=
+(optional), db=` — `name=` is optional on that row, not absent, so the named
+spelling was never anything but legal. It is no longer extracted, so
+`annotateDbScopes` tags it in place exactly as it does the `name=`-less form.
+Verified: dial `_scrml_ws/metrics_feed` + route `_scrml_route_ws_metrics_feed`,
+paired.
+
+**2. WASM module (`mode=`) and 3. server endpoint (`route=`) — a fail-closed
+diagnostic.** New code `E-NESTED-PROGRAM-CONTEXT-NOMINAL`, severity `error`. The
+brief's instruction was decisive: "silently emitting nothing is how the
+top-level-`name=` hole behaves, and it is not good." Neither context has codegen;
+the parent's `<#calc>.send()` / `callchar{}` would reach nothing. The message
+names the context, its §4.12.3 runtime model, and the shape that IS implemented.
+
+**One code, not two.** It is one condition — "this §4.12.3 execution context is
+specified but has no compiler behind it" — and two rows differing only in a noun
+would be two ways of saying the same thing. Precedent: `E-FOREIGN-SIDECAR-NOMINAL`
+is exactly this shape of code for exactly this situation.
+
+**4. Foreign sidecar (`lang=`, with or without `port=`) — silent splice, NO new
+diagnostic.** Deliberate, and the reason is in the corpus:
+`conformance/cases/capability/inheritance-inherit-covers` and
+`inheritance-closest-wins-no-union` both declare `<program name= lang="ts">` with
+a `use foreign:` in the body, and both already assert `E-FOREIGN-SIDECAR-NOMINAL`.
+Firing a second code at the declaration would put two errors on one unbuilt shape
+in ratified cases. §23.4 owns the sidecar's refusal; this round only stops it
+inventing a worker. (Residual: a sidecar declared with NO `use foreign:` in the
+parent is silent — pre-existing, listed below.)
+
+### N3 — DISSOLVED, as predicted
+
+```
+$ scrml compile w-scopeddb.scrml -o dist/      # <program name="analytics" db=…> holding a <channel>
+BEFORE: FAILED — 1 error   E-CHANNEL-INSIDE-NESTED-PROGRAM
+AFTER:  Compiled 1 file    (3 warnings, 0 errors)
+        client dials:  _scrml_ws/metrics_feed
+        server routes: _scrml_route_ws_metrics_feed
+```
+
+The channel check had no independent bug. It inherited the extractor's
+over-claim, which is exactly why the fix was to make both call one predicate
+rather than to patch the check.
+
+### N5 — the hole is closed from BOTH sides
+
+`extractWorkerPrograms` now takes a `programDepth`; the top-level call passes 0,
+so the document-root `<program>` can never be claimed. Consequence, measured:
+
+```
+BEFORE: errors=[]  dials=[]  routes=[]   <body> EMPTY   + w.worker.js (22 bytes)
+AFTER:  errors=[]  dials=[top_feed]  routes=[top_feed]  <body> renders
+        warning W-PROGRAM-TOP-LEVEL-NAME
+```
+
+The §38.1/§38.2 SHALL no longer has a hole at this shape, and it closes by making
+the SHALL's own words true rather than by widening it: the SHALL is about a
+**nested** `<program>`, and depth 0 is not nested. The extractor was the thing
+disagreeing with the SHALL.
+
+**And the §4.12.2 MUST NOT now has enforcement.** New `W-PROGRAM-TOP-LEVEL-NAME`,
+severity `warning`. This is not a fresh direction call: `W-STORY-ON-TOP-LEVEL` is
+the ratified treatment of the byte-identical condition (`story=` on the top-level
+`<program>` — "emits `W-STORY-ON-TOP-LEVEL` and is ignored"), and with the depth
+guard in place `name=` at the root is genuinely inert, so warn-and-ignore is
+proportionate. Blast radius zero: 0 corpus files declare a top-level
+`<program name=>`.
+
+### The second site — found by EXECUTING, and it changes the shape of the finding
+
+After the extractor fix, the top-level-named case still emitted an EMPTY `<body>`.
+`emit-html.ts:2329` carried the identical over-claim:
+
+```js
+// Named programs are worker bundles (§4.12.4) — skip entirely.
+const nameAttr = attrs.find((a) => a.name === "name");
+if (nameAttr) return;
+```
+
+Two shapes hit, and the second is a bite **this round opened**:
+
+1. top-level `<program name="X">` — the whole document skipped as a worker body.
+   Fixing only the extractor left this.
+2. a named scoped-DB context — its markup children silently dropped, while the
+   byte-identical `name=`-less form rendered. Before item 1 that shape was
+   extracted, so the skip was moot; un-extracting it made the skip bite. **A fix
+   that stops deleting a subtree can expose a second site that was deleting the
+   same subtree for a different wrong reason.**
+
+Fixed with the shared predicate plus a `programDepth` counter. In practice the
+extracted shapes are already spliced before this walker runs, so the guard is
+defence-in-depth — but it must AGREE with the pre-pass, which is the whole reason
+it calls the same function.
+
+### Two-sided bite proof — item 1
+
+New `compiler/tests/integration/nested-program-execution-context-gate.test.js`
+(18 tests). Central invariant deliberately stated over the ARTIFACT SET, not over
+filenames, so it survives a rename:
+
+> for every §4.12.3 shape: (a) every `new Worker("…")` in the WRITTEN client
+> bundle names a file that exists on disk, AND (b) no `.worker.js` exists on disk
+> that nothing references.
+
+**Both halves are load-bearing, and (b) is the round-2 half.** Round 1 satisfied
+(a) by WRITING the bogus bundles — which is exactly how a loud 404 became a
+silent hang.
+
+**RED** (round-1 source `67342227` restored, round-2 tests): **15 pass / 13 fail.**
+
+```
+(fail) WASM: fails closed with E-NESTED-PROGRAM-CONTEXT-NOMINAL naming the context
+(fail) WASM: emits NEITHER a new Worker(...) reference NOR a bundle
+(fail) route=: fails closed with E-NESTED-PROGRAM-CONTEXT-NOMINAL naming the context
+(fail) route=: emits NEITHER a new Worker(...) reference NOR a bundle
+(fail) lang= WITHOUT port= is a sidecar too: no Worker ref, no bundle
+(fail) a NAMED scoped-DB program compiles clean and keeps its channel
+(fail) named scoped-DB: client dial and server route pair up
+(fail) named scoped-DB: its markup children RENDER
+(fail) W-PROGRAM-TOP-LEVEL-NAME fires
+(fail) top-level named: the document is NOT annihilated
+(fail) top-level named: a NESTED worker under it still extracts normally
+(fail) exactly one shape produces a worker artifact at all
+(fail) [channel suite] scoped-DB WITH a name= keeps its channel too
+ 15 pass / 13 fail
+```
+
+**GREEN: 28 pass / 0 fail** across the gate file + the round-1 channel file.
+
+The 15 that pass RED are the OVER-FIRE GUARDS — the §4.12.4 control, the §23.4
+`port=` carve-out, the `name=`-less scoped-DB carve-out, the canonical top-level
+channel, the "nested worker under a top-level named program still extracts"
+regression pin. They must stay green through the change and are what stops the
+new refusals breaking working programs.
+
+---
+
+## Item 2 — N2, the half-implemented S353 ruling
+
+### What round 1 actually did, and why it read as done
+
+| shape | base | round 1 | round 2 |
+|---|---|---|---|
+| `<page>` → `<program name=w>` → `<channel>` | `E-CHANNEL-INSIDE-PAGE` | `E-CHANNEL-INSIDE-NESTED-PROGRAM` | `E-CHANNEL-INSIDE-NESTED-PROGRAM` |
+| `<page>` → `<program db=…>` → `<channel>` | `E-CHANNEL-INSIDE-PAGE` | unchanged | **no diagnostic** |
+
+Row 1 moved because round 1 added a NEW, higher-precedence code and ordered it
+ahead of the page check. The `pageDepth` reset the ruling names was never
+written. **A precedence ruling implemented by adding a higher-precedence code is
+not the same change as reversing the precedence** — and the row it leaves behind
+is the one that matters, because the non-extracted scoped-DB program is the only
+one of the two whose channel can actually work.
+
+### MEASURED before it was taken
+
+```
+$ scrml compile p-page-db.scrml     # <page> -> <program db=> -> <channel>, PRE-fix
+FAILED — 1 error  E-CHANNEL-INSIDE-PAGE
+  client dials:  _scrml_ws/page_feed
+  server routes: _scrml_route_ws_page_feed     <-- BOTH halves already emitted
+```
+
+Both halves pair up. Un-refusing this releases a shape that works; it does not
+admit a broken one. That measurement is what made completing the ruling safe
+rather than merely principled.
+
+Implemented as
+`childPageDepth = tag === "page" ? pageDepth + 1 : (tag === "program" && programDepth >= 1 ? 0 : pageDepth)`.
+
+### The adjacent question — ANSWERED: no
+
+Should `E-CHANNEL-OUTSIDE-PROGRAM`'s `fileHasProgram` pre-scan be
+nested-`<program>`-aware? **No change is owed, and none is possible.** The
+pre-scan counts every `<program>` in the file, nested ones included — and it
+cannot need an exception, because a nested `<program>` cannot exist without an
+enclosing one. A file containing a nested `<program>` therefore always contains a
+top-level `<program>` and is never a PURE-CHANNEL-FILE (§38.12.6). Verified by
+execution, then pinned by test rather than left as an argument:
+
+```
+$ scrml compile o-filetop-chan.scrml   # file-top <channel> + <program> containing <program name=w>
+FAILED — 1 error  E-CHANNEL-OUTSIDE-PROGRAM   ✓ still fires
+```
+
+### Two-sided bite proof — item 2
+
+New `compiler/tests/integration/channel-placement-ordering.test.js` (8 tests). It
+pins the PRECEDENCE — which code wins when two conditions hold at once — not
+merely the outcome, so a future re-ordering of the three placement arms fails
+here rather than silently changing which diagnostic an author reads. It also pins
+that the reset does NOT over-apply: a `<page>` INSIDE the nested program re-arms
+the check, so a nested `<program>` is a FRESH scope rather than a disabled one.
+
+**RED** (round-1 `symbol-table.ts` restored): **7 pass / 1 fail.**
+
+```
+(fail) <page> -> NON-EXTRACTED <program db=> -> <channel> fires NOTHING — the ruling's visible half
+ 7 pass / 1 fail
+```
+
+Exactly the un-moved row. The other 7 pass both sides by design — they are the
+guards and the already-correct precedence.
+
+**GREEN: 8 pass / 0 fail.**
+
+known-gaps `g-channel-in-nested-program-inside-page-ordering`: `open` →
+**RESOLVED**, recording BOTH the partial round-1 state and the completion. (The
+only `docs/known-gaps.md` edit this dispatch made.)
+
+---
+
+## Item 3 — N4, §38.9's LOCAL error-code table
+
+Added the missing `E-CHANNEL-INSIDE-NESTED-PROGRAM` row and re-grounded the
+adjacent `E-CHANNEL-INSIDE-PAGE` row with the S353 precedence note.
+
+**This is a recurrence of `g-channel-spec-38-9-stale`** (`docs/known-gaps.md`
+~:5310, RESOLVED S189), which found and fixed the identical class once already:
+"§38.9's error-code table … OMITS `E-CHANNEL-OUTSIDE-PROGRAM` + `E-CHANNEL-INSIDE-PAGE`
+— directly contradicting §38.1 / §38.4.1". Same table, same failure to update it
+when a placement code changed. **Twice is a pattern, not an accident:** §38.9 is a
+LOCAL duplicate of rows that also live in §34, and nothing links the two, so an
+agent editing §34 has no signal that a second table exists. Recorded here rather
+than in known-gaps because the brief restricted `docs/known-gaps.md` edits to
+item 2's entry.
+
+> A candidate structural fix, for whoever owns it: have `s34-census.ts` warn when
+> a code appears in §34 but not in its section-local table (or vice versa). That
+> converts a recurring doc-drift class into a gate failure.
+
+---
+
+## Item 4 — N6, self-host mirror drift
+
+`compiler/self-host/cg-parts/section-assembly.js:~1568` emitted
+`new Worker("<name>.worker.js")` — the pre-rename BARE form — while the reference
+emitter emits `<sourceBase>.<name>.worker.js` and `api.js` writes the bundle at
+the prefixed name. So the mirror named a file nothing produces: the same
+dangling-reference class this arc exists to close, one layer down. No test gated
+it. Fixed, comment included.
+
+**DEFERRED, surfaced not fixed:** the same file's `extractWorkerPrograms` mirror
+(**`section-assembly.js:~1902`**) still claims ANY `name=`d nested `<program>` as
+a §4.12.4 worker. It is stale by MORE than this round — it never carried the
+§23.4 `port=` sidecar carve-out either, so it is at least two rounds behind. The
+brief authorized a one-line drift fix; pa.md defers `compiler/self-host/` work
+post-v1.0.0. Recorded with the exact line rather than widened into.
+
+---
+
+## Item 5 — the §34.0 census, and how it slipped
+
+`bun scripts/s34-census.ts --check-new --base origin/main` was run and PASSED
+(6 rows) right after the §34 catalog edit — and the §38.9 rows were written
+AFTERWARDS. The pre-commit hook does not run the census, so `9cad52f4` landed
+with the SPEC in a census-FAILING state:
+
+```
+§34.0 gate FAILED — 2 of 8 new/changed §34 row(s) are unverifiable claims:
+  E-CHANNEL-INSIDE-PAGE — no emitter provenance note, no spec-ahead declaration, not struck
+  E-CHANNEL-INSIDE-NESTED-PROGRAM — no emitter provenance note, no spec-ahead declaration, not struck
+```
+
+Fixed in `cab60428`; both rows now name their fire site, and the nested-program
+row also names the shared extraction predicate. **The rule is the one the
+FACTS/SPEC-INDEX pre-push hook already states about itself: run the gate after
+the LAST edit, not after the first one.** Recording it because a census that
+passes mid-dispatch reads as "done" and is not.
+
+---
+
+## VERIFICATION BAR
+
+### Execute, don't grep — every §4.12.3 shape, compiled, disk inspected
+
+| shape | diagnostic | written to disk | `new Worker` ref | ref resolves? |
+|---|---|---|---|---|
+| §4.12.4 inline worker | none | `app.doubler.worker.js` (real: `self.onmessage` + `self.postMessage`) | `app.doubler.worker.js` | **YES — and it RUNS** |
+| §4.12.5 sidecar (`port=`) | none here (§23.4 owns it) | no worker file | none | n/a |
+| §4.12.5 sidecar (no `port=`) | none here (§23.4 owns it) | no worker file | none | n/a |
+| §4.12.3 WASM module | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` | no worker file | none | n/a |
+| §4.12.2 `route=` endpoint | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` | no worker file | none | n/a |
+| §4.12.6 scoped DB (named) | none | no worker file; `.server.js` with the channel route | none | n/a |
+| top-level `name=` | `W-PROGRAM-TOP-LEVEL-NAME` | no worker file; body renders | none | n/a |
+
+The one surviving reference, proved by EXECUTION rather than by `existsSync`:
+
+```
+$ node --check dist/app.doubler.worker.js && echo PARSES
+PARSES
+$ bun run-worker.mjs dist/app.doubler.worker.js '{"value":21}'      # a real Worker
+WORKER REPLY: {"result":42}
+
+$ bun run-worker.mjs dist/app.doubler.worker.01yy7q0t.js '{"value":21}'   # hashed build
+WORKER REPLY: {"result":42}
+
+$ scrml compile examples/13-worker.scrml -o dist/                   # the flagship
+$ bun run-worker.mjs dist/13-worker.primes.worker.js '{"limit":30}'
+WORKER REPLY: {"limit":30,"primes":[2,3,5,7,11,13,17,19,23,29],"count":10}
+```
+
+### Round-1's core guarantee, re-verified across the build-mode matrix
+
+Eight real `write: true` builds, inspected as bytes on disk. Three invariants per
+build: no reference without a file; no worker file without a reference; every
+client WS dial has a matching server route.
+
+| build | worker refs | dangling refs | unreferenced `.worker.js` | dials | routes | dangling dials |
+|---|---|---|---|---|---|---|
+| flat | `app.doubler.worker.js` | NONE | NONE | — | — | NONE |
+| flat + channel | `app.doubler.worker.js` | NONE | NONE | `feed` | `feed` | NONE |
+| flat + named scoped-DB | none | NONE | NONE | `metrics` | `metrics` | NONE |
+| nested-dir (`pages/`) | `about.…`, `index.…` | NONE | NONE | `feed` | `feed` | NONE |
+| `contentHashAssets` | `app.doubler.worker.01yy7q0t.js` | NONE | NONE | `feed` | `feed` | NONE |
+| `contentHashAssets` (worker-only) | `app.doubler.worker.01yy7q0t.js` | NONE | NONE | — | — | NONE |
+| `emitPerRoute` | `about.…`, `index.…` | NONE | NONE | `feed` | `feed` | NONE |
+| `emitPerRoute` + hashed | `index.…01yy7q0t.js`, `about.…01yy7q0t.js` | NONE | NONE | `feed` | `feed` | NONE |
+
+`MATRIX: all builds coherent`.
+
+### Suites
+
+| | round-1 tip `67342227` | round-2 final |
+|---|---|---|
+| `bun test compiler/tests/{unit,integration,conformance}` | 22436 pass / 0 fail | **22471 pass / 70 skip / 1 todo / 0 fail** |
+| `bun conformance/run.ts` | 885/885 | **893/893** |
+| `bun scripts/s34-census.ts --check-new --base origin/main` | PASS | **PASS — 8 new/changed rows, all well-formed** |
+| `examples/*.scrml` | 31 ok / 1 fail | **31 ok / 1 fail** (`09-error-handling`, pre-existing `E-ERROR-009`, unrelated) |
+| `bun run pretest` | clean | **clean** |
+| self-host consumers (`self-compilation`, `parser-conformance-canary`) | — | **98 pass / 13 skip / 0 fail** |
+
+**ENV-GAP ruled out** at step 0: `bun install` (217 packages) and `bun run pretest`
+(13 samples) were run before any measurement, so the gitignored
+`samples/compilation-tests/dist/` tree that fresh worktrees lack was populated up
+front. No phantom failures observed.
+
+### Conformance — 8 new cases, and which of them BITE
+
+Red half run by restoring round-1 source: **888/893, 5 FAILED.**
+
+```
+FAIL  channel/inside-named-scoped-db-program      the N3 false positive
+FAIL  channel/page-nested-scoped-db-program       the S353 ruling's visible half
+FAIL  nested-program/wasm-module-nominal
+FAIL  nested-program/route-endpoint-nominal
+FAIL  nested-program/top-level-name
+```
+
+Three pass both sides BY DESIGN — they are over-fire guards, and one of them has
+a limitation worth stating:
+`channel/page-nested-extracted-program` (the precedence pin) and
+`nested-program/inline-worker-emits-bundle` (the control) are guards.
+`nested-program/foreign-sidecar-no-worker` **cannot bite in conformance at all**:
+the conformance runner asserts CODES, and the round-1 compiler emitted no code
+for that shape either — it just emitted a bogus artifact. The artifact difference
+is only visible to the integration test, which does assert it. Recorded so nobody
+later reads that case as proving something it cannot prove.
+
+`channel/inside-scoped-db-program`'s description + rationale were STALE — they
+asserted the `name=` discriminator this round disproved. Corrected in place and
+cross-linked to the new `name=`-bearing twin, so the case file stops teaching the
+wrong rule.
+
+---
+
+## The two HIGHs I was told not to fix — not regressed, and one observation owed
+
+`g-when-message-parent-handler-drops-all-but-the-first-statement` — untouched.
+Nothing in this round goes near the parent-side `when message` lowering.
+
+`g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client` —
+untouched, and **the brief asked whether item 1 makes the ORDERING fix natural.
+It does, and more than before:**
+
+- The extraction pre-pass is now **classification-driven and depth-aware**. It no
+  longer needs anything `analyzeAll` produces — it reads attributes off the raw
+  tree. So hoisting it above `analyzeAll` is a pure MOVE, with no dependency to
+  untangle first. That was already true, but it was harder to see when the
+  decision was an inline `if (nameAttr)` tangled with the splice.
+- The set of shapes that mutate the tree is now **named** (`nestedProgramSubtreeIsExtracted`),
+  so "which snapshots go stale" has a predicate answer rather than an
+  archaeological one.
+- Third data point for the ordering fix: `emit-html.ts` was the THIRD site
+  compensating for the pre-pass's timing/semantics. Round 1 found the
+  `channelNodes` staleness; this round found a second consumer of the same wrong
+  question. `treeMutatedByExtraction` + the post-splice `channelNodes` re-collect
+  are both compensations that the reordering would DELETE rather than fix, and
+  RESIDUAL 4 (the other seven snapshotted `FileAnalysis` fields) is still
+  unaudited.
+
+I did not attempt it, per the brief.
+
+---
+
+## RESIDUALS — round 2
+
+Round-1 residuals 1-9 all still stand except where noted. New and updated:
+
+1. **RESIDUAL 5 is now half-closed.** `route=` is still unimplemented, but it no
+   longer mis-compiles as a web worker — it fails closed naming itself. The
+   §4.12.2 claim ("declares the nested program as a server endpoint") is now
+   honestly labelled Nominal in §4.12.3's implementation-status paragraph rather
+   than silently contradicted by the emitter.
+
+2. **NEW — a §4.12.5 sidecar with no `use foreign:` in the parent is silent.**
+   The sidecar's only diagnostic (`E-FOREIGN-SIDECAR-NOMINAL`) fires at the USE
+   site. Declare `<program name="ml" lang="go" port="9001">` and never write
+   `use foreign:ml` and you get nothing at all — no worker (correct, as of this
+   round) and no diagnostic. Arguably fine (a declaration nothing uses is dead
+   code, and `W-DEAD-FUNCTION` covers the functions inside it); arguably the
+   declaration site should say "this context is Nominal". I did NOT route it to
+   `E-NESTED-PROGRAM-CONTEXT-NOMINAL` because that would double-fire in the two
+   ratified capability conformance cases. Needs a direction call, not a fix.
+
+3. **NEW — §38.9 is a structurally duplicated table with no link to §34.** The
+   N4 recurrence (twice now, S189 and S356) is a property of the layout, not of
+   the agents. A census rule ("a code in §34 whose section-local table omits it")
+   would convert it into a gate failure. See item 3 above.
+
+4. **NEW — the self-host `extractWorkerPrograms` mirror is two rounds stale**
+   (`compiler/self-host/cg-parts/section-assembly.js:~1902`). Exact line given;
+   deliberately not fixed (pa.md defers self-host).
+
+5. **NEW — `git rebase` replays through the repo's full-suite `post-commit`
+   hook**, ~5 min per content commit. Not a defect; worth knowing before someone
+   kills a "hung" rebase.
+
+6. **RESIDUAL 1 (a FAILED build still writes a complete dist) is now the one I
+   would fix next**, ahead of RESIDUAL 4. Round 2 made the refusals more
+   numerous, and every one of them still leaves a dist on disk. The bytes are now
+   COHERENT in every case measured (the matrix above), so the danger is narrower
+   than it was — but "we fail closed AND write the artifacts anyway" is a
+   contract nobody can rely on, and `api.js:2860`'s comment still asserts the
+   opposite of what the code does.
+
+7. **RESIDUAL 7 (worker-body token spacing) unchanged.** `self.postMessage( {
+   result : twice ( data . value ) } )` — parses, runs, does not meet the
+   readable-output bar. The structural fix is still "lower `whenMessage.bodyExpr`
+   instead of re-emitting a token join".
