@@ -1,13 +1,13 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S354-peter.       -->
-<!-- Mechanical stream: handOffs/delta-log.md [1592]-[1597].        -->
+<!-- hand-off.md — live session state. WRAPPED at S354-peter (extended).-->
+<!-- Mechanical stream: handOffs/delta-log.md [1592]-[1601].        -->
 <!-- Body below the S354 block is the S352 WRAP + older (history).  -->
 <!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
 <!-- ============================================================= -->
 
 # scrml — Session 354 (peter · P-Tech1 Windows) — WRAP
 
-**Date:** 2026-08-19. `/boot` Profile A, solo. **Four PRs merged (#582–#585) + review floor drained.**
+**Date:** 2026-08-19. `/boot` Profile A, solo. **Nine PRs merged (#582–#588 + wrap #586 + this continuity) + review floor drained.**
 A disjoint EXECUTION lane running alongside bryan's still-open S352/S353 deliberation board.
 
 **Framing:** execution + hygiene, not deliberation. Three fix-bundles + a ledger reconciliation, and the
@@ -39,12 +39,24 @@ None of this was touched by S354 (disjoint). Full detail in the **S352 WRAP bloc
   *heading text* is stale) + 1 docs gap (`G-DBAUTH-DOCS-NO-DO-NOT-MARK-USERS-EXAMPLE`, L1716, heading=resolved
   marker=open). NOT flipped this session — each needs its marker verified before aligning the heading. Run
   `headingMarkerDrift()` (state.ts, exported) to re-list.
-- **Ledger health:** now well-reconciled (7 gaps closed S354). Repro-on-HEAD stays mandatory, but the ledger
-  is largely trustworthy — the sweep found only 1 stale among 15 high-signal candidates.
+- **One crisp code follow-up (from #588):** `new Response(...)` inside a `handle()` body still fires
+  `E-SCOPE-001` — the §40 raw-Response allowlist doesn't admit `Response` in the handle escape hatch. Adopter
+  #471 needs it (a PDF/binary body IS a raw Response). Separate gap from the now-fixed formData await; a real
+  adopter-facing HIGH-ish follow-up if you want one that's clearly in-lane.
+- **Reconciliation is DONE + the finding:** the ledger is self-consistent (high-confidence stale scans return
+  empty); stale gaps are found only by repro and are BOUNDED. **The accessible compute-lane fix-bundles are
+  largely EXHAUSTED** (this session's bundle yield fell A→3, B→2, D→1, E→1, F→0). The next productive arc is
+  likely **operator/bryan-coordinated** (the ruling-gated render-async / if-value language forks) or
+  **genuinely-new work off the ledger** — not more mechanical bundle-hunting.
+- **★ OWNERSHIP-FIRST, not just repro:** before fixing ANY bryan-filed gap, grep the heading for
+  `ROUTED-TO-BRYAN` / `prov=ruling|dd|debate` FIRST (E's #2 was a build-then-revert miss). See
+  `[[scrml-med-shortlist-gaps-stale-verify-first]]`.
+- **Low-priority hygiene (carried):** the self-host DCL `{once:true}` leg (`section-emit-wiring.js`) + the 16
+  heading/marker cosmetic drifts (run `headingMarkerDrift()` to re-list; each needs its marker verified).
 
 ### C. Owed regardless of lane
-- **This wrap's continuity PR** (hand-off + changelog + delta-log [1592]-[1597] + the review-floor drain in
-  `docs/pr-reviews.md`) must land — it's the branch-first continuity commit.
+- **This wrap-delta's continuity PR** (hand-off + changelog + delta-log [1598]-[1601]) — the branch-first
+  continuity commit for the #587/#588 continuation.
 
 ## WHAT LANDED (S354-peter)
 
@@ -54,9 +66,11 @@ None of this was touched by S354 (disjoint). Full detail in the **S352 WRAP bloc
 | **#583** | B — dev-server | leak HIGH fixed (parent-death guard) + readdir LOW (2 legs); **2 stale gaps flipped** (fail-open HIGH + watcher-death MED, fixed by #539) |
 | **#584** | D — `state.ts` ledger-integrity | crosscheck LOW fixed (order-independent `markerCount`) + regression test; **3 stale gaps flipped** (fixed+tested S334) |
 | **#585** | reconciliation sweep | 1 verified stale gap flipped (`g-synth-read…`, fixed #291); 14 candidates confirmed legitimately-open |
+| **#587** | E — implicit-cell double-write (MED) | emission-order tracker so `reset()` on a double-written implicit `@cell` restores, not increments. Bundle E collapsed to this — #2 was ROUTED-TO-BRYAN (reverted, ownership-check miss), #3/#4 screened |
+| **#588** | #471 file-upload (HIGH) | ⭐ **adopter unblock** — `handle()` bodies now auto-await `request.formData()`/`.json()`/… (scoped `injectHandleRequestAwaits`, hardened pipeline byte-identical). Operator-authorized cross into bryan's autoawait lane. + reconciled `g-match-block-arm…` (S330-stale) |
 | — | review floor | #573–#577 drained → **0 OWED** |
 
-**Gap counts:** HIGH 49→47 · MED 157→150 · LOW 70→69 (7 resolved).
+**Gap counts:** HIGH 49→46 · MED 157→148 · LOW 70→69 (11 resolved).
 **The session's lesson (thrice-earned):** repro-on-HEAD before every fix — the gap shortlist mislocates loci
 (`:14589`, `:843`), mis-states mechanisms (the leak was force-killed-parent orphans, not test-reaping), and
 carries fixed-but-never-flipped debt (#539 ×2, S334 ×3). The sweep bounded that debt: not systemic.
