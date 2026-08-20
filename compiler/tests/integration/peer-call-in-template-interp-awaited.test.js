@@ -95,9 +95,18 @@ function assertValidJs(src) {
 // Strip top-level `import`/`export` lines so the bodies parse inside an async
 // wrapper (we only care about statement/template syntax validity here).
 function stripModuleSyntax(src) {
+  // Neutralise module syntax so the bodies parse inside the async wrapper. Drop `import`
+  // lines (they cannot live in a function body); for `export`, strip only the KEYWORD, not
+  // the whole line — deleting the whole `export const X = {` opener orphaned the multi-line
+  // object body (`path:`, `method:` …) into statement position, which bun 1.3.x's lenient
+  // `vm.Script` tolerated but bun 1.4.0's stricter parser rejects with `Unexpected token ':'`.
   return src
     .split("\n")
-    .map((l) => (/^\s*(import|export)\b/.test(l) ? "" : l))
+    .map((l) =>
+      /^\s*import\b/.test(l)
+        ? ""
+        : l.replace(/^(\s*)export\s+default\s+/, "$1").replace(/^(\s*)export\s+/, "$1"),
+    )
     .join("\n");
 }
 
