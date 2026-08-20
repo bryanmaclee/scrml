@@ -890,3 +890,108 @@ this round, per brief):
 narrowing in the SAME change as the structural rewrite, not after.** Round 3 shipped
 the cross-function widening without it and created a false positive on §40.3.5's own
 documented shape; the twin can skip that round trip entirely.
+
+---
+
+# ROUND 5 — the two executed fail-opens, and three false claims
+
+Round 4 returned **DO-NOT-LAND**. Two of its own changes regressed against
+`origin/main`: the S354 narrowing opened a header-mutation fail-open (H1), and the
+structural rewrite left an unparseable expression able to silently disarm the whole
+gate (H2). Both were PA-reproduced and both are closed below with a two-sided,
+EXECUTED bite proof.
+
+## ⛔ H1 — the S354 narrowing was true of the CONSTRUCTION and false of the BINDING. FIXED.
+
+`compiler/src/codegen/protect-egress.ts` — the `!argsAreAllLiterals(n.args)` guards on
+the `new Response(...)` and `Response.json(...)` egress predicates, introduced by
+`a2594385`.
+
+The ruling's premise as implemented — *"a `Response` whose every argument is a literal
+cannot carry caller data"* — is a statement about the CONSTRUCTION. A `Response` is a
+live mutable handle: its headers are writable after it is built, so the premise says
+nothing about what the object carries by the time it leaves the function.
+
+### The bite, both sides, EXECUTED
+
+```scrml
+export server function getUser(id) {
+  let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+  let r = new Response("ok", { status: 200 })
+  r.headers.set("x-user", u.passwordHash)
+  return r
+}
+```
+
+| tree | compile | executed handler (stubbed `_scrml_sql` returning `passwordHash: "$argon2id$SECRET"`) |
+|---|---|---|
+| round-4 head (`08255478`) | **silent** — no `E-PROTECT-004` | body `ok`, **headers `[["x-user","$argon2id$SECRET"]]`** → **SECRET SHIPPED** |
+| this fix | **`E-PROTECT-004` FIRES** — build-blocked | the handler never ships |
+
+The redaction floor cannot catch this one: `_scrml_protect_redact` passes a `Response`
+instance through untouched (it cannot introspect a serialized body or a header map), so
+for this shape the gate is the ONLY thing between the row and the wire. That is exactly
+what `docs/known-gaps.md`'s
+`g-handle-globalthis-response-ships-protected-columns` (a) says, and round 4 removed the
+gate from in front of it.
+
+Same silence measured on the round-4 head for `.headers.append(...)`, for
+`new Response()` with no arguments at all, and for `Response.json({ok:true})` bound to a
+name — four executed shapes, all silent, all firing on `origin/main`.
+
+### THE FIX — the ruling's stated boundary, narrowed to RETURN POSITION
+
+The all-literal narrowing now applies **only where the construction IS the returned
+value** — the `exprNode` a `return-stmt` holds. A construction assigned to a binding
+stays an egress.
+
+Why this is the right shape and not a retreat:
+
+- The ruling was granted for exactly one shape, §40.3.5's own worked example
+  `return new Response("Forbidden", { status: 403 })`. Return-position-only preserves
+  that shape **completely**.
+- It stays **purely syntactic** — one boolean threaded through the existing walk,
+  answering "is this node the `exprNode` of a `return-stmt`?". It does not consult a
+  binding, so it does not drift toward the flow analysis the ruling explicitly rejected
+  on DIRECTION.
+- It is strictly **fail-CLOSED** relative to round 4: every shape it changes moves from
+  silent to firing, and none moves the other way.
+
+Deliberately NOT return position, every one the fail-closed answer: an arrow's
+EXPRESSION body, a construction under a ternary or a `||` inside a `return`, and a
+construction returned through a temporary. Each is one syntactic step from the shape the
+ruling names, and none of them is that shape.
+
+The implementation records the exemption on the NODE the `return-stmt` holds. Its stated
+bound: if the expression parser ever memoized one node into two positions — one of them
+a `return` — the walk's `seen` guard would visit it once and the exemption could carry.
+**Measured on this tree:** identical `new Response("Forbidden", { status: 403 })` text in
+a `let` and in a `return` produces TWO distinct nodes (the instrumented walk reports both
+separately), so the aliasing does not occur. Stated because the property belongs to the
+expression parser, not to this file.
+
+### The green half — VERIFIED, not trusted
+
+The round-4 adversarial pass asserted that all 8 `cleanShapes` and all 6 clean
+`adversarial` entries already use `return new Response(...)`. Re-checked by execution
+rather than by reading: `g-sql-row-protect-leak.test.js` went **109 pass / 0 fail →
+118 pass / 0 fail**. Not one previously-green shape moved.
+
+### Owed tests — landed, and their bite is measured
+
+Nine new tests in the S354 `describe`:
+
+- 4 **bound-then-mutated** shapes (`headers.set`, `headers.append`, no-arg construction,
+  `Response.json`) — FIRE;
+- 3 **bound-then-returned-UNMUTATED** shapes — FIRE. We do not track mutation, and this
+  half is as load-bearing as the mutated one: proving "this binding was never mutated" is
+  the rejected flow analysis, and every gap in it would be a fail-OPEN;
+- 1 **ternary inside the return** — FIRES (not the returned value itself);
+- 1 **§40.3.5 return shape** — still SILENT, the guard against the guard.
+
+Every firing test also asserts no `E-SCOPE-001`, so a fixture that failed to compile for
+an unrelated reason cannot pass it.
+
+**Two-sided bite, run:** against the pre-fix collector those 9 tests are
+**1 pass / 8 fail**; against the fix, **9 pass / 0 fail**. The one that passes on both
+sides is the §40.3.5 silent shape — deliberately, it is the guard against over-applying.

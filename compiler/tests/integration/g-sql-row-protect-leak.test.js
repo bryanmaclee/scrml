@@ -1048,6 +1048,95 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
     ));
     expect(fires(result)).toBe(true);
   });
+
+  // --- RETURN POSITION: the S355 narrowing of the S354 narrowing -----------
+  //
+  // The all-literal test is true of the CONSTRUCTION and false of the BINDING.
+  // A `Response` is a live mutable handle — its headers are writable after it is
+  // built — so "every argument is a literal" says nothing about what the object
+  // carries when it leaves the function.
+  //
+  // Reproduced: with the narrowing applied everywhere, the first shape below
+  // compiled at exit 0 with NO E-PROTECT-004 (it fires on `origin/main`), and
+  // the emitted handler, executed against a stubbed `_scrml_sql`, answered
+  // `[["x-user","$argon2id$SECRET"]]` on the response HEADERS. The redaction
+  // floor cannot catch it: `_scrml_protect_redact` passes a `Response` instance
+  // through untouched (it cannot introspect one), so the gate is the only thing
+  // between that shape and the wire.
+  //
+  // The rule: the narrowing applies ONLY where the construction is the RETURN
+  // VALUE — §40.3.5's own worked example, and the one shape the ruling was
+  // granted for. It stays purely syntactic (is this node the `exprNode` of a
+  // `return-stmt`?), so it does not drift toward the flow analysis the ruling
+  // rejected, and it is strictly fail-CLOSED relative to applying it everywhere.
+  // provenance: ruling:user-voice-scrml.md S354, narrowed S355 (round 5)
+
+  const boundShapes = {
+    "bound then HEADER-MUTATED — the executed leak":
+      `let r = new Response("ok", { status: 200 })\n        r.headers.set("x-user", u.passwordHash)\n        return r`,
+    "bound then header-APPENDED":
+      `let r = new Response("ok", { status: 200 })\n        r.headers.append("x-user", u.passwordHash)\n        return r`,
+    "bound with NO arguments, then header-mutated":
+      `let r = new Response()\n        r.headers.set("x-user", u.passwordHash)\n        return r`,
+    "`Response.json` bound then header-mutated":
+      `let r = Response.json({ ok: true })\n        r.headers.set("x-user", u.passwordHash)\n        return r`,
+    // We do NOT track mutation, so an UNMUTATED binding fires too. That is the
+    // fail-CLOSED half of the rule and it is as load-bearing as the mutated one:
+    // deciding "this binding was never mutated" is the flow analysis the ruling
+    // rejected, and every gap in that analysis would be a fail-OPEN.
+    "bound then returned UNMUTATED (we do not track mutation)":
+      `let r = new Response("Forbidden", { status: 403 })\n        return r`,
+    "bound with no arguments then returned UNMUTATED":
+      `let r = new Response()\n        return r`,
+    "`Response.json` of a literal, bound then returned UNMUTATED":
+      `let r = Response.json({ ok: true })\n        return r`,
+  };
+  for (const [label, body] of Object.entries(boundShapes)) {
+    test(`RETURN POSITION — a BINDING is not return position: ${label} FIRES`, () => {
+      const { result } = compileSource(protectProgram(
+        `      export server function getUser(id) {\n` +
+        `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+        `        ${body}\n` +
+        `      }`,
+      ));
+      expect(fires(result)).toBe(true);
+      // ...and the file is otherwise well-formed: the fire is this gate's, not a
+      // fixture that failed to compile for an unrelated reason.
+      expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    });
+  }
+
+  // The OTHER half — §40.3.5's shape is untouched.
+  test("RETURN POSITION — §40.3.5's own `return new Response(\"Forbidden\", { status: 403 })` stays SILENT", () => {
+    const { result } = compileSource(protectProgram(
+      `      function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        if (id < 0) { return deny() }\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        return { name: u.name }\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(false);
+    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    // the row that DOES leave goes out the compiler-emitted, redacting path
+    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+  });
+
+  // A shape one syntactic step from the ruling's, deliberately CLOSED: it is not
+  // `return <construction>`, and admitting it would start the walk down the flow
+  // analysis the ruling rejected.
+  test("RETURN POSITION — NOT the returned value itself: a ternary inside the return FIRES", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        return id < 0 ? new Response("Forbidden", { status: 403 }) : new Response("ok")\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
