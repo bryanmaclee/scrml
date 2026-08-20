@@ -25132,13 +25132,22 @@ function checkLifecycleFieldAccess(
         const calleePropName = typeof calleeProp === "string" ? calleeProp : calleeProp?.name;
         const isMemberResetCall =
           en?.kind === "call" && en.callee?.kind === "member" && calleePropName === "reset";
-        const bareText = statementText(stmt);
+        // g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder:
+        // mask string/template CONTENTS to equal-length filler before the raw-text
+        // reset scan, so a `reset(@u.field)` SPELLING inside a string literal cannot
+        // register a bogus revert. Parity with the sibling checkLifecycleBindingAccess,
+        // which #582 masked; this tracker was left raw.
+        const bareText = maskStringLiteralSpans(statementText(stmt));
         if (!isMemberResetCall && bareText && /(?<![A-Za-z0-9_$.])reset\s*\(/.test(bareText)) {
           resetSpans = handleResetTextMatches(bareText);
         }
       }
 
-      const text = statementText(stmt);
+      // Same launder class: mask string/template contents before the FIELD_WRITE_RE /
+      // FIELD_REF_RE scan so a `u.field =` write-spelling in a string can't launder a
+      // real pre-transition read (E-TYPE-001 suppressed), nor a read-spelling false-fire.
+      // Equal-length masking preserves offsets, so `resetSpans` stay aligned.
+      const text = maskStringLiteralSpans(statementText(stmt));
 
       if (text) {
         const accesses = extractAccesses(text, resetSpans.length > 0 ? resetSpans : undefined);
@@ -25311,7 +25320,14 @@ function runLifecycleAccessCheck(
         // Source-text candidates for heuristic match: prefer init (parser-canonical
         // for let-decl) → initExpr.raw (escape-hatch wraps the unparseable RHS) →
         // value (fallback for older AST shapes).
-        const initText = readInitText(stmt);
+        // g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder: mask
+        // string/template CONTENTS before the seeding regexes (recordInitialFromAttrText
+        // ATTR_RE / seedInitialFromObjectLiteral). Otherwise a `field =` write-spelling
+        // INSIDE a string literal in the (over-captured) init blob seeds the field
+        // "post" → laundering a real pre-transition read. The anchored `^<`/`^(`/`^{`
+        // heuristics below are unaffected (they test markup/paren/brace, never string
+        // contents). Equal-length masking preserves all offsets.
+        const initText = maskStringLiteralSpans(readInitText(stmt));
         if (varName && stateTypeName && lifecycleRegistry.has(stateTypeName)) {
           structInstances.set(varName, stateTypeName);
           recordInitialFromAttrs(stmt, stateTypeName, varName, initialFieldStates);
@@ -25472,7 +25488,10 @@ function runLifecycleAccessCheck(
               //     Conservative fallback: simply check whether the field appears
               //     in the init text AND its value isn't `not`.
               // (b) escape-hatch raw text — same heuristic.
-              const initText = readInitText(n);
+              // Mask string/template contents before seedInitialFromObjectLiteral —
+              // same launder class as the let-decl seeding above
+              // (g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder).
+              const initText = maskStringLiteralSpans(readInitText(n));
               const perField = seedInitialFromObjectLiteral(annot, initText);
               if (perField.size > 0) initialFieldStates.set(cellName, perField);
             }
