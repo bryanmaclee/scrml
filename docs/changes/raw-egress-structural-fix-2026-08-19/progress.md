@@ -995,3 +995,172 @@ an unrelated reason cannot pass it.
 **Two-sided bite, run:** against the pre-fix collector those 9 tests are
 **1 pass / 8 fail**; against the fix, **9 pass / 0 fail**. The one that passes on both
 sides is the §40.3.5 silent shape — deliberately, it is the guard against over-applying.
+
+## ⛔ H2 — an unparseable expression silently disarmed the whole gate. FIXED.
+
+`compiler/src/codegen/protect-egress.ts` — the `visit` closure in
+`collectRawEgressFacts` had no handling for `kind: "escape-hatch"` (the string did not
+appear in the file).
+
+`expression-parser.ts:3018-3033` returns `{ kind: "escape-hatch", nativeKind, raw }`
+for any expression acorn rejects after scrml preprocessing, and `ast-builder.js:373` /
+`:3815` do the same for every expression `shouldSkipExprParse` declines. **The node
+carries the expression as a STRING**, so the walk found no `kind:"new"`, no
+`kind:"foreign"`, no `kind:"sql"` and no call edges inside it — and read every one of
+those as *"no"* when the truth was *"UNKNOWN"*. Exactly the depth-cap class the round-3
+`truncated` fix closed; the escape-hatch path had no equivalent.
+
+### The bite, RED half — six executed reproducers
+
+Every one is plain JS whose only offence is a token acorn rejects after preprocessing.
+Every one emitted VALID server JS, compiled at exit 0 with **no `E-PROTECT-004`** on the
+round-4 head, and fires on `origin/main`:
+
+```scrml
+return new Response(~u ? JSON.stringify(u) : '')
+return new Response(JSON.stringify(u), { status: 200 + ~0 + 1 })   // ← the canonical leak, silenced by an incidental `~`
+return new Response(JSON.stringify(u).slice(~~0))                  // ← `~~x` is the standard trunc idiom
+return new Response(JSON.stringify(u), { status: 200 + 1n })
+return new Response(u |> JSON.stringify)
+return new Response(JSON.stringify(u), { status: -2 ** 2 })
+```
+
+### The blindness was NOT confined to the egress side — and the worst case is the canonical idiom
+
+Measured on this tree: **an `!{}` error arm (§17) reaches this walk ONLY as an
+escape-hatch.** The arm object carries `handler` as a STRING and `handlerExpr` as an
+escape-hatch node, and there is **no structured form of the arm body anywhere in the
+tree**:
+
+```
+R5ARM pattern:string binding:string handler:string handlerExpr:object armArrow:string
+      | handler= "e - > {\nreturn new Response ( JSON . stringify ( e ) )\n}"
+```
+
+And the arm body is emitted **VERBATIM** into the server handler, ahead of the
+`instanceof Response` passthrough:
+
+```js
+const AuthError = _scrml__scrml_result_3.data;
+return new Response ( JSON . stringify ( row ) )      // ← emitted from the raw text
+...
+if (_scrml_result instanceof Response) return _scrml_result;      // ← never reaches the redact
+const _scrml_resp_body = JSON.stringify(_scrml_protect_redact(_scrml_result) ?? null);
+```
+
+So a raw egress inside an `!{}` arm was a **live, unredacted egress the tree could not
+see** — in THE canonical scrml failure idiom. Same for a `?{}` and for a call edge
+inside an arm (measured: an arm-hidden `?{}` produced no `I-PROTECT-STRIP-001` at all,
+and an arm-hidden call produced `W-DEAD-FUNCTION` on its callee).
+
+### THE FIX, and why it is not the form dpa-029 Q1 rejected
+
+The escape-hatch node's own `raw` field is asked what the opaque region COULD hold:
+
+| question | answer | effect |
+|---|---|---|
+| could it hold a `?{}`? (`/\?\s*\{/`) | the QUERY half is unknown | `truncated` — the body fails CLOSED outright, because the gate's whole predicate rests on resolving the query |
+| could it hold a raw egress? (`Response` in any member-chain spelling · the full §23.2.4a `_`+N`=`+`{` opener grammar · `asIs`) | an ordinary egress kind | resolved by the SAME co-occurrence rule as `_{}` / `Response` / `asIs` |
+| what call edges does it hide? (`name(`) | recovered as candidate edges | a recovered name that declares no function in this file contributes nothing |
+
+**Why testing this string is within the ruling, not against it.** dpa-029 Q1 rejected
+scanning the function's SOURCE SLICE — "asking the text a question the tree already
+answered" — and all four measured defects of that form followed from a better oracle
+being available and ignored. Here there is no better oracle: **the tree's answer for
+this node IS a string, by construction.** That is the same standing `annotationIsAsIs`
+already has in this file, justified in its own comment as "the field is the tree's own
+answer (invariant 55)". The test is used ONLY as an over-approximation of what the
+opaque region could hold, never as the primary detector for anything the tree does
+answer, and every error it makes is an over-report — the fail-CLOSED direction.
+
+Two consequences, stated rather than hidden, both now in the source docblock:
+- a `Response` / `asIs` token inside a COMMENT or string literal within the unparsed
+  region over-reports. That was defect (3) of the old whole-slice scan; here the surface
+  is ONE unparsed expression rather than a whole function body, and an over-report
+  cannot ship a secret.
+- a constructor whose NAME is not in the text (`globalThis["Resp" + "onse"]`)
+  under-reports — the same residual as the tree path's bound (1). Carried, not
+  introduced.
+
+⚑ **This is the one judgement in round 5 that touches a ratified ruling's reasoning
+rather than only its scope. It is flagged for the PA to confirm or overturn.** The
+alternative the brief literally specified (`truncated = true` on every escape-hatch) was
+implemented and MEASURED first — see below — and it is not shippable.
+
+### WHY NOT the literal brief — measured, both alternatives
+
+| treatment | closes the 3 reproducers? | corpus sources that gain `E-PROTECT-004` |
+|---|---|---|
+| **(A)** every escape-hatch ⇒ `truncated` (the brief's literal text) | yes | **22 of 1912** — all 21 `examples/23-trucking-dispatch/*` plus `samples/login.scrml` |
+| **(B)** every escape-hatch ⇒ an unanalyzable EGRESS kind | yes | **1** — `samples/login.scrml`, i.e. every `!{}` in a protect-reachable set |
+| **(F)** ask the raw what it could hold — **LANDED** | yes | **0** |
+
+(A) build-blocks 21 adopter files on nothing worse than a C-style `for` header, and does
+it with the depth-cap message ("reduce the expression nesting"), which is factually
+wrong for that cause. (B) build-blocks the canonical `!{}` idiom — and it is **not
+avoidable by the adopter**: measured, EVERY arm-body form escape-hatches, including
+`| AuthError e -> not`. A gate an adopter cannot satisfy is not a safety property.
+
+### The escape-hatch CORPUS MEASUREMENT (owed by the brief)
+
+Instrumented walk, `examples,samples,conformance,stdlib,benchmarks` recursive:
+
+```
+sources enumerated : 1912
+sources with >=1 escape-hatch node reached by the §14.8.9 walk : 22   (ALL 22 protect-active)
+escape-hatch nodes : 59
+by nativeKind      : ParseError 30 · SkippedExpr 29
+```
+
+Every one of the 59 is either a C-style `for` header (`SkippedExpr`) with its `let i = 0`
+init (`ParseError`), or a benign `!{}` arm. **0 of 22** sources have an escape-hatch text
+that could hold an egress; **0 of 22** could hold a `?{}`. Hence the 0-source blast
+radius above. The 22 (21 of them one adopter example) are listed in the round-5 census
+output.
+
+### The diagnostic now names the RIGHT cause
+
+`truncated` had ONE hard-coded resolution sentence — "reduce the expression nesting" —
+which is the remedy for the depth cap and the wrong instruction for an unparsed
+expression. The two reasons now carry their own kind + resolution
+(`TRUNCATED_EGRESS_KIND_DEPTH` / `TRUNCATED_EGRESS_KIND_UNPARSED`), threaded to the
+message through a new `resolution` field on the detection. Both are pinned two-sidedly:
+the unparsed case asserts the parse remedy and asserts the nesting remedy is ABSENT, and
+the depth-cap case asserts the reverse.
+
+### Owed tests — landed, 17 of them, and their bite is measured
+
+- 6 RED — the unparsed-expression egress shapes above;
+- 4 RED — a raw egress hidden in an `!{}` arm (`Response`, member-chain `Response`,
+  a level-1 `_={}=` foreign block, an `asIs` binding);
+- 1 RED — a protected `?{}` hidden in an arm ⇒ fails the body CLOSED, message asserted;
+- 1 RED — a call edge hidden in an arm, recovered, so the SELECT becomes reachable;
+- 5 GREEN — the C-style `for` header, the benign `!{}` arm, an unparsed expression in a
+  body whose SELECT projects no protected column, an `import()` expression, and the
+  depth-cap message staying itself. Every green one asserts anti-vacuity (no
+  `E-SCOPE-001`, `I-PROTECT-STRIP-001` present, `_scrml_protect_redact` emitted).
+
+**Two-sided bite, run:** against the pre-fix collector those 17 are **5 pass / 12 fail**;
+against the fix, **17 pass / 0 fail**. The 5 that pass on both sides are the green half —
+deliberately, they are the guard against over-firing.
+
+`g-sql-row-protect-leak.test.js` 118 → **135 pass / 0 fail**.
+`bun conformance/run.ts` → **889/889**.
+Corpus `E-PROTECT-004` population **unchanged at 7 sources**, all of them this branch's
+own conformance cases.
+
+### ⚑ FILED, NOT FIXED — a silent miscompile, REPRODUCED (not relayed)
+
+`1n`, `|>` and `-2 ** 2` escape-hatch and emit **syntactically invalid server JS** that
+passes `validateEmit: true` with **zero errors**. Verified independently, on a
+NON-protect program so §14.8.9 is out of the picture:
+
+```
+[bigint]   errors=[]  serverJs=SYNTAX-ERROR: Unexpected token (38:51)
+[pipeline] errors=[]  serverJs=SYNTAX-ERROR: Unexpected token (38:31)
+[exponent] errors=[]  serverJs=SYNTAX-ERROR: Unexpected token (38:47)
+[control]  errors=[]  serverJs=PARSES
+```
+
+Not a §14.8.9 leak — the bundle will not parse — but a silent miscompile, and
+`validateEmit` is not catching it. **For the PA to file.**

@@ -1861,9 +1861,7 @@ export function generateServerJs(
         ? `E-PROTECT-004: server function \`${_fnName}\` reaches ${_leak.egressKind}. The app declares ` +
           `\`protect=\` columns, and §14.8.9 admits a protected-origin column only through an egress the ` +
           `compiler can redact — a body it cannot walk in full is not such an egress, so the gate fails ` +
-          `CLOSED here rather than passing an unexamined body. Resolution: reduce the expression nesting in ` +
-          `this function (extract sub-expressions into named bindings) so the structural analysis can reach ` +
-          `the whole body.`
+          `CLOSED here rather than passing an unexamined body. ${_leak.resolution ?? ""}`
         : `E-PROTECT-004: server function \`${_fnName}\` ` +
           (_leak.queryVia
             ? `reaches both a protected (\`protect=\`) column selected in \`${_leak.query}\` and `
