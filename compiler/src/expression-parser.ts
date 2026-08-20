@@ -2771,9 +2771,17 @@ export function esTreeToExprNode(
         // runtime enum-tag string the store is keyed on (`_scrml_messages_register`
         // keys on `error.tag` = "Required"). Without this the key leaked as the
         // literal placeholder and every Level-2 registered-message lookup missed.
+        // A non-computed key is an Identifier (`.name`) or a Literal (`.value`).
+        // Coerce a Literal value to a string: a NUMERIC key (`{ 0: x }`) parses as
+        // `keyNode.value === 0` (a number), and a bare number leaks downstream to
+        // emitProp — whose `typeof key === "string"` guard fails and routes it into
+        // emitExpr as if it were an ExprNode → E-CODEGEN-INVALID-LOGIC. Stringifying
+        // here lets it flow through emitObjectKey (emit-expr.ts): "0" re-emits bare
+        // (valid), "1.5" re-quotes. The quoted form (`{ "0": x }`) already worked
+        // because its value is the string "0".
         let rawKeyName = computed
           ? null
-          : (keyNode.name as string ?? keyNode.value as string ?? "");
+          : ((keyNode.name as string) ?? (keyNode.value != null ? String(keyNode.value) : ""));
         if (
           typeof rawKeyName === "string" &&
           rawKeyName.startsWith("__scrml_bare_variant_") &&
