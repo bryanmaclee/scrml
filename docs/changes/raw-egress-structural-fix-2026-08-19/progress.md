@@ -366,16 +366,22 @@ compiling all three spellings:
 
 | spelling | `origin/main` | this branch |
 |---|---|---|
-| `let R = Response` | **E-SCOPE-001 — does not compile** | silent (leak) |
+| `let R = Response` | silent | silent |
 | `let R = globalThis.Response` | silent | silent |
 | `let k = "Response"; globalThis[k]` | silent | silent |
 
-So the CLASS carries forward, but for the one spelling the paragraph named it is a
-**WIDENING**: this branch adds `Response` to `LOGIC_SCOPE_GLOBAL_ALLOWLIST` for
-§40.3.5, which is what makes that program compile at all. The residual paragraph in
-`protect-egress.ts` is rewritten as three numbered bounds with that parity table
-stated in words, and pinned by a test asserting BOTH that the gate is silent AND
-that E-SCOPE-001 no longer fires.
+> **CORRECTED at round 5.** This table originally recorded `let R = Response` as
+> **"E-SCOPE-001 — does not compile"** on `main`, and the round-3/4 text built a
+> WIDENING claim on it. Re-measured at S355 against a COMPLETE extracted
+> `origin/main` tree (`git archive origin/main` + the real `node_modules`): it
+> compiles on `main` with no `E-SCOPE-001`, because `Response` / `Request` /
+> `Headers` are in `LOGIC_SCOPE_GLOBAL_ALLOWLIST` **on main** (#590, S355) and this
+> branch's `type-system.ts` diff is comment-only. The whole class is a plain
+> CARRY-FORWARD; this branch widens nothing and allowlists nothing.
+
+The residual paragraph in `protect-egress.ts` is rewritten as three numbered bounds
+with that parity table stated in words, and pinned by a test asserting BOTH that the
+gate is silent AND that E-SCOPE-001 does not fire (on either tree).
 
 ### M4 — the passthrough guard on ONE arm only. FIXED.
 
@@ -481,7 +487,9 @@ the full pre-commit hook ran clean on all five commits this round.
    `obj.method()` all still slip the gate. Closing them needs the name resolver /
    constant propagation. Each is pinned by a passing `RESIDUAL (documented)` test so
    closing one turns a test red and forces the bound paragraph to move with it.
-   `let R = Response` is a WIDENING vs `main`, not a carry-forward.
+   **CORRECTED at round 5:** `let R = Response` is a CARRY-FORWARD, not a widening —
+   it compiles on `origin/main` with no `E-SCOPE-001` (measured on an extracted
+   tree; main already allowlists `Response`/`Request`/`Headers` via #590/S355).
 2. **The value-scoped `reveal` EXIT at a raw egress is still absent.** §14.8.9 admits
    a protected column only when its descriptor bears a `reveal` stamp AT THE SINK,
    and a raw egress has no compiler-emitted serializer to read it — so the gate is a
@@ -1164,3 +1172,59 @@ NON-protect program so §14.8.9 is out of the picture:
 
 Not a §14.8.9 leak — the bundle will not parse — but a silent miscompile, and
 `validateEmit` is not catching it. **For the PA to file.**
+
+## Item 4 — the "WIDENING" claim was false in FIVE loci. CORRECTED.
+
+The claim, as it stood in round 4:
+
+> *"on `origin/main` `let R = Response` fails `E-SCOPE-001` … This branch allowlists
+> `Response` … this is a WIDENING of the residual, not a carry-forward."*
+
+**Measured, not relayed.** A COMPLETE `origin/main` tree was extracted with
+`git archive origin/main | tar -x` plus a symlink to the real `node_modules` (a partial
+extraction with no `stdlib/` makes every `scrml:` import fail and reads exactly like a
+regression — that is what produced the earlier wrong number). Against that tree:
+
+```
+[main:let-R-eq-Response]           E-SCOPE-001=silent  E-PROTECT-004=silent
+[main:globalThis-bracket-key]      E-SCOPE-001=silent  E-PROTECT-004=silent
+[main:let-R-eq-globalThis-Response] E-SCOPE-001=silent  E-PROTECT-004=silent
+```
+
+All three spellings compile on `main` and are silent there. `E-PROTECT-004` is absent on
+both trees. `"Response", "Request", "Headers",` is in `LOGIC_SCOPE_GLOBAL_ALLOWLIST`
+**on main** (#590 / S355 — confirmed with `git show origin/main:compiler/src/type-system.ts`),
+and this branch's `type-system.ts` diff is **comment-only**. The residual is a plain
+**carry-forward**; this branch widens nothing and allowlists nothing.
+
+Independently confirmed by compiling each host HTTP name on this tree:
+
+```
+Response   E-SCOPE-001=silent      Request    E-SCOPE-001=silent
+Headers    E-SCOPE-001=silent      FormData   E-SCOPE-001=FIRES
+Blob       E-SCOPE-001=FIRES       File       E-SCOPE-001=FIRES
+```
+
+Corrected in all five places the claim sat (the brief named four; `progress.md` stated
+it twice, once as a parity TABLE ROW and once in the residual list, so both are fixed):
+
+1. `compiler/src/codegen/protect-egress.ts` — residual bound (1). Now records that two
+   earlier revisions of this comment got the parity wrong in BOTH directions, and that
+   all three spellings are carry-forwards.
+2. `compiler/tests/integration/g-sql-row-protect-leak.test.js` — the block comment AND
+   the test title (`"RESIDUAL (documented, WIDENED by this branch)"` →
+   `"RESIDUAL (documented, carry-forward)"`), plus the inline note on the
+   `expect(...E-SCOPE-001).toBe(false)` assertion, which was pinning a carry-forward
+   while claiming to pin a widening.
+3. `docs/known-gaps.md` — the `**One is a WIDENING**` sentence. (This is the one
+   known-gaps edit this round makes.)
+4. `docs/changes/…/progress.md` — the round-3 parity table row, now `silent | silent`
+   with a `CORRECTED at round 5` note naming the extraction defect that produced the
+   wrong reading.
+5. `docs/changes/…/progress.md` — the residual-list restatement of the same claim.
+
+**Method note, since this is the third measurement of the same fact and the second wrong
+one:** a base-tree claim is only as good as the base tree. Both wrong readings came from
+comparing against something that was not a complete `origin/main` checkout. Every
+main-side number in this round was taken from `git archive origin/main` + real
+`node_modules`, and the probe script that took them is reproducible.

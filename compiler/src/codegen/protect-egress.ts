@@ -752,15 +752,19 @@ export interface RawEgressFacts {
  *      bound, and a concatenation of literals does not meet it.
  *
  *      Parity with the source-text form this replaces, stated precisely because
- *      an earlier revision of this comment overstated it: `let R =
- *      globalThis.Response` and `globalThis[k]` are silent on `origin/main` too
- *      — carried forward. `let R = Response` is NOT: on `origin/main` that
- *      program fails `E-SCOPE-001` (`Response` is absent from
- *      `LOGIC_SCOPE_GLOBAL_ALLOWLIST` there) and does not compile at all. This
- *      branch allowlists `Response` for §40.3.5, which makes that spelling
- *      reachable. For that one spelling this is a WIDENING of the residual, not
- *      a carry-forward, and it is pinned as such in
- *      `g-sql-row-protect-leak.test.js`.
+ *      two earlier revisions of this comment got it wrong in BOTH directions:
+ *      all three spellings — `let R = Response`, `let R = globalThis.Response`
+ *      and `globalThis[k]` — are silent on `origin/main` too, so the residual is
+ *      a plain CARRY-FORWARD and this branch widens nothing.
+ *
+ *      The claim this replaces said `let R = Response` fails `E-SCOPE-001` on
+ *      `origin/main` and so was a WIDENING. Measured on an extracted
+ *      `origin/main` tree (`git archive` + the real `node_modules`): that source
+ *      compiles there with NO `E-SCOPE-001`, and `E-PROTECT-004` is absent on
+ *      both trees. `Response` / `Request` / `Headers` are in
+ *      `LOGIC_SCOPE_GLOBAL_ALLOWLIST` ON MAIN (#590, S355); this branch's
+ *      `type-system.ts` diff is comment-only and allowlists nothing. Each
+ *      spelling is pinned in `g-sql-row-protect-leak.test.js`.
  *
  *   2. **The call graph is INTRA-FILE and by BARE-IDENTIFIER callee.** The
  *      cross-function shape itself is CLOSED (see
