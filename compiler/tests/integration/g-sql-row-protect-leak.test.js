@@ -1140,6 +1140,212 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
 });
 
 // ---------------------------------------------------------------------------
+// §14.8.9 raw-egress — an UNPARSEABLE expression silently disarmed the gate
+// (S355, round 5).
+//
+// `expression-parser.ts` returns `{ kind: "escape-hatch", nativeKind, raw }` for
+// any expression it cannot turn into a tree, and `ast-builder.js` does the same
+// for every expression `shouldSkipExprParse` declines. THE NODE CARRIES THE
+// EXPRESSION AS A STRING. The structural walk therefore found no `kind:"new"`,
+// no `kind:"foreign"`, no `kind:"sql"` and no call edges inside it — and read
+// every one of those as "no" when the truth was UNKNOWN.
+//
+// This is the same class as the depth cap (fixed via `truncated`); the
+// escape-hatch path had no equivalent. The source-text detector this rewrite
+// replaced never needed a parse, which is why `origin/main` catches all of these.
+//
+// The fix asks the escape-hatch's OWN `raw` field what the opaque region could
+// hold. That is not the source-SLICE scan dpa-029 Q1 rejected — there is no
+// better oracle here, because the tree's answer for this node IS a string (same
+// standing as `annotationIsAsIs`, which token-tests the `typeAnnotation` field).
+// Every error the text test makes is an over-report, which is fail-CLOSED.
+//
+// provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1); the hole and this
+// resolution are S355 (round 5).
+// ---------------------------------------------------------------------------
+describe("§14.8.9 raw-egress — an escape-hatch is UNKNOWN, not `no` (S355)", () => {
+  const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
+  const fires = (result) => codesOf(result).some((d) => d.code === "E-PROTECT-004");
+  const e004 = (result) => codesOf(result).find((d) => d.code === "E-PROTECT-004");
+  const serverJsOf = (result) =>
+    (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
+
+  const inBody = (stmts) =>
+    `      export server function getUser(id) {\n` +
+    `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+    `        ${stmts}\n` +
+    `      }`;
+
+  // --- THE RED HALF: plain JS whose only offence is a token acorn rejects ---
+  //
+  // Every one of these emits VALID server JS, compiled at exit 0 with NO
+  // E-PROTECT-004 on the round-4 head, and fires on `origin/main`. The second is
+  // the canonical leak, silenced by an incidental `~` in an unrelated argument.
+  const unparsedEgressShapes = {
+    "a bitwise `~` in a ternary test": `return new Response(~u ? JSON.stringify(u) : '')`,
+    "a bitwise `~` in the STATUS — the canonical leak, silenced incidentally":
+      `return new Response(JSON.stringify(u), { status: 200 + ~0 + 1 })`,
+    "`~~x`, the standard truncation idiom": `return new Response(JSON.stringify(u).slice(~~0))`,
+    "a BigInt literal": `return new Response(JSON.stringify(u), { status: 200 + 1n })`,
+    "a pipeline operator": `return new Response(u |> JSON.stringify)`,
+    "a unary base of `**`": `return new Response(JSON.stringify(u), { status: -2 ** 2 })`,
+  };
+  for (const [label, ret] of Object.entries(unparsedEgressShapes)) {
+    test(`FIRES — an unparsed expression that could hold a Response: ${label}`, () => {
+      const { result } = compileSource(protectProgram(inBody(ret)));
+      expect(fires(result)).toBe(true);
+    });
+  }
+
+  // The `!{}` error arm (§17) — THE canonical scrml failure idiom — reaches the
+  // walk ONLY as an escape-hatch: the arm object carries `handler` as a STRING
+  // and `handlerExpr` as an escape-hatch node, and no structured form of the arm
+  // body exists anywhere in the tree. Its body is then emitted VERBATIM into the
+  // server handler, ahead of the `instanceof Response` passthrough — so a raw
+  // egress inside an arm is a live, unredacted leak the tree cannot see.
+  const armProgram = (arm) =>
+    `      function authenticate(u) {\n` +
+    `        let row = ?{\`SELECT * FROM users WHERE id = \${u}\`}.get()\n` +
+    `        return row\n` +
+    `      }\n` +
+    `      export server function getUser(id) {\n` +
+    `        let result = authenticate(id) !{\n` +
+    `          | AuthError e -> {\n` +
+    `            ${arm}\n` +
+    `          }\n` +
+    `        }\n` +
+    `        return { ok: true }\n` +
+    `      }`;
+
+  const armEgressShapes = {
+    "a manual `Response`": `return new Response(JSON.stringify(result))`,
+    "a member-chain `Response`": `return new globalThis.Response(JSON.stringify(result))`,
+    "a level-1 `_={}=` foreign block": `_={ leak(result) }=`,
+    "an `asIs` binding": `let v:asIs = result\n            return v`,
+  };
+  for (const [label, arm] of Object.entries(armEgressShapes)) {
+    test(`FIRES — a raw egress hidden in an \`!{}\` arm: ${label}`, () => {
+      const { result } = compileSource(protectProgram(armProgram(arm)));
+      expect(fires(result)).toBe(true);
+    });
+  }
+
+  // A `?{}` inside an unparsed region makes the QUERY half unknown, not "no" —
+  // and the gate's whole predicate rests on the query. That one fails the body
+  // CLOSED outright, with its OWN resolution sentence.
+  test("FIRES — a protected `?{}` hidden inside an `!{}` arm fails the body CLOSED", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let result = loadIt(id) !{\n` +
+      `          | AuthError e -> {\n` +
+      `            let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `            return new Response(JSON.stringify(u))\n` +
+      `          }\n` +
+      `        }\n` +
+      `        return { ok: true }\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+    const d = e004(result);
+    // The message names the RIGHT cause and the RIGHT remedy. The depth-cap
+    // resolution ("reduce the expression nesting") would send the author to fix
+    // something that is not broken — a diagnostic that misnames its root cause
+    // is itself a defect.
+    expect(d.message).toContain("has no tree form");
+    expect(d.message).toContain("move the `?{}` out of that expression");
+    expect(d.message).not.toContain("reduce the expression nesting");
+  });
+
+  // CALL EDGES are the third invisible half. Here the protected SELECT is
+  // reachable ONLY through a call the opaque region hides; without edge recovery
+  // no query resolves and the gate stays silent.
+  test("FIRES — a call edge hidden in an `!{}` arm is recovered, so the SELECT is reachable", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      function doThing(id) { return id }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let result = doThing(id) !{\n` +
+      `          | AuthError e -> {\n` +
+      `            return new Response(JSON.stringify(loadUser(id)))\n` +
+      `          }\n` +
+      `        }\n` +
+      `        return { ok: true }\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+  });
+
+  // --- THE GREEN HALF: the boundary, and it is the load-bearing half --------
+  //
+  // Treating EVERY escape-hatch as an unconditional fire was measured first and
+  // rejected: it build-blocks 22 of the 1912 corpus sources (all 21
+  // `examples/23-trucking-dispatch/` files plus `samples/login.scrml`) on nothing
+  // worse than a C-style `for` header, and it does so with the depth-cap message,
+  // which is factually wrong for that cause. A gate that cannot be satisfied is
+  // not a safety property.
+
+  test("SILENT — a C-style `for` header holds neither an egress nor a `?{}`", () => {
+    const { result } = compileSource(protectProgram(inBody(
+      `let out = ""\n` +
+      `        for (let i = 0; i < 3; i = i + 1) {\n` +
+      `          out = out + u.name\n` +
+      `        }\n` +
+      `        return { name: out }`,
+    )));
+    expect(fires(result)).toBe(false);
+    // anti-vacuity: the fixture really compiled, and the row really went out the
+    // redacting path
+    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    expect(codesOf(result).some((d) => d.code === "I-PROTECT-STRIP-001")).toBe(true);
+    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+  });
+
+  test("SILENT — a benign `!{}` arm (the canonical failure idiom) is not build-blocked", () => {
+    const { result } = compileSource(protectProgram(armProgram(
+      `log(e.message)\n            return not`,
+    )));
+    expect(fires(result)).toBe(false);
+    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    expect(codesOf(result).some((d) => d.code === "I-PROTECT-STRIP-001")).toBe(true);
+    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+  });
+
+  test("SILENT — an unparsed expression in a body whose SELECT projects no protected column", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let n = ?{\`SELECT id, name FROM users WHERE id = \${id}\`}.get()\n` +
+      `        return new Response(JSON.stringify(n.name), { status: 200 + ~0 + 1 })\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(false);
+    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    expect(serverJsOf(result).length).toBeGreaterThan(0);
+  });
+
+  test("SILENT — an `import()` expression carries no egress and no `?{}`", () => {
+    const { result } = compileSource(protectProgram(inBody(
+      `let m = import("./x.js")\n        return { name: u.name }`,
+    )));
+    expect(fires(result)).toBe(false);
+    expect(codesOf(result).some((d) => d.code === "I-PROTECT-STRIP-001")).toBe(true);
+  });
+
+  // The depth cap keeps its OWN message. Two truncation reasons, two remedies.
+  test("the depth-cap truncation still names the NESTING remedy, not the parse one", () => {
+    const deep = "[".repeat(300) + "]".repeat(300);
+    const { result } = compileSource(protectProgram(inBody(
+      `let big = ${deep}\n        return new Response(JSON.stringify(u))`,
+    )));
+    expect(fires(result)).toBe(true);
+    const d = e004(result);
+    expect(d.message).toContain("reduce the expression nesting");
+    expect(d.message).not.toContain("has no tree form");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // LAYER 3b — channel `broadcast()` (§38) + SSE `server function*` (§37) egress
 // sinks. These are ADDITIONAL compiler-emitted client-egress serializers; the
 // floor redacts at them identically to the server-fn return.

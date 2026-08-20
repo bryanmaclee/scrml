@@ -528,6 +528,115 @@ function annotationIsAsIs(annotation: unknown): boolean {
 }
 
 /**
+ * An `escape-hatch` node is an expression the parser could NOT turn into a tree.
+ * `expression-parser.ts` emits one whenever acorn rejects the preprocessed
+ * expression (`nativeKind: "ParseError"`), whenever the ESTree→ExprNode
+ * conversion throws (`"ConversionError"`), for a malformed `?{}` placeholder
+ * (`"SqlPlaceholderError"`), for any ESTree node type the converter does not
+ * handle (`nativeKind` = that type), and `ast-builder.js` emits one for every
+ * expression `shouldSkipExprParse` declines (an HTML fragment, a leading-dot
+ * chain continuation, a C-style `for` header — `nativeKind: "SkippedExpr"`).
+ *
+ * **The node carries the expression as SOURCE TEXT on `raw`, and nothing else.**
+ * That is why it was a hole: the structural walk found no `kind:"new"`, no
+ * `kind:"foreign"`, no `kind:"sql"` and no call edges inside it, and read every
+ * one of those as "NO" when the truth was "UNKNOWN". Three executed reproducers,
+ * every one ordinary JS whose only offence is a bitwise `~` (which scrml's
+ * expression preprocessing hands to acorn in a form acorn rejects), every one
+ * emitting VALID server JS, every one shipping the secret before this fix and
+ * firing on `origin/main`:
+ *
+ * ```scrml
+ * return new Response(~u ? JSON.stringify(u) : '')
+ * return new Response(JSON.stringify(u), { status: 200 + ~0 + 1 })
+ * return new Response(JSON.stringify(u).slice(~~0))
+ * ```
+ *
+ * The blindness is NOT confined to the egress side. Measured on this tree, an
+ * `!{}` error arm (§17 — THE canonical scrml failure idiom) reaches this walk
+ * ONLY as an escape-hatch: the arm object carries `handler` as a string and
+ * `handlerExpr` as an escape-hatch node, and there is no structured form of the
+ * arm body anywhere in the tree. Its body is then emitted VERBATIM into the
+ * server handler, ahead of the `instanceof Response` passthrough — so a
+ * `return new Response(JSON.stringify(row))` inside an arm is a live, unredacted
+ * egress that the tree cannot see. A `?{}` and a call edge inside an arm are
+ * equally invisible.
+ *
+ * **WHY THIS TESTS A STRING, AND WHY THAT IS NOT THE FORM dpa-029 Q1 REJECTED.**
+ * The ruling rejected scanning the function's SOURCE SLICE — "asking the text a
+ * question the tree already answered" — and the four measured defects of that
+ * form were all consequences of a better oracle being available and ignored.
+ * Here there is no better oracle: the tree's answer for this node IS a string,
+ * by construction. This is the same standing as `annotationIsAsIs`, which token-
+ * tests the `typeAnnotation` FIELD for the same reason (invariant 55 — the field
+ * is the tree's own answer). The test is used ONLY as an over-approximation of
+ * what the opaque region COULD hold; every one of its errors is an over-report,
+ * which is the fail-CLOSED direction, and it is never the primary detector for
+ * anything the tree does answer.
+ *
+ * Two consequences of it being an over-approximation, both stated rather than
+ * hidden:
+ *   - a `Response` / `asIs` token inside a COMMENT or a string literal within
+ *     the unparsed region over-reports. That was defect (3) of the old whole-
+ *     slice scan; here the surface is ONE unparsed expression rather than a
+ *     whole function body, and an over-report cannot ship a secret.
+ *   - a constructor whose NAME is not in the text (`globalThis["Resp" + "onse"]`)
+ *     under-reports. That is the same residual as the tree path's bound (1): a
+ *     name whose value is not present cannot be resolved without the name
+ *     resolver. Carried, not introduced.
+ *
+ * Measured over the 1912-source corpus: 59 escape-hatch nodes across 22 sources
+ * (all 22 protect-active), every one either a C-style `for` header + its `let`
+ * init or a benign `!{}` arm. NONE of their texts could hold an egress and NONE
+ * could hold a `?{}`, so this rule adds ZERO diagnostics to the corpus while
+ * closing all three reproducers.
+ *
+ * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1) — the escape-hatch
+ * hole and this resolution are S355 (round 5).
+ */
+function escapeHatchSurface(raw: unknown): {
+  /** The text could hold a `?{}` — the QUERY half is unknown, not "no". */
+  couldHoldSql: boolean;
+  /** The text could hold a §23 / §40 / §14.1.1 raw egress. */
+  couldHoldEgress: boolean;
+  /** Bare-identifier callee names recovered from the text, so the intra-file
+   *  call graph does not silently lose the edges the region hides. */
+  calls: string[];
+} {
+  if (typeof raw !== "string" || raw === "") {
+    // No text to test is the UNKNOWN answer, and unknown answers closed.
+    return { couldHoldSql: true, couldHoldEgress: true, calls: [] };
+  }
+  const calls = new Set<string>();
+  for (const m of raw.matchAll(ESCAPE_HATCH_CALL_RE)) calls.add(m[1]);
+  return {
+    couldHoldSql: ESCAPE_HATCH_SQL_RE.test(raw),
+    couldHoldEgress:
+      ESCAPE_HATCH_RESPONSE_RE.test(raw) ||
+      ESCAPE_HATCH_FOREIGN_RE.test(raw) ||
+      annotationIsAsIs(raw),
+    calls: [...calls],
+  };
+}
+
+/** `?{` — a `?{}` query. The tokenizer may space the two apart. */
+const ESCAPE_HATCH_SQL_RE = /\?\s*\{/;
+/** The `Response` identifier, in ANY member-chain spelling. */
+const ESCAPE_HATCH_RESPONSE_RE = /(^|[^A-Za-z0-9_$])Response([^A-Za-z0-9_$]|$)/;
+/** The §23.2.4a foreign opener grammar: `_` + N `=` + `{`, tokenizer-spaced. */
+const ESCAPE_HATCH_FOREIGN_RE = /(^|[^A-Za-z0-9_$])_\s*=*\s*\{/;
+/** `name(` — a call. Every match is a CANDIDATE edge; a name that declares no
+ *  function in this file contributes nothing (see `indicesByName`). */
+const ESCAPE_HATCH_CALL_RE = /([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+
+/** A short, quotable slice of an unparsed expression, for the diagnostic. */
+function escapeHatchSnippet(raw: unknown): string {
+  const t = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ") : "";
+  if (t === "") return "<empty>";
+  return t.length > 60 ? t.slice(0, 60) + "…" : t;
+}
+
+/**
  * The structural walk's depth cap.
  *
  * This is a RESOURCE bound (JS call-stack depth), NOT a correctness one:
@@ -566,9 +675,20 @@ export interface RawEgressFacts {
   /** Bare-identifier callee names invoked from this body — the intra-file call
    *  graph's out-edges. */
   calls: string[];
-  /** The walk hit `RAW_EGRESS_MAX_DEPTH`: every field above is UNKNOWN rather
-   *  than "no", and the gate fails CLOSED on this body. */
+  /** An `escape-hatch` node whose SOURCE TEXT could hold a raw egress — the
+   *  unparsed expression, quotable, or null. An ordinary egress kind: it is
+   *  resolved by the same co-occurrence rule as the three above. */
+  unanalyzableEgress: string | null;
+  /** The walk hit `RAW_EGRESS_MAX_DEPTH`, or met an `escape-hatch` whose source
+   *  text could hold a `?{}`: every field above is UNKNOWN rather than "no", and
+   *  the gate fails CLOSED on this body. */
   truncated: boolean;
+  /** WHY `truncated` is set, as the diagnostic's egress-kind phrase and its
+   *  resolution sentence. The two truncation reasons have different remedies, so
+   *  a single hard-coded message would be telling the author to fix the wrong
+   *  thing. Null when `truncated` is false. */
+  truncatedKind: string | null;
+  truncatedResolution: string | null;
 }
 
 /**
@@ -699,13 +819,18 @@ export function collectRawEgressFacts(
   ctx: ProtectContext,
 ): RawEgressFacts {
   if (!fnNode || typeof fnNode !== "object") {
-    return { protectedQuery: null, sawForeign: false, sawResponse: false, sawAsIs: false, calls: [], truncated: false };
+    return {
+      protectedQuery: null, sawForeign: false, sawResponse: false, sawAsIs: false,
+      unanalyzableEgress: null, calls: [], truncated: false,
+      truncatedKind: null, truncatedResolution: null,
+    };
   }
 
   let protectedQuery: string | null = null;
   let sawForeign = false;
   let sawResponse = false;
   let sawAsIs = false;
+  let unanalyzableEgress: string | null = null;
   const calls = new Set<string>();
 
   // Generic structural walk — the `astReadsCurrentUserAmbient` precedent
@@ -729,6 +854,8 @@ export function collectRawEgressFacts(
   // array literals fired E-PROTECT-004 and under 255 did NOT — compiling at
   // exit 0, zero diagnostics, secret shipped.
   let truncated = false;
+  let truncatedKind: string | null = null;
+  let truncatedResolution: string | null = null;
   const seen = new WeakSet<object>();
   // `isReturnValue` is TRUE for exactly one node: the `exprNode` a `return-stmt`
   // holds, visited explicitly from the `return-stmt` branch below. Every other
@@ -739,6 +866,8 @@ export function collectRawEgressFacts(
     if (!node || typeof node !== "object") return;
     if (depth > RAW_EGRESS_MAX_DEPTH) {
       truncated = true;
+      truncatedKind ??= TRUNCATED_EGRESS_KIND_DEPTH;
+      truncatedResolution ??= TRUNCATED_RESOLUTION_DEPTH;
       return;
     }
     if (seen.has(node as object)) return;
@@ -762,6 +891,30 @@ export function collectRawEgressFacts(
 
     // --- egress kind 1: a `_{}` foreign-code block (§23) --------------------
     // Node kind, so EVERY opener level (`_{`, `_={`, `_=={`, …) is one answer.
+    // --- egress kind 0: an `escape-hatch` — an expression with no tree -----
+    // The node carries SOURCE TEXT and nothing else, so "no egress here", "no
+    // protected query here" and "no call edges here" are all UNKNOWN. See
+    // `escapeHatchSurface` for what the text is asked and why asking it is not
+    // the source-slice scan dpa-029 Q1 rejected.
+    if (n.kind === "escape-hatch") {
+      const surface = escapeHatchSurface(n.raw);
+      // A `?{}` the walk cannot resolve makes the QUERY half unknown, and the
+      // gate's whole predicate rests on it — so this one fails the body CLOSED
+      // outright rather than waiting for a co-occurrence it cannot compute.
+      if (surface.couldHoldSql) {
+        truncated = true;
+        truncatedKind ??= TRUNCATED_EGRESS_KIND_UNPARSED(escapeHatchSnippet(n.raw));
+        truncatedResolution ??= TRUNCATED_RESOLUTION_UNPARSED;
+      }
+      if (surface.couldHoldEgress && unanalyzableEgress === null) {
+        unanalyzableEgress = escapeHatchSnippet(n.raw);
+      }
+      // Recover the call edges the opaque region hides. A recovered name that
+      // declares no function in this file contributes nothing, so the cost of a
+      // false one is zero and the cost of a missing one is a shipped secret.
+      for (const c of surface.calls) calls.add(c);
+    }
+
     if (n.kind === "foreign") sawForeign = true;
 
     // --- egress kind 2: a manual `Response` (§40) ---------------------------
@@ -823,7 +976,10 @@ export function collectRawEgressFacts(
   };
   visit(fnNode, 0, false);
 
-  return { protectedQuery, sawForeign, sawResponse, sawAsIs, calls: [...calls], truncated };
+  return {
+    protectedQuery, sawForeign, sawResponse, sawAsIs, unanalyzableEgress,
+    calls: [...calls], truncated, truncatedKind, truncatedResolution,
+  };
 }
 
 /**
@@ -835,13 +991,34 @@ function egressKindOf(facts: RawEgressFacts): string | null {
   if (facts.sawForeign) return "a `_{}` foreign-code block (§23)";
   if (facts.sawResponse) return "a manual `Response` / `handle()` body (§40)";
   if (facts.sawAsIs) return "an `asIs`-typed value (§14.1.1)";
+  if (facts.unanalyzableEgress !== null) {
+    return "a raw egress inside an expression the compiler could not parse into a tree (`" +
+      facts.unanalyzableEgress + "`)";
+  }
   return null;
 }
 
-/** The `MAX_DEPTH` message fragment, shared by the truncation detection. */
-const TRUNCATED_EGRESS_KIND =
+/**
+ * The two reasons a body comes back `truncated`, each with the resolution that
+ * actually applies to it. They are NOT interchangeable: telling an author to
+ * "reduce the expression nesting" when the real cause is an expression the
+ * parser could not represent sends them to fix something that is not broken.
+ */
+const TRUNCATED_EGRESS_KIND_DEPTH =
   "a body the compiler could not analyse in full — its nesting exceeds the " +
   `§14.8.9 structural-analysis depth cap (${RAW_EGRESS_MAX_DEPTH} tree levels)`;
+const TRUNCATED_RESOLUTION_DEPTH =
+  "Resolution: reduce the expression nesting in this function (extract " +
+  "sub-expressions into named bindings) so the structural analysis can reach the " +
+  "whole body.";
+const TRUNCATED_EGRESS_KIND_UNPARSED = (snippet: string): string =>
+  "a body the compiler could not analyse in full — the expression `" + snippet +
+  "` has no tree form (the parser fell back to a source-text escape hatch), and a " +
+  "`?{}` inside it cannot be resolved";
+const TRUNCATED_RESOLUTION_UNPARSED =
+  "Resolution: move the `?{}` out of that expression into a named binding, or " +
+  "rewrite the expression into a form the compiler can parse — while it has no " +
+  "tree, the gate cannot see which columns the query projects.";
 
 /**
  * One E-PROTECT-004 detection, resolved against the whole file's function set.
@@ -856,6 +1033,10 @@ export interface ProtectedRawEgressDetection {
   egressKind: string;
   /** Set when the detection is the fail-closed answer for an un-walkable body. */
   truncated?: true;
+  /** The resolution sentence for a `truncated` detection. The two truncation
+   *  reasons — nesting past the depth cap, and an expression with no tree form —
+   *  have different remedies, so the message does not hard-code one. */
+  resolution?: string;
   /** The call path `fn -> … -> <the fn that holds the protected SELECT>`, when
    *  the SELECT is not in `fn`'s own body. */
   queryVia?: string[];
@@ -975,7 +1156,13 @@ export function detectProtectedRawEgressAcrossFns(
     // stopped short of the whole tree, so "no protected query here", "no raw
     // egress here" AND "no call edges here" are all UNKNOWN, not "no".
     if (facts[i].truncated) {
-      out.push({ fn: nodes[i], query: facts[i].protectedQuery, egressKind: TRUNCATED_EGRESS_KIND, truncated: true });
+      out.push({
+        fn: nodes[i],
+        query: facts[i].protectedQuery,
+        egressKind: facts[i].truncatedKind ?? TRUNCATED_EGRESS_KIND_DEPTH,
+        truncated: true,
+        resolution: facts[i].truncatedResolution ?? TRUNCATED_RESOLUTION_DEPTH,
+      });
       continue;
     }
 
