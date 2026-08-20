@@ -1,0 +1,9 @@
+<program>
+
+  <program name="api" route="/api/v1">
+    ${ function handler(req) { return { ok: true } } }
+  </program>
+
+  <p>hi</p>
+
+</program>

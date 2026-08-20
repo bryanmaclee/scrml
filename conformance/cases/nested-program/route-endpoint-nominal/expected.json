@@ -1,0 +1,12 @@
+{
+  "id": "nested-program-route-endpoint-nominal",
+  "description": "§4.12.2 — a nested `<program name= route=>` declares a SERVER ENDPOINT at the given route. That codegen is Nominal/spec-ahead, so the declaration fails closed with E-NESTED-PROGRAM-CONTEXT-NOMINAL and the compiler emits NEITHER a `new Worker(...)` reference NOR a bundle. Pre-fix (S356) `route=` was not implemented at all AND was silently mis-compiled: the extraction pre-pass claimed the program as a §4.12.4 web worker and emitted `new Worker(\"<base>.api.worker.js\")` against a 71-byte stub. So the SPEC's \"declares the nested program as a server endpoint\" was a claim with no compiler behind it, presenting to the author as a client-side worker.",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §4.12.3, §4.12.9",
+  "rationale": "§4.12.2's attribute table gives `route=` as valid in nested position with the semantics \"Declares the nested program as a server endpoint at the given route\" — a shape the §4.12.3 execution-context table does not enumerate, and one nothing implements. §4.12.3 normative (S356) requires the inline-worker context be selected ONLY by `name=` with none of `lang=`/`mode=`/`route=`/`db=`/`port=`, and requires an unimplemented context to emit neither a reference nor a stand-in artifact and to fail closed naming the context.",
+  "expect": {
+    "codes": ["E-NESTED-PROGRAM-CONTEXT-NOMINAL"],
+    "notCodes": ["E-CHANNEL-INSIDE-NESTED-PROGRAM"],
+    "severity": { "E-NESTED-PROGRAM-CONTEXT-NOMINAL": "error" }
+  }
+}

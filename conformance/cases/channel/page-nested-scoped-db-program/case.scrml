@@ -1,0 +1,12 @@
+<program db="postgres://localhost/app">
+
+  <page>
+    <program db="postgres://localhost/analytics">
+      <channel name="page-feed">
+        <items> = []
+      </channel>
+      <p>${@items.length}</p>
+    </program>
+  </page>
+
+</program>

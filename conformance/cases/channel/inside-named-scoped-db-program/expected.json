@@ -1,0 +1,11 @@
+{
+  "id": "channel-inside-named-scoped-db-program",
+  "description": "§4.12.3 + §4.12.6 + §38.1 — a `<channel>` inside a nested `<program name= db=>` SCOPED-DB context is canonical placement and does NOT fire E-CHANNEL-INSIDE-NESTED-PROGRAM. The `name=`-bearing twin of `channel/inside-scoped-db-program`. When E-CHANNEL-INSIDE-NESTED-PROGRAM landed it keyed on the `name=` attribute, on the empirical ground that the codegen extraction pre-pass claimed exactly the `name=`d nested programs. That was true of the compiler and WRONG about the language: §4.12.3's table reads `Scoped DB context | name= (optional), db=`, so `name=` is OPTIONAL on that row, not absent. The `name=`-keyed check therefore refused this LEGAL shape. Corrected S356 — both the extractor and the diagnostic now key on whether the subtree is EXTRACTED, and a scoped-DB context is never extracted whichever way it is spelled.",
+  "language-version": "1.0",
+  "spec": "§4.12.3, §4.12.6, §38.1, §38.2",
+  "rationale": "§4.12.3's execution-context table gives \"Scoped DB context | `name=` (optional), `db=`\" as a type distinct from the inline worker / foreign sidecar / WASM module rows. §38.2 normative (S356): \"The discriminator SHALL be the extraction predicate of §4.12.3, not the presence of `name=`\", and \"A `<channel>` inside a §4.12.6 SCOPED-DB context (`<program db=>`, with or without `name=`) is canonical placement, is not extracted, and SHALL NOT fire this code.\" The subtree stays in the tree, the server mounts the WebSocket route of §38.8, the client dials that same route, and the pair works — so firing here would refuse a program that compiles and runs correctly.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-INSIDE-NESTED-PROGRAM", "E-CHANNEL-OUTSIDE-PROGRAM", "E-CHANNEL-INSIDE-PAGE", "E-NESTED-PROGRAM-CONTEXT-NOMINAL"]
+  }
+}

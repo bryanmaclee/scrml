@@ -1,0 +1,12 @@
+{
+  "id": "channel-page-nested-extracted-program",
+  "description": "§38.1 PRECEDENCE — `<page>` → nested `<program name=\"w\">` → `<channel>`. Two placement conditions hold at once (there is a `<page>` ancestor AND an extracted nested `<program>` ancestor) and exactly ONE code fires: E-CHANNEL-INSIDE-NESTED-PROGRAM. E-CHANNEL-INSIDE-PAGE must NOT fire. This is the S353-bryan ruling, option (b): a nested `<program>` is a FRESH placement scope, so the enclosing `<page>` is invisible to the check. It is also the right diagnostic on the merits — the nested-program code names the reason the declaration cannot be built at all (the subtree is extracted before server emission, so the WebSocket route of §38.8 is never emitted), whereas the `<page>` remedy would send the author to move a declaration out of a `<page>` that is not the problem.",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.2, §4.12.1, §4.12.3",
+  "rationale": "§38.2 normative (S356): \"A nested `<program>` SHALL be a fresh `<channel>` placement scope: an enclosing `<page>` SHALL NOT disqualify a `<channel>` declared inside a nested `<program>` … Concretely: `<page>` → `<program name=\\\"w\\\">` → `<channel>` SHALL emit E-CHANNEL-INSIDE-NESTED-PROGRAM and SHALL NOT emit E-CHANNEL-INSIDE-PAGE.\" §4.12.1 supplies the ground: a nested `<program>` \"SHALL be subject to the same grammar rules as a top-level `<program>`\" and \"SHALL be a separate compilation unit\", so the `<page>` is as invisible to the placement check as the parent's bindings are under §4.12.1 shared-nothing isolation.",
+  "expect": {
+    "codes": ["E-CHANNEL-INSIDE-NESTED-PROGRAM"],
+    "notCodes": ["E-CHANNEL-INSIDE-PAGE", "E-CHANNEL-OUTSIDE-PROGRAM"],
+    "severity": { "E-CHANNEL-INSIDE-NESTED-PROGRAM": "error" }
+  }
+}

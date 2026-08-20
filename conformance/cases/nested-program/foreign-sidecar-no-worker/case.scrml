@@ -1,0 +1,9 @@
+<program>
+
+  <program name="ml" lang="go" build="go build -o ./bin/ml ./cmd/ml">
+    ${ export function predict(n: number) -> number }
+  </program>
+
+  <p>hi</p>
+
+</program>

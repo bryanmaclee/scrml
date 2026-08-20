@@ -1,11 +1,15 @@
 {
   "id": "channel-inside-scoped-db-program",
-  "description": "§4.12.6 + §38.1 — a `<channel>` inside a nested `<program db=>` SCOPED-DB context with NO `name=` is canonical placement and does NOT fire E-CHANNEL-INSIDE-NESTED-PROGRAM. The over-fire guard for `channel/inside-nested-program`: the discriminator for that diagnostic is the `name=` attribute, because `name=` is exactly what makes the compiler extract the subtree as a separate compilation unit. A `name=`-less scoped-DB context is never extracted, so the channel stays in the tree, the server mounts its WebSocket route, the client dials that same route, and the pair works. Firing here would break a program that compiles correctly.",
+  "description": "§4.12.6 + §38.1 — a `<channel>` inside a nested `<program db=>` SCOPED-DB context with no `name=` is canonical placement and does NOT fire E-CHANNEL-INSIDE-NESTED-PROGRAM. The over-fire guard for `channel/inside-nested-program`: the discriminator for that diagnostic is whether the compiler EXTRACTS the subtree as a separate compilation unit, and a scoped-DB context is never extracted. The channel therefore stays in the tree, the server mounts its WebSocket route, the client dials that same route, and the pair works. Firing here would break a program that compiles correctly. (When this case landed the discriminator was stated as the `name=` attribute; that was corrected S356 — see the `name=`-bearing twin `channel/inside-named-scoped-db-program`, which the `name=`-keyed version refused.)",
   "language-version": "1.0",
   "spec": "§4.12.6, §4.12.3, §38.1, §38.2",
-  "rationale": "§4.12.3's execution-context table gives \"Scoped DB context | `name=` (optional), `db=`\" as a distinct type from the three `name=`-bearing types (inline web worker, foreign language sidecar, WASM compute module). §38.1 invariant 1 states the carve-out explicitly: \"The discriminator is the `name=` attribute ... a §4.12.6 SCOPED-DB context (`<program db=>` with no `name=`) is NOT extracted and MAY hold a `<channel>`.\" The file compiles clean.",
+  "rationale": "§4.12.3's execution-context table gives \"Scoped DB context | `name=` (optional), `db=`\" as a distinct type from the three `name=`-bearing types (inline web worker, foreign language sidecar, WASM compute module). §38.1 invariant 1 states the carve-out explicitly: \"The discriminator is EXTRACTION, not `name=` ... A §4.12.6 SCOPED-DB context (`<program db=>` — `name=` is OPTIONAL on that row of the §4.12.3 table, not absent) is NOT extracted and MAY hold a `<channel>`.\" The file compiles clean.",
   "expect": {
     "codes": [],
-    "notCodes": ["E-CHANNEL-INSIDE-NESTED-PROGRAM", "E-CHANNEL-OUTSIDE-PROGRAM", "E-CHANNEL-INSIDE-PAGE"]
+    "notCodes": [
+      "E-CHANNEL-INSIDE-NESTED-PROGRAM",
+      "E-CHANNEL-OUTSIDE-PROGRAM",
+      "E-CHANNEL-INSIDE-PAGE"
+    ]
   }
 }

@@ -1,0 +1,9 @@
+<program>
+
+  <program name="calc" lang="rust" mode="wasm">
+    ${ export function fib(n: number) -> number }
+  </program>
+
+  <p>hi</p>
+
+</program>

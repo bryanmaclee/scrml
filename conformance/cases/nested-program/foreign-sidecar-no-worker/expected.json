@@ -1,0 +1,11 @@
+{
+  "id": "nested-program-foreign-sidecar-no-worker",
+  "description": "§4.12.5 — a nested `<program name= lang=>` is a FOREIGN LANGUAGE SIDECAR, whether or not it also declares `port=`. It emits no `new Worker(...)` and no worker bundle. Pre-fix (S356) the §23.4 carve-out that suppressed the bogus worker keyed on `port=` ALONE, so this `port=`-less spelling of the same execution context was still compiled as a §4.12.4 web worker and shipped a 24-byte stub bundle. The declaration deliberately does NOT fire E-NESTED-PROGRAM-CONTEXT-NOMINAL: §23.4 already fails the sidecar closed at the `use foreign:name { … }` site with E-FOREIGN-SIDECAR-NOMINAL, and two errors on one unbuilt shape is two diagnostics for one mistake.",
+  "language-version": "1.0",
+  "spec": "§4.12.3, §4.12.5, §23.4",
+  "rationale": "§4.12.3's table gives \"Foreign language sidecar | `name=`, `lang=` (non-WASM language) | Subprocess with HTTP/socket\" — `port=` is a sidecar CONFIGURATION attribute (§4.12.2: \"Port number for sidecar HTTP/socket communication\"), not the discriminator. §4.12.3 normative (S356): the inline-worker context is selected if and only if `name=` is present and `lang=`/`mode=`/`route=`/`db=`/`port=` are all absent. The absence of a declaration-site diagnostic here is the deliberate carve-out recorded in the §34 row for E-NESTED-PROGRAM-CONTEXT-NOMINAL.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-NESTED-PROGRAM-CONTEXT-NOMINAL", "E-CHANNEL-INSIDE-NESTED-PROGRAM"]
+  }
+}

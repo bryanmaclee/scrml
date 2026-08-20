@@ -1,0 +1,12 @@
+{
+  "id": "nested-program-wasm-module-nominal",
+  "description": "§4.12.3 — a nested `<program name= lang= mode=\"wasm\">` is a WASM COMPUTE MODULE, whose runtime model is `WebAssembly.instantiate()`. That codegen is Nominal/spec-ahead, so the declaration fails closed with E-NESTED-PROGRAM-CONTEXT-NOMINAL and the compiler emits NEITHER a `new Worker(...)` reference NOR a bundle. Pre-fix (S356) the extraction pre-pass claimed EVERY `name=`d nested `<program>` as a §4.12.4 inline web worker, so this shape compiled exit-0 to `new Worker(\"<base>.calc.worker.js\")` plus a 25-byte bundle containing one comment line — a file that returns 200, LOADS, and never assigns `self.onmessage`, turning `<#calc>.send()` into a Promise that never resolves. A silent hang is worse than the 404 it replaced.",
+  "language-version": "1.0",
+  "spec": "§4.12.3, §4.12.9",
+  "rationale": "§4.12.3's table gives \"WASM compute module | `name=`, `lang=`, `mode=\\\"wasm\\\"` | `WebAssembly.instantiate()`\" as a type distinct from the inline web worker. §4.12.3 normative (S356): \"a nested `<program>` SHALL be compiled as a §4.12.4 inline web worker … if and only if it carries `name=` and carries none of `lang=`, `mode=`, `route=`, `db=`, `port=`\", and \"Where an execution context's codegen is not implemented in a given compiler revision, that revision SHALL emit NEITHER a reference to the context … NOR an artifact standing in for it, and SHALL fail closed with a diagnostic naming the context.\"",
+  "expect": {
+    "codes": ["E-NESTED-PROGRAM-CONTEXT-NOMINAL"],
+    "notCodes": ["E-CHANNEL-INSIDE-NESTED-PROGRAM"],
+    "severity": { "E-NESTED-PROGRAM-CONTEXT-NOMINAL": "error" }
+  }
+}

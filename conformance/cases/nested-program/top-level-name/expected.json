@@ -1,0 +1,12 @@
+{
+  "id": "nested-program-top-level-name",
+  "description": "§4.12.2 — `name=` on the TOP-LEVEL `<program>` fires W-PROGRAM-TOP-LEVEL-NAME and is ignored. SPEC has said \"The top-level `<program>` MUST NOT have a `name=` attribute (it is the implicit root)\" since §4.12.2 was written, and until S356 that MUST NOT had NO enforcement anywhere in the compiler. Worse than unenforced: the extraction pre-pass claimed the root as a §4.12.4 inline worker, spliced the ENTIRE document body out, emitted an empty `<body>` and a shell client bundle, and wrote a \"worker bundle\" containing one comment line — all at exit 0. The pre-pass is now depth-aware, so the attribute is inert and this is a warn-and-ignore, matching the ratified W-STORY-ON-TOP-LEVEL treatment of the sibling condition (`story=` on the top-level `<program>`).",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §4.12.9",
+  "rationale": "§4.12.2 (S356): \"`name=` on the top-level `<program>` SHALL emit `W-PROGRAM-TOP-LEVEL-NAME` (§4.12.9) and SHALL be ignored — `name=` exists so a PARENT program can reference a nested one (`<#name>.send()`, `use foreign:name`, `callchar{}`), and the root has no parent. The compiler SHALL NOT treat a top-level `<program name=>` as a nested execution context: the extraction pre-pass of §4.12.8 applies to nested `<program>` elements only.\" Warning rather than error because the attribute is now genuinely inert and relaxing-to-tighten is the reversible direction.",
+  "expect": {
+    "codes": ["W-PROGRAM-TOP-LEVEL-NAME"],
+    "notCodes": ["E-NESTED-PROGRAM-CONTEXT-NOMINAL"],
+    "severity": { "W-PROGRAM-TOP-LEVEL-NAME": "warning" }
+  }
+}

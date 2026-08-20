@@ -1,0 +1,26 @@
+<program>
+
+  <program name="doubler">
+    ${
+      when message(data) {
+        send({ result: data.value * 2 })
+      }
+    }
+  </program>
+
+  ${
+    <result> = not
+
+    function runDoubler() {
+      <#doubler>.send({ value: 21 })
+    }
+
+    when message from <#doubler> (data) {
+      @result = data.result
+    }
+  }
+
+  <button onclick=runDoubler()>Double it</button>
+  <p if=(@result is some)>${@result}</p>
+
+</program>

@@ -1,0 +1,11 @@
+<program db="postgres://localhost/app">
+
+  <program name="analytics" db="postgres://localhost/analytics">
+    <channel name="scoped-feed">
+      <items> = []
+    </channel>
+  </program>
+
+  <p>${@items.length}</p>
+
+</program>

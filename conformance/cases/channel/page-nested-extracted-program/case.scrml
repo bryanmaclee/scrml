@@ -1,0 +1,11 @@
+<program>
+
+  <page>
+    <program name="w">
+      <channel name="page-feed">
+        <items> = []
+      </channel>
+    </program>
+  </page>
+
+</program>

@@ -1,0 +1,11 @@
+{
+  "id": "channel-page-nested-scoped-db-program",
+  "description": "§38.1 PRECEDENCE, the visible half of the S353-bryan ruling — `<page>` → nested `<program db=>` → `<channel>` fires NOTHING. The scoped-DB subtree is not extracted, so the channel survives into server emission: the server mounts `/_scrml_ws/page_feed` and the client dials that same route. Before the ruling landed this shape was refused with E-CHANNEL-INSIDE-PAGE even though it works. This is the one row where option (b) has a consequence an author can see, and it is the row a partial implementation leaves behind — moving only the `name=`d case is achievable by ordering a new code ahead of the page check, without ever writing the `pageDepth` reset the ruling names.",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.2, §4.12.1, §4.12.6",
+  "rationale": "§38.2 normative (S356): \"A nested `<program>` SHALL be a fresh `<channel>` placement scope … `<page>` → `<program db=\\\"…\\\">` → `<channel>` SHALL emit NEITHER.\" §4.12.1 is the more specific normative sentence and wins over §38's flat \"channels SHALL NOT live inside `<page>`\": a nested `<program>` is a separate compilation unit subject to top-level grammar, so a `<channel>` in its body is at canonical placement FOR THAT UNIT. Blast radius was measured at 0 corpus instances across all 2260 `.scrml` (S239), so the ruling was taken on correctness rather than cost.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-INSIDE-PAGE", "E-CHANNEL-INSIDE-NESTED-PROGRAM", "E-CHANNEL-OUTSIDE-PROGRAM"]
+  }
+}
