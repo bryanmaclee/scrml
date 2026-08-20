@@ -1,11 +1,15 @@
 {
   "id": "nested-program-inline-worker-emits-bundle",
-  "description": "§4.12.4 — the OVER-FIRE GUARD for the S356 execution-context gate. A nested `<program name=\"doubler\">` carrying nothing but `name=` IS the inline web worker: it is extracted, it gets a `new Worker(...)` reference and a real worker bundle, and it compiles clean. Neither E-NESTED-PROGRAM-CONTEXT-NOMINAL nor W-PROGRAM-TOP-LEVEL-NAME may fire on it. Without this case the gate could be satisfied by refusing every nested `<program>`, which would break the one execution context that works.",
+  "description": "§4.12.4 — the OVER-FIRE GUARD for the S356 execution-context gate. A nested `<program name=\"doubler\">` carrying nothing but `name=` IS the inline web worker: it is extracted, it gets a `new Worker(...)` reference and a real worker bundle, and it compiles clean. Neither E-NESTED-PROGRAM-CONTEXT-NOMINAL nor W-PROGRAM-TOP-LEVEL-NAME may fire on it. Without this case the gate could be satisfied by refusing every nested `<program>`, which would break the one execution context that works. COVERAGE NOTE (S356 r3): this case's `codes` list is EMPTY and it has no runtime half, so the conformance harness verifies only that the shape compiles clean and that the three `notCodes` stay absent — it does NOT verify the property in the case's own name. Nothing here checks that a bundle is EMITTED, because artifact presence is not something the codes-only harness can observe. The bundle-on-disk property IS covered, by `compiler/tests/integration/nested-program-worker-artifact-emission.test.js`, which reads the written dist and asserts every `new Worker(\"…\")` specifier resolves to a real file; the `<page>`-rooted variant is covered by `compiler/tests/integration/nested-program-root-discriminator.test.js`.",
   "language-version": "1.0",
   "spec": "§4.12.3, §4.12.4, §4.12.8",
   "rationale": "§4.12.3: \"Inline web worker | `name=`, no `lang=` | `new Worker()`, postMessage IPC\". §4.12.4: \"A nested `<program>` with no `lang=` attribute is an inline web worker declaration. The compiler generates a `Worker` instantiation and postMessage-based IPC.\" §4.12.8 gives the communication model this case exercises in both directions — `<#name>.send(value)` parent-to-child, `send(value)` inside the `when message` handler child-to-parent.",
   "expect": {
     "codes": [],
-    "notCodes": ["E-NESTED-PROGRAM-CONTEXT-NOMINAL", "W-PROGRAM-TOP-LEVEL-NAME", "E-CHANNEL-INSIDE-NESTED-PROGRAM"]
+    "notCodes": [
+      "E-NESTED-PROGRAM-CONTEXT-NOMINAL",
+      "W-PROGRAM-TOP-LEVEL-NAME",
+      "E-CHANNEL-INSIDE-NESTED-PROGRAM"
+    ]
   }
 }

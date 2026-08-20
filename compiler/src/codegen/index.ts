@@ -1545,6 +1545,43 @@ export function runCG(input: CgInput): CgOutput {
       const { label, runtime, spec } = describeNestedProgramKind(kind);
       const span = node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
       const label0 = name ? `<program name="${name}">` : "<program>";
+
+      // MALFORMED `mode=` — name the value, do not put words in the author's mouth.
+      //
+      // The classifier routes ANY `mode=` to `wasm-module` (§4.12.2 defines the
+      // attribute as `"wasm"` for client-side WASM modules, "omitted for sidecar
+      // processes", so a `mode=` is always a WASM-shaped declaration). That is the
+      // right CLASSIFICATION and the wrong MESSAGE: telling the author of
+      // `<program name="x" mode="native">` that they "declare the WASM COMPUTE
+      // MODULE execution context" reports a declaration they did not make, and
+      // sends them looking for a WASM problem they do not have.
+      //
+      // Same code — the condition is still "this declaration has no runtime
+      // behind it" — but the message names the malformed value first.
+      if (kind === "wasm-module") {
+        const modeVal = nestedProgramAttrValue(node, "mode");
+        if (modeVal !== "wasm") {
+          const shown = modeVal === null ? "(unreadable value)" : `"${modeVal}"`;
+          errors.push(new CGError(
+            "E-NESTED-PROGRAM-CONTEXT-NOMINAL",
+            `E-NESTED-PROGRAM-CONTEXT-NOMINAL: \`${label0}\` carries \`mode=${shown}\`, which is ` +
+            `not a recognized execution mode. SPEC §4.12.2 defines \`mode=\` as \`"wasm"\` for ` +
+            `client-side WASM modules, and "omitted for sidecar processes" — those are the only ` +
+            `two spellings. A \`mode=\` attribute always selects the §4.12.3 WASM COMPUTE MODULE ` +
+            `context (whose runtime model is \`WebAssembly.instantiate()\`), so this declaration ` +
+            `is refused for the same reason \`mode="wasm"\` is: that codegen is Nominal/spec-ahead ` +
+            `and this compiler revision does not build it, so \`<#${name ?? "name"}>\` would reach ` +
+            `nothing. Fix: drop the \`mode=\` attribute to declare a §4.12.4 inline worker ` +
+            `(\`name=\` only — no \`lang=\`, no \`mode=\`, no \`route=\`, no \`db=\`), which IS ` +
+            `implemented; or correct it to \`mode="wasm"\` and wait for the WASM context. ` +
+            `(SPEC §4.12.2 + §4.12.3 + §4.12.9 + §34.)`,
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+          return;
+        }
+      }
+
       errors.push(new CGError(
         "E-NESTED-PROGRAM-CONTEXT-NOMINAL",
         `E-NESTED-PROGRAM-CONTEXT-NOMINAL: \`${label0}\` declares the ${spec} ` +

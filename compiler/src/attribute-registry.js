@@ -158,6 +158,46 @@ ELEMENT_ATTR_REGISTRY.set("program", {
     ["callchar",      attrSpec({ supportsInterpolation: false })],
     ["build",         attrSpec({ supportsInterpolation: false })],
     ["autostart",     attrSpec({ supportsInterpolation: false })],
+    // §4.12.2 — three more of the nested-<program> attribute table. All three are
+    // listed "Valid in nested? YES" in §4.12.2 but were never registered here, so
+    // each emitted W-ATTR-001: "not recognized on `<program>` … forwarded to the
+    // rendered HTML as-is and has no compile-time effect."
+    //
+    // That claim is FALSE for these three, and for `route=` it was flatly
+    // SELF-CONTRADICTORY — one source line produced W-ATTR-001 ("no compile-time
+    // effect") AND E-NESTED-PROGRAM-CONTEXT-NOMINAL ("declares the SERVER
+    // ENDPOINT execution context"). Both cannot be true, and the author has no
+    // way to tell which to believe. `port=` is a live DISCRIMINATOR in
+    // `nested-program-kind.ts` (it selects the §4.12.5 sidecar and so decides
+    // whether a worker bundle is emitted at all); `health=` rides the same
+    // sidecar declaration, whose refusal §23.4 does emit.
+    //
+    // Registering suppresses only the incidental unknown-attr warning; the owning
+    // sections keep their own diagnostics.
+    ["route",         attrSpec({ supportsInterpolation: false })],
+    ["port",          attrSpec({ supportsInterpolation: false })],
+    ["health",        attrSpec({ supportsInterpolation: false })],
+    //
+    // DELIBERATELY NOT REGISTERED, though §4.12.2's table lists both. The
+    // discriminator is the same one §34 uses for attribute prohibitions — INERT
+    // vs WRONG — and here it points the other way:
+    //
+    //   `protect=` — RETIRED from `<program>` in S80 (channel `protect=` became
+    //     `auth=`; §38 records that "the field-level access control surface
+    //     `protect=` remains on `<db>` and `<Type>` declarations per §6.12.1 and
+    //     §52"). `compiler/tests/unit/program-attrs-registry.test.js` pins the
+    //     W-ATTR-001. Registering it here would silently reverse a ratified
+    //     retirement. §4.12.2's table row is STALE SPEC that outlived S80 —
+    //     surfaced as a residual, NOT resolved by implementing it.
+    //
+    //   `story=` — §58 is Nominal/spec-ahead and `W-STORY-ON-TOP-LEVEL` has ZERO
+    //     fire sites in `compiler/src/`. Nothing reads `story=`, so W-ATTR-001's
+    //     "has no compile-time effect" is TRUE, and it is the ONLY signal the
+    //     author gets. Silencing it would be fail-OPEN on an unimplemented
+    //     attribute — the exact shape §4.12.3 normatively forbids ("SHALL emit
+    //     NEITHER a reference to the context … NOR an artifact standing in for
+    //     it, and SHALL fail closed with a diagnostic naming the context").
+    //     Register it when §58 lands its emitter, not before.
     // §43.4 — supervision strategy
     ["restart",       attrSpec({
       supportsInterpolation: false,
