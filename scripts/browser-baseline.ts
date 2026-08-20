@@ -121,7 +121,13 @@ function runTier(): {
   const res = spawnSync("bun", ["test", TIER], {
     cwd: REPO_ROOT,
     encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    // 512 MB, not the default 1 MB and not the first cut's 64 MB (S357 scar). The tier's ~48 baseline
+    // failures each dump a full happy-dom node on their assertion diff, so the RAW captured output is
+    // ~148 MB and GROWS as failures accrue. At 64 MB spawnSync ENOBUFS-killed bun BEFORE its `N pass`
+    // summary printed, so `ranOk` (below) saw no pass line and reported HARNESS-DID-NOT-RUN — a green
+    // main tier reading as a hard gate failure, deterministically, for every PR at once. The buffer
+    // must clear the whole dump, not a slice; 512 MB is generous headroom over the current 148 MB.
+    maxBuffer: 512 * 1024 * 1024,
   });
   const raw = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
 
