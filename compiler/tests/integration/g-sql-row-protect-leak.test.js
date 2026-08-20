@@ -442,13 +442,15 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
   // is the point: the residual paragraph in `protect-egress.ts` must be updated
   // in the same change.
   //
-  // NOT parity with `main` for the rebinding spelling: on `origin/main`
-  // `let R = Response` fails E-SCOPE-001 (`Response` is not allowlisted there),
-  // so that program does not compile at all. This branch allowlists `Response`
-  // for §40.3.5, which makes the spelling reachable — a WIDENING of this
-  // residual, not a carry-forward. The `let R = globalThis.Response` and
-  // `globalThis[k]` spellings ARE carry-forwards (verified: silent on
-  // `origin/main` too).
+  // ALL THREE spellings are parity with `main` — this branch widens nothing.
+  // Measured on an extracted `origin/main` tree (`git archive origin/main` plus
+  // the real `node_modules`): `let R = Response`, `let R = globalThis.Response`
+  // and `globalThis[k]` each compile there with NO E-SCOPE-001, and
+  // E-PROTECT-004 is absent on both trees. `Response` / `Request` / `Headers`
+  // are in `LOGIC_SCOPE_GLOBAL_ALLOWLIST` ON MAIN (#590, S355) — this branch's
+  // `type-system.ts` diff is comment-only and allowlists nothing. The earlier
+  // "WIDENED by this branch" label was measured against a base tree that did
+  // not have main's allowlist, and was wrong.
   test("RESIDUAL (documented): a dynamic bracket key `globalThis[k]` is not resolved", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        let k = "Response"\n        return new globalThis[k](JSON.stringify(u))\n      }`,
@@ -457,14 +459,15 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
   });
 
-  test("RESIDUAL (documented, WIDENED by this branch): a local rebinding `let R = Response` is not resolved", () => {
+  test("RESIDUAL (documented, carry-forward): a local rebinding `let R = Response` is not resolved", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        let R = Response\n        return new R(JSON.stringify(u))\n      }`,
     ));
     const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
-    // ...and it no longer build-blocks either, which is the widening: on
-    // `origin/main` this same source fails E-SCOPE-001.
+    // ...and it does not build-block, on this tree OR on `origin/main` — the
+    // allowlist entry that makes the spelling reachable is main's, not this
+    // branch's. This assertion pins a CARRY-FORWARD, not a widening.
     expect(all.some((d) => d.code === "E-SCOPE-001")).toBe(false);
   });
 
