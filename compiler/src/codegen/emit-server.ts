@@ -21,7 +21,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
-import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
+import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
@@ -3119,7 +3119,12 @@ export function generateServerJs(
         // less on purpose (it is throwaway + partial, so it must not push).
         const code = emitLogicNode(stmt, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors });
         if (code) {
-          for (const line of code.split('\n')) lines.push('      ' + line);
+          // g-handle-request-formdata-emitted-unawaited — the handle body runs inside
+          // the async IIFE above, so `await` is legal; inject it before the async
+          // `<request>.formData()`/`.json()`/… Request-body reads the server-fn
+          // auto-await (bare-name only) cannot see (adopter #471).
+          const awaited = injectHandleRequestAwaits(code, requestParamName);
+          for (const line of awaited.split('\n')) lines.push('      ' + line);
         }
       }
 
