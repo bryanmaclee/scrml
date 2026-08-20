@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 50 |
+| HIGH | 51 |
 | MED | 148 |
 | LOW | 67 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -6783,6 +6783,16 @@ _scrml_worker_w.onmessage = function(event) { const d = event.data; _scrml_cs_re
 **Two statements → NO warning at all.** Three statements → a bare `console.warn` from `expression-parser.ts:3007` ("statement boundary not detected — trailing content would be silently dropped"), which is not a compiler diagnostic and does not fail the build.
 
 **⚑ Why this is filed with urgency:** the nested-program arc's commit `d100ef4e` is titled *"make `when message` bodies reconstruct faithfully"* and closes exactly this class **on the worker side only**. A reader — human or agent — will reasonably conclude both sides are closed. They are not. The parent side is the half an adopter writes first.
+
+### g-bang-brace-arm-bodies-have-no-tree-form-so-every-structural-pass-is-blind-inside-them — an `!{}` arm carries its body as a STRING (`handler`) plus an escape-hatch parse (`handlerExpr`); the body is emitted VERBATIM, so a raw egress inside an arm was a live unredacted leak — `NEW S354-bryan (raw-egress round 5; PA-CONFIRMED at the AST site); HIGH; open`
+<!-- @gap id=g-bang-brace-arm-bodies-have-no-tree-form sev=HIGH status=open locus=compiler/src/ast-builder.js:15069 prov=empirical:S354-round5-measured -->
+**PA-confirmed at the source.** `ast-builder.js:15069/15146/15202` build every `!{}` arm as `handler: <trimmed source string>` plus `handlerExpr: _parseHandlerExpr(...)`, and `_parseHandlerExpr` yields an **escape-hatch node** for anything acorn rejects after scrml preprocessing. **No structured arm body exists anywhere in the AST.** Measured during round 5: *every* arm-body form escape-hatches, including one as ordinary as `| AuthError e -> not`.
+
+**Why it is HIGH and not a tidiness item:** the arm body is emitted **verbatim, ahead of the `instanceof Response` passthrough**, so a raw egress written inside an arm reached the wire with no redaction and no diagnostic. §14.8.9's walk could not see it because the node it must inspect is a string.
+
+⚑ **The blast radius is not this gate.** Any pass that walks bodies structurally — protect/egress, tenant isolation, route inference, reachability, the auto-await injectors — is blind inside an `!{}` arm and silently reads "nothing here" where the truth is "unanalyzable". This is the [[g-...dpa-024...]] class (in-place decoration over a non-load-bearing canonical AST) surfacing as a *security* blindness rather than a typing one.
+
+**Round 5 mitigated §14.8.9 specifically** by testing the escape-hatch node's own `raw` string for what it could hold (0 corpus false positives, vs 22 for a blanket fail-closed and 1 for treating every arm as an egress). **That mitigation is per-gate and does not generalise** — and it tests a string, which is the form dpa-029 Q1 declined; the judgement is recorded there for the operator. **Root fix: give arm bodies a real parsed form.** Until then, every new structural pass inherits the blindness by default.
 
 ### g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client — `analyzeAll` caches `FileAnalysis` fields BEFORE the nested-`<program>` extraction splice; `fnNodes` and `cssBlocks` are stale and LEAK worker-only code into the client bundle — `NEW S354-bryan (adversarial pass; 2 of 7 fields confirmed leaking by execution, 3 UNVERIFIED); HIGH; open`
 <!-- @gap id=g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client sev=HIGH status=open locus=compiler/src/codegen/index.ts prov=empirical:S354-adversarial-executed-both-trees -->
