@@ -1355,3 +1355,130 @@ S352 is the **RULING** (dpa-029 Q1 — `Response` admitted for §40.3.5); S355/#
 them into one label. (The same file's line 711 and its provenance line 728 already had
 it right — `S355/#590` and `S352 … issue #471 / #590` respectively — so the two
 corrected loci were the outliers, not the convention.) 20 pass / 0 fail.
+
+## Item 7 — the VERIFICATION BAR. Regression floor re-verified, and the honest baseline is bigger than the one handed over.
+
+**Base tree extracted COMPLETELY**, per the brief's warning:
+`git archive origin/main | tar -x -C .tmp/r5/base` plus a symlink to the real
+`node_modules`. That tree enumerates **1906** `.scrml` sources (with `stdlib/`, so no
+`scrml:` import fails). The round-4 reviewer's baseline of *"74 sources shared between
+the trees"* was a truncated population — the truncated-probe class `pa-base v2.13 §8`
+names, and exactly what the brief warned about.
+
+**Standing gate, both sides captured with `scripts/corpus-emit-differential.ts`:**
+
+```
+base  (origin/main 1d245134)  enumerated 1906 · compiled 1224 · emitted 7383 · checked 4426
+head  (raw-egress-r5-work)    enumerated 1912 · compiled 1225 · emitted 7413 · checked 4444
+```
+
+```
+  sources enumerated        base 1906   head 1912      (source set delta 8 — head-only conformance cases)
+  compile-failure delta     0 newly failing / 0 newly passing
+  diagnostic changes        0 CODE / 1226 text-only
+  artifact set delta        0 added / 0 removed
+  artifact content diffs    1176 of 7378 compared
+  syntax delta (effective)  0 new / 0 fixed / 0 message-changed
+  load-context changes      0
+```
+
+### **0 diagnostic-CODE deltas over 1905 common sources.** The floor holds.
+
+### The two large numbers, explained rather than waved at
+
+**1226 text-only diagnostic changes → 1 real one.** A DETERMINISM CONTROL was run: the
+head tree captured TWICE and self-diffed (`--allow-same-revision`) —
+
+```
+  diagnostic changes        0 code / 1225 text-only
+  artifact content diffs    0 of 7413 compared
+```
+
+The same tree against itself produces 1225 of the 1226. Set-differencing the two runs
+leaves **two** candidates, and one of those (`if-in-dispatched-arm-neg`) is the same
+nondeterminism caught a run later — its message embeds `match_00zohdyn_8` vs
+`match_00r1enft_8`. The **one** real diagnostic-text change is
+`conformance/cases/protect/raw-egress-e004`: the E-PROTECT-004 resolution sentence lost
+`"declassify explicitly at the value with reveal(\"col\")"`, which is round 3's
+dpa-033 (c) fix (reveal does NOT admit a value past this gate). Intended, and not from
+this round.
+
+**1176 artifact content diffs → 158 intended, 1018 harness.** Every one was classified by
+re-reading both artifacts and normalizing scrml's generated-id shape (`0` + 7 lowercase
+alphanumerics — the chunk-scope, `each_`, `match_`, `_scrml_meta_` and
+`__scrml_engine_` families all share it):
+
+```
+  1018  GENERATED-ID ONLY   ← e.g. `// --- chunk cell scope (019nucek) ---` vs `(01cstyxu)`
+   158  the M4 guard line   ← `if (_scrml_result instanceof Response) return _scrml_result;`
+     0  anything else
+```
+
+The 1018 are an artifact of comparing two checkout LOCATIONS (the id varies with the
+tree root, which is why the self-diff finds 0 of them); the 158 are round 4's intended
+M4 emission, matching that round's own recorded 159 to within the one source whose path
+moved. **Nothing else in 7378 compared artifacts differs.**
+
+### The rest of the bar
+
+- `bun conformance/run.ts` → **889/889**.
+- `bun test compiler/tests/integration/g-sql-row-protect-leak.test.js` → **135 pass /
+  0 fail**, 308 `expect()` calls (was 109/211 at round start).
+- `bun test compiler/tests/integration/authed-server-fn-response-http.test.js` →
+  **20 pass / 0 fail**.
+- `bun scripts/s34-census.ts --check-new --base origin/main` → **PASS** (2 new/changed
+  §34 rows, all well-formed), re-run AFTER the last SPEC edit.
+- The full pre-commit gate ran on **every** commit of this round; no `--no-verify`, no
+  hook override. One commit hit a 5 s per-test TIMEOUT in
+  `compiler/tests/integration/mcp-program-attr.test.js` under load; re-run in isolation
+  that file is **14 pass / 0 fail in 415 ms** — an environmental timeout, not a
+  regression, and the commit passed the gate on retry. (A timeout wears the same
+  `(fail) <name>` as an assertion; that is why it was re-run rather than assumed.)
+- ENV-GAP ruled out up front: `bun install` and `bun run pretest` were both run in this
+  worktree before any measurement, so `samples/compilation-tests/dist/` is populated.
+
+## ROUND 5 — RESIDUAL HANDED BACK
+
+1. ⚑ **The `!{}` arm body has no tree form. This is the finding of the round, and it is
+   bigger than §14.8.9.** An `!{}` error arm — the canonical scrml failure idiom — carries
+   its body as `handler` (a STRING) and `handlerExpr` (an `escape-hatch` node). There is no
+   structured representation of the arm body anywhere in the AST, and the body is emitted
+   VERBATIM into the handler. **Every** structural analysis over function bodies is
+   therefore blind inside `!{}` arms, not just this gate. §14.8.9 is now fail-closed across
+   that blindness; the tenant twin, the auth graph, the reachability solver, the DG and
+   every future body-walking pass are NOT. **Root fix: parse the arm body.** Filed here for
+   the PA to scope.
+
+2. ⚑ **A silent miscompile past `validateEmit: true`.** `1n`, `|>` and `-2 ** 2`
+   escape-hatch and emit syntactically INVALID server JS with **zero** errors (reproduced
+   on a non-protect program — see the H2 section). Not a §14.8.9 leak; a miscompile, and
+   `validateEmit` is not catching it. For the PA to file.
+
+3. ⚑ **The judgement call in H2 is flagged for confirmation.** Asking an `escape-hatch`
+   node's own `raw` field what it could hold is a TEXT test, and dpa-029 Q1 rejected a
+   source-text form. The argument that this is within the ruling — no better oracle exists,
+   the tree's answer for THIS node is a string, same standing as `annotationIsAsIs`, every
+   error is an over-report — is stated in full in the source docblock and in the H2 section
+   above. Both alternatives were implemented and measured (22-source and 1-source corpus
+   regressions respectively; both unshippable). **The PA should confirm or overturn.**
+
+4. **`conformance/cases/protect/raw-egress-e004/case.scrml` has the same E-SCHEMA-001
+   defect as the case fixed in item 6, and it is on `origin/main`.** Bare `<program>` with
+   a `<schema>` block. One-word fix, deliberately not taken here because the brief scoped
+   the nit to the NEW case.
+
+5. **The generated-id families are nondeterministic across checkout LOCATIONS.** 1018 of
+   1176 artifact diffs in the corpus gate are `0`+7-alphanumeric ids that vary with the
+   tree root. Not a defect this round introduced, but it makes the standing gate's headline
+   artifact-diff number unreadable without a normalizer. Worth a `--normalize-generated-ids`
+   flag on `scripts/corpus-emit-differential.ts` so the signal is not buried; a future round
+   that skips the classification step will read 1176 as a regression.
+
+6. **CARRIED, unchanged from round 4:** the value-scoped `reveal` EXIT at a raw egress is
+   still absent (§14.8.9 is a floor with no exit — dpa-033 (d), a separate arc); a FAILED
+   build still writes `dist/` artifacts (`scrml compile` exits 1, prints
+   "FAILED — 1 error", and still writes `app.server.js` / `app.client.js` / `app.html`);
+   and the tenant twin (`compiler/src/codegen/tenant-egress.ts`) is untouched, per brief —
+   the round-4 port table above still applies, and **H1 and H2 both port to it**: the twin's
+   eventual structural rewrite must land the RETURN-POSITION rule and the escape-hatch
+   treatment in the SAME change, not after.
