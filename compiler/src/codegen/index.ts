@@ -1572,10 +1572,48 @@ export function runCG(input: CgInput): CgOutput {
      * top-level-membership guard above stops the annihilation; this names the
      * violation rather than ignoring it in silence.
      *
-     * Severity `warning`, matching the ratified `W-STORY-ON-TOP-LEVEL` precedent
-     * for the sibling condition (`story=` on the top-level `<program>` — "emits
-     * W-STORY-ON-TOP-LEVEL and is ignored"). The attribute is inert at the root:
-     * there is no parent to reference the program by name.
+     * ## Severity `warning` — the house rule is INERT vs WRONG
+     *
+     * This used to cite "the ratified `W-STORY-ON-TOP-LEVEL` precedent". Both
+     * halves of that citation fail. `W-STORY-ON-TOP-LEVEL` has NO FIRE SITE
+     * anywhere in `compiler/src/` (`grep` returns only this comment); it is
+     * SPEC-only, inside §58, which SPEC-INDEX marks Nominal/spec-ahead, and its
+     * §34 row carries neither emitter provenance nor a spec-ahead marker. And
+     * SPEC does not say MUST NOT for `story=` — §58 says it "SHALL emit
+     * `W-STORY-ON-TOP-LEVEL` and SHALL be ignored". An unimplemented code is not
+     * a precedent, and the conditions are not parallel.
+     *
+     * The verdict is still `warning`; here is the argument that actually carries
+     * it, from enumerating SPEC's attribute prohibitions and their §34 rows:
+     *
+     * | condition | SPEC phrasing | severity |
+     * |---|---|---|
+     * | `<page route=>` | "SHALL NOT carry"; regresses filesystem inference AND collides with nested-program `route=` | `E-PAGE-ROUTE-ATTR-FORBIDDEN` |
+     * | `<page>` outside the five per-route attrs | not in the allowed set | `E-PAGE-INVALID-ATTR` |
+     * | `onclient:*` handler declared `server function` | "SHALL NOT be declared" | `E-CHANNEL-006` |
+     * | documentary attrs on a nested `<program>` | "MAY be present syntactically but SHALL NOT emit any HTML" | `W-PROGRAM-TITLE-NESTED` |
+     * | `story=` on the top-level `<program>` | "SHALL be ignored" | `W-STORY-ON-TOP-LEVEL` |
+     *
+     * The discriminator is **INERT vs WRONG**, not MUST-NOT vs not. Every Error
+     * is a case where honouring the attribute would do something WRONG; every
+     * warn-and-ignore is a case where SPEC describes the attribute as INERT.
+     *
+     * `name=` at the root settles it by itself: §4.12.2 phrases it as a genuine
+     * **MUST NOT** and yet, in the very next sentence, pairs it with "SHALL emit
+     * `W-PROGRAM-TOP-LEVEL-NAME` … and SHALL be ignored". A MUST-NOT-keyed rule
+     * would have to call that SPEC text self-contradictory. Inert-vs-wrong reads
+     * it straight: the root has no parent, so there is nothing that could
+     * reference the program by name, so honouring `name=` cannot do anything —
+     * right or wrong.
+     *
+     * **DEPENDENCY (do not break this).** "Inert" is a claim about behaviour,
+     * and it was FALSE until S356 round 3. `collectWorkerBodyFunctionIds`
+     * (`route-inference.ts`) keyed the worker-body test on `hasName`, so a
+     * top-level `name=` suppressed `E-ROUTE-001` for every function in the file
+     * — a very large effect for an attribute this warning calls ignored. If a
+     * future change gives root-`name=` any behaviour again, this severity must
+     * be revisited: the argument for `warning` is entirely that there is nothing
+     * to get wrong.
      *
      * **EVERY top-level `<program>`, not just the first.** This used to `return`
      * after inspecting the first one, on the reasoning "only the FIRST top-level
