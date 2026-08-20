@@ -701,20 +701,21 @@ describe("emission shape — every server-fn route handler terminates in a Respo
 // adopter's deliberate 403 / 404 / redirect would be re-emitted as a 200 with
 // an empty-object body. A DENY silently becoming a SUCCESS.
 //
-// HONEST SCOPE. This shape is NOT reachable from clean scrml source today: a
-// body naming `Response` build-blocks on `E-SCOPE-001` (asserted below, so the
-// day that gate changes these tests say so), and the `_{}` escape-hatch forms
-// fail earlier still. But codegen EMITS the handler regardless of the
-// downstream diagnostic, so the emitted code path is real and executable — and
-// §14.8.9/§14.8.10 already model a manual-`Response`/`handle()` body as a live
-// server-fn egress kind, so the shape is anticipated rather than hypothetical.
-// A fail-OPEN shape is the exact category this change exists to remove, so it
-// is guarded and pinned rather than left to the upstream gate alone.
+// HONEST SCOPE. This shape IS reachable from clean scrml source as of S355/#590:
+// admitting `Response` to the logic-scope allowlist
+// (g-handle-new-response-fires-e-scope-001) removed the upstream `E-SCOPE-001`
+// gate this block used to lean on. §14.8.9/§14.8.10 already model a
+// manual-`Response`/`handle()` body as a live server-fn egress kind, so the shape
+// was always anticipated — and now an adopter can write it directly. A fail-OPEN
+// shape is the exact category this change exists to remove, so the passthrough
+// guard below is now LOAD-BEARING (not belt-and-braces): verified emitted, in
+// order, AND executed. (`this test used to pin the E-SCOPE-001 gate; it now pins
+// the opposite — the gate is gone and the guard alone holds the line.)
 // ---------------------------------------------------------------------------
 describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
-  // A server fn that hand-builds a 403. `Response` is not a declared scrml
-  // identifier, so this reports E-SCOPE-001 — but codegen still emits the
-  // handler, which is what we execute.
+  // A server fn that hand-builds a 403 with `new Response(...)`. Since S355/#590
+  // `Response` is allowlisted, so this compiles clean; codegen emits the handler,
+  // which is what we execute.
   const BODY_BUILDS_RESPONSE = `<program auth="required">
   \${
     export server function deny() {
@@ -724,11 +725,15 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
   <button onclick=deny()>D</button>
 </program>`;
 
-  test("the shape still build-blocks on E-SCOPE-001 (pins the upstream gate)", () => {
+  test("the shape now COMPILES CLEAN — adopter-reachable, so the passthrough guard is load-bearing", () => {
     const { errors } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-gate");
-    // If this ever stops firing, the shape becomes adopter-reachable and the
-    // passthrough guard below stops being belt-and-braces and becomes load-bearing.
-    expect(errors.map((e) => e.code)).toContain("E-SCOPE-001");
+    // S355/#590 admitted `Response` to the logic-scope allowlist
+    // (g-handle-new-response-fires-e-scope-001), removing the upstream E-SCOPE-001
+    // gate this used to pin. The `new Response(...)` body is now adopter-reachable
+    // — exactly the condition this block's own note anticipated — so the passthrough
+    // guard below (verified emitted + executed) is now genuinely load-bearing.
+    expect(errors.map((e) => e.code)).not.toContain("E-SCOPE-001");
+    expect(errors).toEqual([]);
   });
 
   test("the guard is emitted ahead of the envelope, in that order", () => {
@@ -746,9 +751,8 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
     if (domPolluted()) return;
 
     const { serverJsPath } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-run");
-    // The compile reported E-SCOPE-001 but the artifact was still written; we
-    // execute the emitted handler, which is the code an adopter would run if the
-    // upstream gate ever admitted this shape.
+    // Since S355/#590 the compile is clean and the artifact is written; we execute
+    // the emitted handler — the code an adopter now runs for a hand-built Response.
     expect(existsSync(serverJsPath)).toBe(true);
     const { mod, server, stop } = await serveBundle(serverJsPath);
     try {
