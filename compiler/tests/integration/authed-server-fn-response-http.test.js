@@ -747,10 +747,12 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
 
   test("the shape is ADOPTER-REACHABLE — no E-SCOPE-001 on a bare `Response` (§40.3.5)", () => {
     const { errors } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-gate");
-    // The inverse of what this test asserted before S352/#590. `Response`
-    // resolving is what makes the passthrough guard below load-bearing; if
-    // E-SCOPE-001 ever comes back here, SPEC §40.3.5's worked example has
-    // stopped compiling.
+    // The inverse of what this test asserted before the allowlist landed. S352
+    // is the RULING (dpa-029 Q1 — `Response` admitted for §40.3.5); S355/#590 is
+    // the LANDING that put `Response`/`Request`/`Headers` in
+    // `LOGIC_SCOPE_GLOBAL_ALLOWLIST`. `Response` resolving is what makes the
+    // passthrough guard below load-bearing; if E-SCOPE-001 ever comes back here,
+    // SPEC §40.3.5's worked example has stopped compiling.
     expect(errors.map((e) => e.code)).not.toContain("E-SCOPE-001");
     expect(errors).toEqual([]);
   });
@@ -770,7 +772,8 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
     if (domPolluted()) return;
 
     const { serverJsPath } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-run");
-    // The compile is CLEAN as of S352/#590 (§40.3.5), so the artifact is written
+    // The compile is CLEAN as of S355/#590 — the LANDING of the S352 ruling
+    // (§40.3.5) — so the artifact is written
     // and this executes the code an adopter actually runs for a hand-built
     // Response — not a hypothetical behind a build block.
     expect(existsSync(serverJsPath)).toBe(true);

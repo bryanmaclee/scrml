@@ -1318,3 +1318,40 @@ in a way that leaves the gate silent — `let z = TOTALLY_UNDECLARED_IDENT` besi
 The old assertion passed on the broken fixture and the new one caught it — which is
 exactly the vacuity L1 named. Fixture restored; the file is **135 pass / 0 fail**, with
 `expect()` calls up from **211 to 308**.
+
+## Item 6 — the two nits. BOTH FIXED, and one has a twin on `main`.
+
+**(a) `conformance/cases/protect/reveal-does-not-suppress-e004` shipped a second, unrelated hard error.**
+Cause located rather than guessed — it is not "no `db=`" in the abstract, it is the
+`<schema>` rule:
+
+```
+E-SCHEMA-001: this `<schema>` block's enclosing `<program>` root has no `db=` attribute.
+```
+
+The case's opener was a bare `<program>`; its four raw-egress siblings all carry
+`<program db="./app.db">`. Opener aligned to the siblings. Measured before/after:
+
+```
+before   reveal-does-not-suppress-e004   errors=["E-SCHEMA-001","E-PROTECT-004"]
+after    reveal-does-not-suppress-e004   errors=["E-PROTECT-004"]
+```
+
+Superset-on-codes meant it passed either way; the point is that a case demonstrating
+E-PROTECT-004 was also demonstrating an unrelated schema failure, which would mask a
+future regression in exactly the code the case exists to pin.
+
+⚑ **The same defect has a twin that is NOT this branch's:**
+`conformance/cases/protect/raw-egress-e004/case.scrml` also opens with a bare
+`<program>` and also emits `E-SCHEMA-001` — and it is on `origin/main`
+(`git show origin/main:…` returns it verbatim). The brief scoped this nit to the NEW
+case, so the twin is **reported, not edited**. The fix is the same one word:
+`<program>` → `<program db="./app.db">`. **For the PA to take or delegate.**
+
+**(b) `authed-server-fn-response-http.test.js` attributed the allowlist to "S352/#590" in two places.**
+S352 is the **RULING** (dpa-029 Q1 — `Response` admitted for §40.3.5); S355/#590 is the
+**LANDING** that actually put `Response` / `Request` / `Headers` into
+`LOGIC_SCOPE_GLOBAL_ALLOWLIST`. Both comments now say which is which rather than fusing
+them into one label. (The same file's line 711 and its provenance line 728 already had
+it right — `S355/#590` and `S352 … issue #471 / #590` respectively — so the two
+corrected loci were the outliers, not the convention.) 20 pass / 0 fail.
