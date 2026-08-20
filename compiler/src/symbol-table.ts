@@ -160,6 +160,7 @@ import { isAuthorMainTag } from "./landmark-tag.ts";
 // `extractWorkerPrograms` so the E-CHANNEL-INSIDE-NESTED-PROGRAM refusal keys on
 // the SAME predicate that decides whether the subtree is actually removed.
 import { nestedProgramSubtreeIsExtracted } from "./nested-program-kind.ts";
+import { collectTopLevelPrograms } from "./program-root.ts";
 // B14 fix — `resolveModulePath` is the path-shape normalizer used by MOD when
 // it builds `exportRegistry` (keys are absolute, post-`resolveModulePath`).
 // Import-binding `sourcePath` is the LITERAL `imp.source` string — typically
@@ -9529,6 +9530,8 @@ function walkValidateChannels(
     errors,
     filePath,
     visitedPlacement,
+    /*nestedProgramName*/ null,
+    /*topLevelPrograms*/ collectTopLevelPrograms(ast.nodes),
   );
 
   // 2. `@shared` modifier rejection. Fires on any state-decl with
@@ -10019,11 +10022,25 @@ function walkChannelPlacement(
    * below for why `name=` — not merely "nested" — is the discriminator.
    */
   nestedProgramName: string | null = null,
+  /**
+   * The file's TOP-LEVEL `<program>` elements (`compiler/src/program-root.ts`).
+   * Every OTHER `<program>` node is NESTED — including one whose nearest markup
+   * ancestor is a `<page>`.
+   *
+   * This replaces `programDepth >= 1` as the nested-vs-root discriminator.
+   * `programDepth` counts `<program>` ANCESTORS, so in a `<page>`-rooted file a
+   * nested `<program name="w">` was at depth 0 and read as the document root:
+   * `E-CHANNEL-INSIDE-NESTED-PROGRAM` did not fire on a `<channel>` inside it,
+   * and the `<page>` placement scope was not reset. `programDepth` is RETAINED
+   * for the separate `E-CHANNEL-OUTSIDE-PROGRAM` question ("does this channel
+   * have any `<program>` ancestor at all"), which genuinely is a depth question.
+   */
+  topLevelPrograms: Set<object> = new Set<object>(),
 ): void {
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      walkChannelPlacement(n, programDepth, pageDepth, fileHasProgram, errors, filePath, visited, nestedProgramName);
+      walkChannelPlacement(n, programDepth, pageDepth, fileHasProgram, errors, filePath, visited, nestedProgramName, topLevelPrograms);
     }
     return;
   }
@@ -10103,7 +10120,7 @@ function walkChannelPlacement(
   // sees, never whether a broken shape ships.
   const childPageDepth = tag === "page"
     ? pageDepth + 1
-    : (tag === "program" && programDepth >= 1 ? 0 : pageDepth);
+    : (tag === "program" && !topLevelPrograms.has(node) ? 0 : pageDepth);
 
   // The nearest enclosing EXTRACTED nested `<program>`, threaded to children.
   //
@@ -10121,19 +10138,25 @@ function walkChannelPlacement(
   // was refused. It is not extracted, its channel stays in the tree, the server
   // mounts the route and the client dials it.
   //
-  // `programDepth >= 1` excludes the ROOT `<program>`: SPEC §4.12.2 forbids
-  // `name=` there ("it is the implicit root"), a channel under the root is
-  // canonical placement, and the extraction pre-pass no longer claims the root
-  // either.
+  // `!topLevelPrograms.has(node)` excludes the TOP-LEVEL `<program>` elements:
+  // SPEC §4.12.2 forbids `name=` there ("it is the implicit root"), a channel
+  // under the root is canonical placement, and the extraction pre-pass does not
+  // claim a top-level element either.
+  //
+  // It replaces `programDepth >= 1`, which counted `<program>` ANCESTORS and so
+  // read a `<page>`-rooted file's nested `<program name="w">` as the root — no
+  // refusal on a `<channel>` inside it, while `codegen/index.ts` (which had the
+  // same counter) equally failed to extract it. Both sites now key on
+  // root-nodes membership, so they cannot disagree.
   const childNestedProgramName =
-    tag === "program" && programDepth >= 1 && nestedProgramSubtreeIsExtracted(node)
+    tag === "program" && !topLevelPrograms.has(node) && nestedProgramSubtreeIsExtracted(node)
       ? (nestedProgramAttrName(node) ?? "<nested>")
       : nestedProgramName;
 
   const descend = (kids: any) =>
     walkChannelPlacement(
       kids, childProgramDepth, childPageDepth, fileHasProgram, errors, filePath, visited,
-      childNestedProgramName,
+      childNestedProgramName, topLevelPrograms,
     );
 
   if (Array.isArray(node.children)) descend(node.children);

@@ -71,6 +71,7 @@ import {
   nestedProgramContextIsNominal,
   type NestedProgramKind,
 } from "../nested-program-kind.ts";
+import { collectTopLevelPrograms } from "../program-root.ts";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
@@ -1403,29 +1404,55 @@ export function runCG(input: CgInput): CgOutput {
     let treeMutatedByExtraction = false;
 
     /**
+     * The TOP-LEVEL `<program>` elements of this file — the members of the root
+     * nodes array whose tag is `program`. Everything else with that tag is a
+     * NESTED `<program>` in the §4.12 sense, whatever encloses it.
+     *
+     * Computed once and shared by the three passes below
+     * (`detectNestedDocAttrs`, `detectTopLevelProgramName`,
+     * `extractWorkerPrograms`) so they cannot disagree about which element is
+     * the root — see `compiler/src/program-root.ts` for why membership beats the
+     * `<program>`-ancestor DEPTH counter this replaces.
+     */
+    const topLevelPrograms = collectTopLevelPrograms(nodes);
+
+    /**
      * §4.12.3 execution-context extraction pre-pass.
      *
-     * `programDepth` is the number of `<program>` ANCESTORS of `parentChildren`.
-     * The top-level call passes 0, so the document-root `<program>` itself is at
-     * depth 0 and can never be claimed — SPEC §4.12.2: "The top-level
-     * `<program>` MUST NOT have a `name=` attribute (it is the implicit root)."
-     * Before the depth was tracked, a root `<program name="X">` was spliced as an
-     * inline worker: the whole document body vanished, `<body>` emitted empty, and
-     * the "worker bundle" was a single comment line.
+     * §4.12.8: "The compiler SHALL extract each nested `<program>` as an
+     * independent compilation unit." §4.12.2, the other side: "The compiler
+     * SHALL NOT treat a top-level `<program name=>` as a nested execution
+     * context — the extraction pre-pass of §4.12.8 applies to nested
+     * `<program>` elements only."
+     *
+     * So the discriminator is **"is this element in the file's ROOT nodes
+     * array"**, and the classification is TOTAL: every `<program>` is top-level
+     * (never claimed) or nested (always classified).
+     *
+     * This replaces a `programDepth` counter that counted `<program>` ANCESTORS.
+     * That counter incremented only when descending THROUGH a `<program>`, so in
+     * a file whose root element is not a `<program>` — a `<page>`-rooted route
+     * file — a nested `<program name="w">` sat at depth 0 and fell through EVERY
+     * branch below: no extraction, no bundle, no `new Worker(...)`, and no
+     * diagnostic. `emit-client` still emitted the `<#w>.send()` call site, so the
+     * build exited 0 with zero diagnostics and shipped
+     * `_scrml_worker_w.send(...)` against a binding nothing declared —
+     * `ReferenceError` on first click. `node --check` passes on that file, so
+     * `--validate-emit` could not see it either.
      *
      * Which shapes are removed, and which of those get a worker, is decided by
      * `classifyNestedProgram` (`compiler/src/nested-program-kind.ts`) — shared
      * with `symbol-table.ts` so the extraction decision and the
      * `E-CHANNEL-INSIDE-NESTED-PROGRAM` refusal cannot drift apart.
      */
-    function extractWorkerPrograms(parentChildren: any[], programDepth: number): void {
+    function extractWorkerPrograms(parentChildren: any[]): void {
       for (let i = parentChildren.length - 1; i >= 0; i--) {
         const node = parentChildren[i];
         if (!node || typeof node !== "object") continue;
 
         if (node.kind === "markup" && node.tag === "program") {
-          // A NESTED `<program>` only — depth 0 is the document root (§4.12.2).
-          if (programDepth >= 1) {
+          // A NESTED `<program>` only — a top-level one is the root (§4.12.2).
+          if (!topLevelPrograms.has(node)) {
             const { kind, name } = classifyNestedProgram(node);
 
             if (kind === "inline-worker" && name) {
@@ -1486,13 +1513,13 @@ export function runCG(input: CgInput): CgOutput {
           }
 
           if (node.children?.length > 0) {
-            extractWorkerPrograms(node.children, programDepth + 1);
+            extractWorkerPrograms(node.children);
           }
           continue;
         }
 
         if (node.kind === "markup" && (node.children?.length > 0)) {
-          extractWorkerPrograms(node.children, programDepth);
+          extractWorkerPrograms(node.children);
         }
       }
     }
@@ -1542,20 +1569,29 @@ export function runCG(input: CgInput): CgOutput {
      *
      * There was no diagnostic for that MUST NOT. Instead the extraction pre-pass
      * claimed the root as an inline worker and annihilated the document. The
-     * depth guard above stops the annihilation; this names the violation rather
-     * than ignoring it in silence.
+     * top-level-membership guard above stops the annihilation; this names the
+     * violation rather than ignoring it in silence.
      *
      * Severity `warning`, matching the ratified `W-STORY-ON-TOP-LEVEL` precedent
      * for the sibling condition (`story=` on the top-level `<program>` — "emits
      * W-STORY-ON-TOP-LEVEL and is ignored"). The attribute is inert at the root:
      * there is no parent to reference the program by name.
+     *
+     * **EVERY top-level `<program>`, not just the first.** This used to `return`
+     * after inspecting the first one, on the reasoning "only the FIRST top-level
+     * `<program>` is the document root". True but irrelevant: a SECOND top-level
+     * `<program name="w">` is equally top-level, so §4.12.2's rule reaches it for
+     * exactly the same reason — it has no enclosing `<program>` to reference it
+     * by name. Under the `return`, that sibling got neither this warning nor any
+     * extraction: it was the silent third instance of the dangling-worker-binding
+     * defect.
      */
     function detectTopLevelProgramName(topLevelNodes: any[]): void {
       for (const node of topLevelNodes) {
         if (!node || typeof node !== "object") continue;
         if (node.kind !== "markup" || node.tag !== "program") continue;
+        if (!hasNestedProgramAttr(node, "name")) continue;
         const name = nestedProgramAttrValue(node, "name");
-        if (!hasNestedProgramAttr(node, "name")) return;
         const span = node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
         errors.push(new CGError(
           "W-PROGRAM-TOP-LEVEL-NAME",
@@ -1567,23 +1603,27 @@ export function runCG(input: CgInput): CgOutput {
           { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
           "warning",
         ));
-        return; // Only the FIRST top-level <program> is the document root.
       }
     }
 
     // §40.7 documentary-attrs-on-nested-program detection (Phase A1a, 2026-05-05).
-    // Walk all <program> nodes; the FIRST top-level <program> is the document
-    // root (its documentary attrs emit head metadata in the head-emission pass
-    // below). Any deeper <program> with one of the five documentary attrs
-    // (title, description, version, author, license) emits W-PROGRAM-TITLE-NESTED.
+    // Walk all <program> nodes; a TOP-LEVEL <program> owns the document head (its
+    // documentary attrs emit head metadata in the head-emission pass below). Any
+    // NESTED <program> with one of the five documentary attrs (title,
+    // description, version, author, license) emits W-PROGRAM-TITLE-NESTED.
     // Runs BEFORE extractWorkerPrograms() so worker-program nodes are still in
     // tree and discoverable.
+    //
+    // Keyed on root-nodes MEMBERSHIP, not on a `<program>`-ancestor depth count:
+    // the depth version silently skipped a `<page>`-rooted file's nested
+    // `<program title="…">`, which is the same defect that let the extraction
+    // pre-pass ship a dangling worker binding (see `extractWorkerPrograms`).
     const DOC_ATTR_NAMES = ["title", "description", "version", "author", "license"];
-    function detectNestedDocAttrs(parentChildren: any[], depth: number): void {
+    function detectNestedDocAttrs(parentChildren: any[]): void {
       for (const node of parentChildren) {
         if (!node || typeof node !== "object") continue;
         if (node.kind === "markup" && node.tag === "program") {
-          if (depth >= 1) {
+          if (!topLevelPrograms.has(node)) {
             // Nested <program> — check for documentary attrs
             const attrs: any[] = node.attributes ?? node.attrs ?? [];
             const offending = attrs.filter((a: any) =>
@@ -1603,21 +1643,21 @@ export function runCG(input: CgInput): CgOutput {
               ));
             }
           }
-          // Recurse into nested program children at the next depth
+          // Recurse into nested program children
           if (Array.isArray(node.children)) {
-            detectNestedDocAttrs(node.children, depth + 1);
+            detectNestedDocAttrs(node.children);
           }
           continue;
         }
         if (node.kind === "markup" && Array.isArray(node.children) && node.children.length > 0) {
-          detectNestedDocAttrs(node.children, depth);
+          detectNestedDocAttrs(node.children);
         }
       }
     }
-    detectNestedDocAttrs(nodes, 0);
+    detectNestedDocAttrs(nodes);
 
     detectTopLevelProgramName(nodes);
-    extractWorkerPrograms(nodes, /*programDepth*/ 0);
+    extractWorkerPrograms(nodes);
 
     if (workerDefs.size > 0) {
       const bundles = new Map<string, string>();

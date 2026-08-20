@@ -15,6 +15,7 @@ import { isAuthorMainTag } from "../landmark-tag.ts";
 // pre-pass and `symbol-table.ts` so all three agree on which nested `<program>`
 // subtrees leave the document.
 import { nestedProgramSubtreeIsExtracted } from "../nested-program-kind.ts";
+import { collectTopLevelPrograms } from "../program-root.ts";
 import { CGError } from "./errors.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -1534,11 +1535,25 @@ export function generateHtml(
   // the top-level file compilation).
   const markupParentStack: string[] = nestedMarkupContext ? ["__nested-markup__"] : [];
 
-  // §4.12 — how many `<program>` ancestors the markup walker is currently
-  // inside. 0 at the file root, so the DOCUMENT-ROOT `<program>` is at depth 0
-  // and can never be mistaken for a nested execution context (§4.12.2: the
-  // top-level `<program>` is the implicit root).
-  let programDepth = 0;
+  // §4.12 — the TOP-LEVEL `<program>` elements of this file: the members of the
+  // root nodes array whose tag is `program`. Any OTHER `<program>` the walker
+  // reaches is a nested execution context (§4.12.2: the top-level `<program>` is
+  // the implicit root, and the §4.12.8 extraction pre-pass reaches nested
+  // elements only).
+  //
+  // This replaces a `programDepth` ancestor counter. The counter incremented only
+  // when descending THROUGH a `<program>`, so in a `<page>`-rooted file a nested
+  // `<program name="w">` sat at depth 0 and its EXTRACTED subtree was rendered
+  // into the parent document instead of being skipped. Membership is
+  // walk-invariant, so it cannot be re-derived differently here and in
+  // `codegen/index.ts`.
+  //
+  // A NESTED-MARKUP invocation (an engine / match-arm body) receives a SUBTREE,
+  // not the file root, so nothing in it is top-level — an empty set is the
+  // correct seed there.
+  const topLevelPrograms: Set<object> = nestedMarkupContext
+    ? new Set<object>()
+    : collectTopLevelPrograms(nodes);
 
   // Bug 60 (S157) — the active compound-parent wrapper nesting stack. When the
   // markup walker enters a BLOCK element whose tag resolves (via lookupStateCell
@@ -2358,18 +2373,18 @@ export function generateHtml(
         // In practice the extracted shapes are already spliced out of the tree
         // by the codegen pre-pass before this walker runs, so this is a
         // defence-in-depth guard rather than the primary mechanism — but it must
-        // agree with the pre-pass, which is why it calls the same predicate.
-        if (programDepth >= 1 && nestedProgramSubtreeIsExtracted(node)) return;
+        // agree with the pre-pass, which is why it calls the same TWO predicates:
+        // `program-root.ts` for "is this nested", `nested-program-kind.ts` for
+        // "is its subtree extracted".
+        if (!topLevelPrograms.has(node) && nestedProgramSubtreeIsExtracted(node)) return;
         // ss15 item-2 (S214) -- the <program> body is a DEFAULT-LOGIC root
         // (§40.8). Push its tag so a bare-expr logic child resolves to effect
         // mode (no render slot); a `${...}` nested in a real markup descendant
         // still renders (that descendant pushes its own tag in the generic walk).
         markupParentStack.push(tag);
-        programDepth++;
         for (const child of children) {
           emitNode(child);
         }
-        programDepth--;
         markupParentStack.pop();
         return;
       }

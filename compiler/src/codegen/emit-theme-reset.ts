@@ -34,6 +34,7 @@
 // ---------------------------------------------------------------------------
 
 import { CGError } from "./errors.ts";
+import { findDocumentRootProgram } from "../program-root.ts";
 
 /** A single `name = value` token binding (matches theme-body-parser.ThemeToken). */
 interface ThemeToken {
@@ -87,13 +88,24 @@ function walkNodes(nodes: unknown, visit: (n: Record<string, unknown>) => void):
  */
 export function collectThemeContext(nodes: unknown): ThemeContext {
   const themeDecls: ThemeDecl[] = [];
-  let programNode: Record<string, unknown> | null = null;
   const cellNames = new Set<string>();
   walkNodes(nodes, (node) => {
     if (node.kind === "theme-decl") themeDecls.push(node as unknown as ThemeDecl);
-    else if (node.kind === "markup" && node.tag === "program" && !programNode) programNode = node;
     else if (node.kind === "state-decl" && typeof node.name === "string" && node.name) cellNames.add(node.name);
   });
+
+  // §65.3.4 — the DOCUMENT-ROOT `<program>`, which is what `emitResetLayer` and
+  // `reset="none"` are about ("the reset is a program-level, app-wide concern").
+  //
+  // This used to be "the first `<program>` encountered in the full-tree walk",
+  // which is not the same thing. Measured: a `<page>`-rooted route file holding a
+  // §4.12.6 nested `<program db="…">` emitted the whole reset `@layer` — a `.css`
+  // artifact the identical file WITHOUT the nested program does not emit — because
+  // the nested execution context was standing in for a document root the file does
+  // not have. The opt-out inverted the same way: `reset="none"` on a NESTED
+  // `<program>` silently suppressed the reset for the entire document.
+  const programNode = findDocumentRootProgram(nodes) as Record<string, unknown> | null;
+
   return { themeDecls, programNode, cellNames };
 }
 
