@@ -1480,7 +1480,11 @@ export function emitEventWiring(ctx, fnNameMap) {
     }
   }
 
-  lines.push("});");
+  // `{ once: true }` — the DOMContentLoaded wiring registration must not survive a
+  // second boot (a re-injected chunk / composed document); every main-codegen
+  // sibling already onces it. Closes the last leg of
+  // g-residual-order-bearing-readdir-and-unonced-self-host-dcl (self-host path).
+  lines.push("}, { once: true });");
 
   return lines;
 }
