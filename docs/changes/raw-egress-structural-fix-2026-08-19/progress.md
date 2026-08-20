@@ -1228,3 +1228,51 @@ one:** a base-tree claim is only as good as the base tree. Both wrong readings c
 comparing against something that was not a complete `origin/main` checkout. Every
 main-side number in this round was taken from `git archive origin/main` + real
 `node_modules`, and the probe script that took them is reproducible.
+
+## Item 3 — the SPEC contradicted the tree's own shipped allowlist. CORRECTED (not struck).
+
+**The provenance round 4 was given was backwards, and verifying it changed the fix.**
+
+| claim | verified how | verdict |
+|---|---|---|
+| the *"deliberately narrow — `Response` only"* sentence "survived the rebase" | `git show origin/main:compiler/SPEC.md \| grep -c "deliberately narrow"` → **0**; on the branch → **1** | FALSE. The branch is **introducing** it. |
+| `"Response", "Request", "Headers",` is this branch's widening | `git show origin/main:compiler/src/type-system.ts` shows the trio verbatim; the branch's diff in that region is comment-only | came from **main** (#590 / S355) |
+| `origin/main` documents the §40.3.5 admission | no §40.3.5 admission text on main at all | the #590 widening landed with **zero normative text** |
+
+So the branch was about to publish a SHALL-adjacent sentence that its own tree's shipped
+allowlist flatly contradicts. Confirmed by compiling each name on this tree rather than
+reading the allowlist:
+
+```
+Response  silent    Request   silent    Headers   silent
+FormData  E-SCOPE-001 FIRES    Blob    E-SCOPE-001 FIRES    File   E-SCOPE-001 FIRES
+```
+
+`Headers` is admitted by the compiler and denied by the sentence.
+
+**Struck? No — corrected.** Striking it would leave `main`'s state, which is an
+undocumented widening: worse than a wrong sentence, because there would be nothing to
+compare the compiler against. `compiler/SPEC.md` §40.3.5 now reads:
+
+- the SHALL widened to the trio — **`Response`, `Request` and `Headers` SHALL be in
+  scope as bare identifiers**;
+- the two-step grant recorded: `Response` alone as the §40.3.5 conformance restoration
+  (S352, dpa-029 Q1), then `Request` + `Headers` on adopter #471's document-workflow
+  path, which constructs all three (#590, S355);
+- the `request`-vs-`Request` distinction lifted from `type-system.ts:7302-7308` — the
+  lowercase parameter binding never consults the allowlist; the capitalized global
+  CONSTRUCTOR is exactly what the allowlist arbitrates. (That distinction is in the
+  source because it was got wrong once, so it belongs in the normative text too.)
+- `File` / `FormData` / `Blob` stay OUT, with the reason: a native scrml file-upload
+  arrival shape is an open deliberation (dpa-030) and admitting those names would
+  pre-empt it;
+- the trailing clause kept **verbatim**: *"A manual `Response` remains an un-analyzable
+  egress for §14.8.9 purposes — being in scope makes it authorable, not redactable, and
+  `E-PROTECT-004` still fires when a protected-origin column reaches it."*
+
+Bidirectional check for other loci: `grep -n '\`Headers\`|\`FormData\`|\`Blob\`'` over
+`compiler/SPEC.md` returns **one** hit — this line. No second locus states the allowlist,
+so there is nothing else to bring into agreement.
+
+`bun scripts/s34-census.ts --check-new --base origin/main` re-run after this, the last
+SPEC edit of the round.
