@@ -1,9 +1,92 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S355-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1602]-[1605].        -->
-<!-- Body below the S355 block is S354 + S352 + older (history).    -->
-<!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
+<!-- hand-off.md — live session state. WRAPPED at S356-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1606]-[1611].        -->
+<!-- ⚠️ S356 landed NOTHING on main — the browser-tier `gate` is DOWN -->
+<!--    (Node-24). FOUR PRs staged-not-merged: #595 #596 #597 + this  -->
+<!--    wrap. Cross-clone state lives on the BOARD (scrml-support     -->
+<!--    active-sessions/S356-peter.md), pushable while main is blocked.-->
+<!-- Body below the S356 block is S355 + S354 + S352 + older.        -->
 <!-- ============================================================= -->
+
+# scrml — Session 356 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-20. `/boot` Profile A, solo. **Drained the review floor (14 OWED → 0); fixed 1 HIGH + 1 MED
+fully + 1 MED partial; routed 1 + deferred 1. NOTHING MERGED — the required `gate` check is DOWN.**
+
+**Framing:** booted to drain the S313/S316 **review floor** (14 merged PRs it had never read, #578/#582–#594).
+Ran the S239 pass via 8 independent read-only satellites → 0 OWED, **5 findings filed**. Peter then said "fix
+this" → built + verified the HIGH (#582-followup), and "pull another list / bundle" → attacked the other 4
+findings. **Verify-first earned its keep: only 2 of the 5 were the tidy fixes they looked like.**
+
+**⛔ THE SESSION'S BLOCKER (read FIRST): the browser-tier `gate` step is failing for EVERYONE.**
+`bun scripts/browser-baseline.ts --check` → "HARNESS DID NOT RUN — no `N pass` line" (happy-dom crash under
+the CI runner's forced **Node-20→24**). Reproduced on 2 runs of a docs-only PR. **All correctness gates pass**
+(unit + conformance + gauntlet + parser green); only the browser tier fails. Since `gate` is branch-protection-
+required, **no PR can merge** — including this wrap. **It's bryan's CI-infra lane** (Peter stayed off it per
+"keep our workflow separate"). Pinged bryan (`scrml-support/handOffs/incoming/2026-08-20-...browser-tier-gate-
+down-node24...`).
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 0. ⛔ Is the gate healthy yet? (gates everything below)
+`gh pr checks 595` — if the `gate` check is green, **merge the four staged PRs** (correct + verified, held only
+by the gate): **#595** (drain, docs-only) → **#596** (#582 HIGH fix — owes bryan a language-surface review at
+landing) → **#597** (#588 + #583 fixes) → **this wrap PR**. If still red, the browser-tier CI is still down —
+it's bryan's; re-ping or wait. Do NOT try to admin-merge / bypass without bryan.
+
+### 1. FOUR staged branches (all pushed, none merged — gate-blocked)
+| PR | branch | what | state |
+|---|---|---|---|
+| **#595** | `fix/s356-review-floor-drain` | review floor 14 OWED → 0; 5 findings filed | docs-only; verified |
+| **#596** | `fix/s356-lifecycle-field-string-launder` | #582 HIGH lifecycle field-tracker string-launder fix | red-green + 10/10 class + S239 CLEAN; **owes bryan a language-surface review** (false-fire fix is newly-accepting; parity-completion of #582) |
+| **#597** | `fix/s356-drain-followups` | #588 `bytes()` auto-await (RESOLVED) + #583 orphan-guard ESRCH-narrow (PARTIAL) | both red-green tested |
+| wrap | `wrap/s356-peter` | this hand-off + changelog + delta-log | — |
+
+These branches STACK on each other's known-gaps.md edits: #596 + #597 are cut from #595's branch. When the
+gate's back, **merge in order 595 → 596 → 597 → wrap**; each rebases cleanly (later branches drop the earlier's
+now-in-main commits). Final gap counts once all merge: **HIGH 47 · MED 149 · LOW 70**.
+
+### 2. Routed / deferred (no code owed from Peter)
+- **#590** (`g-emitobjectkey-proto-emitted-bare-prototype-setter`, LOW) — **ROUTED-TO-BRYAN.** The satellite's
+  "quote `__proto__`" fix is a NO-OP (PA-verified in node: `{"__proto__":v}` makes no own property, same as
+  bare). An own property needs a COMPUTED `["__proto__"]` emit → forces a **language-semantics decision**
+  (should a scrml `__proto__` object key set the prototype or be an own data property?) = bryan's lane.
+- **#592** (`g-object-literal-bigint-key-fails-codegen`, LOW) — **DEFERRED.** Real (only via `write:true` full
+  codegen; `write:false` short-circuits) but the emit locus is DEEPER than the finding's stated parser line
+  (`String(0n)`→`"0"` should work yet emit is still invalid) — needs emit-side investigation; real-world-
+  negligible, not rabbit-holed per pacing.
+- **#583** PID-reuse residual — the headline Windows PID-reuse under-detection stays OPEN (needs a heartbeat/
+  job-object mechanism; no cheap reparent backstop). Only the EPERM false-positive-kill half landed in #597.
+
+### 3. Owed to bryan (both pinged, cross-clone delivered)
+- **The gate blocker** (his CI-infra lane) — the one thing gating all merges.
+- **#581 blocks the heading/marker-drift sweep** (16 drifts in known-gaps.md; collision). Land #581 when the
+  gate's back → then re-run `headingMarkerDrift()` and align. Still the only clean peter-lane hygiene left.
+- **#596's language-surface review** (the newly-accepting false-fire correction).
+
+### 4. Peter-lane state (unchanged blockers)
+Dog-food #471 is behind #593 (handle-onion, routed to bryan). Mechanical bundles exhausted. The productive
+vein remains **dog-food** (write an adopter's real program, RUN the emitted server, fix the next break) — but
+#471's next break is bryan-gated, and #509 (offline/PWA) leans on a direction ruling. Little clean solo peter
+work until the gate's back and bryan's board moves.
+
+## WHAT HAPPENED (S356-peter)
+- **Review floor drained:** `review-debt.ts` 14 OWED → **0**. 6 docs-only carve-outs + 8 code-bearing S239
+  reviews recorded in `docs/pr-reviews.md` (via 8 independent read-only satellites). Carve-out rate note:
+  2/82 code-bearing (the 2nd is #578, bryan's dpa-034 SPEC ruling — spec-prose, correctly carved).
+- **5 findings filed**, every one the same shape (a class-closing fix that missed one class member) — the
+  floor doing its job on already-merged work.
+- **Verify-first outcomes:** #582 root was the SEEDING pass, deeper than the finding's locus; #590's suggested
+  fix was a no-op hiding a semantics decision; #592's locus is deeper than stated. Catching these before
+  shipping is the point.
+- **Gate:** every local pre-commit suite ran green on all commits; cloud `gate` blocked on the browser tier
+  only (see blocker above).
+
+---
+
+<!-- ================= S355 WRAP (history) ================= -->
 
 # scrml — Session 355 (peter · P-Tech1 Windows) — WRAP
 

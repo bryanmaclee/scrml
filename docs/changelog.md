@@ -6170,6 +6170,33 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-20 (S356-peter — review floor drained to zero, a HIGH launder fix, and a browser-tier gate outage that blocked every merge)
+
+**⚠️ STAGED, NOT LANDED.** Everything below is verified-correct and pushed as four PRs (#595–#597 + the wrap),
+but **none merged** — the required cloud `gate` check is down on its browser-tier step (`browser-baseline.ts
+--check` → "HARNESS DID NOT RUN", a happy-dom crash under the CI runner's forced Node-20→24). All correctness
+gates (unit + conformance + gauntlet + parser) pass; only the browser tier fails. It's bryan's CI-infra lane
+and was pinged; these PRs merge the instant it's healthy (order 595 → 596 → 597 → wrap).
+
+- **#595 — review floor drained 14 OWED → 0.** The S313/S316 floor had never read 14 merged PRs (#578,
+  #582–#594). Ran the S239 pass via 8 independent read-only satellites; recorded 6 docs-only carve-outs + 8
+  code-bearing reviews in `docs/pr-reviews.md`. Surfaced 5 findings, each a class-closing fix that missed one
+  class member — the floor doing its job on already-merged work.
+- **#596 — closed `g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder` (HIGH).** #582 masked
+  the sibling lifecycle tracker but left the parallel struct-field tracker scanning raw text, so a `u.field=`
+  write-spelling inside a string literal laundered a real pre-transition read of a protected field (E-TYPE-001
+  suppressed). Fixed 4 scan sites via `maskStringLiteralSpans()`; the real root was the seeding pass, deeper
+  than the finding's stated locus. Red-before-green + 10/10 class variants + S239 adversarial CLEAN. Owes bryan
+  a language-surface review (the false-fire correction is newly-accepting).
+- **#597 — `bytes()` auto-await (#588) + dev orphan-guard ESRCH-narrow (#583).** Added `bytes` to the handle()-
+  body Request auto-await set (was emitting a floating Promise). Narrowed the orphan-guard's bare `catch` to
+  ESRCH-only so an EPERM no longer false-positive-kills a live-parent dev server (the harder Windows PID-reuse
+  under-detection stays open). Both red-before-green tested.
+- **Routed / deferred:** `g-emitobjectkey-proto-emitted-bare-prototype-setter` (LOW) routed to bryan — the
+  "quote it" fix is a no-op; an own-property `__proto__` needs a computed-key emit = a semantics decision.
+  `g-object-literal-bigint-key-fails-codegen` (LOW) deferred — real but the emit locus is deeper than stated
+  and it's negligible.
+
 ### 2026-08-19 (S352-bryan — six operator rulings, a six-session `gc` failure closed, and a budget gate that measured a five-line fixture)
 
 **Ten PRs merged (#564-#573).** The session's shape was conversion, not construction: a queue of blocked deliberations became a queue of buildable arcs. Four dPA advisories went from awaiting-bryan to banked on the drain path, and the two blockers on the held D2/D3/D4 security cluster both cleared — dpa-033 by ruling, M4 by structure.
