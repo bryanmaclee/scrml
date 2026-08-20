@@ -1713,8 +1713,27 @@ export function runCG(input: CgInput): CgOutput {
         if (node.kind === "markup" && node.tag === "program") {
           const attrs: any[] = node.attributes ?? node.attrs ?? [];
           const dbAttr = attrs.find((a: any) => a.name === "db");
-          const nameAttr = attrs.find((a: any) => a.name === "name");
-          if (dbAttr && !nameAttr) {
+          // §4.12.6 — the SCOPED-DB context, per the SHARED classifier.
+          //
+          // This gate used to read `dbAttr && !nameAttr`. But §4.12.3's table
+          // spells the row `Scoped DB context | name= (optional), db=` — `name=`
+          // is OPTIONAL there, not absent — so the NAMED form is exactly as legal
+          // as the anonymous one, and it got no `_dbScope` at all: no `?{}`
+          // re-scoping, no §44.2 driver resolution. Measured differential:
+          //
+          //   `<program db="mongodb://…">`                  E-SQL-005
+          //   `<program name="analytics" db="mongodb://…">`  silent, exit 0
+          //
+          // Round 2 fixed `emit-html` so the named form's markup renders and
+          // admitted a `<channel>` inside it, which moved the shape from VISIBLY
+          // broken (spliced as a bogus worker, markup gone) to SILENTLY WRONG:
+          // it renders, compiles clean, and queries the PARENT's database.
+          //
+          // Keyed on `classifyNestedProgram` rather than on the attribute pair so
+          // it cannot drift from the extraction decision: a `db=` that co-occurs
+          // with `mode=` or `route=` classifies as THAT context (and is refused by
+          // `E-NESTED-PROGRAM-CONTEXT-NOMINAL`), never as a scoped DB.
+          if (dbAttr && classifyNestedProgram(node).kind === "scoped-db") {
             // Scoped DB context — tag all children with the scoped DB variable
             const dbVal = dbAttr.value?.value ?? dbAttr.value?.name ?? "";
             const scopedDbVar = `_scrml_sql_${++dbScopeCounter}`;

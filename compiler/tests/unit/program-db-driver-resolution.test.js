@@ -166,23 +166,55 @@ describe("§G SQLite forms pass through", () => {
 });
 
 describe("§H _dbScope annotation invariants", () => {
-  test("named program (with name=) does NOT get _dbScope", () => {
-    // Per existing logic: if name= is present, the program is a worker,
-    // not a DB scope. The code only annotates when nameAttr is absent.
+  test("named program (with name=) DOES get _dbScope — §4.12.3 makes name= optional, not absent", () => {
+    // INVERTED (S356 round 3). This test used to assert `_dbScope` is
+    // UNDEFINED here, on the rationale "if name= is present, the program is a
+    // worker, not a DB scope". That rationale is the `name=`-keyed over-claim
+    // this arc exists to correct: §4.12.3's table spells the row
+    // `Scoped DB context | name= (optional), db=`, and §4.12.3's normative
+    // statement says a nested `<program>` is an inline worker "if and only if
+    // it carries `name=` and carries none of `lang=`, `mode=`, `route=`,
+    // `db=`, `port=`".
+    //
+    // The consequence of the old gate was measurable and silent:
+    //   <program db="mongodb://…">                  -> E-SQL-005
+    //   <program name="analytics" db="mongodb://…">  -> silent, exit 0
+    // The named form got no `?{}` re-scoping and no §44.2 driver resolution,
+    // so it queried the PARENT's database while compiling clean.
     const node = {
       kind: "markup",
       tag: "program",
       attributes: [
         { name: "db", value: { kind: "string-literal", value: "postgres://x" }, span: span(10) },
-        { name: "name", value: { kind: "string-literal", value: "worker1" }, span: span(20) },
+        { name: "name", value: { kind: "string-literal", value: "analytics" }, span: span(20) },
       ],
       children: [],
       selfClosing: false,
       span: span(0),
     };
     compile(node);
-    // The worker path takes the node out of the tree; _dbScope is not
-    // attached, and no E-SQL-005 fires (since worker ≠ DB scope).
+    expect(node._dbScope).toBeDefined();
+    expect(node._dbScope.driver).toBe("postgres");
+    expect(node._dbScope.connectionString).toBe("postgres://x");
+  });
+
+  test("a `db=` co-occurring with `mode=` is the WASM context, NOT a DB scope", () => {
+    // The precedence guard. `classifyNestedProgram` is exclusive and
+    // most-specific-first, so widening the scoped-DB gate must not let a
+    // Nominal execution context in through the `db=` door.
+    const node = {
+      kind: "markup",
+      tag: "program",
+      attributes: [
+        { name: "db", value: { kind: "string-literal", value: "postgres://x" }, span: span(10) },
+        { name: "name", value: { kind: "string-literal", value: "calc" }, span: span(20) },
+        { name: "mode", value: { kind: "string-literal", value: "wasm" }, span: span(30) },
+      ],
+      children: [],
+      selfClosing: false,
+      span: span(0),
+    };
+    compile(node);
     expect(node._dbScope).toBeUndefined();
   });
 
