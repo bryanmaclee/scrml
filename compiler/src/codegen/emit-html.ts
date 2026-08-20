@@ -11,6 +11,10 @@ import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransi
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
+// §4.12.3 execution-context classification — shared with the codegen extraction
+// pre-pass and `symbol-table.ts` so all three agree on which nested `<program>`
+// subtrees leave the document.
+import { nestedProgramSubtreeIsExtracted } from "../nested-program-kind.ts";
 import { CGError } from "./errors.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -944,11 +948,12 @@ function checkInputStateDuplicateIds(nodes: any[], errors: CGError[]): void {
       }
     }
 
-    // Always recurse — including into <program name="..."> (worker bundle
-    // bodies) because their input-state declarations still participate in
-    // the runtime registry and warrant the same uniqueness guarantee within
-    // their own scope. The emit-html walker short-circuits named programs
-    // for HTML emission; that does not apply to this static check.
+    // Always recurse — including into an extracted nested <program> (§4.12.3
+    // worker / sidecar / WASM / route= bodies) because their input-state
+    // declarations still participate in the runtime registry and warrant the
+    // same uniqueness guarantee within their own scope. The emit-html walker
+    // short-circuits those programs for HTML emission; that does not apply to
+    // this static check.
     for (const child of children) walk(child);
 
     if (isScopeBoundary) scopeStack.pop();
@@ -1528,6 +1533,12 @@ export function generateHtml(
   // render (the file-root empty-stack default-logic semantics apply ONLY to
   // the top-level file compilation).
   const markupParentStack: string[] = nestedMarkupContext ? ["__nested-markup__"] : [];
+
+  // §4.12 — how many `<program>` ancestors the markup walker is currently
+  // inside. 0 at the file root, so the DOCUMENT-ROOT `<program>` is at depth 0
+  // and can never be mistaken for a nested execution context (§4.12.2: the
+  // top-level `<program>` is the implicit root).
+  let programDepth = 0;
 
   // Bug 60 (S157) — the active compound-parent wrapper nesting stack. When the
   // markup walker enters a BLOCK element whose tag resolves (via lookupStateCell
@@ -2327,18 +2338,38 @@ export function generateHtml(
       }
 
       if (tag === "program") {
-        // Named programs are worker bundles (§4.12.4) — skip entirely.
-        // Only emit children for the unnamed/root program.
-        const nameAttr = attrs.find((a: any) => a.name === "name");
-        if (nameAttr) return;
-        // ss15 item-2 (S214) -- the unnamed <program> is a DEFAULT-LOGIC root
+        // Skip a NESTED `<program>` whose subtree the compiler EXTRACTS as a
+        // separate compilation unit (§4.12.3 — the inline worker, the foreign
+        // sidecar, the WASM module, the `route=` server endpoint). Those bodies
+        // are not part of this document's DOM.
+        //
+        // This used to read `if (nameAttr) return` — "named programs are worker
+        // bundles". That was the SAME over-claim `extractWorkerPrograms` made,
+        // and it bit in two places (S356):
+        //
+        //   - a TOP-LEVEL `<program name="X">` (which §4.12.2 forbids, but which
+        //     had no diagnostic) emitted a completely EMPTY `<body>`: the whole
+        //     document was skipped here as if it were a worker;
+        //   - a §4.12.6 scoped-DB context spelled WITH a `name=`
+        //     (`<program name="analytics" db="…">` — `name=` is optional on that
+        //     row of the §4.12.3 table, not absent) had its markup children
+        //     dropped, while the identical `name=`-less form rendered fine.
+        //
+        // In practice the extracted shapes are already spliced out of the tree
+        // by the codegen pre-pass before this walker runs, so this is a
+        // defence-in-depth guard rather than the primary mechanism — but it must
+        // agree with the pre-pass, which is why it calls the same predicate.
+        if (programDepth >= 1 && nestedProgramSubtreeIsExtracted(node)) return;
+        // ss15 item-2 (S214) -- the <program> body is a DEFAULT-LOGIC root
         // (§40.8). Push its tag so a bare-expr logic child resolves to effect
         // mode (no render slot); a `${...}` nested in a real markup descendant
         // still renders (that descendant pushes its own tag in the generic walk).
         markupParentStack.push(tag);
+        programDepth++;
         for (const child of children) {
           emitNode(child);
         }
+        programDepth--;
         markupParentStack.pop();
         return;
       }

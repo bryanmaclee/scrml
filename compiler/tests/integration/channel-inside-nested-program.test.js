@@ -35,10 +35,24 @@
  *      `scrml build` writes its dist even on a failed build (pre-existing, and
  *      general to every fatal error — verified independently on E-SCOPE-001).
  *
- * THE DISCRIMINATOR is the `name=` attribute, because that is exactly what
- * makes `extractWorkerPrograms` claim the subtree. A §4.12.6 SCOPED-DB context
- * (`<program db=>` with NO `name=`) is not extracted, its channel stays in the
- * tree, and server route + client dial match. That case must keep compiling.
+ * THE DISCRIMINATOR is EXTRACTION, not `name=`.
+ *
+ * When this file landed it keyed on `name=`, on the empirical ground that
+ * `extractWorkerPrograms` claimed exactly the `name=`d nested programs. That
+ * was true of the compiler and WRONG about the language: the §4.12.3 table
+ * reads `Scoped DB context | name= (OPTIONAL), db=`, so
+ * `<program name="analytics" db="…">` is a legal scoped-DB context and its
+ * channel was being refused. The extractor over-claimed; the diagnostic
+ * inherited the over-claim.
+ *
+ * Corrected S356 (the operator ruling): both consumers now call
+ * `nestedProgramSubtreeIsExtracted` (`compiler/src/nested-program-kind.ts`),
+ * so the refusal keys on the same predicate that decides whether the subtree is
+ * actually removed. The four extracted contexts are the §4.12.4 inline worker,
+ * the §4.12.5 foreign sidecar, the §4.12.3 WASM module and the §4.12.2 `route=`
+ * server endpoint. A §4.12.6 scoped-DB context — with OR without `name=` — is
+ * not extracted, its channel stays in the tree, and server route + client dial
+ * match. Both scoped-DB spellings must keep compiling.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -215,6 +229,29 @@ describe("E-CHANNEL-INSIDE-NESTED-PROGRAM — the carve-out that must NOT fire",
       expect(o.errors).toEqual([]);
       expect(clientDials(o)).toEqual(["scoped_feed"]);
       expect(serverRoutes(o)).toEqual(["scoped_feed"]);
+    } finally { o.cleanup(); }
+  });
+
+  test("§4.12.6 scoped-DB context WITH a name= keeps its channel too (S356 — the false positive)", () => {
+    // The N3 dissolution, pinned. §4.12.3: `Scoped DB context | name= (optional),
+    // db=`. The `name=`-keyed discriminator refused this LEGAL shape. It is not
+    // extracted, so the channel stays in the tree and both halves are emitted.
+    const o = compileSrc(`<program db="postgres://localhost/app">
+  <program name="analytics" db="postgres://localhost/analytics">
+    <channel name="scoped-feed">
+      <items> = []
+    </channel>
+  </program>
+  <div>n: \${@items.length}</>
+</program>
+`);
+    try {
+      expect(codesOf(o)).not.toContain("E-CHANNEL-INSIDE-NESTED-PROGRAM");
+      expect(o.errors).toEqual([]);
+      expect(clientDials(o)).toEqual(["scoped_feed"]);
+      expect(serverRoutes(o)).toEqual(["scoped_feed"]);
+      // and no worker artifact was invented for it
+      expect(o.clientJs).not.toContain("new Worker(");
     } finally { o.cleanup(); }
   });
 
