@@ -30,4 +30,22 @@ describe("scrml dev — parent-death guard (g-dev-watcher-tests-leak-server-proc
     // here, but this also documents that a vanished launcher is never alive.
     expect(launchingProcessGone(2_147_483_646)).toBe(true);
   });
+
+  test("catch branch (g-dev-orphan-guard-...pid-reuse S356): ESRCH → GONE, but EPERM → ALIVE (no false-positive kill)", () => {
+    // Reach the kill-probe by keeping ppid matching (first branch false), then
+    // force the probe to throw. Pre-fix the bare `catch { return true }` treated
+    // ANY throw as "gone" — so an EPERM (parent EXISTS but unsignalable: different
+    // user / integrity level) would false-positive-kill a live dev server.
+    const realKill = process.kill;
+    const ppid = process.ppid;
+    try {
+      process.kill = () => { const e = new Error("no such process"); e.code = "ESRCH"; throw e; };
+      expect(launchingProcessGone(ppid)).toBe(true); // genuinely gone
+
+      process.kill = () => { const e = new Error("operation not permitted"); e.code = "EPERM"; throw e; };
+      expect(launchingProcessGone(ppid)).toBe(false); // exists but unsignalable → NOT gone
+    } finally {
+      process.kill = realKill;
+    }
+  });
 });
