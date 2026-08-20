@@ -568,11 +568,16 @@ describe("auth= AND protect= together", () => {
     const { mod, server, stop } = await serveBundle(serverJsPath);
     try {
       const { res } = await authedPost(server, routeFor(mod, "loadNames").path, {});
+      // Capture the raw wire bytes via a clone BEFORE expectJsonResponse consumes the
+      // body: a Response body reads once, so cloning AFTER the read throws
+      // ERR_BODY_ALREADY_USED ("Body is disturbed or locked") under bun 1.4.0 (1.3.x
+      // tolerated it). Clone-then-read preserves the raw-payload assertion intact.
+      const rawText = await res.clone().text();
       const body = await expectJsonResponse(res);
       expect(Array.isArray(body)).toBe(true);
       expect(body.length).toBeGreaterThan(0);
       for (const row of body) expect(row.secret).toBeUndefined();
-      expect(await res.clone().text()).not.toContain("hunter2");
+      expect(rawText).not.toContain("hunter2");
     } finally { stop(); }
   });
 });
