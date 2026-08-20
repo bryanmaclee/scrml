@@ -965,6 +965,76 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
     });
   }
 
+  // The ADVERSARIAL matrix — shapes probed AFTER the narrowing was written, to
+  // look for a fail-OPEN it introduced rather than to confirm the shapes it was
+  // written against. Pinned rather than measured-once, which is the same lesson
+  // this round applied to the residual list: an unpinned measurement decays.
+  //
+  // Two of these are the fail-CLOSED corners the implementation states rather
+  // than hides: a COMPUTED key built with `+` is an expression (the fold is
+  // available for a bracket KEY, where a wrong answer is a fail-OPEN, and is
+  // deliberately not taken for an ARGUMENT, where it would be), and a
+  // unary-negated number is an operator node, not a literal.
+  const adversarial = {
+    "a deeply nested all-literal object (3 levels)":
+      [`return new Response("x", { a: { b: { c: [1, 2, "z"] } } })`, false],
+    "the same shape with a member expression at the bottom":
+      [`return new Response("x", { a: { b: { c: [1, u.name] } } })`, true],
+    "a COMPUTED key that is a plain string literal":
+      [`return new Response("x", { ["status"]: 403 })`, false],
+    "a COMPUTED key built with `+` (an expression — fail-CLOSED)":
+      [`return new Response("x", { ["st" + "atus"]: 403 })`, true],
+    "a spread of a literal object":
+      [`return new Response("x", { ...{ status: 403 } })`, false],
+    "an array spread of a literal array":
+      [`return new Response("x", { h: [...["a", "b"]] })`, false],
+    "a member-chain callee with all-literal arguments":
+      [`return new globalThis.Response("nope", { status: 403 })`, false],
+    "a member-chain callee with a row argument":
+      [`return new globalThis.Response(JSON.stringify(u))`, true],
+    "a bracket-chain callee with all-literal arguments":
+      [`return new globalThis["Response"]("nope", { status: 403 })`, false],
+    "a bracket-chain callee with a row argument":
+      [`return new globalThis["Response"](JSON.stringify(u))`, true],
+    "a FOLDED-key callee with all-literal arguments":
+      [`return new globalThis["Resp" + "onse"]("nope", { status: 403 })`, false],
+    "Response.json of a literal, through a member-chain receiver":
+      [`return globalThis.Response.json({ ok: true })`, false],
+    "Response.json of the row, through a member-chain receiver":
+      [`return globalThis.Response.json(u)`, true],
+    "a unary-negated number (an operator node — fail-CLOSED)":
+      [`return new Response("x", { status: -1 })`, true],
+    "a call inside an otherwise-literal array":
+      [`return new Response("x", { h: [JSON.stringify(u)] })`, true],
+    "a call inside a nested literal object value":
+      [`return new Response("x", { a: { b: JSON.stringify(u) } })`, true],
+  };
+  for (const [label, [ret, mustFire]] of Object.entries(adversarial)) {
+    test(`ADVERSARIAL — ${label} ${mustFire ? "FIRES" : "is CLEAN"}`, () => {
+      const { result } = compileSource(protectProgram(
+        `      export server function getUser(id) {\n` +
+        `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+        `        ${ret}\n` +
+        `      }`,
+      ));
+      expect(fires(result)).toBe(mustFire);
+    });
+  }
+
+  // An `asIs`-typed value is an egress KIND of its own, so it fires even when the
+  // only `Response` in the body is all-literal — the narrowing must not leak
+  // across egress kinds.
+  test("an `asIs` value beside an all-literal Response STILL fires", () => {
+    const { result } = compileSource(protectProgram(
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        let v:asIs = u\n` +
+      `        return new Response("nope", { status: 403 })\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+  });
+
   // The narrowing is scoped to ARGUMENT-BEARING constructions. A `_{}` foreign
   // block and an `asIs` value have no argument list to test, so they remain
   // egresses unconditionally — even when their visible content is all literal.
