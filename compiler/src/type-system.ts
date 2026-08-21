@@ -7121,7 +7121,7 @@ function generateDbTypes(
       const otherTable = seenNamesThisBlock.get(generatedName!);
       errors.push(new TSError(
         "E-TYPE-050",
-        `E-TYPE-050: Tables \`${otherTable}\` and \`${tableName}\` in the same \`< db>\` block ` +
+        `E-TYPE-050: Tables \`${otherTable}\` and \`${tableName}\` in the same \`<db>\` block ` +
         `both produce the generated type name \`${generatedName}\`. Rename one of the tables to resolve the collision.`,
         blockSpan,
       ));
