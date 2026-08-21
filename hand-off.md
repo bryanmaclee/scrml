@@ -59,6 +59,10 @@ shape — do NOT re-scan the LOW/MED shortlist for clean rips (proven empty).
   `\${` (corrected: SPEC bug not OQ) · css-hash no-diagnostic (refined: benign mis-parse, not
   data-loss) · anon-fn return-type (consolidated with #1).
 - **Routed to bryan** — 4 queue addenda (`S358-peter-bryan-lane-low-queue.md`) + 1 branch + 1 inbox note.
+- **POST-WRAP continuation — 4 MORE deep-dives (#7–#10), delta-log [1633]–[1636], all routed to the bryan-lane queue** (this postwrap continuity PR carries their ledger corrections):
+  - **⚠️ SECURITY (#7 + #8, one confidentiality surface — bundle for one look):** #7 `g-namespace-signal-computed-bracket` — the E-CG-006 egress gate is **static-property-blind**: `globalThis["process"].env.SECRET` (computed) compiles CLEAN and ships to client while the static form is blocked (the ledger's "backstop covers env-ish cases" was FALSE); #8 `g-cli-emits-artifacts-on-failed-compile` — a compile that FAILS E-CG-006 still writes the leaking client.js to disk (locus traced `api.js:2962/2967`, gated only by `!emitGateFailed`, not fatal-error state). Both LOW→MED severity calls for bryan; exploitability limited but the gates silently fail.
+  - #9 `g-tailwind-lint-false-positive` — SPLIT: same-file case already RESOLVED (`collectAuthorDefinedClasses`), only cross-file remains (per-file lint can't see sibling `#{}`); fix = compilation-unit class union.
+  - #10 `g-each-textarea-bindvalue-content-conflict-is-silent` — premise doesn't reproduce (bind:value is deferred+diagnosed, single writer, not silent); recommend bryan CLOSE.
 
 ## ⚑ MISSES / lessons (S359)
 - **`git apply --3way` STAGES its result.** A later `git add <otherfile>` + commit swept the wrap-bound
