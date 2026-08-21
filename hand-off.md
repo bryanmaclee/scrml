@@ -1,13 +1,86 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S357-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1606]-[1616].        -->
-<!-- S357 RECONCILES the stranded S356-peter: S356 opened 4 PRs,     -->
-<!-- hit a red gate, ended UNwrapped (never landed, no delta-log).   -->
-<!-- ⚑ S357 CONTINUED PAST ITS WRAP (#600): a post-wrap burst of 5   -->
-<!--   more PRs (#601-#604 + this touch-up) — see §POST-WRAP below.   -->
-<!-- Body below the S357 block is S355 + S354 + S352 + older.        -->
+<!-- hand-off.md — live session state. WRAPPED at S358-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1618]-[1624].        -->
+<!-- S358 = a LOW/tooling rip pass + a dog-food pass. 4 PRs merged   -->
+<!--   (#606-#609); promote-engine ROUTED to bryan; ~15 LOWs + 3     -->
+<!--   dog-food finds NOTATED to the bryan-lane queue (per Peter:    -->
+<!--   accumulate, don't ping bryan piecemeal).                      -->
+<!-- Body below the S358 block is S357 + S355 + older (history).     -->
 <!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
 <!-- ============================================================= -->
+
+# scrml — Session 358 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+**Two live lanes — pick by who boots** (bryan's lane-A board is untouched by S358).
+
+### A. bryan's lane — unchanged (carried from S352/S353, still UNSTARTED)
+See the S352 WRAP block far below. Summary: raw-egress structural fix (c)→(d) · i18n substrate B ·
+dpa-035 replacement sequence · dpa-029 Q1 · two held fix rounds (`soft-nav-head-sync` `70c14838`,
+`runtime-size-and-probes` `083ce19e`) · the S355 dog-food HIGH `g-handle-onion-...-404` (#593, §40.3
+ruling owed). **⭐ NEW for bryan, from S358:**
+- **`promote --engine` same-named-cell lift — ROUTED, awaiting your SPEC §56.6 review.** Peter built +
+  verified it (18 promote tests + full unit suite 17628/0); it edits `SPEC.md` §56.6 (tool-doc), so it
+  owes your stamp. Branch `origin/feat/promote-engine-same-named-cell-lift @ 01a8f33f` + an inbox note
+  with the §56.6 diff inline (`scrml-support/handOffs/incoming/2026-08-21-...promote-engine-spec-56-6...`).
+  Land it or stamp it. (Drop the branch's known-gaps.md flip — mis-stamped S357, collides with #581 — and
+  `progress.md` scratch.)
+- **The bryan-lane LOW queue** (`scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`): ~15
+  direction-of-change LOWs each with the "why bryan" class + fix locus, + 3 dog-food finds (w-dead
+  reachability-family, if-in-each GH#409, ssr-if-false-flash). Rip them in one pass — Peter deliberately
+  did NOT ping you piecemeal.
+
+### B. peter's lane — the LOW vein is worked out; dog-food is the productive vein
+**The durable S358 finding:** the LOWs that rip cleanly are the ZERO-BEHAVIOUR-CHANGE ones (diagnostic
+message text + tooling). Everything else in the open-LOW backlog encodes a latent DIRECTION-OF-CHANGE
+(newly-rejecting/accepting · a diagnostic fire-condition · an emit change) that owes bryan review, OR
+doesn't reproduce, OR is deferred-negligible. Bundleable-by-file ≠ bundleable-by-lane. So the clean
+peter-lane LOW rips are essentially spent (S358 landed the last easy ones: review-debt tooling + the
+E-PA family message sweep). **The productive peter-lane vein going forward is DOG-FOOD** — but S358's
+dog-food of the real aM app found the compiler has genuinely improved (app compiles clean; the old
+issue-repros are fixed or bryan-lane). Next dog-food should exercise a FRESH shape or RUN the emitted
+server (browser-observe reactivity), not re-check the old `docs/scrml-issues/` repros.
+- **Peter-lane deferred (NOT safe autonomous rips)** — in the bryan-lane queue's tail section with reasons:
+  s320 stale comments (needs the auto-await arch in context), flagship-hos harness (dubious 2nd half),
+  collectexpr + g-263 (don't reproduce), object-literal-bigint-key (deferred-negligible S356).
+- **Heading/marker drift sweep — STILL held on bryan's open #581** (unchanged; #581 edits known-gaps.md).
+
+## WHAT LANDED (S358-peter)
+
+| PR | what | class |
+|---|---|---|
+| **#606** | ⭐ **browser-baseline streaming** — the durable S357 follow-up C | `spawnSync` maxBuffer (155 MB, growing) → bounded streaming line-filter (~45 KB, ~2 MB heap). Proven 48/48 vs a real 155 MB capture; parseOk oracle = loud safety net; PA-added `child.on("error")` = fail-loud-not-hang. Gate PASS in the S357-breaking CI env. |
+| **#607** | review-debt code-bearing whitelist (LOW → RESOLVED) | `CODE_BEARING_RE` +lsp/editors/e2e/dashboard + conformance/cases→conformance. Latent, 0 retroactive re-class (rate 2/90). |
+| **#608** | E-PA-005 `<db>` message (LOW) | `< db>`→`<db>` + regression pin. |
+| **#609** | E-PA-006 + E-TYPE-050 family sweep (LOW → RESOLVED) | post-#608 coherence grep caught the sweep was incomplete → completed the class. |
+
+## ⚑ MISSES / lessons (S358)
+1. **★ #608 fixed only ONE instance of a "sweep the family" gap.** A post-merge coherence grep (`< db>`
+   count on the resolved file) caught E-PA-006 + E-TYPE-050 still carried the deprecated form → #609.
+   Reinforces [[feedback-verify-the-bug-class-not-just-reported-instance]] — and the coherence grep is
+   what saved it. Do it before flipping a "sweep"/"family"/"all-sites" gap.
+2. **★ Two satellite triage passes had TOO-GENEROUS lane verdicts.** The first audit marked a
+   ROUTED-TO-BRYAN gap (empty-arm-yields-object) as INCLUDE, and "all-repro" candidates (style-double-attr)
+   didn't reproduce + had a stale locus. Repro-first + read-the-body caught every one. A satellite's lane
+   call is a claim; verify it. [[feedback-gap-report-fix-direction-can-be-wrong]].
+3. The auto-mode classifier blocked compound `gh pr merge && git checkout && pull` commands twice;
+   standalone `gh pr merge` went through. Split state-changing git/gh ops from read-backs.
+
+## 🧷 STATE
+- **main** `<wrap PR>` (this wrap). Coherence 0/0. Cloud `gate` GREEN on #606-#609 (`tracking`'s 4
+  dev-watcher `fs.watch` flakes are the pre-existing non-required baseline).
+- Gaps: **HIGH 47 · MED 149 · LOW 68 · Nominal 7** (LOW 70→68: g-review-debt-... + g-e-pa-messages-... resolved).
+- Review floor: #605-#609 recorded → **0 OWED**.
+- **#581 still OPEN** — this wrap's known-gaps.md / pr-reviews.md / delta-log flips 3-way against it at
+  merge (additive; resolvable). The heading-drift sweep stays held on it.
+- **Worktrees: main + app-pinned only** (agent-a3a45a9b's work landed #606; agent-a37769fc is on origin
+  as `feat/promote-engine-same-named-cell-lift` — both removed at wrap 6b).
+- Delta-log `[1618]`-`[1624]`. Bryan-lane queue: `scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`.
+
+---
+
+<!-- ================= S357 WRAP (history) ================= -->
 
 # scrml — Session 357 (peter · P-Tech1 Windows) — WRAP (recovery of stranded S356)
 

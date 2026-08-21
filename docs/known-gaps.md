@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 47 |
 | MED | 149 |
-| LOW | 70 |
+| LOW | 68 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -6739,8 +6739,10 @@ The twin of GH #237 (fixed at `88f9745e` for `on mount` only). A bare top-level 
 <!-- @gap id=g-label-for-registerlabels-silent-noop sev=MED status=open -->
 Same chunk and same class as GH #234, opposite outcome. `_scrml_label_for`'s `typeof` guard **works** (unlike the `_scrml_message_for` one — that symbol is renamed by `cell-accessor-rename.ts`, this one is not), so instead of throwing it falls back silently to the compile-time mechanical label. Net: the project-registered label tier of §41.14.7's resolution chain never fires and nothing says so. One more `POST_EMIT_HELPER_CHUNK_GATES` entry would close it; out of scope for the lane that found it.
 
-### g-e-pa-messages-deprecated-space-form — sibling `E-PA-*` messages hand adopters the deprecated `< db>` / `< schema>` space form — `NEW S295 (lane 3); LOW; OPEN`
-<!-- @gap id=g-e-pa-messages-deprecated-space-form sev=LOW status=open -->
+### g-e-pa-messages-deprecated-space-form — sibling `E-PA-*` messages hand adopters the deprecated `< db>` / `< schema>` space form — `NEW S295 (lane 3); LOW; RESOLVED S358-peter (#608 + #609)`
+<!-- @gap id=g-e-pa-messages-deprecated-space-form sev=LOW status=resolved -->
+**RESOLVED S358-peter.** Swept the family: `E-PA-005` (#608, `f5d2af18`) + `E-PA-006` and its sibling-class `E-TYPE-050` (#609, `2e7cc274`) — all `` `< db>` `` → `` `<db>` ``, each with a `.not.toContain("< db>")` regression pin mirroring the `E-PA-002` `a9044329` pin. A post-#608 coherence grep caught that #608 had fixed only one instance (E-PA-005), so #609 completed the sweep (E-PA-006 + E-TYPE-050 across two files). Remaining `< db>` in protect-analyzer.ts are internal comments (not adopter-facing), left out of scope.
+
 `W-WHITESPACE-001` deprecates the space form and it becomes `E-WHITESPACE-001` at P3, so a remedy string teaching it hands adopters a soon-to-be-rejected shape — the exact diagnostic-trust failure the message is trying to fix. `E-PA-002` was corrected at `a9044329` (and pinned with a negative assertion); **`E-PA-005` still says `< db>`**, same file. Sweep the `E-PA-*` family.
 
 ### g-pa-createtablemap-per-file — a `<schema>` in file A does not satisfy a `<db>` in file B — `NEW S295 (lane 3); MED; OPEN`
@@ -8392,8 +8394,9 @@ Found while re-verifying `g-block-analysis-emit-foreign-underscore` (enum erasur
 
 Carried from the S334 census (found incidentally during census-1). A `=` in a base64 literal on a continuation line of a server-fn template literal is mis-read as an assignment and false-fires `E-FN-003`. **Re-verify owed before any fix** (HEAD moved since the census; the exact repro shape was not captured verbatim) — [[feedback-gap-report-fix-direction-can-be-wrong]].
 
-### g-review-debt-codebearing-whitelist-misses-code-dirs — the review-floor instrument's code-bearing classifier whitelists only `compiler|stdlib|scripts|conformance/cases`, so a PR landing solely in `lsp/`/`editors/`/`dashboard/`/`e2e/`/the conformance harness is silently carve-out-invisible — `NEW S335-peter (#481 review-floor finding); LOW; open`
-<!-- @gap id=g-review-debt-codebearing-whitelist-misses-code-dirs sev=LOW status=open locus=scripts/review-debt.ts:90(CODE_BEARING_RE) prov=rationale:review-floor-pass-on-481-arithmetic-reconciled-exact-but-the-whitelist-is-incomplete-relative-to-repo-layout-latent-no-in-scope-PR-touches-those-dirs-alone-today -->
+### g-review-debt-codebearing-whitelist-misses-code-dirs — the review-floor instrument's code-bearing classifier whitelists only `compiler|stdlib|scripts|conformance/cases`, so a PR landing solely in `lsp/`/`editors/`/`dashboard/`/`e2e/`/the conformance harness is silently carve-out-invisible — `NEW S335-peter (#481 review-floor finding); LOW; RESOLVED S358-peter (#607 a53e8e82)`
+<!-- @gap id=g-review-debt-codebearing-whitelist-misses-code-dirs sev=LOW status=resolved locus=scripts/review-debt.ts:90(CODE_BEARING_RE) prov=rationale:review-floor-pass-on-481-arithmetic-reconciled-exact-but-the-whitelist-is-incomplete-relative-to-repo-layout-latent-no-in-scope-PR-touches-those-dirs-alone-today -->
+**RESOLVED S358-peter (#607).** `CODE_BEARING_RE` widened to `/^(compiler|stdlib|scripts|lsp|editors|e2e|dashboard)\/|^conformance\//` — added the source trees the repo carries (each verified to hold real source) + broadened `conformance/cases/` → `conformance/` (the harness `run.ts`/`driver.ts` count too). Latent closed with ZERO retroactive re-classification (re-ran review-debt: code-bearing rate stayed 2/90 — no in-scope PR touches those dirs alone today).
 
 Latent (no in-scope PR touches those trees alone today), but the moment one does, a real-code PR recorded `carve-out` is excluded from the code-bearing health signal AND never printed by name — the exact evasion the S331 refinement was built to detect. bryan's instrument; noted, not fixed. Fix = extend the whitelist (or invert to a docs/known-non-code blacklist).
 
