@@ -212,6 +212,10 @@ describe("E-PA-006 — src= absent", () => {
     const { protectAnalysis, errors } = runPA({ files: [ast] });
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe("E-PA-006");
+    // Canonical element form, never the deprecated space form (family sweep of
+    // g-e-pa-messages-deprecated-space-form; mirrors the E-PA-002 pin a9044329).
+    expect(errors[0].message).toContain("<db>");
+    expect(errors[0].message).not.toContain("< db>");
     expect(protectAnalysis.views.size).toBe(0);
   });
 
