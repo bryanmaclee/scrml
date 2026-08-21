@@ -181,7 +181,12 @@ jobs:
       # leaves it, so this step now carries information and the steps after it execute.
       - name: Browser tier — failure NAME-SET assertion (not exit code)
         run: bun scripts/browser-baseline.ts --check
-      - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking)
+      # NOTE (label accuracy — g-ci-does-not-run-root-level-test-files): this step runs ONLY the
+      # within-node parity file. The canary (parser-conformance-canary.test.js) is NOT run here — it
+      # is gated in the BLOCKING `gate` job by the `*.test.js` root glob above ("Root-level
+      # parser/native conformance (S302)"). The step name is kept truthful to its command so an
+      # auditor reading "is the canary covered?" is not misled into thinking THIS step covers it.
+      - name: Within-node parser-parity (M6.x native-parser migration backlog — tracking; canary gated in the blocking `gate` job)
         run: bun test compiler/tests/parser-conformance-within-node.test.js
 
   windows:

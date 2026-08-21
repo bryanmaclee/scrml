@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 47 |
-| MED | 149 |
-| LOW | 68 |
+| MED | 148 |
+| LOW | 67 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -1955,8 +1955,9 @@ bite proof is what distinguishes it from a probe that cannot fail (`pa-base` §8
 worktree with its file counts, invoked at wrap 6b so the disposition is evidence rather than judgement,
 and so the S268 backlog drains once instead of being re-deferred each session.
 
-### g-specifier-resolution-test-hook-timeout-knife-edge — an integration test's `beforeAll` spawns a full flagship-app compile against bun's DEFAULT 5s hook timeout; the margin is ~1.1s and it goes red under ordinary machine load, blocking commits for reasons no change caused — `NEW S326-bryan; MED; open`
-<!-- @gap id=g-specifier-resolution-test-hook-timeout-knife-edge sev=MED status=open locus=compiler/tests/integration/corpus-emitted-specifier-resolution.test.js:121-131(beforeAll) prov=rationale:blocked-a-clean-commit-twice-then-measured-base-vs-head-and-found-no-regression -->
+### g-specifier-resolution-test-hook-timeout-knife-edge — an integration test's `beforeAll` spawns a full flagship-app compile against bun's DEFAULT 5s hook timeout; the margin is ~1.1s and it goes red under ordinary machine load, blocking commits for reasons no change caused — `NEW S326-bryan; MED; RESOLVED S359-peter`
+<!-- @gap id=g-specifier-resolution-test-hook-timeout-knife-edge sev=MED status=resolved locus=compiler/tests/integration/corpus-emitted-specifier-resolution.test.js:121-131(beforeAll) prov=rationale:blocked-a-clean-commit-twice-then-measured-base-vs-head-and-found-no-regression -->
+**RESOLVED S359-peter.** Added an explicit `30000`ms timeout as `beforeAll`'s second arg. Re-measured on HEAD: the flagship compile (`examples/23-trucking-dispatch`) runs **~4.5s** against bun's default **5s** hook budget — a ~0.5s margin (tighter than the ~1.1s originally estimated), so any load reds it spuriously. Zero-behaviour-change: a real hang still fails (now at 30s) and a genuine compile error still fails at the `:130` exitCode assertion identically — the timeout removes only the false *timeout* flake, changing no assertion and no failure the suite accepts. Test re-run green (3/3).
 
 `beforeAll` (`:121-131`) spawns `bun <CLI> compile examples/23-trucking-dispatch` — the 36-file,
 66-handler flagship — and bun's default hook timeout is **5s**. There is no explicit timeout argument.
@@ -6850,8 +6851,9 @@ Fixed in the S299 refresh: the claim is withdrawn and replaced with the measured
 
 ⚠️ Filed HIGH not because the test matters most, but because **a blocking gate that disagrees with local on its own tier is a gate-integrity question** (`pa-base` v2.4 §8 — a gate's entire value is its capacity to go red). — `NEW S297; HIGH; open`
 
-### g-ci-does-not-run-root-level-test-files — 13 of the 14 test files at `compiler/tests/` root are executed by NO workflow, and a step NAME claims to cover one of them — `NEW S297 (categorizing the 36-fail baseline); MED; infra/CI`
-<!-- @gap id=g-ci-does-not-run-root-level-test-files sev=LOW status=open locus=.github/workflows/ci.yml:130 prov=spec:S302-ci-hole-closure -->
+### g-ci-does-not-run-root-level-test-files — 13 of the 14 test files at `compiler/tests/` root are executed by NO workflow, and a step NAME claims to cover one of them — `NEW S297 (categorizing the 36-fail baseline); MED; infra/CI; RESOLVED S359-peter (label residual only — the coverage half was already false since S302)`
+<!-- @gap id=g-ci-does-not-run-root-level-test-files sev=LOW status=resolved locus=.github/workflows/ci.yml:130 prov=spec:S302-ci-hole-closure -->
+**RESOLVED S359-peter.** Only the cosmetic label residual survived (the coverage claim was already false since S302 — see the S314 correction below). Verified on HEAD: the canary (`parser-conformance-canary.test.js`) IS run by the blocking `gate` job's `bun test compiler/tests/*.test.js` root glob; the `tracking` step at `ci.yml:184` ran only `parser-conformance-within-node.test.js` yet was named `"…+ canary"`. Reworded the step name to drop the false `+ canary` claim and point at the `gate` job where the canary is actually gated, with an inline NOTE tying the step name to its command (the hollow-label detection generalization). Zero behaviour change — a step `name:` string + comment only; no command, no coverage moved. YAML re-validated; canary file confirmed present.
 > **⚠️ S314 CORRECTION — THE BODY BELOW IS FALSE AND WAS DISPATCH-HAZARDOUS.** *"Nothing runs the other 13 files"* has been untrue since **S302** (`b7dda491`): the **blocking `gate`** job runs `bun test compiler/tests/*.test.js` at `ci.yml:73` — step *"Root-level parser/native conformance (S302 — previously ungated)"* — covering all **14** root files including `parser-conformance-canary.test.js`. **As written this entry would have sent someone to fix a closed hole.** Verified by reading the workflow, not the ledger.
 >
 > **The surviving residual is cosmetic and is now the whole entry:** the `tracking` job's step at `ci.yml:130` is still labelled *"Within-node parser-parity + canary"* while `:131` runs only `parser-conformance-within-node.test.js`. The canary IS gated — at `:73`, in a different job — so the label overstates *that step's* scope without leaving anything uncovered. **Re-severitized MED → LOW.**
