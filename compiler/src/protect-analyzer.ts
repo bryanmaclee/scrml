@@ -1043,7 +1043,7 @@ function processDbBlock(
   if (tablesRaw === null) {
     errors.push(new PAError(
       "E-PA-005",
-      `E-PA-005: The \`< db>\` state block is missing the required \`tables=\` attribute. ` +
+      `E-PA-005: The \`<db>\` state block is missing the required \`tables=\` attribute. ` +
       `Specify which tables to bring into scope, e.g. \`tables="users"\`.`,
       blockSpan,
     ));
@@ -1059,7 +1059,7 @@ function processDbBlock(
   if (tableNames.length === 0) {
     errors.push(new PAError(
       "E-PA-005",
-      `E-PA-005: The \`tables=\` attribute on the \`< db>\` block produced an empty table name list ` +
+      `E-PA-005: The \`tables=\` attribute on the \`<db>\` block produced an empty table name list ` +
       `after parsing (value: \`"${tablesRaw}"\`). Provide at least one valid table name.`,
       blockSpan,
     ));
