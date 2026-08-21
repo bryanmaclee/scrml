@@ -6195,6 +6195,20 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-21 (S359-peter — the last clean MED/LOW rips, then six deep-dive dispositions that caught a lying ledger three times)
+
+**One PR merged (#611); six gaps deep-dived.** The session opened by clearing the owed #610 review (carve-out → review floor 0 OWED) and landing the last two zero-behaviour-change rips: a CI `tracking`-step label that falsely claimed canary coverage (the canary is gated in the blocking `gate` job), and a specifier-sweep `beforeAll` that ran ~0.5s under bun's 5s hook default and reddened under load. Two exhaustive repro-first satellite sweeps (145 MED + 68 LOW) then confirmed what S358 suspected: the clean autonomous peter-lane rip vein is exhausted — every survivor is direction-of-change owing bryan, a flake, or a doc coupled to an in-flight arc.
+
+With rips spent, the session pivoted to **deep-dive dispositions** — first-hand repro on HEAD of one gap at a time. Six ran; three found the ledger entry materially WRONG (the shortlist is unreliable — first-hand verification is load-bearing):
+
+- **fn-anon `=`-body** (`g-fn-anon-expr-equals-body-emits-invalid-js`) — the filed asymmetry ("`=>` routes cleanly; mirror it for `=`") is false on HEAD; every anonymous `fn(...)` in a `let`/`const` RHS is broken across all body shapes (truncates or emits invalid JS). Corrected + routed.
+- **anon-fn return-type** (`g-anon-fn-return-type-invalid-js`) — the SAME root; cross-linked so one expression-parser fix covers both entries.
+- **string `\${` escape** (`g-string-literal-dollar-brace-interp-no-literal-escape`) — not the filed "SPEC-triage OQ": SPEC §4.18.3 *mandates* `\${`, and the impl doesn't honor it even in display-text. A conformance bug, not a design question.
+- **todomvc hollow-gate** (`g-todomvc-harness-dangling-runtime-ref-passes-silently`) — a real pa-base §8 lying gate: the harness silently substituted the runtime source template on a dangling `<script src>`, so a DOA compile stayed green. Built + verified the fix (happy path stays green, dangling ref now reds loud); ROUTED to bryan (M1-gate acceptance change, his gap).
+- **emitobjectkey proto** + **css-hash no-diagnostic** — ledger was right; re-confirmed with added precision (the css case is a benign lenient mis-parse, explicitly *not* the silent-data-loss class).
+
+Everything actionable was routed to the bryan-lane queue (4 addenda + 1 branch + 1 inbox note); no direction-of-change was landed unilaterally. Gaps HIGH 47 · MED 148 · LOW 67 · Nominal 7.
+
 ### 2026-08-19 (S352-bryan — six operator rulings, a six-session `gc` failure closed, and a budget gate that measured a five-line fixture)
 
 **Ten PRs merged (#564-#573).** The session's shape was conversion, not construction: a queue of blocked deliberations became a queue of buildable arcs. Four dPA advisories went from awaiting-bryan to banked on the drain path, and the two blockers on the held D2/D3/D4 security cluster both cleared — dpa-033 by ruling, M4 by structure.
