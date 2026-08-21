@@ -4755,10 +4755,12 @@ The `bun scrml promote --match` CLI shipped S66 (Tier-0→1 lift mechanical). Th
 
 ---
 
-### g-promote-engine-same-named-cell-no-lift — `promote --engine` leaves the redundant same-named cell decl — `open`
-<!-- @gap id=g-promote-engine-same-named-cell-no-lift sev=LOW status=open -->
+### g-promote-engine-same-named-cell-no-lift — `promote --engine` leaves the redundant same-named cell decl — `RESOLVED S357`
+<!-- @gap id=g-promote-engine-same-named-cell-no-lift sev=LOW status=resolved -->
 
-Follow-on from Bug 20 (S228, ss53). The ratified-scope `--engine` span-only rewrite promotes the `<match>` block in place but does NOT remove the now-redundant same-named cell decl outside the match span. Idiomatic shape — `<phase>: Phase` + `<match for=Phase on=@phase>` — after rewrite the surviving `<phase>` decl collides with the engine's auto-declared `@phase` → `E-ENGINE-VAR-DUPLICATE` → the transactional `sanityCheckParse` gate REVERTS (reports `failed`, file untouched; guided-not-silent). So `--engine` one-pass-promotes only when the match `on=@cell` name DIFFERS from the type-derived engine cell. Fix = extend `--engine` to lift/remove the redundant same-named decl. SPEC §56.6.2 documents the boundary honestly. LOW — usable today via guided revert + manual decl removal.
+Follow-on from Bug 20 (S228, ss53). The ratified-scope `--engine` span-only rewrite promotes the `<match>` block in place but did NOT remove the now-redundant same-named cell decl outside the match span. Idiomatic shape — `<phase>: Phase` + `<match for=Phase on=@phase>` — after rewrite the surviving `<phase>` decl collided with the engine's auto-declared `@phase` → `E-ENGINE-VAR-DUPLICATE` → the transactional `sanityCheckParse` gate REVERTED (reported `failed`, file untouched; guided-not-silent). So `--engine` one-pass-promoted only when the match `on=@cell` name DIFFERED from the type-derived engine cell.
+
+**RESOLVED S357 (PA-lane tooling fix, `compiler/src/commands/promote.js`).** `rewriteOneMatchBlock` now detects the same-named-cell case (`plainCellRefName(on=) === autoDeriveEngineVarName(for=)`) and LIFTS the redundant decl in the same transactional pass. The lift is conservative (`declIsRedundantForEngine`): only a plain, mutable, single-variant-initial `<cell>` with no `default=`/pinned projection — nothing the promoted engine does not reproduce (name via §51.0.C, type via `for=`, initial via `initial=`). Crucially the engine's `initial=` is seeded from the DECL's declared initial value (takes precedence over the first-arm default), so the machine's starting state is preserved exactly. A richer decl is left in place → the collision is genuine → the gate still fails closed. Compiler accept/reject unchanged (tooling-only). SPEC §56.6.2/§56.6.3 updated to document the lift; +3 bite tests in `promote-engine.test.js` (18 pass; full unit suite 17628 pass / 0 fail).
 
 ---
 

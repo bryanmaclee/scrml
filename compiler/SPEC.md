@@ -34951,14 +34951,20 @@ verbatim.
 Every rewrite is gated by a transactional re-compile (`sanityCheckParse`, the S86 standing
 rule shared with `--match` / `--each` / `migrate`): the rewritten source is staged in place,
 compiled, and reverted if it carries any blocking error. The file is NEVER left in a state
-that does not compile. Two cell-ownership cases are caught HERE rather than by a pre-check:
+that does not compile. Two cell-ownership cases interact with the gate:
 
-- **Name collision.** When the dropped `on=@cell` named a SEPARATELY-declared state cell
-  whose name equals the engine's type-derived name (the idiomatic `@phase` ↔ `<engine
-  for=Phase>` pairing), the engine's auto-declaration collides with the surviving
-  declaration → `E-ENGINE-VAR-DUPLICATE` (§51.0.C) → the gate REVERTS and the site is
-  reported `failed`. The span-only rewrite intentionally does NOT delete the surviving
-  declaration; the adopter removes it (or uses `var=` on the engine) and re-runs.
+- **Same-named cell (lifted).** When the dropped `on=@cell` named a SEPARATELY-declared state
+  cell whose name equals the engine's type-derived name (the idiomatic `@phase` ↔ `<engine
+  for=Phase>` pairing), the engine's auto-declaration would collide with the surviving
+  declaration → `E-ENGINE-VAR-DUPLICATE` (§51.0.C). Because this is the common promotion
+  shape, the rewrite LIFTS the now-redundant declaration in the same pass: the decl carries
+  nothing the engine does not reproduce — its name (the §51.0.C derivation), its type (the
+  engine's `for=`), and its declared initial value (which seeds the engine's `initial=`;
+  §56.6.3). Downstream `@cell` reads/writes bind to the engine's cell unchanged. The lift is
+  conservative — it applies ONLY to a plain, mutable, single-variant-initial cell with no
+  `default=` (§6.8.1) and no pinned projection; any richer declaration is left in place, at
+  which point the collision is genuine and the gate REVERTS (site reported `failed`), and the
+  adopter removes the declaration (or uses `var=` on the engine) and re-runs.
 - **Non-exhaustive arms.** A `<match>` made exhaustive only by a `<_>` wildcard arm produces
   an `<engine>` missing a state-child for each wildcard-covered variant →
   `E-ENGINE-STATE-CHILD-MISSING` (§51.0.B / §51.0.F) → the gate REVERTS. (Engines enumerate
@@ -34971,6 +34977,9 @@ an initial state. The CLI defaults to the FIRST arm's variant tag. A leading `<_
 arm has no variant tag and cannot seed `initial=`; such a site is skipped (reported, not
 rewritten). Because `initial=.V0` is always emitted on a clean promotion, the §51.0.E
 `W-ENGINE-INITIAL-MISSING` default-to-first-state-child surface does not fire on the output.
+When a same-named cell is lifted (§56.6.2), that cell's DECLARED initial value takes
+precedence over the first-arm default — the promoted engine starts in exactly the state the
+original cell was seeded to, so the lift never silently changes the machine's starting state.
 
 #### 56.6.4 Idempotency
 

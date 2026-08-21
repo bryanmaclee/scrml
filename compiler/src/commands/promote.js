@@ -45,6 +45,7 @@ import { resolve, join, relative, sep } from "path";
 import { compileScrml } from "../api.js";
 import { findPromotableChains } from "../lint-i-match-promotable.js";
 import { parseMatchArms } from "../match-statechild-parser.ts";
+import { autoDeriveEngineVarName } from "../engine-varname.ts";
 
 const isTTY = process.stderr.isTTY && process.stdout.isTTY;
 
@@ -1542,14 +1543,23 @@ export function promoteEachOnFile(filePath, targetLine, opts, cwd) {
 // and the rewrite is idempotent: re-running on an `<engine>` is a no-op
 // because the detector only finds `match-block` nodes, never `engine-decl`.
 //
-// CELL-OWNERSHIP NOTE (empirical, S210 build): the engine auto-declares its
-// own §51.0.C cell (`autoDeriveEngineVarName(forType)` — `Phase`→`@phase`).
-// The original match's `on=@cell` is dropped. When the dropped cell was a
-// SEPARATELY-declared state cell sharing the engine's type-derived name, the
-// engine's auto-declaration collides → E-ENGINE-VAR-DUPLICATE → the gate
-// REVERTS the rewrite (fail-closed). When the names differ, the rewrite
-// compiles (the original cell remains; engine drives its own cell). Either
-// way the gate guarantees no broken scrml is ever written.
+// CELL-OWNERSHIP NOTE (empirical, S210 build; extended S357): the engine
+// auto-declares its own §51.0.C cell (`autoDeriveEngineVarName(forType)` —
+// `Phase`→`@phase`). The original match's `on=@cell` is dropped. When the
+// dropped cell was a SEPARATELY-declared state cell sharing the engine's
+// type-derived name (the idiomatic `<phase>: Phase` + `<match on=@phase>`
+// shape), the engine's auto-declaration WOULD collide with the surviving decl
+// → E-ENGINE-VAR-DUPLICATE. To land that common shape, the SAME pass LIFTS the
+// now-redundant decl (see rewriteOneMatchBlock's same-named-cell block): the
+// decl carries nothing the engine does not reproduce — name (§51.0.C), type
+// (`for=`), and initial (its declared `= .V` → the engine's `initial=`, which
+// takes PRECEDENCE over the first-arm default so the machine's starting state
+// is preserved exactly). Only a fully-redundant plain/mutable/variant-initial
+// decl with no `default=`/`pinned` is lifted; a richer decl is left in place and
+// the gate then fails closed exactly as before. When the names differ, the
+// rewrite compiles untouched (engine drives its own cell). Either way the
+// transactional sanityCheckParse gate guarantees no broken scrml is ever
+// written.
 
 /**
  * Walk a typed FileAST and collect `match-block` nodes (the --engine
@@ -1577,6 +1587,90 @@ function findMatchBlockSites(file) {
   if (file.ast?.components) walk(file.ast.components);
   if (file.components) walk(file.components);
   return sites;
+}
+
+/**
+ * Walk a typed FileAST and collect top-level `state-decl` nodes (the author's
+ * `<cell>: T = .V` state declarations). Used by the same-named-cell decl lift
+ * (SPEC §56.6.2): when `--engine` drops a `<match on=@cell>` whose cell shares
+ * the engine's type-derived name, the surviving decl collides with the engine's
+ * auto-declared cell — so we lift the now-redundant decl in the same pass.
+ *
+ * @param {object} file
+ * @returns {object[]}  state-decl nodes
+ */
+function findStateDeclSites(file) {
+  const sites = [];
+  const seen = new WeakSet();
+  function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+    if (node.kind === "state-decl") sites.push(node);
+    for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "consequent", "alternate", "components", "defChildren"]) {
+      if (Array.isArray(node[k])) walk(node[k]);
+    }
+  }
+  walk(file.ast?.nodes ?? file.nodes ?? file);
+  if (file.ast?.components) walk(file.ast.components);
+  if (file.components) walk(file.components);
+  return sites;
+}
+
+/**
+ * Parse a match's `on=` header as a PLAIN single-cell reference (`@cell`).
+ * Returns the bare cell name, or null when the header is anything more complex
+ * (a navigation `@a.b`, a call, an expression) — those are never the redundant
+ * same-named-decl shape and must not trigger a decl lift.
+ *
+ * @param {string|undefined} onExprRaw
+ * @returns {string|null}
+ */
+function plainCellRefName(onExprRaw) {
+  if (typeof onExprRaw !== "string") return null;
+  const m = onExprRaw.trim().match(/^@([A-Za-z_$][A-Za-z0-9_$]*)$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Read a state-decl's initial value as a single enum variant tag (`.Idle` →
+ * `Idle`). Returns null when the initial is anything the engine's `initial=`
+ * cannot carry (a compound expression, a cross-cell `@other`, empty) — in which
+ * case the decl is NOT redundant and must be left in place (fail-closed).
+ *
+ * @param {string|undefined} init
+ * @returns {string|null}
+ */
+function declInitialVariant(init) {
+  if (typeof init !== "string") return null;
+  const m = init.trim().match(/^\.\s*([A-Za-z_$][A-Za-z0-9_$]*)$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Decide whether a state-decl is a REDUNDANT same-named cell that `--engine`
+ * may safely lift when promoting a `<match on=@cell>` whose cell name equals the
+ * engine's type-derived name. Conservative: only a plain, mutable, single-type
+ * cell with a clean variant initial and no `default=`/`pinned` semantics — every
+ * bit of information it carries is reproduced by the promoted engine (name from
+ * §51.0.C derivation, type from `for=`, initial from `initial=`), so removing the
+ * declaration loses nothing. Anything else is left in place (the gate then fails
+ * closed exactly as before).
+ *
+ * @param {object} decl — state-decl AST node
+ * @param {string} forType — the engine's governed type
+ * @returns {boolean}
+ */
+function declIsRedundantForEngine(decl, forType) {
+  if (!decl || decl.kind !== "state-decl") return false;
+  if (decl.shape !== "plain") return false;
+  if (decl.isConst) return false;
+  if (decl.pinned) return false;
+  if (decl.defaultExpr != null) return false;
+  if (decl.typeAnnotation !== forType) return false;
+  if (!decl.span || typeof decl.span.start !== "number" || typeof decl.span.end !== "number") return false;
+  return declInitialVariant(decl.init) != null;
 }
 
 /**
@@ -1615,9 +1709,11 @@ function findMatchOpenerEnd(s) {
  *
  * @param {string} source — full file source
  * @param {object} matchBlock — typed match-block AST node
- * @returns {{ ok: true, rewritten: string } | { ok: false, reason: string }}
+ * @param {object[]} [stateDecls] — sibling state-decl nodes (same-named lift)
+ * @param {Set<object>} [liftedDecls] — decls already lifted this pass (dedupe)
+ * @returns {{ ok: true, rewritten: string, liftedDecl?: object } | { ok: false, reason: string }}
  */
-function rewriteOneMatchBlock(source, matchBlock) {
+function rewriteOneMatchBlock(source, matchBlock, stateDecls, liftedDecls) {
   const span = matchBlock.span;
   if (!span || typeof span.start !== "number" || typeof span.end !== "number") {
     return { ok: false, reason: "match-block has no usable source span" };
@@ -1667,6 +1763,30 @@ function rewriteOneMatchBlock(source, matchBlock) {
   }
   const firstVariant = firstArm.variantName;
 
+  // ---- Same-named-cell decl lift (SPEC §56.6.2) --------------------------
+  // The engine auto-declares a §51.0.C cell named `autoDeriveEngineVarName(T)`.
+  // When the dropped `on=@cell` referenced a SEPARATELY-declared state cell of
+  // that same name, the surviving decl would collide with the engine's
+  // auto-declaration → E-ENGINE-VAR-DUPLICATE. Rather than let the gate revert
+  // the whole promotion, lift the now-redundant decl in the same pass and seed
+  // the engine's `initial=` from the DECL's declared initial value (the true
+  // initial state — never the first arm, which may differ). Only a fully
+  // redundant plain/mutable/variant-initial decl is lifted; anything richer is
+  // left untouched (the gate then fails closed exactly as before).
+  let initialVariant = firstVariant;
+  let declToLift = null;
+  const engineVar = autoDeriveEngineVarName(forType);
+  const onCellName = plainCellRefName(matchBlock.onExprRaw);
+  if (Array.isArray(stateDecls) && onCellName && onCellName === engineVar) {
+    const decl = stateDecls.find(
+      (d) => d && d.name === engineVar && (!liftedDecls || !liftedDecls.has(d)),
+    );
+    if (decl && declIsRedundantForEngine(decl, forType)) {
+      initialVariant = declInitialVariant(decl.init); // decl's declared initial
+      declToLift = decl;
+    }
+  }
+
   // Slice the full match-block span and locate the opener `>` + trailing closer.
   const matchSrc = source.slice(span.start, span.end);
   const openerEnd = findMatchOpenerEnd(matchSrc);
@@ -1688,10 +1808,22 @@ function rewriteOneMatchBlock(source, matchBlock) {
   const armsRegion = matchSrc.slice(openerEnd + 1, closerStart);
 
   // Rebuild: opener + verbatim arms + `</>` engine closer.
-  const engineBlock = `<engine for=${forType} initial=.${firstVariant}>` + armsRegion + "</>";
+  const engineBlock = `<engine for=${forType} initial=.${initialVariant}>` + armsRegion + "</>";
 
-  const rewritten = source.slice(0, span.start) + engineBlock + source.slice(span.end);
-  return { ok: true, rewritten };
+  // Apply the match-span replacement and (optionally) the redundant-decl
+  // removal as one transaction. Both edits are spliced DESCENDING by start
+  // offset so the earlier removal does not shift the match span. The decl always
+  // precedes the match (declared before it is referenced), so this is safe.
+  const edits = [{ start: span.start, end: span.end, text: engineBlock }];
+  if (declToLift) {
+    edits.push({ start: declToLift.span.start, end: declToLift.span.end, text: "" });
+  }
+  edits.sort((a, b) => b.start - a.start);
+  let rewritten = source;
+  for (const e of edits) {
+    rewritten = rewritten.slice(0, e.start) + e.text + rewritten.slice(e.end);
+  }
+  return { ok: true, rewritten, liftedDecl: declToLift || undefined };
 }
 
 /**
@@ -1702,8 +1834,9 @@ function rewriteOneMatchBlock(source, matchBlock) {
  * @param {string} sourceText
  * @param {object[]} sites — match-block nodes
  * @param {number|null} targetLine — restrict to site at this line (±1 lenient)
+ * @param {object[]} [stateDecls] — sibling state-decls (same-named lift)
  */
-function applyEngineRewrite(sourceText, sites, targetLine) {
+function applyEngineRewrite(sourceText, sites, targetLine, stateDecls) {
   let rewritten = sourceText;
   let count = 0;
   const skipped = [];
@@ -1727,11 +1860,13 @@ function applyEngineRewrite(sourceText, sites, targetLine) {
     return bStart - aStart;
   });
 
+  const liftedDecls = new Set();
   for (const site of sorted) {
-    const r = rewriteOneMatchBlock(rewritten, site);
+    const r = rewriteOneMatchBlock(rewritten, site, stateDecls, liftedDecls);
     if (r.ok) {
       rewritten = r.rewritten;
       count++;
+      if (r.liftedDecl) liftedDecls.add(r.liftedDecl);
     } else {
       skipped.push({ line: site.span?.line ?? 0, reason: r.reason });
     }
@@ -1790,7 +1925,8 @@ export function promoteEngineOnFile(filePath, targetLine, opts, cwd) {
     return { status: "no-sites", relPath };
   }
 
-  const { rewritten, count, skipped } = applyEngineRewrite(source, sites, targetLine);
+  const stateDecls = findStateDeclSites(fileAST);
+  const { rewritten, count, skipped } = applyEngineRewrite(source, sites, targetLine, stateDecls);
   if (count === 0) {
     if (targetLine != null) {
       return {

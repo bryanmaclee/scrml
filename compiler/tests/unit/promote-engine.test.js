@@ -317,7 +317,12 @@ type Book:enum = {
 // ---------------------------------------------------------------------------
 
 describe("§4 Fail-closed safety gate — §56.6.2", () => {
-  test("name collision (on=@phase == type-derived) reverts via E-ENGINE-VAR-DUPLICATE", async () => {
+  // g-promote-engine-same-named-cell-no-lift: the idiomatic `<phase>: Phase` +
+  // `<match for=Phase on=@phase>` shape. Before the fix the surviving same-named
+  // decl collided with the engine's auto-declared cell → E-ENGINE-VAR-DUPLICATE
+  // → the gate REVERTED and `--engine` silently did nothing. Now the redundant
+  // decl is lifted in the same pass so the promotion lands.
+  test("same-named cell (on=@phase == type-derived) LIFTS the redundant decl and promotes clean", async () => {
     const { promoteEngineOnFile } = await import("../../src/commands/promote.js");
     const src = `<program>
 type Phase:enum = { Idle, Loading, Ready }
@@ -335,15 +340,87 @@ type Phase:enum = { Idle, Loading, Ready }
         <p>ready</p>
     </>
 </match>
+
+<p>cur: ${D}@phase.variant}</p>
 </program>`;
     const { dir, filePath } = makeTmpFile("samename.scrml", src);
     try {
-      const before = readFileSync(filePath, "utf8");
       const r = promoteEngineOnFile(filePath, null, { dryRun: false, check: false }, dir);
-      // Gate fails closed — file left UNTOUCHED, never emits broken scrml.
-      expect(r.status).toBe("failed");
-      expect(r.reason).toContain("E-ENGINE-VAR-DUPLICATE");
-      expect(readFileSync(filePath, "utf8")).toBe(before);
+      expect(r.status).toBe("promoted");
+      expect(r.count).toBe(1);
+      const after = readFileSync(filePath, "utf8");
+      // Engine emitted; the redundant same-named `<phase>` decl is GONE.
+      expect(after).toContain("<engine for=Phase initial=.Idle>");
+      expect(after).not.toContain("<phase>: Phase = .Idle");
+      expect(after).not.toContain("<match");
+      // A downstream `@phase` read still resolves (engine owns the cell now).
+      expect(after).toContain("cur: " + D + "@phase.variant}");
+      // Promotion implies sanityCheckParse passed — re-assert it compiles.
+      expect(blockingErrorCount(filePath)).toBe(0);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  // The lifted decl carries the TRUE initial state. When the cell's declared
+  // initial differs from the first arm, `initial=` must follow the DECL (.Ready)
+  // — never the first-arm default (.Idle) — or the promotion silently changes
+  // the machine's starting state.
+  test("lifted decl seeds initial= from the cell's declared value, not the first arm", async () => {
+    const { promoteEngineOnFile } = await import("../../src/commands/promote.js");
+    const src = `<program>
+type Phase:enum = { Idle, Loading, Ready }
+
+<phase>: Phase = .Ready
+
+<match for=Phase on=@phase>
+    <Idle rule=.Loading>
+        <p>idle</p>
+    </>
+    <Loading rule=.Ready>
+        <p>loading</p>
+    </>
+    <Ready>
+        <p>ready</p>
+    </>
+</match>
+</program>`;
+    const { dir, filePath } = makeTmpFile("samename-differ.scrml", src);
+    try {
+      const r = promoteEngineOnFile(filePath, null, { dryRun: false, check: false }, dir);
+      expect(r.status).toBe("promoted");
+      const after = readFileSync(filePath, "utf8");
+      // initial= follows the DECL (.Ready), not the first arm (.Idle).
+      expect(after).toContain("<engine for=Phase initial=.Ready>");
+      expect(after).not.toContain("initial=.Idle");
+      expect(after).not.toContain("<phase>");
+      expect(blockingErrorCount(filePath)).toBe(0);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  // Idempotency of the lift path: the lifted output has no match-block AND no
+  // surviving same-named decl, so a second pass finds nothing to do.
+  test("re-running after a same-named lift is a no-op", async () => {
+    const { promoteEngineOnFile } = await import("../../src/commands/promote.js");
+    const src = `<program>
+type Phase:enum = { Idle, Loading, Ready }
+
+<phase>: Phase = .Idle
+
+<match for=Phase on=@phase>
+    <Idle rule=.Loading></>
+    <Loading rule=.Ready></>
+    <Ready></>
+</match>
+</program>`;
+    const { dir, filePath } = makeTmpFile("samename-idem.scrml", src);
+    try {
+      const r1 = promoteEngineOnFile(filePath, null, { dryRun: false, check: false }, dir);
+      expect(r1.status).toBe("promoted");
+      const r2 = promoteEngineOnFile(filePath, null, { dryRun: false, check: false }, dir);
+      expect(r2.status).toBe("no-sites");
     } finally {
       cleanup(dir);
     }
