@@ -3891,7 +3891,16 @@ export function generateServerJs(
 
       lines.push(`  const _scrml_result = await (async () => {`);
 
-      lines.push(`    const _scrml_body = await _scrml_req.json();`);
+      // A no-argument server function does not require a request body: tolerate an
+      // empty/absent one (an external, non-scrml-client caller POSTing with no body
+      // would otherwise hit an uncaught `await req.json()` throw → 500). `_scrml_body`
+      // stays defined for any server-mode `@cell` reads. The arg-bearing path keeps
+      // the strict read — a missing body for a call that carries args IS an error.
+      lines.push(
+        paramNames.length === 0
+          ? `    const _scrml_body = await _scrml_req.json().catch(() => ({}));`
+          : `    const _scrml_body = await _scrml_req.json();`,
+      );
 
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(`    const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
@@ -4094,7 +4103,14 @@ export function generateServerJs(
         lines.push(`  }`);
       }
     } else {
-      lines.push(`  const _scrml_body = await _scrml_req.json();`);
+      // A no-argument server function does not require a request body — tolerate an
+      // empty/absent one (see the baseline-CSRF path above). Arg-bearing calls keep
+      // the strict read.
+      lines.push(
+        paramNames.length === 0
+          ? `  const _scrml_body = await _scrml_req.json().catch(() => ({}));`
+          : `  const _scrml_body = await _scrml_req.json();`,
+      );
 
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(`  const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
