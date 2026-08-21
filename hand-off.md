@@ -1,13 +1,45 @@
 <!-- ============================================================= -->
 <!-- hand-off.md — live session state. WRAPPED at S357-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1606]-[1612].        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1606]-[1616].        -->
 <!-- S357 RECONCILES the stranded S356-peter: S356 opened 4 PRs,     -->
 <!-- hit a red gate, ended UNwrapped (never landed, no delta-log).   -->
+<!-- ⚑ S357 CONTINUED PAST ITS WRAP (#600): a post-wrap burst of 5   -->
+<!--   more PRs (#601-#604 + this touch-up) — see §POST-WRAP below.   -->
 <!-- Body below the S357 block is S355 + S354 + S352 + older.        -->
 <!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
 <!-- ============================================================= -->
 
 # scrml — Session 357 (peter · P-Tech1 Windows) — WRAP (recovery of stranded S356)
+
+## ⚑ POST-WRAP CONTINUATION (after #600) — bun 1.4.0 sweep + a codegen fix
+
+After the S357 wrap (#600) landed, the session continued (operator: "keep going"). Five more PRs
+merged; delta-log `[1613]`–`[1616]`; review floor drained to 0 (this touch-up records the markers).
+**Local bun was upgraded 1.3.14 → 1.4.0 to match CI's unpinned `setup-bun@v2`** — the whole
+`tracking` regression traced to that version drift.
+
+| PR | what | class |
+|---|---|---|
+| **#601** | ss22/ss39 emitted-JS validity strip (18 fails) | test-harness: whole-line `export` strip orphaned a multi-line `export const … = {` body → invalid under 1.4.0's stricter parser |
+| **#602** | auth+protect response clone (1 fail) | test-harness: `res.clone().text()` **after** `res.json()` → `ERR_BODY_ALREADY_USED` on 1.4.0 |
+| **#603** | R26 `Server.fetch` (7 fails) | test-harness: happy-dom `Request` into bun-native `Bun.serve().fetch()` → `ERR_INVALID_ARG_TYPE`; fixed to `SRV.fetch(url, init)` |
+| **#604** | ⭐ **codegen (§39.3): a no-arg server fn tolerates an empty body** | REAL fix — unguarded `await req.json()` 500'd on an empty body from an external caller; zero-param → `.json().catch(() => ({}))` (arg path byte-identical). **S239 satellite CLEAN.** |
+
+**Result:** `tracking` went ~30 → **4** fails — the remaining 4 are the genuine **dev-watcher `fs.watch` timing flakes** (debounce `<2s`, fail-closed-500, delete-restore, atomic-save), environmental, NOT a bun-1.4.0 artifact. All three test-harness bugs were the **same 1.4.0-strictness class**; the compiler was never at fault except the one real #604 codegen robustness fix.
+
+**⚑ Root risk flagged, NOT fixed (bryan/infra lane):** CI's `.github/workflows/ci.yml` uses
+`oven-sh/setup-bun@v2` **unpinned** → a bun release silently red-lines the (non-blocking) `tracking`
+job with zero scrml changes. This whole burst is the cost of that drift. **Pinning bun is the durable
+fix** — a small `.github/` edit, deferred to bryan's infra call. (Also still open from the wrap: the
+browser-baseline 148 MB dump band-aid #599; the dead no-arg `req.json()` was the #604 find.)
+
+**⚑ Housekeeping:** one review-satellite worktree dir (`agent-a5ecbda7d2c57206f`) is Windows-locked by
+its still-running background regression suite — git registry pruned, dir + local branch clear on process
+exit; sweep next boot if it lingers.
+
+---
+
+## The recovery (the original S357 wrap, #600)
 
 **Date:** 2026-08-20. `/boot` Profile A, solo. **The whole session was a recovery: S356-peter had
 opened four PRs (#595–#598), hit a red cloud `gate`, and ended without landing OR wrapping** — the
