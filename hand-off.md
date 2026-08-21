@@ -1,13 +1,88 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S358-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1618]-[1624].        -->
-<!-- S358 = a LOW/tooling rip pass + a dog-food pass. 4 PRs merged   -->
-<!--   (#606-#609); promote-engine ROUTED to bryan; ~15 LOWs + 3     -->
-<!--   dog-food finds NOTATED to the bryan-lane queue (per Peter:    -->
-<!--   accumulate, don't ping bryan piecemeal).                      -->
-<!-- Body below the S358 block is S357 + S355 + older (history).     -->
-<!-- TWO LANES LIVE: bryan's S352/S353 board is UNSTARTED — see §A.  -->
+<!-- hand-off.md — live session state. WRAPPED at S359-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1625]-[1632].        -->
+<!-- S359 = the last clean MED/LOW rips (#611, 2 fixes) + SIX        -->
+<!--   deep-dive dispositions. Clean rip vein now EXHAUSTED (2       -->
+<!--   satellite sweeps). 3 ledger CORRECTIONS (entries were wrong   -->
+<!--   on HEAD), 2 confirm-with-refine, 1 built+routed (todomvc).    -->
+<!--   4 routes added to the bryan-lane queue + 1 branch.            -->
+<!-- Body below the S359 block is S358 + S357 + older (history).     -->
+<!-- TWO LANES LIVE: bryan's S352/S353 board still UNSTARTED — §A.   -->
 <!-- ============================================================= -->
+
+# scrml — Session 359 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+**Two live lanes — pick by who boots.** bryan's lane-A board is UNTOUCHED by S359 (carried intact).
+
+### A. bryan's lane — UNSTARTED, and it GREW this session
+Everything from the S358 PICKUP (see the S358 block below) is unchanged: raw-egress (c)→(d) · i18n
+substrate B · dpa-035 · dpa-029 Q1 · two held fix rounds · the S355 handle-onion HIGH (#593) ·
+`promote --engine` (branch `origin/feat/promote-engine-same-named-cell-lift @ 01a8f33f`, owes §56.6
+stamp) · the S358 ~15-LOW queue. **⭐ NEW from S359 — appended to the SAME bryan-lane queue**
+(`scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`, S359 addenda) + 1 branch:
+- **`fix/s359-todomvc-hollow-gate @ 681fdad6` (BUILT + VERIFIED, test-only) — owes your M1-gate
+  accepted-failure stamp.** todomvc harness silently substituted the SCRML_RUNTIME source template on a
+  dangling `<script src>` → DOA compiles stayed 44/0 green; fix throws loud. Happy path stays 44/0.
+  Inbox note: `…incoming/2026-08-21-from-peter-to-bryan-todomvc-hollow-gate-fix-for-review.md`. Two Qs
+  for you inside (accept the acceptance change? + the un-built part-2 version-discrimination arc).
+- **anon-fn-in-expression-position (ONE root, TWO entries)** — `g-fn-anon-expr-equals-body-emits-invalid-js`
+  (corrected — ledger asymmetry was FALSE) + `g-anon-fn-return-type-invalid-js` (same root). ANY anon
+  `fn(...)` in a `let`/`const` RHS is broken across ALL body shapes (`=`/`=>`/`{}`, typed/untyped):
+  truncates or emits invalid JS. ONE `expression-parser.ts` fix covers both. Direction-of-change.
+- **string-literal `\${` escape is SPEC-mandated-but-broken** (`g-string-literal-dollar-brace-interp-no-literal-escape`)
+  — NOT the filed "SPEC-triage OQ". SPEC §4.18.3:1221 SHALLs `\${`; impl doesn't honor it (fails in
+  display-text where mandated). "Make impl match §4.18.3", LOW→MED your call.
+- **emit-differential docstring** (`g-corpus-emit-differential-path-derived-chunk-id-false-diffs`) —
+  defer to your in-flight normalization arc (correcting it standalone is churn the arc reverts).
+
+### B. peter's lane — clean MED/LOW rips are EXHAUSTED; the vein is DEEP-DIVE + DOG-FOOD
+**The durable S359 finding (extends S358 from LOW to the whole backlog):** two exhaustive repro-first
+satellite sweeps (145 MED + 68 LOW) found the clean autonomous rips spent — the survivors are
+test-harness flakes (one landed) and docs coupled to in-flight arcs; everything else is
+direction-of-change owing bryan. **So the productive peter-lane moves are (1) DEEP-DIVE dispositions**
+(this session did 6: 3 caught a materially-WRONG ledger entry on HEAD — vindicating "verify on HEAD,
+never trust the shortlist"; each corrected in place + routed) **and (2) DOG-FOOD a FRESH shape / RUN
+the emitted server** (S358 said re-checking old `docs/scrml-issues/` repros is spent; exercise a new
+program or browser-observe reactivity live). Next boot: pick a fresh deep-dive target OR a dog-food
+shape — do NOT re-scan the LOW/MED shortlist for clean rips (proven empty).
+- **Heading/marker drift sweep — STILL held on bryan's open #581** (it edits known-gaps.md). Unchanged.
+
+## WHAT LANDED (S359-peter)
+- **#611** (main @ `60cca8cb`) — two ZERO-behaviour-change fixes: CI canary-label correction
+  (`g-ci-does-not-run-root-level-test-files` → resolved) + specifier-sweep `beforeAll` 30s timeout
+  (`g-specifier-resolution-test-hook-timeout-knife-edge` → resolved). MED 149→148 · LOW 68→67.
+- **#610 review recorded** → review floor **0 OWED** (carve-out; docs-only wrap).
+- **6 deep-dive dispositions** (all ledger edits ride THIS wrap): fn-anon `=`-body (corrected) · proto
+  (re-confirmed post-#590/#592) · todomvc hollow-gate (built + routed, branch `681fdad6`) · string
+  `\${` (corrected: SPEC bug not OQ) · css-hash no-diagnostic (refined: benign mis-parse, not
+  data-loss) · anon-fn return-type (consolidated with #1).
+- **Routed to bryan** — 4 queue addenda (`S358-peter-bryan-lane-low-queue.md`) + 1 branch + 1 inbox note.
+
+## ⚑ MISSES / lessons (S359)
+- **`git apply --3way` STAGES its result.** A later `git add <otherfile>` + commit swept the wrap-bound
+  ledger edits into a routed feature branch (contaminated bryan's PR, emptied main). Caught + fully
+  recovered (capture diff → reset --soft → recommit test-only → force-push clean → re-apply to main).
+  **Rule banked: `git diff --cached --name-only` before EVERY commit that follows a `git apply`.** ([1632])
+- **Cannot merge PRs myself** — the harness permission classifier hard-blocks `gh pr merge` regardless of
+  in-conversation authorization. Peter merged #611 via `! gh pr merge …`. A `gh pr merge` allow-rule
+  would unblock autonomous landing (matches the S358 pattern).
+- **3 of 6 deep-dived ledger entries were materially inaccurate on HEAD** (fn-anon asymmetry false;
+  string-escape mis-framed as OQ; anon-fn-return-type isolated-vs-same-root). The shortlist really is
+  unreliable — first-hand repro is load-bearing, not ceremony.
+
+## 🧷 STATE (S359 close)
+- **main** @ `60cca8cb` (#611), in sync, **working tree clean after this wrap commit**.
+- **Gaps:** HIGH 47 · MED 148 · LOW 67 · Nominal 7 (see the `@generated:gap-counts` block).
+- **Deep-dive ledger edits** (5 known-gaps stamps + #610 pr-reviews marker) ride THIS wrap PR.
+- **Routed-to-bryan, awaiting his boot:** branch `fix/s359-todomvc-hollow-gate @ 681fdad6` (+ inbox note);
+  the S358+S359 bryan-lane queue; `promote --engine` branch; handle-onion HIGH #593; heading-drift on #581.
+- **Env:** bun 1.4.0-local in PowerShell / 1.3.14 in the Bash-tool shell (PATH split — both green on the
+  touched tests). `tracking` baseline = dev-watcher ×4 fs.watch flakes (environmental, [1615]).
+- **Branch hygiene owed:** ~40 local branches + several worktrees re-accumulated since S358's prune — see wrap step 6b.
+
+<!-- ================= S358 history below ================= -->
 
 # scrml — Session 358 (peter · P-Tech1 Windows) — WRAP
 
