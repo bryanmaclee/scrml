@@ -46,7 +46,9 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { spawnSync } from "child_process";
+import { spawn } from "child_process";
+import { createInterface } from "readline";
+import { PassThrough } from "stream";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_PATH = join(REPO_ROOT, "compiler/tests/browser/FAILURE-BASELINE.json");
@@ -110,26 +112,103 @@ const ENV_EXCLUDED: EnvExclusion[] = [
   },
 ];
 
-function runTier(): {
+async function runTier(): Promise<{
   names: string[];
   ranOk: boolean;
   raw: string;
   reported: number | null;
   parsed: number;
   parseOk: boolean;
-} {
-  const res = spawnSync("bun", ["test", TIER], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    // 512 MB, not the default 1 MB and not the first cut's 64 MB (S357 scar). The tier's ~48 baseline
-    // failures each dump a full happy-dom node on their assertion diff, so the RAW captured output is
-    // ~148 MB and GROWS as failures accrue. At 64 MB spawnSync ENOBUFS-killed bun BEFORE its `N pass`
-    // summary printed, so `ranOk` (below) saw no pass line and reported HARNESS-DID-NOT-RUN — a green
-    // main tier reading as a hard gate failure, deterministically, for every PR at once. The buffer
-    // must clear the whole dump, not a slice; 512 MB is generous headroom over the current 148 MB.
-    maxBuffer: 512 * 1024 * 1024,
-  });
-  const raw = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
+}> {
+  // STREAMING LINE-FILTER, not a buffered capture — and that is the whole point of the S357 fix.
+  // The tier's ~48 baseline failures each dump a full happy-dom node on their assertion diff, so the
+  // RAW output is ~155 MB and GROWS as failures accrue. Buffering all of it (the S357 band-aid raised
+  // spawnSync's `maxBuffer` 64→512 MB, PR #599) is a time bomb: once the dumps cross the ceiling,
+  // spawnSync ENOBUFS-kills bun BEFORE its `N pass` summary prints, so `ranOk` (below) sees no pass
+  // line and reports HARNESS-DID-NOT-RUN — a green main tier reading as a hard gate failure,
+  // deterministically, for every PR at once (the S357 outage). Streaming keeps memory BOUNDED
+  // regardless of how large the dumps grow: we read the merged output line by line and KEEP only what
+  // the downstream oracles need — every `(fail)` marker with a small context window around it (for
+  // failureReason's error-block lookback / timeout-marker lookahead) plus the trailing summary lines —
+  // DROPPING the multi-thousand-line object dumps that are the 155 MB bulk. `raw` below is therefore
+  // the FILTERED text (tens of KB), and every downstream computation (names / ranOk / reported /
+  // parseOk / failureReason / the `!ranOk` tail) runs on it byte-identically to the buffered version.
+  const child = spawn("bun", ["test", TIER], { cwd: REPO_ROOT });
+
+  // Merge stdout + stderr into ONE ordered line sequence. The tier writes ~all of its payload (markers,
+  // error blocks, dumps, AND the `N pass/skip/fail` summary) to STDERR; stdout is ~181 bytes. Both
+  // streams pipe into a single PassThrough WITHOUT ending it (`{ end: false }`); we end it once BOTH
+  // child streams have ended, so arrival order is preserved and an `error:` block stays contiguous with
+  // its `(fail)` marker. readline reads the merged stream (crlfDelay:Infinity for Windows CRLF).
+  const merged = new PassThrough();
+  child.stdout.pipe(merged, { end: false });
+  child.stderr.pipe(merged, { end: false });
+  let openStreams = 2;
+  const endMerged = () => {
+    if (--openStreams === 0) merged.end();
+  };
+  child.stdout.on("end", endMerged);
+  child.stderr.on("end", endMerged);
+  // FAIL LOUD, never hang. If the spawn itself fails (bun missing) or a stream errors, the `end`
+  // events above may never fire and readline would block forever. End the merged stream so the read
+  // loop completes with whatever it has: an empty/partial `raw` trips `!ranOk` → HARNESS-DID-NOT-RUN,
+  // which is the same loud outcome the buffered `spawnSync` gave on a spawn error. A hung gate job is
+  // strictly worse than a failed one (pa-base §8 — a gate must be able to report).
+  child.on("error", () => merged.end());
+
+  const CTX_BACK = 25; // >= failureReason's 20-line error-block lookback
+  const CTX_FWD = 4; //  >= failureReason's 3-line lookahead for the `^ … timed out` marker
+  const MAX_LINE = 16384; // defensive per-line cap; the tier's max line is ~3143 so it never fires
+  // A bun summary line, e.g. ` 730 pass` / ` 48 fail` / ` 8 skip`. Retained unconditionally: the
+  // summary sits far past the last marker's window, so window/lookahead retention would miss it, and
+  // both `ranOk` (needs a `pass` line) and the SUMMARY_FAIL oracle (needs the `fail` line) depend on it.
+  const SUMMARY_LINE = /^\s*\d+\s+(pass|fail|skip|todo)\b/;
+
+  const retained: string[] = [];
+  const back: { idx: number; text: string }[] = []; // ring of the last CTX_BACK lines
+  let globalIdx = 0;
+  let flushedThrough = -1; // high-water mark of global indices already in `retained` (dedup)
+  let fwd = 0; // forward-keep countdown after a marker
+
+  const rl = createInterface({ input: merged, crlfDelay: Infinity });
+  for await (let line of rl) {
+    if (line.length > MAX_LINE) {
+      const half = MAX_LINE >> 1;
+      line = `${line.slice(0, half)}…[line truncated]…${line.slice(-half)}`;
+    }
+    const idx = globalIdx++;
+    back.push({ idx, text: line });
+    while (back.length > CTX_BACK) back.shift();
+
+    // NON-anchored FAIL_MARKER test (reset lastIndex — it is a global regex) catches the documented
+    // mid-line-glued marker case, exactly as the buffered parse below does.
+    FAIL_MARKER.lastIndex = 0;
+    if (FAIL_MARKER.test(line)) {
+      // Trigger: flush the whole back-window (skipping indices already retained by an overlapping
+      // earlier window) so failureReason can walk back to the preceding `error:` block.
+      for (const w of back) {
+        if (w.idx > flushedThrough) {
+          retained.push(w.text);
+          flushedThrough = w.idx;
+        }
+      }
+      fwd = CTX_FWD;
+    } else if (fwd > 0) {
+      if (idx > flushedThrough) {
+        retained.push(line);
+        flushedThrough = idx;
+      }
+      fwd--;
+    } else if (SUMMARY_LINE.test(line)) {
+      if (idx > flushedThrough) {
+        retained.push(line);
+        flushedThrough = idx;
+      }
+    }
+    // else DROP — the bulk happy-dom object dump (the 155 MB we exist to shed).
+  }
+
+  const raw = `${retained.join("\n")}\n`;
 
   const names = new Set<string>();
   FAIL_MARKER.lastIndex = 0;
@@ -226,7 +305,7 @@ function writeBaseline(names: string[], stamp: string): void {
   writeFileSync(BASELINE_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const mode = process.argv.includes("--check")
     ? "check"
     : process.argv.includes("--write")
@@ -237,7 +316,7 @@ function main(): void {
   const stamp = process.argv.find((a) => a.startsWith("--stamp="))?.slice("--stamp=".length) ?? "";
 
   console.log(`\n  Running ${TIER} … (this tier is slow; ~20-30s)\n`);
-  const { names, ranOk, raw, reported, parsed, parseOk } = runTier();
+  const { names, ranOk, raw, reported, parsed, parseOk } = await runTier();
 
   if (!parseOk) {
     console.error(`  PARSER DISAGREES WITH THE HARNESS — bun reports ${reported} failure(s), this`);
@@ -321,4 +400,7 @@ function main(): void {
   process.exit(1);
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
