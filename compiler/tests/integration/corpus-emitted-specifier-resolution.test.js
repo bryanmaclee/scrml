@@ -128,7 +128,11 @@ beforeAll(async () => {
   // The app compiles clean today; if that changes, fail LOUDLY here rather than
   // sweeping a half-emitted tree and reporting a misleading dangler count.
   expect({ exitCode, stderr: stderr.slice(0, 800) }).toEqual({ exitCode: 0, stderr: stderr.slice(0, 800) });
-});
+  // Explicit 30s hook timeout: the full flagship compile spawned above runs ~4.5s, only ~0.5s
+  // under bun's DEFAULT 5s beforeAll budget, so it reds spuriously under any machine load. A
+  // real hang still fails (at 30s) and a compile error still fails at the exitCode assertion
+  // above — the timeout removes the flake without changing which failures the suite accepts.
+}, 30000);
 
 afterAll(() => { if (OUT) rmSync(OUT, { recursive: true, force: true }); });
 
