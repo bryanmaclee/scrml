@@ -59,6 +59,78 @@ export function escapeRegex(s: string): string {
 }
 
 /**
+ * Blank the CONTENTS of every string literal in `text` to equal-length spaces,
+ * preserving overall length and every non-string offset. Single-, double- and
+ * template-quoted strings are handled; a template's `${...}` interpolations are
+ * left INTACT (their code — including any nested strings, which ARE masked — is
+ * real, executing text). Escapes inside a string body are blanked as a unit.
+ *
+ * WHY (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence):
+ * the server-only-stdlib chunk-prune and the sibling read-line prune decide
+ * keep/drop by scanning the assembled client body with a word-boundary regex
+ * for each bound name. Raw text makes a name inside a STRING LITERAL — a plain
+ * display label like `"call hashPassword on the server"` — read as a genuine
+ * use, so a server-only chunk (argon2id / `Bun.password.*`) is kept and SHIPPED
+ * to the browser on a textual coincidence (a §12 hard-split violation, silent).
+ * Masking string bodies before the scan makes a token inside a literal count as
+ * nothing while a real member/interp use (`obj.name`, `${name()}`) still counts.
+ * Same shape + fix as the S338/S354 raw-text-launder guards in type-system.ts
+ * (which carries a private twin `maskStringLiteralSpans` that could converge
+ * onto this shared copy — a hygiene follow-up, not required here). Comments are
+ * deliberately NOT masked: a stdlib name in a client-position comment is not a
+ * live vector (server-fn-body comments lower to a fetch stub; a comment in a
+ * client handler body does not compile), and the read-line prune relies on
+ * comment markers (`// --- scrml reactive runtime ---`) surviving this pass.
+ */
+export function maskStringLiteralSpans(text: string): string {
+  if (!text || !/["'`]/.test(text)) return text;
+  const out = text.split("");
+  const n = text.length;
+
+  // Positioned just AFTER an opening quote at `start`; mask the string body,
+  // recursing into any `${...}` (template only) so interpolated code stays
+  // intact. Returns the index just after the closing quote (or n if unterminated).
+  function maskString(start: number, quote: string): number {
+    let i = start;
+    while (i < n) {
+      const c = text[i];
+      if (c === "\\") { out[i] = " "; if (i + 1 < n) out[i + 1] = " "; i += 2; continue; }
+      if (c === quote) return i + 1;
+      if (quote === "`" && c === "$" && text[i + 1] === "{") {
+        i = scanCode(i + 2); // `${` and its body stay intact; nested strings masked within
+        continue;
+      }
+      out[i] = " ";
+      i++;
+    }
+    return i;
+  }
+
+  // Positioned just after `${`; walk the interpolation's real code (left
+  // intact), masking any nested string literals, until the matching `}`.
+  function scanCode(start: number): number {
+    let i = start;
+    let depth = 1;
+    while (i < n) {
+      const c = text[i];
+      if (c === '"' || c === "'" || c === "`") { i = maskString(i + 1, c); continue; }
+      if (c === "{") { depth++; i++; continue; }
+      if (c === "}") { depth--; i++; if (depth === 0) return i; continue; }
+      i++;
+    }
+    return i;
+  }
+
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") { i = maskString(i + 1, c); continue; }
+    i++;
+  }
+  return out.join("");
+}
+
+/**
  * Replace `@varName` references in a CSS value string with CSS custom property
  * references: `var(--scrml-varName)`.
  *
