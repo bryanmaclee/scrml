@@ -1388,10 +1388,29 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
       if (content[pos] === "\\" && pos + 1 < content.length) {
         str += content[pos] + content[pos + 1];
         advance(2);
-      } else {
-        str += content[pos];
-        advance();
+        continue;
       }
+      // A `${...}` interpolation body inside a quoted string is OPAQUE to the
+      // string terminator: SPEC §4.18.4 makes a `"..."` display-text literal
+      // template-string-shaped, and §4.18.3:1244 fixes `${...}` as "interpolate
+      // an expression here" — the SAME token in an attribute-value string and a
+      // body display-text literal. So a quote (or `}`) that lives INSIDE the
+      // interpolation expression (`"x-${ @k == "a" ? "y" : "z" }"`) is a
+      // delimiter of that expression, NOT the terminator of this string. Without
+      // this skip the reader stopped at the first inner quote — splitting a
+      // double-quoted markup-attr value into STRING/IDENT token debris (the
+      // conditional-markup-value recovery then failed → raw markup leaked) or
+      // truncating a plain interpolated string to its pre-`${` prefix (silent
+      // data loss). Mirrors `scanTemplateBody`'s `${` handling and the
+      // interp-aware attribute-value reader (the `"` attr scanner at ~L706).
+      if (content[pos] === "$" && content[pos + 1] === "{") {
+        str += "${";
+        advance(2);
+        str += scanInterpBody();
+        continue;
+      }
+      str += content[pos];
+      advance();
     }
     if (pos < content.length) advance(); // consume closing delimiter
     tokens.push(makeToken("STRING", str, start, absOff(), l, c));

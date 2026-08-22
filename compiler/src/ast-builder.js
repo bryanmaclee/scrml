@@ -3960,6 +3960,33 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // markup case is `< span` / `<span`. Bail fast when there is no such opener.
     if (!/<\s*[A-Za-z_]/.test(expr)) return null;
 
+    // arc4 seam A — a `${…}` (or sigil-`{…}`) interpolation body inside an
+    // attribute string value is OPAQUE to the delimiter trackers below: a quote
+    // living inside the interpolation (`class="x-${ @k == "a" ? "y" : "z" }"`)
+    // is a string-literal delimiter of the INTERPOLATED EXPRESSION, not a
+    // re-close of the attribute string. Without this skip, that inner `"`
+    // prematurely toggles the attr-string state → the span scan unbalances →
+    // parseExprWithMarkupValues bails (return null) and the whole conditional
+    // markup value is silently dropped / leaks raw source. `s[idx]` must be the
+    // opening `{`. Brace-balanced + string-literal-aware; returns the index one
+    // past the matching `}` (or s.length if unterminated).
+    const skipInterpBody = (s, idx) => {
+      let d = 0, q = "", p = idx;
+      while (p < s.length) {
+        const c = s[p];
+        if (q) { if (c === "\\") { p += 2; continue; } if (c === q) q = ""; p++; continue; }
+        if (c === '"' || c === "'" || c === "`") { q = c; p++; continue; }
+        if (c === "{") { d++; p++; continue; }
+        if (c === "}") { d--; p++; if (d === 0) return p; continue; }
+        p++;
+      }
+      return p;
+    };
+    // Is `s[idx]` the `$`/sigil that opens a `{…}` interpolation? (compact form
+    // `${`/`?{`/`#{`/`!{`/`^{`/`~{` — matches the tokenizer's interp-opener set.)
+    const opensInterp = (s, idx) =>
+      "$?#!^~".includes(s[idx]) && s[idx + 1] === "{";
+
     // Balanced markup-span scanner over the spaced expression. Collects each
     // top-level markup element span [start,end). Nested elements are absorbed
     // into the enclosing top-level span (parseLogicBody re-parses them).
@@ -4012,6 +4039,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
                 let selfClose = false;
                 while (n < expr.length) {
                   const nc = expr[n];
+                  // arc4 seam A (opener scanner) — inside a quoted attribute value,
+                  // a `${…}` interpolation body is opaque (a matching-delimiter quote
+                  // inside it must not re-close the attr string).
+                  if ((oD || oS) && opensInterp(expr, n)) { n = skipInterpBody(expr, n + 1); continue; }
                   if (oD) { if (nc === '"') oD = false; n++; continue; }
                   if (oS) { if (nc === "'") oS = false; n++; continue; }
                   if (obd > 0) { if (nc === "{") obd++; else if (nc === "}") obd--; n++; continue; }
