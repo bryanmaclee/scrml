@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 42 |
+| HIGH | 43 |
 | MED | 147 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -9177,3 +9177,21 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **NOT a regression** — `a0e30329` gates the splice on `nameAttr` too, so `nested-program-r4-work` inherits this rather than causing it. It is filed because that branch **ratifies the fail-closed guarantee into SPEC §4.12.3 while its own classifier does not deliver it**, and SPEC marks `name=` on a nested `<program>` only as a **SHOULD**.
 >
 > **Fix direction:** classify on the execution-context attributes (`lang=` / `mode=` / `route=` / `db=` / `port=`), not on `name=` presence. The refusal is about the CONTEXT being unbuilt; the name is addressing metadata and should not gate a safety check. Newly-REJECTING (a program that compiled now errors) → reversible, owes a measured corpus migration before landing.
+
+### g-delta-lint-gate-vacuous-on-zero-population — the `delta-lint` blocking CI gate reports PASS over a delta-log containing the exact duplicate it exists to catch, whenever its parser matches zero entries — `NEW S365-bryan (found by the S239 pass on instrument-integrity; PA-REPRODUCED against the gate I had landed hours earlier and vouched for); HIGH; open`
+<!-- @gap id=g-delta-lint-gate-vacuous-on-zero-population sev=HIGH status=open locus=scripts/delta-lint.ts(the live-scope entry parser + the PASS path — no degenerate-population guard) prov=rationale:S365-bryan-S239-finding-4-PA-reproduced-exit-codes-measured-directly-not-through-a-pipe-canonical-separator-with-a-real-duplicate-exit-1-correct-same-duplicate-with-the-separator-drifted-from-middot-to-hyphen-exit-0-PASS-empty-file-exit-0-PASS -->
+> **⚑ S365-bryan: PA-REPRODUCED, and this is a defect in a gate I landed the same session and recorded as bite-proven.**
+>
+> | input | delta-lint result |
+> |---|---|
+> | real duplicate, canonical `·` separator | **exit 1** — correct, RED |
+> | **the same duplicate still present**, separator drifted `·` → `-` | **exit 0**, prints `0 entries in the live scope (from line 875), 0 distinct sequence numbers, max [0] — PASS` |
+> | **empty file** | **exit 0**, `PASS` |
+>
+> The parser matches nothing, concludes there is nothing to check, and reports PASS over a file holding the very defect it was built for. This is the pa-base §8 *"a gate reports green while verifying nothing"* shape — **shipped inside PR #581, whose entire purpose was to stop a delta-log entry being silently dropped from the flogence digest.**
+>
+> **Why my own bite proof missed it, recorded because the lesson is the reusable part.** The proof I ran was real: during #581's land-merge the gate went RED on four genuine sequence collisions, named them with line numbers, and returned GREEN after I renumbered. Both directions — but **both inside the canonical format.** A gate proven only on well-formed input is unproven against the degenerate case, and the degenerate case is precisely where hollowness hides. *Proving a gate bites is not the same as proving it cannot be silenced.*
+>
+> ⚑ **Also recorded: my first measurement of this read `exit=0` for ALL THREE rows**, because I piped the command into `tail` and read `$?` — which is `tail`'s status, not the gate's. That is the S354 miss #4 (*"a success signal that cannot fail"*) recurring in the very act of testing a gate for hollowness. Measure exit codes directly.
+>
+> **Fix direction:** refuse when the live scope yields zero entries while the file has content — the same degenerate-measurement guard the `instrument-integrity` branch already applies to `facts.ts`, `state.ts`, `snippet-gate.js`, `benchmark-perf-baseline.ts` and `perf-regression-check.ts`. Reuse that idiom rather than minting a sixth. Routed into the instrument-integrity fix round (it is a blocking CI gate, so it is urgent).
