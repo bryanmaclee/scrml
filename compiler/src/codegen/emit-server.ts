@@ -1,6 +1,6 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
-import { routePath, paramSignature, paramName, stripPagesPrefix } from "./utils.ts";
+import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
@@ -95,77 +95,10 @@ export const SERVER_STRUCTURAL_EQ_HELPER = [
   "",
 ].join("\n");
 
-// Indent each line of emitted server-fn body `code` by `indent` — EXCEPT a line
-// that begins inside the RAW text of an unterminated template literal, where the
-// newline is string CONTENT, not layout, so a prefix would silently corrupt the
-// literal's cooked value (g-server-fn-body-reindent-corrupts-multiline-template-
-// literals: an email body / CSV / PEM blob / LLM prompt returned from a server fn
-// would ship with leading whitespace injected into every continuation line).
-// Newlines inside a `${…}` interpolation, or in ordinary code, ARE layout and get
-// indented. For any body with no multi-line template literal (the entire corpus
-// today — all SQL, whitespace-insignificant) the output is byte-identical to the
-// old blind `code.split("\n").map(l => indent + l)`. A mini string/template lexer:
-// tracks `'`/`"` strings, `` ` `` template raw text, `${…}` expr nesting
-// (brace-counted, templates nest), and `//` / `/* */` comments (so a delimiter inside
-// an emitted comment — e.g. `// boundary check: 'p'` — can't open a phantom string that
-// swallows a following template's backtick). A newline suppresses the next line's indent
-// iff the current context is raw template text.
-//
-// ⚠ KNOWN LIMITATION (g-server-fn-reindent, S239): a REGEX LITERAL containing a backtick
-// (`/…`…/`) is NOT recognized — `/` is not lexed as a regex delimiter (division
-// ambiguity needs full expression-position tracking), so such a backtick would desync
-// template state. This is NOT reachable in the corpus (0 instances) and requires a server
-// fn pairing a backtick-bearing regex with a multi-line template literal. The complete
-// fix is structural — have the emitter tag template-raw vs layout lines at emit time
-// rather than re-lexing the generated string; filed as a follow-up. Comments + strings +
-// templates (the emitted forms that actually occur) are handled.
-function indentServerFnBodyLines(code: string, indent: string): string[] {
-  const out: string[] = [];
-  let line = "";
-  const stack: Array<{ k: "code" | "expr" | "sq" | "dq" | "tmpl" | "lc" | "bc"; brace: number }> = [{ k: "code", brace: 0 }];
-  const top = () => stack[stack.length - 1];
-  let indentThisLine = true;
-  const flush = (nl: boolean): void => {
-    out.push((indentThisLine ? indent : "") + line);
-    line = "";
-    if (nl) indentThisLine = top().k !== "tmpl";
-  };
-  for (let i = 0; i < code.length; i++) {
-    const c = code[i], n = code[i + 1];
-    if (c === "\n") {
-      if (top().k === "lc") stack.pop(); // a `//` line comment ends at the newline
-      flush(true);
-      continue;
-    }
-    line += c;
-    const t = top();
-    if (t.k === "lc") {
-      // inside a line comment — ignore every delimiter until the newline (above)
-    } else if (t.k === "bc") {
-      if (c === "*" && n === "/") { line += n; i++; stack.pop(); } // end of block comment
-    } else if (t.k === "sq") {
-      if (c === "\\") { if (n != null) { line += n; i++; } }
-      else if (c === "'") stack.pop();
-    } else if (t.k === "dq") {
-      if (c === "\\") { if (n != null) { line += n; i++; } }
-      else if (c === '"') stack.pop();
-    } else if (t.k === "tmpl") {
-      if (c === "\\") { if (n != null) { line += n; i++; } }
-      else if (c === "`") stack.pop();
-      else if (c === "$" && n === "{") { line += n; i++; stack.push({ k: "expr", brace: 0 }); }
-    } else { // "code" or "expr"
-      if (c === "/" && n === "/") { line += n; i++; stack.push({ k: "lc", brace: 0 }); }
-      else if (c === "/" && n === "*") { line += n; i++; stack.push({ k: "bc", brace: 0 }); }
-      else if (c === "'") stack.push({ k: "sq", brace: 0 });
-      else if (c === '"') stack.push({ k: "dq", brace: 0 });
-      else if (c === "`") stack.push({ k: "tmpl", brace: 0 });
-      else if (c === "{") t.brace++;
-      else if (c === "}") { if (t.k === "expr" && t.brace === 0) stack.pop(); else t.brace--; }
-    }
-  }
-  flush(false);
-  return out;
-}
+// Re-indenting a server-fn body without corrupting a multi-line template literal is
+// now the ONE shared `indentBodyLines` in ./utils.ts (S361 — it also gained regex
+// handling, closing the desync this file's old lexer had; and the two blind
+// split+prefix siblings in emit-tool / emit-library-shared route through it too).
 
 // Inject `helper` after the file header + imports block (the first blank-line
 // boundary) so a hoisted helper sits above every reference. Shared by the
@@ -1439,7 +1372,7 @@ function emitEndpointServerHelperLines(
     const out: string[] = [];
     out.push(`${asyncPrefix}function ${name}(${paramSigs.join(", ")}) {`);
     for (const code of bodyCodes) {
-      for (const line of indentServerFnBodyLines(code, "  ")) out.push(line);
+      for (const line of indentBodyLines(code, "  ")) out.push(line);
     }
     out.push(`}`);
     blocks.push(out.join("\n"));
@@ -3548,7 +3481,7 @@ export function generateServerJs(
       for (const stmt of body) {
         const code = emitLogicNode(stmt, _serverFnOptsSSE);
         if (code) {
-          for (const line of indentServerFnBodyLines(code, "          ")) {
+          for (const line of indentBodyLines(code, "          ")) {
             lines.push(line);
           }
         }
@@ -4004,7 +3937,7 @@ export function generateServerJs(
             }
             const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
             if (code) {
-              for (const line of indentServerFnBodyLines(code, "    ")) {
+              for (const line of indentBodyLines(code, "    ")) {
                 lines.push(line);
               }
             }
@@ -4029,7 +3962,7 @@ export function generateServerJs(
         for (const stmt of body) {
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
           if (code) {
-            for (const line of indentServerFnBodyLines(code, "    ")) {
+            for (const line of indentBodyLines(code, "    ")) {
               lines.push(line);
             }
           }
@@ -4261,7 +4194,7 @@ export function generateServerJs(
             }
             const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
             if (code) {
-              for (const line of indentServerFnBodyLines(code, _bodyIndentNonCsrf)) {
+              for (const line of indentBodyLines(code, _bodyIndentNonCsrf)) {
                 lines.push(line);
               }
             }
@@ -4286,7 +4219,7 @@ export function generateServerJs(
         for (const stmt of body) {
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
           if (code) {
-            for (const line of indentServerFnBodyLines(code, _bodyIndentNonCsrf)) {
+            for (const line of indentBodyLines(code, _bodyIndentNonCsrf)) {
               // Indented for the capture IIFE the handler now always opens (see
               // `_bodyIndentNonCsrf` above) — the body's `return` is the IIFE's
               // return, and the handler enveloped it as a `Response`.
@@ -4789,7 +4722,7 @@ export function generateServerJs(
       for (const stmt of (_peerInfo.fnNode.body ?? [])) {
         const code = serverRewriteEmitted(emitLogicNode(stmt, _peerOpts));
         if (code) {
-          for (const line of indentServerFnBodyLines(code, "  ")) _peerBodyLines.push(line);
+          for (const line of indentBodyLines(code, "  ")) _peerBodyLines.push(line);
         }
       }
       lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
@@ -5359,7 +5292,7 @@ export function generateServerJs(
       for (const stmt of wsBody) {
         const code = serverRewriteEmitted(emitLogicNode(stmt, _wsFnOpts));
         if (code) {
-          for (const line of indentServerFnBodyLines(code, "  ")) _wsBodyLines.push(line);
+          for (const line of indentBodyLines(code, "  ")) _wsBodyLines.push(line);
         }
       }
       // Server-mode `@cell` reads lower to `_scrml_body["cell"]` (the HTTP

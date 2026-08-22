@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 43 |
-| MED | 149 |
+| HIGH | 41 |
+| MED | 150 |
 | LOW | 67 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -8254,7 +8254,8 @@ not. Do not record it as verified without executing it.
 function path). This is the same class in a position the per-function walk structurally cannot reach.
 
 ### g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class — #474 made ONE emitter template-literal-aware; three sibling emitters in the same class still corrupt multi-line template content, all reachable with zero diagnostics — `NEW S331-bryan (adversarial review of #474); HIGH`
-<!-- @gap id=g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts:692(emitLibraryFnMember)+compiler/src/codegen/emit-tool.ts:466+compiler/src/codegen/emit-control-flow.ts:1073(emitTryStmt)+compiler/src/codegen/emit-logic.ts:3410 prov=spec:§48 -->
+<!-- @gap id=g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class sev=HIGH status=resolved locus=compiler/src/codegen/utils.ts(indentBodyLines — the one shared re-indenter)+emit-tool.ts+emit-library-shared.ts(routed through it) prov=spec:§48 -->
+**⚑ RESOLVED S361-peter — converged onto ONE shared re-indenter; the two over-claims corrected.** The class is real but was 2 live sites, not "3 reachable of 8-of-25": **emit-tool** (`<program kind="tool">` main body) and **emit-library-shared** (an async/nested-async exported library fn — a plain sync `export function` emits verbatim via span-slice and was already safe). Both blindly `split("\n")+prefix` and corrupted a multi-line template's cooked value; both now route through the shared `indentBodyLines` (codegen/utils.ts). **`emitTryStmt` (emit-control-flow.ts:1073) is DEAD CODE, not a reachable site — the S331 "corrupts on both boundaries, 0 errors" claim is FALSIFIED:** the `try` keyword fires `E-TRY-NOT-IN-SCRML` (ast-builder.js:9112), and the scrml `!{}` failable lowers to an INLINE if/else variant-dispatch (verified in the emitted client.js of samples/compilation-tests/control-015-try-catch.scrml), never through `emitTryStmt` — so `emitTryStmt` runs only in error-recovery emit of an already-errored compile. `emit-logic.ts:3410` is `propagate-expr` (short constructed lines, not a split site — stale locus). Also fixes the sibling desync ([[g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate]]). Pins: `g-server-fn-reindent-converge.test.js` (12 — indentBodyLines adversarial unit + server/tool end-to-end); the S331-flagged shared-oracle weakness is addressed (the new tests eval the cooked value at each site). **⚑ SEPARATE pre-existing finding (NOT this class):** a multi-line template literal inside a `!{}` handler ARM BODY emits `E-CODEGEN-INVALID-LOGIC` (gated, LOUD — not the silent-corruption class); reproduces on base; filed as [[g-failable-arm-body-multiline-template-invalid-logic]].
 
 **Found by the S239 pass on #474. NOT a regression** — every shape below reproduces byte-identically on the parent `0beddacc`, so this is an incomplete fix, not damage. #474 routed **8 sites, all inside `emit-server.ts`**; the identical blind split-and-indent pattern remains at sibling emitters. Three are reachable today, each verified end-to-end with **0 errors and 0 warnings**:
 
@@ -8273,9 +8274,10 @@ function path). This is the same class in a position the per-function walk struc
 **Fix direction:** hoist `indentServerFnBodyLines` into a shared codegen util and route the residual sites — or, better and as the PR's own comment recommends, tag template-raw vs layout **at emit time** instead of re-lexing generated text.
 
 ### g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate — the shipped KNOWN-LIMITATION comment names a trigger far narrower than the real one, and its zero-instance corpus measurement used a predicate that does not describe the bug — `NEW S331-bryan (adversarial review of #474); HIGH`
-<!-- @gap id=g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(indentServerFnBodyLines, the regex-vs-division lexer state) prov=spec:§48 -->
+<!-- @gap id=g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate sev=HIGH status=resolved locus=compiler/src/codegen/utils.ts(indentBodyLines — now regex-literal-aware) prov=spec:§48 -->
+**⚑ RESOLVED S361-peter.** The shared `indentBodyLines` (codegen/utils.ts) gained regex-literal handling: a `/` in code/expr context opens a `regex` state (with a `[…]` char-class sub-state where `/` does not close) instead of leaving its inner `'`/`"`/`` ` ``/`//` to open phantom string/comment states. Regex-vs-division is disambiguated by the previous significant token (operand-end char + not a regex-preceding keyword → division; else regex). Verified: `name.replace(/['"]/g,"")` before a multi-line template no longer desyncs — the template's continuation lines stay at column 0 (was 4 injected spaces). Pinned in `g-server-fn-reindent-converge.test.js` with the adversarial surface the fix direction below called for: division vs regex, char-class `/[/]/`, backtick-in-regex `/[`]/`, keyword-preceding `return /re/`, regex inside a `${…}` interpolation, division-after-template-close. The "wrong predicate" measurement critique stands as recorded history; the fix moots it. Converged with [[g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class]] onto the one shared re-indenter.
 
-**Found by the S239 pass on #474.** The shipped comment describes the blind spot as *"a REGEX LITERAL containing a backtick"*, *"NOT reachable in the corpus (0 instances)"*, requiring *"pairing a backtick-bearing regex with a multi-line template literal."* **All three claims are wrong or too narrow.**
+**Found by the S239 pass on #474.** The shipped comment described the blind spot as *"a REGEX LITERAL containing a backtick"*, *"NOT reachable in the corpus (0 instances)"*, requiring *"pairing a backtick-bearing regex with a multi-line template literal."* **All three claims were wrong or too narrow** (history below).
 
 The real desync trigger is any regex literal containing an **odd count of `'`, `"` or `` ` ``**, an **unbalanced `{`/`}`**, or a **`//` sequence** (which self-opens a phantom line comment). Reproduced on a mundane sanitizer — `name.replace(/['"]/g, "")` beside a multi-line template inside an `if` block: the lone `'` opens a phantom string state that never closes, the template's backtick is swallowed, and **the pass silently degenerates to the exact pre-fix blind indent** (HEAD output byte-identical to the parent). No diagnostic; `node --check` clean.
 
@@ -8284,6 +8286,16 @@ The real desync trigger is any regex literal containing an **odd count of `'`, `
 **Bounded, and the bound is worth recording:** the desync is per-emitted-chunk — lexer state resets between statements, so a regex in statement N cannot poison statement N+1. The regex and the template must land in the same chunk (same statement, or the same nested block emitted as one string). That narrows it to one `if` block away, not to zero.
 
 **Fix direction:** the `/`-is-regex-vs-division ambiguity needs expression-position tracking to resolve properly; the cheaper and sound fix is the structural one above — never re-lex generated text.
+
+### g-failable-arm-body-multiline-template-invalid-logic — a multi-line template literal in a `!{}` handler arm body emits invalid JS (caught by the emit-gate) — `NEW S361-peter (surfaced verifying the reindent class; reproduced on base); MED; open`
+<!-- @gap id=g-failable-arm-body-multiline-template-invalid-logic sev=MED status=open locus=searched:the-failable-arm-body-emitter(the !{} inline if/else variant-dispatch lowering, emit-control-flow/emit-logic match-arm path — NOT indentBodyLines) prov=rationale:a-multi-line-template-in-a-failable-arm-body-lowers-to-invalid-js-gated-loud-by-E-CODEGEN-INVALID-LOGIC-reproduced-on-base-distinct-from-the-silent-reindent-class -->
+
+A `!{}` failable handler whose arm body is a multi-line template literal fails to compile with `E-CODEGEN-INVALID-LOGIC` (the emit-gate — LOUD, not silent). Repro (compiles-clean if the arm body is single-line; errors if multi-line):
+```
+let r = parseJson('{}')!{ ::SyntaxError(e) :> `line one
+line two` }
+```
+Reproduced on `main` (base, pre-S361-reindent-fix), so it is NOT a reindent-converge regression — the `!{}` arm lowers to an inline if/else variant-dispatch (verified in control-015-try-catch.client.js), a DIFFERENT emitter than the `indentBodyLines` sites. Distinct severity from the silent-reindent class: a valid scrml program (an arm body is an expression; a template literal is a valid expression) fails to compile rather than shipping a wrong cooked value. Fix locus is the failable-arm-body emitter, not re-established here (searched, not traced). Sibling of the reindent class ([[g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class]]) only by shared trigger (a multi-line template), not by mechanism.
 
 ### g-template-interp-regex-swallows-following-source — a `${}` interpolation containing a regex with a quote makes the tokenizer run past the template's end and splice raw scrml into the emitted JS — `NEW S331-bryan (adversarial review of #474, out of its scope); MED`
 <!-- @gap id=g-template-interp-regex-swallows-following-source sev=MED status=open locus=searched:emit-server.ts,emit-logic.ts,indentServerFnBodyLines — no locus found; the defect precedes codegen (a codegen indent pass cannot emit `<msg> = ""`), so it is parse/tokenize-stage prov=rationale:surfaced-adjacent-to-the-474-lexer-desync-but-reproduces-independently -->
