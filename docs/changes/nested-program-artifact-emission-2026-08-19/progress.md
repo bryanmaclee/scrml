@@ -1887,3 +1887,104 @@ meet the readable-output bar. Structural fix is still "lower
 `compiler/self-host/cg-parts/section-assembly.js:1968` — the `!nameAttr` scoped-DB
 gate, and now also the root-vs-nested discriminator, are stale in the self-host
 mirror. pa.md defers self-host; surfaced only.
+
+# ROUND 4 — 2026-08-22
+
+## Step 0 — setup (DONE)
+
+Branch `nested-program-r4-work`, cut from `origin/nested-program-r3-work` (tip
+`9d9f30de`). `git rebase origin/main` was ABANDONED after 2 minutes at 3 of 24
+commits — the merge backend re-checks out the whole tree per commit and would have
+asked for the same generated-doc conflict resolution up to 24 times. The brief
+admits either shape ("Rebase or merge — never file-delta"), so this line takes
+`origin/main` (`a0e30329`) by MERGE instead: one resolution point, no rewrite of
+the three rounds already reviewed.
+
+One conflict, `docs/FACTS.md`, and it is entirely inside the
+`@generated:facts-table` anchor (line counts, test-file count, conformance-case
+count). Resolved by `--theirs` + `bun scripts/facts.ts --write`, per the standing
+rule that a generated doc is regenerated, never hand-merged.
+
+ENV-GAP ruled out first, both halves: `bun install` (a fresh worktree inherits no
+`node_modules`) and `bun run pretest` (browser tests read
+`samples/compilation-tests/dist/`, which is gitignored and therefore absent from a
+fresh checkout). Baseline after the merge, from the pre-commit gate:
+**28966 pass / 0 fail / 86 skip / 1 todo**, 1269 files, 261.97s.
+
+## Item 1 precondition — what fires for a `use foreign:x` that nothing declares
+
+The brief made this a gate on the retirement: *if an existing unresolved-name
+diagnostic already covers it, retire cleanly; if nothing covers it, retiring the
+code opens that hole.*
+
+**Measured, not reasoned.** `.tmp/r4/ghost-use.scrml` — a `use foreign:ghost { run }`
+with no `<program name="ghost">` anywhere in the file:
+
+```
+error [E-FOREIGN-SIDECAR-NOMINAL]: the `use foreign:ghost { ... }` sidecar declaration …
+FAILED — 1 error, 3 warnings
+```
+
+That is the ONLY error. No `E-SCOPE-001`, no `E-IMPORT-005`, no unresolved-name
+diagnostic of any kind — and by construction: `ast-builder.js`'s `foreign:` branch
+deliberately KEEPS `names` in scope (so a `run(...)` call site does not
+double-report) and deliberately leaves `source` null (so MOD skips resolution and
+emits no `import … from "foreign:ml"`). Both suppressions are correct for their
+own reasons, and together they mean the retiring code is load-bearing for a
+condition that has nothing to do with Nominal-ness.
+
+**So: the second case. Retiring alone WOULD open a hole — and the closure is
+already ratified.** §23.4's normative statements say, verbatim:
+
+> The `name` in `use foreign:name` MUST match the `name=` attribute of a nested
+> `<program>` declared within the same top-level `<program>`. An unresolved name
+> SHALL be a compile error (E-FOREIGN-010 …).
+
+`E-FOREIGN-010` is catalogued in §34 (`§23.4 | `use foreign:name` references a name
+that matches no nested `<program>` | Error`) and has **zero fire sites** —
+`grep` over `compiler/src/`, `compiler/tests/`, `conformance/` returns exactly one
+hit, and it is the ast-builder COMMENT saying `E-FOREIGN-010/011/012` supersede the
+placeholder when the sidecar layer lands. So the hole is closed by implementing a
+code SPEC already requires, not by minting one. This round makes that comment true
+for the `010` third of it.
+
+Note what this is NOT: it is not R1. R1 is the `<#name>.send()` WORKER binding
+(`<#dubler>` typo, zero diagnostics), a different reference site with a different
+resolution table, and it stays untouched per §4 of the brief.
+
+## Item 2 red half — the r3 double-fire, reproduced on HEAD after the merge
+
+`conformance/cases/capability/inheritance-inherit-covers/case.scrml`, unmodified:
+
+```
+error [E-FOREIGN-SIDECAR-NOMINAL]: the `use foreign:probe { ... }` … (line 3, col 9)
+error [E-NESTED-PROGRAM-CONTEXT-NOMINAL]: `<program name="probe">` … and NOTHING IN
+  THIS FILE CLAIMS IT: there is no `use foreign:probe { … }` declaration in the parent …
+FAILED — 2 errors, 1 warning
+```
+
+Line 3 of that file is `use foreign:probe { run }`. The diagnostic asserts the
+absence of a declaration the reader can see two lines up. Both halves of the r3
+regression in one output: the invariant broken (two diagnostics for one unbuilt
+declaration) and the message false.
+
+## The red-half matrix — every §4.12.3 context, before any r4 edit
+
+`.tmp/r4/*.scrml`, compiled through `compiler/src/cli.js`; `W-PROGRAM-SPA-INFERRED`
+elided (fires on every single-file probe and says nothing about this arc).
+
+| probe | shape | error codes BEFORE |
+|---|---|---|
+| `ghost-use` | `use foreign:ghost`, no declaration anywhere | `E-FOREIGN-SIDECAR-NOMINAL` |
+| `p1-inline-worker` | §4.12.4, `name=` only | *(none — implemented)* |
+| `p2-sidecar-claimed-parent` | §4.12.5 claimed from the PARENT | `E-FOREIGN-SIDECAR-NOMINAL` |
+| `p3-sidecar-claimed-inside` | §4.12.5 claimed from INSIDE the subtree | `E-FOREIGN-SIDECAR-NOMINAL` + `E-NESTED-PROGRAM-CONTEXT-NOMINAL` ⛔ |
+| `p4-sidecar-unclaimed` | §4.12.5, no `use foreign:` at all | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` |
+| `p5-wasm` | §4.12.3 `mode="wasm"` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` |
+| `p6-server-endpoint` | §4.12.2 `route=` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` |
+| `p7-launder-route-lang` | `route=` + `lang=` (the r2 laundering shape) | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` |
+| `p8-scoped-db` | §4.12.6 `db=` | *(none — implemented, stays in-tree)* |
+
+Exactly one row is wrong, and it is the row the seam creates. Every other row
+already satisfies one-diagnostic-per-unbuilt-declaration — which is the argument
+for removing the seam rather than moving it a fourth time.
