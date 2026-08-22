@@ -1988,3 +1988,289 @@ elided (fires on every single-file probe and says nothing about this arc).
 Exactly one row is wrong, and it is the row the seam creates. Every other row
 already satisfies one-diagnostic-per-unbuilt-declaration — which is the argument
 for removing the seam rather than moving it a fourth time.
+
+## Item 1 (⭐ THE RULING) — the two Nominal codes, consolidated
+
+### What changed
+
+| file | change |
+|---|---|
+| `compiler/src/nested-program-kind.ts` | `nestedProgramContextIsNominal` now includes `foreign-sidecar` |
+| `compiler/src/codegen/index.ts` | the `sidecarUnclaimed` branch and `fileDeclaresUseForeign` (+ its `excludeSubtree` argument) DELETED; new `detectUnresolvedForeignSidecarUses` pre-pass; sidecar message rewritten |
+| `compiler/src/ast-builder.js` | the `E-FOREIGN-SIDECAR-NOMINAL` `errors.push` removed; the RECOGNIZER kept intact |
+| `compiler/src/gauntlet-phase1-checks.js` | the E-USE-001 exemption's justification no longer cites the retired code |
+
+The retirement is a deletion of ONE `errors.push`, not of the S231 recognizer.
+Everything that push sat next to still happens: the bare `use foreign:` line is
+lifted into the logic stream (no HTML leak), `source` stays null (MOD skips
+resolution, no `import … from "foreign:ml"` in the bundles), `names` still
+register in scope (no secondary `E-SCOPE-001` on a `predict(...)` call site), and
+the sidecar `<program>` is still excluded from worker extraction. Retiring the
+code and retiring the behaviour are different operations and only the first was
+ordered.
+
+### The green matrix — same probes, after
+
+| probe | before | after |
+|---|---|---|
+| `ghost-use` | `E-FOREIGN-SIDECAR-NOMINAL` | **`E-FOREIGN-010`** |
+| `p1-inline-worker` | *(none)* | *(none)* |
+| `p2-sidecar-claimed-parent` | `E-FOREIGN-SIDECAR-NOMINAL` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` |
+| `p3-sidecar-claimed-inside` | **2 errors** (the regression) | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` |
+| `p4-sidecar-unclaimed` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` | unchanged |
+| `p5-wasm` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` | unchanged |
+| `p6-server-endpoint` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` | unchanged |
+| `p7-launder-route-lang` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL` | unchanged |
+| `p8-scoped-db` | *(none)* | *(none)* |
+
+**Exactly one diagnostic per unbuilt declaration in every row.** Two rows moved
+and one was repaired; the other six are byte-identical, which is the check that
+the consolidation did not widen anything.
+
+### Item 2 — the r3 regression, and whether the consolidation dissolved it
+
+**It did.** `conformance/cases/capability/inheritance-inherit-covers/case.scrml`,
+unmodified:
+
+```
+BASE (r3) : FAILED — 2 errors   E-FOREIGN-SIDECAR-NOMINAL + E-NESTED-PROGRAM-CONTEXT-NOMINAL
+R4        : FAILED — 1 error    E-NESTED-PROGRAM-CONTEXT-NOMINAL
+```
+
+No residue: there is no seam left to leak through. The mechanism that produced
+the double fire — a second code whose applicability was computed from a
+whole-file walk with a subtree exclusion — no longer exists in the file. The
+false sentence went with it; the message now says nothing about whether a
+`use foreign:` is present, and a test asserts that it does not
+(`the message makes NO claim about whether a use foreign: exists`, run against
+all three of unclaimed / claimed-from-parent / claimed-from-inside).
+
+### The precondition, closed rather than inherited
+
+Answered above under "Item 1 precondition": nothing covered it, so retiring alone
+would have opened a hole. Closed by IMPLEMENTING `E-FOREIGN-010`, which §23.4 has
+required in normative text since the section landed and which had zero fire sites.
+
+```
+error [E-FOREIGN-010]: `use foreign:ghost { … }` names a sidecar that nothing in
+this file declares. SPEC §23.4: "The `name` in `use foreign:name` MUST match the
+`name=` attribute of a nested `<program>` declared within the same top-level
+`<program>`." This file declares no nested `<program name="…">` at all. Fix:
+declare the sidecar … or correct the name in the `use foreign:` line. NOTE: the
+§23.4 sidecar RUNTIME is still Nominal/spec-ahead, so a correctly-declared
+sidecar is separately refused at its declaration with
+`E-NESTED-PROGRAM-CONTEXT-NOMINAL` until v1.next lands that codegen.
+```
+
+Three design points worth keeping:
+
+1. **It runs BEFORE extraction.** `extractWorkerPrograms` splices nested
+   `<program>` subtrees out, taking any `use foreign:` inside them along. One
+   walk over the untouched tree collects both sides, so the answer cannot depend
+   on splice order. Every r1-r3 defect came from a check whose answer depended on
+   where in a walk it was asked; this is the same class, deliberately avoided.
+2. **Resolution is by NAME, not by execution context.** A `use foreign:calc`
+   pointing at `<program name="calc" mode="wasm">` is a wrong-CONTEXT error
+   (§23.4's 011/012 territory, landing with the sidecar layer). Reporting it as
+   "matches no nested `<program>`" would be false, so it does not fire. Pinned by
+   test.
+3. **A `use foreign:` inside the sidecar's own subtree RESOLVES.** No exclusion.
+   The enclosing element is a declaration wherever the reference sits — this is
+   the exact shape r3's `excludeSubtree` misread, so it is pinned by test AND by
+   two conformance cases.
+
+Not R1. R1 is the `<#name>.send()` worker binding, a different reference site
+against a different table (`workerDefs`). Re-measured on r4 HEAD and UNCHANGED:
+`<#dubler>` with only `<program name="doubler">` declared still compiles exit 0
+and still ships `_scrml_worker_dubler` against a binding nothing declares. Not
+regressed, not fixed — its arc is with the operator.
+
+### Conformance — 5 real assertions, measured by parsing `expect`, not grepping
+
+| case | before | after |
+|---|---|---|
+| `nested-program/foreign-sidecar-claimed` | codes `[E-FOREIGN-SIDECAR-NOMINAL]`, notCodes `[E-NESTED-…]` | codes `[E-NESTED-…]`, notCodes `[E-FOREIGN-SIDECAR-NOMINAL, E-FOREIGN-010, E-CHANNEL-…]` |
+| `nested-program/foreign-sidecar-no-worker` | codes `[E-NESTED-…]`, notCodes `[E-FOREIGN-SIDECAR-NOMINAL, …]` | + `E-FOREIGN-010` in notCodes; severity pinned |
+| `capability/inheritance-closest-wins-no-union` | codes `[W-FOREIGN-UNDECLARED-CAPABILITY, E-FOREIGN-SIDECAR-NOMINAL]` | codes `[W-…, E-NESTED-…]`; retired code + `E-FOREIGN-010` in notCodes |
+| `capability/inheritance-inherit-covers` | codes `[E-FOREIGN-SIDECAR-NOMINAL]` | codes `[E-NESTED-…]`; retired code + `E-FOREIGN-010` in notCodes |
+| `capability/undeclared-with-foreign` | codes `[W-…, E-FOREIGN-SIDECAR-NOMINAL]` | codes `[W-…, **E-FOREIGN-010**]` |
+| `capability/inline-block-undeclared` | prose only | prose corrected; now SAYS it pins nothing |
+
+`capability/undeclared-with-foreign` is the one that MOVED rather than renamed,
+and it is the sharpest evidence for the precondition finding. Its source is:
+
+```scrml
+<program lang="ts">
+use foreign:ml { predict }
+<div>hi</div>
+</>
+```
+
+There is no nested `<program name="ml">` — the `lang=` is on the TOP-LEVEL
+`<program>`. So what is actually wrong with this file is an unresolved reference,
+and the retired code was reporting it under a Nominal banner. A case that had
+been passing for three rounds was asserting the wrong diagnosis.
+
+**Every touched case now lists the RETIRED code in `notCodes`** — the assertion
+r3 did not have, which is exactly why a genuine double fire passed 894/894.
+
+**What conformance still cannot catch, stated plainly.** `conformance/run.ts` is
+SET-based: emitted must be a superset of `codes`, and disjoint from `notCodes`.
+Neither expresses CARDINALITY, so a double fire of a SINGLE code remains
+invisible to it. Listing the retired twin catches the resurrection class and
+nothing more. The cardinality half is pinned by COUNT in
+`nested-program-sidecar-unclaimed.test.js` (a `refusalCount` helper that sums
+both codes, asserted to equal 1 across six shapes) and in
+`nested-program-execution-context-gate.test.js`. Recording this because "we added
+notCodes, the class is closed" would be the fourth version of the same over-claim
+this arc keeps making.
+
+### §34 retirement form, and the census
+
+Form per §34.0(3), verified against `scripts/s34-census.ts` rather than assumed:
+the script's `struck` test is `first.includes("~~")` on the CODE cell, and a
+struck row buckets as STRUCK — "must NOT enter any denominator". Matches the
+`~~E-ATTR-012~~` precedent already in §34.
+
+```
+| ~~E-FOREIGN-SIDECAR-NOMINAL~~ | §23.4, §4.12.3 | **Retired 2026-08-22 (S354).** … | — |
+```
+
+`bun scripts/s34-census.ts --check-new --base origin/main` → **16 new/changed
+rows, all well-formed, PASS.**
+
+Whole-census delta, measured by checking out the r4 base tree (`bde85e7e`) and
+re-running, not by arithmetic:
+
+| bucket | r4 base | r4 HEAD | why |
+|---|---|---|---|
+| STRUCK | 34 | **35** | `E-FOREIGN-SIDECAR-NOMINAL` retired |
+| PINNED | 346 | 346 | retired code leaves; `E-FOREIGN-010` arrives (pinned by `capability/undeclared-with-foreign`) |
+| IMPL-SITES | 322 | **321** | `E-FOREIGN-010` moves to PINNED |
+| DECLARED-AHEAD | 14 | **16** | `E-FOREIGN-011`/`012` given the spec-ahead declaration §34.0 requires |
+| FALSE-CLAIM | 93 | **91** | the same two — they were bare rows promising live diagnostics |
+
+**A self-inflicted census bug, caught and fixed in the same round.** The first
+version of the consolidation wrote the two sibling codes as full tokens in two
+`compiler/src/` comments. `s34-census.ts` scans impl trees for a RAW `E-*` token
+match and calls that an EMITTER, and IMPL-SITES outranks DECLARED-AHEAD — so
+merely NAMING an unimplemented code in a comment reclassified an honest
+spec-ahead row as one with a fire site. Measured: IMPL-SITES 323 / DECLARED-AHEAD
+14 with the bad comments, 321 / 16 without, same tree. The pre-existing spelling
+`E-FOREIGN-010/011/012` tokenizes only the FIRST of the three — that was not an
+accident, and both comments now say so, so the spelling does not get "fixed"
+back. Landed as its own commit because it is a distinct defect from the ruling.
+
+### The four standing guarantees — re-verified, 40 builds
+
+`bun docs/changes/nested-program-artifact-emission-2026-08-19/probes/build-matrix.mjs`
+across flat / nested-dir × flat / `contentHashAssets` / `emitPerRoute` /
+`hash+per-route`:
+
+```
+40 builds. VIOLATIONS: 0
+```
+
+G1 (every `new Worker(...)` names a file that exists), G2 (every `.worker.js`
+written is referenced), G3 (every client dial has a server route), G4 (every
+worker binding used is declared) all ok on every row. The `wkr` column is
+NON-ZERO on the `content-hash` rows (1 and 2), which is what makes G1/G2 on those
+rows non-vacuous — under the old `.endsWith(".worker.js")` predicate those rows
+read 0 and passed on an empty set.
+
+### LOW-2 / LOW-3 — the vacuous predicate, all five sites
+
+`/\.worker(\.[a-z0-9]+)?\.js$/` now, in:
+
+- `docs/changes/…/probes/exec-probe.mjs:69`
+- `compiler/tests/integration/nested-program-root-discriminator.test.js`
+- `compiler/tests/integration/nested-program-scoped-db-named.test.js`
+- `compiler/tests/integration/nested-program-execution-context-gate.test.js`
+- `compiler/tests/integration/nested-program-sidecar-unclaimed.test.js`
+
+Each carries a comment saying WHY, because the failure mode is silent: the suite
+that would expose it is the one that turns `contentHashAssets` on, and none of
+these do today.
+
+### LOW-5 — `docs/known-gaps.md`, one round stale
+
+`g-channel-in-nested-program-inside-page-ordering` quoted the round-2 form
+`programDepth` greater-than-or-equal-1. Verified the live code before editing
+(`compiler/src/symbol-table.ts:10121`): it is `!topLevelPrograms.has(node)`. The
+entry now carries both, with the reason the substitution was made — the depth
+counter increments only when descending THROUGH a `<program>`, so in a
+`<page>`-rooted route file a nested `<program name="w">` sat at depth 0 and the
+reset never fired. That was round 3's own HIGH-1, so the gap doc was asserting
+the predicate that round proved wrong.
+
+### LOW-4 — the sweep population, banked so it is not re-derived
+
+The r3 reviewer found 7 sites beyond the audited 41 — `commands/migrate.js` x4,
+`native-parser/parse-markup.js:2230`, `native-parser/collect-hoisted.js:324` and
+`:967` — READ all seven, and found **NO DEFECT**: every one is root-by-position
+or a tag-set membership test, neither of which is the `name=`-keyed
+discriminator the sweep was hunting. **No code change is owed.** Recorded here so
+round 5 does not re-derive it.
+
+The generalisation is still the point (R5): `tag === "program"` finds 31 sites,
+the same test is spelled four other ways across three IR layers for 41, and the
+reviewer's four grep spellings found 48. **No single literal grep enumerates this
+population** — four independent attempts have each returned a different number.
+That is the finding; the specific count is not.
+
+## VERIFICATION BAR — round 4
+
+| gate | result |
+|---|---|
+| `bun conformance/run.ts` | **894/894** |
+| `bun test compiler/tests/unit compiler/tests/integration` | 21117 pass / 0 fail / 40 skip |
+| full pre-commit gate (`bun test compiler/tests/`) | see below |
+| `bun scripts/s34-census.ts --check-new --base origin/main` | 16 rows, all well-formed, PASS |
+| `probes/build-matrix.mjs` | 40 builds, 0 violations |
+| ENV-GAP | ruled out first: `bun install` + `bun run pretest` |
+
+Baseline for comparison, taken from the merge commit's own pre-commit run:
+**28966 pass / 0 fail / 86 skip / 1 todo**, 1269 files.
+
+## RESIDUALS — round 4
+
+### The conformance harness cannot express CARDINALITY
+
+Not a defect in this round's work, but it is the reason the r3 double fire
+survived a full run and it will be the reason the next one does. `expect` has
+`codes` (superset) and `notCodes` (disjoint); neither can say "exactly once".
+Every invariant in this arc that is about COUNT has to be pinned in an
+integration test instead, and nothing prevents a future case from asserting a
+cardinality claim it cannot check. A third key — `codeCounts: { "E-X": 1 }` —
+would be a small change to `conformance/run.ts` and would let the corpus carry
+the arc's central invariant directly. Surfaced, deliberately not built: it widens
+the versioned contract's schema, which is not this round's ruling to take.
+
+### `s34-census.ts` treats a source COMMENT as an emitter
+
+Found the hard way this round (see above). The scan is a raw token match over
+`compiler/src` / `native-parser` / `runtime`, so naming an unimplemented code in
+a comment is indistinguishable from pushing it. The consequence is backwards:
+documenting a spec-ahead code makes the catalog look MORE built than it is, and
+the honest DECLARED-AHEAD row is overridden because IMPL-SITES ranks higher. The
+workaround in the code is a spelling convention plus a comment explaining it,
+which is fragile. A real fix would require the token to appear in a push-like
+position (`new XError("CODE"` / `code: "CODE"`), or would rank DECLARED-AHEAD
+above IMPL-SITES when the row explicitly declares no fire site. Not this round's
+scope.
+
+### R1, R2, R3, R6, R7, R8 — carried unchanged from round 3
+
+None touched. R1 (the dangling worker binding) was explicitly out of scope and
+was re-measured to confirm it is not regressed: still exit 0, still ships
+`_scrml_worker_dubler` against nothing.
+
+### `E-FOREIGN-011` / `E-FOREIGN-012` are now honestly labelled, and still unbuilt
+
+Both are §23.4 normative SHALLs with no fire site. This round moved them from
+FALSE-CLAIM to DECLARED-AHEAD, which is a labelling fix, not an implementation.
+`E-FOREIGN-011` (a listed fn the sidecar does not export) is arguably buildable
+today — the sidecar's `export function` declarations are in the subtree the
+compiler already walks — but it is a name-resolution feature of a runtime that
+does not exist, and building half a diagnostic for an unbuilt layer is how this
+arc got its seam in the first place. Left with the sidecar layer, deliberately.
