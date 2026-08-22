@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 37 |
+| HIGH | 41 |
 | MED | 147 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -6672,6 +6672,45 @@ Reported by scrml-site's error-code probe harness (one minimal reproducer per §
 
 **Remediation-message correction (S239 finding 1).** The first cut emitted one remedy — *"move it to be a direct child of `<program>`, a SIBLING of the `<page>` declarations … no other change is needed"* — which is wrong in every clause for the DOMINANT multi-page shape: a route file (`pages/chat.scrml`) is a top-level `<page>` with **no `<program>` in the file at all**, so there is no `<program>` to become a child of, the `<page>` has no siblings, and the fix necessarily edits a different file. The message now branches on the `fileHasProgram` signal the walker already had: the in-`<program>` branch keeps the local-move remedy (and the "use sites do not change" claim, which is true only there); the route-file branch states explicitly that the fix CROSSES FILES and gives both remedies — the entry file's `<program>` body, or a PURE-CHANNEL-FILE module (§38.12.6) with a copy-pasteable `import` + mount snippet derived from the ACTUAL channel name (kebab names camel-cased for the alias, matching `examples/23-trucking-dispatch/pages/driver/messages.scrml:25`).
 
+### g-nested-program-emits-artifacts-it-never-produces — a nested `<program>` emits a `new Worker(...)` reference and channel CLIENT connections, but neither the worker file nor the channel's SERVER route is ever produced — `NEW S354-bryan (S239 adversarial pass on the g-channel-in-nested-program-inside-page-ordering landing); HIGH; open`
+<!-- @gap id=g-nested-program-emits-artifacts-it-never-produces sev=HIGH status=open locus=compiler/src/codegen/emit-channel.ts prov=empirical:S354-bryan-reproduced -->
+**PRE-EXISTING and independent of the placement ruling — PA-reproduced by execution on BOTH `main` and the fix branch, not relayed from the review.** A nested `<program>` compiles to references it never backs with artifacts. Two instances in one emit:
+
+1. **The worker file is never written.** `<program name="worker">` emits `new Worker("worker.worker.js")` into the client bundle; no `worker.worker.js` appears in the output directory. Verified on `main` (control, no `<page>` involved) and on the fix branch.
+2. **A `<channel>` inside the nested `<program>` gets a CLIENT connection and no SERVER route.** The client dials `/_scrml_ws/nested_feed`; the server emits only `_scrml_route_ws_canonical_feed` for the top-level sibling and nothing for the nested one. The emitted client sets `_ws.onclose = () => { _reconn = setTimeout(_connect, 2000); }`, so the runtime failure mode is a **silent infinite 2-second reconnect loop** against a route that does not exist. Exit 0, zero errors, zero warnings naming it.
+
+**Reproducer (the control — no `<page>`, so it compiles on `main` today):**
+
+```
+<program db="postgres://localhost/app">
+  <channel name="canonical-feed">
+    <messages> = []
+  </channel>
+  <program name="worker">
+    <channel name="nested-feed">
+      <items> = []
+    </channel>
+  </program>
+</program>
+```
+
+`bun run compiler/src/cli.js compile nopage.scrml` → **Compiled, exit 0**. Emitted: `nopage.client.js` (dials BOTH `/_scrml_ws/canonical_feed` and `/_scrml_ws/nested_feed`, plus `new Worker("worker.worker.js")`), `nopage.server.js` (routes ONLY `canonical_feed`), and no worker file.
+
+**⚑ Why this is filed now, and why it blocks a landing it did not cause.** `E-CHANNEL-INSIDE-PAGE` was doing more than placement hygiene: it was the only thing keeping authors out of this codegen path for the `<page>` → nested `<program>` → `<channel>` shape. The S353-ruled fix for [[g-channel-in-nested-program-inside-page-ordering]] is **correct on its own terms** — the depth-tracking change is minimal, correctly scoped, and its 15 new tests were verified two-sided (8 of 15 fail against the unfixed base). But landing it alone converts a **loud, accurate build error into a silently broken artifact**, which is strictly worse for an adopter than the rejection it removes. Worse, the sibling diagnostic `E-CHANNEL-OUTSIDE-PROGRAM` then *steers authors into it*: for a route file whose only `<program>` is page-nested, its remediation says "move it inside `<program>`" — and doing so produces the broken artifact above.
+
+**Blast radius: 0 corpus instances** (the S299/S353 re-measurement walked all 2260 `.scrml` and found 0 page-nested channels of any kind), and the no-`<page>` shape is equally unexercised. **Nothing is broken in the corpus today** — which is exactly why holding the placement fix costs nothing while landing it alone does.
+
+**⚑ ROOT CAUSE — located at dispatch-scoping, and it CORRECTS this entry's own first framing.** "Nested-`<program>` codegen is unbuilt" is **wrong**. The two symptoms have two different and much narrower causes:
+
+1. **The worker bundle is BUILT and then DROPPED.** `codegen/index.ts:~1500` calls `generateWorkerJs(...)` and stores the result in `workerBundlesPerFile`, surfaced on the compile output as `workerBundles` (`index.ts:289` · `:1973` · `:2534`). But **`grep -rn 'workerBundles' compiler/src/` returns hits in `codegen/index.ts` ONLY** — nothing else in the tree reads it, and `api.js`'s write path (`~:3195-3280`) writes `toolJs`/`serverJs`/`libraryJs`/`clientJs`/`html`/`css`/maps with **zero** mentions of `worker`. The generator exists and works; the WRITER never learned about it. That is a writer fix, not a codegen build.
+2. **The channel falls into a hole between two emitters.** The symbol-table pass registers the channel globally (so `emit-client.ts:2393` emits the connection), then `extractWorkerPrograms` (`index.ts:1387`) splices the nested `<program>` out of the main tree before server-route emission, and `emit-worker.ts:22 generateWorkerJs` handles **only function declarations + the `when message` hook** — it has no channel handling at all. So neither emitter owns it.
+
+**⚑ AND A LANGUAGE QUESTION THIS EXPOSES, which bears directly on the S353 ruling.** §4.12.1's normative sentence is **scoped**: *"A `<program>` nested inside another `<program>` SHALL be subject to the same grammar rules as a top-level `<program>` (§4.1, §4.2, §4.3, §4.11)"* — **§38 (channels) is not in that enumeration.** The S353 ruling for [[g-channel-in-nested-program-inside-page-ordering]] read that sentence as general. Compounding it, §4.12.3 classifies a nested `<program name=>` with no `lang=` as an **inline web worker** — client-side, and structurally incapable of hosting a server-backed WebSocket route — while §4.12.2 lists `route=` and `db=` as valid nested attributes, so *some* nested programs are server-side. Whether a `<channel>` may live in a nested `<program>` plausibly depends on the §4.12.3 execution-context TYPE, which no current check consults. **Operator question, not a build decision.**
+
+**⚑ TOOLING NOTE (S354-bryan, from the worktree-reap dry-run this arc ran alongside) — three independent reasons the obvious "is this worktree safe to delete?" tests all answer WRONG on this repo, recorded because the sweep is still owed and will be re-attempted:** (1) `git rev-list origin/main..<branch>` marks **every** worktree branch unmerged, because the repo squash-merges and a squashed branch's commits never become ancestors of `main`; (2) a merged-PR lookup finds only **1 of 54** worktree branches, because the historical workflow was file-delta (the PA copies files off the agent branch onto its own), so agent branches never get a PR at all; (3) comparing committed branch content (`git diff origin/main...<branch>`) **cannot see staged-but-uncommitted work**, so a worktree holding a staged 370-line change scored 0-unlanded and reached a reap list. A sweep MUST run `git status --porcelain` per worktree and READ any non-empty result before removing. Content-level test that does discriminate: for each branch-touched file, `git diff --quiet origin/main..<branch> -- <file>`; on this corpus that yields 4 reapable of 54.
+
+**Owed:** (1) write the generated worker bundles through `writeOutput`, with the same content-hash / asset-ref rewriting the sibling `.client.js` refs get, preserving the existing `port=`-sidecar carve-out at `index.ts:~1405` (which already exists precisely to avoid emitting a reference to a never-emitted bundle — the repo's own precedent that this class is a bug). (2) Fail closed on the channel case whichever way the semantics land, since a client dialing a nonexistent route is wrong under every reading. Dispatched S354-bryan, change-id `nested-program-artifact-emission-2026-08-19`. Cross-ref [[g-channel-in-nested-program-inside-page-ordering]] (the placement ruling this blocks).
+
 ### g-channel-in-nested-program-inside-page-ordering — a `<channel>` inside a NESTED `<program>` inside a `<page>` is rejected even though the channel IS inside a `<program>` — `NEW S299 (S239 adversarial pass on the g-channel-inside-page-never-fires landing); LOW; RULING-GATED`
 <!-- @gap id=g-channel-in-nested-program-inside-page-ordering sev=LOW status=open locus=compiler/src/symbol-table.ts prov=ruling:user-voice-scrml.md-S353 -->
 **⚑ RULED S353-bryan — option (b), reverse the precedence.** Reset `pageDepth` when descending into a nested `<program>`, treating it as a fresh placement scope. **§4.12.1 is the more specific normative sentence and it wins:** a nested `<program>` "SHALL be subject to the same grammar rules as a top-level `<program>`" (`:724`) and "SHALL be a separate compilation unit" (`:718`) — so the enclosing `<page>` is as invisible to the placement check as the parent's bindings are under §4.12.1 shared-nothing isolation. **The FORK RULE genuinely split** (limit-over-widen / fail-closed / reversibility all favoured keeping the rejection; **root-over-position favoured (b)** — hardcoding the exception patches a position while the compilation-unit boundary is the actual rule), which is why it was surfaced rather than PA-decided. Root won. **Blast radius MEASURED zero** (0 page-nested channels across all 2260 `.scrml`), so the ruling is free and was taken on correctness, not cost. **Owed by the build:** a test pinning the ordering (none exists today, either way) AND the adjacent question this ruling forces — should `E-CHANNEL-OUTSIDE-PROGRAM`'s `fileHasProgram` pre-scan be nested-`<program>`-aware? Status flipped ruling-gated → open: the ruling is delivered, the build is not.
@@ -6784,6 +6823,55 @@ The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = 
 
 **The real discriminator is the §7.2 extension set.** §7.2 names four scrml extensions to `logic-content`; inside a mount body **three of the four fail**: `lift` (§10) ❌ · markup-as-expression (§7.4) ❌ · `?{}` SQL (§8) ❌ · `@variable` (§6) ✅ — plus `!{}` error arms (§19, absent from §7.2's stale list) ❌. All four failures are `E-CODEGEN-INVALID-LOGIC`, fail-CLOSED. So: **the mount body's string pipeline lowers plain JS and `@`, but none of the scrml extensions that require real lowering.** Scope (c)'s acceptance test to that set — a fix closing `!{}` alone and leaving `?{}`/`lift`/markup-as-expr failing is the pa-base §5 shape (correct at that site, incomplete, passing its own new tests because the untouched paths have no coverage either). Pin both conformance halves (codes + runtime) — §62.2 makes the corpus the contract and this is a freeze surface.
 
+### g-when-message-parent-handler-drops-all-but-the-first-statement — a parent-side `when message from <#w>` handler silently emits ONLY its first statement; 2 statements produce no diagnostic at all — `NEW S354-bryan (adversarial pass on the nested-program artifact fix; PA-briefed, agent-EXECUTED both trees); HIGH; open`
+<!-- @gap id=g-when-message-parent-handler-drops-all-but-the-first-statement sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts:3772 prov=empirical:S354-adversarial-executed-both-trees -->
+`emit-logic.ts:3772` emits the parent-side handler via `emitExprField(node.bodyExpr, …)`, and `bodyExpr` is `safeParseExprToNode(bodyRaw)` — which parses **one** statement.
+
+```scrml
+when message from <#w> (d) {
+  @out = d.r
+  @cnt = @cnt + 1        // silently dropped
+}
+```
+
+Emitted identically on both trees:
+
+```js
+_scrml_worker_w.onmessage = function(event) { const d = event.data; _scrml_cs_reactive_set("out", d.r); };
+```
+
+**Two statements → NO warning at all.** Three statements → a bare `console.warn` from `expression-parser.ts:3007` ("statement boundary not detected — trailing content would be silently dropped"), which is not a compiler diagnostic and does not fail the build.
+
+**⚑ Why this is filed with urgency:** the nested-program arc's commit `d100ef4e` is titled *"make `when message` bodies reconstruct faithfully"* and closes exactly this class **on the worker side only**. A reader — human or agent — will reasonably conclude both sides are closed. They are not. The parent side is the half an adopter writes first.
+
+### g-bang-brace-arm-bodies-have-no-tree-form-so-every-structural-pass-is-blind-inside-them — an `!{}` arm carries its body as a STRING (`handler`) plus an escape-hatch parse (`handlerExpr`); the body is emitted VERBATIM, so a raw egress inside an arm was a live unredacted leak — `NEW S354-bryan (raw-egress round 5; PA-CONFIRMED at the AST site); HIGH; open`
+<!-- @gap id=g-bang-brace-arm-bodies-have-no-tree-form sev=HIGH status=open locus=compiler/src/ast-builder.js:15069 prov=empirical:S354-round5-measured -->
+**PA-confirmed at the source.** `ast-builder.js:15069/15146/15202` build every `!{}` arm as `handler: <trimmed source string>` plus `handlerExpr: _parseHandlerExpr(...)`, and `_parseHandlerExpr` yields an **escape-hatch node** for anything acorn rejects after scrml preprocessing. **No structured arm body exists anywhere in the AST.** Measured during round 5: *every* arm-body form escape-hatches, including one as ordinary as `| AuthError e -> not`.
+
+**Why it is HIGH and not a tidiness item:** §14.8.9's walk cannot see into an arm at all, because the node it must inspect is a string — so the gate reads "nothing here" where the truth is "unanalyzable".
+
+⚑ **CORRECTION (S354-bryan, from the round-5 adversarial pass) — the original filing over-claimed and is fixed here.** This entry first said a raw egress inside an arm *"reached the wire with no redaction"*. **That is UNVERIFIED and probably false.** An `!{}` arm with a NAMED binder emits literally `e - > { … }` — syntactically invalid JS — so the bundle would not load; there is no live wire leak to demonstrate. PA-reproduced on the client path: the emit gate catches it (`E-CODEGEN-INVALID-LOGIC`, build FAILS, no files written).
+
+★ **But the correction exposes a sharper defect than the claim it retracts.** On a SERVER path carrying any *other* fatal diagnostic, the invalid JS ships uncaught — because `api.js:~2869` enters the emitted-JS parse gate as `if (validateEmit && !hasPriorFatalError && ...)`, so **a prior fatal error SKIPS the gate**. That is the same mechanism traced for [[g-...failed-build-writes-dist...]] at delta-log `[1638]`: the skip exists to avoid piling a misleading `E-CODEGEN-INVALID-LOGIC` on an already-surfaced source error, and it silently takes the invalid-artifact check with it. So the honest statement is: **arm bodies with a named binder emit invalid JS, and whether anyone finds out depends on whether an unrelated diagnostic happened to fire first.**
+
+⚑ **The blast radius is not this gate.** Any pass that walks bodies structurally — protect/egress, tenant isolation, route inference, reachability, the auto-await injectors — is blind inside an `!{}` arm and silently reads "nothing here" where the truth is "unanalyzable". This is the [[g-...dpa-024...]] class (in-place decoration over a non-load-bearing canonical AST) surfacing as a *security* blindness rather than a typing one.
+
+**Round 5 mitigated §14.8.9 specifically** by testing the escape-hatch node's own `raw` string for what it could hold (0 corpus false positives, vs 22 for a blanket fail-closed and 1 for treating every arm as an egress). **That mitigation is per-gate and does not generalise** — and it tests a string, which is the form dpa-029 Q1 declined; the judgement is recorded there for the operator. **Root fix: give arm bodies a real parsed form.** Until then, every new structural pass inherits the blindness by default.
+
+### g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client — `analyzeAll` caches `FileAnalysis` fields BEFORE the nested-`<program>` extraction splice; `fnNodes` and `cssBlocks` are stale and LEAK worker-only code into the client bundle — `NEW S354-bryan (adversarial pass; 2 of 7 fields confirmed leaking by execution, 3 UNVERIFIED); HIGH; open`
+<!-- @gap id=g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client sev=HIGH status=open locus=compiler/src/codegen/index.ts prov=empirical:S354-adversarial-executed-both-trees -->
+`analyzeAll` runs **before** `extractWorkerPrograms` and caches its node collections **by object reference**. When the pre-pass splices a nested `<program name=>` subtree out, every cached field still points at the removed nodes. The S354 nested-program arc fixed `channelNodes`; the class is wider.
+
+| field | consumer | verdict |
+|---|---|---|
+| `channelNodes` | `emit-reactive-wiring.ts:928` | fixed by the S354 arc |
+| `fnNodes` | `emit-functions.ts:537` | **STALE, LEAKS** — a `function` inside a nested `<program name=>` is emitted into the **client** bundle. On `examples/13-worker.scrml` the whole `sieve` body ships in `13-worker.client.js`. |
+| `cssBlocks` | `codegen/index.ts:1952` | **STALE, LEAKS** — `#{ .ghostclass{…} }` inside a worker program lands in `<base>.css`. |
+| `markupNodes` · `topLevelLogic` | `emit-bindings.ts:756` · `index.ts:2155` | probed, no observed leak |
+| `cssBridges` · `testGroups` · `usage` | — | **UNVERIFIED** (`usage` over-inclusion only reduces elision — the sound direction) |
+
+**The structural fix is ordering the extraction pre-pass BEFORE `analyzeAll`**, not refreshing fields one at a time — every per-field patch leaves the next one latent. Pre-existing on both trees; the S354 arc makes it visible rather than causing it. Cross-ref [[g-nested-program-emits-artifacts-it-never-produces]].
+
 ### g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate — `detectTenantRawEgress` carries ALL THREE defects the §14.8.9 gate was just fixed for, on the tenant-ROW isolation floor — `NEW S353-bryan (found while briefing the raw-egress fix; PA-VERIFIED by reading + the sibling's reproduction); HIGH; open`
 <!-- @gap id=g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts:371 prov=ruling:user-voice-scrml.md-S353 -->
 `detectTenantRawEgress` (`tenant-egress.ts`, the §14.8.10 fail-closed gate) is a **byte-identical twin** of `detectProtectedRawEgress` and carries every defect the S353 raw-egress arc fixed in the §14.8.9 sibling — on the **tenant-ROW isolation floor**, where the failure mode is cross-tenant row leakage rather than column leakage.
@@ -6792,6 +6880,27 @@ The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = 
 1. **`globalThis.Response` bypasses it.** Same `/\bnew\s+Response\b/` test — a member-chain spelling does not match. Same trap-closes-on-itself dynamic: bare `Response` fired `E-SCOPE-001` until the sibling fix admitted it, so the workaround an author reached for was the spelling that silenced the gate.
 2. **The suppressor is BODY-WIDE, not value-scoped.** `if (/\.\s*acrossTenants\s*\(/.test(fnSource)) return null;` — an `.acrossTenants()` on ANY value anywhere in the body suppresses the gate for every other value in it, exactly as `.reveal(` did for §14.8.9.
 3. **It is a source-text regex in a post-AST stage** — a **Rule 7** instance (S338), and the root cause of both defects above.
+
+**⚑ UPGRADED read-verified → EXECUTED (S354-bryan, adversarial pass on the §14.8.9 round-3 fix).** All three predicted defects are now reproduced by running the emitted handler, not by reading. On an `assets` table with `tenant_id` and NO `protect=`, this compiles **exit 0, zero diagnostics**:
+
+```scrml
+function f() {
+  let rows = ?{`SELECT id, name FROM assets`}.all()
+  return new globalThis.Response(JSON.stringify(rows))
+}
+```
+
+Executed, caller pinned to `tenantA`:
+
+```
+CONTROL (compiler-emitted path): [{"id":1,"name":"A-asset"}]
+EVASION (globalThis.Response):   [{"id":1,"name":"A-asset","tenant_id":"tenantA"},
+                                  {"id":2,"name":"B-SECRET-asset","tenant_id":"tenantB"}]
+```
+
+`emit-server.ts:126`'s `instanceof Response` passthrough returns the manual Response **before** `_scrml_tenant_redact` — the §12.5 mechanism the protect side closed at round 3. Also executed-silent: `new globalThis["Response"](…)` and the cross-function shape (query in a helper, `new Response` in the caller). Also **build-breaking FALSE POSITIVES**, the mirror failure: `// this returns asIs data eventually` in a comment and `let label = "asIs"` in a string each fire `E-TENANT-RAW-EGRESS`. Two further holes found in the same pass: `emit-server.ts:1954` still `continue`s on a span-less fn node (the hole round 3 closed on the protect arm), and the whole §14.8.10 block is gated on `if (_src)` (`emit-server.ts:1890`) so a FileAST without `_sourceText` silently disables `E-TENANT-WRITE`/`AGG`/`RAW-EGRESS` — that last is UNVERIFIED as CLI-reachable.
+
+⚑ **Bookkeeping note for whoever fixes this:** the round-3 adversarial pass reported this gap as "filed nowhere" (`grep` → 0 hits). That grep ran in a worktree based on `6ca6e468`, which predates #577 landing this entry on `main` — a stale-base read, not a missing entry. The finding is real; the "unfiled" half is not.
 
 **Why this is filed HIGH and separately:** the raw-egress brief scoped §14.8.9 only, so the sibling fix does NOT reach this file. The two gates were written as a matched pair and must be fixed as one — the structural detector, the member-chain callee resolution and the value-scoped suppression the S353 arc built are all directly reusable here. Landing the §14.8.9 fix alone leaves the tenant floor with a known, reproduced bypass and creates a false impression that the class is closed.
 
