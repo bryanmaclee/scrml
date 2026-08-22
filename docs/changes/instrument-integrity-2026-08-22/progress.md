@@ -223,3 +223,177 @@ the 106 are defects is a per-case ruling.
 **F2 — `docs/known-gaps.md:588` is now one key stale.** It carries a PA-VERIFIED
 enumeration of "the harness's complete `expect` vocabulary" and does not list
 `codeCounts`. The brief forbids touching that file, so: flagged for the PA.
+
+---
+
+## BUILD B — `s34-census.ts`, two blind spots
+
+### B1 — comment-as-emitter
+
+**Chosen: comment-span exclusion. The precise push-position match was tried,
+measured, and REJECTED on evidence.** The brief permits the fallback if
+push-position "is not tractable"; that is a claim I had to earn rather than
+assume, so here is the measurement.
+
+There is no single syntactic push shape in this codebase. Counting quoted-literal
+`code:` pushes across the three impl trees gives **233 sites** against **320
+codes** the raw scan credits with an emitter — so the property-literal form is a
+minority of live emission shapes. The rest split three ways, and two of them are
+syntactically identical to each other:
+
+| shape | example | is it an emitter? |
+|---|---|---|
+| `code: "E-X"` property | `{ code: "E-MARKUP-001", … }` | YES |
+| the code inside the MESSAGE template | `` `E-DBAUTH-NO-TENANT-COLUMN: db-authoritative table(s) …` `` (`commands/db-migrate.js:616`) | **YES** — that is how the CLI surfaces it |
+| the code inside the MESSAGE template | `"[scrml] W-NAV-CHUNK-LOAD-FAILED: cross-chunk soft navigation…"` (`runtime-template.js:2908`) | **YES** — the runtime's own diagnostic |
+| the code inside a DIFFERENT diagnostic's message | `` `(A tighter sibling of E-CHANNEL-004; §34.)` `` | NO — a cross-reference |
+| the code inside a DIFFERENT diagnostic's message | `` `becomes E-WHITESPACE-001 in P3.` `` | NO — names a FUTURE code |
+
+Rows 2-3 and rows 4-5 are the same syntax. Separating them needs semantics, not a
+regex. A strict push-position match excluded 18-19 codes, and hand-checking them
+found **real emitters among the excluded** (`E-DBAUTH-NO-TENANT-COLUMN`,
+`W-NAV-CHUNK-LOAD-FAILED`) — i.e. it would have moved LIVE codes into FALSE-CLAIM
+and inflated the freeze denominator. That is trap **T3**, which this script's own
+header already records costing 17 false dead-code claims once before. Shipping it
+would have traded a known over-count for an unknown under-count, which is the
+worse of the two errors: an over-count wastes a fire-attempt, an under-count
+deletes a real diagnostic from the contract.
+
+Comment exclusion, by contrast, has **zero false-negative risk by construction** —
+a comment cannot fire a diagnostic, so the change can only remove claims, never
+real emitters.
+
+Implemented as a mode-tracking `stripComments()` (line + block, string- and
+template-aware, so `"http://…"` and `/* */` inside a literal are not mistaken for
+comment openers), applied to `.ts/.js/.mjs` before the token match.
+
+**Effect on the census (same tree, both scripts):**
+
+| bucket | old scan | new scan |
+|---|---|---|
+| IMPL-SITES | 320 | **299** |
+| DECLARED-AHEAD | 14 | **18** |
+| FALSE-CLAIM | 95 | **112** |
+
+21 codes lost an emitter they never had. 32 catalogued codes were measured to have
+a hit whose every occurrence is a comment.
+
+**Bite proof — two-sided.** `E-TYPE-027` is a FALSE-CLAIM code with zero mentions
+in any impl tree. Injected two comments naming it into `compiler/src/type-system.ts`:
+
+```
+=== [0] CLEAN TREE, fixed scan
+  IMPL-SITES=299  DECLARED-AHEAD=18  FALSE-CLAIM=112
+
+=== injecting two COMMENTS naming E-TYPE-027 into compiler/src/type-system.ts
+
+=== [1] DEFECT PRESENT, OLD scan (bare token, counts comments)
+  IMPL-SITES=321  DECLARED-AHEAD=14  FALSE-CLAIM=94     <- RED: two comments promoted the row
+
+=== [2] DEFECT PRESENT, NEW scan (comment spans stripped)
+  IMPL-SITES=299  DECLARED-AHEAD=18  FALSE-CLAIM=112    <- GREEN: identical to clean
+
+=== [3] CLEAN TREE again, fixed scan
+  IMPL-SITES=299  DECLARED-AHEAD=18  FALSE-CLAIM=112
+```
+
+Two comments, and the old scan moves a row out of the honest bucket. That
+reproduces the brief's `323/14 -> 321/16` shape on this tree as `321/14 -> 299/18`.
+
+### B2 — provenance that resolves
+
+The §34.0 gate tested the SHAPE of a provenance note (`emitted at` + a backticked
+path) and never asked whether the note pointed at anything.
+
+**Found by execution, on `main`, before writing the check.** Ran the candidate
+resolver across all 811 catalogued rows: 55 name a symbol, 219 name a path.
+
+- **symbols failing: 0** (after one refinement — `E-SCHEMA-011` names the Postgres
+  catalog `pg_constraint`, prose in backticks, not a JS symbol. Excluded via a
+  lowercase_snake filter; this codebase has no lowercase_snake function names and
+  `_scrml_*` keeps its leading underscore. It was the ONLY false positive in 811 rows.)
+- **paths failing: 1, and it is REAL** —
+
+```
+I-MATCH-PROMOTABLE  ->  `compiler/src/lint-promotable.ts`
+$ ls compiler/src/lint-promotable.ts
+ls: cannot access 'compiler/src/lint-promotable.ts': No such file or directory
+$ ls compiler/src/ | grep -i promot
+lint-i-fn-promotable.js
+lint-i-match-promotable.js      <- the actual emitter
+lint-w-each-promotable.js
+```
+
+The row (SPEC.md:19618) claims "Emitted at `compiler/src/lint-promotable.ts` and
+consumed by `compiler/src/commands/promote.js`". The second path exists; the first
+does not. A rename staled the note and nothing checked. Exactly the defect class
+the brief describes, sitting in the catalog today.
+
+Implemented: for each NEW/CHANGED row, every backticked repo path must exist on
+disk, and every symbol named by the two conventions §34 actually uses
+(`` `path` `sym` `` adjacency, or "via `sym`" / "in `sym`") must appear in
+EXECUTABLE source — comments stripped, reusing B1's machinery, so a function
+deleted but still eulogised in a comment cannot launder the claim. The resolution
+check runs BEFORE the spec-ahead `continue`: a Nominal row citing a deleted file
+is still a stale claim.
+
+**Diff-scoping held.** The brief is emphatic that `--check-new` must stay silent
+on the legacy corpus, and the stale `I-MATCH-PROMOTABLE` row is the live test of
+that: it is a legacy row, the gate sees it, and the gate says nothing.
+
+```
+$ bun scripts/s34-census.ts --check-new --base origin/main
+§34.0 gate: no new/changed §34 rows vs origin/main — PASS      exit 0
+```
+
+**Bite proof — two-sided.** Injected three new §34 rows: one whose provenance
+resolves, one naming a nonexistent file, one naming a renamed function.
+
+```
+=== [1] DEFECT PRESENT, OLD gate (shape-only regex)
+§34.0 gate: 3 new/changed §34 row(s), all well-formed — PASS
+    exit=0                                            <- RED: passed BOTH false claims
+
+=== [2] DEFECT PRESENT, NEW gate (provenance must resolve)
+§34.0 gate FAILED — 2 problem(s) across 3 new/changed §34 row(s):
+  E-BITE-BADPATH — STALE PROVENANCE: names `compiler/src/does-not-exist.ts`, which does not exist
+  E-BITE-BADSYM  — STALE PROVENANCE: names symbol `checkPrintArgsRENAMED`, which appears in no executable source
+    exit=1
+
+=== [3] remove ONLY the two bad rows, keep the good one
+§34.0 gate: 1 new/changed §34 row(s), all well-formed (provenance resolves) — PASS
+    exit=0                                            <- GREEN: the honest row is unaffected
+
+=== [4] clean tree
+§34.0 gate: no new/changed §34 rows vs origin/main — PASS
+    exit=0                                            <- legacy corpus still silent
+```
+
+**Third proof, for a claim made in the shipped comment.** The code asserts that a
+symbol surviving only in a comment does not satisfy the check. Proving rather than
+asserting it — added `// checkGhostRenamedFn was removed in S300; kept here as a
+breadcrumb.` and a row naming that symbol:
+
+```
+E-BITE-GHOST — STALE PROVENANCE: names symbol `checkGhostRenamedFn`, which appears in no executable source
+    exit=1
+```
+
+### Filed, not fixed
+
+**F3 — `I-MATCH-PROMOTABLE`'s §34 row names a file that does not exist.**
+SPEC.md:19618, `compiler/src/lint-promotable.ts`; the real emitter is
+`compiler/src/lint-i-match-promotable.js`. Legacy row, so the diff-scoped gate is
+correctly silent on it. It is a one-word SPEC edit but it is a SPEC edit, and the
+brief scopes this dispatch to the instruments. Reproducer: the gate itself — touch
+that row and the gate names it.
+
+**F4 — the emitter scan still over-counts by one residual class.** With comments
+stripped, ~19 codes' only remaining mention is a cross-reference INSIDE another
+diagnostic's message string (`E-CHANNEL-004`, `E-CHANNEL-INSIDE-PROGRAM`,
+`E-WHITESPACE-001`, `E-REACTIVE-004`, `W-DEPRECATED-001`, `E-CPS-NEEDS-FAILABLE`,
+`E-STATE-BLOCK-BARE-WRITE-DECL`, `W-SCHEMA-002`, …). Those rows are credited with
+an emitter they do not have. NOT fixed here because the same syntax carries two
+LIVE emission shapes (the message-prefix convention in `commands/*.js` and
+`runtime-template.js`), and separating them needs per-code adjudication of ~19
+rows — a ruling, not a regex. Reproducer is in the table above.

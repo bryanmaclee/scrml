@@ -32,6 +32,16 @@
  *            fully built. Caught the hard way: all three E-PARSEVARIANT-* were classified FALSE-CLAIM
  *            and written up as the pre-freeze arc's sharpest case before the runtime was checked and
  *            found to implement them. See the RUNTIME_SURFACED note below.
+ *  T7 (S364) A COMMENT IS NOT AN EMITTER. The scan matched a bare code token anywhere in a source
+ *            file, prose included, so writing the code in two comments was enough to move an honest
+ *            spec-ahead row into IMPL-SITES. Measured on this tree: 32 catalogued codes had a "hit"
+ *            whose every occurrence is a comment. Comment spans are now stripped first — which can
+ *            only remove claims, never real emitters, since a comment cannot fire a diagnostic.
+ *  T8 (S364) A PROVENANCE NOTE THAT POINTS AT NOTHING. The §34.0 gate regex tested the SHAPE of a
+ *            provenance note and never whether it RESOLVED, so a row naming a deleted file or a
+ *            renamed function passed. Found by execution: `I-MATCH-PROMOTABLE` cites
+ *            `compiler/src/lint-promotable.ts`, which does not exist (the emitter is
+ *            `compiler/src/lint-i-match-promotable.js`). Paths and symbols are now resolved.
  *
  * NO HARDCODED LINE NUMBERS. §34's range is derived from the headings every run. A baked line number
  * in a maintained artifact rots silently and nothing fails — the defect class behind the 3,140-line
@@ -42,7 +52,7 @@
  *         bun scripts/s34-census.ts --check-new [--base <ref>]   # §34.0 gate, DIFF-SCOPED
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -148,6 +158,44 @@ for (let i = SEC34_START - 1; i < SEC34_END && i < specLines.length; i++) {
 const codeSet = new Set(rows.map((r) => r.code));
 
 // -- fs ------------------------------------------------------------------------------------------
+/**
+ * Blank out `//` line comments and `/* *\/` block comments, preserving offsets and line count.
+ * String and template literals are tracked so a `"http://…"` or a `/* inside a string *\/` is not
+ * mistaken for a comment opener.
+ *
+ * WHY (T7, this round): the emitter scan below counted a code token appearing ANYWHERE in a source
+ * file, prose included. Writing `E-FOO-001` in two comments was therefore enough to move an honest
+ * spec-ahead row into IMPL-SITES — a comment was reported as an emitter. Measured on this tree:
+ * 32 catalogued codes had a "hit" whose every occurrence is a comment. A comment cannot fire a
+ * diagnostic, so this exclusion has no false-negative risk: it can only remove claims, never real
+ * emitters.
+ */
+function stripComments(src: string): string {
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  let mode: "code" | "line" | "block" | "s" | "d" | "t" = "code";
+  while (i < n) {
+    const c = src[i], c2 = src[i + 1];
+    if (mode === "code") {
+      if (c === "/" && c2 === "/") { mode = "line"; out += "  "; i += 2; continue; }
+      if (c === "/" && c2 === "*") { mode = "block"; out += "  "; i += 2; continue; }
+      if (c === "'" || c === '"' || c === "`") { mode = c === "'" ? "s" : c === '"' ? "d" : "t"; out += c; i++; continue; }
+      out += c; i++; continue;
+    }
+    if (mode === "line") { if (c === "\n") { mode = "code"; out += c; } else out += " "; i++; continue; }
+    if (mode === "block") {
+      if (c === "*" && c2 === "/") { mode = "code"; out += "  "; i += 2; continue; }
+      out += (c === "\n" ? "\n" : " "); i++; continue;
+    }
+    // inside a string/template literal — copy verbatim, honoring escapes
+    if (c === "\\") { out += c + (c2 ?? ""); i += 2; continue; }
+    if ((mode === "s" && c === "'") || (mode === "d" && c === '"') || (mode === "t" && c === "`")) mode = "code";
+    out += c; i++; continue;
+  }
+  return out;
+}
+
 function walk(dir: string, out: string[] = []): string[] {
   let es: string[]; try { es = readdirSync(dir); } catch { return out; }
   for (const e of es) {
@@ -173,7 +221,12 @@ const SCAN = ["compiler/src", "compiler/native-parser", "compiler/runtime", "com
   "compiler/self-host", "compiler/self-host-v2", "lsp", "scripts", "stdlib", "compiler/tests"];
 const EXT = /\.(ts|js|mjs|scrml)$/;
 const TOKEN = /\b[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
+const JSISH = /\.(ts|js|mjs)$/;
+const IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/g;
 const implHits = new Map<string, number>();
+/** Every identifier appearing in EXECUTABLE source (comments stripped) — backs the §34.0
+ *  provenance check below. Populated only for `--check-new`; the default census never needs it. */
+const treeIdents = new Set<string>();
 let filesScanned = 0;
 for (const rootRel of SCAN) {
   for (const f of walk(join(ROOT, rootRel))) {
@@ -182,8 +235,14 @@ for (const rootRel of SCAN) {
     const isImpl = rel.startsWith("compiler/src/") || rel.startsWith("compiler/native-parser/") || rel.startsWith("compiler/runtime/");
     let t: string; try { t = readFileSync(f, "utf8"); } catch { continue; }
     filesScanned++;
+    // A COMMENT IS NOT AN EMITTER. Strip comment spans before the token match, or a code
+    // named in prose counts as an implementation site (see stripComments above).
+    const code = JSISH.test(f) ? stripComments(t) : t;
+    if (CHECK_NEW && JSISH.test(f)) {
+      for (const id of code.match(IDENT) ?? []) treeIdents.add(id);
+    }
     if (!isImpl) continue;
-    for (const tok of t.match(TOKEN) ?? []) {
+    for (const tok of code.match(TOKEN) ?? []) {
       if (codeSet.has(tok)) implHits.set(tok, (implHits.get(tok) ?? 0) + 1);
     }
   }
@@ -245,7 +304,35 @@ if (CHECK_NEW) {
   }
 
   const EMITTER = /emitted at|emitter:|`(?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+`|\((?:compiler|scripts)\/[A-Za-z0-9_./-]+:\d+\)/i;
+
+  // -- provenance RESOLUTION (this round) --------------------------------------------------------
+  // The check above is a regex for the SHAPE of a provenance note. It never asked whether the note
+  // points at anything: a row naming a deleted file or a renamed function passed, because a
+  // backticked path is a backticked path. Measured on this tree — `I-MATCH-PROMOTABLE` claims
+  // "Emitted at `compiler/src/lint-promotable.ts`"; that file does not exist (the emitter is
+  // `compiler/src/lint-i-match-promotable.js`). A rename staled the note and nothing checked.
+  //
+  // So a note that HAS the shape must also RESOLVE:
+  //   - every backticked repo path in the row must exist on disk
+  //   - every symbol the row names must appear in executable source (comments stripped, so a
+  //     function deleted but still eulogised in a comment does not launder the claim)
+  const PATH_REF = /`((?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+?)(?::\d+)?`/g;
+  // The two provenance conventions §34 actually uses, and only those: a backticked symbol
+  // IMMEDIATELY after a backticked path (`compiler/src/type-system.ts` `checkPrintArgs`), or one
+  // introduced by "via"/"in". Anything looser reads ordinary prose as a symbol claim.
+  const SYMBOL_REFS = [
+    /`(?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+(?::\d+)?`\s+`([A-Za-z_$][A-Za-z0-9_$]*)`/g,
+    /\bvia\s+`([A-Za-z_$][A-Za-z0-9_$]*)`/gi,
+    /\bin\s+(?:the\s+)?`([A-Za-z_$][A-Za-z0-9_$]*)`/gi,
+  ];
+  // Backticked prose that is NOT a JS symbol: pure lowercase_snake_case with no leading underscore
+  // — e.g. E-SCHEMA-011's row names the Postgres catalog `pg_constraint`. This codebase has no
+  // lowercase_snake function names, and `_scrml_*` keeps its leading underscore, so the filter costs
+  // nothing real. It was the ONLY false positive across all 811 catalogued rows.
+  const NOT_A_SYMBOL = /^[a-z]+(?:_[a-z0-9]+)+$/;
+
   const offenders: { code: string; why: string }[] = [];
+  const stale: { code: string; why: string }[] = [];
   let added = 0;
 
   for (const line of diff.split("\n")) {
@@ -261,23 +348,51 @@ if (CHECK_NEW) {
     if (!/^[EWI]-[A-Z0-9-]+$/.test(code)) continue;
     added++;
     if (struck) continue;                       // (3) retirement row
+
+    // A row may name an emitter AND declare itself spec-ahead. Whatever provenance it does name
+    // still has to resolve — a Nominal row citing a deleted file is a stale claim either way.
+    for (const m of row.matchAll(PATH_REF)) {
+      if (!existsSync(join(ROOT, m[1]))) {
+        stale.push({ code, why: `names \`${m[1]}\`, which does not exist` });
+      }
+    }
+    for (const re of SYMBOL_REFS) {
+      re.lastIndex = 0;
+      for (const m of row.matchAll(re)) {
+        const sym = m[1];
+        if (NOT_A_SYMBOL.test(sym)) continue;
+        if (!treeIdents.has(sym)) {
+          stale.push({ code, why: `names symbol \`${sym}\`, which appears in no executable source` });
+        }
+      }
+    }
+
     if (DECLARED_AHEAD.test(row)) continue;     // (2) honest spec-ahead declaration
     if (EMITTER.test(row)) continue;            // (1) emitter provenance note
     offenders.push({ code, why: "no emitter provenance note, no spec-ahead declaration, not struck" });
   }
 
   if (!added) { console.log(`§34.0 gate: no new/changed §34 rows vs ${BASE_REF} — PASS`); process.exit(0); }
-  if (offenders.length) {
-    console.error(`§34.0 gate FAILED — ${offenders.length} of ${added} new/changed §34 row(s) are unverifiable claims:\n`);
+  if (offenders.length || stale.length) {
+    const n = offenders.length + stale.length;
+    console.error(`§34.0 gate FAILED — ${n} problem(s) across ${added} new/changed §34 row(s):\n`);
     for (const o of offenders) console.error(`  ${o.code} — ${o.why}`);
-    console.error(`\nEvery NEW row SHALL carry ONE of (SPEC §34.0):`);
-    console.error(`  1. an emitter provenance note — e.g. (… emitted at \`compiler/src/foo.ts:123\`.)`);
-    console.error(`  2. an explicit spec-ahead declaration — Reserved / Nominal / spec-ahead / not yet emitted`);
-    console.error(`  3. strikethrough ~~CODE~~ + a retirement note`);
-    console.error(`\nOutcome 2 is a first-class answer: if the emitter does not exist yet, SAY SO.`);
+    for (const s of stale) console.error(`  ${s.code} — STALE PROVENANCE: ${s.why}`);
+    if (offenders.length) {
+      console.error(`\nEvery NEW row SHALL carry ONE of (SPEC §34.0):`);
+      console.error(`  1. an emitter provenance note — e.g. (… emitted at \`compiler/src/foo.ts:123\`.)`);
+      console.error(`  2. an explicit spec-ahead declaration — Reserved / Nominal / spec-ahead / not yet emitted`);
+      console.error(`  3. strikethrough ~~CODE~~ + a retirement note`);
+      console.error(`\nOutcome 2 is a first-class answer: if the emitter does not exist yet, SAY SO.`);
+    }
+    if (stale.length) {
+      console.error(`\nA provenance note SHALL RESOLVE: every backticked repo path must exist, and every`);
+      console.error(`symbol named via \`path\` \`sym\` / "via \`sym\`" / "in \`sym\`" must appear in executable`);
+      console.error(`source. A note pointing at a renamed function is a false claim in the §62.2 contract.`);
+    }
     process.exit(1);
   }
-  console.log(`§34.0 gate: ${added} new/changed §34 row(s), all well-formed — PASS`);
+  console.log(`§34.0 gate: ${added} new/changed §34 row(s), all well-formed (provenance resolves) — PASS`);
   process.exit(0);
 }
 
