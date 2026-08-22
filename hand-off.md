@@ -1,14 +1,106 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S360-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1641]-[1649].         -->
-<!-- S360 = the DEEP-DIVE vein, worked hard. 7 fresh HIGHs deep-dived -->
-<!--   across 2 satellite batches; 2 FIXED+LANDED (reset raw-body     -->
-<!--   #617, endpoint-400 #619), 4 ROUTED turnkey (A/B/F/G; F BUILT   -->
-<!--   on a branch), 1 DOWNGRADED (rename-swallow HIGH→MED, stale).   -->
-<!--   HIGH 47→44. 5 PRs landed. Plus auto-mode setup.               -->
-<!-- Body below the S360 block is S359 + S358 + older (history).      -->
-<!-- TWO LANES LIVE: bryan's S352/S353 board still UNSTARTED — §A.   -->
+<!-- hand-off.md — live session state. WRAPPED at S361-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1650]-[1658].         -->
+<!-- S361 = a LONG, high-yield DEEP-DIVE session. 3 code fixes landed  -->
+<!--   (stdlib-prune string vector #622, reindent-converge #624,       -->
+<!--   each-interp transitive #627); 5 stale HIGHs + 1 stale MED        -->
+<!--   RESOLVED via verified ledger corrections; 10 items routed        -->
+<!--   turnkey to bryan across 3 batches. HIGH 44→37 · MED 150→149.    -->
+<!--   8 PRs merged (3 code, 4 continuity, 1 scrml-support routing).    -->
+<!-- Body below the S361 block is S360 + S359 + older (history).       -->
+<!-- TWO LANES LIVE: bryan's S352/S353 board still UNSTARTED — §A.    -->
 <!-- ============================================================= -->
+
+# scrml — Session 361 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+**Two live lanes — pick by who boots.** bryan's lane-A board is UNTOUCHED by S361 and GREW substantially.
+
+### A. bryan's lane — UNSTARTED, and it GREW a lot this session
+Everything from S352→S360 carried intact (raw-egress (c)→(d) · i18n-B · dpa-035 · dpa-029 Q1 · held
+fix rounds · handle-onion #593 · promote-engine + todomvc branches awaiting stamp · the S358+S359+S360
+queue). **⭐ NEW from S361 — appended to the SAME queue** (`scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`,
+S361 addenda batches 1/2/3), all repro-first VERIFIED on HEAD, turnkey:
+- **⚠️ 2 SECURITY-CRITICAL (inbox-flagged too, `…incoming/2026-08-21-…s361-two-security-highs-routed.md`):**
+  **A** stdlib-prune SHADOW vector (the RI-consult substrate — PR #622 only closed the string-literal half;
+  the client-local-shadow still ships `Bun.password` to the browser; entangled with the derived-transitive arc);
+  **B** handle-mw undefined-ref — mechanical fix BUT **fixing the crash UNMASKS a live `passwordHash` leak**,
+  so sequence it behind the E-PROTECT-004 cross-call arc.
+- **C** unexpanded cross-file `<phase/>` engine-mount → literal tag in HTML (durable fix = a newly-rejecting guard).
+- **D** param-default server-only reach (3-entry CONVERGE, §12 confidentiality, `collectServerOnlyBindingModules`
+  scans body not param defaults — placement change owes co-sign; template-literal member is your comment-token arc).
+- **E** 5c caller-context promotes a pure helper → derived cell caches `[object Promise]` (placement-semantics fork,
+  the gap's own S343/S345 arc).
+- **H** schema composite/table-level constraints silently dropped (CONVERGE 2 gaps; undeclared §39.5 form =
+  the E-SCHEMA-011 reject-or-implement ruling).
+- **I** on-mount-in-markup ships raw source text into HTML (newly-rejecting §6.7 placement diagnostic; locus traced).
+
+### B. peter's lane — the MED vein has REAL buildables (unlike the worked-out HIGH vein)
+**The durable S361 finding:** the HIGH vein is now essentially worked out for peter — every remaining live
+HIGH is bryan-lane (security-envelope / auto-await arc / placement-semantics / pending-ruling). **But the MED
+vein still has clean peter-lane material.** 3 verified peter-lane BUILDABLES are annotated turnkey in
+`docs/known-gaps.md` (verified live on HEAD, loci corrected) — pick one next boot:
+- **`g-request-ref-in-lift-event-handler-attr-misroute`** (the 3-seam CLUSTER ANCHOR; highest value — gap1 is a
+  *silent whole-bundle ReferenceError*). Fix = the established S340 surgical `reparseRequestRefEscapeHatch(gate=true)`
+  pattern at each of the 3 string-fallback seams (emit-lift event-handler · rewriteExprWithDerived · emit-bindings.ts:423
+  rewriteTemplateAttrValue). Byte-divergence-sensitive area — a clean slot. Peter-lane (no semantics ruling).
+- **`g-ishtmlelement-registry-incomplete`** (cleanest) — reactive `attr=(@expr)` silently dropped on elements
+  missing from `ELEMENT_DEFS` (details/summary/output/meter/thead/tbody/pre/code/em/strong/…). Fix = complete
+  `ELEMENT_DEFS` (`isVoid:false`+domInterface) so name-resolver classifies them html-builtin. Watch blast radius
+  on NR classification. VOID_ELEMENTS is already complete — do NOT touch it.
+- **`g-markup-value-attr-interp-string-brace`** — span scanner (`ast-builder.js:3955-4045`) not `${}`-aware →
+  a quote inside an attr-position interp silently DROPS the whole conditional-markup. Fix = make the attr-string
+  delimiter trackers skip `${…}` bodies. Parser-scanner area (fragile).
+- **each-interp IMPORTED-fn residual** (a peter follow-on to #627): cross-file imported markup fns still stringify
+  in a nested each interp — needs exportRegistry threading into `collectMarkupReturningFnNames`. Fail-safe.
+- **Method that paid off this session — the STALENESS SPOT-CHECK:** re-compiling likely-stale ledger entries on
+  HEAD caught **5 HIGHs + 1 MED fixed long ago but never marked resolved** (shortlist unreliable — see MISSES).
+  Worth periodic re-runs. Heading/marker drift sweep still HELD on bryan's open #581.
+
+## WHAT LANDED (S361-peter) — 8 PRs
+- **#622** ⭐ **stdlib-prune string-literal vector** (`g-prune-server-only-stdlib-chunks-…`, PARTIAL) — a server-only
+  stdlib name in a DISPLAY STRING kept the `stdlib-auth` chunk → argon2id shipped to the browser (§12 leak, silent).
+  Fixed via shared `maskStringLiteralSpans` at both prune sites. The SHADOW vector (real code) stays open, routed.
+- **#624** ⭐ **reindent converge (×2 HIGH)** — 3 drifting re-indenters (emit-server desync-on-regex + 2 blind
+  split+prefix in emit-tool/emit-library-shared, all corrupting multi-line template cooked values) converged onto
+  ONE regex-aware `indentBodyLines` (codegen/utils.ts). Corrected 2 S331 over-claims (emitTryStmt is DEAD code).
+- **#627** ⭐ **each nested-markup transitive** (`g-each-nested-markup-interp-stringifies`) — a transitively-markup
+  fn `${wrap(it.name)}` stringified a DOM node; `collectMarkupReturningFnNames` now runs a fail-safe fixpoint.
+- **#623/#625/#626/#628** — continuity (ledger corrections + review markers + delta-log).
+- **RESOLVED via verified staleness/ledger corrections (never re-opened lightly — each re-compiled on HEAD):**
+  HIGH ×5 — for-loop-lift (S337), machine (S307 removal), arg-position-await (#323), offline-flush (false-positive),
+  protect-tojson (branch-only-never-merged); MED ×1 — onmount-failable (fails-closed duplicate facet).
+
+## ⚑ MISSES / lessons (S361)
+- **★ A satellite FALSE-"resolved" — caught by my own re-compile.** A staleness satellite claimed
+  `g-inferred-async-call-value-position-no-autoawait` was fixed by #287; my direct compile showed the
+  intermediate-binding form `let r = fetchStatus(); r.status` STILL emits unawaited. **Verify EVERY "resolved"
+  claim on HEAD before marking — a false-resolved on a live bug is the dangerous direction.** [[feedback-verify-on-committed-state-not-staged-overlay]]
+- **★ The shortlist is unreliable at scale.** Across 3 deep-dive batches this session, materially-wrong loci /
+  stale severities / false lane-calls were the norm, not the exception (param-default loci named nonexistent files;
+  reindent "8 of 25 / try-stmt reachable" both false; machine/for-loop-lift long-fixed). First-hand repro on HEAD
+  is load-bearing, not ceremony. [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ The lane-triage that held:** confidentiality/placement-change fixes route to bryan even when mechanical
+  (stdlib-shadow, param-default, 5c) — "ambiguous confidentiality/placement fails closed → route it"; only the
+  SUBTRACTIVE leak-closure (stdlib string-literal) + non-security codegen (reindent, each-interp) landed. [[feedback-stay-in-adopter-lane-not-grammar-decisions]]
+
+## 🧷 STATE (S361 close)
+- **main** in sync after this wrap (coherence target 0/0). Cloud `gate` GREEN on all merges (`tracking` red = the
+  known dev-watcher fs.watch baseline, non-required). Full suite: **22435 pass / 6 pre-existing baseline fail**
+  (self-host-smoke ×3 / self-compilation / B5-session / one unnamed — none codegen).
+- **Gaps: HIGH 37 · MED 149 · LOW 67 · Nominal 7** (`@generated:gap-counts`). HIGH 44→37, MED 150→149 this session.
+- **Review floor:** #616–#628 recorded EXCEPT **#628 (this session's final continuity) — the inherent 1-PR
+  carve-out tail, record next boot.** Watch: this session added several code-bearing `clean` markers (#617/#619
+  from S360 + #622/#624/#627), keeping the code-bearing carve-out rate healthy.
+- **Routed-to-bryan, awaiting his boot:** 10 items across queue batches 1/2/3 (see §A) + the 2 security-critical
+  inbox flags + everything carried from S352→S360 (promote-engine `01a8f33f`, reset-init `3540a2d7`, both on origin).
+- **Branches:** main + app-pinned only (pruned the 2 routed local copies — both safe on origin). **Worktrees:**
+  main + scrml-pinned only (clean). **Maps:** surgical codegen edits only (emit-client/emit-server/utils/emit-tool/
+  emit-library-shared/emit-each) — no new modules/entrypoints, maps unchanged.
+- **Env:** bun 1.4.0. `gh pr merge --squash` worked all session (auto-mode + allow-rule).
+
+<!-- ================= S360 history below ================= -->
 
 # scrml — Session 360 (peter · P-Tech1 Windows) — WRAP
 
