@@ -3646,12 +3646,24 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         return val ? `${resultVar} = ${val}` : `${resultVar} = null`;
       };
 
-      const emitArmAssign = (armBody: string): string[] => {
+      const emitArmAssign = (armBody: string, isExpressionBody = false): string[] => {
         const trimmed = armBody.trim();
         // M-7C-D-12 Track 3: empty-body arm produces `resultVar = null;` (was `= undefined;`)
         // per §42.5/§42.8 canonical scrml absence.
         if (!trimmed) return [`    ${resultVar} = null;`];
         if (trimmed.includes("\n")) {
+          // A body spanning physical lines is EITHER a single multi-line
+          // EXPRESSION (a multi-line template literal — `isExpressionBody`, from
+          // the non-block emitExprField path) OR a genuinely multi-STATEMENT block
+          // (a `{ … }` body / a nested `!{}` lowering, which come multi-line).
+          // g-failable-arm-body-multiline-template-invalid-logic: a multi-line
+          // expression must be ASSIGNED to resultVar as one unit (its value is the
+          // guarded-expr result) — splitting at the interior newline both discards
+          // the value and, before the isTemplate re-emit fix, produced invalid JS.
+          if (isExpressionBody) {
+            const bareExpr = trimmed.replace(/;\s*$/, "");
+            return [`    ${resultVar} = ${bareExpr};`];
+          }
           // Multi-statement handler: emit body as-is (authors should assign to
           // resultVar themselves for non-trivial bodies). A terminal top-level
           // `return` is rewritten to a resultVar assignment (see helper).
@@ -3711,12 +3723,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         let isFirst = true;
         for (const arm of arms) {
           const armCode = emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
+          // A non-block, non-re-fail arm body is a single EXPRESSION (emitArmBody
+          // routes it through emitExprField); a multi-line one (a template literal)
+          // must be assigned to resultVar as a unit, not split as statements.
+          const armIsExpr = !arm.failExpr && !(arm.handler ?? "").trim().startsWith("{");
           if (arm.pattern === "_") {
             lines.push(`  ${isFirst ? "" : "else "}{`);
             if (arm.binding && arm.binding !== "_") {
               for (const l of emitGuardedArmBinding(arm.binding, "", resultVar)) lines.push(l);
             }
-            for (const l of emitArmAssign(armCode)) lines.push(l);
+            for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
             lines.push(`  }`);
           } else {
             const variantName = (arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
@@ -3725,7 +3741,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             if (arm.binding && arm.binding !== "_") {
               for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
             }
-            for (const l of emitArmAssign(armCode)) lines.push(l);
+            for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
             lines.push(`  }`);
           }
           isFirst = false;

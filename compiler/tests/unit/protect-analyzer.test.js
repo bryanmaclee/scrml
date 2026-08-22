@@ -212,6 +212,10 @@ describe("E-PA-006 — src= absent", () => {
     const { protectAnalysis, errors } = runPA({ files: [ast] });
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe("E-PA-006");
+    // Canonical element form, never the deprecated space form (family sweep of
+    // g-e-pa-messages-deprecated-space-form; mirrors the E-PA-002 pin a9044329).
+    expect(errors[0].message).toContain("<db>");
+    expect(errors[0].message).not.toContain("< db>");
     expect(protectAnalysis.views.size).toBe(0);
   });
 
@@ -289,6 +293,11 @@ describe("E-PA-005 — tables= absent or empty", () => {
     const ast = makeDbFileAST(srcFile, { src: "db.sqlite" });
     const { protectAnalysis, errors } = runPA({ files: [ast] });
     expect(errors.some(e => e.code === "E-PA-005")).toBe(true);
+    // Message teaches the CANONICAL element form, never the deprecated space
+    // form (g-e-pa-messages-deprecated-space-form; mirrors the E-PA-002 pin a9044329).
+    const msg = errors.find(e => e.code === "E-PA-005").message;
+    expect(msg).toContain("<db>");
+    expect(msg).not.toContain("< db>");
     expect(protectAnalysis.views.size).toBe(0);
   });
 
@@ -297,6 +306,9 @@ describe("E-PA-005 — tables= absent or empty", () => {
     const ast = makeDbFileAST(srcFile, { src: "db.sqlite", tables: "  ,  ,  " });
     const { errors } = runPA({ files: [ast] });
     expect(errors.some(e => e.code === "E-PA-005")).toBe(true);
+    const msg = errors.find(e => e.code === "E-PA-005").message;
+    expect(msg).toContain("<db>");
+    expect(msg).not.toContain("< db>");
   });
 
   test("src= is checked before tables= — both absent produces only E-PA-006", () => {

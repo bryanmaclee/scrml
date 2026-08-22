@@ -9,7 +9,7 @@ import { validateEmittedArtifact } from "./validate-emit.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, rawReferencesRegisteredRequest } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
-import { isRcdataElement, isHtmlElement } from "../html-elements.js";
+import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 // §4.12.3 execution-context classification — shared with the codegen extraction
 // pre-pass and `symbol-table.ts` so all three agree on which nested `<program>`
@@ -158,7 +158,19 @@ function valueAttrElementIsLowerable(node: any, tag: string): boolean {
   if (node?.resolvedKind === "html-builtin") return true;
   // Post-NR synthesized markup (re-parsed <match> arm bodies): NR never saw it,
   // so ask the element registry directly. Fails closed on an unknown tag.
-  if (node?.resolvedKind == null) return isHtmlElement(tag);
+  // g-ishtmlelement-registry-incomplete (S362) — also honor the complete standard-
+  // render set here, else a registry-absent render element (details/output/pre/…)
+  // inside a <match> arm body is dropped exactly as the top-level "unknown" case was.
+  if (node?.resolvedKind == null) return isHtmlElement(tag) || isStandardHtmlRenderElement(tag);
+  // g-ishtmlelement-registry-incomplete (S362) — NR stamped "unknown" only because
+  // the CURATED element registry omits this tag; but it IS a standard HTML element
+  // that renders to the DOM (details/summary/output/meter/pre/code/em/strong/thead/
+  // tbody/…). A reactive `attr=(@expr)` on it must lower exactly as on a registry-
+  // listed element, not be silently dropped. Gated to the COMPLETE standard-render
+  // set (isStandardHtmlRenderElement), so a component / directive / typo — which is
+  // not a standard HTML render name — stays refused. The other "unknown" drop
+  // clauses at the call site (declared-prop / user-component / directive) still apply.
+  if (node?.resolvedKind === "unknown") return isStandardHtmlRenderElement(tag);
   return false;
 }
 

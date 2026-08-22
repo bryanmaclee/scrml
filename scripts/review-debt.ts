@@ -86,8 +86,17 @@ function parseLedger(text: string): Map<number, Reviewed> {
  * though it holds `docs/changes/**` briefs, because a brief has no runtime
  * surface; `scripts/` is INCLUDED because a probe defect is exactly the class
  * this floor exists to catch (S328 found three in one session).
+ *
+ * S358 (g-review-debt-codebearing-whitelist-misses-code-dirs): consciously added
+ * the remaining source trees the repo layout carries — `lsp/`, `editors/`
+ * (vscode extension + neovim), `e2e/`, `dashboard/` (a `.scrml` app) — and
+ * BROADENED `conformance/cases/` → `conformance/` so the harness (`run.ts`,
+ * `driver.ts`, `normalize.ts`) counts too, not just the case data. Before this a
+ * PR landing solely in one of those trees recorded `carve-out` was silently
+ * excluded from the code-bearing health signal and never printed by name — the
+ * exact evasion the S331 refinement exists to detect.
  */
-const CODE_BEARING_RE = /^(compiler|stdlib|scripts)\/|^conformance\/cases\//;
+const CODE_BEARING_RE = /^(compiler|stdlib|scripts|lsp|editors|e2e|dashboard)\/|^conformance\//;
 
 type PR = { number: number; title: string; mergedAt: string; files?: Array<{ path: string }> };
 

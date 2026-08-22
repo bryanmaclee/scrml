@@ -986,8 +986,15 @@ export function launchingProcessGone(launchPpid) {
   try {
     process.kill(launchPpid, 0);
     return false;
-  } catch {
-    return true;
+  } catch (e) {
+    // g-dev-orphan-guard-collapses-on-windows-pid-reuse (S356): only ESRCH ("no
+    // such process") means the parent is genuinely gone. EPERM means the process
+    // EXISTS but is not signalable from here (different user / integrity level) —
+    // treating that as "gone" would FALSE-POSITIVE kill a live-parent dev server.
+    // (The PID-reuse under-detection — process.kill succeeding on a recycled pid —
+    // is a separate, harder residual tracked on that gap: Windows has no
+    // reparent-to-init signal, so there is no cheap backstop here.)
+    return e != null && e.code === "ESRCH";
   }
 }
 

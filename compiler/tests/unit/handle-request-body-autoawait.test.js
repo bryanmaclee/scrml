@@ -40,6 +40,7 @@ function handle(request, resolve) {
   const fd = request.formData()
   const name = request.formData().get("name")
   const other = request.text()
+  const raw = request.bytes()
   return resolve(request)
 }
 `;
@@ -63,6 +64,9 @@ describe("§39.3 handle() — Request body reads are auto-awaited (g-handle-requ
     expect(serverJs).toMatch(/const body = await request\.json\(\);/);
     expect(serverJs).toMatch(/const fd = await request\.formData\(\);/);
     expect(serverJs).toMatch(/const other = await request\.text\(\);/);
+    // g-handle-request-bytes-omitted-from-autoawait-set (S356): bytes() is a Promise-returning
+    // Request body read and must be awaited like its five siblings.
+    expect(serverJs).toMatch(/const raw = await request\.bytes\(\);/);
   });
 
   test("a chained Request read is paren-wrapped: `(await request.formData()).get(...)`", () => {

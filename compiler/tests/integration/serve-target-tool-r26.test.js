@@ -100,36 +100,40 @@ describe("R26 — fsp-wire serve= tool compiles + node --check + inspect", () =>
   });
 });
 
-// Drive the booted server through its OWN handler (`Server.fetch(new Request())`),
+// Drive the booted server through its OWN handler (`Server.fetch(url, init)`),
 // NOT a real localhost socket round-trip. The integration suite registers happy-dom,
 // which overrides global `fetch` with a socket-fetch that ECONNREFUSED-races the
 // in-process listener under the full combined run (a boot-vs-connect flake — S273
 // ruling: a runtime test executes the shipped helper + asserts the wiring; it must
 // NOT drive an over-HTTP round-trip). `Server.fetch` routes through the same mounted
 // handlers and returns the same Response, deterministically, with no socket.
+// ⚑ Call it with a (url, init) pair, NOT `new Request(...)`: happy-dom ALSO overrides
+// the global `Request`, and bun 1.4.0's native `Server.fetch` rejects a foreign
+// (happy-dom) Request object with `ERR_INVALID_ARG_TYPE: fetch() expects a string`
+// (bun 1.3.x tolerated it). The (url, init) form sidesteps the polluted global entirely.
 describe("R26 — the booted server serves the endpoint + SSE (via Server.fetch, no socket)", () => {
   test("POST /fsp {tag:FleetStatus} → 200 + the JSON-RPC result envelope", async () => {
-    const res = await SRV.fetch(new Request(`http://localhost/fsp`, {
+    const res = await SRV.fetch(`http://localhost/fsp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "FleetStatus" }),
-    }));
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ jsonrpc: "2.0", result: { active: 3, note: "fleet" } });
   });
 
   test("POST /fsp {tag:Dispatch,...} → 200 + the positional payload back on the wire", async () => {
-    const res = await SRV.fetch(new Request(`http://localhost/fsp`, {
+    const res = await SRV.fetch(`http://localhost/fsp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "Dispatch", prompt: "scale", project: "atlas" }),
-    }));
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ jsonrpc: "2.0", result: { prompt: "scale", project: "atlas" } });
   });
 
   test("GET /fsp/deltas → the SSE stream frames (event: delta / data:)", async () => {
-    const res = await SRV.fetch(new Request(`http://localhost/fsp/deltas`));
+    const res = await SRV.fetch(`http://localhost/fsp/deltas`);
     expect(res.headers.get("Content-Type")).toContain("text/event-stream");
     const body = await res.text();
     expect(body).toContain("event: delta");
@@ -138,12 +142,12 @@ describe("R26 — the booted server serves the endpoint + SSE (via Server.fetch,
   });
 
   test("an unmatched path → 404 (the serve-harness fallback)", async () => {
-    const res = await SRV.fetch(new Request(`http://localhost/nope`));
+    const res = await SRV.fetch(`http://localhost/nope`);
     expect(res.status).toBe(404);
   });
 
   test("OPTIONS preflight on any path → 204 + CORS headers (the /* route)", async () => {
-    const res = await SRV.fetch(new Request(`http://localhost/fsp`, { method: "OPTIONS" }));
+    const res = await SRV.fetch(`http://localhost/fsp`, { method: "OPTIONS" });
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
   });
@@ -175,11 +179,11 @@ describe("R26 — FIX 2: a top-level const referenced by an endpoint arm flows l
   afterAll(() => { if (srv2) srv2.stop(true); });
 
   test("POST /ping → 200 + the top-level const value (no ReferenceError)", async () => {
-    const res = await srv2.fetch(new Request(`http://localhost/ping`, {
+    const res = await srv2.fetch(`http://localhost/ping`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "Ping" }),
-    }));
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ msg: "hello-from-const" });
   });
@@ -215,11 +219,11 @@ describe("R26 — FIX (S256): a peer-callable-closed `export let` flows live", (
   afterAll(() => { if (srv3) srv3.stop(true); });
 
   test("POST /n → 200 (the peer read the closed-over `export let` without a ReferenceError)", async () => {
-    const res = await srv3.fetch(new Request(`http://localhost/n`, {
+    const res = await srv3.fetch(`http://localhost/n`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "Ping" }),
-    }));
+    });
     // Pre-fix `export let BASE` was dropped → the peer `bump`'s `return BASE + 1`
     // was a `ReferenceError` at request time → a 500. Post-fix the binding is
     // emitted, so the peer runs and the arm resolves → 200 with the `n` field.

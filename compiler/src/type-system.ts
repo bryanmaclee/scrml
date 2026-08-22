@@ -7121,7 +7121,7 @@ function generateDbTypes(
       const otherTable = seenNamesThisBlock.get(generatedName!);
       errors.push(new TSError(
         "E-TYPE-050",
-        `E-TYPE-050: Tables \`${otherTable}\` and \`${tableName}\` in the same \`< db>\` block ` +
+        `E-TYPE-050: Tables \`${otherTable}\` and \`${tableName}\` in the same \`<db>\` block ` +
         `both produce the generated type name \`${generatedName}\`. Rename one of the tables to resolve the collision.`,
         blockSpan,
       ));
@@ -24029,6 +24029,17 @@ function checkFnBodyProhibitions(
   // Matches `identifier =` not followed by `=` or `>`, not preceded by `!`, `<`, `>`, `=`
   const ASSIGN_RE = /([A-Za-z_$][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)?\s*=[^=>]/;
 
+  // g-server-fn-template-literal-base64-eq-false-e-fn-003 — the heuristic ASSIGN_RE
+  // runs over raw statement TEXT, so a bare `=` inside a STRING or TEMPLATE literal
+  // (e.g. a base64 `=` padding char on a continuation line of a `return \`…=\``) is
+  // misread as an outer-scope assignment → a false E-FN-003 on valid code. Blank the
+  // interior of string / template literals before matching (an outer-scope write is
+  // never inside a string literal), while KEEPING `${…}` interpolation bodies — those
+  // are code, and a real reactive/outer write inside one must still be seen. The
+  // module-level `maskStringLiteralSpans` (below, hoisted) already does exactly this,
+  // correctly recursing into strings NESTED inside an interpolation — reuse it rather
+  // than a bespoke inline scanner (same class as the S133 markup skip above).
+
   function checkOuterScopeMutation(stmt: ASTNodeLike, txt: string): void {
     const stmtSpan = (stmt.span ?? fnSpan) as Span;
     // Check for assignment node kind first
@@ -24062,7 +24073,7 @@ function checkFnBodyProhibitions(
     }
     // Heuristic text check for assignment patterns
     if (txt) {
-      const match = ASSIGN_RE.exec(txt);
+      const match = ASSIGN_RE.exec(maskStringLiteralSpans(txt));
       if (match) {
         const targetName = match[1];
         if (targetName && !localNames.has(targetName)) {
@@ -25132,13 +25143,22 @@ function checkLifecycleFieldAccess(
         const calleePropName = typeof calleeProp === "string" ? calleeProp : calleeProp?.name;
         const isMemberResetCall =
           en?.kind === "call" && en.callee?.kind === "member" && calleePropName === "reset";
-        const bareText = statementText(stmt);
+        // g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder:
+        // mask string/template CONTENTS to equal-length filler before the raw-text
+        // reset scan, so a `reset(@u.field)` SPELLING inside a string literal cannot
+        // register a bogus revert. Parity with the sibling checkLifecycleBindingAccess,
+        // which #582 masked; this tracker was left raw.
+        const bareText = maskStringLiteralSpans(statementText(stmt));
         if (!isMemberResetCall && bareText && /(?<![A-Za-z0-9_$.])reset\s*\(/.test(bareText)) {
           resetSpans = handleResetTextMatches(bareText);
         }
       }
 
-      const text = statementText(stmt);
+      // Same launder class: mask string/template contents before the FIELD_WRITE_RE /
+      // FIELD_REF_RE scan so a `u.field =` write-spelling in a string can't launder a
+      // real pre-transition read (E-TYPE-001 suppressed), nor a read-spelling false-fire.
+      // Equal-length masking preserves offsets, so `resetSpans` stay aligned.
+      const text = maskStringLiteralSpans(statementText(stmt));
 
       if (text) {
         const accesses = extractAccesses(text, resetSpans.length > 0 ? resetSpans : undefined);
@@ -25311,7 +25331,14 @@ function runLifecycleAccessCheck(
         // Source-text candidates for heuristic match: prefer init (parser-canonical
         // for let-decl) → initExpr.raw (escape-hatch wraps the unparseable RHS) →
         // value (fallback for older AST shapes).
-        const initText = readInitText(stmt);
+        // g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder: mask
+        // string/template CONTENTS before the seeding regexes (recordInitialFromAttrText
+        // ATTR_RE / seedInitialFromObjectLiteral). Otherwise a `field =` write-spelling
+        // INSIDE a string literal in the (over-captured) init blob seeds the field
+        // "post" → laundering a real pre-transition read. The anchored `^<`/`^(`/`^{`
+        // heuristics below are unaffected (they test markup/paren/brace, never string
+        // contents). Equal-length masking preserves all offsets.
+        const initText = maskStringLiteralSpans(readInitText(stmt));
         if (varName && stateTypeName && lifecycleRegistry.has(stateTypeName)) {
           structInstances.set(varName, stateTypeName);
           recordInitialFromAttrs(stmt, stateTypeName, varName, initialFieldStates);
@@ -25472,7 +25499,10 @@ function runLifecycleAccessCheck(
               //     Conservative fallback: simply check whether the field appears
               //     in the init text AND its value isn't `not`.
               // (b) escape-hatch raw text — same heuristic.
-              const initText = readInitText(n);
+              // Mask string/template contents before seedInitialFromObjectLiteral —
+              // same launder class as the let-decl seeding above
+              // (g-lifecycle-field-access-tracker-scans-unmasked-text-string-launder).
+              const initText = maskStringLiteralSpans(readInitText(n));
               const perField = seedInitialFromObjectLiteral(annot, initText);
               if (perField.size > 0) initialFieldStates.set(cellName, perField);
             }

@@ -760,6 +760,10 @@ describe("§17 E-TYPE-050 — two tables same generated name", () => {
     // Verify both table names appear in the message (TS-AB-007 / TS-AB-RE-003)
     expect(e050[0].message).toMatch(/users/i);
     expect(e050[0].message).toMatch(/USERS|Users/);
+    // Canonical element form, never the deprecated space form
+    // (family sweep of g-e-pa-messages-deprecated-space-form).
+    expect(e050[0].message).toContain("<db>");
+    expect(e050[0].message).not.toContain("< db>");
   });
 });
 

@@ -659,12 +659,13 @@ export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: Prom
 }
 
 /** The Bun/Web `Request` instance methods that return a Promise (§39.3 handle body). */
-const _REQUEST_ASYNC_METHODS = new Set(["formData", "json", "text", "arrayBuffer", "blob"]);
+const _REQUEST_ASYNC_METHODS = new Set(["formData", "json", "text", "arrayBuffer", "blob", "bytes"]);
 
 /**
  * g-handle-request-formdata-emitted-unawaited (§39.3, adopter #471) — inject `await`
- * before a `<request>.formData()` / `.json()` / `.text()` / `.arrayBuffer()` / `.blob()`
- * call in a `handle()` escape-hatch body. These Request methods return Promises; scrml
+ * before a `<request>.formData()` / `.json()` / `.text()` / `.arrayBuffer()` / `.blob()` /
+ * `.bytes()` call in a `handle()` escape-hatch body (`bytes()` added S356 —
+ * g-handle-request-bytes-omitted-from-autoawait-set). These Request methods return Promises; scrml
  * has no `await` keyword (E-AWAIT-NOT-IN-SCRML), and the server-fn auto-await only awaits
  * bare-name SCRML server-fn calls, so a host-method member call was emitted BARE:
  * `const fd = request.formData()` leaves `fd` a Promise and `fd.get("file")` throws.

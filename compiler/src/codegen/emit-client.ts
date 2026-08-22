@@ -9,7 +9,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
-import { escapeRegex } from "./utils.ts";
+import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
@@ -2953,8 +2953,14 @@ export function generateClientJs(ctx: CompileContext): string {
       if (moduleNames.size === 0) return;
 
       // Client body view: every emitted line EXCEPT the lowered read decls, so a
-      // bound name is never counted as used by its own declaration.
-      const body = strLines.filter((_, i) => !readLineIdx.has(i)).join("\n");
+      // bound name is never counted as used by its own declaration. String
+      // literals are masked (maskStringLiteralSpans) so a stdlib name appearing
+      // only inside a display label — `"call hashPassword on the server"` — is
+      // not misread as a genuine client use that keeps a server-only chunk
+      // (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence).
+      const body = maskStringLiteralSpans(
+        strLines.filter((_, i) => !readLineIdx.has(i)).join("\n"),
+      );
 
       for (const [mod, locals] of moduleNames) {
         // Defensive: a direct `_scrml_stdlib.<mod>` registry access keeps the chunk.
@@ -3755,6 +3761,13 @@ export function generateClientJs(ctx: CompileContext): string {
         body = body.slice(0, rtStart) + "\n;\n" + body.slice(rtEnd);
       }
     }
+
+    // Mask string-literal bodies AFTER the runtime-span excision (the RT markers
+    // are line comments the indexOf above must still find). A stdlib name that
+    // appears only inside a display label must not read as a client use and keep
+    // this read-line alive — the read-line twin of the chunk-prune leak
+    // (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence).
+    body = maskStringLiteralSpans(body);
 
     // A region drops only when NONE of its bound names appear in the remaining
     // body (whole-region grain — matches GITI-003 and the brief: strip when

@@ -14996,6 +14996,23 @@ function parseTestBody(tokens, filePath, span, errors) {
  * @param {string} filePath
  * @returns {MatchArm[]}
  */
+/**
+ * Re-emit a STRING token inside a `!{}` failable arm handler, preserving its
+ * ORIGINAL delimiter. A backtick TEMPLATE literal (`isTemplate`) keeps its
+ * backticks so its `${…}` interpolations survive AND a multi-line body stays
+ * valid JS; a plain string is double-quoted with escaping. Shared by all three
+ * arm-handler token-reconstruction sites in parseErrorTokens — re-quoting a
+ * template as a plain double-quoted string both loses the interpolation (`${e}`
+ * → literal text) and, for a multi-line template, spans physical lines into an
+ * unterminated string literal (g-failable-arm-body-multiline-template-invalid-logic).
+ * Mirrors the established isTemplate re-emit sites (e.g. :5616 / :10824).
+ */
+function reemitHandlerStringToken(tok) {
+  return tok.isTemplate
+    ? "`" + tok.text + "`"
+    : '"' + tok.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+}
+
 function parseErrorTokens(tokens, filePath) {
   const arms = [];
   let i = 0;
@@ -15096,9 +15113,10 @@ function parseErrorTokens(tokens, filePath) {
           (tokens[i + 1].text === "=>" || tokens[i + 1].text === ":>") &&
           (tokens[i].text === "_" || /^[A-Z]/.test(tokens[i].text))
         ) break;
-        // Re-quote STRING tokens so their delimiters are preserved in the handler
+        // Re-emit STRING tokens preserving their original delimiter (backtick
+        // templates keep `${…}` interpolation + multi-line validity) — shared helper.
         if (tokens[i].kind === "STRING") {
-          handlerParts.push('"' + tokens[i].text.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"');
+          handlerParts.push(reemitHandlerStringToken(tokens[i]));
         } else {
           handlerParts.push(tokens[i].text);
         }
@@ -15178,7 +15196,7 @@ function parseErrorTokens(tokens, filePath) {
           (tokens[i].text === "_" || /^[A-Z]/.test(tokens[i].text))
         ) break;
         if (tokens[i].kind === "STRING") {
-          handlerParts.push('"' + tokens[i].text.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"');
+          handlerParts.push(reemitHandlerStringToken(tokens[i]));
         } else {
           handlerParts.push(tokens[i].text);
         }
@@ -15233,7 +15251,7 @@ function parseErrorTokens(tokens, filePath) {
         // Stop at pipe-style arm start
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
         if (tokens[i].kind === "STRING") {
-          handlerParts.push('"' + tokens[i].text.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"');
+          handlerParts.push(reemitHandlerStringToken(tokens[i]));
         } else {
           handlerParts.push(tokens[i].text);
         }
