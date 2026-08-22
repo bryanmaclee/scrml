@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 44 |
+| HIGH | 43 |
 | MED | 149 |
 | LOW | 67 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -8174,7 +8174,8 @@ nobody enumerated. **Root fix = one emission route, completing what #470 started
 **⛔ NEEDS A RULING — escalate or refuse, and the derived rationale does NOT transfer.** A derived cell is a synchronous pull (§6.6.3) and therefore *cannot* be escalated — escalating would make every recompute a network round trip. A **one-shot mutable-cell initialiser** has no such constraint and arguably *should* escalate. Refusing all three uniformly is the fail-closed default; escalating the initialiser is the more powerful answer and a one-way door. Bryan's lane (language-surface, §12.2 jurisdiction).
 
 ### g-derived-server-only-reach-misses-for-loop-lift-body — a derived cell nested in a `for`-loop `lift` body evades the #486 check entirely and ships the server-only impl + secret to the browser; the exact target class in a nesting-position variant the fix misses — `NEW S335-peter (review-floor pass on #486, PA-confirmed on committed HEAD); HIGH`
-<!-- @gap id=g-derived-server-only-reach-misses-for-loop-lift-body sev=HIGH status=open locus=compiler/src/route-inference.ts:3650(collectDerivedCellDecls descends node.body/node.children only; a for-loop stores its body under an expr wrapper never descended, so the lift-body derived cell is never visited and Step 3b never runs) prov=ruling:pending-bryan-escalate-vs-refuse(same family as g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate) -->
+<!-- @gap id=g-derived-server-only-reach-misses-for-loop-lift-body sev=HIGH status=resolved locus=compiler/src/route-inference.ts:3730(collectDerivedCellDecls — now a generic structural walk, S337) prov=rationale:CLOSED-at-S337-when-collectDerivedCellDecls-became-a-structural-walk(Object.keys-minus-skipDerivedWalkKey)-that-descends-the-for-loop-expr-wrapper;the-escalate-vs-refuse-ruling-was-already-SETTLED-refuse-for-a-derived-const-per-6.6.19-486-and-S337-implemented-it-BY-CONSTRUCTION-closing-SIX-positions-at-once(for-loop-lift-while-lift-each-row-engine-state-child-loop-in-conditional-kind-tool);the-pending-bryan-note-was-stale -->
+**⚑ RESOLVED — stale HIGH, closed at S337 (S361-peter ledger correction, verified).** The stated pre-S337 root ("descends `node.body`/`node.children` only") was fixed at S337 when `collectDerivedCellDecls` became a **generic structural walk** (`Object.keys` minus `skipDerivedWalkKey`), which DOES descend the for-loop `expr` wrapper — its docstring (`route-inference.ts:3688-3711`) names the for-loop lift body explicitly as one of six positions the fix closed at once. Verified on HEAD: the gap's own repro (a `const <h> = hashPassword(@pw)` derived cell inside a `for`-loop lift) now fires `E-DERIVED-SERVER-ONLY-REACH` identically to the top-level control; gate `route-inference-derived-server-only-reach.test.js` + `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` = 52/0. No bryan ruling was owed — "refuse" for a derived const was already settled (§6.6.19/#486); the `pending-bryan` prov was stale. **Distinct from the still-open sibling** `g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate` (a MUTABLE initialiser / markup-interp position at `route-inference.ts:1086`, `collectFileFunctions` — a different substrate that remains genuinely undiagnosed).
 
 **PA-CONFIRMED by execution on committed HEAD `ddb924b3`** (not the reviewer's word alone). Repro:
 `<div>${ for (let it of @items) { lift <div>${ const <h> = hashPassword(@pw) }<span>${@h}</span></div> } }</div>`
