@@ -2977,6 +2977,44 @@ export function generateServerJs(
       lines.push("  return null;");
       lines.push("}");
       lines.push("");
+      // F1 (S355) — `ratelimit=` is scoped to ROUTE requests, not every request.
+      //
+      // SPEC classifies `ratelimit=` as one of the PER-ROUTE concerns (§4.15 line
+      // 1080 / E-PAGE-INVALID-ATTR: the `<page>` attribute set is "db=, auth=,
+      // csrf=, ratelimit=, keep-alive" — per-route — as opposed to the app-wide
+      // attributes that live only on `<program>`), and §40.2 fixes the order as
+      // "CORS -> rate limit -> CSRF -> route handler". `handle()` gets an explicit
+      // carve-in at §40.3.4 ("applies to all HTTP requests handled by the compiled
+      // server -- including statically-served assets"); the limiter gets no such
+      // sentence, and MUST NOT inherit one just because it now shares the onion.
+      //
+      // Counting every request instead broke the app's own boot: one ordinary page
+      // load is HTML + CSS + runtime + client bundle, so `ratelimit="3/min"` 429'd
+      // the client bundle on the FIRST visit.
+      //
+      // The predicate mirrors THIS module's dispatch exactly — same exact-case
+      // method compare the route loop uses, so "counted" and "routed" can never
+      // disagree. It reads the module's own `routes`, which is what scopes the
+      // limiter per module: a sibling module's page is not this module's route, so
+      // it is not counted against this module's budget.
+      //
+      // WebSocket upgrades are excluded per §40.3.4 ("handle() does NOT apply to
+      // WebSocket upgrade requests") — both hosts dispatch them before the onion.
+      lines.push("// §4.15/§40.2 — `ratelimit=` is a PER-ROUTE concern: only requests a");
+      lines.push("// registered route will serve are counted. Static assets (this page's own");
+      lines.push("// CSS / client bundle / runtime) and 404s are not — otherwise one ordinary");
+      lines.push("// page load would spend the whole budget before the app could boot.");
+      lines.push("// Mirrors the route loop below (exact-case method) so 'counted' and");
+      lines.push("// 'routed' always agree. WebSocket upgrades are excluded per §40.3.4.");
+      lines.push("function _scrml_is_rate_limited_route(req) {");
+      lines.push("  const url = new URL(req.url, 'http://localhost');");
+      lines.push("  for (const route of routes) {");
+      lines.push("    if (route.isWebSocket) continue;");
+      lines.push("    if (route.path === url.pathname && route.method === req.method) return true;");
+      lines.push("  }");
+      lines.push("  return false;");
+      lines.push("}");
+      lines.push("");
     }
 
     if (_scrml_hasSecureHeaders) {
@@ -3043,8 +3081,14 @@ export function generateServerJs(
     }
 
     if (_scrml_hasRatelimit) {
-      lines.push("    const _scrml_rl = _scrml_check_ratelimit(_scrml_mw_req);");
-      lines.push("    if (_scrml_rl) return _scrml_rl;");
+      // F1 (S355) — per-route scope. Position is unchanged (§40.2/§40.3.3: rate
+      // limit still runs BEFORE handle() PRE); only the SET of counted requests is
+      // restored to route traffic. See `_scrml_is_rate_limited_route` above.
+      lines.push("    // §40.3.3 order: rate limit runs before handle() PRE — but only for route traffic.");
+      lines.push("    if (_scrml_is_rate_limited_route(_scrml_mw_req)) {");
+      lines.push("      const _scrml_rl = _scrml_check_ratelimit(_scrml_mw_req);");
+      lines.push("      if (_scrml_rl) return _scrml_rl;");
+      lines.push("    }");
     }
 
     if (_scrml_handleNode) {
