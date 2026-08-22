@@ -459,3 +459,98 @@ Shape [2] is one blank `## Session` header away at any wrap.
 **FILED, not fixed** — the script is not on `main`, and pulling the sibling branch's in-flight work
 into this one to patch it is exactly the wrong trade. Fix is ~4 lines: refuse when
 `seen.size === 0` while the file is non-empty.
+
+---
+
+## FIXED — four vacuous instruments, each with a two-sided bite proof
+
+The brief's rule: fix where the gate is vacuous and the fix is small and obvious; file the rest.
+Four qualified. Every one mirrors `scripts/browser-baseline.ts`'s refusal, which is this repo's
+reference pattern for the shape.
+
+### 1. `snippet-gate.js` — BLOCKING CI GATE
+
+RED (before): `bun scripts/snippet-gate.js docs/does-not-exist` → *"no .scrml files discovered in
+the declared corpus"*, **exit 0**. It gates 110 public snippets including all of `docs/website`,
+which its own header calls "the most-read public surface we ship". Rename that directory and the
+gate leaves silently while CI stays green.
+
+GREEN (after):
+```
+$ bun scripts/snippet-gate.js docs/does-not-exist
+snippet-gate: NO .scrml FILES DISCOVERED — refusing to report success.
+  A gate that compiled nothing has verified nothing (that is the hollow-gate shape).
+  corpus: docs/does-not-exist
+    DOES NOT EXIST  docs/does-not-exist
+exit 1
+$ bun scripts/snippet-gate.js
+snippet-gate: 110 passed, 0 failed (110 total).      exit 0   <- live path unchanged
+```
+Tolerating ONE absent root is preserved (documented, deliberate — "a row may pre-date its
+directory"). Discovering nothing AT ALL is now the refusal.
+
+### 2. `facts.ts` — BLOCKING CI GATE
+
+RED (before): a tree with no source in it → `0 lines across 0 files`, `0 conformance cases`,
+`0 CLI verbs`; `--write` recorded it; `--check` said *"PASS — all derived facts current"*.
+**exit 0 at all three steps.**
+
+GREEN (after): refuses at print, write and check, listing all ten zero counters, **exit 2** — a code
+distinct from 1 because this is not "the facts are stale", it is "the instrument is not measuring
+the repo". Live path unchanged: `PASS — all derived facts current`, exit 0.
+
+### 3. `state.ts` — the PA-state projection
+
+RED (before): a `known-gaps.md` holding its anchors and zero `@gap` tokens → `--write` recorded
+`HIGH 0 / MED 0 / LOW 0 / Nominal 0` at exit 0; `--check` then reported *"PASS — all @generated
+sections current"* at exit 0.
+
+GREEN (after): **exit 2** at both `--write` and `--check`, and the probe confirms the previously-
+recorded values are left untouched (nothing was written). Live path unchanged.
+
+The predicate is deliberately `tokens.length === 0` over a NON-EMPTY ledger, not `high === 0`. A
+repo can legitimately have zero open HIGHs; a parser that sees no population at all over a
+6,000-line ledger cannot be right. `gapCounts()` already threw on an *unclassifiable* status — this
+closes the *no markers at all* hole beside it.
+
+### 4. `benchmark-perf-baseline.ts` + `perf-regression-check.ts` — the compounding pair
+
+This one is a chain, and the chain was proven end-to-end before the fix:
+
+```
+BEFORE
+  benchmark-perf-baseline  no corpora resolvable -> [SKIP] x8 -> wrote perf-baseline.json
+                           with  corpora: {}                                     exit 0
+  perf-regression-check    reading that baseline -> "no regressions detected"    exit 0
+  perf-regression-check    every corpus key renamed -> [SKIP] x8 ->
+                           "no regressions detected"                             exit 0
+
+AFTER
+  benchmark-perf-baseline  "MEASURED ZERO CORPORA — refusing to write a baseline"  exit 2
+                           (and no file is written at all)
+  perf-regression-check    "COMPARED ZERO CORPORA — this run verified NOTHING;
+                            refusing to report a verdict"                          exit 2
+                           corpora: {}      -> "The baseline itself lists NO corpora"
+                           7 listed, 0 met  -> "lists 7 … and NONE could be measured"
+  perf-regression-check    real baseline, real corpora -> still DETECTS regressions, exit 1
+```
+
+The last line is the load-bearing half of the proof: the guard did not blunt the live path. The
+control run flags real per-stage regressions (`trucking-dispatch RS +755%`), so the check still
+bites where it should. **Both exit 2, not 1** — an inconclusive run is a distinct state from a clean
+one, which is the whole point.
+
+**Side observation, NOT this dispatch's scope:** that control run shows large per-stage deltas
+against the recorded baseline. This script is in no workflow and no hook, so nothing has been
+reading it. The numbers are machine- and load-sensitive and this box was running a test suite, so
+they are NOT a regression claim — but a perf baseline nothing runs is worth a look.
+
+### Deliberately NOT fixed
+
+`regen-spec-index.ts`'s ungated row ranges. The naive read is "vacuous — all 65 ranges corrupted and
+it still says OK", and that is what the execution shows. But the header states the exclusion is
+deliberate, with the reason: *"they drift by design between amendments and a gate that cries wolf
+gets bypassed then deleted (`pa-base v2.4` §8)"*. Gating them would be re-litigating a ruling under
+cover of a bug fix. Filed as a residual (F10) with the observation that the class which actually
+rotted — a 3,140-line stale index, which is the script's stated reason for existing — is the class
+that remains ungated.
