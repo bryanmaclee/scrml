@@ -8556,9 +8556,14 @@ writable after construction, so revocation must be decided over the call graph. 
 available to this gate is intra-file and syntactic (bare-identifier callees only), and revocation
 requires proving a NEGATIVE over it — *this value is never named anywhere*. That is not provable
 over an incomplete graph, and each of the three formulations attempted (arguments-all-literal;
-…and-in-return-position; …and-never-named-in-the-reachable-set) admitted a shipped, executed leak
-one level deeper than the last. The fail-closed SHALL above is the property that makes this gate
-worth having, and it is not traded for precision.
+…and-in-return-position; …and-never-named-in-the-reachable-set) admitted a leak one level deeper
+than the last. Two of those leaks EXECUTE and place a protected column on the response headers
+under an innocuous body; the remainder are latent, silenced at runtime only by an unrelated
+implementation accident and not by anything this specification guarantees — which is why the
+SHALL is stated over the compile-time gate and not over observed behaviour.
+
+The fail-closed SHALL above is the property that makes this gate worth having, and it is not traded
+for precision.
 
 **Reopening condition.** If an adopter meets the accepted false positive on a real application and
 neither resolution above is acceptable, the question to reopen is how to make a raw sink

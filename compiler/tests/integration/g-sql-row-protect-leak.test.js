@@ -1190,8 +1190,8 @@ describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key 
 //
 // WHY, stated so a fourth formulation cannot be written by accident: the
 // exemption was a whitelist REVOKED BY PROVING A NEGATIVE — *this value is never
-// named* — over a call graph that is provably incomplete. Five executed leaks
-// across three formulations, each found one level deeper:
+// named* — over a call graph that is provably incomplete. Five leaks across
+// three formulations, each found one level deeper:
 //
 //   1. v1 (S354) "the arguments are syntactically all literals" — true of the
 //      CONSTRUCTION, false of the BINDING. A `Response` is a live mutable
@@ -1203,17 +1203,39 @@ describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key 
 //      exit 0, zero diagnostics.
 //   2. v2 (S355) "return position only" — wrong by one syntactic level: a
 //      NESTED helper's `return`, whose value the enclosing body then names.
+//      Executed: `[["x-etag","$argon2id$SECRET"]]`, status 204, body `""`.
 //   3. v2 again, across a file-level call edge (`let r = deny()`).
 //   4. v3 (S356) "unnamed in return position" — laundered two frames out
 //      through a pass-through (`function passthru() { return deny() }`).
-//   5. v3 again, through an edge the classifier cannot classify AT ALL:
+//   5. v3 again, through a callee spelling the graph cannot resolve AT ALL:
 //      `let make = deny; make()`, `http.deny()`, `handlers["deny"]()`,
-//      `apply(deny)`. See the `RESIDUAL (documented): the EGRESS behind an
-//      invisible edge` tests in the M2 describe above — all four are silent on
-//      `origin/main` and on the round-6 head too, for the call-GRAPH bound
-//      rather than for the exemption, so deleting the exemption does not close
-//      them and was never going to. Handed back as residual, pinned so it
-//      cannot close silently.
+//      `apply(deny)`.
+//
+// ⚑ (5) IS TWO DIFFERENT CLASSES AND ROUND 7 CONFLATED THEM. The full split is
+// in the M2 describe above; the short version is that it turns on whether the
+// caller ALSO calls the helper by BARE NAME somewhere (`if (!u) { return deny() }`):
+//   * WITH that edge, the exemption was the SOLE cause of the silence and
+//     deleting it CLOSED the leak. Round 8 measured both halves and pinned all
+//     four spellings as `REGRESSION GUARD (closed leak)` tests.
+//   * WITHOUT it, `reach()` has no edge to the helper at all, the silence is the
+//     call-GRAPH bound and is the same on `origin/main`, on the round-6 head and
+//     here. That half is handed back as residual, pinned so it cannot close
+//     silently.
+// Round 7's fixtures omitted the bare-name call, so it measured only the second
+// class and wrote "deleting the exemption was never going to close them" over
+// BOTH. That sentence is false of the first class.
+//
+// ⚑ EXECUTION STATUS, re-measured at round 8 with an `async`-preserving harness,
+// because "five EXECUTED leaks" is not true of all five. (1) and (2) ship the
+// secret today — verified above. (3), (4) and (5) all name a FILE-LEVEL
+// `<db>`-block helper, which lowers to an `async` in-process peer; asynchrony is
+// NOT propagated across a call to a peer, so `let r = deny()` binds a Promise and
+// the handler throws on `r.headers.set` before anything reaches the wire. Those
+// three are LATENT leaks masked by an unrelated codegen gap, not executed ones.
+// The earlier "executed" reading came from a harness that sliced the peer out of
+// the emission starting at `function`, silently dropping its `async`. The masking
+// is an accident that disappears the day the propagation gap is fixed, which is
+// why the compile-time gate is the thing that has to hold.
 //
 // It never converged because it cannot. A build error with a workaround beats a
 // fail-open, so the trade is taken in the other direction now: the gate
@@ -1308,15 +1330,31 @@ describe("§14.8.9 raw-egress — E-PROTECT-004 is CO-OCCURRENCE; there is no al
     expect(d.message).toContain("compiler-emitted response");
   });
 
-  // --- (b) THE LEAK PINS — every formulation's executed leak, still firing --
+  // --- (b) THE LEAK PINS — every formulation's leak, still firing -----------
   //
-  // These are the reproducers that killed v1, v2 and v3. Each was compiled AND
-  // EXECUTED against a stubbed `_scrml_sql`, and each answered with the secret
-  // on the response HEADERS and an innocuous BODY — a body-only probe reads
-  // every one of them as clean. They fire now for the plain reason (a
-  // `Response` co-occurs with a protected read) rather than for a revocation
-  // that had to be computed, which is why they cannot be re-opened by a
-  // narrowing: there is nothing left to narrow.
+  // These are the reproducers that killed v1, v2 and v3. They fire now for the
+  // plain reason (a `Response` co-occurs with a protected read) rather than for
+  // a revocation that had to be computed, which is why they cannot be re-opened
+  // by a narrowing: there is nothing left to narrow.
+  //
+  // ⚑ EXECUTION STATUS, re-measured at round 8 — the pins split in two, and the
+  // difference is whether the `Response` comes from the SAME frame or from a
+  // FILE-LEVEL helper:
+  //   * SAME FRAME (`let r = new Response(...)`, and the NESTED-`function-decl`
+  //     twin) — EXECUTED, and each answers with the secret on the response
+  //     HEADERS over an innocuous BODY (`[["x-user","$argon2id$SECRET"]]` /
+  //     status 200 body `"ok"`; `[["x-etag","$argon2id$SECRET"]]` / status 204
+  //     body `""`). A body-only probe reads both as clean.
+  //   * FILE-LEVEL HELPER (the v2 file-level twin, the `let r = deny()` call
+  //     edge, the v3 pass-through, and `taint(deny(), u)`) — these do NOT ship
+  //     the header today. The helper lowers to an `async` in-process peer,
+  //     asynchrony is not propagated across the call, so the binding holds a
+  //     Promise and the handler throws on `r.headers.set`. LATENT, masked by an
+  //     unrelated codegen gap; un-masked the day that gap is fixed.
+  // The earlier blanket "each was EXECUTED and answered with the secret" was a
+  // harness artifact — slicing a peer out of the emission from `function` drops
+  // its `async`. Corrected here rather than deleted, because the distinction is
+  // the reason the compile-time gate has to hold on its own.
 
   const leakPins = {
     "v1 — `let r = new Response(...)` then `r.headers.set(secret)`":

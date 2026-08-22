@@ -681,6 +681,16 @@ export interface RawEgressFacts {
  *      reachable only through one of those is still invisible. Same syntactic
  *      bound as (1), same fix (the name resolver).
  *
+ *      ⚑ The MIRROR of this — the raw EGRESS behind such a spelling — is TWO
+ *      classes, not one, and round 7 conflated them. If the caller ALSO calls
+ *      the helper by BARE NAME anywhere (`if (!u) { return deny() }`), the helper
+ *      IS in `reach()`, this bound does not apply, and the gate fires; that shape
+ *      was silenced by the all-literal exemption alone, and deleting the
+ *      exemption closed it. Only where NO bare-name call exists does this bound
+ *      do the silencing. Both classes are pinned side by side in
+ *      `g-sql-row-protect-leak.test.js` — `REGRESSION GUARD (closed leak)` for
+ *      the first, `RESIDUAL (documented, NO-EDGE class B)` for the second.
+ *
  *   3. **Only `Response.json` is a static-factory egress.** `Response.redirect`
  *      / `Response.error` carry no caller-supplied body, so no protected column
  *      can ride them.
@@ -690,9 +700,20 @@ export interface RawEgressFacts {
  *      file carried the opposite rule through three formulations — "the
  *      arguments are syntactically all literals" (S354), "…and it is in return
  *      position" (S355), "…and its value is never NAMED anywhere in the
- *      call-reachable set" (S356) — and every one of them SHIPPED AN EXECUTED
- *      LEAK, because a `Response` is a mutable handle: what it was built from
- *      bounds nothing about what it carries when it reaches the wire.
+ *      call-reachable set" (S356) — and every one of them SHIPPED A LEAK,
+ *      because a `Response` is a mutable handle: what it was built from bounds
+ *      nothing about what it carries when it reaches the wire.
+ *
+ *      ⚑ Two of the five EXECUTE today and answer with the secret on the
+ *      response HEADERS over an innocuous body (the same-frame binding, and its
+ *      nested-`function-decl` twin). The other three name a FILE-LEVEL helper,
+ *      which lowers to an `async` in-process peer; asynchrony is not propagated
+ *      across a call to a peer, so `let r = deny()` binds a Promise and the
+ *      handler throws on `r.headers.set` before anything reaches the wire. Those
+ *      three are LATENT — masked by an unrelated codegen gap, not prevented by
+ *      anything, and un-masked the day that gap is fixed. Re-measured at round 8;
+ *      the earlier blanket "executed" reading came from a probe harness that
+ *      sliced peers out of the emission from `function`, dropping their `async`.
  *
  *      The mechanism is DELETED, not disabled (S354 re-ruling, delta-log
  *      [1676]). Nothing here reads an argument list, no flag records an
@@ -1006,11 +1027,22 @@ export interface ProtectedRawEgressDetection {
  *
  * Three rounds tried to carve it out. Each carve-out was a whitelist revoked by
  * proving a NEGATIVE — *this value is never named* — over a call graph that is
- * provably incomplete, and each shipped an executed leak: the value bound
- * directly; bound via a nested helper's return; bound across a call edge; bound
- * two frames out through a pass-through; and finally bound through an edge the
- * classifier cannot classify at all. It never converged because it cannot: you
- * cannot prove a negative over an incomplete graph.
+ * provably incomplete, and each shipped a leak: the value bound directly; bound
+ * via a nested helper's return; bound across a call edge; bound two frames out
+ * through a pass-through; and finally bound through a CALLEE SPELLING the graph
+ * cannot resolve (`let make = deny; make()`, `http.deny()`,
+ * `handlers["deny"]()`). It never converged because it cannot: you cannot prove
+ * a negative over an incomplete graph.
+ *
+ * ⚑ That fifth one is TWO classes and round 7 reported them as one. Where the
+ * caller ALSO calls the helper by BARE NAME, the helper is in `reach()`, the
+ * exemption was the SOLE cause of the silence, and deleting it CLOSED the leak —
+ * measured at round 8 on an otherwise-identical tree carrying only the round-6
+ * `protect-egress.ts`. Where it does not, `reach()` has no edge at all and the
+ * silence is the intra-file bare-identifier bound, which the deletion never
+ * touched. A change that re-silences the FIRST class has re-introduced the
+ * exemption; the `REGRESSION GUARD (closed leak)` pins in
+ * `g-sql-row-protect-leak.test.js` are what say so.
  *
  * So the trade is taken the other way. A build error with a workaround beats a
  * fail-open. The diagnostic names both workarounds — project the protected
