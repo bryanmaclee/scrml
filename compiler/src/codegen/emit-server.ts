@@ -4382,8 +4382,13 @@ export function generateServerJs(
       //
       // This guard is LOAD-BEARING, not belt-and-braces. The note here used to
       // say "no corpus source reaches it today (a plain body naming `Response`
-      // build-blocks on E-SCOPE-001)" — that stopped being true in this same
-      // arc, when `Response` was added to `LOGIC_SCOPE_GLOBAL_ALLOWLIST` because
+      // build-blocks on E-SCOPE-001)" — that stopped being true at S355/#590, a
+      // SEPARATE landing on `main`, when `Response` was added to
+      // `LOGIC_SCOPE_GLOBAL_ALLOWLIST` there. (NOT this arc: this arc carries the
+      // S352 dpa-029 Q1 / dpa-033 (c) ruling and its `type-system.ts` diff is
+      // comment-only — it allowlists nothing. The mis-attribution is corrected
+      // here for the sixth time; it keeps re-entering because the two changes
+      // were adjacent in time and both cite §40.3.5.) The allowlist landed because
       // SPEC §40.3.5's own worked example returns a bare
       // `new Response("Forbidden", { status: 403 })` under the normative
       // sentence "This is intentional and valid". The shape is now ordinary
