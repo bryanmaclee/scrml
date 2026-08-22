@@ -22,9 +22,11 @@ since-last-poke at sparse checkpoints (prompt-cache TTL → don't poke constantl
 the changelog (per-session landings, coarse). This is the live PA-state stream the deputy absorbs; it does NOT
 replace the wrap hand-off (kept for cold-start safety + audit) — it replaces the deputy's *dependence* on it.
 
-**Single-writer rule (refined S203):** only the LIVE PA appends to the source stream. The deputy is read-only
+**Single-writer rule (refined S203; ⚑ SUPERSEDED S354 — it stopped being true and nothing noticed):** only the LIVE PA appends to the source stream. The deputy is read-only
 on this file — the one narrow exception is the Function-3 (LIVE S203) reboot-gap entry (an ordinary `state` entry
 flagged `(deputy)`, observation-only, recording an agent that landed while the PA was rebooting; never substantive).
+
+**⚑ MULTI-WRITER, RATIFIED IN FACT IF NOT IN TEXT (S354).** The single-writer rule above assumes ONE live PA. The project has run two concurrent operators for months, plus a dPA that writes its own entries — so the counter has multiple writers and always did. The cost was invisible because nothing checked: **nine duplicate sequence numbers already sit in the live scope**, every one a collision between two writers (dPA-vs-PA, Peter-vs-dPA, or two concurrent PA sessions), and seven more were caught by hand in a single S354 window. **A duplicate is not cosmetic** — `scripts/state.ts` and the flogence bridge both parse `^\[(\d+)\]` and the bridge checkpoints on the sequence, so the SECOND entry to merge reads as already-absorbed and drops out of the digest. Two changes now make multi-writer safe: `.gitattributes` sets `merge=union` on this file, so concurrent tail-appends merge automatically instead of raising a conflict that has to be hand-resolved (one such hand-resolve renumbered the OTHER session's already-merged entries); and `bun scripts/delta-lint.ts` fails CI on a NEW duplicate, with the nine pre-existing ones baselined as named debt. **Append freely; do not hand-renumber another session's entries; let the gate tell you.**
 
 ---
 

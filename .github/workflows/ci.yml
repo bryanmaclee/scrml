@@ -153,6 +153,14 @@ jobs:
       # SPEC §34.0 — a NEW catalog row must state where it fires, or honestly declare it does not yet.
       # DIFF-SCOPED: silent on the legacy corpus by construction (pa-base §8 — a gate that is instantly
       # red for reasons no change caused gets bypassed, then deleted).
+      # The delta-log sequence is a shared counter and its own header still claimed a
+      # single-writer rule that stopped being true when the project went to two concurrent
+      # operators. A duplicate is not cosmetic: the flogence bridge checkpoints on the
+      # sequence, so the second entry to merge reads as already-absorbed and DROPS OUT of
+      # the digest. BASELINED (handOffs/delta-log-dupes.baseline.json) so it is not
+      # instantly red on nine pre-existing collisions — only a NEW duplicate fails.
+      - name: delta-log sequence gate (a duplicate silently drops an entry from the digest)
+        run: bun scripts/delta-lint.ts
       - name: §34.0 row-provenance gate (new error-code rows state where they fire)
         run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
 
