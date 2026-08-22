@@ -623,3 +623,60 @@ loud "I could not scan", which exposes that question rather than papering over i
 | **F8** | **`delta-lint.ts` reports PASS over a log that still contains the duplicate it exists to catch**, when the entry format drifts. Three zero-population shapes all green. | Not on `main` — it lives on `origin/fix/s354-nested-program-artifact-gap`. Pulling that branch in to patch it is the wrong trade. | Full four-case transcript in the audit section above. Fix is ~4 lines: refuse `seen.size === 0` over a non-empty file. |
 | **F9** | `regen-spec-index.ts --check` cannot see the rot class it was written for — all 65 row ranges corrupted, still "totals OK". | **Deliberate and documented** (pa-base §8, cry-wolf). Gating them would re-litigate a ruling under cover of a bug fix. Recorded because the gap between "why the script exists" and "what the gate checks" is worth an operator's eye. | `sed -E 's/\| [0-9]+-[0-9]+ \| [0-9]+ \|/\| 1-1 \| 1 \|/'` on SPEC-INDEX.md → exit 0. |
 | **F10** | `corpus-emit-differential.ts`'s CAPTURE half writes a 0-source manifest at exit 0. | The DIFF half catches it with an explicit `FINDING [VACUOUS]`, which is the point that matters. Noted for completeness. | Capture against an empty roots dir. |
+
+---
+
+## VERIFICATION BAR
+
+`main` moved during the dispatch (`a0e30329` → `d2f16aca`, one commit: `emit-library.ts` + its
+integration test + a regenerated `docs/FACTS.md` count). **Merged, not file-delta'd**, per the
+brief. No overlap with any instrument file; the merge was clean.
+
+### Full gate set, post-merge, on the real tree
+
+| gate | before | after |
+|---|---|---|
+| `browser-baseline --check` | exit 0 | **exit 0** — `PASS — browser failure name set matches the baseline (48 asserted, 0 of 2 env-excluded observed)` |
+| `snippet-gate` | exit 0 (110 passed) | **exit 0** — `110 passed, 0 failed (110 total)` |
+| `facts --check` | exit 0 | **exit 0** — `PASS — all derived facts current` |
+| `regen-spec-index --check` | exit 0 | **exit 0** — `SPEC-INDEX totals OK — Total lines: 37,293 \| Total sections: 65 + appendices` |
+| `s34-census --check-new --base origin/main` | exit 0 | **exit 0** — `no new/changed §34 rows vs origin/main — PASS` |
+| `s34-census` (census) | exit 0 | **exit 0** — buckets shifted by the T7 fix (see Build B) |
+| `state --check` | exit 0 | **exit 0** — both `@generated` sections PASS |
+| `conformance/run.ts` | 883/883, exit 0 | **883/883, exit 0** |
+| `issue-debt --check` | exit 0 | **exit 0** — `✅ every open issue has a home` |
+| `dpa-debt` | exit 0 | **exit 0** — `✓ nothing owed` |
+| `threads` | exit 0 | **exit 0** |
+| `source-text-regex-census` (+ `--selftest`) | exit 0 | **exit 0** |
+| `corpus-zero-debt --check` | exit 0 (**hollow — 0 scanned, green tick**) | **exit 1 — INTENDED.** Now says `NOT VERIFIED — scanned ZERO artifacts`. Not a regression: it is the fix reporting honestly. In no workflow and no hook, so nothing is blocked. |
+
+**Zero gates regressed.** The single exit-code change is `corpus-zero-debt`, and it changed from a
+false green to an honest red.
+
+### Pre-commit suite
+
+Ran on every commit (never `--no-verify`, `core.hooksPath` untouched):
+**28,964 tests across 1,260 files · 0 fail · 86 skip · 1 todo · 129,420 expect() calls.**
+Identical before and after.
+
+### ENV-GAP ruled out, not assumed
+
+`compiler/tests/browser/render-by-tag-nested-compound-bug60.browser.test.js` fails 5/5 in the
+post-commit hook. Ruled out as mine by execution rather than by argument: `git checkout origin/main
+-- compiler/ conformance/`, re-ran, got the identical **5 fail**, then restored. **PRE-EXISTING on
+`origin/main`.** (`bun install` + `bun run pretest` were both run at setup — a fresh worktree
+carries no gitignored `samples/compilation-tests/dist/`.)
+
+### A note on this dispatch's own method
+
+Two things nearly went in wrong, and both were caught by executing rather than reasoning:
+
+1. **The brief's target code did not exist.** Following it literally would have red-lined two
+   ratified conformance cases for a code with no emitter. Caught by compiling the cases and counting.
+2. **A design decision was nearly filed as a defect.** `regen-spec-index`'s ungated row ranges look
+   exactly like vacuity under execution — all 65 corrupted, still green. Reading the header first
+   showed the exclusion is deliberate with a stated rationale. Gating them would have been
+   re-litigating a ruling under cover of a bug fix.
+
+The second is the one worth keeping: **"the gate does not catch X" and "the gate deliberately does
+not catch X" produce identical evidence.** An audit that only executes will call the second a bug.
