@@ -297,6 +297,118 @@ function pruneServerFnsAndLowerGuarded(
     ops.push({ start: sp.start, end: sp.end, text: lowered });
   }
 
+  // g-library-mode-toplevel-decl-match-leaks — a TOP-LEVEL `const/let X = match …`
+  // (`node.matchExpr` on a const-/let-decl) is NOT a function-decl, so
+  // `emitControlFlowLibraryFns` (which prunes + APPENDS the lowered fn — safe
+  // because function declarations hoist) never routes it, and the raw `match`
+  // leaks its scrml syntax into the library `.js` → §2.2.1 E-CODEGEN-INVALID-LOGIC.
+  // A `const`/`let` does NOT hoist, so it must be lowered IN PLACE — hence a splice
+  // here (not an append). Reuse the SAME browser decl lowering the emit-logic
+  // const-/let-decl `matchExpr` arm uses (`emitLogicNode` → `emitMatchExprDecl`,
+  // the tilde form `let _scrml_tilde = null; …; ${kw} X = _scrml_tilde;`), span-
+  // spliced over the raw decl. The tilde form places each arm body in EXPRESSION
+  // position, so a brace-delimited arm result (an object literal / block-body arm)
+  // is a value, not a statement block that silently returns undefined. Nested
+  // `const = match` inside a fn body is already handled (its fn routes structurally
+  // via emitControlFlowLibraryFns), so only the top-level `logicBody` children are
+  // scanned here. `match` lowers correctly cross-mode — library↔browser parity, no
+  // language surface. Two parser shapes: a NON-export decl arrives as a const-/
+  // let-decl carrying `matchExpr`; an EXPORT decl arrives SPLIT (export-decl + a
+  // sibling match-stmt) and is re-associated below.
+  if (Array.isArray(logicBody)) {
+    const declBody = logicBody as ASTNode[];
+    const spanOf = (n: ASTNode | undefined): Span | null => {
+      const sp = n?.span as Span | undefined;
+      return sp && typeof sp.start === "number" && typeof sp.end === "number" ? sp : null;
+    };
+    const insideRemoval = (sp: Span): boolean =>
+      removals.some((r) => sp.start >= r.start && sp.end <= r.end);
+    // A `match`/decl node span can OVERSHOOT its closing `}` into the start of the
+    // NEXT statement (a parser span-accuracy quirk — filed g-match-decl-span-
+    // overshoots-next-statement). Splicing on the raw end would clobber the next
+    // decl's leading keyword. Trim back to the match's own closing `}`: it is the
+    // last `}` at or before the span end, and the overshoot region is a
+    // next-statement opener (`const`/`let`/`export`/identifier) that never holds a
+    // `}`, so this is deterministic.
+    const matchCloseEnd = (end: number): number => {
+      const b = sourceText.lastIndexOf("}", end - 1);
+      return b >= 0 ? b + 1 : end;
+    };
+    // The tilde lowering (emitMatchExprDecl) can be MULTI-LINE — module-local temps
+    // (`let _scrml_tilde_N = null; …`) followed by the final `${kw} ${name} = …;`
+    // binding. To EXPORT such a decl, only the FINAL binding gets the `export `
+    // keyword (the temps must stay module-local). Prefix the last `${kw} ${name} =`
+    // statement; a single-line lowering (`const X = <IIFE>`) is prefixed at its head.
+    const exportify = (lowered: string, kw: string, name: string): string => {
+      const marker = `${kw} ${name} = `;
+      const idx = lowered.lastIndexOf(marker);
+      return idx >= 0 ? lowered.slice(0, idx) + "export " + lowered.slice(idx) : `export ${lowered}`;
+    };
+    for (let di = 0; di < declBody.length; di++) {
+      const node = declBody[di];
+      if (!node) continue;
+      const o = node as Record<string, unknown>;
+      // Shape 1 — NON-export `const/let X = match …`: a const-/let-decl carrying a
+      // `matchExpr` init (the same node the browser emit-logic decl arm consumes).
+      if ((node.kind === "const-decl" || node.kind === "let-decl") && o.matchExpr) {
+        const sp = spanOf(node);
+        if (!sp || insideRemoval(sp)) continue;
+        const name = typeof o.name === "string" ? o.name : null;
+        if (!name) continue; // destructure LHS — leave to the raw path (out of scope)
+        // Lower via the SAME browser decl path (emitLogicNode → emitMatchExprDecl,
+        // the tilde form): it places each arm body in EXPRESSION position
+        // (`_scrml_tilde = <arm>`), so a brace-delimited arm result — an object
+        // literal `{ x: 1 }` or a block-body arm — is a value, not a statement
+        // block that returns undefined (which a bare `return <arm>` IIFE would
+        // silently produce). This is the cross-mode parity the gap requires.
+        const lowered = emitLogicNode(
+          node as Parameters<typeof emitLogicNode>[0],
+          {} as Parameters<typeof emitLogicNode>[1],
+        );
+        if (lowered == null) continue;
+        ops.push({ start: sp.start, end: matchCloseEnd(sp.end), text: lowered });
+        continue;
+      }
+      // Shape 2 — EXPORT `export const/let X = match …`: the parser splits this into
+      // an `export-decl` whose `raw` ends at the `=` (init NOT captured) IMMEDIATELY
+      // followed by a sibling `match-stmt` node — the binding is disassociated from
+      // its match init (browser drops the binding for the same reason). Re-associate
+      // + lower to the value-IIFE, splicing over BOTH spans as one `export const X = …`.
+      if (
+        node.kind === "export-decl" &&
+        (o.exportKind === "const" || o.exportKind === "let") &&
+        typeof o.exportedName === "string" &&
+        typeof o.raw === "string" && /=\s*$/.test(o.raw as string)
+      ) {
+        const next = declBody[di + 1];
+        if (next && next.kind === "match-stmt") {
+          const sp = spanOf(node);
+          const nsp = spanOf(next);
+          if (sp && nsp && !insideRemoval(sp) && !insideRemoval(nsp)) {
+            const kw = o.exportKind as string;
+            const name = o.exportedName as string;
+            // Re-associate: synthesize the const-/let-decl the parser did NOT build
+            // and lower it through the SAME tilde path as Shape 1 (correct for
+            // brace-delimited arm bodies). Then export-prefix the final binding and
+            // splice over `export … = match …` from the `export` keyword itself
+            // (found by scanning back from the decl span) so no double-`export`.
+            const synthetic = { kind: kw === "let" ? "let-decl" : "const-decl", name, matchExpr: next, span: { start: sp.start, end: matchCloseEnd(nsp.end) } };
+            const lowered = emitLogicNode(
+              synthetic as unknown as Parameters<typeof emitLogicNode>[0],
+              {} as Parameters<typeof emitLogicNode>[1],
+            );
+            if (lowered != null) {
+              const exportKw = sourceText.lastIndexOf("export", sp.start);
+              const spliceStart = exportKw >= 0 ? exportKw : sp.start;
+              ops.push({ start: spliceStart, end: matchCloseEnd(nsp.end), text: exportify(lowered, kw, name) });
+              di++; // consume the match-stmt too
+            }
+          }
+        }
+      }
+    }
+  }
+
   // §23.6 (S238) — lower each inline value-returning `_={ … }=` foreign block to
   // its §23.2.4a async-IIFE (emit-logic `case "foreign"`) and splice it over the
   // raw `_={ … }=` span. Skip any foreign node inside a pruned server-fn span
