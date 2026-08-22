@@ -4,13 +4,17 @@
   "language-version": "1.0",
   "spec": "§23.5.4, §23.5.5",
   "source-test": "compiler/tests/unit/capability-declaration.test.js",
-  "rationale": "§23.5.4: a nested `capabilities=` REPLACES the ancestor's set for its subtree (mirrors §23.2.1 `lang=`); it does NOT union. The inner explicit `[]` governs the inner foreign → empty set → the §23.5.5 presence-nudge fires. E-FOREIGN-SIDECAR-NOMINAL co-occurs (the §23.4 sidecar runtime is Nominal/spec-ahead). No E-SCOPE-001, no E-FOREIGN-CAPABILITY-UNKNOWN.",
+  "rationale": "§23.5.4: a nested `capabilities=` REPLACES the ancestor's set for its subtree (mirrors §23.2.1 `lang=`); it does NOT union. The inner explicit `[]` governs the inner foreign → empty set → the §23.5.5 presence-nudge fires. E-FOREIGN-SIDECAR-NOMINAL co-occurs (the §23.4 sidecar runtime is Nominal/spec-ahead). No E-SCOPE-001, no E-FOREIGN-CAPABILITY-UNKNOWN. `codeCounts` pins BOTH live codes at EXACTLY 1: one nudge for one undeclared foreign, one sidecar-Nominal for one claimed sidecar. `codes`/`notCodes` are set-valued and read a double fire as identical to a single one, so the \"never two\" half of the §4.12.3 invariant has no other home in this harness.",
   "expect": {
     "codes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-FOREIGN-SIDECAR-NOMINAL"],
     "notCodes": ["E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-ATTR-001"],
     "severity": {
       "W-FOREIGN-UNDECLARED-CAPABILITY": "info",
       "E-FOREIGN-SIDECAR-NOMINAL": "error"
+    },
+    "codeCounts": {
+      "W-FOREIGN-UNDECLARED-CAPABILITY": 1,
+      "E-FOREIGN-SIDECAR-NOMINAL": 1
     }
   }
 }

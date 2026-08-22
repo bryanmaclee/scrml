@@ -41,6 +41,20 @@ export interface CompileResult {
    * vs warning — the cross-stream rule: a W-/I- code never lands in errors).
    */
   byCode: Record<string, Severity>;
+  /**
+   * Per-code OCCURRENCE COUNT across both streams — how many diagnostics the
+   * compiler actually pushed carrying that code. `codes`/`byCode` are both
+   * de-duplicating maps, so cardinality is destroyed by the time a case sees
+   * them: a code firing ONCE and a code firing TWICE are the identical
+   * observation. That blindness is what `expect.codeCounts` reads, and the
+   * invariant it exists to pin is "one diagnostic per mistake, never two,
+   * never none" (§4.12.3's `or` between the two nested-program NOMINAL codes).
+   *
+   * Counts EVERY diagnostic entry, including two entries sharing a code across
+   * the errors and warnings streams — the honest answer to "how many
+   * diagnostics did the user see", which is the thing a double fire is bad for.
+   */
+  counts: Record<string, number>;
 }
 
 /** The diagnostic's own severity wins; the stream is authoritative fallback. */
@@ -89,16 +103,20 @@ export function compile(source: string, auxFiles: Record<string, string> = {}): 
     // Build the per-code severity map. The errors stream wins (the §34 fatal
     // partition): a code present as an error is never downgraded to a warning.
     const byCode: Record<string, Severity> = {};
+    const counts: Record<string, number> = {};
     const record = (d: Diagnostic, streamSev: "error" | "warning") => {
       const c = d?.code;
       if (typeof c !== "string" || c.length === 0) return;
+      // Cardinality is recorded BEFORE the severity de-dup returns early —
+      // otherwise a code fired twice as an error would count once.
+      counts[c] = (counts[c] ?? 0) + 1;
       if (byCode[c] === "error") return;
       byCode[c] = normalizeSeverity(d.severity, streamSev);
     };
     for (const d of result.errors ?? []) record(d, "error");
     for (const d of result.warnings ?? []) record(d, "warning");
     const codes = Object.keys(byCode).sort();
-    return { codes, byCode };
+    return { codes, byCode, counts };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
