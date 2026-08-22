@@ -1591,8 +1591,11 @@ export function runCG(input: CgInput): CgOutput {
       // NOT restrict the match to sidecar-shaped ones, and it should not: a
       // `use foreign:calc` pointing at `<program name="calc" mode="wasm">` is a
       // WRONG-CONTEXT error, not an unresolved-NAME one, and the wrong-context
-      // half is `E-FOREIGN-011`/`012` territory that lands with the sidecar layer.
+      // half is §23.4's 011/012 territory, which lands with the sidecar layer.
       // Reporting it as "matches no nested `<program>`" would be false.
+      // (Those two are not spelled as full `E-FOREIGN-0nn` tokens for the reason
+      // given at the `foreign:` branch in `ast-builder.js`: the §34 census reads
+      // any raw token match under `compiler/src/` as an emitter.)
       const declaredNames = new Set<string>();
       const uses: Array<{ name: string; span: any }> = [];
 

@@ -11166,8 +11166,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // sidecar no nested `<program>` declares. That check needs the whole file
       // (the declaration may appear after the reference), so it lives in
       // `codegen/index.ts` `detectUnresolvedForeignSidecarUses`, keyed on the
-      // `_foreignSidecarName` marker set below. §23.4's `E-FOREIGN-011`/`012` land
-      // with the real sidecar layer.
+      // `_foreignSidecarName` marker set below. §23.4's other two codes — 011
+      // (`fn` not exported by the named sidecar) and 012 (a sidecar fn called
+      // from a client path) — land with the real sidecar layer.
+      //
+      // Those two are deliberately NOT spelled as full `E-FOREIGN-0nn` tokens
+      // here. `scripts/s34-census.ts` counts a raw token match anywhere under
+      // `compiler/src/` as an EMITTER, and IMPL-SITES outranks DECLARED-AHEAD in
+      // its bucket precedence — so naming an unimplemented code in a comment
+      // reclassifies an honest spec-ahead row as one that has a fire site, which
+      // is a false claim in the §34 catalog. Same reason the pre-existing form
+      // was `E-FOREIGN-010/011/012`: only the first of those is a token.
       const foreignSidecarMatch = expr.match(/^\s*foreign\s*:\s*([\w-]+)/);
       if (foreignSidecarMatch) {
         const sidecarName = foreignSidecarMatch[1];
