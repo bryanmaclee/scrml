@@ -309,8 +309,30 @@ if (import.meta.main) {
     console.log(`  <!-- @corpus-zero role=blast-radius|data|load-bearing disposition=overruled by=S<N>-<who> date=<ISO> note=<what> -->`);
   }
 
-  if (!s.owed.length && !s.violations.length) {
-    console.log(`  ✅ no corpus-zero debt — every in-epoch deliberation artifact is disposed.`);
+  // NOT-VERIFIED IS A DISTINCT STATE FROM ZERO DEBT (S364).
+  //
+  // Scanning zero artifacts previously produced the identical "✅ no corpus-zero debt" a genuinely
+  // clean corpus produces. That is not hypothetical: `SUPPORT` is `<repo>/../scrml-support`, which
+  // does NOT resolve from a git worktree under `.claude/worktrees/<agent>/` — so every dispatched
+  // agent, and the boot probe in scripts/boot.ts:311, read a green tick over 288 unscanned
+  // deep-dives. A probe read as evidence must never report a clean bill of health for a scan that
+  // did not happen.
+  //
+  // EXIT SHAPE follows this repo's own established boot-probe pattern (review-debt.ts /
+  // issue-debt.ts): report loudly, do NOT break the boot in report mode — "a probe that breaks the
+  // boot is a probe that gets removed" — but a `--check` that verified nothing is not a pass.
+  if (artifacts.length === 0) {
+    console.log(`\n  ⚠️ NOT VERIFIED — scanned ZERO artifacts, so this run proves NOTHING.`);
+    console.log(`     A zero scan and a clean corpus print the same tick; they are not the same fact.`);
+    for (const root of SCAN_ROOTS) {
+      const p = `${SUPPORT}/${root}`;
+      console.log(`     ${existsSync(p) ? "empty     " : "UNRESOLVED"}  ${p}`);
+    }
+    console.log(`     Most likely cause: running from a git worktree, where \`../scrml-support\` does not`);
+    console.log(`     resolve to the sibling repo. Corpus-zero debt NOT verified — say so in the boot report.`);
+    if (args.has("--check")) process.exit(1);
+  } else if (!s.owed.length && !s.violations.length) {
+    console.log(`  ✅ no corpus-zero debt — all ${artifacts.length} in-epoch deliberation artifact(s) disposed.`);
   }
 
   if (args.has("--check") && (s.owed.length > 0 || s.violations.length > 0)) process.exit(1);

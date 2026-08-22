@@ -554,3 +554,72 @@ gets bypassed then deleted (`pa-base v2.4` §8)"*. Gating them would be re-litig
 cover of a bug fix. Filed as a residual (F10) with the observation that the class which actually
 rotted — a 3,140-line stale index, which is the script's stated reason for existing — is the class
 that remains ungated.
+
+### 5. `corpus-zero-debt.ts` — hollow RIGHT NOW, in this checkout, not hypothetically
+
+This is the one finding that was not a constructed condition. Run in the worktree, unmodified:
+
+```
+$ bun scripts/corpus-zero-debt.ts --check
+corpus-zero-debt — 0 artifacts scanned · 0 carry a corpus-zero phrase · 0 in scope · 0 OWED · 0 VIOLATION
+  ✅ no corpus-zero debt — every in-epoch deliberation artifact is disposed.
+exit 0
+```
+
+`SUPPORT` is `${ROOT}/../scrml-support`. From a git worktree under `.claude/worktrees/<agent>/`
+that resolves to `.claude/worktrees/scrml-support`, which does not exist — while the real sibling
+holds **288 deep-dives**. `walk()` returns `[]` for a missing dir, so the scan silently empties and
+the tick prints anyway.
+
+It is `scripts/boot.ts:311`, a **boot probe** — the PA reads that tick as evidence at session start,
+and every dispatched agent runs from a worktree. This is the brief's opening thesis, live.
+
+**Fixed** with this repo's own established boot-probe shape (`review-debt.ts` / `issue-debt.ts`):
+NOT-VERIFIED is a distinct printed state from zero debt; report loudly but do NOT break the boot in
+report mode ("a probe that breaks the boot is a probe that gets removed"); a `--check` that verified
+nothing is not a pass.
+
+**Bite proof — and the GREEN half found real debt.**
+
+```
+RED (this worktree, where ../scrml-support does not resolve):
+  ⚠️ NOT VERIFIED — scanned ZERO artifacts, so this run proves NOTHING.
+     A zero scan and a clean corpus print the same tick; they are not the same fact.
+     UNRESOLVED  …/agent-a4cfd2ab232fddafc/../scrml-support/docs/deep-dives
+     UNRESOLVED  …/agent-a4cfd2ab232fddafc/../scrml-support/docs/debates
+  exit 1
+
+GREEN (a root from which the sibling DOES resolve):
+  corpus-zero-debt — 322 artifacts scanned · 44 carry a corpus-zero phrase ·
+                     5 in scope (authored ≥ 2026-08-16) · 5 OWED · 0 VIOLATION
+  ⚠️ OWED — corpus-zero raised in an in-epoch deliberation artifact, no @corpus-zero marker:
+     docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md  L15
+     docs/deep-dives/d1-no-editions-earned-or-assumed-dpa-034-2026-08-19.md  L183
+     … (5 total)
+  exit 1
+```
+
+The live path is intact — and it exits 1 for the RIGHT reason, over a real population. **There are
+5 genuinely OWED corpus-zero dispositions that the worktree-hollow gate has been hiding.** Routed to
+the PA as F5; disposing them is a per-artifact reading, not this dispatch's call.
+
+The path-resolution half is FILED, not fixed: making `SUPPORT` worktree-aware is a decision about
+where the sibling repo lives, which is not mine to make. The guard turns a silent false-pass into a
+loud "I could not scan", which exposes that question rather than papering over it.
+
+---
+
+## FILED — findings routed to the PA, not closed here
+
+| id | finding | why not fixed here | reproducer |
+|---|---|---|---|
+| **F1** | 106 of 883 conformance cases emit some code more than once, invisibly — extremes `W-STDLIB-SEED-FAILCLOSED=23`, `E-ERROR-005=2` for one uncovered variant. Some legitimate (one diagnostic per site), some likely real double fires. | Deciding which of the 106 are defects is a per-case ruling. The instrument to see them now exists. | `loadCases()` + `compile().counts`, filter `n > 1`. |
+| **F2** | `docs/known-gaps.md:588` carries a PA-VERIFIED enumeration of "the harness's complete `expect` vocabulary" and is now one key stale (`codeCounts`). | Brief forbids touching that file. | Read the line. |
+| **F3** | `I-MATCH-PROMOTABLE`'s §34 row (SPEC.md:19618) cites `compiler/src/lint-promotable.ts`, which does not exist; the emitter is `compiler/src/lint-i-match-promotable.js`. | A SPEC edit, and a legacy row the diff-scoped gate is correctly silent on. | Touch that row → the new gate names it. |
+| **F4** | The emitter scan still over-counts ~19 codes whose only non-comment mention is a cross-reference inside ANOTHER diagnostic's message string. | The same syntax carries two LIVE emission shapes; separating them needs per-code adjudication, not a regex. | Table in Build B above. |
+| **F5** | **5 genuinely OWED corpus-zero dispositions** in `scrml-support/docs/deep-dives`, hidden by the worktree-hollow gate. Also: `SUPPORT = ${ROOT}/../scrml-support` does not resolve from a worktree at all. | Disposition is a per-artifact reading; the path question is a decision about repo layout. | `bun scripts/corpus-zero-debt.ts --check` from a root where the sibling resolves. |
+| **F6** | `dpa-debt.ts` has exactly one `process.exit`, and it is `0`. No failing path exists, and a missing queue reports as a normal run. | It is a reporter with no gate mode; adding one is a design call. It does name the missing path. | Move `handOffs/dpa-queue.md` → `queue not found`, exit 0. |
+| **F7** | `threads.ts` cannot distinguish "no change dirs exist at all" from "dirs exist, none declares a DONE-PROBE" — identical output for both. | Minor; needs a denominator in the message ("N BRIEF.md scanned, 0 declare a probe"). | Empty tree vs a tree with a probe-less BRIEF.md → same line. |
+| **F8** | **`delta-lint.ts` reports PASS over a log that still contains the duplicate it exists to catch**, when the entry format drifts. Three zero-population shapes all green. | Not on `main` — it lives on `origin/fix/s354-nested-program-artifact-gap`. Pulling that branch in to patch it is the wrong trade. | Full four-case transcript in the audit section above. Fix is ~4 lines: refuse `seen.size === 0` over a non-empty file. |
+| **F9** | `regen-spec-index.ts --check` cannot see the rot class it was written for — all 65 row ranges corrupted, still "totals OK". | **Deliberate and documented** (pa-base §8, cry-wolf). Gating them would re-litigate a ruling under cover of a bug fix. Recorded because the gap between "why the script exists" and "what the gate checks" is worth an operator's eye. | `sed -E 's/\| [0-9]+-[0-9]+ \| [0-9]+ \|/\| 1-1 \| 1 \|/'` on SPEC-INDEX.md → exit 0. |
+| **F10** | `corpus-emit-differential.ts`'s CAPTURE half writes a 0-source manifest at exit 0. | The DIFF half catches it with an explicit `FINDING [VACUOUS]`, which is the point that matters. Noted for completeness. | Capture against an empty roots dir. |
