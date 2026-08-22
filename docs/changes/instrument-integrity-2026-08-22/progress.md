@@ -837,3 +837,35 @@ different fixes:
 
 The duplicate-detection path is untouched: row 1 is character-for-character what it was.
 The only removed line in the whole diff is the read site, split so the guard can size the file.
+
+### (3) MEDIUM — the PA-VERIFIED `expect` enumeration went false on landing — **DONE**
+
+`docs/known-gaps.md:588` carries a **PA-VERIFIED** enumeration of the harness's *complete*
+`expect` vocabulary. This branch adds `codeCounts` to that interface, so the moment it lands
+the enumeration becomes an authority-stamped list that is missing a key — and the next session
+reads the stamp, not the interface. The original brief forbade touching this file, which is why
+the branch filed it rather than fixing it; that restriction is lifted for this line only.
+
+**Checked bidirectionally rather than just inserting the one key.** A stamp that says
+*complete* has to be re-earned, not patched:
+- every key in the doc's list → confirmed present in `ExpectedCase` (all 14);
+- every key in `ExpectedCase.expect` → confirmed present in the doc's list.
+
+`codeCounts` was the ONLY divergence. It is now listed, in interface order (after `severity`,
+before the runtime half `input`), and the stamp reads `PA-VERIFIED at S319, RE-VERIFIED
+key-by-key against the interface at S365` — provenance for both the original claim and the
+re-check, so a future reader can see which one they are trusting.
+
+**The gap itself is unchanged and stays open.** A parenthetical says so explicitly: a per-code
+occurrence count is not the content of an artifact, so
+`g-conformance-cannot-assert-emitted-route-path` is not narrowed by `codeCounts`. Recorded
+because "a new assertion key landed" is exactly the shape a future session would mistake for
+"that gap is smaller now."
+
+Line 588 is prose, not inside an `@generated` anchor pair — verified by executing both
+regenerators rather than by reading the anchors:
+
+```
+$ bun scripts/state.ts --check; echo $?   ->  0
+$ bun scripts/facts.ts --check; echo $?   ->  0
+```
