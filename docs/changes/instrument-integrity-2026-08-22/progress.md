@@ -397,3 +397,65 @@ an emitter they do not have. NOT fixed here because the same syntax carries two
 LIVE emission shapes (the message-prefix convention in `commands/*.js` and
 `runtime-template.js`), and separating them needs per-code adjudication of ~19
 rows — a ruling, not a regex. Reproducer is in the table above.
+
+---
+
+## AUDIT — the vacuity table
+
+**Method.** Every target derives its `ROOT` from its own file location, so a copy of the script in
+a constructed tree is a clean "input missing / empty / zero-length" condition without touching the
+repo. Where that only proved module resolution (a script importing a sibling), a targeted probe was
+built instead. Every row below is an EXECUTED exit code, not a reading.
+
+**Headline: 3 of the 5 blocking CI gates could pass while measuring nothing.**
+`.github/workflows/ci.yml` blocks on exactly five: `browser-baseline --check` (the reference,
+guarded), `snippet-gate` (VACUOUS — fixed), `facts --check` (VACUOUS — fixed),
+`regen-spec-index --check` (narrow by design, and the narrow claim bites), and
+`s34-census --check-new` (two blind spots — closed in Build B above).
+
+| script | can it pass while measuring nothing? | executed evidence | verdict |
+|---|---|---|---|
+| `browser-baseline.ts` | **NO** | empty tree → `HARNESS DID NOT RUN — no \`N pass\` line` / `Refusing to record or compare an empty set (that is the hollow-gate shape)`, **exit 1** | **REFERENCE.** Three layers: a `ranOk` harness-ran check, a `parseOk` check against bun's OWN reported failure count, and an empty-set refusal. |
+| `facts.ts` | **YES → FIXED** | tree with no source: `0 lines across 0 files`, `0 conformance cases`, `0 CLI verbs`; `--write` recorded all of it; `--check` → `PASS — all derived facts current`. **exit 0 at all three steps** | **VACUOUS — FIXED.** Now refuses, exit 2. |
+| `regen-spec-index.ts` | **NO, for what it claims** | totals corrupted → `SPEC-INDEX totals are STALE`, exit 1; totals anchor deleted → `ERROR: … missing or malformed`, exit 1 | **NARROW BY DESIGN.** All 65 row ranges corrupted to `1-1 \| 1` → still `totals OK`, exit 0 — but the header states the ranges are *deliberately* ungated ("they drift by design between amendments and a gate that cries wolf gets bypassed then deleted"). Filed as a residual, NOT fixed. |
+| `snippet-gate.js` | **YES → FIXED** | corpus discovering zero files → `no .scrml files discovered`, **exit 0** | **VACUOUS — FIXED.** Now refuses, exit 1. |
+| `review-debt.ts` | yes, but **LABELLED** | `gh` unreachable → `review-debt: UNAVAILABLE (…)` + "review debt NOT verified this session. Say so in the boot report.", exit 0 | **DELIBERATE + HONEST.** Documented ("a probe that breaks the boot is a probe that gets removed"). NOT-VERIFIED is a distinct printed state from 0 OWED. Not a defect. |
+| `corpus-zero-debt.ts` | **YES** | empty scan dirs → `0 artifacts scanned · … · 0 OWED · 0 VIOLATION` + `✅ no corpus-zero debt`, **exit 0** in `--check` | **VACUOUS.** Mitigated: it prints its denominator AND already carries "a clean scan is NOT proof of a clean corpus". FILED (F5). |
+| `issue-debt.ts` | **NO** | missing ledgers → every issue unhomed → `2 open · 0 homed · 2 OWED`, exit 1; `gh` down → `UNAVAILABLE`, exit 0 with "NOT-VERIFIED is a distinct state from 0 OWED" | **GUARDED.** Also carries a truncation guard with auto-widen to a reported ceiling. Best of the debt family. |
+| `threads.ts` | yes (reporter) | no BRIEF declares a probe → `thread-board: no BRIEF.md declares a DONE-PROBE: yet`, exit 0 | **REPORTER, no gate mode.** Cannot distinguish "no change dirs at all" from "dirs exist, none declares a probe" — same line for both. FILED (F7, minor). |
+| `dpa-debt.ts` | yes (reporter) | missing queue → `dpa-debt — queue not found at <path>`, exit 0 | **REPORTER, no failing exit path at all** (one `process.exit`, and it is 0). Names the missing path, so not silent. FILED (F6). |
+| `delta-lint.ts` | **YES** | see below — three separate zero-population shapes all → `PASS`, exit 0 | **VACUOUS. Not on `main`** (sibling branch `fix/s354-…`). FILED (F8). |
+| `state.ts` | **YES** | known-gaps with zero `@gap` tokens: `--write` recorded `HIGH 0 / MED 0 / LOW 0 / Nominal 0`, exit 0; `--check` → `PASS — all @generated sections current`, **exit 0** | **VACUOUS.** Same mechanism as `facts.ts`. FILED (F9) — see the fix note below. |
+| `corpus-emit-differential.ts` | **NO** | zero-artifact diff → `FINDING [VACUOUS] compared ZERO artifacts — this run verified NOTHING.` + `VERDICT: NOT A VALID COMPARISON`, **exit 2**; self-diff → `FINDING [INCOMPARABLE] both sides are the SAME revision … clean by construction and proves nothing`, exit 2; typo'd flag → exit 2 | **BEST-GUARDED IN THE SET**, stronger than the reference. Caveat: the CAPTURE half writes a 0-source manifest at exit 0; the DIFF half catches it, which is the point that matters. |
+| `perf-regression-check.ts` | **YES** | every corpus key renamed → `[SKIP] … unknown corpus name` ×8 then `no regressions detected`, **exit 0**; `corpora: {}` → `no regressions detected` with no SKIP lines at all, **exit 0** | **VACUOUS.** |
+| `benchmark-perf-baseline.ts` | **YES** | no corpora resolvable → `[SKIP]` ×8, then `wrote: …/perf-baseline.json` with `corpora: {}`, **exit 0** | **VACUOUS, and it COMPOUNDS**: that empty baseline then makes `perf-regression-check` report "no regressions detected" forever. Proven end-to-end. |
+| `source-text-regex-census.ts` | yes (reporter) | empty `compiler/src` → `files / lines : 0 / 0`, `POST-AST … : 0`, exit 0 | **REPORTER, self-declared "DETECTION, not a gate".** Prints its denominator first, so a zero cannot be misread. Not a defect. |
+| `dock-health.ts` | yes (by design) | empty corpus → `corpus: 0 .scrml file(s) · compiled 0`, exit 0 | **REPORTER, self-declared "ADVISORY, NEVER GATING … Always exit 0".** Prints its denominator. Not a defect. |
+
+### `delta-lint.ts` — the sharpest of the audit findings
+
+Three zero-population shapes, all reporting PASS. The middle one is the dangerous one: **a real
+duplicate is present and the gate says PASS**, because the entry separator drifted.
+
+```
+=== [0] CONTROL — a healthy log with a real duplicate
+    exit=1   delta-lint FAILED — 1 NEW duplicated sequence number(s) across 3 entries
+
+=== [1] ENTRY-FORMAT DRIFT — the '·' separator becomes '-' (the duplicate is STILL THERE)
+    exit=0   delta-lint — 0 entries in the live scope (from line 2), 0 distinct sequence numbers, max [0] — PASS
+
+=== [2] TRAILING SESSION HEADER — the live scope is empty by construction
+    exit=0   delta-lint — 0 entries in the live scope (from line 7), … — PASS
+
+=== [3] EMPTY FILE
+    exit=0   delta-lint — 0 entries in the live scope (from line 1), … — PASS
+```
+
+Shape [1] is not hypothetical for this script specifically: its own header states the `ENTRY` regex
+must agree with `flogence src/ports/bridge-tool.scrml`, and "a divergence here is a silently
+different population". A bridge-side format change empties the live scope and the gate goes green.
+Shape [2] is one blank `## Session` header away at any wrap.
+
+**FILED, not fixed** — the script is not on `main`, and pulling the sibling branch's in-flight work
+into this one to patch it is exactly the wrong trade. Fix is ~4 lines: refuse when
+`seen.size === 0` while the file is non-empty.
