@@ -9,8 +9,10 @@
  * the exposure is any server fn returning a multi-line DATA literal — an email body, a
  * CSV/markdown/YAML blob, a PEM key, an LLM prompt.
  *
- * FIX: `indentServerFnBodyLines` is template-literal-aware — it indents code layout but
- * emits a continuation line that begins inside raw template text VERBATIM.
+ * FIX: the shared `indentBodyLines` (codegen/utils.ts, S361) is template-literal-aware —
+ * it indents code layout but emits a continuation line that begins inside raw template
+ * text VERBATIM. (Regex-desync + the tool/library blind-sibling variants are pinned in
+ * g-server-fn-reindent-converge.test.js.)
  *
  * This pins the COOKED VALUE (not the artifact bytes) — the class is invisible to an
  * artifact-only differential, so the test evals the emitted literal directly.
