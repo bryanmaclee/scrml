@@ -1,18 +1,182 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S363-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1665]-[1670].         -->
-<!-- S363 = the four fragile peter-lane arcs S362 traced (full-context). -->
-<!--   ARC 1 library-mode `match` → FIXED (#636). ARC 2 failable-arm     -->
-<!--   multiline-template → FIXED (#637, S362 ASI trace was wrong).      -->
-<!--   ARC 3 reactive-member auto-await → ROUTED to bryan (#638; stale   -->
-<!--   locus, contested axis). ARC 4 markup-value scanner → PARKED with  -->
-<!--   a full 3-scanner+emit seam map (#638; partial built+reverted).    -->
-<!--   +5 residual gaps filed. Review floor 0. HIGH 37 · MED 147 · LOW 68.-->
-<!--   3 PRs merged (#636/#637 code, #638 continuity).                   -->
-<!-- ⭐ NEXT BOOT (peter): ARC 4 (markup scanner, seam map ready) OR a    -->
-<!--   fresh dog-food. bryan: ARC 3 auto-await + the S358→S362 queue.    -->
-<!-- Body below the S363 block is S362 + older (history).               -->
+<!-- hand-off.md — live session state. WRAPPED at S354-bryan.      -->
+<!-- Mechanical stream: handOffs/delta-log.md [1669]-[1680].       -->
+<!-- Body below the S354 block is S352/S350 WRAPs (history).       -->
 <!-- ============================================================= -->
+
+# scrml — Session 354 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-19 → 08-22 (four calendar days; `/boot recover session` as the recovery successor
+to a crashed S353). **Nothing merged to main by this session. Five branches in hand, all pushed,
+none landed. Five operator decisions pending.**
+
+**Read this framing first: the session's output was DIAGNOSIS, not landing.** Two compiler arcs ran
+to eight and four rounds respectively; a retrofit census and an instrument-integrity pass ran
+alongside. What changed is that a set of *believed-closed* surfaces are now measured, and a set of
+*deferred* ones lost the reason they were deferred under.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ FIVE BRANCHES IN HAND — all pushed, none landed, none merged
+
+| branch | ahead | state | needs |
+|---|---|---|---|
+| `raw-egress-r8-work` | 39 | **complete through round 8.** Floor 0 code-deltas / 1905 shared sources. Four regression guards on the closed leak + a CONTROL. | land (rounds 4/6/8 each passed an S239 pass; r8's corrections are post-review) |
+| `nested-program-r4-work` | 32 | **complete through round 4.** Consolidation landed; double-fire dissolved; `E-FOREIGN-010` built. | **S239 pass owed** — never reviewed |
+| `handle-onion-top-level-dispatch` | 8 | **complete.** Onion at top-level in all 3 dispatchers. | **S239 pass owed**, and DECISION 1 below blocks it |
+| `instrument-integrity` | 7 | **complete.** `codeCounts` + census fixes + 6 gate fixes, 10 filed. | **S239 pass owed** |
+| `fix/s354-…-artifact-gap` (**PR #581**) | 20 | gap filings, review-floor drain, all S354 rulings banked, delta-log fix | mergeable; **blocks S356-peter's heading-drift sweep** |
+
+⚑ **All five are behind a fast-moving `main` (a sibling operator lands continuously). LAND BY REBASE
+OR MERGE — NEVER FILE-DELTA.** Measured: a wholesale file-delta would revert #634 (E-FN-003) and
+#624 (re-indenter, ×2 HIGH) and drop 6 gap entries + 24 `@gap` marker changes.
+
+### 2. ⚠️ FIVE OPERATOR DECISIONS PENDING
+
+1. **CSP / SSR-seed fork (BLOCKING `handle-onion`).** `headers="strict"` now actually applies (it
+   never did before). §39.2.5 pins `default-src 'self'` — and **scrml's own emitted inline SSR-seed
+   `<script>` + runtime inline `<style>` violate it.** Chromium-measured: main `__scrml_ssr_state` =
+   object / 0 violations; branch = **undefined / 2 violations**. The §39.2.5 escape ("override via
+   `handle()`") does not cover compiler-emitted content. **PA rec: move the seed to
+   `<script type="application/json">` + `JSON.parse`; ship transition keyframes in the emitted
+   stylesheet.** Zero adopter cost, small emit change.
+2. **`handle()` auth semantics.** Unauthenticated `GET /quote.pdf` → **200**, while an
+   unauthenticated route → 302. `_scrml_auth_check` is per-route, downstream of `resolve()`.
+   **PA rec: this is arguably CORRECT for a raw escape** (short-circuit = author owns the path,
+   incl. auth) — the defect is that nothing says so. Document normatively + consider a lint.
+   Protected *columns* ARE covered (`E-PROTECT-004` names the `handle()` body).
+3. **Bank the deferral queue as a tracked artifact?** ~54 (Part A) + 23 (Part B) SIZE-deferred items
+   whose reason is now void. Currently only in scratch + this hand-off.
+4. **Take the three confirmed flips to rulings?** dpa-033 type route · dpa-036/§7.5 (already banked
+   UNRUN) · body-split Ext 3+2.
+5. **Renumber the 9 historical delta-log duplicates?** `--fix` would RECOVER entries the flogence
+   cursor skipped, but rewrites shared history while a sibling is live.
+
+### 3. ⭐ dpa-036 HAS RUN — COMPLETE (ADVISORY), awaiting bryan. **Its verdict INVERTS the PA's.**
+
+The dPA fired during this wrap and completed it (`[1679]`, artifact
+`scrml-support/docs/deep-dives/type-system-assignability-dpa-036-2026-08-22.md`). **Read the
+artifact before ruling — the PA's framing was wrong on the axis:**
+
+- The PA offered **(a) literal propagation vs (b) a real inference pass** as the one-way fork, with
+  the `asIs` question as a detail *inside* (b). **The dPA inverts both**, using `[1678]`'s own
+  surface/internals split against the item: **(a)→(b) is REVERSIBLE internals**, so the a/b choice
+  is *subordinate scheduling*, not a door. **The one-way fork is the `asIs` SEMANTICS.**
+- **5/5 poles converged independently:** `asIs` must mean ***the developer signed for it***, never
+  ***the compiler did not look***. Inference failure must be **structurally incapable** of producing
+  `asIs` — yielding a loud, countable `unknown^gap(k)` instead.
+
+That is precisely the decay the PA flagged ("if `asIs` silently absorbs every un-inferable
+expression, (b) becomes (a) and nobody notices") — promoted from a caveat to the actual ruling axis.
+
+**§7.5: scrml has type ANNOTATIONS but no type SYSTEM for expressions.** `[EXEC]` — three of four
+positions are silent: typed cell, argument, and return all compile clean; only `let` fires. Operand
+typing does not exist (`"x" * 2` compiles). **bryan hit this independently writing real scrml.**
+Ranked #1 by the retrofit census. The queue item carries the full `[EXEC]` measurement — do not re-derive it.
+
+### 4. THE STANDING DIRECTION CHANGE — `[1678]`, read before citing any deferral
+
+> *"that restraint is completely gone for me. days, months or years. dosn't matter to me any more"*
+
+**Size is no longer a valid deferral reason.** Valid reasons remaining: a genuine dependency, an
+unratified fork, an unwitnessed need. **The cost boundary is the load-bearing half:** development
+cost yes, ADOPTER cost no — which makes refusal-based fixes the *cheap* answer, not the sound one.
+**"One chance" binds the AUTHORING SURFACE, not compiler internals** (`E-PROTECT-004` was rewritten
+7× this week at zero adopter cost).
+
+⚑ **Consequence not yet propagated:** every artifact reading *"deferred — too large"* / *"defer to
+v2"* reasons from a withdrawn constraint. `master-list.md:143` still defers cross-function
+body-split at *"~200-400h"* — a number bryan's own **S258** ruling already refuted
+(`known-gaps.md:6429`: the estimate was for a seam the corpus does not need; the real work was
+~80% built; Phase 1 landed S269).
+
+### 5. FINDINGS THAT MUST NOT BE LOST
+
+- **The retrofit census refuted its own instrument.** §32 `~` has zero gaps AND a fail-closed SHALL
+  — **and the rule does not fire.** A zero bug family reads identically for "sound" and
+  "unenforced". Sharper predictor: enforced-fail-closed → ~0 bugs · enforced-fail-open → large
+  family (§12 = 35 gaps) · **unenforced → 0 bugs and no signal.** Four more instances found:
+  `E-FN-009`, `E-ENGINE-012`, `E-STATE-TRANSITION-NO-RETURN`, `E-LANGUAGE-VERSION-TOO-NEW` — zero
+  fire sites, 13/5/5/1 SPEC mentions.
+- **`corpus-zero-debt` printed `✅ no debt` over 288 unscanned deep-dives** from any worktree
+  (`../scrml-support` does not resolve there). It is a BOOT probe. Fixed on `instrument-integrity`;
+  now prints `⚠️ NOT VERIFIED — scanned ZERO artifacts`. Surfaced 5 genuinely owed dispositions.
+- **3 of 5 blocking CI gates could pass while measuring nothing.** Two fixed, one closed, one was
+  already the reference, one narrow-by-design.
+- **106 of 883 conformance cases already emit some code more than once, invisibly.** `codeCounts`
+  built; its bite proof found a real double-fire in a ratified passing case (`E-ERROR-005` ×2).
+- **`raw` is in three contradictory states:** dpa-012 RATIFIED *"KILL `raw` PERMANENTLY"* · §61.10
+  *"DEFERRED, gated on a witnessed case"* · queue FACT 7 *"the witness has arrived… the deferral
+  has EXPIRED"*. And the named interim (`handle()`) was runtime-broken. **Record integrity, on a
+  live adopter's path.**
+- **`!{}` arm bodies have no tree form** (`ast-builder.js:15069` — `handler` is a source STRING).
+  Every structural pass is blind inside an arm. Filed HIGH.
+- **§44.6 / §19.10.5 / §8.9 disagree about whether scrml has transactions.**
+- **`resolve()` was never awaited** — the SPEC's own worked example + `examples/20-middleware.scrml`
+  bound a Promise. Fixed on `handle-onion`.
+
+### 6. OWED OUTWARD
+
+**Five peter→bryan pings held in `scrml-support/handOffs/incoming/`** (deliberately NOT filed to
+`read/` — filing them hides a live queue). One needs a ruling (`handle()` §40.3 — **now RULED, see
+`[1677]`; the ping can be closed once the branch lands**); three need a stamp (reset-init-await
+HIGH — *bryan filed it, and its ledger premise is FALSE* · promote-engine SPEC §56.6 ·
+todomvc hollow-gate); one is entangled (two security HIGHs, one of which **must sequence behind
+`raw-egress-r8` landing** or fixing it opens a live leak).
+
+**Three peter branches are pushed with NO PR** — invisible to `gh pr list`:
+`feat/promote-engine-same-named-cell-lift` · `fix/s359-todomvc-hollow-gate` ·
+`fix/s360-reset-init-await-parity`.
+
+---
+
+## ⚑ MISSES (mine, recorded because they will recur)
+
+1. **★ I propagated "five executed leaks" all session — it is TWO executed, THREE latent.** Origin:
+   a harness that sliced an in-process peer from the token `function` and dropped its `async`. I
+   put it in the `[1676]` bank, the voice ledger, an escalation and four briefs **without executing
+   it myself.** Corrected at `[1679]` + in place at `[1676]`. **My verification holds when I
+   EXECUTE and fails when I RELAY** — third recorded instance.
+2. **★ I renumbered the SIBLING's already-merged delta-log entries.** In a MERGE, `HEAD` is my
+   branch; in a REBASE it is upstream. I carried the rebase assumption across. Caught only by
+   inspecting what the renumbered lines *were*. The retry asserts orientation explicitly.
+3. **★ I committed conflict markers.** The resolution script asserted and exited non-zero, the file
+   was never written, and the next command chained `git add` without checking. Caught by grepping
+   `HEAD`, not by trusting "Successfully rebased".
+4. **★ Twice I built a success signal that cannot fail** — `echo "PUSHED"` after a rejected push,
+   and `push_exit=$?` reading a pipeline's `tail`. Now: compare remote and local refs.
+5. **★ Three of my briefed premises were corrected by the agents** — `#582` vs `#590`, the SPEC
+   provenance direction, and the symbol-table hypothesis. Plus two in one dispatch
+   (`E-NESTED-PROGRAM-CONTEXT-NOMINAL` not on main; `delta-lint.ts` not on main).
+6. **★ I banked dpa-036 wrong twice** — `dpa-debt.ts` anchors on the LEADING TOKEN of **column 2**
+   (`BANKED — UNRUN`). Both misses read as `0 UNRUN`. Caught by running the probe, not trusting the
+   append.
+7. **The largest generator of unstated deferrals is my own dispatch protocol** — agents end with
+   `DEFERRED_ITEMS`, the PA banks them verbatim, **and no reason is ever recorded.** Those cannot
+   be re-derived at all.
+8. **Method correction from the instrument audit:** *"the gate does not catch X"* and *"the gate
+   deliberately does not catch X"* produce **identical evidence**. Execution establishes what a
+   gate does; only the record establishes what it was meant to do.
+
+## 🧷 STATE
+
+- **main** `6a9545b0` (sibling-driven; this session merged **one** PR, #578, on day 1).
+- **Delta-log `[1669]`-`[1680]`.** ⚑ **SEVEN sequence collisions this session**; my entries were
+  renumbered four times. **FIXED** on PR #581: `.gitattributes merge=union` + `scripts/delta-lint.ts`
+  (CI-gated, 9 pre-existing duplicates baselined). Root cause: the log's own *"single-writer rule"*
+  stopped being true and nothing checked. **A duplicate silently DROPS an entry from the digest.**
+- **Rulings banked:** `[1669]` Nominal-code consolidation (a) · `[1671]`-`[1675]` renumbered ·
+  `[1676]` all-literal exemption DROPPED (b) · `[1677]` `handle()` is a literal onion (a) ·
+  `[1678]` **time-investment restraint withdrawn (STANDING)** · `[1679]` my over-claim corrected.
+- **Worktrees RETAINED deliberately** — every branch above has one, none landed. Do not sweep.
+- **Test state:** each branch green on its own gate at push (`raw-egress-r8` 147/0 + conformance
+  890/890; `nested-program-r4` 22607/0 + conformance 894/894; `handle-onion` floor 0 across 2138
+  files; `instrument-integrity` 28971 tests / 0 fail). **No full-suite run at wrap** — no code
+  landed on the wrap branch (docs-only). **Maps unchanged** (docs-only).
+
+---
 
 # scrml — Session 363 (peter · P-Tech1 Windows) — WRAP
 

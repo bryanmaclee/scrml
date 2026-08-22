@@ -6229,6 +6229,30 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-19 → 08-22 — S354: five branches in hand, five decisions pending, and the instruments audited
+
+A four-day recovery session (successor to a crashed S353). **Output was diagnosis, not landing** —
+nothing merged but PR #578 on day one. Two compiler arcs ran to round 8 and round 4; a retrofit
+census and an instrument-integrity pass ran alongside. Five branches are complete and pushed, none
+landed; five operator decisions are pending. Full pickup state in `hand-off.md`.
+
+- **§14.8.9 raw-egress** — the all-literal exemption took **three formulations and five leaks**
+  before being **dropped** (ruling `[1676]`); `E-PROTECT-004` returns to co-occurrence with the
+  §40.3.5 false positive accepted and pinned as a conformance case. Branch `raw-egress-r8-work`,
+  floor 0 code-deltas across 1,905 shared sources.
+- **Nested `<program>`** — worker bundles were generated and dropped on the floor; a `handle()`-only
+  program emitted 100% dead code. Two Nominal codes **consolidated** (ruling `[1669]`), `E-FOREIGN-010`
+  built from a SHALL that had zero fire sites. Branch `nested-program-r4-work`.
+- **`handle()` is a literal onion** (ruling `[1677]`) — the onion now wraps top-level dispatch in all
+  three dispatchers. Also fixed: `resolve()` was never awaited, breaking the SPEC's own worked example.
+- **Instrument integrity** — `codeCounts` added to the conformance contract (**106 of 883 cases
+  already double-fire invisibly**); `corpus-zero-debt` was printing a clean board over **288 unscanned
+  artifacts** from any worktree; **3 of 5 blocking CI gates could pass while measuring nothing**.
+- **The delta-log sequence** — seven collisions in one session, root-caused to a *"single-writer rule"*
+  that stopped being true. Fixed with `merge=union` + a CI-gated `delta-lint` (PR #581).
+- **Standing direction change `[1678]`** — the time-investment restraint is withdrawn; size is no
+  longer a valid deferral reason. ~77 deferred items re-derived on merit.
+
 ### 2026-08-22 (S363-peter — the four fragile arcs: two fixed, one routed, one mapped — and three of the four filed traces were wrong on HEAD)
 
 A full-context session working the four fragile peter-lane arcs S362 traced and kept open. Each was verified/re-derived first-hand on HEAD before acting — and three of the four S362 traces proved materially wrong (an ASI misattribution, a stale locus, an undercounted scanner set), reinforcing that first-hand re-derivation is load-bearing, not ceremony. Two arcs landed as codegen fixes, one routed to bryan (its lane), one stayed parked with a much richer seam map. Review floor cleared to 0. Three PRs merged (#636/#637 code, #638 continuity).
