@@ -1,14 +1,64 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S359-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1625]-[1632].        -->
-<!-- S359 = the last clean MED/LOW rips (#611, 2 fixes) + SIX        -->
-<!--   deep-dive dispositions. Clean rip vein now EXHAUSTED (2       -->
-<!--   satellite sweeps). 3 ledger CORRECTIONS (entries were wrong   -->
-<!--   on HEAD), 2 confirm-with-refine, 1 built+routed (todomvc).    -->
-<!--   4 routes added to the bryan-lane queue + 1 branch.            -->
-<!-- Body below the S359 block is S358 + S357 + older (history).     -->
+<!-- hand-off.md — live session state. WRAPPED at S360-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1641]-[1649].         -->
+<!-- S360 = the DEEP-DIVE vein, worked hard. 7 fresh HIGHs deep-dived -->
+<!--   across 2 satellite batches; 2 FIXED+LANDED (reset raw-body     -->
+<!--   #617, endpoint-400 #619), 4 ROUTED turnkey (A/B/F/G; F BUILT   -->
+<!--   on a branch), 1 DOWNGRADED (rename-swallow HIGH→MED, stale).   -->
+<!--   HIGH 47→44. 5 PRs landed. Plus auto-mode setup.               -->
+<!-- Body below the S360 block is S359 + S358 + older (history).      -->
 <!-- TWO LANES LIVE: bryan's S352/S353 board still UNSTARTED — §A.   -->
 <!-- ============================================================= -->
+
+# scrml — Session 360 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+**Two live lanes — pick by who boots.** bryan's lane-A board is UNTOUCHED by S360.
+
+### A. bryan's lane — UNSTARTED, and it GREW this session
+Everything from S358/S359 carried intact (raw-egress (c)→(d) · i18n substrate B · dpa-035 · dpa-029 Q1 ·
+held fix rounds · handle-onion HIGH #593 · `promote --engine` branch · todomvc branch · the S358+S359
+bryan-lane LOW queue). **⭐ NEW from S360 — appended to the SAME queue** (`scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`,
+S360 addenda batches 1 + 2), all repro-first VERIFIED on HEAD, turnkey per Peter's S360 routing directive:
+- **A `g-lambda-param-renamed-to-fetch-stub-...` (HIGH)** — mangler collision; locus traced `emit-client.ts:2969`/regex`:2993-2996`; by-reference ambiguity PROVEN → the mangler-retirement arc. Sound fix needs a scope model.
+- **B `g-if-attr-subscript-silently-dropped` (HIGH)** — GENERIC to all unquoted attr values (not if=); locus corrected `tokenizer.ts:922-928`; **amend-§5.2 grammar fork, BOTH directions laid out turnkey** (accept via :925 / reject via new diagnostic).
+- **F `g-reset-writes-pending-promise-...` (HIGH) — BUILT + VERIFIED, branch `origin/fix/s360-reset-init-await-parity @ 3540a2d7` + inbox note. YOUR S322 STAMP OWED.** Mirrors the declaration path (thenable→fire-and-forget settle); `_scrml_reset` stays sync. The ledger's "makes reset async" route-premise was FALSE (corrected). If you read it as a settled-SHALL conformance fix → rubber-stamp merge. VERIFY-ON-LANDING: `_scrml_error_boundary_log` chunk co-location (typeof-guarded).
+- **G `g-expr-positions-field-gate-blind` (HIGH)** — locus corrected (gate is BRANCH-ONLY; live carrier `emit-client.ts:425-428`); **leak-critical** (the fix must extend `boundOut` :466-472 or it LEAKS a server-only const) → your S252 security-envelope lane; NOT built.
+- **C-residuals** — reset raw-body: non-canonical targets `reset(@a[0])` + the reparse substrate (closes the whole 4-pass raw-body keyword class + `tare`/#501) → converge-not-enumerate.
+
+### B. peter's lane — the DEEP-DIVE vein is productive; keep working it (or dog-food)
+S360 proved the vein: 7 fresh HIGH deep-dives across 2 repro-first satellite batches, each independently
+re-verified on HEAD before acting (satellites are a claim, not the answer — the ledger shortlist stays
+unreliable: E's locus named a nonexistent file, D's HIGH was stale, F's route-premise was false, B/G loci
+were wrong). **2 were clean PETER-LANE fixes + landed** (C reset raw-body #617, E endpoint-400 #619 — both
+conformance to a settled SHALL). **Next boot: dispatch another deep-dive batch** (fresh HIGHs not yet dived;
+avoid ruling/dd/route=bryan-prov entries) **OR dog-food a fresh shape.** Do NOT re-scan the clean-rip
+shortlist (proven empty S358/S359).
+- **Heading/marker drift sweep — STILL held on bryan's open #581** (edits known-gaps.md). Unchanged.
+
+## WHAT LANDED (S360-peter) — 5 PRs
+- **#616** review-floor drain (5 OWED→0): #611 clean (S239) + #612–#615 carve-out.
+- **#617** ⭐ **HIGH — §6.8.2 `reset(@cell)` raw-body dangling ref** (`g-cleanup-onclick-raw-body-...` RESOLVED). `rewriteResetCalls` added to clientPasses; string-aware + guarded. Discriminator was statement-body vs expr-body (ledger root was wrong). S239 caught + fixed 3 fragilities in the first cut.
+- **#618 / #620** ledger continuity (the two deep-dive batches' corrections + delta-log + review markers).
+- **#619** ⭐ **HIGH — §61.3 `<endpoint>` malformed body → 400** (`g-endpoint-malformed-json-body-...` RESOLVED). `.json()`→`.text()` at `emit-server.ts:4623` so the decode IIFE owns the parse → ::Malformed→400. S239 clean (2 test-quality fixes).
+
+## ⚑ MISSES / lessons (S360)
+- **runtime-template.js is an emitted TEMPLATE LITERAL — comments there CANNOT use backticks** (they close the template string). My first reset-init cut put `` `[object Promise]` `` in a comment → `node --check` + the reset tests caught it (SyntaxError "Unexpected identifier 'Promise'"). Rule: plain identifiers in runtime-template.js comments, no backticks. In-template comments already follow this.
+- **The Facts gate (`scripts/facts.ts --check`) reds a PR whenever a code/test LOC or file-count changes** — regen `docs/FACTS.md` (`--write`) as part of ANY code/test-adding PR or the cloud gate fails (hit it on #617; folded the regen into #619 + the routed branch pre-emptively).
+- **No active pre-commit hook on this clone** (only `.sample` files) — the cloud `gate` is the sole authority; local full-suite is the pre-push self-check. (Explains how baseline-failing clones still commit.)
+- The 6 baseline test fails (self-host-smoke ×4 / self-compilation / session-b4b5 / one unnamed) are PRE-EXISTING on main (stash-verified identical on base each time) and NOT in the cloud `gate` scope (gate green on all merges). Not mine.
+
+## 🧷 STATE (S360 close)
+- **main** in sync after this wrap. Coherence target 0/0. Cloud `gate` GREEN on all 5 merges (`tracking` red = the known dev-watcher fs.watch baseline, non-required).
+- **Gaps: HIGH 44 · MED 149 · LOW 67 · Nominal 7** (`@generated:gap-counts`). HIGH 47→44: C + E resolved, D downgraded HIGH→MED.
+- **Review floor:** #616–#620 recorded; this wrap PR + #618/#620 are the inherent carve-out tail (record next boot).
+- **Routed-to-bryan, awaiting his boot:** F branch `fix/s360-reset-init-await-parity @ 3540a2d7` (+ inbox, S322 stamp) · A/B/G + C-residuals in the bryan-lane queue · everything carried from S358/S359.
+- **auto-mode** set up this session (`~/.claude/settings.json` autoMode.environment: autonomous-lane posture, dev+CI-only, walls kept; global — covers scrml + assetManagement).
+- **Worktrees:** main + app-pinned only (clean). **Branches:** main + app-pinned + 2 routed (promote-engine, reset-init — kept, on origin).
+- **Env:** bun 1.4.0. `gh pr merge` worked all session (auto-mode + allow-rule).
+
+<!-- ================= S359 history below ================= -->
 
 # scrml — Session 359 (peter · P-Tech1 Windows) — WRAP
 
