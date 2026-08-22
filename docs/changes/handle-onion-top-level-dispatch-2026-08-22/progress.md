@@ -187,6 +187,107 @@ Browser suite (pre-existing happy-dom global-state flakes): failing test-NAME se
 is **identical** between `origin/main` and HEAD — 47 both sides, zero new, zero
 fixed. Not a regression.
 
+## WebSocket upgrades are the ONE exclusion (§40.3.4)
+
+`emit-channel.ts:863` emits `return ok ? void 0 : new Response(…)` — Bun's
+`server.upgrade()` contract is "return `undefined` and I will not send a
+response". §40.3.2 types `resolve()` as returning a `Response`, so the total-
+resolve normalization manufactured a 404 AFTER the protocol switch. The
+handshake still completed in practice (`HTTP/1.1 101 Switching Protocols`
+measured both before and after) because Bun ignores a post-upgrade Response —
+but the compiler was manufacturing the offending Response itself and relying on
+a host tolerance nobody promised.
+
+Both hosts now dispatch an `isWebSocket` route directly, ahead of the onion.
+This restores pre-§40.3 behaviour for WS specifically (the `_scrml_route_ws_*`
+export was never middleware-wrapped either), so it is a zero-delta choice.
+
+**SPEC TEXT DEFECT — reported, not rewritten.** `SPEC.md:22647-22648`, two
+adjacent bullets in §40.3.4, contradict each other:
+
+> - `handle()` does NOT apply to WebSocket upgrade requests. …
+> - `handle()` applies to all HTTP requests handled by the compiled server —
+>   including statically-served assets and the `/_scrml_ws/` upgrade routes. …
+
+Both agree that relying on WS interception is undefined. Bullet 4's other clause
+(statically-served assets) IS honored. The implementation follows bullet 3
+because bullet 4's WS reading cannot be implemented without breaking a working
+upgrade. Executed: channel + `handle()` fixture serves `/quote.pdf` 200,
+`/index.html` 200, `/nope` 404, `/_scrml_ws/chat` **101 Switching Protocols**.
+
+## ⚠ BLOCKING FOLLOW-UP — `headers="strict"` now bites, and scrml's own output violates it
+
+This is the one thing a reviewer must not skim. **It is a SPEC-level collision,
+not an implementation choice** — and it is newly VISIBLE because of this branch.
+
+§39.2.5 (`SPEC.md:22533-22545`) is normative on two points at once:
+
+1. `headers="strict"` "injects the following headers **on all responses**"
+   (also `SPEC.md:22462`); and
+2. the `Content-Security-Policy` value is pinned to `default-src 'self'`.
+
+Pre-fix, (1) was NOT honored — the header reached only non-SSR registered route
+responses, never the HTML document, never a static asset, never a 404. Moving
+the onion to top-level dispatch makes (1) true for the first time. That
+immediately collides with (2), because **the compiler's own emitted output
+violates its own pinned CSP**:
+
+- the §52.8 SSR compose handler injects `<script>window.__scrml_ssr_state=…</script>`
+  inline into `<head>` (`emit-server.ts`, the `_scrml_seed_tag` line);
+- the client runtime injects a `<style>` element with `textContent` at load for
+  the §38 transition keyframes (`scrml-runtime.js`, "Transition CSS injection").
+
+Executed in headless Chromium (puppeteer) against a real built server —
+fixture `<program headers="strict" db="sqlite:…">` with one `<cell server>` SSR seed:
+
+| tree | `window.__scrml_ssr_state` | CSP violations |
+|---|---|---|
+| `origin/main` | `object` | 0 |
+| this branch | **`undefined`** | **2** |
+
+```
+Refused to execute inline script … violates … 'default-src 'self''
+Refused to apply inline style  … violates … 'default-src 'self''
+```
+
+So on this branch a `headers="strict"` app loses its SSR seed (client falls back
+to a cold fetch or a divergent mount) and loses every §38 transition.
+
+§39.2.5's escape hatch does not cover this: it says "if the developer's
+application loads scripts or styles from **external origins** … the developer
+MUST override the CSP via `handle()`". The blocked content here is **compiler-
+emitted**, not author-chosen, so the author cannot fix it by not doing it.
+
+**This is not a reason to revert.** Reverting re-hides a violated normative
+requirement, which is exactly the "ship the smaller surface" reasoning `pa.md`
+Rule 2 forbids. But the collision MUST be resolved before adopters see it.
+
+Options for the operator, with a recommendation:
+
+- **(a) — RECOMMENDED — CSP-safe seed + external transition CSS.** Change the
+  SSR seed to `<script type="application/json" id="__scrml_ssr_state">…</script>`
+  (not executed, so `script-src` does not apply) with the client runtime doing
+  `JSON.parse(el.textContent)`, and ship the transition keyframes in the emitted
+  stylesheet instead of an injected `<style>`. Keeps `default-src 'self'` pinned
+  exactly as §39.2.5 says. Cost: a client-runtime change plus a seed wire-format
+  change. This is the standard pattern (`__NEXT_DATA__` et al).
+- **(b) Widen the pinned CSP** to `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'`.
+  One-line change, but needs a §39.2.5 SPEC amendment and materially weakens the
+  XSS protection that is the whole point of the directive. Not recommended.
+- **(c) Per-response nonce.** Most correct CSP-wise, but requires generating a
+  nonce per response AND rewriting the response body to stamp it on every
+  compiler-emitted inline tag. Heaviest; no better than (a) in outcome.
+
+Reproduction is committed as this dispatch's fixture shape; the probe scripts
+are throwaway (`.tmp/`), but the fixture is four lines:
+
+```scrml
+<program headers="strict" db="sqlite:./csp.db">
+  ${ <notes server> = ?{`SELECT * FROM notes`}.all() }
+  <main><each in=@notes key=@.id><li : @.body></each></main>
+</program>
+```
+
 ## Observation for the operator's open question (NOT built here)
 
 The brief asks whether a **protected column** can now reach a `handle()`-served
