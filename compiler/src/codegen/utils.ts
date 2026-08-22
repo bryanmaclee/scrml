@@ -59,6 +59,184 @@ export function escapeRegex(s: string): string {
 }
 
 /**
+ * Blank the CONTENTS of every string literal in `text` to equal-length spaces,
+ * preserving overall length and every non-string offset. Single-, double- and
+ * template-quoted strings are handled; a template's `${...}` interpolations are
+ * left INTACT (their code — including any nested strings, which ARE masked — is
+ * real, executing text). Escapes inside a string body are blanked as a unit.
+ *
+ * WHY (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence):
+ * the server-only-stdlib chunk-prune and the sibling read-line prune decide
+ * keep/drop by scanning the assembled client body with a word-boundary regex
+ * for each bound name. Raw text makes a name inside a STRING LITERAL — a plain
+ * display label like `"call hashPassword on the server"` — read as a genuine
+ * use, so a server-only chunk (argon2id / `Bun.password.*`) is kept and SHIPPED
+ * to the browser on a textual coincidence (a §12 hard-split violation, silent).
+ * Masking string bodies before the scan makes a token inside a literal count as
+ * nothing while a real member/interp use (`obj.name`, `${name()}`) still counts.
+ * Same shape + fix as the S338/S354 raw-text-launder guards in type-system.ts
+ * (which carries a private twin `maskStringLiteralSpans` that could converge
+ * onto this shared copy — a hygiene follow-up, not required here). Comments are
+ * deliberately NOT masked: a stdlib name in a client-position comment is not a
+ * live vector (server-fn-body comments lower to a fetch stub; a comment in a
+ * client handler body does not compile), and the read-line prune relies on
+ * comment markers (`// --- scrml reactive runtime ---`) surviving this pass.
+ */
+export function maskStringLiteralSpans(text: string): string {
+  if (!text || !/["'`]/.test(text)) return text;
+  const out = text.split("");
+  const n = text.length;
+
+  // Positioned just AFTER an opening quote at `start`; mask the string body,
+  // recursing into any `${...}` (template only) so interpolated code stays
+  // intact. Returns the index just after the closing quote (or n if unterminated).
+  function maskString(start: number, quote: string): number {
+    let i = start;
+    while (i < n) {
+      const c = text[i];
+      if (c === "\\") { out[i] = " "; if (i + 1 < n) out[i + 1] = " "; i += 2; continue; }
+      if (c === quote) return i + 1;
+      if (quote === "`" && c === "$" && text[i + 1] === "{") {
+        i = scanCode(i + 2); // `${` and its body stay intact; nested strings masked within
+        continue;
+      }
+      out[i] = " ";
+      i++;
+    }
+    return i;
+  }
+
+  // Positioned just after `${`; walk the interpolation's real code (left
+  // intact), masking any nested string literals, until the matching `}`.
+  function scanCode(start: number): number {
+    let i = start;
+    let depth = 1;
+    while (i < n) {
+      const c = text[i];
+      if (c === '"' || c === "'" || c === "`") { i = maskString(i + 1, c); continue; }
+      if (c === "{") { depth++; i++; continue; }
+      if (c === "}") { depth--; i++; if (depth === 0) return i; continue; }
+      i++;
+    }
+    return i;
+  }
+
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") { i = maskString(i + 1, c); continue; }
+    i++;
+  }
+  return out.join("");
+}
+
+const REGEX_PRECEDING_KEYWORDS = new Set<string>([
+  "return", "typeof", "instanceof", "in", "of", "case", "delete", "void",
+  "do", "else", "yield", "await", "throw", "new",
+]);
+
+/**
+ * Indent each physical line of emitted JS `code` by `indent` — EXCEPT a line that
+ * begins inside the RAW text of an unterminated multi-line template literal, where
+ * the newline is string CONTENT, not layout, so a prefix would silently corrupt the
+ * literal's cooked value (an email body / CSV / PEM blob / LLM prompt returned from
+ * a server fn would ship with leading whitespace injected into every continuation
+ * line — `g-server-fn-body-reindent-corrupts-multiline-template-literals`). Newlines
+ * inside a `${…}` interpolation, or in ordinary code, ARE layout and get indented.
+ * For any body with no multi-line template literal (the common case) the output is
+ * byte-identical to a blind `code.split("\n").map(l => indent + l)`.
+ *
+ * THE ONE SHARED RE-INDENTER (S361). Three copies drifted before: emit-server's
+ * (a template-aware lexer that desynced on regex literals) and two BLIND
+ * `split("\n")+prefix` loops in emit-tool / emit-library-shared that corrupted a
+ * multi-line template unconditionally. Converged here so a fix lands once.
+ *
+ * A mini JS lexer tracks the states that decide whether a newline is content or
+ * layout: `'`/`"` strings, `` ` `` template raw text, `${…}` expr nesting
+ * (brace-counted, templates nest), `//` / `/* *​/` comments, AND **regex literals**
+ * (incl. `[…]` char classes, where `/` does not close). Regex-vs-division is
+ * disambiguated by the previous significant token: `/` divides iff the prior
+ * non-space char is an operand-end (`ident`/digit/`)`/`]`/`}`/quote/backtick) and the
+ * prior word is not a regex-preceding keyword (`return /re/`, `typeof /re/`, …);
+ * otherwise it opens a regex. Without regex handling a `name.replace(/['"]/g, "")`
+ * before a template desynced the lexer (the `'` inside the regex opened a phantom
+ * string) and the template's continuation lines were blindly indented — a real,
+ * silent, node-check-clean corruption on the most ordinary sanitizer.
+ */
+export function indentBodyLines(code: string, indent: string): string[] {
+  const out: string[] = [];
+  let line = "";
+  const stack: Array<{ k: "code" | "expr" | "sq" | "dq" | "tmpl" | "lc" | "bc" | "regex" | "rclass"; brace: number }> = [{ k: "code", brace: 0 }];
+  const top = () => stack[stack.length - 1];
+  let indentThisLine = true;
+  // Regex-vs-division disambiguation state (code/expr context only):
+  let prevSig = "";  // last significant (non-space) char
+  let word = "";     // the identifier run ending at prevSig (for keyword lookup)
+  const flush = (nl: boolean): void => {
+    out.push((indentThisLine ? indent : "") + line);
+    line = "";
+    if (nl) indentThisLine = top().k !== "tmpl";
+  };
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i], n = code[i + 1];
+    if (c === "\n") {
+      if (top().k === "lc") stack.pop(); // a `//` line comment ends at the newline
+      flush(true);
+      continue;
+    }
+    line += c;
+    const t = top();
+    if (t.k === "lc") {
+      // inside a line comment — ignore every delimiter until the newline (above)
+    } else if (t.k === "bc") {
+      if (c === "*" && n === "/") { line += n; i++; stack.pop(); } // end of block comment
+    } else if (t.k === "sq") {
+      if (c === "\\") { if (n != null) { line += n; i++; } }
+      else if (c === "'") { stack.pop(); prevSig = "'"; }
+    } else if (t.k === "dq") {
+      if (c === "\\") { if (n != null) { line += n; i++; } }
+      else if (c === '"') { stack.pop(); prevSig = '"'; }
+    } else if (t.k === "tmpl") {
+      if (c === "\\") { if (n != null) { line += n; i++; } }
+      else if (c === "`") { stack.pop(); prevSig = "`"; }
+      else if (c === "$" && n === "{") { line += n; i++; stack.push({ k: "expr", brace: 0 }); prevSig = ""; word = ""; }
+    } else if (t.k === "regex") {
+      if (c === "\\") { if (n != null) { line += n; i++; } }
+      else if (c === "[") { stack.push({ k: "rclass", brace: 0 }); }
+      else if (c === "/") {
+        stack.pop();
+        while (i + 1 < code.length && /[a-z]/i.test(code[i + 1])) { line += code[i + 1]; i++; } // flags
+        prevSig = "/"; // closing delim = operand end
+      }
+    } else if (t.k === "rclass") {
+      if (c === "\\") { if (n != null) { line += n; i++; } }
+      else if (c === "]") { stack.pop(); }
+    } else { // "code" or "expr"
+      if (c === "/" && n === "/") { line += n; i++; stack.push({ k: "lc", brace: 0 }); }
+      else if (c === "/" && n === "*") { line += n; i++; stack.push({ k: "bc", brace: 0 }); }
+      else if (c === "/") {
+        const divides = /[A-Za-z0-9_$)\]}"'`]/.test(prevSig) && !REGEX_PRECEDING_KEYWORDS.has(word);
+        if (!divides) stack.push({ k: "regex", brace: 0 });
+        else prevSig = "/";
+        word = "";
+      }
+      else if (c === "'") { stack.push({ k: "sq", brace: 0 }); word = ""; }
+      else if (c === '"') { stack.push({ k: "dq", brace: 0 }); word = ""; }
+      else if (c === "`") { stack.push({ k: "tmpl", brace: 0 }); word = ""; }
+      else if (c === "{") { t.brace++; prevSig = "{"; word = ""; }
+      else if (c === "}") { if (t.k === "expr" && t.brace === 0) stack.pop(); else t.brace--; prevSig = "}"; word = ""; }
+      else if (/\s/.test(c)) { /* whitespace: keep prevSig/word */ }
+      else {
+        prevSig = c;
+        if (/[A-Za-z0-9_$]/.test(c)) word += c; else word = "";
+      }
+    }
+  }
+  flush(false);
+  return out;
+}
+
+/**
  * Replace `@varName` references in a CSS value string with CSS custom property
  * references: `var(--scrml-varName)`.
  *

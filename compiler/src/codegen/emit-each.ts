@@ -220,12 +220,16 @@ function exprNodeHasMarkupValue(node: any): boolean {
 // RESIDUALS (documented, out of scope for #161):
 //   - Cross-file IMPORTED markup fns are not in this same-file set (would need
 //     exportRegistry threading) — the interp still stringifies for them.
-//   - A same-file fn that returns markup only TRANSITIVELY (`fn wrap(n){ return
-//     badge(n) }`) is not detected — "returns markup" here means the return
-//     carries a markup value DIRECTLY (a markup literal / ternary-or-match
-//     markup branch), not a call to another markup fn. A transitive fixpoint is
-//     a safe (never over-wraps a string) follow-on.
-//   - Markup-typed struct FIELDS used bare (`${it.badge}`) are not detected.
+//   - Markup-typed struct FIELDS used bare (`${it.badge}`) are not detected —
+//     mounting a bare member-access interp is a newly-accepting language-surface
+//     decision (bryan's lane), not a codegen hole.
+//
+// CLOSED (S361): a same-file fn that returns markup only TRANSITIVELY (`fn
+// wrap(n){ return badge(n) }`) IS now detected — `collectMarkupReturningFnNames`
+// runs a fixpoint over `fnBodyReturnsCallToMarkupFn` so a chain wrap→badge→…
+// closes fully. Still same-file only (cross-file IMPORTED markup fns remain a
+// residual — would need exportRegistry threading; the interp still stringifies
+// for them).
 // ---------------------------------------------------------------------------
 
 // Module-level, set once per file at emitEachBodyRenderForFile entry, cleared
@@ -328,6 +332,7 @@ function fnBodyReturnsMarkup(body: any): boolean {
  */
 function collectMarkupReturningFnNames(fileAST: any): Set<string> {
   const out = new Set<string>();
+  const named: Array<{ name: string; body: any }> = [];
   const visited = new WeakSet<object>();
   const walk = (node: any): void => {
     if (!node || typeof node !== "object") return;
@@ -337,8 +342,9 @@ function collectMarkupReturningFnNames(fileAST: any): Set<string> {
     }
     if (visited.has(node)) return;
     visited.add(node);
-    if (node.kind === "function-decl" && typeof node.name === "string" && node.name && fnBodyReturnsMarkup(node.body)) {
-      out.add(node.name);
+    if (node.kind === "function-decl" && typeof node.name === "string" && node.name) {
+      named.push({ name: node.name, body: node.body });
+      if (fnBodyReturnsMarkup(node.body)) out.add(node.name);
     }
     for (const key of Object.keys(node)) {
       const v = (node as Record<string, unknown>)[key];
@@ -346,7 +352,52 @@ function collectMarkupReturningFnNames(fileAST: any): Set<string> {
     }
   };
   walk(fileAST);
+  // Transitive fixpoint (documented residual: `fn wrap(n){ return badge(n) }`).
+  // A fn whose return YIELDS a call to an already-known markup fn is itself
+  // markup-returning, so `${wrap(it.name)}` in a nested each interp mounts
+  // instead of `String()`-ing the returned DOM node. Fail-safe: the same
+  // positional `interpMayYieldNode` used at the interp site never returns true
+  // for a string-yielding shape, so the set only ever WIDENS onto genuinely
+  // markup-returning fns — and the emitted mount is `instanceof Node`-guarded
+  // regardless. Iterate to a fixpoint so a chain (wrap→badge→…) is fully closed.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const { name, body } of named) {
+      if (out.has(name)) continue;
+      if (fnBodyReturnsCallToMarkupFn(body, out)) { out.add(name); changed = true; }
+    }
+  }
   return out;
+}
+
+/**
+ * Body-scan sibling of `fnBodyReturnsMarkup` for the transitive step: does this
+ * fn body have a `return` whose VALUE is a call to a fn already in `markupFns`
+ * (or a ternary/match whose value branches are)? Reuses the interp-site
+ * `interpMayYieldNode` so the "yields a node" judgment is identical at the
+ * return position and the interp position. Does NOT descend a nested
+ * `function-decl` (its returns are its own).
+ */
+function fnBodyReturnsCallToMarkupFn(body: any, markupFns: Set<string>): boolean {
+  const seen = new WeakSet<object>();
+  const scan = (n: any): boolean => {
+    if (!n || typeof n !== "object") return false;
+    if (Array.isArray(n)) {
+      for (const x of n) if (scan(x)) return true;
+      return false;
+    }
+    if (seen.has(n)) return false;
+    seen.add(n);
+    if (n.kind === "function-decl") return false;
+    if (n.kind === "return-stmt" && interpMayYieldNode(n.exprNode, markupFns)) return true;
+    for (const key of Object.keys(n)) {
+      const v = (n as Record<string, unknown>)[key];
+      if (v && typeof v === "object" && scan(v)) return true;
+    }
+    return false;
+  };
+  return scan(body);
 }
 
 /**

@@ -839,6 +839,39 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
  * structured (non-escape-hatch) form under the active regime, else the input
  * node unchanged (the string-fallback / drop path is preserved byte-identically).
  */
+/**
+ * True when `raw` carries a top-level statement SEPARATOR — a `;` at bracket depth
+ * 0, outside any string, with non-whitespace after it (a bare trailing `;` does
+ * NOT count). Such a raw is a multi-STATEMENT body, not a single expression;
+ * `parseExprToNode` would silently keep only the first statement and DROP the rest.
+ * Reparsing it is therefore a truncation, so the reparse is skipped and the caller's
+ * pre-fix (string-fallback) path — which emits the whole body — is preserved.
+ *
+ * This only ever fires for the event-HANDLER callers (`onclick=${a(); b()}`); an
+ * attribute VALUE (`class=${<#r>.data is some ? … : …}`) is always a single
+ * expression, so this is a no-op for the value/bool/class/if seams (byte-identical).
+ * (S362 — a `<#request>`-leading multi-statement handler was routing the ref but
+ * dropping the trailing statements; the escape-hatch has no per-statement tree form,
+ * so the honest interim is to leave that rare shape on its pre-fix path.)
+ */
+function rawHasTopLevelStatementSep(raw: string): boolean {
+  let depth = 0;
+  let str: string | null = null;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (str) {
+      if (c === "\\" && i + 1 < raw.length) { i++; }
+      else if (c === str) str = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
+    if (c === ";" && depth === 0 && raw.slice(i + 1).trim().length > 0) return true;
+  }
+  return false;
+}
+
 export function reparseRequestRefEscapeHatch(
   node: ExprNode | null | undefined,
   raw: string | undefined,
@@ -857,6 +890,9 @@ export function reparseRequestRefEscapeHatch(
     (!node || (node as any).kind === "escape-hatch") &&
     typeof raw === "string" &&
     raw.includes("<#") &&
+    // A multi-statement body (event handler `${a(); b()}`) cannot become a single
+    // ExprNode without dropping the trailing statements — leave it on its pre-fix path.
+    !rawHasTopLevelStatementSep(raw) &&
     (!gateToRegisteredRequests ||
       (effIds !== undefined &&
         effIds.size > 0 &&

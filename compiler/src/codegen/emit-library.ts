@@ -409,8 +409,8 @@ function emitAsyncLibraryFns(
   crossImportSeed: Set<string> | undefined,
   filePath: string,
   errors: CGError[],
-): { removals: Array<{ start: number; end: number }>; lines: string[] } {
-  const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[] };
+): { removals: Array<{ start: number; end: number }>; lines: string[]; routedNames: Set<string> } {
+  const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[], routedNames: new Set<string>() };
   if (!Array.isArray(logicBody) || !calleeMap || !exportRegistry || exportRegistry.size === 0) {
     return none;
   }
@@ -510,7 +510,104 @@ function emitAsyncLibraryFns(
   for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
   // E-SQL-006 .prepare() diagnostics from lowering an async fn body.
   for (const e of preparedStmtErrors) if (e) errors.push(e as CGError);
+  return { removals, lines: outLines, routedNames: new Set(toEmit.map((f) => f.name as string)) };
+}
+
+/**
+ * §18 cross-mode parity (g-library-mode-match-expr-fails-codegen) — route every
+ * library function-decl whose body contains a `match` expression that browser
+ * mode LOWERS but the whole-block text path passes through RAW through the SAME
+ * structured `emitLibraryFnMember` the async / server / tool paths use. The
+ * whole-block slicer below emits fn bodies verbatim, so a `match` expression leaks
+ * its raw scrml syntax into the importable `.js` — invalid JS that trips the
+ * §2.2.1 E-CODEGEN-INVALID-LOGIC emit gate — exactly as a raw `!{}` / `?{}` would.
+ * Mirrors `emitAsyncLibraryFns`: returns the source SPANS to prune (the caller
+ * merges them into the prune pass so the verbatim copy is removed) plus the
+ * structured JS to append.
+ *
+ * Selection is disjoint from the async / SQL routers by construction:
+ *   - `alreadyRouted` names are the async / nested-async-holder fns emitted
+ *     structurally above (their body already lowers the match) — skip them.
+ *   - a `?{}` / transaction fn is pruned to `.server.js` by
+ *     `collectSqlFnRemovalRanges` (its whole body, match included) — skip it.
+ * What remains is a pure SYNC fn whose ONLY blocker to valid output is the
+ * unlowered `match`, so `emitLibraryFnMember` with an empty async set (client
+ * boundary) reproduces browser mode's client lowering byte-for-byte.
+ *
+ * Detection is by AST node kind (`match-expr`/`match-stmt`, or a `matchExpr`
+ * attachment on an enclosing return/let/const), NOT by span-splicing the inner
+ * node: the match-expr node's own span bleeds across the enclosing `return ` and
+ * the fn's trailing brace, so re-emitting the WHOLE fn from the AST (which the
+ * shared member emitter already does correctly) is the sound unit. `if`-expression
+ * forms are deliberately NOT routed — see `fnBodyContainsMatch`.
+ */
+function emitControlFlowLibraryFns(
+  logicBody: unknown,
+  sourceText: string,
+  alreadyRouted: Set<string>,
+): { removals: Array<{ start: number; end: number }>; lines: string[] } {
+  const removals: Array<{ start: number; end: number }> = [];
+  const outLines: string[] = [];
+  if (!Array.isArray(logicBody)) return { removals, lines: outLines };
+  const emptyAsync = new Set<string>();
+  for (const node of logicBody as ASTNode[]) {
+    if (!node || node.kind !== "function-decl" || typeof node.name !== "string") continue;
+    if (alreadyRouted.has(node.name)) continue;
+    if (containsSqlOrTransaction(node)) continue;
+    if (!fnBodyContainsMatch(node)) continue;
+    const sp = node.span as Span | undefined;
+    if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
+    // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the decl
+    // span starts at `function`/`fn` (mirrors emitAsyncLibraryFns / collectSqlFnRemovalRanges).
+    const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
+    const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
+    const prefixLen = m ? m[1].length : 0;
+    removals.push({ start: sp.start - prefixLen, end: sp.end });
+    outLines.push(
+      emitLibraryFnMember(node, { isExported: node.fromExport === true, asyncFnNames: emptyAsync }),
+    );
+  }
   return { removals, lines: outLines };
+}
+
+/**
+ * True when a library fn body holds a `match` expression the whole-block text
+ * path cannot lower — a bare `match`/`match-expr` node (statement position) or a
+ * `matchExpr` attachment on an enclosing `return`/`let`/`const`. Walks the whole
+ * body so a `match` nested inside a block-arm / inner helper is caught too;
+ * routing the enclosing fn structurally lowers the nested one in the same pass.
+ *
+ * SCOPE (deliberate — match ONLY, not `if`): browser mode's `if`-expression-value
+ * lowering is itself broken (an `if`-bound `let` compiles but the arm values
+ * assign to fresh block-scoped temps, so the binding stays `null` at runtime — a
+ * silent-wrong in BOTH modes, filed as g-if-expression-value-binding-lowers-null).
+ * Routing an `if`-bearing fn here would trade library's loud
+ * E-CODEGEN-INVALID-LOGIC for that silent-wrong — the dangerous direction — so
+ * `if` stays raw-failing (loud, unchanged) until the shared lowering is fixed.
+ * `match` lowers correctly in browser mode (verified byte- and run-identical), so
+ * routing it is pure cross-mode parity.
+ */
+function fnBodyContainsMatch(fnNode: ASTNode): boolean {
+  let found = false;
+  const walk = (n: unknown): void => {
+    if (found || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      for (const c of n) walk(c);
+      return;
+    }
+    const o = n as Record<string, unknown>;
+    const k = o.kind;
+    if (k === "match-expr" || k === "match-stmt" || o.matchExpr) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(o)) {
+      const v = o[key];
+      if (v && typeof v === "object") walk(v);
+    }
+  };
+  walk(fnNode.body);
+  return found;
 }
 
 /**
@@ -759,13 +856,23 @@ export function generateLibraryJs(
           filePath,
           errors,
         );
+        // g-library-mode-match-expr-fails-codegen — route the remaining SYNC fns
+        // whose body holds an unlowered `match`/`if` expression through the same
+        // structured member emitter (disjoint from the async / SQL routers). Its
+        // removals join the async removals in the single prune-splice below so the
+        // verbatim `match` text is excised; its lines are appended alongside.
+        const controlFlowEmit = emitControlFlowLibraryFns(
+          logic.body,
+          sourceText,
+          asyncEmit.routedNames,
+        );
         blockText = pruneServerFnsAndLowerGuarded(
           blockText,
           logicSpan.start,
           logic.body,
           sourceText,
           errors,
-          asyncEmit.removals,
+          [...asyncEmit.removals, ...controlFlowEmit.removals],
         );
         // Strip the ${ prefix and } suffix
         if (blockText.startsWith("${")) blockText = blockText.slice(2);
@@ -823,6 +930,15 @@ export function generateLibraryJs(
         // trailing placement after the imports/sync content is resolution-safe.
         if (asyncEmit.lines.length > 0) {
           for (const fnBlock of asyncEmit.lines) {
+            lines.push(fnBlock);
+            lines.push("");
+          }
+        }
+        // g-library-mode-match-expr-fails-codegen — append the structured
+        // match/if sync fns (pruned from the verbatim block above), same as the
+        // async fns. Function declarations hoist, so trailing placement is safe.
+        if (controlFlowEmit.lines.length > 0) {
+          for (const fnBlock of controlFlowEmit.lines) {
             lines.push(fnBlock);
             lines.push("");
           }
