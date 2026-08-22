@@ -6667,7 +6667,17 @@ Reported by scrml-site's error-code probe harness (one minimal reproducer per §
 
 Row 1 moved because round 1 added a NEW, higher-precedence code and ordered it ahead of the page check — the `pageDepth` reset the ruling actually names was never written. So the ruled direction read as delivered while the row where it has a VISIBLE consequence was untouched. That row is the one that matters: the non-extracted scoped-DB program is the only one of the two whose channel can actually work, and it was the one still being refused. **A precedence ruling implemented by adding a higher-precedence code is not the same change as reversing the precedence** — worth remembering the next time a ruling looks satisfied by a diff that never touched the mechanism the ruling names.
 
-**Round 2 (S356) wrote the reset**: `walkChannelPlacement`'s `childPageDepth` is now `tag === "page" ? pageDepth + 1 : (tag === "program" && programDepth >= 1 ? 0 : pageDepth)`. Measured BEFORE it was taken, not after: on the pre-fix tree `<page>` → `<program db=>` → `<channel>` already emitted BOTH halves — client dial `_scrml_ws/page_feed` AND server route `_scrml_route_ws_page_feed` — so un-refusing it releases a shape that works rather than admitting a broken one.
+**Round 2 (S356) wrote the reset**, as `tag === "page" ? pageDepth + 1 : (tag === "program" && programDepth >= 1 ? 0 : pageDepth)`. Measured BEFORE it was taken, not after: on the pre-fix tree `<page>` → `<program db=>` → `<channel>` already emitted BOTH halves — client dial `_scrml_ws/page_feed` AND server route `_scrml_route_ws_page_feed` — so un-refusing it releases a shape that works rather than admitting a broken one.
+
+**Round 3 replaced the discriminator, and this entry quoted the superseded version for a round.** The live code (`compiler/src/symbol-table.ts:10121`) is now:
+
+```
+const childPageDepth = tag === "page"
+  ? pageDepth + 1
+  : (tag === "program" && !topLevelPrograms.has(node) ? 0 : pageDepth);
+```
+
+`programDepth >= 1` counted `<program>` ANCESTORS, so it incremented only when descending THROUGH a `<program>` — and in a `<page>`-rooted route file, whose root element is not a `<program>`, a nested `<program name="w">` sat at depth 0 and the reset never fired. Membership in the top-level set is positional and cannot miss it: everything with `tag === "program"` that is not a member of `topLevelPrograms` is nested, whatever encloses it. That substitution WAS round 3's HIGH-1 — the same defect class in the extraction pre-pass — so quoting the depth-counter form here left the gap doc asserting the exact predicate that round proved wrong. (Corrected S356 r4.)
 
 **The adjacent question, ANSWERED: no.** `E-CHANNEL-OUTSIDE-PROGRAM`'s `fileHasProgram` pre-scan needs no nesting exception. It counts every `<program>` element in the file, nested ones included, and it cannot be otherwise: a nested `<program>` cannot exist without an enclosing one, so a file containing a nested `<program>` always contains a top-level `<program>` and is never a PURE-CHANNEL-FILE (§38.12.6). Pinned by test rather than argued.
 
