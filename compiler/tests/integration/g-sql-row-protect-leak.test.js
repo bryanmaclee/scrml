@@ -808,6 +808,81 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
     expectCompiledAndProtecting(result);
   });
 
+  // --- THE SAME BOUND, MIRRORED: the EGRESS behind the invisible edge -------
+  //
+  // The three residuals above put the protected SELECT behind an edge the graph
+  // cannot see. These four put the raw EGRESS there, and they are the fifth
+  // executed leak from the round-7 adversarial pass — the one it described as
+  // "an edge the classifier cannot classify at all".
+  //
+  // ⚑ THEY ARE NOT AN EXEMPTION LEAK, and deleting the exemption did not close
+  // them. MEASURED at round 7 on three trees — `origin/main`, the round-6 head,
+  // and this one — every spelling is SILENT on all three. On `origin/main` the
+  // gate has no call graph at all; on the round-6 head the exemption ALSO hid
+  // them; here neither applies and they are still silent, because
+  // `reach(getUser)` simply has no edge to `deny`. That is the intra-file
+  // BARE-IDENTIFIER call-graph bound (residual (2) in
+  // `detectProtectedRawEgressAcrossFns`), a plain CARRY-FORWARD, and closing it
+  // needs the name resolver — it is not a fourth exemption question.
+  //
+  // Executed on the emitted handler against a stubbed `_scrml_sql`: the first
+  // three answered `[["x-user","$argon2id$SECRET"]]` on the response HEADERS
+  // with body `"Forbidden"` and status 403 — header-only, so a body-only probe
+  // reads them clean. They are pinned HERE so that closing the bound turns these
+  // red and forces the bound paragraph to be updated in the same change.
+  const invisibleEgressEdges = {
+    "an ALIASED callee (`let make = deny; make()`)":
+      `let make = deny\n        let r = make()`,
+    "a MEMBER callee (`http.deny()`)":
+      `let http = { deny: deny }\n        let r = http.deny()`,
+    "an INDEX callee (`handlers[\"deny\"]()`)":
+      `let handlers = { deny: deny }\n        let r = handlers["deny"]()`,
+  };
+  for (const [label, bind] of Object.entries(invisibleEgressEdges)) {
+    test(`RESIDUAL (documented): the EGRESS behind an invisible edge — ${label}`, () => {
+      const { result } = compileSource(protectProgram(
+        `      function deny() {\n` +
+        `        return new Response("Forbidden", { status: 403 })\n` +
+        `      }\n` +
+        `      export server function getUser(id) {\n` +
+        `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+        `        ${bind}\n` +
+        `        r.headers.set("x-user", u.passwordHash)\n` +
+        `        return r\n` +
+        `      }`,
+      ));
+      expect(fires(result)).toBe(false);
+      // ...and the silence is the RESIDUAL, not a fixture that never compiled.
+      expectCompiledAndProtecting(result);
+    });
+  }
+
+  // The fourth spelling — a PARAMETER callee (`apply(deny)`). It gets its own
+  // test because it additionally surfaces a SEPARATE, pre-existing codegen gap:
+  // a server fn referenced as a VALUE emits no in-process peer, so the emitted
+  // handler dies on `ReferenceError: deny is not defined` rather than shipping
+  // the secret. The gate's silence here is still the call-graph bound (`apply`
+  // is reached, `deny` is not), which is what this test pins; the peer-emission
+  // gap is handed back separately and is NOT a §14.8.9 question.
+  test("RESIDUAL (documented): the EGRESS behind an invisible edge — a PARAMETER callee (`apply(deny)`)", () => {
+    const { result } = compileSource(protectProgram(
+      `      function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }\n` +
+      `      function apply(f) {\n` +
+      `        return f()\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        let r = apply(deny)\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
+  });
+
   // The cross-FILE half of the same bound. The call graph is built from THIS
   // file's `function-decl` set, so an imported helper contributes no edge even
   // though the row crosses the boundary at runtime exactly as it would in-file.
@@ -986,9 +1061,12 @@ describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key 
 //      through a pass-through (`function passthru() { return deny() }`).
 //   5. v3 again, through an edge the classifier cannot classify AT ALL:
 //      `let make = deny; make()`, `http.deny()`, `handlers["deny"]()`,
-//      `apply(deny)`. See the residual describe at the end of this file — those
-//      four are silent on `origin/main` too, for the call-GRAPH bound rather
-//      than for the exemption, and deleting the exemption does not close them.
+//      `apply(deny)`. See the `RESIDUAL (documented): the EGRESS behind an
+//      invisible edge` tests in the M2 describe above — all four are silent on
+//      `origin/main` and on the round-6 head too, for the call-GRAPH bound
+//      rather than for the exemption, so deleting the exemption does not close
+//      them and was never going to. Handed back as residual, pinned so it
+//      cannot close silently.
 //
 // It never converged because it cannot. A build error with a workaround beats a
 // fail-open, so the trade is taken in the other direction now: the gate
