@@ -11138,20 +11138,36 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
       const useNode = { id: ++counter.next, kind: "use-decl", raw: rawStr, span, names: [], source: null };
 
-      // §23.4 — `use foreign:name { fn-list }` sidecar declaration. The sidecar
-      // runtime (out-of-process HTTP/socket client codegen) is Nominal/spec-ahead:
-      // NOT implemented in this compiler revision (deferred to scrml-language
-      // v1.next). Fail closed with the honest E-FOREIGN-SIDECAR-NOMINAL — and do
-      // NOT route it as a normal component import. A `foreign:ml` specifier is not
-      // a resolvable module, so a plain use-decl would fire a misleading
-      // E-IMPORT-005 in MOD and emit a broken `import { … } from "foreign:ml"` in
-      // the client/server bundles. Detect on the collected `expr` (the tokenizer
-      // spaces the `:` to `foreign : ml`, so `useNode.source` is unreliable here).
-      // Mark the node nominal + leave the source null so MOD / emit-client /
-      // emit-server skip resolution + import emission; KEEP `names` so the
-      // sidecar-fn names still register in scope (no secondary E-SCOPE-001 on a
-      // `predict(...)` call site). (When the real sidecar layer lands, the spec'd
-      // E-FOREIGN-010/011/012 supersede this fail-closed placeholder.)
+      // §23.4 — `use foreign:name { fn-list }` sidecar declaration. RECOGNIZE it
+      // here; do NOT route it as a normal component import. A `foreign:ml`
+      // specifier is not a resolvable module, so a plain use-decl would fire a
+      // misleading E-IMPORT-005 in MOD and emit a broken
+      // `import { … } from "foreign:ml"` in the client/server bundles. Detect on
+      // the collected `expr` (the tokenizer spaces the `:` to `foreign : ml`, so
+      // `useNode.source` is unreliable here). Mark the node nominal + leave the
+      // source null so MOD / emit-client / emit-server skip resolution + import
+      // emission; KEEP `names` so the sidecar-fn names still register in scope
+      // (no secondary E-SCOPE-001 on a `predict(...)` call site).
+      //
+      // NO DIAGNOSTIC FIRES HERE (S356 r4 ruling). This used to push
+      // `E-FOREIGN-SIDECAR-NOMINAL` — "the §23.4 sidecar layer is Nominal and this
+      // revision does not build it". That code is RETIRED: it said the same thing
+      // as `E-NESTED-PROGRAM-CONTEXT-NOMINAL` (§4.12.9) and was distinguished from
+      // it only by which site noticed the unbuilt context — the `use foreign:`
+      // REFERENCE here, or the `<program name= lang=>` DECLARATION in codegen.
+      // Three rounds tried to draw a line between the two sites and produced a
+      // defect each time (no diagnostic for an unclaimed sidecar; a `route=`
+      // endpoint laundered past the refusal by adding `lang=`; a double fire whose
+      // message denied the `use foreign:` two lines above it). The declaration is
+      // now the single fire site for all four unbuilt §4.12.3 contexts.
+      //
+      // What the reference site DOES still own is its own condition, not
+      // Nominal-ness: `E-FOREIGN-010` (§23.4) — `use foreign:name` naming a
+      // sidecar no nested `<program>` declares. That check needs the whole file
+      // (the declaration may appear after the reference), so it lives in
+      // `codegen/index.ts` `detectUnresolvedForeignSidecarUses`, keyed on the
+      // `_foreignSidecarName` marker set below. §23.4's `E-FOREIGN-011`/`012` land
+      // with the real sidecar layer.
       const foreignSidecarMatch = expr.match(/^\s*foreign\s*:\s*([\w-]+)/);
       if (foreignSidecarMatch) {
         const sidecarName = foreignSidecarMatch[1];
@@ -11159,16 +11175,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (namesMatch) {
           useNode.names = namesMatch[1].split(",").map(s => s.trim()).filter(Boolean);
         }
-        errors.push(new TABError(
-          "E-FOREIGN-SIDECAR-NOMINAL",
-          `E-FOREIGN-SIDECAR-NOMINAL: the \`use foreign:${sidecarName} { ... }\` sidecar ` +
-          `declaration (SPEC §23.4) is Nominal/spec-ahead and is not implemented in this ` +
-          `compiler revision; tracked for scrml-language v1.next. Sidecar processes ` +
-          `(out-of-process Go/Python/… services) have no HTTP/socket client codegen yet — ` +
-          `remove the \`use foreign:\` import (and its sidecar \`<program>\`), or move the ` +
-          `logic into a server \`function\`, until v1.next lands the §23.4 sidecar layer.`,
-          span,
-        ));
         useNode._foreignSidecarNominal = true;
         useNode._foreignSidecarName = sidecarName;
         nodes.push(useNode);

@@ -62,6 +62,16 @@ afterAll(() => {
   if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true });
 });
 
+/**
+ * Hash-safe worker-bundle predicate. Under `contentHashAssets` the bundle is
+ * written as `<base>.<name>.worker.<hash>.js`, so a bare `.endsWith(".worker.js")`
+ * finds ZERO and every worker assertion in this file passes VACUOUSLY. This suite
+ * does not pass that option today — which is precisely why the wrong predicate
+ * would sit here undetected until someone did. (The same bug was found and fixed
+ * in `probes/build-matrix.mjs`, where it had silently voided 20 of 40 builds.)
+ */
+const IS_WORKER = /\.worker(\.[a-z0-9]+)?\.js$/;
+
 /** Compile one source string into its own dist dir and report what landed. */
 function build(dir, src, opts = {}) {
   const root = join(TMP, dir);
@@ -81,7 +91,7 @@ function build(dir, src, opts = {}) {
   return {
     outDir,
     files: listed,
-    workerFilesOnDisk: listed.filter((f) => f.endsWith(".worker.js")).sort(),
+    workerFilesOnDisk: listed.filter((f) => IS_WORKER.test(f)).sort(),
     errors: result.errors ?? [],
     warnings: result.warnings ?? [],
     clientJs: read("app.client.js"),
@@ -91,6 +101,13 @@ function build(dir, src, opts = {}) {
 }
 
 const codesOf = (o) => [...o.errors, ...o.warnings].map((e) => e.code);
+/**
+ * COUNT, not membership. `expect(codesOf(o)).toContain(X)` is satisfied by ONE
+ * fire and by TWO, which is exactly how the r3 double-fire survived a full
+ * conformance run — one-diagnostic-per-unbuilt-declaration is a claim about
+ * cardinality, so it has to be asserted as one.
+ */
+const countOf = (o, code) => codesOf(o).filter((c) => c === code).length;
 
 /** Every `new Worker("…")` specifier in the written client bundle. */
 const workerRefs = (o) =>
@@ -221,10 +238,11 @@ const SIDECAR_WITH_PORT = `<program>
 
 /**
  * The two sidecar spellings above, each CLAIMED by a `use foreign:` in the
- * parent. §23.4's carve-out is what these exercise: with a `use foreign:` present
- * there IS a site for `E-FOREIGN-SIDECAR-NOMINAL` to fire at, so the declaration
- * must stay quiet. Without one — the fixtures above — the declaration is the only
- * place a diagnostic can go.
+ * parent. There is no longer a carve-out to exercise (S356 r4 retired
+ * `E-FOREIGN-SIDECAR-NOMINAL`); what these pin now is that CLAIMING a sidecar
+ * changes NOTHING about the refusal. Same code, same count, same site. The claim
+ * used to be the discriminator between two codes, and that discriminator is what
+ * produced a defect in each of the three preceding rounds.
  */
 const SIDECAR_NO_PORT_CLAIMED = `<program>
 
@@ -323,23 +341,28 @@ describe("§4.12.5 foreign sidecar — §23.4 owns the diagnostic, both spelling
     assertWorkerArtifactsAreCoherent(o);
   });
 
-  test("a CLAIMED sidecar does NOT also fire E-NESTED-PROGRAM-CONTEXT-NOMINAL", () => {
-    // Deliberate, and unchanged. §23.4 already fails the sidecar closed at the
-    // `use foreign:name { … }` site with the ratified E-FOREIGN-SIDECAR-NOMINAL.
-    // Firing a second code at the declaration would put two errors on one
-    // unbuilt shape — two diagnostics for one mistake.
+  test("a CLAIMED sidecar is refused at its DECLARATION, exactly once", () => {
+    // REWRITTEN S356 r4, and this is the third rewrite of this one assertion.
     //
-    // CORRECTED S356 r3: this used to assert the absence on the two fixtures
-    // above, which declare a sidecar and NEVER `use foreign:` it. That made the
-    // carve-out UNCONDITIONAL, and an unconditional carve-out suppresses the ONLY
-    // diagnostic when there is no `use foreign:` to fire at — the shape compiled
-    // exit 0 with its body silently discarded. The rule is one-diagnostic-per-
-    // mistake, so the fixtures here now actually claim their sidecar. See
-    // `nested-program-sidecar-unclaimed.test.js` for the other half.
+    //   r1/r2: "a CLAIMED sidecar does NOT fire E-NESTED-PROGRAM-CONTEXT-NOMINAL"
+    //          — asserted on fixtures that never claimed anything, which made the
+    //          carve-out unconditional and left an unclaimed sidecar silent.
+    //   r3:    same assertion, on fixtures that DO claim — which was true for
+    //          these two and false for the ratified capability cases, whose
+    //          `use foreign:` sits inside the sidecar's own subtree. Double fire.
+    //   r4:    there is no carve-out. Claiming a sidecar does not change which
+    //          code fires, or how many.
+    //
+    // Asserted by COUNT, not membership: a `not.toContain` on one code plus a
+    // `toContain` on the other cannot see a double fire of a single code, and
+    // membership checks are what let r3 through a full conformance run.
     for (const [dir, src] of [["sc-a", SIDECAR_NO_PORT_CLAIMED], ["sc-b", SIDECAR_WITH_PORT_CLAIMED]]) {
       const o = build(dir, src);
-      expect(codesOf(o)).toContain("E-FOREIGN-SIDECAR-NOMINAL");
-      expect(codesOf(o)).not.toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+      expect(countOf(o, "E-NESTED-PROGRAM-CONTEXT-NOMINAL")).toBe(1);
+      // The retirement guard.
+      expect(countOf(o, "E-FOREIGN-SIDECAR-NOMINAL")).toBe(0);
+      // The name resolves, so the §23.4 reference check stays quiet.
+      expect(countOf(o, "E-FOREIGN-010")).toBe(0);
     }
   });
 
@@ -348,7 +371,7 @@ describe("§4.12.5 foreign sidecar — §23.4 owns the diagnostic, both spelling
     // `port=`-less one cannot regress back into silence.
     for (const [dir, src] of [["sc-u-a", SIDECAR_NO_PORT], ["sc-u-b", SIDECAR_WITH_PORT]]) {
       const o = build(dir, src);
-      expect(codesOf(o)).toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+      expect(countOf(o, "E-NESTED-PROGRAM-CONTEXT-NOMINAL")).toBe(1);
       // Still no worker artifacts either way — the round-2 guarantee holds.
       expect(workerRefs(o)).toEqual([]);
       expect(o.workerFilesOnDisk).toEqual([]);

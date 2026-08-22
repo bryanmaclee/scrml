@@ -65,7 +65,7 @@ type ASTNodeLike = Record<string, unknown>;
 export type NestedProgramKind =
   /** §4.12.4 — `name=` and nothing else context-bearing. `new Worker()` + postMessage IPC. IMPLEMENTED. */
   | "inline-worker"
-  /** §4.12.5 — `name=` + `lang=` (non-WASM) and/or `port=`. Subprocess + HTTP/socket. Nominal (§23.4). */
+  /** §4.12.5 — `name=` + `lang=` (non-WASM) and/or `port=`. Subprocess + HTTP/socket. NOT IMPLEMENTED (§23.4 Nominal). */
   | "foreign-sidecar"
   /** §4.12.3 — `name=` + `mode="wasm"`. `WebAssembly.instantiate()`. NOT IMPLEMENTED. */
   | "wasm-module"
@@ -202,13 +202,33 @@ export function nestedProgramSubtreeIsExtracted(programNode: unknown): boolean {
  * The §4.12.3 execution-context types whose CODEGEN is Nominal/spec-ahead — the
  * shapes `E-NESTED-PROGRAM-CONTEXT-NOMINAL` refuses.
  *
- * `foreign-sidecar` is deliberately ABSENT: §23.4 already fails it closed at the
- * `use foreign:name { … }` site with the ratified `E-FOREIGN-SIDECAR-NOMINAL`,
- * and firing a second code at the declaration would put two errors on one
- * unbuilt shape.
+ * ALL FOUR UNBUILT CONTEXTS, `foreign-sidecar` INCLUDED (S356 r4 ruling). The
+ * three revisions before this one carved the sidecar out and tried to say WHEN
+ * the carve-out applied; each attempt produced a defect, and every one of them
+ * lived in the carve-out:
+ *
+ * 1. an unconditional exemption gave an UNCLAIMED sidecar no diagnostic at all —
+ *    the covering code fires at a `use foreign:` site, and there was none;
+ * 2. `<program name="api" route="/api/v1" lang="go">` LAUNDERED past the refusal,
+ *    because `lang=` outranks `route=` in the §4.12.3 classifier and so routed a
+ *    server endpoint down the exempt path;
+ * 3. the conditional carve-out that fixed (1) DOUBLE-FIRED on the two ratified
+ *    capability cases, with a message asserting the file contains no
+ *    `use foreign:` when line 3 of it does.
+ *
+ * The common cause is not any of the three conditions: it is that TWO codes said
+ * the same thing — *this context is specified but unbuilt; refuse rather than
+ * emit a stub* — and were told apart by WHICH SITE NOTICED. `E-FOREIGN-SIDECAR-NOMINAL`
+ * is retired; the declaration is the single fire site for all four, so there is
+ * no longer a condition to get wrong.
+ *
+ * The `use foreign:name` REFERENCE keeps its own diagnostic, but for its own
+ * condition rather than for Nominal-ness: `E-FOREIGN-010` (§23.4), an unresolved
+ * name. That code outlives the Nominal period — `use foreign:ghost` with nothing
+ * declaring `ghost` is an error after the sidecar layer lands too.
  */
 export function nestedProgramContextIsNominal(kind: NestedProgramKind): boolean {
-  return kind === "wasm-module" || kind === "server-endpoint";
+  return kind === "foreign-sidecar" || kind === "wasm-module" || kind === "server-endpoint";
 }
 
 /** Human-readable §4.12.3 context label + runtime model, for diagnostics. */

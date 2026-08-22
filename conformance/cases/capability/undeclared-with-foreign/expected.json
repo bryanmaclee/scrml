@@ -1,16 +1,21 @@
 {
   "id": "capability-undeclared-with-foreign",
-  "description": "§23.5.5 — a foreign-code construct (`use foreign:ml` sidecar, §23.4) with NO `capabilities=` on any ancestor `<program>` is governed by the empty (declare-nothing) set, so the presence-nudge W-FOREIGN-UNDECLARED-CAPABILITY fires (Info). The lint nudges the author to declare the scope's intended capability surface. It is PRESENCE-only (opacity bound §23.2.3 — it never inspects the foreign interior). Advisory (Info) — never blocks the build.",
+  "description": "§23.5.5 — a foreign-code construct (`use foreign:ml` sidecar, §23.4) with NO `capabilities=` on any ancestor `<program>` is governed by the empty (declare-nothing) set, so the presence-nudge W-FOREIGN-UNDECLARED-CAPABILITY fires (Info). The lint nudges the author to declare the scope's intended capability surface. It is PRESENCE-only (opacity bound §23.2.3 — it never inspects the foreign interior). Advisory (Info) — never blocks the build. CODE UPDATED S356 r4, and this case is the one that MOVED rather than renamed: the co-occurring error used to be `E-FOREIGN-SIDECAR-NOMINAL` (\"the §23.4 sidecar runtime is unbuilt\"), but this file declares no nested `<program name=\"ml\">` AT ALL — the `lang=\"ts\"` is on the top-level `<program>` — so what is actually wrong with it is that `use foreign:ml` names a sidecar nothing declares. That is `E-FOREIGN-010` (§23.4, normative since the section landed, first emitted S356 r4). The retired code was covering an unresolved reference under a Nominal banner, which is exactly why retiring it needed a real closure rather than a deletion.",
   "language-version": "1.0",
-  "spec": "§23.5.5, §23.5.7",
+  "spec": "§23.5.5, §23.5.7, §23.4",
   "source-test": "compiler/tests/unit/capability-declaration.test.js",
-  "rationale": "§23.5.5: the compiler SHALL emit W-FOREIGN-UNDECLARED-CAPABILITY (Info) when a foreign construct is governed by an empty capability set. Here no ancestor declares `capabilities=` → empty → the lint fires as Info (partitions into result.warnings; CLI exit driven by the co-occurring E-FOREIGN-SIDECAR-NOMINAL, which is the §23.4 Nominal fail-closed). No E-SCOPE-001.",
+  "rationale": "§23.5.5: the compiler SHALL emit W-FOREIGN-UNDECLARED-CAPABILITY (Info) when a foreign construct is governed by an empty capability set. Here no ancestor declares `capabilities=` → empty → the lint fires as Info (partitions into result.warnings; CLI exit driven by the co-occurring E-FOREIGN-010, an Error). §23.4 normative: \"The `name` in `use foreign:name` MUST match the `name=` attribute of a nested `<program>` declared within the same top-level `<program>`. An unresolved name SHALL be a compile error (E-FOREIGN-010).\" No nested `<program>` exists here, so it fires. E-NESTED-PROGRAM-CONTEXT-NOMINAL does NOT: that code refuses a nested-`<program>` DECLARATION, and there is none to refuse. No E-SCOPE-001 — the sidecar fn names stay in scope by design, so a `predict(...)` call site does not double-report.",
   "expect": {
-    "codes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-FOREIGN-SIDECAR-NOMINAL"],
-    "notCodes": ["E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN"],
+    "codes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-FOREIGN-010"],
+    "notCodes": [
+      "E-FOREIGN-SIDECAR-NOMINAL",
+      "E-NESTED-PROGRAM-CONTEXT-NOMINAL",
+      "E-SCOPE-001",
+      "E-FOREIGN-CAPABILITY-UNKNOWN"
+    ],
     "severity": {
       "W-FOREIGN-UNDECLARED-CAPABILITY": "info",
-      "E-FOREIGN-SIDECAR-NOMINAL": "error"
+      "E-FOREIGN-010": "error"
     }
   }
 }

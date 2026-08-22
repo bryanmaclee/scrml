@@ -66,6 +66,10 @@ console.log("PROBE " + JSON.stringify({
   clickError,
   thrown,
   workerRequests,
-  workerFilesOnDisk: files.filter((f) => f.endsWith(".worker.js")),
+  // Hash-safe. Under `contentHashAssets` the bundle is written as
+  // `<base>.<name>.worker.<hash>.js`, so a bare `.endsWith(".worker.js")` finds
+  // ZERO — the same predicate silently voided 20 of the 40 builds in
+  // `build-matrix.mjs` before it was corrected there.
+  workerFilesOnDisk: files.filter((f) => /\.worker(\.[a-z0-9]+)?\.js$/.test(f)),
 }, null, 2));
 process.exit(0);

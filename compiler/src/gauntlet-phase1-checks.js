@@ -337,10 +337,16 @@ function checkAstMisplacedDecls(ast, filePath, errors) {
       // §23.4 exemption: a `use foreign:name { … }` sidecar declaration is
       // top-level-valid (SPEC §23.4) but arrives as a bare text block in v0.3
       // default-logic mode, so the lift pass wraps it in a synthetic `${...}` to
-      // route it to parseLogicBody's `use` handler — which has already failed it
-      // closed with the honest E-FOREIGN-SIDECAR-NOMINAL. Don't pile on the
-      // misleading "move it out of the logic block" E-USE-001 (the lift is an
-      // internal mechanism, not author placement).
+      // route it to parseLogicBody's `use` handler. Don't pile on the misleading
+      // "move it out of the logic block" E-USE-001 — the lift is an INTERNAL
+      // mechanism, not author placement, and the author cannot act on it.
+      //
+      // (This comment used to justify the exemption by "the `use` handler has
+      // already failed it closed with E-FOREIGN-SIDECAR-NOMINAL". That code is
+      // retired as of S356 r4 — the §4.12.3 unbuilt-context refusal fires at the
+      // nested-`<program>` DECLARATION now. The exemption stands on its own:
+      // E-USE-001 would be wrong here whatever else does or does not fire,
+      // because the placement it complains about is the compiler's own.)
       if (node.kind === "use-decl" && !node._foreignSidecarNominal) {
         errors.push(new GauntletError(
           "E-USE-001",

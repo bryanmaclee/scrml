@@ -54,7 +54,10 @@ function build(dir, src) {
     errors: result.errors ?? [],
     warnings: result.warnings ?? [],
     serverJs: read("app.server.js"),
-    workerFilesOnDisk: listed.filter((f) => f.endsWith(".worker.js")).sort(),
+    // Hash-safe: under `contentHashAssets` the bundle is
+    // `<base>.<name>.worker.<hash>.js`, and a bare `.endsWith(".worker.js")`
+    // would find ZERO and pass every worker assertion vacuously.
+    workerFilesOnDisk: listed.filter((f) => /\.worker(\.[a-z0-9]+)?\.js$/.test(f)).sort(),
   };
 }
 

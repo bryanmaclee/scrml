@@ -1480,41 +1480,9 @@ export function runCG(input: CgInput): CgOutput {
             }
 
             if (kind === "foreign-sidecar" || kind === "wasm-module" || kind === "server-endpoint") {
-              // §4.12.5 SIDECAR — the carve-out is CONDITIONAL, not absolute.
-              //
-              // `nestedProgramContextIsNominal` excludes `foreign-sidecar`
-              // because §23.4 already fails the sidecar closed at the
-              // `use foreign:name { … }` site, and two errors on one unbuilt
-              // shape is two diagnostics for one mistake. That reasoning holds
-              // only when there IS a `use foreign:` to fire at. With none, the
-              // carve-out suppressed the ONLY diagnostic, and the declaration
-              // compiled to exit 0 with its markup children silently deleted.
-              //
-              // Measured, both pre-fix:
-              //   <program name="ml" lang="go" build= port= health=>   exit 0, silent
-              //   <program name="api" route="/api/v1" lang="go">        exit 0, silent
-              //
-              // The second is worse than a missing diagnostic: `lang=` outranks
-              // `route=` in the §4.12.3 precedence, so ADDING `lang=` LAUNDERED a
-              // `route=` server endpoint past the refusal it would otherwise get.
-              //
-              // Closed WITHOUT changing which codes exist (the consolidation
-              // question — whether these two codes are one concept — is with the
-              // operator and is NOT decided here). The rule is simply
-              // one-diagnostic-per-mistake, evaluated rather than assumed:
-              //   sidecar WITH    `use foreign:` -> §23.4's E-FOREIGN-SIDECAR-NOMINAL only
-              //   sidecar WITHOUT `use foreign:` -> E-NESTED-PROGRAM-CONTEXT-NOMINAL here
-              const sidecarUnclaimed =
-                kind === "foreign-sidecar" && !!name && !fileDeclaresUseForeign(nodes, name, node);
-              if (sidecarUnclaimed) {
-                fireNestedProgramContextNominal(node, kind, name);
-                parentChildren.splice(i, 1);
-                treeMutatedByExtraction = true;
-                continue;
-              }
-              // The other three EXTRACTED execution contexts (§4.12.5 sidecar,
-              // §4.12.3 WASM module, §4.12.2 `route=` server endpoint). None has
-              // codegen in this compiler revision.
+              // The three EXTRACTED execution contexts with no codegen in this
+              // compiler revision: §4.12.5 sidecar, §4.12.3 WASM module, §4.12.2
+              // `route=` server endpoint.
               //
               // They are spliced — their bodies are separate compilation units
               // (§4.12.1) and must not compile into the parent — but they emit
@@ -1529,6 +1497,18 @@ export function runCG(input: CgInput): CgOutput {
               // never assigns `self.onmessage`, so `<#calc>.send()` returned a
               // Promise that never resolved — a SILENT HANG where the honest
               // outcome is a refusal.
+              //
+              // ONE FIRE SITE FOR ALL FOUR (S356 r4 ruling). `nestedProgramContextIsNominal`
+              // now includes `foreign-sidecar`, and the conditional sidecar
+              // carve-out that used to sit here — the `fileDeclaresUseForeign`
+              // seam — is DELETED along with the code it deferred to. Three
+              // rounds put three different conditions on that carve-out and each
+              // one produced a defect: no diagnostic for an unclaimed sidecar, a
+              // `route=` endpoint laundered past the refusal by adding `lang=`,
+              // and finally a DOUBLE FIRE whose message asserted the file had no
+              // `use foreign:` while line 3 of it did. The seam was the defect,
+              // not any of its conditions. See `nested-program-kind.ts`
+              // `nestedProgramContextIsNominal` for the full argument.
               if (nestedProgramContextIsNominal(kind)) {
                 fireNestedProgramContextNominal(node, kind, name);
               }
@@ -1557,44 +1537,113 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     /**
-     * Does this file declare `use foreign:<sidecarName> { … }` ANYWHERE outside
-     * the sidecar's own subtree?
+     * `E-FOREIGN-010` (§23.4) — `use foreign:<name> { … }` naming a sidecar that
+     * NO nested `<program name="<name>">` in this file declares.
      *
-     * `ast-builder.js` tags each such use-decl with `_foreignSidecarName` at the
-     * site where it fires `E-FOREIGN-SIDECAR-NOMINAL` (§23.4), so this reads the
-     * same marker that diagnostic keys on rather than re-parsing `use foreign:`.
+     * ## Why this exists, and why it is not the code it replaces
      *
-     * `excludeSubtree` is the sidecar `<program>` node itself: §4.12.1 makes it a
-     * separate compilation unit, so a `use foreign:` INSIDE it is the sidecar's
-     * own import and does not claim the sidecar from the parent.
+     * §23.4 normative, verbatim: *"The `name` in `use foreign:name` MUST match the
+     * `name=` attribute of a nested `<program>` declared within the same top-level
+     * `<program>`. An unresolved name SHALL be a compile error (E-FOREIGN-010)."*
+     * The code has been catalogued in §34 since the section landed and had no fire
+     * site; `ast-builder.js`'s own comment said the spec'd `E-FOREIGN-010/011/012`
+     * "supersede this fail-closed placeholder" when the sidecar layer lands.
      *
-     * Deep walk (`children` / `body` / plain object values) because a use-decl
-     * can sit at file top level, inside the parent `<program>`'s body, or inside
-     * a `${…}` logic block within it.
+     * S356 r4 retires that placeholder — `E-FOREIGN-SIDECAR-NOMINAL` — because the
+     * DECLARATION now carries the Nominal refusal for all four §4.12.3 unbuilt
+     * contexts. Retiring it alone would have opened a hole, and the hole was
+     * measured before anything was deleted: a `use foreign:ghost { run }` with no
+     * `<program name="ghost">` anywhere fired `E-FOREIGN-SIDECAR-NOMINAL` and
+     * NOTHING ELSE. Not `E-SCOPE-001` — the `foreign:` branch deliberately keeps
+     * `names` in scope so a `run(...)` call site does not double-report. Not
+     * `E-IMPORT-005` — it deliberately leaves `source` null so MOD skips
+     * resolution. Both suppressions are right for their own reasons, and together
+     * they left an unresolved reference with no diagnostic at all.
+     *
+     * So the closure is an IMPLEMENTATION of a ratified code, not a new one. It is
+     * also a different condition than the one it replaces, and a longer-lived one:
+     * `E-NESTED-PROGRAM-CONTEXT-NOMINAL` is retired for the sidecar the day §23.4's
+     * codegen lands, whereas `use foreign:ghost` with nothing declaring `ghost`
+     * stays an error forever.
+     *
+     * ## Ordering, and why it runs BEFORE extraction
+     *
+     * `extractWorkerPrograms` SPLICES every nested `<program>` of an extracted kind
+     * out of the tree, taking any `use foreign:` inside it along. Running the check
+     * first means one walk over the untouched tree collects both sides — declared
+     * names and referencing sites — with no dependency on splice order. That is the
+     * whole reason this is a separate pre-pass rather than a hook inside the
+     * extraction loop: the r1-r3 defects all came from a check whose answer
+     * depended on where in the walk it was asked.
+     *
+     * ## What it does NOT cover
+     *
+     * The `<#name>.send()` WORKER binding is a different reference site with a
+     * different resolution table (`workerDefs`, not `use foreign:`), and a
+     * `<#dubler>` typo still compiles silently. That is the standing R1 residual —
+     * `expression-parser.ts:2266` returns worker refs as bare `IdentExpr` with the
+     * comment "handled at a higher level", and no higher level checks. Untouched
+     * here on purpose; it is its own arc.
      */
-    function fileDeclaresUseForeign(
-      rootNodes: any[],
-      sidecarName: string,
-      excludeSubtree: any,
-    ): boolean {
+    function detectUnresolvedForeignSidecarUses(rootNodes: any[]): void {
+      // Every nested `<program name=…>` in the file, whatever its execution
+      // context. §23.4 says the name must match "a nested `<program>`" — it does
+      // NOT restrict the match to sidecar-shaped ones, and it should not: a
+      // `use foreign:calc` pointing at `<program name="calc" mode="wasm">` is a
+      // WRONG-CONTEXT error, not an unresolved-NAME one, and the wrong-context
+      // half is `E-FOREIGN-011`/`012` territory that lands with the sidecar layer.
+      // Reporting it as "matches no nested `<program>`" would be false.
+      const declaredNames = new Set<string>();
+      const uses: Array<{ name: string; span: any }> = [];
+
       const seen = new WeakSet<object>();
-      function walk(value: any): boolean {
-        if (!value || typeof value !== "object") return false;
-        if (value === excludeSubtree) return false;
-        if (seen.has(value)) return false;
+      function walk(value: any): void {
+        if (!value || typeof value !== "object") return;
+        if (seen.has(value)) return;
         seen.add(value);
         if (Array.isArray(value)) {
-          for (const item of value) if (walk(item)) return true;
-          return false;
+          for (const item of value) walk(item);
+          return;
         }
-        if (value.kind === "use-decl" && value._foreignSidecarName === sidecarName) return true;
+        if (value.kind === "markup" && value.tag === "program" && !topLevelPrograms.has(value)) {
+          const nested = nestedProgramAttrValue(value, "name");
+          if (nested) declaredNames.add(nested);
+        }
+        // A use-decl can sit at file top level, inside the top-level `<program>`'s
+        // body, or inside a `${…}` logic block within it — hence the deep walk over
+        // plain object values rather than a `children`/`body` traversal.
+        if (value.kind === "use-decl" && typeof value._foreignSidecarName === "string") {
+          uses.push({ name: value._foreignSidecarName, span: value.span });
+        }
         for (const key of Object.keys(value)) {
           if (key === "span" || key === "parent") continue;
-          if (walk(value[key])) return true;
+          walk(value[key]);
         }
-        return false;
       }
-      return walk(rootNodes);
+      walk(rootNodes);
+
+      for (const use of uses) {
+        if (declaredNames.has(use.name)) continue;
+        const span = use.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+        const declaredList = [...declaredNames].sort();
+        errors.push(new CGError(
+          "E-FOREIGN-010",
+          `E-FOREIGN-010: \`use foreign:${use.name} { … }\` names a sidecar that nothing in this ` +
+          `file declares. SPEC §23.4: "The \`name\` in \`use foreign:name\` MUST match the \`name=\` ` +
+          `attribute of a nested \`<program>\` declared within the same top-level \`<program>\`." ` +
+          (declaredList.length > 0
+            ? `The nested programs declared here are: ${declaredList.map((n) => `\`${n}\``).join(", ")}. `
+            : `This file declares no nested \`<program name="…">\` at all. `) +
+          `Fix: declare the sidecar — \`<program name="${use.name}" lang="…" port=…>\` inside the ` +
+          `same top-level \`<program>\` — or correct the name in the \`use foreign:\` line. ` +
+          `NOTE: the §23.4 sidecar RUNTIME is still Nominal/spec-ahead, so a correctly-declared ` +
+          `sidecar is separately refused at its declaration with ` +
+          `\`E-NESTED-PROGRAM-CONTEXT-NOMINAL\` until v1.next lands that codegen. ` +
+          `(SPEC §23.4 + §34.)`,
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "error",
+        ));
+      }
     }
 
     /**
@@ -1605,10 +1654,12 @@ export function runCG(input: CgInput): CgOutput {
      * `W-PROGRAM-TITLE-NESTED` is: it is a nested-`<program>`-attribute
      * diagnostic about what codegen will and will not do with the element.
      *
-     * The §4.12.5 SIDECAR shape is deliberately not routed here — §23.4 already
-     * fails it closed at the `use foreign:name { … }` site with the ratified
-     * `E-FOREIGN-SIDECAR-NOMINAL`, and two errors on one unbuilt shape is two
-     * diagnostics for one mistake.
+     * ALL FOUR unbuilt §4.12.3 contexts route here, the §4.12.5 SIDECAR included
+     * (S356 r4). The sidecar used to be carved out and refused instead at the
+     * `use foreign:name { … }` site by `E-FOREIGN-SIDECAR-NOMINAL`; that code is
+     * retired, because two codes saying the same thing and told apart by which
+     * site noticed produced a defect in every one of the three rounds that tried
+     * to draw the line. One unbuilt declaration, one diagnostic, one fire site.
      */
     function fireNestedProgramContextNominal(
       node: any,
@@ -1619,11 +1670,18 @@ export function runCG(input: CgInput): CgOutput {
       const span = node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
       const label0 = name ? `<program name="${name}">` : "<program>";
 
-      // §4.12.5 SIDECAR with no `use foreign:` to claim it. The generic message
-      // below is written for a context the PARENT reaches by name; an unclaimed
-      // sidecar's problem is the opposite — nothing reaches it at all — so it
-      // gets its own wording. Same code; see the call site for why the §23.4
-      // carve-out is conditional rather than absolute.
+      // §4.12.5 SIDECAR. The generic message below is written for a context the
+      // parent reaches by an in-language reference (`<#name>`, a call char); the
+      // sidecar is reached by a `use foreign:name { … }` DECLARATION instead, and
+      // its fix is a different one, so it gets its own wording.
+      //
+      // It says nothing about whether a `use foreign:` exists. The r3 version did
+      // — it asserted "NOTHING IN THIS FILE CLAIMS IT: there is no
+      // `use foreign:<name> { … }` declaration in the parent" — and that sentence
+      // was FALSE on the two ratified capability conformance cases, whose
+      // `use foreign:` sits inside the sidecar's own subtree. A diagnostic must
+      // not make a claim about the file that the reader can disprove from the
+      // same screen.
       if (kind === "foreign-sidecar") {
         const langVal = nestedProgramAttrValue(node, "lang");
         const alsoRoute = hasNestedProgramAttr(node, "route");
@@ -1632,17 +1690,17 @@ export function runCG(input: CgInput): CgOutput {
           `E-NESTED-PROGRAM-CONTEXT-NOMINAL: \`${label0}\` declares the §4.12.5 FOREIGN LANGUAGE ` +
           `SIDECAR execution context (${langVal ? `\`lang="${langVal}"\`` : "`lang=`/`port=`"}), ` +
           `whose runtime model is a subprocess reached over HTTP/socket. That codegen is ` +
-          `Nominal/spec-ahead — this compiler revision does not build it — and NOTHING IN THIS ` +
-          `FILE CLAIMS IT: there is no \`use foreign:${name ?? "name"} { … }\` declaration in the ` +
-          `parent, so §23.4's \`E-FOREIGN-SIDECAR-NOMINAL\` never fires and the declaration would ` +
-          `otherwise compile to exit 0 while its body is silently discarded. ` +
+          `Nominal/spec-ahead — this compiler revision does not build it — so no subprocess is ` +
+          `launched, no HTTP/socket client is generated, and the declaration would otherwise ` +
+          `compile to exit 0 while its body is silently discarded. ` +
           (alsoRoute
             ? `NOTE: this element also carries \`route=\`. Per §4.12.3's exclusive classifier, ` +
               `\`lang=\` selects the sidecar context and \`route=\` is inert here — adding \`lang=\` ` +
               `does NOT turn a server endpoint into something this compiler can build. `
             : "") +
-          `Fix: remove the nested \`<program>\`, or express the work as a server \`function\` ` +
-          `(§12), until v1.next lands the §23.4 sidecar layer. ` +
+          `Fix: remove the nested \`<program>\` (and any \`use foreign:${name ?? "name"} { … }\` ` +
+          `that names it), or express the work as a server \`function\` (§12), until v1.next ` +
+          `lands the §23.4 sidecar layer. ` +
           `(SPEC §4.12.3 + §4.12.5 + §4.12.9 + §23.4 + §34.)`,
           { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
           "error",
@@ -1836,6 +1894,9 @@ export function runCG(input: CgInput): CgOutput {
     detectNestedDocAttrs(nodes);
 
     detectTopLevelProgramName(nodes);
+    // BEFORE extraction — `extractWorkerPrograms` splices nested `<program>`
+    // subtrees out of the tree, and a `use foreign:` can be inside one.
+    detectUnresolvedForeignSidecarUses(nodes);
     extractWorkerPrograms(nodes);
 
     if (workerDefs.size > 0) {

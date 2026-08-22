@@ -1,34 +1,45 @@
 /**
- * §4.12.5 + §23.4 — the sidecar carve-out is CONDITIONAL, not absolute.
+ * §4.12.5 + §23.4 — the sidecar has NO carve-out. All four unbuilt §4.12.3
+ * execution contexts are refused at the DECLARATION, by one code.
  *
- * `E-NESTED-PROGRAM-CONTEXT-NOMINAL` deliberately excludes the §4.12.5 foreign
- * sidecar, because §23.4 already fails it closed at the `use foreign:name { … }`
- * site with `E-FOREIGN-SIDECAR-NOMINAL`, and two errors on one unbuilt shape is
- * two diagnostics for one mistake.
+ * ## What this file used to pin, and why that shape is gone (S356 r4)
  *
- * That reasoning holds only when there IS a `use foreign:` to fire at. With none,
- * the carve-out suppressed the ONLY diagnostic. Two defects lived in that gap:
+ * Two codes said the same thing — *this execution context is specified but
+ * unbuilt; refuse rather than emit a stub* — and were told apart by WHICH SITE
+ * NOTICED: `E-FOREIGN-SIDECAR-NOMINAL` at the `use foreign:name { … }` USE site,
+ * `E-NESTED-PROGRAM-CONTEXT-NOMINAL` at the nested-`<program>` DECLARATION. Three
+ * rounds tried to draw the line between them and produced three defects, every
+ * one of them living in the line itself:
  *
- *   1. A sidecar declared with no `use foreign:` in the parent compiled to
- *      exit 0, silent, with its markup children deleted.
+ *   1. An unconditional sidecar carve-out gave a sidecar declared with no
+ *      `use foreign:` NO diagnostic at all — exit 0, silent, markup children
+ *      deleted. The covering code fires at a use site, and there was none.
  *   2. `<program name="api" route="/api/v1" lang="go">` compiled to exit 0,
- *      silent — because `lang=` outranks `route=` in the §4.12.3 precedence,
- *      so ADDING `lang=` LAUNDERED a `route=` server endpoint past the refusal
- *      it would otherwise get.
+ *      silent — `lang=` outranks `route=` in the §4.12.3 precedence, so ADDING
+ *      `lang=` LAUNDERED a `route=` server endpoint past the refusal.
+ *   3. The CONDITIONAL carve-out that fixed (1) DOUBLE-FIRED on the two ratified
+ *      §23.5.4 capability cases, with a message asserting the file contained no
+ *      `use foreign:` while line 3 of it did. Neither case listed the co-firing
+ *      code in `notCodes`, so 894/894 conformance still passed.
  *
- * ## Scope discipline
+ * The operator ruling: fire at the declaration for all four, sidecar included,
+ * and RETIRE `E-FOREIGN-SIDECAR-NOMINAL`. A use-site alias was considered and
+ * rejected — the declaration always exists when a sidecar is declared, so a
+ * use-site twin could only ever fire IN ADDITION, which is the double fire being
+ * removed.
  *
- * The reviewer's argument that `E-NESTED-PROGRAM-CONTEXT-NOMINAL` and
- * `E-FOREIGN-SIDECAR-NOMINAL` express ONE concept split by WHERE they fire is
- * with the operator, and is NOT decided here. Neither code is consolidated,
- * retired, or re-scoped. What changed is only the CONDITION each fires on, made
- * precise as ONE-DIAGNOSTIC-PER-MISTAKE:
+ * ## The invariant this file pins
  *
- *   sidecar WITH    `use foreign:`  ->  E-FOREIGN-SIDECAR-NOMINAL (§23.4), only
- *   sidecar WITHOUT `use foreign:`  ->  E-NESTED-PROGRAM-CONTEXT-NOMINAL, only
+ *   EXACTLY ONE diagnostic per unbuilt declaration. Never two, never none.
  *
- * §4.12.3's normative sentence already reads that way — it names the two
- * diagnostics with an "or", expecting one of them, not both and not neither.
+ * Pinned across all four contexts and across claimed / unclaimed / claimed-from-
+ * inside-the-subtree, by COUNT rather than by membership: a `toContain` check
+ * cannot see a double fire, which is precisely how (3) survived a full
+ * conformance run.
+ *
+ * The `use foreign:` site keeps a diagnostic for its OWN condition — `E-FOREIGN-010`
+ * (§23.4, "references a name that matches no nested `<program>`"). That is not
+ * Nominal-ness and it outlives the Nominal period.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -42,6 +53,13 @@ let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "sidecar-unclaimed-")); });
 afterAll(() => { if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true }); });
 
+// Hash-safe. Under `contentHashAssets` the bundle is written as
+// `<base>.<name>.worker.<hash>.js`, so a bare `.endsWith(".worker.js")` finds
+// ZERO and every worker assertion below passes VACUOUSLY. This suite does not
+// enable that option today, which is exactly why the wrong predicate would sit
+// here undetected until someone did.
+const IS_WORKER = /\.worker(\.[a-z0-9]+)?\.js$/;
+
 function build(dir, src) {
   const root = join(TMP, dir);
   mkdirSync(root, { recursive: true });
@@ -52,12 +70,21 @@ function build(dir, src) {
   const listed = existsSync(outDir) ? readdirSync(outDir) : [];
   return {
     diagnostics: [...(result.errors ?? []), ...(result.warnings ?? [])],
-    workerFilesOnDisk: listed.filter((f) => f.endsWith(".worker.js")).sort(),
+    workerFilesOnDisk: listed.filter((f) => IS_WORKER.test(f)).sort(),
   };
 }
 
 const codesOf = (o) => o.diagnostics.map((d) => d.code);
+const countOf = (o, code) => o.diagnostics.filter((d) => d.code === code).length;
 const messageFor = (o, code) => (o.diagnostics.find((d) => d.code === code) ?? {}).message ?? "";
+
+/**
+ * The count that matters: how many diagnostics refuse this declaration for being
+ * an unbuilt execution context. It sums the surviving code AND the retired one,
+ * so the assertion stays honest if the retired code is ever resurrected.
+ */
+const refusalCount = (o) =>
+  countOf(o, "E-NESTED-PROGRAM-CONTEXT-NOMINAL") + countOf(o, "E-FOREIGN-SIDECAR-NOMINAL");
 
 const SIDECAR_UNCLAIMED = `<program>
   <program name="ml" lang="go" build="go build ." port="9001" health="/health">
@@ -79,6 +106,18 @@ const SIDECAR_CLAIMED = `<program>
 </program>
 `;
 
+/**
+ * The r3 double-fire shape: the `use foreign:` sits INSIDE the sidecar's own
+ * subtree. The two ratified §23.5.4 capability conformance cases are written this
+ * way deliberately — it is how closest-wins capability inheritance is exercised.
+ */
+const SIDECAR_CLAIMED_INSIDE = `<program capabilities=[network("api.example.com")]>
+  <program name="probe" lang="ts">
+    use foreign:probe { run }
+  </>
+</>
+`;
+
 /** `route=` + `lang=` — the laundering shape. */
 const ROUTE_PLUS_LANG = `<program>
   <program name="api" route="/api/v1" lang="go">
@@ -97,7 +136,16 @@ const ROUTE_ONLY = `<program>
 </program>
 `;
 
-describe("§23.4 — an UNCLAIMED sidecar is refused at its declaration", () => {
+/** §4.12.3 WASM compute module — the third unbuilt context. */
+const WASM_MODULE = `<program>
+  <program name="calc" lang="rust" mode="wasm" build="cargo build" source="./crates/calc">
+    <span>wasm body markup</span>
+  </program>
+  <button>go</button>
+</program>
+`;
+
+describe("§23.4 — a sidecar is refused at its DECLARATION, claimed or not", () => {
   test("a sidecar with no `use foreign:` in the parent fails closed", () => {
     const o = build("unclaimed", SIDECAR_UNCLAIMED);
     // Pre-fix: exit 0, zero diagnostics, body silently discarded.
@@ -106,20 +154,54 @@ describe("§23.4 — an UNCLAIMED sidecar is refused at its declaration", () => 
     expect(o.workerFilesOnDisk).toEqual([]);
   });
 
-  test("the message names the MISSING `use foreign:`, not a generic context refusal", () => {
+  test("the message names the SIDECAR context and its runtime model", () => {
     const o = build("unclaimed-msg", SIDECAR_UNCLAIMED);
     const msg = messageFor(o, "E-NESTED-PROGRAM-CONTEXT-NOMINAL");
     expect(msg).toContain("FOREIGN LANGUAGE SIDECAR");
-    expect(msg).toContain("use foreign:ml");
+    expect(msg).toContain("subprocess reached over HTTP/socket");
   });
 
-  test("a CLAIMED sidecar still fires §23.4's code and ONLY §23.4's code", () => {
+  test("the message makes NO claim about whether a `use foreign:` exists", () => {
+    // r3's wording asserted "NOTHING IN THIS FILE CLAIMS IT: there is no
+    // `use foreign:ml { … }` declaration in the parent". On the CLAIMED fixture
+    // that sentence is false, and on the claimed-from-inside fixture it is false
+    // two lines from the caret. A diagnostic must not make a claim about the file
+    // that the reader can disprove from the same screen.
+    for (const [dir, src] of [
+      ["msg-unclaimed", SIDECAR_UNCLAIMED],
+      ["msg-claimed", SIDECAR_CLAIMED],
+      ["msg-claimed-inside", SIDECAR_CLAIMED_INSIDE],
+    ]) {
+      const msg = messageFor(build(dir, src), "E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+      expect(msg).not.toContain("NOTHING IN THIS FILE CLAIMS IT");
+      expect(msg).not.toContain("there is no `use foreign:");
+    }
+  });
+
+  test("a CLAIMED sidecar is refused EXACTLY ONCE — the r3 double fire is gone", () => {
     const o = build("claimed", SIDECAR_CLAIMED);
-    // The double-fire guard. This is the ratified carve-out and it must survive:
-    // two errors on one unbuilt shape is two diagnostics for one mistake.
-    const codes = codesOf(o);
-    expect(codes).toContain("E-FOREIGN-SIDECAR-NOMINAL");
-    expect(codes).not.toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+    expect(refusalCount(o)).toBe(1);
+    expect(codesOf(o)).toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
+  });
+
+  test("a sidecar claimed from INSIDE its own subtree is refused exactly once", () => {
+    // This is the exact shape that double-fired in r3: `fileDeclaresUseForeign`
+    // excluded the sidecar's own subtree, so the `use foreign:probe` on line 3 did
+    // not count as a claim and the declaration fired a SECOND diagnostic whose
+    // text denied that very line.
+    const o = build("claimed-inside", SIDECAR_CLAIMED_INSIDE);
+    expect(refusalCount(o)).toBe(1);
+    expect(countOf(o, "E-FOREIGN-010")).toBe(0);
+  });
+
+  test("E-FOREIGN-SIDECAR-NOMINAL is RETIRED — it fires on none of these shapes", () => {
+    for (const [dir, src] of [
+      ["retired-unclaimed", SIDECAR_UNCLAIMED],
+      ["retired-claimed", SIDECAR_CLAIMED],
+      ["retired-claimed-inside", SIDECAR_CLAIMED_INSIDE],
+    ]) {
+      expect(countOf(build(dir, src), "E-FOREIGN-SIDECAR-NOMINAL")).toBe(0);
+    }
   });
 });
 
@@ -147,4 +229,26 @@ describe("§4.12.3 — `lang=` cannot launder a `route=` endpoint past the refus
     const o = build("route-only", ROUTE_ONLY);
     expect(codesOf(o)).toContain("E-NESTED-PROGRAM-CONTEXT-NOMINAL");
   });
+});
+
+describe("the invariant, across all four unbuilt §4.12.3 contexts", () => {
+  // ONE diagnostic per unbuilt declaration — never two, never none — asserted by
+  // COUNT. A `toContain` membership check is blind to the two-diagnostic failure
+  // mode, which is how the r3 regression passed a full 894-case conformance run.
+  const CASES = [
+    ["sidecar, unclaimed", SIDECAR_UNCLAIMED],
+    ["sidecar, claimed from the parent", SIDECAR_CLAIMED],
+    ["sidecar, claimed from inside its own subtree", SIDECAR_CLAIMED_INSIDE],
+    ["server endpoint (`route=`)", ROUTE_ONLY],
+    ["server endpoint laundered with `lang=`", ROUTE_PLUS_LANG],
+    ["WASM compute module (`mode=\"wasm\"`)", WASM_MODULE],
+  ];
+
+  for (const [label, src] of CASES) {
+    test(`${label} — exactly one refusal, and no worker artifact`, () => {
+      const o = build(`inv-${label.replace(/[^a-z0-9]+/gi, "-")}`, src);
+      expect(refusalCount(o)).toBe(1);
+      expect(o.workerFilesOnDisk).toEqual([]);
+    });
+  }
 });

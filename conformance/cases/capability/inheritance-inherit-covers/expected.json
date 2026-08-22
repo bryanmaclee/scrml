@@ -1,13 +1,20 @@
 {
   "id": "capability-inheritance-inherit-covers",
-  "description": "§23.5.4 — inheritance covers a nested foreign construct. The OUTER `<program>` declares `capabilities=[network(\"api.example.com\")]`; the INNER `<program name=\"probe\">` declares NO `capabilities=`, so it INHERITS the closest ancestor's set (the outer's non-empty `network`). The `use foreign:probe` construct is therefore governed by a NON-empty set → W-FOREIGN-UNDECLARED-CAPABILITY does NOT fire. The positive complement to the no-union case: when the inner does not re-declare, it inherits the outer's declaration.",
+  "description": "§23.5.4 — inheritance covers a nested foreign construct. The OUTER `<program>` declares `capabilities=[network(\"api.example.com\")]`; the INNER `<program name=\"probe\">` declares NO `capabilities=`, so it INHERITS the closest ancestor's set (the outer's non-empty `network`). The `use foreign:probe` construct is therefore governed by a NON-empty set → W-FOREIGN-UNDECLARED-CAPABILITY does NOT fire. The positive complement to the no-union case: when the inner does not re-declare, it inherits the outer's declaration. CODE UPDATED S356 r4: the co-occurring Nominal refusal was `E-FOREIGN-SIDECAR-NOMINAL` (fired at the `use foreign:` site); that code is RETIRED and the refusal now fires once at the nested-`<program>` DECLARATION as `E-NESTED-PROGRAM-CONTEXT-NOMINAL`. REGRESSION PIN: in S356 r3 BOTH codes fired on this file — and the second one's message asserted \"there is no `use foreign:probe { … }` declaration in the parent\" while line 3 of the case IS that declaration. It passed 894/894 because neither code was listed in `notCodes`. The retired code is now pinned absent here, so a resurrection of the twin cannot pass silently again.",
   "language-version": "1.0",
   "spec": "§23.5.4, §23.5.5",
   "source-test": "compiler/tests/unit/capability-declaration.test.js",
-  "rationale": "§23.5.4: if a nested `<program>` does not declare `capabilities=`, the governing set is the CLOSEST ancestor that does — here the outer non-empty `network`. A foreign construct under a non-empty inherited set is declared, so the §23.5.5 presence-nudge stays silent. E-FOREIGN-SIDECAR-NOMINAL co-occurs (the §23.4 sidecar runtime is Nominal).",
+  "rationale": "§23.5.4: if a nested `<program>` does not declare `capabilities=`, the governing set is the CLOSEST ancestor that does — here the outer non-empty `network`. A foreign construct under a non-empty inherited set is declared, so the §23.5.5 presence-nudge stays silent. E-NESTED-PROGRAM-CONTEXT-NOMINAL co-occurs (the §4.12.5 sidecar runtime is Nominal, refused at its declaration per §4.12.3/§4.12.9). E-FOREIGN-010 does NOT fire: `probe` resolves — the `use foreign:probe` names the very `<program name=\"probe\">` it sits inside, which is exactly the shape r3's subtree-excluding walk misread. COVERAGE NOTE: the harness contract is set-based (emitted ⊇ codes, emitted ∩ notCodes = ∅), so it cannot express \"fires exactly once\". The cardinality half of the invariant is pinned by `compiler/tests/integration/nested-program-sidecar-unclaimed.test.js`, which asserts by COUNT.",
   "expect": {
-    "codes": ["E-FOREIGN-SIDECAR-NOMINAL"],
-    "notCodes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-ATTR-001"],
-    "severity": { "E-FOREIGN-SIDECAR-NOMINAL": "error" }
+    "codes": ["E-NESTED-PROGRAM-CONTEXT-NOMINAL"],
+    "notCodes": [
+      "E-FOREIGN-SIDECAR-NOMINAL",
+      "E-FOREIGN-010",
+      "W-FOREIGN-UNDECLARED-CAPABILITY",
+      "E-SCOPE-001",
+      "E-FOREIGN-CAPABILITY-UNKNOWN",
+      "W-ATTR-001"
+    ],
+    "severity": { "E-NESTED-PROGRAM-CONTEXT-NOMINAL": "error" }
   }
 }
