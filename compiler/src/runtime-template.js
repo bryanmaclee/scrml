@@ -1143,6 +1143,24 @@ function _scrml_wire_decode(value) {
 //      declaration-order requirement.
 //   4. Otherwise no-op (defensive: unknown name, e.g. a future engine cell
 //      whose B22 didn't reject — silent rather than throwing).
+// §13.2 auto-await parity for reset (g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn).
+// A server-fn-backed init/default thunk returns a Promise. The DECLARATION path already settles it
+// asynchronously (fire-and-forget async IIFE + await + error boundary) so the RESOLVED value lands in
+// the cell. The reset path re-invoked the same thunk but wrote the raw Promise, so the cell held the
+// string [object Promise]. Mirror the declaration path: detect a thenable and settle it fire-and-forget,
+// otherwise write directly. _scrml_reset stays SYNCHRONOUS (no call-site change), and the async settle
+// matches the declaration path's own async settle -- §6.8.1 mandates writing "the result", which under
+// §13.2 IS the resolved value. _scrml_error_boundary_log is guarded (typeof) like the other optional
+// deps in _scrml_reset, so a bundle without it degrades to a bare resolve rather than throwing.
+function _scrml_reset_apply(name, r) {
+  if (r !== null && typeof r === "object" && typeof r.then === "function") {
+    r.then(function (v) { _scrml_reactive_set(name, v); }).catch(function (e) {
+      if (typeof _scrml_error_boundary_log === "function") _scrml_error_boundary_log(name, e);
+    });
+  } else {
+    _scrml_reactive_set(name, r);
+  }
+}
 function _scrml_reset(name) {
   // S79 / §6.13 — cancel any pending debounced/throttled timer for this cell
   // BEFORE applying the reset value. The cancel-then-apply ordering ensures
@@ -1160,12 +1178,12 @@ function _scrml_reset(name) {
   }
   // Default thunk wins per §6.8.2 line 4857.
   if (typeof _scrml_default_fns[name] === "function") {
-    _scrml_reactive_set(name, _scrml_default_fns[name]());
+    _scrml_reset_apply(name, _scrml_default_fns[name]());
     return;
   }
   // Otherwise re-evaluate init thunk per §6.8.1 line 4831.
   if (typeof _scrml_init_fns[name] === "function") {
-    _scrml_reactive_set(name, _scrml_init_fns[name]());
+    _scrml_reset_apply(name, _scrml_init_fns[name]());
     return;
   }
   // Otherwise: treat as a compound parent — walk every registered child
