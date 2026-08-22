@@ -1896,6 +1896,18 @@ The two **FP** rows are the ACCEPTED FALSE POSITIVE. That is the point, not a re
 
 ### ⚑ THE FIFTH REPRODUCER DOES NOT FIRE, AND THE BRIEF'S PREMISE ON IT IS WRONG
 
+> ⛑ **CORRECTED AT ROUND 8 — THIS HEADING AND THE PARAGRAPH BELOW IT ARE WRONG, AND THE ERROR IS
+> LOAD-BEARING.** The brief's premise was RIGHT and this section's refutation of it was built on a
+> WEAKENED reproducer. The fixtures below omit one line — `if (!u) { return deny() }`, a bare-name
+> call in return position — and that line is what puts `deny` in `reach(getUser)`. WITH it, all four
+> spellings FIRE on this head and are SILENT on an otherwise-identical tree carrying only the
+> round-6 `protect-egress.ts`: the exemption was the SOLE cause, and deleting it CLOSED the leak.
+> WITHOUT it there is no edge at all and the silence is the call-graph bound — which is the only
+> half this section actually measured. **"Deleting the exemption was never going to close them" is
+> false of the edge-bearing class.** Consequence: the leak this arc closed sat UNPINNED for a full
+> round. See ROUND 8 §1-§2; the four `REGRESSION GUARD (closed leak)` tests are the fix.
+
+
 The brief's expected outcome was that all five fire. **Four do.** The fifth's four spellings do not,
 and **the reason is not the exemption** — it is the intra-file BARE-IDENTIFIER call-graph bound
 (residual (2), documented in `detectProtectedRawEgressAcrossFns` since round 3).
@@ -1912,6 +1924,14 @@ be updated in the same change.
 ---
 
 ## 3. THE FIFTH LEAK IS CLOSABLE, MEASURED, AND HANDED BACK — NOT LANDED
+
+> ⛑ **RE-SCOPED AT ROUND 8.** Everything below about the patch — the 10 lines, the zero blast
+> radius, the SPEC-amendment blocker — still holds. Its MOTIVATION does not. This is NOT the fix
+> for a live leak: the edge-bearing half of "the fifth leak" was closed by the exemption deletion
+> in this same round and is now pinned. The patch addresses the weaker NO-EDGE class, which has been
+> silent since before this arc existed. The operator is being asked a PRECISION question, not a
+> security one. See ROUND 8 §5.
+
 
 Because "handed back with a question" is worth less than "handed back with a decision", the fix was
 built and measured on a **scratch copy** (`git archive HEAD` + real `node_modules`), and deliberately
@@ -2071,6 +2091,10 @@ It cost five executed leaks and returned zero.
    10-line patch with **zero** corpus blast radius, NOT landed because it requires a normative
    amendment to §14.8.9's `reach(F)` definition. **This is the one live decision this round hands
    back.**
+
+   > ⛑ **RE-SCOPED AT ROUND 8** — see ROUND 8 §5. The edge-bearing half of this item is CLOSED and
+   > pinned; only the no-edge half remains, and it is a precision question.
+
 2. ⚑ **NEW, and NOT a §14.8.9 question.** A server fn referenced as a VALUE emits **no in-process
    peer**: `function deny() {...}` + `apply(deny)` emits a handler that dies on `ReferenceError:
    deny is not defined`. Found while building reproducer 5d. Pre-existing, unrelated to protect, and
@@ -2092,3 +2116,284 @@ It cost five executed leaks and returned zero.
    now void** — there is no naming rule and no call-edge classification to port. The twin needs the
    escape-hatch treatment and the call-graph reachability, and it must NOT be given an all-literal
    exemption: doing so would reproduce all five leaks in the tenant lane.
+
+---
+
+# ROUND 8 (S354, change-id `raw-egress-structural-fix-2026-08-19`) — THE CORRECTION: ROUND 7 CLOSED A LEAK AND THEN ARGUED IT HADN'T
+
+Branch `raw-egress-r8-work`, cut from `origin/raw-egress-r7-work` (`0e8c3f5e`), which already
+contained `origin/main` (`a0e30329`) — `git merge origin/main` reported *Already up to date*, so
+there is no merge commit this round and no stale-base hazard.
+
+**ENV-GAP ruled out first:** `bun install` (217 packages) in this worktree before any measurement;
+every extracted tree below carries a symlink to that real `node_modules` and a `stdlib/` verified at
+21 modules, so no `scrml:` import fails and nothing reads as a phantom regression.
+
+---
+
+## 1. ⭐ THE CORRECTION — ROUND 7'S CONCLUSION ABOUT REPRODUCER 5 IS FALSE
+
+Round 7 wrote, in this document and in the test file and in `known-gaps.md`:
+
+> *"All four spellings are silent on `origin/main` too… Their silence is the intra-file
+> bare-identifier call-graph bound… Deleting the exemption was never going to close them."*
+
+**Measured at round 8 on two trees. The conclusion is false.** Round 7's fixtures omitted ONE line —
+a bare-name call to the helper, in return position — and that line is the whole difference:
+
+```scrml
+function deny() { return new Response("Forbidden", { status: 403 }) }
+export server function getUser(id) {
+  let u = ?{`SELECT id, name, passwordHash FROM users WHERE id = ${id}`}.get()
+  if (!u) { return deny() }        // ← THE VISIBLE EDGE. Round 7's fixtures omit this.
+  let make = deny                  // the unresolvable callee
+  let r = make()
+  r.headers.set("x-user-hash", u.passwordHash)
+  return r
+}
+```
+
+With that line present, `deny` is in `reach(getUser)`, the gate sees `deny`'s `new Response`, and
+co-occurrence fires. Round 7's own pins are correct **for what they pin**; the conclusion drawn from
+them is not. Two different classes were reported as one.
+
+### The two-sided measurement, BOTH HALVES EXECUTED
+
+| tree | alias | member | index | pass-through |
+|---|---|---|---|---|
+| **r8 head, WITH the visible edge** | FIRES | FIRES | FIRES | FIRES |
+| **r6-exemption tree, WITH the visible edge** | SILENT | SILENT | SILENT | SILENT |
+| either tree, WITHOUT the visible edge | SILENT | SILENT | SILENT | SILENT |
+
+**Neither half is reasoned.** The RED tree is this head's `git archive` + a symlinked
+`node_modules`, with `git show origin/raw-egress-r6-work:compiler/src/codegen/protect-egress.ts`
+written over that one file. That construction isolates the exemption as the **only** variable: the
+only other file the exemption-deletion commit (`e1a25346`) touched is `emit-server.ts`, and that
+hunk is comment-only; nothing else on this branch has touched either file since the r6 tip.
+
+Error sets on the GREEN side are exactly `[E-PROTECT-004, E-SCHEMA-001]` — the fixture-wide constant
+plus this gate, nothing else.
+
+---
+
+## 2. ⛔ THE GAP THAT MATTERED — THE CLOSED LEAK WAS GUARDED BY NOTHING, AND NOW IS
+
+Before this round, **zero** tests in `g-sql-row-protect-leak.test.js` carried BOTH a visible
+return-position call edge AND an alias / member / index / pass-through rebind. Four residuals were
+pinned as *silent*; the shape the deletion actually **fixed** had no pin at all. A future round that
+"improves" the call graph, or reintroduces an exemption in any form, would have reopened a
+password-hash leak against a fully green suite.
+
+**Landed (commit `a1e11066`), 5 new tests, every one executed:**
+
+| test | asserts |
+|---|---|
+| `REGRESSION GUARD (closed leak): a VISIBLE edge + an ALIASED callee (…) FIRES` | `E-PROTECT-004` fires; message names the path ``getUser` -> `deny`` |
+| `…+ a MEMBER callee (`http.deny()`) FIRES` | same |
+| `…+ an INDEX callee (`handlers["deny"]()`) FIRES` | same |
+| `…+ a PASS-THROUGH chain (`passthru()` -> `deny()`) FIRES` | fires; message names ``getUser` -> `passthru` -> `deny`` |
+| `CONTROL — the same file WITHOUT the visible edge is SILENT` | the edge is the whole difference |
+
+**The call path is asserted, not just the code.** ``reached through `getUser` -> `deny``` in the
+message is what proves the fire came through the VISIBLE EDGE and not from something the gate
+happened to see inside `getUser`'s own frame. A regression that re-silenced the edge while leaving
+some other in-frame trigger would still turn these red.
+
+**New anti-vacuity helper `expectFiredAndProtecting`.** `expect(fires(result)).toBe(true)` on its own
+passes on a fixture that fired for an unrelated reason. The guard asserts the error set is EXACTLY
+`[E-PROTECT-004, E-SCHEMA-001]`, that the protected SELECT was genuinely recognised
+(`I-PROTECT-STRIP-001`), and that the file really emitted.
+
+**Which half of each proof was executed:** BOTH, for all four. RED executed on the reconstructed
+exemption tree; GREEN executed on this head. Nothing in the table above is inferred.
+
+---
+
+## 3. ⚑ A SECOND ROUND-7 CLAIM, RE-MEASURED AND CORRECTED — "EXECUTED LEAK" IS TRUE OF TWO OF FIVE
+
+While building the RED half I ran the emitted handlers, per the verification bar (body AND headers).
+They did not leak. They **threw**. Chasing that produced a correction nobody asked for and everyone
+needs:
+
+```
+leak                                          executes?   measured
+1  same-frame `let r = new Response(...)`      YES         [["x-user",  "$argon2id$SECRET"]] 200 "ok"
+2  NESTED function-decl's return               YES         [["x-etag",  "$argon2id$SECRET"]] 204 ""
+3  file-level helper across a call edge        NO          throws on r.headers.set
+4  file-level pass-through, two frames out     NO          throws on r.headers.set
+5  file-level helper, unresolvable callee      NO          throws on r.headers.set
+```
+
+**Mechanism.** A file-level `<db>`-block helper lowers to an `async` in-process peer
+(`async function deny()`), and asynchrony is **not propagated across a call to a peer**: the emitted
+`getUser` contains a bare `let r = make();` / `let r = deny();`. `r` is a Promise, `r.headers.set`
+throws, and the handler 500s before anything reaches the wire. `await` is not available as a
+workaround — it is refused by design (`E-AWAIT-NOT-IN-SCRML`), confirmed by probe.
+
+**Where the original claim came from.** A probe harness that slices a peer out of the emission
+starting at the token `function` drops its `async`, turning it into a synchronous function that
+returns a `Response`. I reproduced that artifact on my first attempt and got round 7's exact
+reported output — `[["x-user","$argon2id$SECRET"]]`, body `"Forbidden"`, status 403 — before fixing
+the harness. That is almost certainly the provenance.
+
+**This does not weaken the pins; it sharpens the argument for them.** Leaks 3/4/5 are **LATENT** —
+masked by an unrelated codegen gap, not prevented by anything in §14.8.9, and un-masked the day that
+gap is fixed. A leak guarded by a bug is the worst state to be in, because fixing the bug is what
+detonates it. The compile-time gate is the only thing actually holding, which is the whole case for
+pinning it.
+
+⚑ **Corpus-zero caution, stated because the reverse ouroboros is easy here:** the fact that these
+three do not execute *today* is not evidence the shapes are unreachable or that the gate over-fires.
+It is one implementation accident, in one lowering path.
+
+---
+
+## 4. THE RECORD, CORRECTED AT EVERY LOCUS (commit `9e32ac72`)
+
+Both corrections were swept bidirectionally — for loci that state the round-7 conclusion, and for
+loci that state "executed" as true of all five.
+
+| locus | was | now |
+|---|---|---|
+| `g-sql-row-protect-leak.test.js`, the M2 block comment | *"every spelling is SILENT on all three"*, *"a plain CARRY-FORWARD"* | a header naming BOTH classes — (A) edge-bearing, exemption was the sole cause, deletion closed it; (B) no-edge, `reach()` has no edge, call-graph bound — plus how round 7 conflated them |
+| same file, class-(B) test titles | `RESIDUAL (documented): the EGRESS behind an invisible edge` | `RESIDUAL (documented, NO-EDGE class B): … and NO bare-name edge` |
+| same file, the CO-OCCURRENCE rationale's five-leak list, item 5 | *"deleting the exemption does not close them and was never going to"* | the two-class split with the two-tree measurement |
+| same file, the LEAK PINS block comment | *"Each was compiled AND EXECUTED… and each answered with the secret"* | the same-frame/file-level split, with the measured values for the two that do execute |
+| `protect-egress.ts` residual (2) | the bound, stated correctly but with no mirror | + an explicit note that the MIRROR splits in two, and which pin guards which half |
+| `protect-egress.ts` residual (4) | *"every one of them SHIPPED AN EXECUTED LEAK"* | *"SHIPPED A LEAK"* + the two-of-five execution table and its mechanism |
+| `protect-egress.ts` `detectProtectedRawEgressAcrossFns` prose | *"each shipped an executed leak … through an edge the classifier cannot classify at all"* | *"each shipped a leak"* + the two-class split + "a change that re-silences the FIRST class has re-introduced the exemption" |
+| `docs/known-gaps.md`, the S354-r7 ruling paragraph | the v3 bullet, and *"every one of them shipped an executed leak"* | two ⛑ corrections appended in place, marked as corrections |
+| **SPEC §14.8.9**, *"why no exemption"* | *"admitted a shipped, executed leak one level deeper than the last"* | *"admitted a leak one level deeper than the last"*, + which execute, + that the latent ones are silenced by an implementation accident **the specification does not guarantee** — which is why the SHALL is written over the compile-time gate rather than over observed behaviour |
+
+Swept and found clean: conformance case descriptions and `expected.json` rationales carry no claim
+about the four spellings; `emit-server.ts`'s §14.8.9 note states the bound without the conclusion.
+
+⚑ **Round 7's reasoning is instructive and is recorded as a correction, not silently edited.** A
+weakened reproducer produced a confident, wrong conclusion about a **security gate**, and the
+conclusion then propagated into four separate documents in one commit. The reproducer was weakened by
+omission — nobody removed a line on purpose; the fixture was written from the shape's *description*
+rather than from the shape that leaked. The defence is the CONTROL test: pin the difference, not just
+the behaviour.
+
+---
+
+## 5. THE HANDED-BACK DECISION — RE-SCOPED, NOT BUILT
+
+Round 7 measured a 10-line reference-edge patch in `collectRawEgressFacts`:
+
+```ts
+if (n.kind === "ident" && typeof n.name === "string") {
+  calls.add(n.name);
+}
+```
+
+**The framing stands and the patch is NOT built this round. Its motivation is corrected:**
+
+- **It is NOT unfinished business from the leak.** The leak — the edge-bearing class — is **CLOSED**,
+  by the exemption deletion, and is now pinned by four regression guards. Round 7 handed this back as
+  though it were the fix for a live hole. It is not.
+- **What it actually addresses is the weaker class (B):** the no-edge spellings, where `reach()` has
+  no edge at all. Those are silent on `origin/main`, on the r6 head and here; they have been silent
+  since before this arc existed; and they are a **precision** question, not a regression.
+- **The blocking reason is unchanged and is still the operator's call.** §14.8.9 now defines
+  `reach(F)` normatively as *"`F` plus every function `F` transitively **calls** within the file"*. A
+  reference edge redefines that as *mentions*. That is a normative SPEC amendment, and Rule 4 makes it
+  the operator's, not a codegen agent's.
+- **Its measured cost is unchanged:** all four class-(B) spellings close; corpus blast radius zero.
+  ⚑ Corpus-zero is blast-radius evidence ONLY. An adopter file that merely *names* a helper would
+  newly be treated as reaching it.
+
+**The question the operator is actually being asked, restated on the correct basis:** *is `reach(F)`
+worth widening from `calls` to `calls-or-names` in order to close a precision gap in a gate whose
+security hole is already closed?* Not: *is this the fix for the fifth leak?* It isn't.
+
+---
+
+## 6. THE REGRESSION FLOOR — RE-MEASURED AGAINST CURRENT MAIN
+
+Method unchanged from round 7 so the numbers are comparable: a diagnostic-code census over the full
+default corpus root set (`examples`, `samples`, `conformance`, `stdlib`, `benchmarks`, recursive),
+each tree compiling ITS OWN checkout, then intersected by relative path. Both trees extracted with
+`git archive` + a real `node_modules` symlink; `stdlib/` verified present (21 modules) on both.
+
+```
+base (origin/main a0e30329) sources : 1906
+head (raw-egress-r8-work)   sources : 1913
+SHARED                              : 1905      head-only 8, base-only 1
+SHARED SOURCES WITH A DIAGNOSTIC-CODE DELTA : 0
+  ...of the 18 shared sources emitting any PROTECT code : 0
+```
+
+**Zero — round 7's floor is not regressed.** The 8 head-only sources are this arc's own conformance
+cases under `conformance/cases/protect/`; the 1 base-only is the retired
+`protect/reveal-suppresses-e004` case (deleted by the dpa-033 (c) ruling, earlier in this arc).
+
+**Non-vacuity.** `I-PROTECT-STRIP-001` fires in **19** base sources and **26** head sources, so the
+protect floor is genuinely engaged on both sides and the zero is not zero-because-nothing-ran.
+`E-PROTECT-004` fires in **1** base source and **8** head sources — and all 7 of the difference are
+head-only files (this arc's own conformance cases). **Zero pre-existing corpus sources gained or lost
+a fire.**
+
+### Other gates
+
+- `bun conformance/run.ts` → **890/890 cases pass**.
+- `bun test compiler/tests/integration/g-sql-row-protect-leak.test.js` → **147 pass / 0 fail**
+  (142 before this round; +5).
+- The other four suites that touch the protect machinery — `trucking-dispatch-smoke-integration`,
+  `authed-server-fn-response-http`, `unit/tenant-egress`, `unit/channel-watches-phase2-runtime` —
+  **97 pass / 0 fail**.
+- `bun scripts/s34-census.ts --check-new --base origin/main` → **2 new/changed rows, all well-formed
+  — PASS.** No §34 row was touched this round; the 2 are the arc's existing `E-PROTECT-004`
+  restatement from round 7.
+- Full pre-commit gate ran on both content commits (no `--no-verify`, no `core.hooksPath` override).
+
+---
+
+## 7. RESIDUAL HANDED BACK — ROUND 8
+
+1. ⭐ **The `reach(F)` = calls-or-names amendment (§5 above).** Unchanged as a decision; **re-scoped**
+   as a precision question about class (B), not as the fix for a live leak. NOT built.
+2. ⚑ **NEW, and NOT a §14.8.9 question — a call to an in-process server peer, bound to a variable, is
+   not auto-awaited.** `let r = deny()` and `let u = loadUser(id)` emit bare inside the exported
+   server fn, while the same call inside a peer body emits `return await deny();`. The bound value is
+   a Promise, and every member access on it is silently wrong (or throws). Consequences beyond this
+   arc: it is a §13.2 position-invariant-auto-await violation, and it is what currently masks leaks
+   3/4/5. **Deliberately NOT filed as a new gap id and NOT fixed:** it may be a residual of
+   `g-indirect-callee-never-server-placed-server-referenceerror`'s await-lowering half — that entry
+   claims alias and dispatch-table callees are resolved *for placement, in-process peer emission, AND
+   await-lowering* — rather than a new class. It needs root-cause triage before it gets an id.
+   Reproducer: any `<db>`-block file-level helper called from an exported server fn with the result
+   bound.
+3. ⚑ **CARRIED, and now the reason for a process rule:** round 7's residual 2 (a server fn referenced
+   as a VALUE emits no in-process peer) is the sibling of (2) above. Both are auto-await/peer-emission
+   defects surfaced by protect fixtures, and both were found only because a probe EXECUTED the
+   emission instead of reading it.
+4. **CARRIED:** the `post-commit` hook runs the full suite per commit, so `git rebase` is unusable on
+   this branch. Merging worked cleanly this round (`Already up to date`).
+5. **CARRIED:** the `!{}` arm body has no tree form, so every body-walking analysis is blind inside
+   it. §14.8.9 is fail-closed across that blindness; the tenant twin, the auth graph, the reachability
+   solver and the DG are not.
+6. **CARRIED:** `1n`, `|>` and `-2 ** 2` escape-hatch and emit syntactically INVALID server JS with
+   zero errors, past `validateEmit: true`. A miscompile.
+7. **CARRIED:** the value-scoped `reveal` EXIT at a raw egress is still absent — §14.8.9 remains a
+   floor with no exit (dpa-033 (d), a separate arc).
+8. **CARRIED and now sharper:** `compiler/src/codegen/tenant-egress.ts` is untouched per brief. It
+   needs the escape-hatch treatment and the call-graph reachability, and it must NOT be given an
+   all-literal exemption — doing so reproduces all five leaks in the tenant lane, including the
+   edge-bearing class this round pinned.
+
+---
+
+## 8. PROCESS NOTE — WHAT WOULD HAVE CAUGHT ROUND 7
+
+Two cheap rules, both of which this round applied and both of which would have prevented the wrong
+conclusion:
+
+1. **A silence claim needs a CONTROL that differs by one line.** "This shape is silent" is only
+   informative next to "…and this shape, differing by exactly the mechanism under test, is not." The
+   `CONTROL` test added this round is that pair. Round 7 pinned four silences with no positive twin,
+   so a mis-built fixture read as a finding.
+2. **A runtime claim needs the emission executed AS EMITTED.** Every over-claim corrected this round
+   — round 7's, and my own first harness — came from evaluating a *transformation* of the emitted
+   code rather than the emitted code. Slice by brace-matching from a token that includes every
+   modifier, or do not slice at all.
