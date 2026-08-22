@@ -6252,6 +6252,32 @@ landed; five operator decisions are pending. Full pickup state in `hand-off.md`.
   that stopped being true. Fixed with `merge=union` + a CI-gated `delta-lint` (PR #581).
 - **Standing direction change `[1678]`** — the time-investment restraint is withdrawn; size is no
   longer a valid deferral reason. ~77 deferred items re-derived on merit.
+### 2026-08-22 (S364-peter — ARC 4 converged + routed, then the decl-match sibling landed with an S239-caught HIGH)
+
+Took the S363 pickup (ARC 4, the markup-value attr-interp scanner) then worked the peter-lane buildable
+list in order. **ARC 4 turned out to be a route, not a land:** first-hand re-derivation on HEAD showed the
+S363 "3-scanner + 1-emit" seam map was materially off — the true root is one convergent substrate,
+non-uniform `${…}`-interpolation-awareness across ≥4 tokenizer/parser string layers (violating SPEC
+§4.18.4/§1244's "single meaning across the language"). That is a central-lexer / SPEC-uniformity change =
+bryan's lane, so it was routed turnkey (a pushed prereq branch with two verified sub-fixes + a queue brief +
+inbox note) rather than enumerate-patched. Then the next buildable — a top-level library-mode `const/let =
+match` leaking raw — was fixed and landed; the S239 adversarial pass caught a real HIGH (a value-IIFE
+lowering silently returned `undefined` for object/block arm bodies) that was fixed before merge.
+
+- **#641** — `g-library-mode-toplevel-decl-match-leaks` (MED) RESOLVED. A top-level library-mode
+  `const/let X = match …` is not a function-decl, so the #636 fn-router never touched it and the raw `match`
+  leaked (E-CODEGEN-INVALID-LOGIC). A `const` doesn't hoist, so it's lowered in place (a splice in
+  `pruneServerFnsAndLowerGuarded`) through the browser tilde decl path — deliberately not a value-IIFE,
+  which lowers a brace-delimited arm body as a statement block → silent `undefined`. Handles both the
+  non-export (`const-decl`+`matchExpr`) and export (`export-decl`+split `match-stmt`) parser shapes.
+  R26-verified across object/enum/string arms + adjacency; multi-scrutinee/destructure fail loud.
+- **Routed to bryan** — the `${…}`-interpolation-uniformity convergent arc (branch
+  `route/s364-markup-interp-uniformity-prereq` + bryan-lane queue group-4 item K + inbox note).
+- **Review floor drained to 0** (the S363 tail: #636/#637 code S239-already-sound + #638/#639 continuity).
+- **2 new gaps filed** — `g-match-decl-span-overshoots-next-statement` (LOW, parser span accuracy) and
+  `g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED — the #636 fn path still has the
+  object-arm silent-undefined the decl fix sidesteps).
+- Gaps: HIGH 37 · MED 147 · LOW 69 · Nominal 7. Cloud `gate` green on #641.
 
 ### 2026-08-22 (S363-peter — the four fragile arcs: two fixed, one routed, one mapped — and three of the four filed traces were wrong on HEAD)
 
