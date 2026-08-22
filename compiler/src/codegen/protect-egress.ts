@@ -826,12 +826,30 @@ function isNestedCallable(n: Record<string, unknown>): boolean {
  *      globalThis[k]`) both read as themselves. Closing either needs the name
  *      resolver / constant propagation, not a wider callee test.
  *
- *      A key BUILT from literals is a different case and is CLOSED, not
- *      residual: `globalThis["Resp" + "onse"]` folds, because both operands sit
- *      in the tree (S354 — `staticIndexKey`). Measured before that fold: it
- *      compiled at exit 0 with zero diagnostics on every tree and the executed
- *      handler shipped the secret. "The key's value is not in the tree" is the
- *      bound, and a concatenation of literals does not meet it.
+ *      A key BUILT from literals is CLOSED **ON THE TREE PATH**, which is not
+ *      the same claim as closed: `globalThis["Resp" + "onse"]` folds, because
+ *      both operands sit in the tree (S354 — `staticIndexKey`). Measured before
+ *      that fold: it compiled at exit 0 with zero diagnostics on every tree and
+ *      the executed handler shipped the secret. "The key's value is not in the
+ *      tree" is the bound, and a concatenation of literals does not meet it.
+ *
+ *      ⚑ **The ESCAPE-HATCH path carries the residual** (F3, corrected S356 —
+ *      the sentence here previously read "CLOSED, not residual", full stop, and
+ *      that was false). Wrapping the identical shape in ANY expression the
+ *      parser cannot represent takes it off the tree path, and
+ *      `escapeHatchSurface` tests TEXT — it does not fold. Measured:
+ *
+ *      ```scrml
+ *      return new globalThis["Resp" + "onse"](JSON.stringify(u), { status: 201 + ~0 })
+ *      ```
+ *
+ *      spells no `Response` TOKEN, so the surface test answers "no egress here";
+ *      silent on both trees, the emitted JS parses, and the executed body ships
+ *      `passwordHash`. Same class as (1) — a name whose value is not present in
+ *      what the analysis can read — carried, not introduced, and pinned as a
+ *      `RESIDUAL (documented)` test. Closing it means folding inside
+ *      `escapeHatchSurface`, which is a text-side constant fold and wants its own
+ *      corpus measurement before it lands.
  *
  *      Parity with the source-text form this replaces, stated precisely because
  *      two earlier revisions of this comment got it wrong in BOTH directions:
