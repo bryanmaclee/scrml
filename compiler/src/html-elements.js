@@ -997,6 +997,51 @@ const STANDARD_HTML_ELEMENTS = new Set([
 ]);
 
 /**
+ * Standard HTML elements that do NOT render visible DOM content (document
+ * metadata / scripting, plus `<template>` whose content is inert / never
+ * rendered). A reactive value attribute on these is meaningless, so they are
+ * excluded from the render-element lowering predicate below. (`<slot>` is NOT
+ * here: it renders projected content and is already in the curated REGISTRY.)
+ */
+const NON_RENDERING_HTML_ELEMENTS = new Set([
+  "html", "head", "base", "link", "meta", "style", "title", "script", "noscript",
+  "template",
+]);
+
+/**
+ * True when `name` is a standard HTML element that renders to the DOM — the
+ * COMPLETE render-element set (the full WHATWG HTML list minus document-metadata
+ * elements), UNLIKE the curated `REGISTRY` / `isHtmlElement` which carry per-
+ * element attribute / void / DOM-render shapes for only the ~57 elements codegen
+ * and attribute-validation actively reason about.
+ *
+ * Consulted by the reactive value-attr lowering gate (`valueAttrElementIsLowerable`
+ * in emit-html.ts) so a reactive `attr=(@expr)` on a standard render element the
+ * curated registry omits (`details` / `summary` / `output` / `meter` / `pre` /
+ * `code` / `em` / `strong` / `thead` / `tbody` / …) still lowers to a DOM binding
+ * instead of being silently dropped (g-ishtmlelement-registry-incomplete, S362).
+ *
+ * Deliberately does NOT add these elements to the curated `REGISTRY`: that would
+ * pull them into attribute validation / void handling / emit — the blast radius the
+ * `isKnownElementName` separation (documented above) exists to avoid. This predicate
+ * answers ONLY "does this tag render to the DOM", nothing about its attribute shape.
+ *
+ * CASE-SENSITIVE: `STANDARD_HTML_ELEMENTS` holds the canonical all-lowercase
+ * names, and a render element in scrml source is written lowercase (an
+ * uppercase-first tag is a COMPONENT). Matching case-sensitively so a mixed-case
+ * near-miss (`dataList`, `textArea`, `tBody`) — which is a typo, not an element,
+ * and which no upstream gate blessed — stays FAIL-CLOSED (refused), exactly as
+ * before this predicate existed, rather than being newly lowered onto a phantom tag.
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isStandardHtmlRenderElement(name) {
+  if (typeof name !== "string" || name.length === 0) return false;
+  return STANDARD_HTML_ELEMENTS.has(name) && !NON_RENDERING_HTML_ELEMENTS.has(name);
+}
+
+/**
  * Complete SVG element names (MDN SVG element reference + legacy). Canonical
  * casing is preserved (SVG uses camelCase names such as `feGaussianBlur`,
  * `linearGradient`, `clipPath`, `foreignObject`). Matching is case-insensitive

@@ -10,7 +10,8 @@
 //   • The request body is decoded via parseVariant (§61.3 / §41.13) against the
 //     `accepts=` enum — the SAME total/failable tagged-variant decoder the §60
 //     `<api>` response half uses (REUSE, no new decoder): a per-variant
-//     `switch (_v.tag)` IIFE applied to `await _scrml_req.json()`.
+//     `switch (_v.tag)` IIFE applied to `await _scrml_req.text()` (raw text, so
+//     the IIFE owns the JSON.parse → ::Malformed → 400; see g-endpoint-malformed-json-body).
 //   • The decoded variant drives an exhaustive dispatch (§61.4): one `case` per
 //     `accepts=` variant, payload locals bound positionally from `.data`.
 //   • The arm's typed value-return is enveloped DIRECTLY as the JSON success
@@ -119,7 +120,11 @@ describe("<endpoint> codegen — server route-handler (§61.6), parseVariant dec
     const js = serverJs(compile(FSP_ENDPOINT));
     // The async server handler reads the request body, then decodes it.
     expect(js).toContain(`async function _scrml_endpoint_`);
-    expect(js).toContain(`const _scrml_body = await _scrml_req.json();`);
+    // §61.3/§61.5 — the body is read as RAW TEXT; the decode IIFE JSON-parses it
+    // inside its own try/catch so a malformed/empty body routes to ::Malformed → 400
+    // (g-endpoint-malformed-json-body-throws-instead-of-400), rather than a bare
+    // `.json()` throwing an uncaught SyntaxError before the IIFE runs.
+    expect(js).toContain(`const _scrml_body = await _scrml_req.text();`);
     // The §61.3 boundary-parse — a parseVariant decode IIFE against FspMethod
     // (REUSE emit-parse-variant — the same `switch (_v.tag)` shape <api> uses).
     expect(js).toContain(`switch (_v.tag)`);

@@ -40,7 +40,7 @@ import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./asy
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
-import { paramSignature } from "./utils.ts";
+import { paramSignature, indentBodyLines } from "./utils.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -488,7 +488,7 @@ export function generateToolJs(
       for (const bodyStmt of inner) {
         if (!bodyStmt) continue;
         const code = emitLogicNode(bodyStmt, emitOpts as never);
-        if (code) for (const line of code.split("\n")) bodyLines.push(`  ${line}`);
+        if (code) for (const line of indentBodyLines(code, "  ")) bodyLines.push(line);
       }
       bodyLines.push("}");
       bodyLines.push("");
