@@ -396,6 +396,97 @@ describe("generateServerEntry", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §40.3 — the handle() onion wraps TOP-LEVEL dispatch in the production server
+// (change-id `handle-onion-top-level-dispatch-2026-08-22`).
+//
+// SPEC §40.3.4: handle() "applies to all HTTP requests handled by the compiled
+// server — including statically-served assets". The pre-fix production fetch
+// only ever reached a handler on a REGISTERED-ROUTE match, so a custom path with
+// no author `route=` 404'd before handle() PRE could short-circuit it.
+// ---------------------------------------------------------------------------
+
+describe("§40.3 handle() onion in the production server entry", () => {
+  beforeEach(setupTmp);
+  afterEach(teardownTmp);
+
+  test("discoverServerRoutes separates _scrml_mw_pipeline from routes", () => {
+    writeFileSync(
+      join(tmpDir, "index.server.js"),
+      [
+        "export const _scrml_route_home = { path: '/', method: 'GET', handler: h };",
+        "export const _scrml_mw_pipeline = _scrml_mw_wrap;",
+      ].join("\n"),
+    );
+    const [mod] = discoverServerRoutes(tmpDir);
+    expect(mod.routeNames).toEqual(["_scrml_route_home"]);
+    expect(mod.middlewareNames).toEqual(["_scrml_mw_pipeline"]);
+    // The onion is a wrapper FUNCTION — putting it in `routes` would break the
+    // `{ path, method, handler }` match loop and lose the onion entirely.
+    expect(mod.routeNames).not.toContain("_scrml_mw_pipeline");
+  });
+
+  test("a module with ONLY the onion (zero routes) is still discovered", () => {
+    writeFileSync(
+      join(tmpDir, "index.server.js"),
+      "export const _scrml_mw_pipeline = _scrml_mw_wrap;\n",
+    );
+    const [mod] = discoverServerRoutes(tmpDir);
+    expect(mod).toBeDefined();
+    expect(mod.routeNames).toEqual([]);
+    expect(mod.middlewareNames).toEqual(["_scrml_mw_pipeline"]);
+  });
+
+  test("the emitted fetch delegates to the onion, and dispatch becomes a named fn", () => {
+    const content = generateServerEntry([
+      {
+        filename: "index.server.js",
+        routeNames: ["_scrml_route_home"],
+        wsHandlerNames: [],
+        middlewareNames: ["_scrml_mw_pipeline"],
+      },
+    ]);
+    expect(content).toContain(
+      'import { _scrml_route_home, _scrml_mw_pipeline as _scrml_mw_pipeline_0 } from "./index.server.js";',
+    );
+    expect(content).toContain("async function _scrml_dispatch(req, server) {");
+    expect(content).toContain("const _scrml_onions = [_scrml_mw_pipeline_0];");
+    expect(content).toContain("return _scrml_onion_dispatch(req, server);");
+    // The FULL remainder — route match, static file, AND the 404 — is downstream
+    // of the onion, so resolve() returns a Response on every path.
+    const dispatch = content.slice(content.indexOf("async function _scrml_dispatch"));
+    expect(dispatch).toContain("for (const route of routes) {");
+    expect(dispatch).toContain("// Static file serving");
+    expect(dispatch).toContain('return new Response("Not found", { status: 404 });');
+    // …and `fetch` no longer inlines the loop.
+    const fetchBody = content.slice(content.indexOf("async fetch(req, server) {"));
+    expect(fetchBody).not.toContain("for (const route of routes) {");
+  });
+
+  test("each module's onion is imported under its OWN alias (same export name)", () => {
+    const content = generateServerEntry([
+      { filename: "a.server.js", routeNames: ["_scrml_route_a"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"] },
+      { filename: "b.server.js", routeNames: ["_scrml_route_b"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"] },
+    ]);
+    expect(content).toContain('_scrml_mw_pipeline as _scrml_mw_pipeline_0 } from "./a.server.js";');
+    expect(content).toContain('_scrml_mw_pipeline as _scrml_mw_pipeline_1 } from "./b.server.js";');
+    // Composed in module order — the first module's onion is outermost.
+    expect(content).toContain("const _scrml_onions = [_scrml_mw_pipeline_0, _scrml_mw_pipeline_1];");
+  });
+
+  test("NON-VACUOUS: a build with NO onion keeps the inlined pre-§40.3 fetch", () => {
+    const content = generateServerEntry([
+      { filename: "index.server.js", routeNames: ["_scrml_route_home"], wsHandlerNames: [] },
+    ]);
+    expect(content).not.toContain("_scrml_mw_pipeline");
+    expect(content).not.toContain("_scrml_onion_dispatch");
+    expect(content).not.toContain("async function _scrml_dispatch");
+    const fetchBody = content.slice(content.indexOf("async fetch(req, server) {"));
+    expect(fetchBody).toContain("for (const route of routes) {");
+    expect(fetchBody).toContain('return new Response("Not found", { status: 404 });');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §38 WebSocket channel — discoverServerRoutes regression tests
 //
 // Bug 2 fix: emitChannelServerJs now emits export const _scrml_route_ws_<name>
