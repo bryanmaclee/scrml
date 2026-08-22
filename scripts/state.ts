@@ -426,9 +426,15 @@ function refuseDegenerateProjection(): void {
     );
   }
 
-  const sessions = recentSessions(8);
-  if (sessions.trim().length === 0) {
-    problems.push(`master-list.md yielded ZERO recent-session anchors — the session parser sees no population at all`);
+  // NOT `.length === 0`: recentSessions() never returns an empty string. Its zero-population path
+  // returns NO_SESSIONS_SENTINEL, so the empty-string test was unreachable and this half of the
+  // guard was dead from the day it was written. The degenerate value has a name; test for the name.
+  const sessions = recentSessions(8).trim();
+  if (sessions.length === 0 || sessions === NO_SESSIONS_SENTINEL) {
+    problems.push(
+      `master-list.md's recent-session index yielded ZERO session-wrap anchors ` +
+        `(the parser scanned 600 commits and matched none) — the session parser sees no population at all`,
+    );
   }
 
   if (problems.length === 0) return;
@@ -547,6 +553,18 @@ function sessionNumOf(subj: string): string | null {
   const m = subj.match(/\(s(\d+)\)/i);
   return m ? m[1] : null;
 }
+/**
+ * What `recentSessions()` yields when the git log surfaces NO session-wrap commits at all.
+ *
+ * Named rather than inlined because `refuseDegenerateProjection()` compares against it, and a
+ * literal duplicated across a producer and its guard is exactly how that guard went dead the first
+ * time: the guard was written as `sessions.trim().length === 0`, but this function has only two
+ * returns and BOTH are non-empty — so the condition could never be true. Zero sessions took the
+ * sentinel path, `--write` recorded the sentinel over the forensic index, and `--check` then
+ * agreed with it at exit 0 forever. One constant, two references, no drift.
+ */
+const NO_SESSIONS_SENTINEL = "_(no session-wrap commits found)_";
+
 function recentSessions(n: number): string {
   const r = sh("git", ["log", "--pretty=%h %s", "-n", "600"]);
   const seen = new Set<string>();
@@ -562,7 +580,7 @@ function recentSessions(n: number): string {
     picked.push({ sha, subj });
     if (picked.length >= n) break;
   }
-  if (picked.length === 0) return "_(no session-wrap commits found)_";
+  if (picked.length === 0) return NO_SESSIONS_SENTINEL;
   const lines: string[] = [];
   for (const { sha, subj } of picked) {
     const pushed = sh("git", ["merge-base", "--is-ancestor", sha, "origin/main"]).ok

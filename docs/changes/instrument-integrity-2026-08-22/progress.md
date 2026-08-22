@@ -732,3 +732,45 @@ keeps first-in-file order, which is blind to which side is already published.
 ## The five conditions
 
 Recorded below as each one closes.
+
+### (1) HIGH — `scripts/state.ts`: the master-list half of the guard was unreachable — **DONE**
+
+The reviewer's reading was exactly right. `recentSessions()` has two returns and both are
+non-empty: the zero-population path returns the sentinel `_(no session-wrap commits found)_`,
+the normal path returns joined lines. `sessions.trim().length === 0` could therefore never be
+true. The hollow write-then-check chain this branch closed for `known-gaps.md` survived intact
+one field over — and `progress.md` above asserted it as covered. **That is this branch's own
+thesis landing on the branch itself: a check that cannot fail, read as evidence.**
+
+**Reproduced before fixing**, with the session population emptied by pointing git at a scratch
+repo with no commits (`GIT_DIR` override — the worktree's own `.git` was never moved, and no
+`git stash` was used anywhere in this dispatch):
+
+```
+$ GIT_DIR=<empty-repo>/.git bun scripts/state.ts --write; echo $?
+  regenerated @generated:recent-sessions in master-list.md
+0                        <- exit 0. Eight lines of forensic index replaced by the sentinel.
+
+$ GIT_DIR=<empty-repo>/.git bun scripts/state.ts --check; echo $?
+  PASS — all @generated sections current.
+0                        <- the gate agreeing with the hollow value, exactly as predicted.
+```
+
+**Fix.** The degenerate value has a name, so test for the name — and give it *one* name:
+`NO_SESSIONS_SENTINEL` is now a named const referenced by both the producer and the guard.
+Inlining it at two sites is precisely how the guard went dead the first time, so the fix
+removes the duplication rather than adding a second literal. `|| sessions.length === 0` is
+kept alongside the sentinel test: it is dead today, but it stops being dead the moment
+someone changes the zero-path return, and it costs nothing.
+
+**Bite proof** (exit codes measured directly with `; echo $?`, never through a pipe):
+
+| population | invocation | pre-fix | post-fix |
+|---|---|---|---|
+| **EMPTY** (git log yields no wrap commits) | `--write` | **exit 0** — records the sentinel over the index | **exit 2 — REFUSES**, `master-list.md` untouched (`git diff --stat` empty) |
+| **EMPTY**, over the hollow write | `--check` | **exit 0 — `PASS`** | **exit 2 — REFUSES** (guard fires before the comparison) |
+| **REAL** (the actual repo) | `--check` | exit 0 `PASS` | **exit 0 `PASS`** |
+| **REAL** | `--write` | idempotent | **exit 0, `no changes (already current)`** |
+
+Both halves of the guard now bite. The known-gaps half was already proven in the round above;
+this is the half that was asserted rather than proven.
