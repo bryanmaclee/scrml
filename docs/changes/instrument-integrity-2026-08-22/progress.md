@@ -774,3 +774,66 @@ someone changes the zero-path return, and it costs nothing.
 
 Both halves of the guard now bite. The known-gaps half was already proven in the round above;
 this is the half that was asserted rather than proven.
+
+### (2) HIGH — `scripts/delta-lint.ts` was vacuous on a zero population — **DONE**
+
+This is the finding that matters most, because of where it was found: **inside the PR whose
+entire purpose was to stop a silent entry-drop, a gate that silently dropped the entire
+population and reported `PASS`.** It landed on `main` as a blocking CI gate between this
+branch being cut and this fix round, which is why STEP 0 merges before touching it.
+
+All three reviewer rows reproduced first-hand before any edit, exit codes measured directly:
+
+```
+$ bun scripts/delta-lint.ts; echo $?      # duplicate present, canonical `·`
+delta-lint FAILED — 1 NEW duplicated sequence number(s) across 1395 entries:
+1                                          <- correct
+
+$ bun scripts/delta-lint.ts; echo $?      # SAME duplicate, separator drifted `·` -> `-`
+delta-lint — baseline lists 9 duplicate(s) that no longer occur; shrink handOffs/delta-log-dupes.baseline.json
+delta-lint — 0 entries in the live scope (from line 875), 0 distinct sequence numbers, max [0] — PASS
+0                                          <- PASS over a file containing the defect
+
+$ bun scripts/delta-lint.ts; echo $?      # empty file
+delta-lint — 0 entries in the live scope (from line 1), 0 distinct sequence numbers, max [0] — PASS
+0
+```
+
+**A second-order harm the review did not name, surfaced by executing it.** In the blind state
+the gate does not merely pass — it prints *"baseline lists 9 duplicate(s) that no longer occur;
+**shrink** `handOffs/delta-log-dupes.baseline.json`"*. It advises DELETING the debt ledger that
+records nine real collisions, on the strength of having measured nothing. The blinder the
+parser got, the more confident the advice.
+
+**Fix — the existing idiom, not a sixth pattern.** `refuseDegenerateScope()` mirrors
+`facts.ts:refuseDegenerateMeasurement()` and `state.ts:refuseDegenerateProjection()`: same
+`MEASURED ZERO — refusing…` banner, same "a zero here is a broken measurement, not a fact"
+prose, same **exit 2** distinct from the substantive exit 1.
+
+**One deliberate difference from the brief's wording, stated because it is a judgement call.**
+The brief says *"refuse when the live scope yields zero entries **while the file has content**"*.
+The guard implemented refuses on zero **unconditionally**, which is a superset. Reason: the
+brief's own row 3 is the empty file, and it must go RED — a truncated log is the *worst* case
+this gate covers, not an exemption from it. `facts.ts` sets the precedent: it refuses any
+counter reading 0 with no "…but only if the directory exists" qualifier. `raw.trim().length`
+is still consulted, but only to *diagnose*, never to decide.
+
+The diagnosis names the root cause rather than the symptom, because the two shapes have
+different fixes:
+- **bracketed but unparsed** → the ENTRY SHAPE drifted; `state.ts` and the flogence bridge
+  parse the same regex, so they are reading an empty log too. The message prints the count of
+  `[NNNN]`-leading lines and the regex it failed against.
+- **nothing bracketed** → truncation, or a stray `## Session ` header that moved `SCOPE_START`
+  past every entry.
+
+**Bite proof** (`cmd; echo $?`, direct, never piped):
+
+| `handOffs/delta-log.md` | pre-fix | post-fix |
+|---|---|---|
+| real NEW duplicate, canonical `·` | exit 1 — `FAILED … 1 NEW duplicated sequence number(s)` | **exit 1**, identical, names both line numbers |
+| **same duplicate**, separator drifted `·` → `-` | **exit 0 — `0 entries … — PASS`** | **exit 2 — REFUSES**, `1399 line(s) … DO start with [NNNN] but none matched … the ENTRY SHAPE has drifted` |
+| **empty file** | **exit 0 — `PASS`** | **exit 2 — REFUSES**, `The file is empty. The log has been truncated to nothing.` |
+| pristine (restored) | exit 0 — `1394 entries … 1385 distinct … max [1686] — PASS` | **exit 0**, byte-identical output |
+
+The duplicate-detection path is untouched: row 1 is character-for-character what it was.
+The only removed line in the whole diff is the read site, split so the guard can size the file.
