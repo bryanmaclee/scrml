@@ -359,12 +359,22 @@ function staticStringLiteralValue(node: unknown): string | null {
  * where a multi-quasi template that could not be sliced falls back to
  * `astringGenerate` (which still renders `${…}`) or, in the last resort, to a
  * bare pair of backticks — a shape that would otherwise read as an empty STATIC
- * template. It costs one false NEGATIVE: an ESCAPED dollar in a single-quasi
- * template is genuinely static but reads as interpolated, because the parser
- * reconstructs that node's `raw` from the cooked text and the backslash is gone
- * by then. That is the fail-CLOSED direction (the value reads as caller-bearing,
- * so the gate fires), which is the only direction a confidentiality floor may
- * err in.
+ * template.
+ *
+ * **Which way its one false NEGATIVE errs, corrected S354 r7.** An ESCAPED
+ * dollar in a single-quasi template is genuinely static but reads as
+ * interpolated (the parser reconstructs that node's `raw` from the cooked text,
+ * and the backslash is gone by then). While the all-literal exemption existed
+ * this predicate had two callers and the note here claimed the miss was
+ * fail-CLOSED — true of the exemption caller, FALSE of the other one, and now
+ * false outright: the exemption is deleted and the only remaining caller is
+ * `staticStringLiteralValue`, i.e. bracket-KEY resolution.
+ *
+ * There, a false negative means the key does not resolve, so the callee does not
+ * resolve, so `` new globalThis[`Resp\${""}onse`] `` reads as no egress — the
+ * fail-OPEN direction. It is the same residual as every other unresolved key
+ * (see `staticIndexKey`), carried and not introduced, and it is stated here
+ * rather than mis-stated.
  */
 function templateLitIsStatic(n: { value?: unknown; raw?: unknown }): boolean {
   if (typeof n.value !== "string" || typeof n.raw !== "string") return false;
@@ -382,167 +392,6 @@ function memberReceiverName(node: unknown): string | null {
   const n = node as { kind?: string; object?: unknown };
   if (n.kind !== "member" && n.kind !== "index") return null;
   return terminalName(n.object);
-}
-
-/**
- * Is this expression node SYNTACTICALLY a literal — a value written out in the
- * source, carrying nothing the caller supplied?
- *
- * **This is the S354 narrowing of the EGRESS test, and its shape is the ruling.**
- * `E-PROTECT-004` fires on CO-OCCURRENCE within a call-reachable set, not on
- * flow, which is what makes it sound; but a `Response` whose every argument is a
- * literal cannot carry caller data at all, so counting it as an egress is not
- * conservatism, it is a defect. Measured: this program is clean on `main` and
- * fired on the round-3 head —
- *
- * ```scrml
- * function loadUser(id) { return ?{`SELECT * FROM users WHERE id = ${id}`}.get() }
- * function deny()       { return new Response("Forbidden", { status: 403 }) }
- * export server function dispatch(id) {
- *   if (id < 0) { return deny() }
- *   let u = loadUser(id)
- *   return { name: u.name }        // compiler-emitted path — redacts correctly
- * }
- * ```
- *
- * `dispatch` reaches both, so round 3's rule fired — while `deny()` returns a
- * CONSTANT and `u` leaves by the redacting path. SPEC §40.3.5's own early-return
- * example is exactly `deny`'s body, so the gate was rejecting the shape the SPEC
- * documents whenever any protected query sat in the same reachable set.
- *
- * **SYNTACTIC, and deliberately so.** A named binding is NOT a literal even when
- * its initializer is: `new Response(SOME_CONST)` still fires, and resolving
- * `SOME_CONST` is the flow analysis the ruling REJECTED — on direction, not cost.
- * A dataflow gate trades this precision bug for a soundness bug, because every
- * gap in a dataflow analysis is a fail-OPEN, and fail-closed is the only property
- * that makes §14.8.9 worth having.
- *
- * **UNNAMED IN RETURN POSITION (S356, round 6) — the rule's THIRD
- * formulation, because POSITION was never the discriminator. BINDING is.**
- * The exemption applies only when the constructed value NEVER BINDS: it is the
- * direct returned expression of the analyzed function's OWN `return`, and no
- * function in the call-reachable set NAMES the value it flows into. Two earlier
- * formulations shipped and both leaked, each executed, each silent where
- * `origin/main` build-blocks:
- *
- *   1. **"the arguments are syntactically all literals" (S354, round 4).** True
- *      of the CONSTRUCTION, false of the BINDING — a `Response` is a live
- *      mutable handle whose headers are writable after it is built:
- *
- *      ```scrml
- *      let r = new Response("ok", { status: 200 })
- *      r.headers.set("x-user", u.passwordHash)   // ships the secret in a header
- *      return r
- *      ```
- *
- *      Executed: `[["x-user","$argon2id$SECRET"]]` on the response HEADERS, at
- *      exit 0 with zero diagnostics. Same for `.headers.append(...)`, for
- *      `new Response()` with no arguments, and for `Response.json({ok:true})`.
- *
- *   2. **"return position only" (S355, round 5).** Wrong by one syntactic level.
- *      The walk recurses into NESTED `function-decl` nodes, so the flag was
- *      granted to EVERY `return-stmt` it reached, not to the analyzed function's
- *      own — and the value it hands back is then named by the caller:
- *
- *      ```scrml
- *      function noContent() { return new Response("", { status: 204 }) }
- *      let res = noContent()
- *      res.headers.set("x-etag", u.passwordHash)
- *      return res
- *      ```
- *
- *      Executed, silent, secret on the wire. The same hole with the helper at
- *      file level (`let r = deny(); r.headers.set(…)`) needed no nesting at all.
- *
- * Both holes are ONE sentence: **the value gets a NAME, then gets MUTATED.** So
- * the predicate tests naming, in two halves, and both halves are still purely
- * syntactic — no dataflow, which the ruling rejected on direction:
- *
- *   - **half one, inside the body** (`collectRawEgressFacts`): the construction
- *     must be the `exprNode` of a `return-stmt` in the analyzed function's OWN
- *     scope. Descending into any nested callable ends that scope, so a nested
- *     helper's `return` is NOT the analyzed function's return.
- *   - **half two, across the call graph**
- *     (`detectProtectedRawEgressAcrossFns`): the exemption is REVOKED for a
- *     function `G` whose result any body in the reachable set NAMES — every
- *     call except one that is the direct returned value of its caller's own
- *     `return`. The revocation propagates through pass-through helpers
- *     (`function passthru() { return deny() }`), because if `passthru`'s result
- *     is named then so is `deny`'s.
- *
- * So `return deny()` stays silent (nothing ever names the value) while
- * `let r = deny()` fires (something does), and the two answers differ for the
- * reason the ruling names rather than for where the text sits.
- *
- * Deliberately NOT exempt, every one the fail-CLOSED answer: an arrow's
- * EXPRESSION body (`() => new Response("x")`), a construction under a ternary or
- * a `||` inside a `return`, a construction returned through a temporary, and a
- * construction inside ANY nested callable. All are one syntactic step away from
- * the shape the ruling names, and none of them is that shape.
- *
- * What counts:
- *   - `lit` — string / number / bool / absence, and an UN-INTERPOLATED template
- *     (see `templateLitIsStatic`; an interpolated one is not a literal);
- *   - `array` / `object` literals whose every element / property value is itself
- *     literal (`{ status: 403 }`, `["a", "b"]`);
- *   - `spread` of a literal (`[...["a"]]`), by the same rule.
- *
- * What does NOT, every one of them the fail-CLOSED answer:
- *   - an identifier, member, index or call — `JSON.stringify(u)`, `SOME_CONST`,
- *     `row.name`;
- *   - an object SHORTHAND property (`{ status }` reads a binding);
- *   - any operator node, including a `+` of two string literals. That fold is
- *     available (`staticIndexKey` does it for a bracket KEY, where the question
- *     is "which property does this denote" and answering it wrong is a fail-OPEN)
- *     but it is deliberately NOT taken here, where the question is "may caller
- *     data ride this argument" and the wrong answer is a fail-OPEN in the other
- *     direction. A `+` is an expression, not a literal.
- *
- * provenance: ruling:user-voice-scrml.md S354 (delta-log [1606])
- */
-function isSyntacticLiteral(node: unknown): boolean {
-  if (!node || typeof node !== "object") return false;
-  const n = node as { kind?: string; litType?: string; elements?: unknown; props?: unknown; argument?: unknown };
-  switch (n.kind) {
-    case "lit":
-      return n.litType !== "template" || templateLitIsStatic(n as { value?: unknown; raw?: unknown });
-    case "array":
-      return Array.isArray(n.elements) && n.elements.every(isSyntacticLiteral);
-    case "object":
-      return Array.isArray(n.props) && n.props.every(objectPropIsLiteral);
-    case "spread":
-      return isSyntacticLiteral(n.argument);
-    default:
-      return false;
-  }
-}
-
-/** One `{ … }` property, under the same rule. See `isSyntacticLiteral`. */
-function objectPropIsLiteral(prop: unknown): boolean {
-  if (!prop || typeof prop !== "object") return false;
-  const p = prop as { kind?: string; key?: unknown; value?: unknown; computed?: boolean; argument?: unknown };
-  if (p.kind === "prop") {
-    // A static key is a plain string on the node and carries nothing; a COMPUTED
-    // key is an expression and has to answer the same test as the value.
-    if (p.computed === true && !isSyntacticLiteral(p.key)) return false;
-    if (p.computed !== true && typeof p.key !== "string" && !isSyntacticLiteral(p.key)) return false;
-    return isSyntacticLiteral(p.value);
-  }
-  if (p.kind === "spread") return isSyntacticLiteral(p.argument);
-  // `shorthand` — `{ status }` is an identifier reference, not a literal.
-  return false;
-}
-
-/**
- * Do ALL of a construction's arguments read as literals — i.e. can no caller
- * value ride this egress? An argument list the walk cannot see as an array is
- * UNKNOWN, and UNKNOWN answers false here (the construction IS an egress), which
- * is the fail-CLOSED direction. An EMPTY list answers true: `new Response()`
- * carries nothing.
- */
-function argsAreAllLiterals(args: unknown): boolean {
-  if (!Array.isArray(args)) return false;
-  return args.every(isSyntacticLiteral);
 }
 
 /** Does a type-annotation FIELD denote the `asIs` escape type (§14.1.1)? */
@@ -704,24 +553,6 @@ export interface RawEgressFacts {
   /** Bare-identifier callee names invoked from this body — the intra-file call
    *  graph's out-edges. */
   calls: string[];
-  /** The subset of `calls` whose RESULT THIS BODY NAMES — every bare-identifier
-   *  call except one that is the direct returned expression of this body's OWN
-   *  `return`. A named value can be mutated by the namer, so a callee's
-   *  all-literal `Response` stops being unnamed the moment it lands here (S356).
-   *  A call recovered from an `escape-hatch`'s text counts as named: the region
-   *  is opaque, and unknown answers closed. */
-  boundCalls: string[];
-  /** The subset of `calls` this body RETURNS DIRECTLY (`return f()`). The
-   *  revocation propagates along these edges: if THIS body's result is named by
-   *  someone, so is the result of everything it forwards, so a pass-through
-   *  helper cannot launder the exemption. */
-  returnedCalls: string[];
-  /** This body holds an all-literal construction in UNNAMED return position, so
-   *  the S356 exemption applied to it. Kept OFF `sawResponse` deliberately: the
-   *  whole-file pass may REVOKE the exemption (see
-   *  `detectProtectedRawEgressAcrossFns`), and it can only do that if the fact
-   *  that there IS a construction here survives the exemption. */
-  exemptReturnResponse: boolean;
   /** An `escape-hatch` node whose SOURCE TEXT could hold a raw egress — the
    *  unparsed expression, quotable, or null. An ordinary egress kind: it is
    *  resolved by the same co-occurrence rule as the three above. */
@@ -736,41 +567,6 @@ export interface RawEgressFacts {
    *  thing. Null when `truncated` is false. */
   truncatedKind: string | null;
   truncatedResolution: string | null;
-}
-
-/**
- * Node kinds that open a callable body of their own. Descending into one ENDS
- * the analyzed function's own scope, so a `return-stmt` beneath it is that
- * callable's return and not the analyzed function's (S356 — see
- * `isSyntacticLiteral` for the executed leak this closes).
- *
- * A `lambda` with a BLOCK body never reaches this list — the expression parser
- * turns it into an `escape-hatch` — but it is named anyway, because the walk
- * must not depend on which of two representations the parser happened to pick.
- */
-const NESTED_CALLABLE_KINDS: ReadonlySet<string> = new Set([
-  "function-decl",
-  "lambda",
-  "component-def",
-  "state-constructor-def",
-  "endpoint-decl",
-  "api-decl",
-  "onchange-decl",
-  "engine-decl",
-  "test",
-]);
-
-/**
- * Does this node open a callable body? The kind list above, plus a STRUCTURAL
- * catch-all: a node that carries its own parameter list is a callable whatever
- * its kind is called. The catch-all is the fail-CLOSED half — a callable kind
- * added to the AST later and not added to the list still ends the scope, and the
- * cost of a false positive here is one over-report, while the cost of a false
- * negative is a shipped secret.
- */
-function isNestedCallable(n: Record<string, unknown>): boolean {
-  if (typeof n.kind === "string" && NESTED_CALLABLE_KINDS.has(n.kind)) return true;
-  return Array.isArray(n.params) || Array.isArray(n.parameters);
 }
 
 /**
@@ -862,9 +658,20 @@ function isNestedCallable(n: Record<string, unknown>): boolean {
  *      `origin/main` tree (`git archive` + the real `node_modules`): that source
  *      compiles there with NO `E-SCOPE-001`, and `E-PROTECT-004` is absent on
  *      both trees. `Response` / `Request` / `Headers` are in
- *      `LOGIC_SCOPE_GLOBAL_ALLOWLIST` ON MAIN (#590, S355); this branch's
- *      `type-system.ts` diff is comment-only and allowlists nothing. Each
- *      spelling is pinned in `g-sql-row-protect-leak.test.js`.
+ *      `LOGIC_SCOPE_GLOBAL_ALLOWLIST` ON MAIN (#590, S355); this arc ADDS NO
+ *      ALLOWLIST ENTRY. Each spelling is pinned in
+ *      `g-sql-row-protect-leak.test.js`.
+ *
+ *      ⚑ That sentence used to end "…this branch's `type-system.ts` diff is
+ *      comment-only", and it was read as a licence to land this file WHOLESALE.
+ *      It is not one, and the phrasing is retired for that reason. "This arc
+ *      adds no allowlist entry" is a claim about THIS ARC'S ADDITIONS; it says
+ *      nothing about what else lives in `type-system.ts`, which is a
+ *      24k-line file main edits constantly. A wholesale file-delta land off a
+ *      stale base REVERTS those edits — measured at round 7, when the branch had
+ *      fallen 24 commits behind and would have reverted #634's
+ *      `maskStringLiteralSpans(txt)` fix, re-opening a wrong `E-FN-003` on a
+ *      base64 data URI, on `"a=b&c=d"` and on `obj["a = b"]`. Rebase or merge.
  *
  *   2. **The call graph is INTRA-FILE and by BARE-IDENTIFIER callee.** The
  *      cross-function shape itself is CLOSED (see
@@ -878,42 +685,20 @@ function isNestedCallable(n: Record<string, unknown>): boolean {
  *      / `Response.error` carry no caller-supplied body, so no protected column
  *      can ride them.
  *
- *   4. **A construction whose arguments are all literals AND WHOSE VALUE NEVER
- *      BINDS is not an egress** (S354, narrowed S355, re-ruled S356).
- *      `return new Response("Forbidden", { status: 403 })` carries nothing the
- *      caller supplied and nothing can reach it afterwards. The test is
- *      SYNTACTIC — `new Response(SOME_CONST)` still fires even when `SOME_CONST`
- *      is a module-level string, because resolving the binding is the flow
- *      analysis the ruling rejected. See `isSyntacticLiteral`. This is a
- *      PRECISION narrowing of a fail-closed gate and the only one in this file:
- *      everything else here errs closed.
+ *   4. **THERE IS NO ARGUMENT TEST, and there is no exemption.** A `Response` in
+ *      a reachable body is an egress whatever its constructor received. This
+ *      file carried the opposite rule through three formulations — "the
+ *      arguments are syntactically all literals" (S354), "…and it is in return
+ *      position" (S355), "…and its value is never NAMED anywhere in the
+ *      call-reachable set" (S356) — and every one of them SHIPPED AN EXECUTED
+ *      LEAK, because a `Response` is a mutable handle: what it was built from
+ *      bounds nothing about what it carries when it reaches the wire.
  *
- *      BINDING, not position, is the discriminator — the two earlier
- *      formulations are written out at `isSyntacticLiteral`, because each
- *      shipped and each leaked, executed. NAMING is tested in two halves: this
- *      function grants the exemption only to a construction that is the
- *      `exprNode` of a `return-stmt` in the analyzed function's OWN scope
- *      (`ownScope` below — descending into any nested callable ends it), and
- *      records it on `exemptReturnResponse` rather than on `sawResponse`;
- *      `detectProtectedRawEgressAcrossFns` then REVOKES it when any body in the
- *      reachable set names the value (`boundCalls`, propagated through
- *      `returnedCalls`).
- *
- *      The exemption is keyed on the NODE the `return-stmt` holds. Its bound:
- *      if the AST ever memoized one expression node into two positions — one of
- *      them a `return`, one of them not — the `seen` guard would visit it once
- *      and the exemption could carry to the non-return position. Measured on
- *      this tree: identical `new Response("Forbidden", { status: 403 })` text in
- *      a `let` and in a `return` produces TWO distinct nodes (the walk reports
- *      both), so the aliasing does not occur; it is stated because the property
- *      belongs to the expression parser, not to this file.
- *
- *      Residual of the revocation, stated rather than hidden: it is bounded by
- *      the same INTRA-FILE call graph as (2). A helper whose all-literal
- *      `Response` is returned across a FILE boundary and named there is not
- *      revoked — but the co-occurrence that would fire on it is equally
- *      invisible across that boundary, on this branch and on `origin/main`
- *      alike, so this is (2)'s bound and not a second one.
+ *      The mechanism is DELETED, not disabled (S354 re-ruling, delta-log
+ *      [1676]). Nothing here reads an argument list, no flag records an
+ *      exemption, and no revocation is computed — see
+ *      `detectProtectedRawEgressAcrossFns` for the ruling and for the
+ *      false positive it accepts.
  *
  * **Declassification is NOT handled here (ruling dpa-033 (c), S352).** §14.8.9
  * scopes `reveal` to the VALUE — "explicitly declassified via the field-level
@@ -936,8 +721,7 @@ export function collectRawEgressFacts(
   if (!fnNode || typeof fnNode !== "object") {
     return {
       protectedQuery: null, sawForeign: false, sawResponse: false, sawAsIs: false,
-      unanalyzableEgress: null, calls: [], boundCalls: [], returnedCalls: [],
-      exemptReturnResponse: false, truncated: false,
+      unanalyzableEgress: null, calls: [], truncated: false,
       truncatedKind: null, truncatedResolution: null,
     };
   }
@@ -947,10 +731,7 @@ export function collectRawEgressFacts(
   let sawResponse = false;
   let sawAsIs = false;
   let unanalyzableEgress: string | null = null;
-  let exemptReturnResponse = false;
   const calls = new Set<string>();
-  const boundCalls = new Set<string>();
-  const returnedCalls = new Set<string>();
 
   // Generic structural walk — the `astReadsCurrentUserAmbient` precedent
   // (emit-server.ts): identity `seen` set against a cyclic tree, a depth cap,
@@ -976,29 +757,13 @@ export function collectRawEgressFacts(
   let truncatedKind: string | null = null;
   let truncatedResolution: string | null = null;
   const seen = new WeakSet<object>();
-  // Two flags carry the S356 UNNAMED-in-return-position rule (see
-  // `isSyntacticLiteral` for the ruling and for the two formulations that
-  // leaked before it).
-  //
-  // `ownScope` is TRUE while the walk is still inside the ANALYZED function's
-  // own body and FALSE from the moment it descends into a nested callable. This
-  // is the half round 5 got wrong: its comment claimed `isReturnValue` was "TRUE
-  // for exactly one node", and that was false as written — the walk recurses
-  // into nested `function-decl` nodes, so EVERY `return-stmt` it reached was
-  // granted the flag, including a nested helper's, whose value the enclosing
-  // body then named and mutated.
-  //
-  // `isReturnValue` is TRUE only for the `exprNode` an OWN-SCOPE `return-stmt`
-  // holds, visited explicitly from the `return-stmt` branch below; every other
-  // recursion passes FALSE. It also classifies each call edge: a call in that
-  // one position is FORWARDED (`returnedCalls`), any other call NAMES its result
-  // (`boundCalls`).
-  const visit = (
-    node: unknown,
-    depth: number,
-    isReturnValue: boolean,
-    ownScope: boolean,
-  ): void => {
+  // The walk carries NO position or scope state. It used to carry two flags —
+  // `isReturnValue` and `ownScope` — that existed solely to grant, and then to
+  // scope, the all-literal exemption. The exemption is gone (S354, delta-log
+  // [1676]), and with it the only question those flags answered. What is left is
+  // a uniform "does this subtree contain X" walk, which is the shape a
+  // co-occurrence test wants: WHERE a construct sits never mattered to it.
+  const visit = (node: unknown, depth: number): void => {
     if (!node || typeof node !== "object") return;
     if (depth > RAW_EGRESS_MAX_DEPTH) {
       truncated = true;
@@ -1010,15 +775,11 @@ export function collectRawEgressFacts(
     seen.add(node as object);
 
     if (Array.isArray(node)) {
-      for (const child of node) visit(child, depth + 1, false, ownScope);
+      for (const child of node) visit(child, depth + 1);
       return;
     }
 
     const n = node as Record<string, unknown>;
-
-    // The analyzed function's own scope ends at the first NESTED callable. The
-    // root itself is a callable and is excluded by identity, not by kind.
-    const ownScopeHere = ownScope && (node === fnNode || !isNestedCallable(n));
 
     // --- the protected-origin `?{}` SELECT ---------------------------------
     // A `?{}` is a `sql` node wherever it sits; the let/const/return attachment
@@ -1052,31 +813,23 @@ export function collectRawEgressFacts(
       // Recover the call edges the opaque region hides. A recovered name that
       // declares no function in this file contributes nothing, so the cost of a
       // false one is zero and the cost of a missing one is a shipped secret.
-      //
-      // Every one of them counts as NAMING its result (`boundCalls`): the region
-      // has no tree, so "this call's value is returned straight out and never
-      // bound" is UNKNOWN, and unknown answers closed — which here means
-      // revoking a callee's all-literal exemption rather than trusting it.
-      for (const c of surface.calls) {
-        calls.add(c);
-        boundCalls.add(c);
-      }
+      for (const c of surface.calls) calls.add(c);
     }
 
     if (n.kind === "foreign") sawForeign = true;
 
     // --- egress kind 2: a manual `Response` (§40) ---------------------------
     // The callee resolves through its member chain, so every spelling of the
-    // constructor answers the same. The ARGUMENTS decide whether it is an egress
-    // at all: a construction whose arguments are syntactically all literals
-    // carries nothing the caller supplied, so it cannot leak a protected row
-    // (S354 — see `isSyntacticLiteral`, which states the boundary and why the
-    // test is syntactic rather than a flow analysis).
+    // constructor answers the same. The ARGUMENTS ARE NOT CONSULTED: a
+    // `Response` in this body is a raw egress, full stop. Three rounds of this
+    // gate asked "but can caller data ride these arguments?" and each answer
+    // shipped an executed leak — a `Response` is a MUTABLE HANDLE, so what its
+    // constructor received bounds nothing about what it carries when it reaches
+    // the wire. See `detectProtectedRawEgressAcrossFns` for the ruling.
     //
     // `new <chain>.Response(...)`.
     if (n.kind === "new" && terminalName(n.callee) === "Response") {
-      if (isReturnValue && argsAreAllLiterals(n.args)) exemptReturnResponse = true;
-      else sawResponse = true;
+      sawResponse = true;
     }
     // `<chain>.Response.json(...)` — a static factory call on the same receiver.
     if (
@@ -1084,8 +837,7 @@ export function collectRawEgressFacts(
       terminalName(n.callee) === "json" &&
       memberReceiverName(n.callee) === "Response"
     ) {
-      if (isReturnValue && argsAreAllLiterals(n.args)) exemptReturnResponse = true;
-      else sawResponse = true;
+      sawResponse = true;
     }
 
     // --- egress kind 3: an `asIs`-typed value (§14.1.1) ---------------------
@@ -1098,45 +850,34 @@ export function collectRawEgressFacts(
     // a file-level function declaration, and the caller resolves these names
     // against the file's own `function-decl` set — so an unresolved name simply
     // contributes no edge.
-    // A call is also CLASSIFIED here, because the S356 exemption turns on it: a
-    // call in own-scope return position FORWARDS its callee's value out of this
-    // body untouched, and any other call NAMES the value.
+    //
+    // The edge is UNCLASSIFIED. It used to be split into "this body NAMES the
+    // callee's result" and "this body FORWARDS it", which was the exemption's
+    // revocation input; a co-occurrence test does not care how the result is
+    // used, only that the edge exists.
     if (n.kind === "call") {
       const callee = n.callee as { kind?: string; name?: string } | undefined;
       if (callee && callee.kind === "ident" && typeof callee.name === "string") {
         calls.add(callee.name);
-        if (isReturnValue) returnedCalls.add(callee.name);
-        else boundCalls.add(callee.name);
       }
     }
 
-    // --- UNNAMED RETURN POSITION (S356) -----------------------------------
-    // A `return-stmt` carries the returned expression on `exprNode` (it also
-    // carries `expr`, the same expression in STRING form, which the generic loop
-    // below skips as a non-object). Visit `exprNode` HERE, with the flag set, so
-    // the all-literal narrowing applies to a construction that IS the returned
-    // value and to nothing else. The generic loop then re-reaches the same node
-    // and the `seen` guard makes that a no-op.
-    //
-    // `ownScopeHere` is the round-6 fix. A `return-stmt` inside a NESTED
-    // callable is not the analyzed function's return: its value goes back to
-    // whoever called that helper, who may name it and mutate it. Round 5 granted
-    // the flag to those too, and that shipped a secret on the response headers.
-    if (n.kind === "return-stmt" && ownScopeHere) {
-      visit(n.exprNode, depth + 1, true, ownScopeHere);
-    }
-
+    // A `return-stmt`'s `exprNode` needs no special visit: the generic loop
+    // below reaches it like any other key. It used to be visited explicitly,
+    // ahead of the loop, purely to set the return-position flag the exemption
+    // read; with the exemption gone the explicit visit computed nothing the loop
+    // did not. (`expr`, the same expression in STRING form, is skipped by the
+    // loop as a non-object — the tree form is the one that is walked.)
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
-      visit(n[key], depth + 1, false, ownScopeHere);
+      visit(n[key], depth + 1);
     }
   };
-  visit(fnNode, 0, false, true);
+  visit(fnNode, 0);
 
   return {
     protectedQuery, sawForeign, sawResponse, sawAsIs, unanalyzableEgress,
-    calls: [...calls], boundCalls: [...boundCalls], returnedCalls: [...returnedCalls],
-    exemptReturnResponse, truncated, truncatedKind, truncatedResolution,
+    calls: [...calls], truncated, truncatedKind, truncatedResolution,
   };
 }
 
@@ -1145,16 +886,13 @@ export function collectRawEgressFacts(
  * is FIXED rather than traversal-ordered, so the reported kind does not depend
  * on where in the body each construct happens to sit.
  *
- * `responseRevoked` re-admits an all-literal construction this body returned
- * UNNAMED but whose value something in the reachable set names after all — the
- * second half of the S356 rule, computed by
- * `detectProtectedRawEgressAcrossFns` because it is a whole-file question.
+ * A pure function of one body's facts. It took a second `responseRevoked`
+ * argument while the all-literal exemption existed, because whether a body's
+ * `Response` counted was then a WHOLE-FILE question; it is a local one again.
  */
-function egressKindOf(facts: RawEgressFacts, responseRevoked: boolean = false): string | null {
+function egressKindOf(facts: RawEgressFacts): string | null {
   if (facts.sawForeign) return "a `_{}` foreign-code block (§23)";
-  if (facts.sawResponse || (responseRevoked && facts.exemptReturnResponse)) {
-    return "a manual `Response` / `handle()` body (§40)";
-  }
+  if (facts.sawResponse) return "a manual `Response` / `handle()` body (§40)";
   if (facts.sawAsIs) return "an `asIs`-typed value (§14.1.1)";
   if (facts.unanalyzableEgress !== null) {
     return "a raw egress inside an expression the compiler could not parse into a tree (`" +
@@ -1255,7 +993,39 @@ export interface ProtectedRawEgressDetection {
  * member (`obj.method()`) contribute no edge. Those are the same syntactic bound
  * as the callee resolution above, and closing them needs the name resolver.
  *
- * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c))
+ * ---
+ *
+ * **THE ACCEPTED FALSE POSITIVE (S354 re-ruling, delta-log [1676]).**
+ *
+ * SPEC §40.3.5's own worked example returns a bare
+ * `new Response("Forbidden", { status: 403 })` under the normative sentence
+ * "This is intentional and valid". When that shape sits in the same
+ * call-reachable set as a protected read, THIS GATE FIRES ON IT — even though
+ * the row that actually leaves does so through the compiler-emitted redacting
+ * path. That is a false positive, it is DELIBERATE, and it is RATIFIED.
+ *
+ * Three rounds tried to carve it out. Each carve-out was a whitelist revoked by
+ * proving a NEGATIVE — *this value is never named* — over a call graph that is
+ * provably incomplete, and each shipped an executed leak: the value bound
+ * directly; bound via a nested helper's return; bound across a call edge; bound
+ * two frames out through a pass-through; and finally bound through an edge the
+ * classifier cannot classify at all. It never converged because it cannot: you
+ * cannot prove a negative over an incomplete graph.
+ *
+ * So the trade is taken the other way. A build error with a workaround beats a
+ * fail-open. The diagnostic names both workarounds — project the protected
+ * column out of the SELECT, or return through the compiler-emitted response
+ * instead of a manual `Response`.
+ *
+ * REOPENING CONDITION: an adopter hits this on a real application and neither
+ * workaround is acceptable. Until then, a change that makes the §40.3.5 shape go
+ * silent has re-introduced the exemption — check the leak pins in
+ * `g-sql-row-protect-leak.test.js` before believing otherwise. Recorded in
+ * `docs/known-gaps.md` and pinned by the conformance case
+ * `protect/raw-egress-40-3-5-accepted-false-positive`.
+ *
+ * provenance: ruling:user-voice-scrml.md S352 (dpa-029 Q1, dpa-033 (c));
+ * S354 re-ruling (delta-log [1676], round 7)
  */
 export function detectProtectedRawEgressAcrossFns(
   fnNodes: readonly unknown[],
@@ -1332,33 +1102,7 @@ export function detectProtectedRawEgressAcrossFns(
     }
 
     const reached = reachFrom(i);
-
-    // --- the S356 exemption's REVOCATION set -------------------------------
-    // An all-literal construction is exempt only while its value stays UNNAMED.
-    // Naming is a whole-file question, so it is answered here rather than in the
-    // body walk: start from every callee whose result some body in this
-    // reachable set NAMES, then close over `returnedCalls` so a pass-through
-    // helper (`function passthru() { return deny() }`) cannot launder the
-    // exemption — if `passthru`'s value is named, `deny`'s is the same value.
-    // Revocation is by NAME, so it covers every declaration of a duplicated name,
-    // matching `indicesByName`'s own fail-closed multimap answer.
-    const namedCallees = new Set<string>();
-    for (const idx of reached.keys()) {
-      for (const c of facts[idx].boundCalls) namedCallees.add(c);
-    }
-    const namingWork = [...namedCallees];
-    while (namingWork.length > 0) {
-      const name = namingWork.pop()!;
-      for (const idx of indicesByName.get(name) ?? []) {
-        for (const forwarded of facts[idx].returnedCalls) {
-          if (namedCallees.has(forwarded)) continue;
-          namedCallees.add(forwarded);
-          namingWork.push(forwarded);
-        }
-      }
-    }
-    const egressKindAt = (idx: number): string | null =>
-      egressKindOf(facts[idx], namedCallees.has(nameOf(nodes[idx])));
+    const egressKindAt = (idx: number): string | null => egressKindOf(facts[idx]);
 
     // The protected SELECT: prefer this body's own, else the shortest reached.
     let query = facts[i].protectedQuery;

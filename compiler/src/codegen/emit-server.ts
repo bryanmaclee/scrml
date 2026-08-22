@@ -4318,10 +4318,14 @@ export function generateServerJs(
       // build-blocks on E-SCOPE-001)" — that stopped being true at S355/#590, a
       // SEPARATE landing on `main`, when `Response` was added to
       // `LOGIC_SCOPE_GLOBAL_ALLOWLIST` there. (NOT this arc: this arc carries the
-      // S352 dpa-029 Q1 / dpa-033 (c) ruling and its `type-system.ts` diff is
-      // comment-only — it allowlists nothing. The mis-attribution is corrected
-      // here for the sixth time; it keeps re-entering because the two changes
-      // were adjacent in time and both cite §40.3.5.) The allowlist landed because
+      // S352 dpa-029 Q1 / dpa-033 (c) ruling and ADDS NO ALLOWLIST ENTRY. The
+      // mis-attribution is corrected here for the sixth time; it keeps
+      // re-entering because the two changes were adjacent in time and both cite
+      // §40.3.5. The old phrasing — "its `type-system.ts` diff is comment-only"
+      // — is retired at round 7: it is a claim about this arc's ADDITIONS that
+      // was read as a licence to land `type-system.ts` wholesale, which off a
+      // stale base reverts main's own edits to that file. See the long note in
+      // `protect-egress.ts`.) The allowlist landed because
       // SPEC §40.3.5's own worked example returns a bare
       // `new Response("Forbidden", { status: 403 })` under the normative
       // sentence "This is intentional and valid". The shape is now ordinary
