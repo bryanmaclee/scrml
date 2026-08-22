@@ -760,6 +760,83 @@ export function rewriteReplayCalls(expr: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// rewriteResetCalls
+// ---------------------------------------------------------------------------
+
+/**
+ * §6.8.2 — rewrite `reset(@target)` to the runtime helper `_scrml_reset("target")`
+ * in RAW-STRING body positions (statement-bodied `cleanup` / `on <event>` handlers).
+ *
+ * In a STRUCTURED position the parser produces a `reset-expr` node and
+ * emit-expr.ts lowers it (→ `_scrml_reset("<key>")`, cs-prefixed downstream by
+ * renameCellAccessors). But a statement-bodied `cleanup(() => { reset(@x) })` or
+ * `onclick=${ if (...) { reset(@x) } }` has no ExprNode — it takes the raw-text
+ * fallback (rewriteExprWithDerived), which carried preserving pre-passes for
+ * `transition` and `replay` but NONE for `reset`. Without this pass the generic
+ * `@x → _scrml_reactive_get("x")` rewrite (Pass 10) clobbers the arg while the
+ * bare `reset` identifier survives undefined → `reset(_scrml_cs_reactive_get("x"))`
+ * → ReferenceError when the handler fires (g-cleanup-onclick-raw-body-keyword-call-dangling-ref).
+ *
+ * This pass makes the raw-text path produce the SAME output as the structured
+ * path. It is the exact sibling of rewriteReplayCalls / rewriteTransitionCalls.
+ *
+ * Shapes emitted (§6.8.2 canonical targets; mirror emit-expr.ts `reset-expr`):
+ *   reset(@cell)            → _scrml_reset("cell")
+ *   reset(@compound.field)  → _scrml_reset("compound.field")   (multi-level OK, §6.3.5)
+ *
+ * MUST run BEFORE rewriteReactiveRefs so the @-target is still literal at match
+ * time (we want its name as a string, not its runtime value). Non-canonical
+ * shapes (a non-`@` arg, extra args) are left untouched — the structured path
+ * rejects them via E-RESET-INVALID-TARGET; here they fall through, exactly as
+ * replay/transition leave their non-canonical forms alone. The negative
+ * lookbehind excludes member calls (`obj.reset(...)`) and the already-lowered
+ * `_scrml_reset(...)`, mirroring the S354 post-dot guard.
+ */
+export function rewriteResetCalls(expr: string): string {
+  if (!expr || typeof expr !== "string" || !expr.includes("reset")) return expr;
+  // §6.8.2 CANONICAL targets only: `@cell` or `@compound.field(.sub...)`. A
+  // non-canonical target (subscript `@a[0]`, an expression) does NOT match and
+  // is left untouched — the structured path owns E-RESET-INVALID-TARGET; the
+  // raw-body non-canonical residual + the reparse substrate that would close the
+  // whole keyword class at the right depth are routed to bryan (see the gap).
+  // The negative lookbehind excludes member calls (`obj.reset(`), the
+  // already-lowered `_scrml_reset(`, and an `@`-prefixed occurrence (`@reset(`).
+  const resetRe = /(?<![A-Za-z0-9_$.@])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+  const rewriteSeg = (seg: string) =>
+    seg.replace(resetRe, (_full, path) =>
+      `_scrml_reset(${JSON.stringify(String(path).replace(/\s+/g, ""))})`);
+
+  // STRING-AWARE: only rewrite outside string literals, mirroring
+  // rewriteReactiveRefs (the pipeline leaves `@x` inside a string alone; this
+  // pass must too, or a handler body like `alert("reset(@x)")` would be
+  // corrupted). Char-scan tracking the open quote, honouring `\` escapes.
+  const out: string[] = [];
+  let inString: string | null = null;
+  let i = 0;
+  let segStart = 0;
+  while (i < expr.length) {
+    const ch = expr[i];
+    if (inString === null) {
+      if (ch === '"' || ch === "'" || ch === "`") {
+        out.push(rewriteSeg(expr.slice(segStart, i)));
+        inString = ch;
+        segStart = i;
+      }
+    } else if (ch === "\\") {
+      i++;
+    } else if (ch === inString) {
+      out.push(expr.slice(segStart, i + 1));
+      inString = null;
+      segStart = i + 1;
+    }
+    i++;
+  }
+  const remaining = expr.slice(segStart);
+  out.push(inString === null ? rewriteSeg(remaining) : remaining);
+  return out.join("");
+}
+
+// ---------------------------------------------------------------------------
 // rewriteWorkerRefs
 // ---------------------------------------------------------------------------
 
@@ -2654,6 +2731,13 @@ const clientPasses: RewritePass[] = [
   // before rewriteReactiveRefs so the first @-ref is still literal at
   // match time (we want its name as a string, not its runtime value).
   (s, _ctx) => rewriteReplayCalls(s),
+  // Pass 9.75: §6.8.2 reset primitive — rewrite `reset(@target)` →
+  // `_scrml_reset("target")` in raw-string body positions (statement-bodied
+  // cleanup / on-<event> handlers have no ExprNode, so the structured
+  // reset-expr lowering never runs). Sibling of the transition/replay passes
+  // above; MUST run before rewriteReactiveRefs so the @-target is still literal
+  // at match time (g-cleanup-onclick-raw-body-keyword-call-dangling-ref).
+  (s, _ctx) => rewriteResetCalls(s),
   // Pass 10: derivedNames-aware reactive ref rewrite
   (s, ctx) => rewriteReactiveRefs(s, ctx.derivedNames ?? null),
   // Pass 10.5: fix leaked reactive assignments (reactive getter on LHS of =)
