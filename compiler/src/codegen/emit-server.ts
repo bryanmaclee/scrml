@@ -4620,7 +4620,13 @@ export function generateServerJs(
 
       lines.push(`// --- §61 <endpoint> ${_epMethod} ${_epPath} (accepts=${_epEnum.name}) ---`);
       lines.push(`async function ${_epHandler}(_scrml_req) {`);
-      lines.push(`  const _scrml_body = await _scrml_req.json();`);
+      // §61.3/§61.5 — read the body as RAW TEXT, not `.json()`. The decode IIFE
+      // (§41.13) JSON-parses the string inside its own try/catch and routes a
+      // parse throw to ::ParseError::Malformed → the compiler-owned 400 envelope.
+      // A bare `.json()` here throws BEFORE the IIFE runs, so a malformed / empty
+      // body escaped as an uncaught SyntaxError (500) instead of the mandated 400
+      // (g-endpoint-malformed-json-body-throws-instead-of-400).
+      lines.push(`  const _scrml_body = await _scrml_req.text();`);
       lines.push(`  // §61.3 — decode the request body against accepts= (parseVariant §41.13).`);
       lines.push(`  const _scrml_decoded = ${_epDecode};`);
       lines.push(`  // §61.3 — a ::ParseError decode failure → the compiler-owned 400 envelope.`);
