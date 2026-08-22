@@ -1,18 +1,97 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S362-peter.        -->
-<!-- Mechanical stream: handOffs/delta-log.md [1659]-[1664].         -->
-<!-- S362 = a LONG deep-dive/throughput session. 3 code fixes landed   -->
-<!--   (request-ref event-handler seam #630, reactive-attr drop on     -->
-<!--   registry-absent render elements #632, E-FN-003 literal-= false- -->
-<!--   positive #634); 1 MED deep-dived to MULTI-SEAM + parked (markup  -->
-<!--   #634-batch); convergent shouldSkipExprParse fix + the whole     -->
-<!--   bryan-lane queue (9-group reconsolidation) ROUTED to bryan;      -->
-<!--   4 fragile peter-lane arcs TRACED + kept open. Staleness vein     -->
-<!--   DRAINED (no stale-resolved found). HIGH 37 · MED 149→146.       -->
-<!--   6 PRs merged (3 code, 3 continuity).                            -->
-<!-- ⭐ NEXT BOOT (peter): go after ONE FRAGILE ARC — §B. bryan: §A.   -->
-<!-- Body below the S362 block is S361 + older (history).             -->
+<!-- hand-off.md — live session state. WRAPPED at S363-peter.        -->
+<!-- Mechanical stream: handOffs/delta-log.md [1665]-[1670].         -->
+<!-- S363 = the four fragile peter-lane arcs S362 traced (full-context). -->
+<!--   ARC 1 library-mode `match` → FIXED (#636). ARC 2 failable-arm     -->
+<!--   multiline-template → FIXED (#637, S362 ASI trace was wrong).      -->
+<!--   ARC 3 reactive-member auto-await → ROUTED to bryan (#638; stale   -->
+<!--   locus, contested axis). ARC 4 markup-value scanner → PARKED with  -->
+<!--   a full 3-scanner+emit seam map (#638; partial built+reverted).    -->
+<!--   +5 residual gaps filed. Review floor 0. HIGH 37 · MED 147 · LOW 68.-->
+<!--   3 PRs merged (#636/#637 code, #638 continuity).                   -->
+<!-- ⭐ NEXT BOOT (peter): ARC 4 (markup scanner, seam map ready) OR a    -->
+<!--   fresh dog-food. bryan: ARC 3 auto-await + the S358→S362 queue.    -->
+<!-- Body below the S363 block is S362 + older (history).               -->
 <!-- ============================================================= -->
+
+# scrml — Session 363 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+S363 worked the four fragile arcs S362 left. **The durable finding: 3 of the 4 S362 traces were WRONG on
+HEAD** — arc-2's "collectExpr ASI" was a misattribution (real root = double-quote token re-quote in
+`parseErrorTokens`), arc-3's locus was stale (the emitted sink is now `_scrml_cs_reactive_set`, not
+`_scrml_reactive_set`), arc-4 was a 3-scanner problem not 1. First-hand re-derivation before acting is
+load-bearing, not ceremony. [[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-dispatch-brief-root-is-a-hypothesis]]
+
+### B. peter's lane — ONE fragile arc left + dog-food
+1. **`g-markup-value-attr-interp-string-brace` (MED) — PARKED, but the seam map is now TURNKEY.** S363 derived
+   it is a **3-scanner + 1-emit** arc (see the gap's S363 annotation): the `${…}`-blindness lives in THREE
+   string-trackers in `parseExprWithMarkupValues` (outer :3968-3976, inner :3986-3994, nested-opener :4055-4065
+   — the double-quote case bails at the OPENER scanner), AND the recovered-attr emit backslash-escapes the
+   ternary's string literals inside the `${…}` interp (`\"a\"`, illegal in a template interp). A `${}`-skip
+   `skipInterpBody` helper threaded into all 3 scanners + an emit-side fix (don't escape quotes inside an interp
+   body). Discriminator verified: single-quote recovers→hits the emit seam; double-quote bails the opener scan.
+   **A partial (1-scanner) fix was built + REVERTED — do NOT re-land it alone.** High blast radius (governs ALL
+   conditional-markup lowering, GITI-032/033/034) → wants the markup gauntlet.
+2. **The other fragile arcs from S362 §B are now dispositioned:** arc-1 (library-match) + arc-2 (failable-arm)
+   LANDED; arc-3 (reactive-member auto-await) ROUTED to bryan. So arc 4 is the last open peter-lane fragile arc.
+3. **5 NEW residual gaps** (S363, all repro-first): `g-library-mode-toplevel-decl-match-leaks` (MED, library-only
+   top-level `const=match`), `g-library-bare-fn-no-trailing-newline-brace-strip` (LOW), `g-library-meta-import-async-not-awaited`
+   (MED, `^{}`-meta async await-drop), `g-template-literal-escaped-delimiter-mislowered` (MED, shared escaped-`\``/`\${`
+   template bug). The two library-mode ones are peter-lane buildable follow-ons; the meta-async + escaped-delimiter
+   are auto-await / shared-template-lowering (weigh lane before building).
+4. **Alternative: DOG-FOOD a fresh shape** — S358→S362 all found the cheap ledger veins worked out; fresh clean
+   bugs now come from RUNNING a new adopter program, not the ledger.
+
+### A. bryan's lane — GREW by one (arc-3), else carried intact
+- **⭐ NEW from S363: `g-reactive-write-member-server-call-no-autoawait` ROUTED (turnkey, in the gap's S363 annotation).**
+  The reactive-SINK member-tail auto-await. FORK laid out: (a) enumerate per-context emit-client string seams
+  [deepens the STAGE-flagged retrofit] vs **(b) RECOMMEND** route reactive-sink member-tail awaits through the AST
+  `collectAwaitSites` machinery uniformly (it already emits `(await x).y`) — the by-construction converge, lifting
+  INVARIANT-2's blanket sink-skip to a sink-aware await. §13.2/§19.9.3 settled SHALL, but the redesign is bryan's.
+- **Everything carried from S358→S362 intact** (unchanged by S363): the 9-group bryan-lane queue
+  (`scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`) incl. the convergent `shouldSkipExprParse` §J
+  request-ref-family fix, the 2 security-criticals, raw-egress, i18n-B, dpa-035/029, the held fix rounds, etc.
+
+## WHAT LANDED (S363-peter) — 3 PRs
+- **#636** ⭐ **`g-library-mode-match-expr-fails-codegen` RESOLVED** (MED). New `emitControlFlowLibraryFns` routes
+  match-bearing sync library fns through the structured `emitLibraryFnMember` (browser-parity IIFE). Match-only by
+  design (if-value is bryan's language fork). All positions R26-verified; S239 forked-review SOUND (byte-identical
+  no-op on match-free files).
+- **#637** ⭐ **`g-failable-arm-body-multiline-template-invalid-logic` RESOLVED** (MED). Root = `parseErrorTokens`
+  double-quote token re-quote (ignored `isTemplate`) + `emitArmAssign` multi-line split. Fix = shared
+  `reemitHandlerStringToken` (converged 3 sites) + `isExpressionBody` single-unit assign. Interp survives; S239 SOUND.
+- **#638** — continuity: arc-3 route + arc-4 seam map + the 5 residual-gap filings + review markers.
+
+## ⚑ MISSES / lessons (S363)
+- **★ 3 of 4 S362 traces were WRONG on HEAD** — re-derive the root first-hand before implementing a filed fix
+  direction. Arc-2 ASI misattribution / arc-3 stale `_cs_` locus / arc-4 1-vs-3 scanners. [[feedback-gap-report-fix-direction-can-be-wrong]]
+- **★ Both S239 forked reviews surfaced a real pre-existing bug the fix UNMASKS** (arc-1 `^{}`-meta async
+  await-drop; arc-2 escaped-delimiter template mis-lowering). Verified each independent + pre-existing on base
+  (not the fix), filed separately, landed the fix. The "expose + file the shared root" pattern (cf. S362). Run the
+  S239 pass on every codegen dispatch. [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ Lane discipline held on the auto-await axis** — arc-3 is conformance-to-settled by authority BUT the fix
+  mechanism (extend the regression-laden per-context string-surgery matchers) is exactly the retrofit STAGE flags
+  as the under-design; routed to bryan for the by-construction converge rather than deepening it. [[feedback-stay-in-adopter-lane-not-grammar-decisions]] [[feedback-repeated-review-same-class-means-converge-not-enumerate]]
+- **Concurrent-PR ledger conflict:** #636/#637 both regen gap-counts+FACTS → #637/#638 needed rebase-onto-main +
+  `bun scripts/state.ts --write` / `facts.ts --write` at merge (strict:true). Routine; regen resolves it cleanly.
+
+## 🧷 STATE (S363 close)
+- **main** @ `738759e8` (#638) + this wrap. Coherence target 0/0. Cloud `gate` GREEN on all 3 merges (`tracking`
+  red = the known non-required dev-watcher fs.watch baseline).
+- **Gaps: HIGH 37 · MED 147 · LOW 68 · Nominal 7** (`@generated:gap-counts`). Arc-1 net +1 MED (1 resolved, 2 new),
+  arc-2 net 0 (1 resolved, 1 new); +1 LOW (bare-fn newline). 2 MED resolved, 4 MED + 1 LOW filed.
+- **Review floor: 0 OWED** (#635 marker recorded this session; #636/#637 are code PRs owing markers → record next boot,
+  #638 continuity carve-out — the inherent tail).
+- **Branches:** main + app-pinned only (3 S363 fix/docs branches pruned post-merge). **Worktrees:** main + scrml-pinned
+  only (clean). **Maps:** surgical codegen edits only (emit-library / ast-builder parseErrorTokens / emit-logic
+  emitArmAssign) — no new modules/entrypoints, maps unchanged.
+- **Env:** bun 1.4.0. Full suite 22466+ pass / 6 pre-existing baseline fail (self-host ×3 / self-compilation /
+  session — stash-verified not-mine, none codegen). `gh pr merge --squash --auto` worked (Peter armed; the harness
+  blocks a PA-run `gh pr merge`).
+
+<!-- ================= S362 history below ================= -->
 
 # scrml — Session 362 (peter · P-Tech1 Windows) — WRAP
 
