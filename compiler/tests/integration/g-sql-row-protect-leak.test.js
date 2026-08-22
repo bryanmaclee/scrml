@@ -40,6 +40,52 @@ function compileSource(src) {
 const parseClean = (js) =>
   expect(() => acorn.parse(js, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
 
+// --- THE FILE-WIDE ANTI-VACUITY FLOOR (F4, round 6) -------------------------
+//
+// `expect(fires(result)).toBe(false)` is satisfied by a fixture that never
+// compiled: every green shape in this file would pass on a syntax error. Round 5
+// answered that with a helper — and then carried TWO SEPARATE COPIES of it, in
+// two describe blocks, while a third describe had none. Worse, both copies only
+// EXCLUDED two codes, so any OTHER hard error walked straight through: adding
+// `let n:number = "not a number"` to a green fixture raises `E-TYPE-031` and
+// every assertion still passed.
+//
+// So there is one helper, it lives here, and it asserts an EQUALITY on the error
+// set. `E-SCHEMA-001` is the fixture-wide constant — `protectProgram`'s
+// `<program>` carries no `db=` attribute, so every fixture in this file raises
+// it. Anything else in `result.errors` means the fixture is broken and its green
+// half proves nothing.
+const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
+const fires = (result) => codesOf(result).some((d) => d.code === "E-PROTECT-004");
+const e004 = (result) => codesOf(result).find((d) => d.code === "E-PROTECT-004");
+const serverJsOf = (result) =>
+  (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
+const errorCodesOf = (result) =>
+  [...new Set((result.errors ?? []).map((d) => d.code))].sort();
+
+/** The fixture COMPILED and raised NOTHING but the fixture-wide `E-SCHEMA-001`.
+ *  Every shape asserted not to fire gets this. */
+const expectCompiledCleanly = (result) => {
+  expect(errorCodesOf(result)).toEqual(["E-SCHEMA-001"]);
+  expect(serverJsOf(result).length).toBeGreaterThan(0);
+};
+
+/** ...and the protect machinery genuinely ENGAGED: the strip info named a
+ *  column, and the row left through the redacting path. Every green shape whose
+ *  fixture selects a protected column IN THIS FILE gets this one. */
+const expectCompiledAndProtecting = (result) => {
+  expectCompiledCleanly(result);
+  expect(codesOf(result).map((d) => d.code)).toContain("I-PROTECT-STRIP-001");
+  expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+};
+
+/** The RED half's mirror: the fixture fired for THIS gate's reason and for no
+ *  other — the error set is exactly the fixture-wide constant plus
+ *  `E-PROTECT-004`. */
+const expectFiredCleanly = (result) => {
+  expect(errorCodesOf(result)).toEqual(["E-PROTECT-004", "E-SCHEMA-001"]);
+};
+
 // Eval the SHIPPED helper block into three callables so we exercise the exact
 // runtime the server bundle ships (not a re-implementation).
 function loadHelper() {
@@ -455,20 +501,19 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        let k = "Response"\n        return new globalThis[k](JSON.stringify(u))\n      }`,
     ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   test("RESIDUAL (documented, carry-forward): a local rebinding `let R = Response` is not resolved", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        let R = Response\n        return new R(JSON.stringify(u))\n      }`,
     ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
     // ...and it does not build-block, on this tree OR on `origin/main` — the
     // allowlist entry that makes the spelling reachable is main's, not this
     // branch's. This assertion pins a CARRY-FORWARD, not a widening.
-    expect(all.some((d) => d.code === "E-SCOPE-001")).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   // The foreign-block egress kind is a NODE KIND, so every opener level answers
@@ -511,16 +556,16 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        // a comment naming new Response and asIs must not fire the gate\n        let label = "new Response / asIs"\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        return { name: u.name, label: label }\n      }`,
     ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   test("no raw egress + protected query -> NO E-PROTECT-004 (the floor strips)", () => {
     const { result } = compileSource(protectProgram(
       `      function getUser(id) {\n        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n      }`,
     ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   // -------------------------------------------------------------------------
@@ -590,8 +635,8 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
       `        return deep.flat(Infinity)[0]\n` +
       `      }`,
     ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   // Population guard: a raw egress with NO protected query must stay silent —
@@ -602,8 +647,11 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     const { result } = compileSource(protectProgram(
       `      function getName(id) {\n        let u = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get()\n        return new Response(JSON.stringify(u))\n      }`,
     ));
-    const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
-    expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    // The fixture compiled, and the SELECT genuinely projects no protected
+    // column — so the strip info is ABSENT here, and that absence is the point.
+    expectCompiledCleanly(result);
+    expect(codesOf(result).map((d) => d.code)).not.toContain("I-PROTECT-STRIP-001");
   });
 });
 
@@ -623,25 +671,6 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
 // evaluated at every function — see `detectProtectedRawEgressAcrossFns`.
 // ---------------------------------------------------------------------------
 describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2)", () => {
-  const codesOf = (result) =>
-    [...(result.warnings ?? []), ...(result.errors ?? [])];
-  const serverJsOf = (result) =>
-    (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
-  // ANTI-VACUITY (L1). `expect(fires(result)).toBe(false)` is satisfied by a
-  // fixture that failed to compile for a reason that has nothing to do with this
-  // gate — every one of these would pass on a syntax error. So a green shape has
-  // to say three more things: the file compiled (no E-SCOPE-001 and no other
-  // fatal), the protect machinery really engaged (I-PROTECT-STRIP-001 named the
-  // stripped column), and the row really left through the redacting path
-  // (`_scrml_protect_redact` in the emitted server JS).
-  const expectCompiledAndProtecting = (result) => {
-    const codes = codesOf(result).map((d) => d.code);
-    expect(codes).not.toContain("E-SCOPE-001");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    expect(codes).toContain("I-PROTECT-STRIP-001");
-    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
-  };
-
   test("SELECT in the callee, `new Response` in the caller (the row RETURNS into the egress)", () => {
     const { result } = compileSource(protectProgram(
       `      function loadUser(id) {\n` +
@@ -705,7 +734,8 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
       `        return new Response("Forbidden", { status: 403 })\n` +
       `      }`,
     ));
-    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 
   // Mutual recursion must terminate the reachability walk (the visited set).
@@ -784,14 +814,11 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
       `      }`,
     ));
     const result = compileScrml({ inputFiles: [app], write: false, validateEmit: true, log: () => {} });
-    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
     // ...and the silence is the RESIDUAL, not a fixture that never compiled. The
     // SELECT sits in the IMPORTED file, so the strip info is raised there — what
     // this app half has to show is that it compiled clean and emitted.
-    const codes = codesOf(result).map((d) => d.code);
-    expect(codes).not.toContain("E-SCOPE-001");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    expect(serverJsOf(result).length).toBeGreaterThan(0);
+    expectCompiledCleanly(result);
   });
 
   // -------------------------------------------------------------------------
@@ -849,7 +876,6 @@ describe("§14.8.9 raw-egress fail-closed — resolved across the call graph (M2
 // false bound: `staticIndexKey` folds a `+` of static string keys, recursively.
 // ---------------------------------------------------------------------------
 describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key (F3)", () => {
-  const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
   const withReturn = (ret) => protectProgram(
     `      export server function getUser(id) {\n` +
     `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
@@ -870,6 +896,33 @@ describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key 
     });
   }
 
+  // ⚑ RESIDUAL (F3, S356) — the fold is CLOSED ON THE TREE PATH and the entry
+  // that called it "CLOSED, not pinned as residual" was wrong. `staticIndexKey`
+  // folds nodes; `escapeHatchSurface` tests TEXT and does not fold. Wrapping the
+  // identical shape in ANY expression the parser cannot represent (here a
+  // bitwise `~` in the status) takes it off the tree path, and the surface test
+  // sees no `Response` TOKEN because the name is spelled in two pieces. Measured:
+  // silent on BOTH trees, the emitted JS parses, and the executed body ships
+  // `passwordHash`. CARRY-FORWARD, not a regression — same class as the
+  // `globalThis[k]` residual. If a later arc folds inside `escapeHatchSurface`,
+  // THIS TEST GOES RED and the bound paragraph in `protect-egress.ts` and the
+  // `docs/known-gaps.md` entry must be corrected in the same change.
+  test("RESIDUAL (documented): an ESCAPE-HATCH wrapper bypasses the fold entirely", () => {
+    const { result } = compileSource(withReturn(
+      `return new globalThis["Resp" + "onse"](JSON.stringify(u), { status: 201 + ~0 })`,
+    ));
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
+    // ...and the silence is not a fixture that failed to emit: the leak really
+    // is in the shipped server JS, which is what makes this a residual and not a
+    // curiosity. The emitted handler returns the hand-built `Response` through
+    // the `instanceof Response` passthrough — i.e. the TAGGED row is serialized
+    // raw, BEFORE `_scrml_protect_redact` is ever reached. (The escape hatch is
+    // re-emitted tokenizer-spaced, hence the whitespace-tolerant match.)
+    expect(serverJsOf(result)).toMatch(/JSON\s*\.\s*stringify\s*\(\s*u\s*\)/);
+    expect(serverJsOf(result)).toContain("if (_scrml_result instanceof Response) return _scrml_result;");
+  });
+
   // The bound the fold does NOT move, pinned so the residual stays honest: an
   // operand whose value is not in the tree leaves the whole key unresolved.
   test("RESIDUAL (documented): a `+` with a DYNAMIC operand is still not a static key", () => {
@@ -880,7 +933,8 @@ describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key 
       `        return new globalThis["Resp" + k](JSON.stringify(u))\n` +
       `      }`,
     ));
-    expect(codesOf(result).some((d) => d.code === "E-PROTECT-004")).toBe(false);
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
   });
 });
 
@@ -900,23 +954,6 @@ describe("§14.8.9 raw-egress fail-closed — a CONCATENATED static bracket key 
 // provenance: ruling:user-voice-scrml.md S354 (delta-log [1606])
 // ---------------------------------------------------------------------------
 describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (S354)", () => {
-  const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
-  const fires = (result) => codesOf(result).some((d) => d.code === "E-PROTECT-004");
-  const serverJsOf = (result) =>
-    (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
-  // ANTI-VACUITY (L1). `expect(fires(result)).toBe(false)` is satisfied by a
-  // fixture that failed to compile — every green shape below would pass on a
-  // syntax error, and the prose claiming they were checked by hand is not an
-  // assertion. An unpinned measurement decays; that is F6's own lesson recursed
-  // one level, so the check is pinned rather than described.
-  const expectCompiledAndProtecting = (result) => {
-    const codes = codesOf(result).map((d) => d.code);
-    expect(codes).not.toContain("E-SCOPE-001");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    expect(codes).toContain("I-PROTECT-STRIP-001");
-    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
-  };
-
   // --- the GREEN half: shapes that must NOT fire ---------------------------
 
   test("THE RULING'S SHAPE: `dispatch` reaching a protected query AND a constant `deny()` is CLEAN", () => {
@@ -935,13 +972,10 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
     ));
     expect(fires(result)).toBe(false);
     // ...and it is not silenced by some OTHER gate rejecting the file first: the
-    // §40.3.5 `Response` name resolves, so the deny arm genuinely compiles.
-    // (`protectProgram`'s `<program>` carries no `db=`, so E-SCHEMA-001 is a
-    // constant of every fixture in this file and is not asserted away here.)
-    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
-    // The row that DOES leave goes out the compiler-emitted path, where the
-    // floor redacts — this gate's silence is not what protects it.
-    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+    // §40.3.5 `Response` name resolves, so the deny arm genuinely compiles, and
+    // the row that DOES leave goes out the compiler-emitted redacting path —
+    // this gate's silence is not what protects it.
+    expectCompiledAndProtecting(result);
   });
 
   test("the same-BODY form: a protected SELECT beside a constant 403 is CLEAN", () => {
@@ -1173,9 +1207,7 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
       `      }`,
     ));
     expect(fires(result)).toBe(false);
-    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
-    // the row that DOES leave goes out the compiler-emitted, redacting path
-    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+    expectCompiledAndProtecting(result);
   });
 
   // A shape one syntactic step from the ruling's, deliberately CLOSED: it is not
@@ -1190,6 +1222,296 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
     ));
     expect(fires(result)).toBe(true);
     expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE S356 RE-RULING (round 6) — the exemption is UNNAMED IN RETURN POSITION.
+//
+//   "Exempt an all-literal egress construction ONLY when it is UNNAMED in
+//    return position — i.e. the constructed value never binds anywhere in the
+//    analyzed function."
+//
+// This is the rule's THIRD formulation. The two before it both SHIPPED and both
+// LEAKED, executed, silent where `origin/main` build-blocks:
+//
+//   v1 (S354) "the arguments are syntactically all literals" — true of the
+//   CONSTRUCTION, false of the BINDING. A `Response` is a live mutable handle:
+//     let r = new Response("ok", { status: 200 })
+//     r.headers.set("x-user", u.passwordHash)
+//     return r
+//   answered `[["x-user","$argon2id$SECRET"]]` on the response HEADERS.
+//
+//   v2 (S355) "return position only" — wrong by one syntactic level. The walk
+//   recurses into nested `function-decl` nodes, so the flag reached EVERY
+//   `return-stmt`, not the analyzed function's own:
+//     function noContent() { return new Response("", { status: 204 }) }
+//     let res = noContent()
+//     res.headers.set("x-etag", u.passwordHash)
+//     return res
+//
+// Both holes are one sentence: THE VALUE GETS A NAME, THEN GETS MUTATED.
+// Position was never the discriminator; BINDING is. Both reproducers are pinned
+// below as regressions, so a fourth positional patch cannot re-open them.
+//
+// provenance: ruling:user-voice-scrml.md S354, re-ruled S356 (delta-log [1644])
+// ---------------------------------------------------------------------------
+describe("§14.8.9 raw-egress — the exemption is UNNAMED-in-return-position (S356)", () => {
+  // A server fn that SELECTS the protected column, with `body` appended.
+  const inGetUser = (body) => protectProgram(
+    `      export server function getUser(id) {\n` +
+    `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+    `        ${body}\n` +
+    `      }`,
+  );
+  // The §40.3.5 helper, declared at file level beside a protected-query helper
+  // and a `dispatch` that reaches both — the shape the exemption exists for.
+  const withDeny = (dispatchBody) => protectProgram(
+    `      function loadUser(id) {\n` +
+    `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+    `      }\n` +
+    `      function deny() {\n` +
+    `        return new Response("Forbidden", { status: 403 })\n` +
+    `      }\n` +
+    `      export server function dispatch(id) {\n` +
+    `        ${dispatchBody}\n` +
+    `      }`,
+  );
+
+  // --- (a) the ONE shape the exemption exists for --------------------------
+
+  test("EXEMPT — §40.3.5's own `return new Response(\"Forbidden\", { status: 403 })` is unnamed", () => {
+    const { result } = compileSource(inGetUser(
+      `if (id < 0) { return new Response("Forbidden", { status: 403 }) }\n` +
+      `        return { name: u.name }`,
+    ));
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
+  });
+
+  test("EXEMPT — the cross-call form: `return deny()` never names the value (round-5 F2)", () => {
+    const { result } = compileSource(withDeny(
+      `if (id < 0) { return deny() }\n` +
+      `        let u = loadUser(id)\n` +
+      `        return { name: u.name }`,
+    ));
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
+  });
+
+  // --- (b) REGRESSION PIN, the v1 leak: named, then header-mutated ----------
+  //
+  // Executed pre-fix at round 4: exit 0, zero diagnostics, secret on the
+  // response HEADERS. `_scrml_protect_redact` cannot catch it — it passes a
+  // `Response` instance through untouched — so this gate is the only thing
+  // between the shape and the wire.
+
+  test("FIRES (v1 leak pin) — `let r = new Response(...)`, then `r.headers.set(secret)`", () => {
+    const { result } = compileSource(inGetUser(
+      `let r = new Response("ok", { status: 200 })\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  test("FIRES — the same binding returned UNMUTATED: naming is enough, mutation is not tracked", () => {
+    const { result } = compileSource(inGetUser(
+      `let r = new Response("Forbidden", { status: 403 })\n` +
+      `        return r`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  // --- (c) REGRESSION PIN, the v2 leak: a helper's return, named by its caller
+
+  test("FIRES (v2 leak pin) — a NESTED `function-decl`'s return, named by the enclosing body", () => {
+    const { result } = compileSource(inGetUser(
+      `function noContent() { return new Response("", { status: 204 }) }\n` +
+      `        let res = noContent()\n` +
+      `        res.headers.set("x-etag", u.passwordHash)\n` +
+      `        return res`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  test("FIRES (v2 leak pin, file-level twin) — a file-level helper's return, named by the caller", () => {
+    const { result } = compileSource(protectProgram(
+      `      function noContent() {\n` +
+      `        return new Response("", { status: 204 })\n` +
+      `      }\n` +
+      `      export server function getUser(id) {\n` +
+      `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `        let res = noContent()\n` +
+      `        res.headers.set("x-etag", u.passwordHash)\n` +
+      `        return res\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  // --- (d) naming is the discriminator, not position -----------------------
+
+  test("FIRES — `let r = deny(); r.headers.set(...)`: the value binds in the analyzed function", () => {
+    const { result } = compileSource(withDeny(
+      `let u = loadUser(id)\n` +
+      `        let r = deny()\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  test("FIRES — `let r = deny(); return r`: the name alone revokes it", () => {
+    const { result } = compileSource(withDeny(
+      `let u = loadUser(id)\n` +
+      `        let r = deny()\n` +
+      `        return r`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  test("FIRES — `taint(deny(), u)`: an ARGUMENT position names it just as a `let` does", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }\n` +
+      `      function taint(r, u) {\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r\n` +
+      `      }\n` +
+      `      export server function dispatch(id) {\n` +
+      `        let u = loadUser(id)\n` +
+      `        return taint(deny(), u)\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  // --- (e) the launder the revocation must not admit ------------------------
+  //
+  // If `passthru`'s value is named then so is `deny`'s — it is the same value.
+  // Without the `returnedCalls` closure the revocation stops at `passthru`,
+  // `deny` keeps its exemption, and the header leak is silent again.
+
+  test("FIRES — a PASS-THROUGH helper cannot launder the exemption", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }\n` +
+      `      function passthru() {\n` +
+      `        return deny()\n` +
+      `      }\n` +
+      `      export server function dispatch(id) {\n` +
+      `        let u = loadUser(id)\n` +
+      `        let r = passthru()\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  // --- (f) the revocation is scoped to the CALL-REACHABLE set ---------------
+  //
+  // Precision, and the reason revocation is computed per root rather than
+  // per file: a sibling that names `deny`'s value does not cost the caller that
+  // only forwards it. The diagnostic lands on the binder and on nobody else.
+
+  test("the binder FIRES and the forwarder stays SILENT — revocation is per reachable set", () => {
+    const { result } = compileSource(protectProgram(
+      `      function loadUser(id) {\n` +
+      `        return ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
+      `      }\n` +
+      `      function deny() {\n` +
+      `        return new Response("Forbidden", { status: 403 })\n` +
+      `      }\n` +
+      `      export server function forwarder(id) {\n` +
+      `        if (id < 0) { return deny() }\n` +
+      `        let u = loadUser(id)\n` +
+      `        return { name: u.name }\n` +
+      `      }\n` +
+      `      export server function binder(id) {\n` +
+      `        let u = loadUser(id)\n` +
+      `        let r = deny()\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r\n` +
+      `      }`,
+    ));
+    expect(fires(result)).toBe(true);
+    const hits = codesOf(result).filter((d) => d.code === "E-PROTECT-004");
+    expect(hits.every((d) => d.message.includes("`binder`"))).toBe(true);
+    expect(hits.some((d) => d.message.includes("`forwarder`"))).toBe(false);
+  });
+
+  // --- (g) the stated fail-CLOSED corners ----------------------------------
+  //
+  // A nested helper is never exempt, even when nothing names its value. The
+  // nested declaration is not a member of the file's `function-decl` set, so the
+  // whole-file revocation cannot see who names it — and "cannot see" answers
+  // CLOSED. The file-level twin of this shape IS exempt (test (a) above); the
+  // asymmetry is deliberate and is the fail-closed side of it.
+
+  test("FIRES — a NESTED helper's return is not exempt even when nothing names it", () => {
+    const { result } = compileSource(inGetUser(
+      `function noContent() { return new Response("", { status: 204 }) }\n` +
+      `        if (id < 0) { return noContent() }\n` +
+      `        return { name: u.name }`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  test("FIRES — an all-literal construction inside an ARROW body is not a return", () => {
+    const { result } = compileSource(inGetUser(
+      `let rs = [1].map(x => new Response("ok", { status: 200 }))\n` +
+      `        return { name: u.name, n: rs.length }`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  // --- (h) `Response.json` answers identically in both directions ----------
+
+  test("EXEMPT — `return Response.json({ ok: true })` is unnamed", () => {
+    const { result } = compileSource(inGetUser(
+      `if (id < 0) { return Response.json({ ok: true }) }\n` +
+      `        return { name: u.name }`,
+    ));
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
+  });
+
+  test("FIRES — `let r = Response.json({ ok: true })` names it", () => {
+    const { result } = compileSource(inGetUser(
+      `let r = Response.json({ ok: true })\n` +
+      `        r.headers.set("x-user", u.passwordHash)\n` +
+      `        return r`,
+    ));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
+  });
+
+  // --- (i) the exemption is about the ARGUMENTS too, not only the naming ---
+
+  test("FIRES — `return new Response(JSON.stringify(u))` is unnamed but NOT all-literal", () => {
+    const { result } = compileSource(inGetUser(`return new Response(JSON.stringify(u))`));
+    expect(fires(result)).toBe(true);
+    expect(errorCodesOf(result)).not.toContain("E-SCOPE-001");
   });
 });
 
@@ -1218,12 +1540,6 @@ describe("§14.8.9 raw-egress — an ALL-LITERAL egress carries no caller data (
 // resolution are S355 (round 5).
 // ---------------------------------------------------------------------------
 describe("§14.8.9 raw-egress — an escape-hatch is UNKNOWN, not `no` (S355)", () => {
-  const codesOf = (result) => [...(result.warnings ?? []), ...(result.errors ?? [])];
-  const fires = (result) => codesOf(result).some((d) => d.code === "E-PROTECT-004");
-  const e004 = (result) => codesOf(result).find((d) => d.code === "E-PROTECT-004");
-  const serverJsOf = (result) =>
-    (result.outputs ? [...result.outputs.values()][0]?.serverJs : "") ?? "";
-
   const inBody = (stmts) =>
     `      export server function getUser(id) {\n` +
     `        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n` +
@@ -1349,11 +1665,7 @@ describe("§14.8.9 raw-egress — an escape-hatch is UNKNOWN, not `no` (S355)", 
       `        return { name: out }`,
     )));
     expect(fires(result)).toBe(false);
-    // anti-vacuity: the fixture really compiled, and the row really went out the
-    // redacting path
-    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
-    expect(codesOf(result).some((d) => d.code === "I-PROTECT-STRIP-001")).toBe(true);
-    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+    expectCompiledAndProtecting(result);
   });
 
   test("SILENT — a benign `!{}` arm (the canonical failure idiom) is not build-blocked", () => {
@@ -1361,9 +1673,7 @@ describe("§14.8.9 raw-egress — an escape-hatch is UNKNOWN, not `no` (S355)", 
       `log(e.message)\n            return not`,
     )));
     expect(fires(result)).toBe(false);
-    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
-    expect(codesOf(result).some((d) => d.code === "I-PROTECT-STRIP-001")).toBe(true);
-    expect(serverJsOf(result)).toContain("_scrml_protect_redact");
+    expectCompiledAndProtecting(result);
   });
 
   test("SILENT — an unparsed expression in a body whose SELECT projects no protected column", () => {
@@ -1374,8 +1684,11 @@ describe("§14.8.9 raw-egress — an escape-hatch is UNKNOWN, not `no` (S355)", 
       `      }`,
     ));
     expect(fires(result)).toBe(false);
-    expect(codesOf(result).some((d) => d.code === "E-SCOPE-001")).toBe(false);
-    expect(serverJsOf(result).length).toBeGreaterThan(0);
+    // This fixture's SELECT projects no protected column, so the strip info is
+    // correctly ABSENT — the floor has nothing to strip and the gate has nothing
+    // to co-occur with.
+    expectCompiledCleanly(result);
+    expect(codesOf(result).map((d) => d.code)).not.toContain("I-PROTECT-STRIP-001");
   });
 
   test("SILENT — an `import()` expression carries no egress and no `?{}`", () => {
@@ -1383,7 +1696,7 @@ describe("§14.8.9 raw-egress — an escape-hatch is UNKNOWN, not `no` (S355)", 
       `let m = import("./x.js")\n        return { name: u.name }`,
     )));
     expect(fires(result)).toBe(false);
-    expect(codesOf(result).some((d) => d.code === "I-PROTECT-STRIP-001")).toBe(true);
+    expectCompiledAndProtecting(result);
   });
 
   // The depth cap keeps its OWN message. Two truncation reasons, two remedies.
