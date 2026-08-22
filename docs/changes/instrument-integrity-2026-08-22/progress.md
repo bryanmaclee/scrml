@@ -680,3 +680,55 @@ Two things nearly went in wrong, and both were caught by executing rather than r
 
 The second is the one worth keeping: **"the gate does not catch X" and "the gate deliberately does
 not catch X" produce identical evidence.** An audit that only executes will call the second a bug.
+
+---
+---
+
+# FIX ROUND — post-adversarial-review, same day
+
+Verdict returned: **LAND, conditional on five named follow-ups.** Two of the five are
+defects in gates that are *already blocking CI on `main`* — which is the same failure
+class this branch was cut to close, found inside the branch that closes it.
+
+Brief archived verbatim at `FIX-ROUND-BRIEF.md` (same directory).
+
+The bar is unchanged and it is this branch's own thesis: **every claim below is an
+executed result with a directly-measured exit code (`cmd; echo $?`), never a reading of
+the source and never a status read through a pipe.**
+
+## STEP 0 — merge `origin/main`
+
+`main` moved past the merge-base and now carries `scripts/delta-lint.ts` plus a 6th
+blocking CI gate that did not exist when this branch was cut. Condition (2) is a defect
+in that new gate, so it is unreachable without the merge.
+
+```
+$ git merge origin/main --no-edit
+Merge made by the 'ort' strategy.
+ 10 files changed, 676 insertions(+), 17 deletions(-)
+```
+
+**Zero conflicts.** The `docs/FACTS.md` / `docs/known-gaps.md` collisions the brief
+warned about did not materialise — this branch had not touched either file's
+`@generated` blocks (that restriction is the reason condition (3) exists as a
+follow-up rather than as original work).
+
+**`handOffs/delta-log.md` sequence handling.** No hand-resolution was needed and none
+was performed. `main` brought in `.gitattributes` with `handOffs/delta-log.md
+merge=union`, so both sides' appends were kept automatically; this branch contributed
+no delta-log entries, so there was no side to yield. Verified rather than assumed —
+and verified by the gate that exists for exactly this:
+
+```
+$ bun scripts/delta-lint.ts; echo $?
+delta-lint — 9 baselined duplicate(s) carried as known debt: [721] [722] [1079] [1080] [1081] [1173] [1174] [1524] [1525]
+delta-lint — 1394 entries in the live scope (from line 875), 1385 distinct sequence numbers, max [1686] — PASS
+0
+```
+
+`delta-lint --fix` was **not** run on the merge result, per the brief: its heuristic
+keeps first-in-file order, which is blind to which side is already published.
+
+## The five conditions
+
+Recorded below as each one closes.
