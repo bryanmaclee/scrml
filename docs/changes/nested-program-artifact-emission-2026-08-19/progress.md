@@ -2232,6 +2232,32 @@ That is the finding; the specific count is not.
 Baseline for comparison, taken from the merge commit's own pre-commit run:
 **28966 pass / 0 fail / 86 skip / 1 todo**, 1269 files.
 
+### The 52 whole-suite failures are PRE-EXISTING — measured both ways, not asserted
+
+`bun test compiler/tests/` (the WHOLE tree, 1391 files — wider than the
+pre-commit gate, which runs 1269) reports **53 fail / 52 distinct names** on this
+branch. It reports the same on the r4 base tree `bde85e7e`, and the failure-NAME
+sets are byte-identical:
+
+```
+diff .tmp/r4/whole-base.txt .tmp/r4/whole-head.txt   ->  IDENTICAL WHOLE-SUITE FAILURE SET   (52 / 52)
+```
+
+Isolated, the same four suites give 48 fail / 47 distinct names, again identical
+between base and HEAD. The 53-vs-48 gap is the documented happy-dom
+global-registrator leak: these numbers are only meaningful WHOLE-SUITE-vs-
+WHOLE-SUITE, never isolated-vs-whole.
+
+Population: `compiler/tests/browser/*` (happy-dom render / transitions /
+navigate-wave1c / engine-runtime) and `compiler/tests/commands/*` (the dev
+watcher). None is in `unit`, `integration`, or `conformance`; none names a
+`<program>`, a worker, a sidecar, or any code this round touched. The three gate
+suites are **0 fail**.
+
+Recorded this way deliberately. "53 failures, but they look unrelated" is the
+shape of claim this arc has been burned by three times; the only thing that
+settles it is running the same command on both trees and diffing the names.
+
 ## RESIDUALS — round 4
 
 ### The conformance harness cannot express CARDINALITY
