@@ -1,0 +1,23 @@
+<program db="./app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function loadUser(id) {
+        return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+      }
+
+      function deny() {
+        return new Response("Forbidden", { status: 403 })
+      }
+
+      export server function dispatch(id) {
+        if (id < 0) { return deny() }
+        let u = loadUser(id)
+        return { name: u.name }
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>
