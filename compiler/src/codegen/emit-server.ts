@@ -3004,9 +3004,38 @@ export function generateServerJs(
       lines.push("");
     }
 
-    lines.push("// §39 Middleware pipeline wrapper");
+    // §40.3 — the onion wraps TOP-LEVEL DISPATCH, not a single route.
+    //
+    // `handle()` is a literal onion: SPEC §40.3.4 says it "applies to all HTTP
+    // requests handled by the compiled server — including statically-served
+    // assets", and §40.3.5 says an early return "short-circuits the pipeline and
+    // prevents the route handler from running". A per-route wrap could satisfy
+    // neither: a custom path with no author `route=` never reached a handler, so
+    // the PRE short-circuit was unreachable and the whole wrapper was dead code
+    // in a `handle()`-only program. `downstream` is therefore the host
+    // dispatcher's REMAINDER (route match → static file → 404), supplied by
+    // whoever mounts this module — the `fetch` aggregate below, the built
+    // server's `Bun.serve`, or `scrml dev`.
+    if (_scrml_handleNode) {
+      // The "nothing matched downstream" 404. Tagged in a WeakSet so the `fetch`
+      // aggregate below can turn an untouched one back into `null` and keep the
+      // documented `scrml(req) ?? myApi(req)` composition contract alive, while
+      // `resolve()` itself still honours §40.3.2 ("returns a Bun Response").
+      lines.push("// §40.3.2 — the 'no route matched' Response resolve() hands to handle().");
+      lines.push("// Tagged so the composable `fetch` export can map an untouched one back to null.");
+      lines.push("const _scrml_mw_no_match_set = new WeakSet();");
+      lines.push("function _scrml_mw_no_match() {");
+      lines.push("  const response = new Response('Not found', { status: 404 });");
+      lines.push("  _scrml_mw_no_match_set.add(response);");
+      lines.push("  return response;");
+      lines.push("}");
+      lines.push("");
+    }
+
+    lines.push("// §40.3 Middleware pipeline wrapper — wraps TOP-LEVEL dispatch.");
     lines.push("// Pipeline: CORS → rate-limit → handle() PRE → CSRF → route → handle() POST → headers → logging");
-    lines.push("function _scrml_mw_wrap(routeHandler) {");
+    lines.push("// `downstream(request)` is the rest of the dispatch (route match → static file → 404).");
+    lines.push("function _scrml_mw_wrap(downstream) {");
     lines.push("  return async function _scrml_mw_handler(_scrml_mw_req) {");
 
     if (_scrml_hasLog) {
@@ -3033,13 +3062,27 @@ export function generateServerJs(
       lines.push("    // handle() escape hatch body (§39.3) — wrapped in IIFE for return capture");
       lines.push("    const _scrml_mw_result = await (async () => {");
 
-      lines.push("      // resolve() = route dispatch (CSRF check is per-route)");
+      // §40.3.2 — "resolve(request) invokes the rest of the pipeline and returns
+      // a Bun Response". TOTAL by construction: a host dispatcher that signals
+      // "nothing matched" with a non-Response (the `fetch` aggregate's `null`
+      // composition contract) is normalized to a 404 here, so author POST-
+      // middleware (`response.headers.set(...)`) never sees a non-Response.
+      lines.push("      // resolve() = the rest of the dispatch (CSRF check is per-route)");
       lines.push("      const resolve = async (_scrml_resolve_req) => {");
-      lines.push("        return routeHandler(_scrml_resolve_req);");
+      lines.push("        const _scrml_resolved = await downstream(_scrml_resolve_req);");
+      lines.push("        // §40.3.2 — resolve() always yields a Response so handle() POST-middleware is total.");
+      lines.push("        return _scrml_resolved instanceof Response");
+      lines.push("          ? _scrml_resolved");
+      lines.push("          : _scrml_mw_no_match();");
       lines.push("      };");
 
       const handleParams: any[] = _scrml_handleNode.params ?? [];
       const requestParamName: string = typeof handleParams[0] === 'string' ? handleParams[0] : 'request';
+      // §40.3.2 types `resolve` as returning a `Response`, and every worked
+      // example binds it synchronously (`const response = resolve(request)`).
+      // The emitted `resolve` is async, so its call sites are auto-awaited under
+      // the author's own param name (`resolve` unless they renamed it).
+      const resolveParamName: string = typeof handleParams[1] === 'string' ? handleParams[1] : 'resolve';
 
       if (requestParamName !== '_scrml_mw_req') {
         lines.push(`      const ${requestParamName} = _scrml_mw_req;`);
@@ -3056,15 +3099,15 @@ export function generateServerJs(
           // the async IIFE above, so `await` is legal; inject it before the async
           // `<request>.formData()`/`.json()`/… Request-body reads the server-fn
           // auto-await (bare-name only) cannot see (adopter #471).
-          const awaited = injectHandleRequestAwaits(code, requestParamName);
+          const awaited = injectHandleRequestAwaits(code, requestParamName, resolveParamName);
           for (const line of awaited.split('\n')) lines.push('      ' + line);
         }
       }
 
       lines.push("    })();");
     } else {
-      lines.push("    // No handle() — direct route dispatch (CSRF check is per-route)");
-      lines.push("    const _scrml_mw_result = await routeHandler(_scrml_mw_req);");
+      lines.push("    // No handle() — straight through to the rest of the dispatch");
+      lines.push("    const _scrml_mw_result = await downstream(_scrml_mw_req);");
     }
 
     if (_scrml_hasSecureHeaders) {
@@ -3088,6 +3131,18 @@ export function generateServerJs(
     lines.push("    return _scrml_mw_result;");
     lines.push("  };");
     lines.push("}");
+    lines.push("");
+
+    // §40.3 — the mount point for a HOST dispatcher. `scrml build`'s generated
+    // `_server.js` and `scrml dev` both import this by name and hand it their own
+    // remainder-of-dispatch, so `handle()` PRE runs for EVERY request they serve
+    // (not only the ones that happen to match a registered route). Exported as a
+    // function, so the `{ path, method, handler }` route scanners in both hosts
+    // skip it by shape; both also name-skip it explicitly.
+    lines.push("// §40.3 — top-level onion mount point for the host dispatcher.");
+    lines.push("// `scrml build` / `scrml dev` call this with their remainder-of-dispatch");
+    lines.push("// (route match → static file → 404); handle() PRE then sees EVERY request.");
+    lines.push("export const _scrml_mw_pipeline = _scrml_mw_wrap;");
     lines.push("");
   }
 
@@ -3555,7 +3610,10 @@ export function generateServerJs(
       lines.push(`export const ${routeName} = {`);
       lines.push(`  path: ${JSON.stringify(path)},`);
       lines.push(`  method: "GET",`);
-      lines.push(`  handler: ${(_scrml_hasMW || _scrml_handleNode != null) ? `_scrml_mw_wrap(${handlerName})` : handlerName},`);
+      // §40.3 — NO per-route `_scrml_mw_wrap` here. The onion now wraps top-level
+      // dispatch (see the wrapper emission above + the `fetch` aggregate below);
+      // wrapping here too would run `handle()` PRE twice on a route match.
+      lines.push(`  handler: ${handlerName},`);
       lines.push(`};`);
       lines.push("");
 
@@ -4403,9 +4461,13 @@ export function generateServerJs(
       lines.slice(_sessHandlerStartIdx).some((l) =>
         l.includes("_scrml_req._scrml_sess.") || _SESSION_BARE_TEXT_RE.test(l));
     const _sessHandlerUsesSession = _webAppShape && _sessHandlerRefsSession;
-    let _sessRegHandler = (_scrml_hasMW || _scrml_handleNode != null)
-      ? `_scrml_mw_wrap(${handlerName})`
-      : handlerName;
+    // §40.3 — NO per-route `_scrml_mw_wrap` here either. The onion moved up to
+    // top-level dispatch, so the cookie-session wrapper is now the ONLY per-route
+    // wrapper and is therefore the outermost PER-ROUTE layer; the middleware onion
+    // sits outside it, at the dispatcher. Resulting order on a route match:
+    //   handle() PRE → route match → _scrml_session_cookie_wrap → handler
+    //   → cookie commit → handle() POST → security headers → logging.
+    let _sessRegHandler = handlerName;
     if (_sessHandlerUsesSession) {
       _sessRegHandler = `_scrml_session_cookie_wrap(${_sessRegHandler})`;
       // §20.5 (i29e, S239 FIX 6) — record this wrapped handler's line range as an
@@ -5367,19 +5429,61 @@ export function generateServerJs(
   while ((m = routeNameRe.exec(emitted)) !== null) {
     collected.push(m[1]);
   }
-  if (collected.length > 0) {
+  // §40.3 — a `handle()`-only program (no route= anywhere, no server fn) used to
+  // collect ZERO routes and therefore emit NO dispatcher at all: the middleware
+  // wrapper was defined and called zero times, 100% dead code. The onion is
+  // top-level dispatch, so the aggregate now emits whenever the program has a
+  // request pipeline, routes or not.
+  const _emitAggregate: boolean =
+    collected.length > 0 || _scrml_hasMW || _scrml_handleNode != null;
+  const _wrapAggregate: boolean = _scrml_hasMW || _scrml_handleNode != null;
+
+  if (_emitAggregate) {
     lines.push("// --- S35 insight 22: aggregate routes + WinterCG fetch handler ---");
     lines.push(`export const routes = [${collected.join(", ")}];`);
     lines.push("");
-    lines.push("export async function fetch(request) {");
-    lines.push("  const url = new URL(request.url, 'http://localhost');");
-    lines.push("  for (const r of routes) {");
-    lines.push("    if (r.path === url.pathname && r.method === request.method) {");
-    lines.push("      return r.handler(request);");
-    lines.push("    }");
-    lines.push("  }");
-    lines.push("  return null;");
-    lines.push("}");
+    if (_wrapAggregate) {
+      // Route matching is the ONION'S DOWNSTREAM here, not the entry point.
+      // `handle()` PRE runs first for every request; only `resolve(request)`
+      // reaches this loop. `null` on no match keeps the documented composition
+      // contract (`scrml(req) ?? myApi(req)`) — `_scrml_mw_wrap` normalizes that
+      // to a tagged 404 before the author's `handle()` body ever sees it, and
+      // `fetch` maps an untouched tagged 404 back to `null` below.
+      lines.push("// Route dispatch — the DOWNSTREAM of the §40.3 handle() onion.");
+      lines.push("async function _scrml_route_dispatch(request) {");
+      lines.push("  const url = new URL(request.url, 'http://localhost');");
+      lines.push("  for (const r of routes) {");
+      lines.push("    if (r.path === url.pathname && r.method === request.method) {");
+      lines.push("      return r.handler(request);");
+      lines.push("    }");
+      lines.push("  }");
+      lines.push("  return null;");
+      lines.push("}");
+      lines.push("");
+      lines.push("// §40.3 — handle() PRE wraps ALL top-level dispatch: every request enters");
+      lines.push("// the onion first, and only resolve(request) continues to route matching.");
+      lines.push("const _scrml_fetch_pipeline = _scrml_mw_wrap(_scrml_route_dispatch);");
+      lines.push("");
+      lines.push("export async function fetch(request) {");
+      lines.push("  const response = await _scrml_fetch_pipeline(request);");
+      if (_scrml_handleNode) {
+        lines.push("  // An untouched 'nothing matched' 404 reads as 'not mine' so this module");
+        lines.push("  // still composes as `scrml(req) ?? myApi(req)`.");
+        lines.push("  if (response && _scrml_mw_no_match_set.has(response)) return null;");
+      }
+      lines.push("  return response;");
+      lines.push("}");
+    } else {
+      lines.push("export async function fetch(request) {");
+      lines.push("  const url = new URL(request.url, 'http://localhost');");
+      lines.push("  for (const r of routes) {");
+      lines.push("    if (r.path === url.pathname && r.method === request.method) {");
+      lines.push("      return r.handler(request);");
+      lines.push("    }");
+      lines.push("  }");
+      lines.push("  return null;");
+      lines.push("}");
+    }
     lines.push("");
   }
 

@@ -674,8 +674,22 @@ const _REQUEST_ASYNC_METHODS = new Set(["formData", "json", "text", "arrayBuffer
  * the main pass); reuses the same adversarially-hardened await-site machinery (scope
  * legality, `(await x).y` paren-wrapping). Returns the input UNCHANGED on a parse
  * failure or when nothing classifies.
+ *
+ * ALSO awaits the bare `resolve(...)` call (change-id
+ * `handle-onion-top-level-dispatch-2026-08-22`). SPEC §40.3.2 types `resolve` as
+ * `(req: Request) => Response` — SYNCHRONOUS — and every §40.3 worked example
+ * writes `const response = resolve(request)` then `response.headers.set(...)`.
+ * The emitted `resolve` is `async` (the downstream dispatch is), so the bare form
+ * bound a Promise and `response.headers` was `undefined` → TypeError on EVERY
+ * POST-middleware path, including the flagship `examples/20-middleware.scrml`.
+ * Scoped to the reserved `resolve` PARAM name of `handle()`, so it cannot
+ * over-await an unrelated local.
  */
-export function injectHandleRequestAwaits(code: string, requestParamName: string): string {
+export function injectHandleRequestAwaits(
+  code: string,
+  requestParamName: string,
+  resolveParamName?: string,
+): string {
   if (!code || !requestParamName) return code;
   const PREFIX = "(async () => {\n";
   let program: any;
@@ -689,7 +703,9 @@ export function injectHandleRequestAwaits(code: string, requestParamName: string
     !!callee.object && callee.object.type === "Identifier" && callee.object.name === requestParamName &&
     !callee.computed &&
     !!callee.property && callee.property.type === "Identifier" && _REQUEST_ASYNC_METHODS.has(callee.property.name);
-  const sites = collectAwaitSites(program, PREFIX.length, () => false, "sink", false, isRequestAsyncMethod);
+  const isResolveCall = (name: string): boolean =>
+    !!resolveParamName && name === resolveParamName;
+  const sites = collectAwaitSites(program, PREFIX.length, isResolveCall, "sink", false, isRequestAsyncMethod);
   return applyAwaitSites(code, sites);
 }
 
