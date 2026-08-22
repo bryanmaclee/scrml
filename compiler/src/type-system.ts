@@ -24029,6 +24029,17 @@ function checkFnBodyProhibitions(
   // Matches `identifier =` not followed by `=` or `>`, not preceded by `!`, `<`, `>`, `=`
   const ASSIGN_RE = /([A-Za-z_$][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)?\s*=[^=>]/;
 
+  // g-server-fn-template-literal-base64-eq-false-e-fn-003 — the heuristic ASSIGN_RE
+  // runs over raw statement TEXT, so a bare `=` inside a STRING or TEMPLATE literal
+  // (e.g. a base64 `=` padding char on a continuation line of a `return \`…=\``) is
+  // misread as an outer-scope assignment → a false E-FN-003 on valid code. Blank the
+  // interior of string / template literals before matching (an outer-scope write is
+  // never inside a string literal), while KEEPING `${…}` interpolation bodies — those
+  // are code, and a real reactive/outer write inside one must still be seen. The
+  // module-level `maskStringLiteralSpans` (below, hoisted) already does exactly this,
+  // correctly recursing into strings NESTED inside an interpolation — reuse it rather
+  // than a bespoke inline scanner (same class as the S133 markup skip above).
+
   function checkOuterScopeMutation(stmt: ASTNodeLike, txt: string): void {
     const stmtSpan = (stmt.span ?? fnSpan) as Span;
     // Check for assignment node kind first
@@ -24062,7 +24073,7 @@ function checkFnBodyProhibitions(
     }
     // Heuristic text check for assignment patterns
     if (txt) {
-      const match = ASSIGN_RE.exec(txt);
+      const match = ASSIGN_RE.exec(maskStringLiteralSpans(txt));
       if (match) {
         const targetName = match[1];
         if (targetName && !localNames.has(targetName)) {
