@@ -1788,3 +1788,307 @@ sources are this arc's own conformance cases; the 1 base-only is a rename.
    and was not taken. Two honest options for the PA: gate the post-commit hook on
    `GIT_REFLOG_ACTION`/rebase-in-progress, or raise the per-test timeout so load cannot
    manufacture a red gate.
+
+---
+
+# ROUND 7 (S354, delta-log `[1676]`) — THE EXEMPTION IS DELETED
+
+Branch `raw-egress-r7-work`, cut from `raw-egress-r6-work` (`5f5736e3`) and brought onto current
+main. **The operator dropped the rule the three prior rounds were built around.**
+
+> "DROP the all-literal exemption. `E-PROTECT-004` returns to CO-OCCURRENCE. The §40.3.5 false
+> positive is ACCEPTED."
+
+This supersedes the original S354 ruling (`[1606]`) and both narrowings (S355, S356 `[1644]`).
+
+---
+
+## 0. The rebase — MERGE, not rebase, and why
+
+The branch was **24 commits behind** and that was a live landing hazard. Both of main's fixes named
+in the brief were absent and a wholesale file-delta land would have REVERTED them. After the merge,
+both verified present:
+
+| main fix | what it does | verified |
+|---|---|---|
+| **#634** (`ef6800c7`) | `ASSIGN_RE.exec(maskStringLiteralSpans(txt))` in `type-system.ts` — without it a base64 data URI, `"a=b&c=d"` and `obj["a = b"]` wrongly fire `E-FN-003` | present at `type-system.ts:24099`; and **independently confirmed by measurement** — the corpus floor shows `compiler/self-host/ast.scrml` LOSING 5 spurious `E-FN-003` between the r6 head and this head |
+| **#624** (`2a2676f8`) | `indentBodyLines` extracted to `codegen/utils.ts` | shared import in place at `emit-server.ts:3`, 8 call sites route through it, the old inline re-indenter is gone |
+
+`docs/known-gaps.md` **auto-merged**, so main's 6 new gap entries and 24 `@gap` marker changes
+survive alongside this arc's. The only conflict was `docs/FACTS.md`, a GENERATED file, resolved to
+main's values and regenerated.
+
+**Merge rather than rebase, deliberately.** The `post-commit` hook runs the full suite on every
+compiler-touching commit and `git rebase` fires it per replayed commit — the round-6 residual (item
+7) measured 22 commits at ≈4.5 h. A first attempt here timed out having replayed exactly ONE commit
+in two minutes. A merge is one commit with identical landing semantics and the brief permits either.
+**Round 6's residual item 7 is hereby re-confirmed as still-open infrastructure: it now costs every
+round of this arc real time.**
+
+---
+
+## 1. What was DELETED and what was KEPT
+
+Read before deleting. The dividing line: **the call-graph reachability is the S352 ruling and is NOT
+part of the exemption; the argument test, the position/scope machinery and the naming classification
+existed ONLY to serve it.**
+
+### DELETED (exemption-only, verified by grep before removal)
+
+| symbol | why it was exemption-only |
+|---|---|
+| `isSyntacticLiteral` + its ~160-line rationale | only callers were `objectPropIsLiteral` / `argsAreAllLiterals` |
+| `objectPropIsLiteral` | only caller was `isSyntacticLiteral` |
+| `argsAreAllLiterals` | only callers were the two grant sites |
+| the two grant sites (`new Response`, `Response.json`) | now set `sawResponse` unconditionally |
+| `RawEgressFacts.exemptReturnResponse` | the grant flag |
+| `RawEgressFacts.boundCalls` / `.returnedCalls` | the revocation inputs |
+| `NESTED_CALLABLE_KINDS` + `isNestedCallable` | only consumer was `ownScopeHere` |
+| `visit`'s `isReturnValue` and `ownScope` parameters | only consumers were the grants + the call classification |
+| the explicit `return-stmt` pre-visit | existed only to set the flag; the generic key loop already reaches `exprNode`, so removing it computes the same walk |
+| `egressKindOf`'s `responseRevoked` parameter | the revocation read |
+| the transitive revocation closure in `detectProtectedRawEgressAcrossFns` | the `boundCalls` seed + `returnedCalls` fixpoint |
+
+Net: **−816 lines / +406** across the four files in that commit.
+
+### KEPT (the gate's non-exemption work)
+
+- **The whole intra-file call graph** — `calls`, `indicesByName` (the fail-closed MULTIMAP, S354
+  round 3), `reachFrom` and the BFS call paths the diagnostic names. Cross-function detection is the
+  S352 ruling; the Extract-Function hole depends on it.
+- **Callee resolution** — `terminalName`, `memberReceiverName`, `staticIndexKey`,
+  `staticStringLiteralValue`, `templateLitIsStatic`. Verified by grep that these serve the CALLEE
+  chain (`new globalThis["Resp" + "onse"]`), not the argument test.
+- **`escapeHatchSurface` / `escapeHatchSnippet`** and the escape-hatch call-edge recovery (minus its
+  `boundCalls` half).
+- **The depth cap and BOTH fail-closed truncation reasons.**
+
+---
+
+## 2. TWO-SIDED BITE PROOF — compiled AND executed, body AND headers
+
+Every leak is **header-only with an innocuous body**, so a body-only probe reads all of them clean.
+Each shape was compiled, its emitted handler imported, and the route handler invoked with a seeded
+session + CSRF token against a stubbed `_scrml_sql`.
+
+| reproducer | `origin/main` | r6 head | **r7 head** |
+|---|---|---|---|
+| **1.** v1 — bound directly (`let r = new Response(...)`; `r.headers.set`) | FIRES | FIRES | **FIRES** |
+| **2.** v2 — a nested helper's return, named by the enclosing body | FIRES | FIRES | **FIRES** |
+| **3.** v2 — across a file-level call edge (`let r = deny()`) | silent | FIRES | **FIRES** |
+| **4.** v3 — two frames out through a pass-through | silent | FIRES | **FIRES** |
+| **5a.** `let make = deny; make()` | silent | silent | **silent** ⚑ |
+| **5b.** `http.deny()` | silent | silent | **silent** ⚑ |
+| **5c.** `handlers["deny"]()` | silent | silent | **silent** ⚑ |
+| **5d.** `apply(deny)` | silent | silent | **silent** ⚑ |
+| **FP** §40.3.5 co-occurrence (`return deny()`) | silent | silent | **FIRES** ← the ruling |
+| **FP** §40.3.5 inline return | FIRES | silent | **FIRES** ← the ruling |
+
+Executed on the r6 head, every `silent` row above answered:
+
+```
+status=403  BODY: "Forbidden"   HEADERS: [["x-user","$argon2id$SECRET"]]
+status=204  BODY: ""            HEADERS: [["x-etag","$argon2id$SECRET"]]
+status=200  BODY: "ok"          HEADERS: [["x-user","$argon2id$SECRET"]]
+```
+
+The two **FP** rows are the ACCEPTED FALSE POSITIVE. That is the point, not a regression.
+
+### ⚑ THE FIFTH REPRODUCER DOES NOT FIRE, AND THE BRIEF'S PREMISE ON IT IS WRONG
+
+The brief's expected outcome was that all five fire. **Four do.** The fifth's four spellings do not,
+and **the reason is not the exemption** — it is the intra-file BARE-IDENTIFIER call-graph bound
+(residual (2), documented in `detectProtectedRawEgressAcrossFns` since round 3).
+
+Proof by measurement on three trees: **all four spellings are silent on `origin/main` too**, where
+there is no exemption AND no call graph at all. `reach(getUser)` simply has no edge to `deny`,
+because the callee arrives through a binding / a member / an index / a parameter. Deleting the
+exemption was never going to close them.
+
+They are now **pinned** as `RESIDUAL (documented)` tests, which is the guarantee `known-gaps.md`
+claimed at S354 and did not have: closing the bound turns them red and forces the bound paragraph to
+be updated in the same change.
+
+---
+
+## 3. THE FIFTH LEAK IS CLOSABLE, MEASURED, AND HANDED BACK — NOT LANDED
+
+Because "handed back with a question" is worth less than "handed back with a decision", the fix was
+built and measured on a **scratch copy** (`git archive HEAD` + real `node_modules`), and deliberately
+**not committed**.
+
+**The patch** — 10 lines in `collectRawEgressFacts`, immediately after the existing `call` branch:
+
+```ts
+// a bare-identifier REFERENCE also contributes an edge, so `let make = deny`,
+// `{ deny: deny }` and `apply(deny)` reach `deny`. The caller's `indicesByName`
+// drops any name that declares no function in this file, so the
+// over-approximation is bounded by the file's own function-decl set.
+if (n.kind === "ident" && typeof n.name === "string") {
+  calls.add(n.name);
+}
+```
+
+**Measured:**
+
+- **All four L5 spellings FIRE** (5a, 5b, 5c AND 5d) — the fifth leak closes completely.
+- **Corpus blast radius: ZERO.** 2,369 shared sources, diagnostic-code multiset delta **empty** —
+  not one source gains or loses a code.
+
+**Why it was NOT landed, and this is the load-bearing reason:** §14.8.9 now states `reach(F)`
+normatively as *"`F` plus every function `F` transitively **calls** within the file"*. A reference
+edge redefines `reach` as *mentions*, not *calls*. That is a **normative SPEC amendment to the
+reachability definition**, and Rule 4 makes that the operator's call, not a codegen agent's — landing
+it would put the compiler in contradiction with SPEC text written in this same dispatch.
+
+Note also that corpus-zero here is **blast-radius evidence only**, not evidence of no cost: an
+adopter file that merely *names* a helper would newly be treated as reaching it.
+
+**The decision PA/operator owes:** amend §14.8.9's `reach(F)` from *calls* to *calls-or-names* and
+land the 10 lines, or leave the bound and keep the four pins. Everything needed to fire it is above.
+
+---
+
+## 4. THE ACCEPTED FALSE POSITIVE IS NOW A CONTRACT, NOT AN ACCIDENT
+
+The adversarial pass found **zero** conformance cases covering the exemption side — the half of the
+rule that shipped two executed leaks had no contract coverage at all.
+
+**New:** `conformance/cases/protect/raw-egress-40-3-5-accepted-false-positive` (889 → 890 cases).
+It asserts the §40.3.5 shape **FIRES** `E-PROTECT-004`, and its description says plainly that the
+fire is deliberate and ratified, names both workarounds, and states the reopening condition.
+`I-PROTECT-STRIP-001` is asserted alongside as the anti-vacuity half — proof the protect machinery
+engaged and the row left by the redacting path, rather than the fixture failing to compile.
+
+Also filed in `docs/known-gaps.md`: the FP, its two workarounds (project the protected column out of
+the SELECT; or return through the compiler-emitted path), and the reopening condition.
+
+---
+
+## 5. SPEC — the exemption was normative text and is struck
+
+**§14.8.9.** The round-6 "TWO REQUIRED CONDITIONS" block is replaced by the co-occurrence rule
+stated normatively, THE ACCEPTED FALSE POSITIVE recorded in the prose, a normative *why no
+exemption* paragraph (a whitelist revoked by proving a NEGATIVE over a provably incomplete graph),
+and a REOPENING CONDITION that routes a future complaint to the make-the-sink-mediatable question
+rather than to a fourth formulation.
+
+**§34 `E-PROTECT-004` row.** Restated for co-occurrence. Both defects the pass found disappear —
+**verified by probe, not by reading:**
+
+1. *It licensed more than the code allowed.* A nested callable's **unnamed** return satisfied the
+   row's plain words ("all literals AND unnamed in return position") but fired. Probed on this head:
+   that shape **FIRES**, and the row now says every construction fires — row and compiler agree.
+2. *Its truncation parenthetical named only the depth cap* while the compiler also truncates on an
+   unparseable `escape-hatch`. The row now names **both causes and both resolutions**, because they
+   differ — "reduce the nesting" sends an author to fix something that is not broken. The second
+   cause is pinned by the existing test asserting `has no tree form` + `move the ?{} out of that
+   expression`.
+
+`bun scripts/s34-census.ts --check-new --base origin/main` → **2 new/changed rows, all well-formed —
+PASS**, run after the last SPEC edit.
+
+---
+
+## 6. SUPERSEDED RULES STATED AS CURRENT — swept
+
+| locus | was | now |
+|---|---|---|
+| `g-sql-row-protect-leak.test.js` v1 block + describe title | "an egress whose arguments are SYNTACTICALLY ALL LITERALS is not an egress" as the current rule | block REPLACED; the phrase survives only inside an explicitly-historical v1/v2/v3 list |
+| same file, v2 block | "applies ONLY where the construction is the RETURN VALUE" | REPLACED |
+| `protect-egress.ts` inline rationale above the code | v1 stated as the live rule | REPLACED with "The ARGUMENTS ARE NOT CONSULTED" |
+| `protect-egress.ts` residual bound (4) | the exemption stated as a shipped precision narrowing | REPLACED with the deletion note |
+
+Swept SPEC, `known-gaps.md`, `docs/changes/**`, conformance descriptions and code/test comments:
+every surviving mention is framed as superseded history. No survivor states a dead rule as current.
+
+**Two additional corrections found while sweeping, neither in the brief:**
+
+- **`templateLitIsStatic`'s fail-direction note was wrong.** It claimed its one false negative errs
+  fail-CLOSED. That was true of the exemption caller and FALSE of the other one even before this
+  change; with the exemption deleted its only caller is bracket-KEY resolution, where a false
+  negative means the key does not resolve, the callee does not resolve, and the shape reads as **no
+  egress** — the fail-OPEN direction. Corrected rather than deleted.
+- **The "`type-system.ts` diff is comment-only" phrasing is RETIRED at three loci**
+  (`protect-egress.ts`, `emit-server.ts`, `known-gaps.md`). It is a true statement about this arc's
+  ADDITIONS that was being read as a licence to land the file WHOLESALE. Off a stale base that
+  reverts main's own edits — measured here, where it would have reverted #634. Replaced with "this
+  arc adds no allowlist entry" plus an explicit **rebase-or-merge, never file-delta** instruction at
+  each site.
+
+---
+
+## 7. ONE VACUOUS ASSERTION — closed
+
+`g-sql-row-protect-leak.test.js` "a non-protect app is byte-unchanged" asserted only
+`not.toContain("_scrml_protect")` + `parseClean`. A fixture that fails to compile yields
+`serverJs === ""`, which contains nothing and parses fine — **both assertions pass on a broken
+fixture.** Positive assertions now come FIRST (error set equals the file-wide `E-SCHEMA-001`, the
+emission is non-empty, and it contains the query the fixture is about plus `_scrml_sql`), and only
+then does the absence claim mean anything. Its channel/SSE twins already carried positive
+assertions and were left alone.
+
+---
+
+## 8. REGRESSION FLOOR — re-measured against CURRENT main
+
+Both baselines extracted completely (`git archive` + symlinked real `node_modules`); **`stdlib/`
+verified present at 21 modules in each**, so no `scrml:` import fails and nothing reads as a phantom
+regression. `compiler/tests/unit/__fixtures__/` differences are **gitignored test-run artifacts**
+(`git check-ignore` confirms; 0 tracked files there) — ENV-GAP, ruled out, not counted.
+
+| comparison | shared sources | files with a CHANGED code multiset |
+|---|---|---|
+| `origin/main` → r7 head | 2,361 | **0** |
+| r6 head → r7 head | 2,368 | **1** — `compiler/self-host/ast.scrml`, which **LOSES** 5 spurious `E-FN-003`. That is main's #634 arriving via the merge: a FIX, and independent proof the merge landed it. |
+| r7 head → r7 head + the §3 probe patch | 2,369 | **0** |
+
+**Non-vacuity:** the measurement is not zero-because-nothing-ran. `I-PROTECT-STRIP-001` fires in
+**27** corpus sources on this head, so the protect floor is genuinely engaged.
+
+### Every new `E-PROTECT-004` fire, enumerated
+
+`E-PROTECT-004` fires in 1 source on `origin/main`, 7 on the r6 head, **8** on this head.
+
+**r6 head → r7 head: exactly ONE new fire**, and it is
+`conformance/cases/protect/raw-egress-40-3-5-accepted-false-positive` — a file that exists only on
+this head, and which is the accepted FP **by construction**. **Zero pre-existing corpus sources
+gained a fire.**
+
+`origin/main` → r7 head: 7 new fires, all of them this arc's own conformance cases (6 from the
+earlier rounds' cross-function / escape-hatch / reveal work, 1 the new FP case). Every one accounted
+for; none is a surprise.
+
+⚑ **The brief expected new fires where the exemption previously silenced them. There are none on the
+corpus.** The honest reading: the exemption never bought a single real corpus source any precision.
+It cost five executed leaks and returned zero.
+
+---
+
+## 9. RESIDUAL HANDED BACK
+
+1. ⭐ **The fifth leak's four spellings** (§3 above) — the call-GRAPH bound, closable by a measured
+   10-line patch with **zero** corpus blast radius, NOT landed because it requires a normative
+   amendment to §14.8.9's `reach(F)` definition. **This is the one live decision this round hands
+   back.**
+2. ⚑ **NEW, and NOT a §14.8.9 question.** A server fn referenced as a VALUE emits **no in-process
+   peer**: `function deny() {...}` + `apply(deny)` emits a handler that dies on `ReferenceError:
+   deny is not defined`. Found while building reproducer 5d. Pre-existing, unrelated to protect, and
+   a plain codegen gap.
+3. **CARRIED (round 6, item 7) and now measured twice:** the `post-commit` hook runs the full suite
+   per commit, so `git rebase` is unusable on this branch — the first attempt here replayed ONE
+   commit in two minutes before timing out. Gate the hook on rebase-in-progress, or accept that
+   every round of this arc must merge rather than rebase.
+4. **CARRIED:** the `!{}` arm body has no tree form, so every body-walking analysis is blind inside
+   it. §14.8.9 is fail-closed across that blindness; the tenant twin, the auth graph, the
+   reachability solver and the DG are not.
+5. **CARRIED:** `1n`, `|>` and `-2 ** 2` escape-hatch and emit syntactically INVALID server JS with
+   zero errors, past `validateEmit: true`. A miscompile.
+6. **CARRIED:** the value-scoped `reveal` EXIT at a raw egress is still absent — §14.8.9 remains a
+   floor with no exit (dpa-033 (d), a separate arc).
+7. ⚑ **The tenant twin's port table SHRINKS.** `compiler/src/codegen/tenant-egress.ts` is untouched
+   per brief, and round 6 said its structural rewrite must land the unnamed-in-return-position rule,
+   the escape-hatch treatment AND the call-edge classification together. **Two of those three are
+   now void** — there is no naming rule and no call-edge classification to port. The twin needs the
+   escape-hatch treatment and the call-graph reachability, and it must NOT be given an all-literal
+   exemption: doing so would reproduce all five leaks in the tenant lane.
