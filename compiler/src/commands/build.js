@@ -532,6 +532,24 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push(`  idleTimeout: ${idleTimeout},`);
   lines.push("  async fetch(req, server) {");
   if (hasOnion) {
+    if (hasWs) {
+      // SPEC §40.3.4: "handle() does NOT apply to WebSocket upgrade requests.
+      // WebSocket lifecycle handlers use <channel> (§38)." A successful
+      // server.upgrade() signals "do not return a response" by returning
+      // undefined; §40.3.2 types resolve() as returning a Response, so routing
+      // an upgrade through the onion would manufacture one AFTER the protocol
+      // switch. Dispatch upgrades directly — same as the pre-§40.3 behaviour
+      // (the `_scrml_route_ws_*` export was never middleware-wrapped either).
+      lines.push("    // §40.3.4 — WebSocket upgrades bypass the handle() onion: a successful");
+      lines.push("    // server.upgrade() must return undefined, and resolve() returns a Response.");
+      lines.push("    const _scrml_ws_url = new URL(req.url);");
+      lines.push("    for (const route of routes) {");
+      lines.push("      if (route.isWebSocket && _scrml_ws_url.pathname === route.path && req.method === route.method) {");
+      lines.push("        return route.handler(req, server);");
+      lines.push("      }");
+      lines.push("    }");
+      lines.push("");
+    }
     lines.push("    // §40.3 — every request enters handle() first; only resolve(request)");
     lines.push("    // continues to route match → static file → 404.");
     lines.push("    return _scrml_onion_dispatch(req, server);");

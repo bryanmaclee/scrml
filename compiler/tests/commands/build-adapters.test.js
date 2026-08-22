@@ -473,6 +473,42 @@ describe("§40.3 handle() onion in the production server entry", () => {
     expect(content).toContain("const _scrml_onions = [_scrml_mw_pipeline_0, _scrml_mw_pipeline_1];");
   });
 
+  test("a WebSocket upgrade BYPASSES the onion (§40.3.4)", () => {
+    const content = generateServerEntry([
+      {
+        filename: "chat.server.js",
+        routeNames: ["_scrml_route_ws_chat"],
+        wsHandlerNames: ["_scrml_ws_handlers"],
+        middlewareNames: ["_scrml_mw_pipeline"],
+      },
+    ]);
+    // SPEC §40.3.4: "handle() does NOT apply to WebSocket upgrade requests."
+    // A successful server.upgrade() returns undefined; §40.3.2 types resolve()
+    // as returning a Response, so an upgrade routed through the onion would get
+    // a manufactured Response AFTER the protocol switch.
+    const fetchBody = content.slice(content.indexOf("async fetch(req, server) {"));
+    const wsCheck = fetchBody.indexOf("if (route.isWebSocket &&");
+    const onionCall = fetchBody.indexOf("_scrml_onion_dispatch(req, server)");
+    expect(wsCheck).toBeGreaterThan(-1);
+    expect(onionCall).toBeGreaterThan(-1);
+    expect(wsCheck).toBeLessThan(onionCall);
+    expect(fetchBody).toContain("return route.handler(req, server);");
+  });
+
+  test("no WS channels ⇒ no upgrade pre-check emitted", () => {
+    const content = generateServerEntry([
+      {
+        filename: "index.server.js",
+        routeNames: ["_scrml_route_home"],
+        wsHandlerNames: [],
+        middlewareNames: ["_scrml_mw_pipeline"],
+      },
+    ]);
+    const fetchBody = content.slice(content.indexOf("async fetch(req, server) {"));
+    expect(fetchBody).not.toContain("route.isWebSocket");
+    expect(fetchBody).toContain("return _scrml_onion_dispatch(req, server);");
+  });
+
   test("NON-VACUOUS: a build with NO onion keeps the inlined pre-§40.3 fetch", () => {
     const content = generateServerEntry([
       { filename: "index.server.js", routeNames: ["_scrml_route_home"], wsHandlerNames: [] },

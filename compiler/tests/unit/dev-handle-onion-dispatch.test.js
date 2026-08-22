@@ -30,6 +30,7 @@ import { tmpdir } from "os";
 import {
   runThroughOnions,
   getRegisteredOnions,
+  getRegisteredRoutes,
   loadServerRoutes,
   buildServeConfig,
   noteCompileResult,
@@ -88,6 +89,10 @@ const SRC = `<program>
 
 </program>
 `;
+
+
+const SERVER_STUB = { upgrade: () => true };
+const upgradeCalls = [];
 
 let mounted = false;
 
@@ -183,6 +188,45 @@ describe("§4 handle() PRE runs EXACTLY ONCE per request", () => {
     // Three requests, three PRE runs. A surviving per-route wrap on top of the
     // top-level onion would read 2 / 4 / 6 here.
     expect(globalThis.__scrmlOnionPre).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6 — a WebSocket upgrade BYPASSES the onion (SPEC §40.3.4)
+//
+// "handle() does NOT apply to WebSocket upgrade requests. WebSocket lifecycle
+// handlers use <channel> (§38)." A successful server.upgrade() signals "do not
+// return a response" by returning undefined; §40.3.2 types resolve() as
+// returning a Response, so routing an upgrade through the onion would
+// manufacture one AFTER the protocol switch.
+// ---------------------------------------------------------------------------
+
+describe("§6 WebSocket upgrades bypass the onion", () => {
+  test("an isWebSocket route is dispatched directly, and its undefined survives", async () => {
+    await mountCompiledFixture();
+
+    // Register a stand-in upgrade route the way loadServerRoutes would, and
+    // record whether the onion ran (the PRE counter) for this request.
+    const routes = getRegisteredRoutes();
+    routes.push({
+      path: "/_scrml_ws/chat",
+      method: "GET",
+      isWebSocket: true,
+      handler: (req, server) => {
+        upgradeCalls.push(server);
+        return undefined; // Bun: "upgraded — do not return a response"
+      },
+    });
+
+    const before = globalThis.__scrmlOnionPre;
+    const { fetch } = buildServeConfig({ port: 0, inputFiles: [join(TMP, "index.scrml")] }, TMP);
+    const res = await fetch(new Request("http://localhost/_scrml_ws/chat"), SERVER_STUB);
+
+    expect(res).toBeUndefined();               // no manufactured Response
+    expect(upgradeCalls).toEqual([SERVER_STUB]); // the server ref was threaded
+    expect(globalThis.__scrmlOnionPre).toBe(before); // handle() PRE did NOT run
+
+    routes.pop();
   });
 });
 

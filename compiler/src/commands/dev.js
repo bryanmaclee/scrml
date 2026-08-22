@@ -194,6 +194,14 @@ export function getRegisteredOnions() {
 }
 
 /**
+ * Test/introspection accessor for the currently registered routes. Returns the
+ * LIVE array `loadServerRoutes` populates and the fetch handler dispatches over.
+ */
+export function getRegisteredRoutes() {
+  return registeredRoutes;
+}
+
+/**
  * §40.3 — run `downstream` (the remainder of the dev dispatch: route match →
  * static file → 404) through every mounted `handle()` onion. Returns
  * `downstream(req)` unchanged when the program defines no `handle()` and no
@@ -1040,7 +1048,25 @@ export function buildServeConfig(opts, serveDir) {
       // the CORS preflight, the compile-failure short-circuit) returned
       // earlier ON PURPOSE — they are the dev server, not the compiled one,
       // and SPEC §40.3.4 scopes handle() to "the compiled server".
+      //
+      // WebSocket upgrades are the ONE exclusion: SPEC §40.3.4 says "handle()
+      // does NOT apply to WebSocket upgrade requests. WebSocket lifecycle
+      // handlers use <channel> (§38)." A successful server.upgrade() signals
+      // "do not return a response" by returning undefined, while §40.3.2 types
+      // resolve() as returning a Response — routing an upgrade through the onion
+      // would manufacture one AFTER the protocol switch. Same as the pre-§40.3
+      // behaviour (the `_scrml_route_ws_*` export was never wrapped either).
       // ------------------------------------------------------------------
+      for (const route of registeredRoutes) {
+        if (
+          route.isWebSocket &&
+          route.path === pathname &&
+          route.method.toUpperCase() === req.method.toUpperCase()
+        ) {
+          return await route.handler(req, server);
+        }
+      }
+
       return runThroughOnions(req, (request) => devDispatch(request, server, serveDir, opts));
     },
   };
