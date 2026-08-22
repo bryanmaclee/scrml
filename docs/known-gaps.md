@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 41 |
+| HIGH | 43 |
 | MED | 147 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -9163,3 +9163,35 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 <!-- @gap id=g-emitobjectkey-proto-emitted-bare-prototype-setter sev=LOW status=open locus=compiler/src/codegen/emit-expr.ts:1271-1273(emitObjectKey) route=bryan prov=rationale:S356-peter-ROUTED-TO-BRYAN-the-satellites-implied-fix-quote-__proto__-is-a-NO-OP-PA-VERIFIED-in-node-{"__proto__":42}-creates-NO-own-property-Object.hasOwn-false-same-as-bare-only-a-COMPUTED-{["__proto__"]:v}-makes-an-own-property-so-the-fix-forces-a-LANGUAGE-SEMANTICS-decision-should-a-scrml-__proto__-object-key-set-the-prototype-JS-default-or-be-an-own-data-property-that-is-bryans-lane-per-the-HARD-BOUNDARY-not-peter-compute-LOW-real-world-negligible -->
 <!-- @reconfirm S359-peter 2026-08-21: SURVIVES #590/#592 (which rewrote emitObjectKey). Locus exact on HEAD (emit-expr.ts:1271-1273 — `__proto__` matches BARE_OBJECT_KEY as an identifier → bare). Reproduced END-TO-END: `let obj = { __proto__: 42, name: "x" }` compiles CLEAN (no diagnostic) → emits `let obj = {__proto__: 42, name: "x"};` (prototype-setter, no own property). Security angle negligible — the vector is a LITERAL author-typed `__proto__:` key (author-controlled), not an attacker computed key (a computed `{[k]:v}` with k="__proto__" makes an OWN property, not this bug). Routing + LOW + bryan-lane all stand; no peter action. -->
 <!-- ============ end S356-peter review-floor drain findings ============ -->
+
+<!-- ============ S365-bryan — S239 pass on nested-program-r4-work ============ -->
+
+### g-nested-program-nameless-bypasses-4-12-3-refusal — deleting `name=` from a nested `<program>` bypasses the ENTIRE §4.12.3 unbuilt-execution-context refusal, so a Nominal sidecar/wasm declaration compiles to exit 0 instead of hard-erroring — `NEW S365-bryan (found by the S239 pass on nested-program-r4-work; PA-REPRODUCED both halves); HIGH; open`
+<!-- @gap id=g-nested-program-nameless-bypasses-4-12-3-refusal sev=HIGH status=open locus=compiler/src/nested-program-kind.ts:150-163(classifyNestedProgram — rows 1-3 gated on hasName) prov=rationale:S365-bryan-S239-review-finding-PA-reproduced-with-name-hard-errors-E-NESTED-PROGRAM-CONTEXT-NOMINAL-FAILED-delete-one-attribute-and-the-identical-element-compiles-exit-0-with-only-an-unrelated-SPA-info-lint-the-classifiers-rationale-a-nameless-one-is-unreachable-by-construction-is-FALSE-the-body-is-not-unreachable-it-compiles-INTO-THE-PARENT -->
+> **⚑ S365-bryan: PA-REPRODUCED on the branch worktree, both halves, plus a REFINEMENT the review did not have.**
+>
+> **Half 1 — the refusal is bypassed unconditionally.** `<program name="ml" lang="go" port="9001" health="/health">` → `error [E-NESTED-PROGRAM-CONTEXT-NOMINAL]` + `FAILED — 1 error`. The **identical element with `name=` deleted** → `Compiled 1 file`, exit 0, and the only diagnostic is an unrelated `W-PROGRAM-SPA-INFERRED` info lint. `W-PROGRAM-001` does not fire either (it requires *neither* `name=` *nor* `lang=` *nor* `db=`), so the author gets nothing at all. Same for `<program mode="wasm" lang="rust">` without `name=`.
+>
+> **Half 2 — the body leaks into the parent, but ONLY when it is scrml-parseable.** This is the refinement: my first reproducer used a raw-Go body (`func predict(x int) int { return x * 2 }`) and **nothing leaked** — the parser discards it, so `grep predict` on the client bundle is empty. With a scrml-parseable body the leak is real and immediate: `${ function predict(x) { return x * 2 } }` + `<div>GO SIDECAR MARKUP</>` emits `function _scrml_predict_1(x)` into `*.client.js` AND renders `GO SIDECAR MARKUP` into the parent's HTML. **So the accurate statement is: the refusal-bypass is unconditional; the body-leak is conditional on the sidecar body containing scrml-parseable content.** Do not scope the fix from the leak — scope it from the bypass.
+>
+> **NOT a regression** — `a0e30329` gates the splice on `nameAttr` too, so `nested-program-r4-work` inherits this rather than causing it. It is filed because that branch **ratifies the fail-closed guarantee into SPEC §4.12.3 while its own classifier does not deliver it**, and SPEC marks `name=` on a nested `<program>` only as a **SHOULD**.
+>
+> **Fix direction:** classify on the execution-context attributes (`lang=` / `mode=` / `route=` / `db=` / `port=`), not on `name=` presence. The refusal is about the CONTEXT being unbuilt; the name is addressing metadata and should not gate a safety check. Newly-REJECTING (a program that compiled now errors) → reversible, owes a measured corpus migration before landing.
+
+### g-delta-lint-gate-vacuous-on-zero-population — the `delta-lint` blocking CI gate reports PASS over a delta-log containing the exact duplicate it exists to catch, whenever its parser matches zero entries — `NEW S365-bryan (found by the S239 pass on instrument-integrity; PA-REPRODUCED against the gate I had landed hours earlier and vouched for); HIGH; open`
+<!-- @gap id=g-delta-lint-gate-vacuous-on-zero-population sev=HIGH status=open locus=scripts/delta-lint.ts(the live-scope entry parser + the PASS path — no degenerate-population guard) prov=rationale:S365-bryan-S239-finding-4-PA-reproduced-exit-codes-measured-directly-not-through-a-pipe-canonical-separator-with-a-real-duplicate-exit-1-correct-same-duplicate-with-the-separator-drifted-from-middot-to-hyphen-exit-0-PASS-empty-file-exit-0-PASS -->
+> **⚑ S365-bryan: PA-REPRODUCED, and this is a defect in a gate I landed the same session and recorded as bite-proven.**
+>
+> | input | delta-lint result |
+> |---|---|
+> | real duplicate, canonical `·` separator | **exit 1** — correct, RED |
+> | **the same duplicate still present**, separator drifted `·` → `-` | **exit 0**, prints `0 entries in the live scope (from line 875), 0 distinct sequence numbers, max [0] — PASS` |
+> | **empty file** | **exit 0**, `PASS` |
+>
+> The parser matches nothing, concludes there is nothing to check, and reports PASS over a file holding the very defect it was built for. This is the pa-base §8 *"a gate reports green while verifying nothing"* shape — **shipped inside PR #581, whose entire purpose was to stop a delta-log entry being silently dropped from the flogence digest.**
+>
+> **Why my own bite proof missed it, recorded because the lesson is the reusable part.** The proof I ran was real: during #581's land-merge the gate went RED on four genuine sequence collisions, named them with line numbers, and returned GREEN after I renumbered. Both directions — but **both inside the canonical format.** A gate proven only on well-formed input is unproven against the degenerate case, and the degenerate case is precisely where hollowness hides. *Proving a gate bites is not the same as proving it cannot be silenced.*
+>
+> ⚑ **Also recorded: my first measurement of this read `exit=0` for ALL THREE rows**, because I piped the command into `tail` and read `$?` — which is `tail`'s status, not the gate's. That is the S354 miss #4 (*"a success signal that cannot fail"*) recurring in the very act of testing a gate for hollowness. Measure exit codes directly.
+>
+> **Fix direction:** refuse when the live scope yields zero entries while the file has content — the same degenerate-measurement guard the `instrument-integrity` branch already applies to `facts.ts`, `state.ts`, `snippet-gate.js`, `benchmark-perf-baseline.ts` and `perf-regression-check.ts`. Reuse that idiom rather than minting a sixth. Routed into the instrument-integrity fix round (it is a blocking CI gate, so it is urgent).
