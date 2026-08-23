@@ -73,3 +73,48 @@ Scope: two surgical fixes from the adversarial DO-NOT-LAND review. No redesign.
   generator all fire E-PROTECT-004, none leaks to clientJs. (First run showed SSE not
   firing — that was MY FIXTURE, missing the §37 `route=` and wrongly `export`ed; the
   predicate is behaviourally identical to the tip so a regression was impossible.)
+- 2026-08-23 MERGE onto current main (25 behind at run time, brief said 19 — re-checked
+  rather than trusted). `emit-server.ts` + `SPEC.md` auto-merged clean; only the two
+  GENERATED docs conflicted, and both conflicts were verified DERIVED-ONLY before
+  resolving (stripping every digit from the two SPEC-INDEX sides makes them
+  byte-identical; every FACTS hunk is a count). Resolved by REGENERATING:
+  `scripts/regen-spec-index.ts` + `scripts/facts.ts --write`. Commit 7c1643e9.
+  Post-merge: suite 29204 pass / 0 fail; leak probe exit 0; five-sink probe exit 0.
+  Divergence after merge: 0 behind / 45 ahead.
+
+- 2026-08-23 POPULATION of the gated arm, measured on the corpus (2198 .scrml scanned):
+  78 sources declare `protect=`/`tenant=`; 12 of those also declare
+  `auth="optional"|"none"` and therefore reach the BASELINE-CSRF arm floor-active —
+  the shape the round-9 gate moves. Both examples the review named are in the list
+  (examples/23-trucking-dispatch/pages/auth/{login,register}.scrml), plus
+  app.scrml, stdlib/auth/templates/login.scrml and 8 conformance cases.
+  Corroborates the review's "14 baseline-CSRF-arm handlers" (handlers > files).
+
+## DEFERRED — filed, not fixed, each with its reason
+
+1. THE PRE-EXISTING `Response`-passthrough TWIN on the non-baseline arm
+   (`emit-server.ts`, the `auth=`-bearing / non-baseline exit). Same shape as the
+   BLOCKING finding and the same leak on a floor-active app; NOT introduced by this
+   branch. Out of scope by explicit instruction this round. Note for whoever takes it:
+   its in-source comment ("Placed BEFORE the redact deliberately") reasons about
+   redaction MANGLING a `Response` and never considered that the envelope's
+   destruction of it was the containment — so that comment should not be read as the
+   question having been settled. The round-9 gate (`!_protectActive && !_tenantActive`)
+   ports to it verbatim.
+
+2. UPSTREAM: an unparsed region's `raw` is a LOSSY TOKEN RE-JOIN that destroys `?{`
+   adjacency on the `!{}`-arm path. This is the ROOT CAUSE of Finding 2's false
+   positive: with adjacency preserved, `/\?\{/` becomes both sound and precise and the
+   `n ? { } : { }` ternary compiles. Deferred because the owning stages (block splitter
+   / ast-builder) are held by concurrent agents this round.
+
+3. NEW RESIDUAL found while pinning Finding 1: the `JSON.stringify(<a Response>) === "{}"`
+   containment is Response-IMPLEMENTATION-dependent. Under happy-dom (globally
+   registered by sibling browser tests in a full-suite run) it yields
+   `{"body":{},"bodyUsed":false,...,"status":200,...}`. Both implementations measured
+   keep the BODY opaque, so the floor holds on both — but it is a BACKSTOP, not a
+   guarantee, and a `Response` whose body were an enumerable own property would leak
+   through this path. The control is the §14.8.9 gate resolving these callee shapes;
+   `JSON.stringify` opacity must not be relied on as the primary defence.
+   (This also cost a test: an initial `expect(body).toBe("{}")` passed standalone and
+   failed in the full suite. The pin now asserts the security property, not the bytes.)
