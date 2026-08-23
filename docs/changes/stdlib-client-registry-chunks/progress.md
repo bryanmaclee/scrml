@@ -152,3 +152,70 @@ already guaranteed-dead.
 **Next**: full-suite comparison vs the clean baseline; conformance; close the gap entry.
 
 **Blockers**: none.
+
+---
+
+## 2026-08-23 — Final verification
+
+**Full suite** (`bun run test`, which chains `pretest`), compared against a baseline captured on the
+CLEAN base BEFORE any source change — the brief's requirement not to assume the baseline:
+
+| | pass | fail | skip | todo |
+|---|---|---|---|---|
+| baseline (clean base `82fb7e68`) | 30357 | 55 | 216 | 1 |
+| after all three limbs | 30391 | 53 | 216 | 1 |
+
+**NEW failures vs the clean baseline: ZERO.** Two baseline failures no longer fail
+(`TodoMVC §0/§1 — dist not compiled`), an artifact of the post-commit hook having compiled
+`benchmarks/todomvc/dist/` in the meantime; not a change in behaviour.
+
+**Conformance**: `bun conformance/run.ts` -> **883/883 pass, exit 0**.
+
+**A transient failure that was NOT ours, recorded because the diagnosis is the reusable part.** The
+first post-change full run showed one new red:
+`Self-host: block-splitter parity > selfHostModules.splitBlocks slot works in compileScrml`. Because
+it named `splitBlocks` — the exact symbol in the submodule-prune fix — it looked like ours. It is not:
+
+- the stack pointed at `/home/bryan-maclee/scrmlMaster/scrml/compiler/src/runtime-template.js:1157`,
+  i.e. **MAIN's checkout, not this worktree** — `self-host-smoke.test.js` resolves `projectRoot`
+  via `findMainProjectRoot()` BY DESIGN, because the `compiler/self-host/dist/` artifacts are
+  gitignored and only built in main;
+- main's line 1157 no longer matches the text that failed to parse (the backticks in that comment
+  are gone), so a concurrent session was editing main's `runtime-template.js` DURING the run;
+- the test passes in isolation, and the re-run full suite is clean.
+
+Lesson worth carrying: a self-host test failing in a worktree may be reporting on MAIN's tree. Check
+the PATH in the stack before attributing it.
+
+**No leakage into main, verified three ways:** the new test file does not exist in main; main's
+`runtime-chunks.ts` still has 4 stdlib chunks (not 13); main's `SPEC.md` has zero occurrences of
+`E-STDLIB-CLIENT-CHUNK-MISSING`.
+
+**DEFERRED — each with its reason, so it can be re-derived:**
+
+1. **Submodule client imports are REFUSED, not SUPPORTED.** `scrml:auth/jwt` used client-side now
+   produces a clear compile error instead of a blank page, but a client-safe submodule still cannot
+   be imported client-side at all. REASON: making it work needs a NESTED registry namespace
+   (`_scrml_stdlib["auth/jwt"]` or a flattening scheme) plus a matching change to the import
+   lowering — a design decision about the registry's shape, not a bug fix, and outside this brief's
+   three limbs. Refusing is correct and safe in the meantime; nothing that previously worked stopped
+   working, because it never worked.
+2. **`auth` and `crypto` carry client chunks despite being escalation-server-only** under the §12.2
+   Trigger 3 criterion. REASON: pre-existing since S95 Bug 18, and REMOVING a chunk is a behaviour
+   removal (programs that load today would stop loading), which is out of scope for a dispatch
+   scoped to adding them. Worth a decision of its own: the shim loader strips their `bun` imports so
+   a client call ReferenceErrors at the CALL rather than killing the page, which is a defensible
+   design — but it does ship those shim bodies into the browser, and that is a confidentiality
+   question somebody should answer deliberately rather than inherit.
+3. **`W-STDLIB-SHIM-MISSING` is now provably unfireable** — all 21 shims exist on disk, so its
+   `existsSync` probe never returns false. REASON: retiring or re-pointing it is a §34 catalog
+   decision (the freeze-denominator / FALSE-CLAIM triage arc owns that call, per
+   `scripts/s34-census.ts`), and this dispatch was scoped to ADD the gate that reads the right
+   property, not to retire the one that reads the wrong one. It is now strictly redundant for the
+   client axis; it may still have server-axis value if a shim is ever deleted.
+4. **The stale comment at `emit-client.ts` claiming unknown stdlib names are "dropped at emit time"**
+   was left in place at limb 1 and is now moot (the gate refuses them before it matters). REASON: it
+   sits inside `detectRuntimeChunks`, adjacent to the surface a concurrent session was declared to
+   own; not worth a collision for a comment.
+
+**Blockers**: none. All three limbs complete.
