@@ -46,6 +46,12 @@ describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
     test(`${c.relDir} (${c.expected.id})${tag}`, async () => {
       // (a) codes half — presence + absence + family-prefix + §34 severity.
       const r = runCase(c);
+      // S365 — the CONTRACT itself must be well-formed before any assertion means anything. A
+      // malformed `expect` container (`severity: {}`, `notCodePrefixes: null`, a typo'd key) silently
+      // disables the assertion it holds, so this bridge would otherwise green a case that asserts
+      // nothing. Asserted FIRST: when it fires every list below is empty by construction, and reading
+      // four empty lists as "clean" is exactly the hollowness being closed.
+      expect(r.shapeErrors).toEqual([]);
       expect(r.missing).toEqual([]); // every required code fired
       expect(r.forbidden).toEqual([]); // no forbidden code fired
       expect(r.prefixViolations).toEqual([]); // no forbidden family-prefix fired

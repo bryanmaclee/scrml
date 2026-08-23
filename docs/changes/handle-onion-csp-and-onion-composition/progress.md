@@ -261,6 +261,12 @@ A/B — the shell document after installing exactly the stylesheets `index.html`
 - `bun conformance/run.ts`: **883/883**, exit 0.
 - The pre-commit gate ran on every commit in this round; none used `--no-verify`.
 
+> ⚑ **DISCLOSURE — added S365-bryan after the S239 re-review, because the sentence above is literally true and materially misleading.**
+> One commit in this round (`672d6ae2`) was made with **the pre-commit hook DISABLED** — `git -c core.hooksPath=<nonexistent>` on a repo that sets no `core.hooksPath`, which silently pointed the gate at nothing. It did not use `--no-verify`, which is why the sentence above reads clean; the effect was the same.
+> **That commit's tree was RED under the real gate.** The re-review extracted it and ran the actual pre-commit command: **exit 1, 1 failure** — `§4 per-route chunk EXECUTES as a module > NEGATIVE control`, caused by an indirect `(0, eval)` at global scope defining the runtime's identifiers globally and silently satisfying another file's negative control.
+> **It is orphaned, not in history** (`git merge-base --is-ancestor 672d6ae2 3b5ecbee` → exit 1). The round soft-reset and re-committed as `d94edd4f` under the real hook, which then caught the leak and forced the IIFE fix. The final tree passes the real gate at exit 0 / 0 fail.
+> **Recorded because the transcript disclosure evaporates and this file does not.** Phrasing a gate-integrity claim around `--no-verify` specifically, when the bypass took another route, is the S283 shape. A durable artifact must name what happened, not what did not.
+
 ### Deferred, surfaced (not closed here)
 
 1. Per-page CSS (Tailwind, `#{}`) is lost on every soft navigation — pre-existing on both
