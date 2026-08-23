@@ -349,6 +349,7 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
 function runWrite(): number {
   // The write path is where a hollow value becomes PERMANENT — guard it first.
   refuseDegenerateProjection();
+  refuseUnparsedDeltaEntries();
   // Group sections by file so each file is read/written once (idempotent across multiple sections).
   const byFile = new Map<string, GenSection[]>();
   for (const s of GEN_SECTIONS) {
@@ -450,6 +451,7 @@ function refuseDegenerateProjection(): void {
 
 function runCheck(): number {
   refuseDegenerateProjection();
+  refuseUnparsedDeltaEntries();
   const stale: string[] = [];
   const missing: string[] = [];
   const ok: string[] = [];
@@ -634,21 +636,91 @@ function mapsStaleness() {
 // ── delta-log projection (the volatile PA-state stream) ─────────────────────────
 // Parse handOffs/delta-log.md: the LATEST `## Session` section's `[N] kind · body` entries.
 // Returns recent rulings + recent activity + the last seq. Pure file-read projection (no test run).
-function deltaLog() {
-  let text = "";
-  try { text = readFileSync(`${ROOT}/handOffs/delta-log.md`, "utf8"); } catch { return null; }
-  const parts = text.split(/^## Session /m);
-  const latest = parts[parts.length - 1] ?? text;
-  const sessHeader = "S" + (latest.split("\n")[0] ?? "").trim();
+//
+// KEEP IN LOCKSTEP WITH scripts/delta-lint.ts (S365). The gate and this projection MUST measure the
+// same population: the gate is what certifies that no entry is silently dropped from what this
+// function feeds. When they diverged — the convention drifted to `[NNNN] <emoji> <kind> · body` and
+// neither regex accepted it — FOUR live entries ([561] [562] [565] [727]) vanished from BOTH the
+// duplicate check and the digest, while the gate printed PASS at exit 0.
+//
+// The optional marker is captured and DISCARDED here on purpose: `kind` drives the rulings and
+// activity filters below (`kind.includes("rule")`, `/disp|land|find|state/`), so folding an emoji
+// into it would leave those four entries parsed-but-mis-bucketed — a quieter version of the same
+// drop. See scripts/delta-lint.ts for why the widen is deliberately narrow.
+const DELTA_ENTRY = /^\[(?<seq>\d+)\]\s+(?:(?<marker>[^\w\s]\S*)\s+)?(?<kind>\S+)\s+·\s+(?<body>.*)$/;
+const DELTA_BRACKETED = /^\[\d+\]/;
+
+/**
+ * The delta-log parser, PURE and EXPORTED (S365) — same reason parseGapMarkers is: "a gate that
+ * cannot be exercised from a test is the pa-base §8 unproven gate; making the parser importable is
+ * what lets its silent-drop guard be pinned" (S307, twelve lines up the file). This parser had the
+ * silent drop, so it gets the same treatment.
+ */
+export function parseDeltaLog(text: string) {
+  // Line-indexed scoping (was: split on /^## Session /m). Same scope — the LAST session section —
+  // but it yields real FILE line numbers, which the unparsed-line diagnostic below needs in order to
+  // name an offending line the operator can go and look at.
+  const all = text.split("\n");
+  const lastHeader = all.reduce((acc, ln, i) => (/^## Session /.test(ln) ? i : acc), -1);
+  const sessHeader =
+    "S" + (lastHeader >= 0 ? all[lastHeader].replace(/^## Session /, "") : (all[0] ?? "")).trim();
+  const scopeStart = lastHeader + 1;
+
   const entries: { seq: number; kind: string; body: string }[] = [];
-  for (const ln of latest.split("\n")) {
-    const m = ln.match(/^\[(\d+)\]\s+(\S+)\s+·\s+(.*)$/);
-    if (m) entries.push({ seq: parseInt(m[1], 10), kind: m[2], body: m[3] });
+  const unparsed: number[] = [];                   // bracketed but unmatched — FILE line numbers (1-based)
+  let bracketed = 0;
+  for (let i = scopeStart; i < all.length; i++) {
+    if (!DELTA_BRACKETED.test(all[i])) continue;
+    bracketed++;
+    const m = all[i].match(DELTA_ENTRY);
+    if (!m) { unparsed.push(i + 1); continue; }
+    entries.push({ seq: parseInt(m.groups!.seq, 10), kind: m.groups!.kind, body: m.groups!.body });
   }
   const lastSeq = entries.length ? entries[entries.length - 1].seq : null;
   const rulings = entries.filter((e) => e.kind.includes("rule")).slice(-5);
   const activity = entries.filter((e) => /disp|land|find|state/.test(e.kind)).slice(-6);
-  return { sessHeader, lastSeq, rulings, activity, total: entries.length };
+  // `entries` is returned alongside the two filtered slices so the parse itself is assertable —
+  // rulings/activity are `.slice(-5)`/`.slice(-6)` views, and pinning a parser only through
+  // truncated views is how a capture regression hides. No caller is obliged to read it.
+  return { sessHeader, lastSeq, entries, rulings, activity, total: entries.length, bracketed, unparsed, scopeStart };
+}
+
+function deltaLog() {
+  let text = "";
+  try { text = readFileSync(`${ROOT}/handOffs/delta-log.md`, "utf8"); } catch { return null; }
+  return parseDeltaLog(text);
+}
+
+/**
+ * REFUSE A PARTIALLY-PARSED DELTA-LOG (S365) — sibling of refuseDegenerateProjection().
+ *
+ * refuseDegenerateProjection() catches a population that reads ZERO. This catches one that reads
+ * SOME, which is both likelier and quieter: partial blindness READS HEALTHIER the more entries
+ * still parse, so the digest simply shows fewer rulings and nobody notices. That is not a
+ * hypothetical — it was the live state of `handOffs/delta-log.md` while `scripts/delta-lint.ts`,
+ * the gate built to prevent exactly this, reported clean.
+ *
+ * The invariant is the gate's: every line in the live scope opening with `[NNNN]` is either PARSED
+ * or REPORTED. Exit 2 — "the instrument is not reading the ledger", not "the ledger moved on".
+ */
+function refuseUnparsedDeltaEntries(): void {
+  const dl = deltaLog();
+  if (!dl || dl.unparsed.length === 0) return;
+
+  console.error("state: PARTIAL PARSE — refusing to project a delta-log it can only half see.\n");
+  console.error(
+    `  handOffs/delta-log.md: ${dl.bracketed} line(s) in the live scope (from line ${dl.scopeStart + 1}) ` +
+      `start with [NNNN],\n  but only ${dl.total} matched the entry shape. ` +
+      `${dl.unparsed.length} line(s) are being dropped from the digest:`,
+  );
+  for (const ln of dl.unparsed) console.error(`    line ${ln}`);
+  console.error(
+    `\n  Those entries are absent from the rulings/activity projection and from \`delta-seq\`.\n` +
+      `  scripts/delta-lint.ts parses the SAME shape and refuses on the same condition — repair the\n` +
+      `  offending lines, or widen DELTA_ENTRY here AND the gate's ENTRY together. They must stay in\n` +
+      `  lockstep or the gate certifies a population the digest never sees.`,
+  );
+  process.exit(2);
 }
 
 function fmtEntry(e: { seq: number; kind: string; body: string }): string {
@@ -722,6 +794,13 @@ function digest(): string {
 }
 
 function runDigest(): number {
+  // S365: the digest IS the delta-log's consumer of record — the PA reads it at session-start and
+  // trusts it when the head stamp matches. Writing a digest whose rulings/activity silently omit
+  // entries is the hollow-projection shape, so the same refusal that guards --write and --check
+  // guards the digest write too. (Only the delta-log guard: whether the digest should also carry
+  // refuseDegenerateProjection()'s known-gaps/session-anchor checks is a separate, pre-existing
+  // question and is NOT settled here.)
+  refuseUnparsedDeltaEntries();
   const out = digest();
   const path = `${ROOT}/handOffs/digest.md`;
   writeFileSync(path, out + "\n");
