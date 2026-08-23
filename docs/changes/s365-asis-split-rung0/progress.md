@@ -250,3 +250,40 @@ Left in place (rung 1 territory), named here so it is not rediscovered as a myst
    Flagging it as a decision the numbers now support making. Options if it bites: `info` severity,
    per-file summarisation, or simply landing rungs 2/3 (which removes 70%).
 5. The LSP advisory denylist (item 8 above) wants a severity-based predicate.
+
+---
+
+## LANDING NOTE FOR PA — base is stale by one docs-only commit, file sets are DISJOINT
+
+`origin/main` advanced during this dispatch: `b74f7363` -> `c96e7012`
+(*"docs(S365): review floor 5 -> 0 (#649 probed by execution); file the SPEC heading-drift gap
+(#653)"*), touching exactly three PA-owned shared docs:
+
+    docs/known-gaps.md
+    docs/pr-reviews.md
+    handOffs/delta-log.md
+
+**This branch touches NONE of them.** They appear as deletions in `git diff origin/main..HEAD`
+only because this base predates that commit — the known stale-base artefact. The 14 files this
+branch actually authored, measured against its TRUE base (`git diff --name-only b74f7363..HEAD`):
+
+    bun.lock
+    compiler/SPEC-INDEX.md
+    compiler/SPEC.md
+    compiler/src/codegen/index.ts
+    compiler/src/type-system.ts
+    compiler/tests/TYPES-BASELINE.json
+    compiler/tests/integration/trucking-dispatch-smoke-integration.test.js
+    compiler/tests/lsp/document-symbols.test.js
+    compiler/tests/unit/s365-asis-unknown-split.test.js
+    docs/FACTS.md
+    docs/changes/s365-asis-split-rung0/BRIEF.md
+    docs/changes/s365-asis-split-rung0/progress.md
+    package.json
+    scripts/types-gate.ts
+
+Intersection with main's newer commit: **EMPTY.** A file-delta of the list above is safe and will
+not clobber the three shared docs. Do NOT `git checkout <branch> -- docs/known-gaps.md` (etc.).
+
+`bun.lock` + `package.json` carry the `typescript` devDependency the types gate requires; they must
+land together or `bun install --frozen-lockfile` fails in CI.
