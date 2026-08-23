@@ -314,8 +314,10 @@ if (import.meta.main) {
   // Scanning zero artifacts previously produced the identical "✅ no corpus-zero debt" a genuinely
   // clean corpus produces. That is not hypothetical: `SUPPORT` is `<repo>/../scrml-support`, which
   // does NOT resolve from a git worktree under `.claude/worktrees/<agent>/` — so every dispatched
-  // agent, and the boot probe in scripts/boot.ts:311, read a green tick over 288 unscanned
-  // deep-dives. A probe read as evidence must never report a clean bill of health for a scan that
+  // agent, and the boot probe in scripts/boot.ts:311, read a green tick over 322 unscanned
+  // deliberation artifacts (295 deep-dives + 27 debates — BOTH entries of SCAN_ROOTS; the figure
+  // first written here said "288 deep-dives", which was stale AND counted only one of the two
+  // roots). A probe read as evidence must never report a clean bill of health for a scan that
   // did not happen.
   //
   // EXIT SHAPE follows this repo's own established boot-probe pattern (review-debt.ts /

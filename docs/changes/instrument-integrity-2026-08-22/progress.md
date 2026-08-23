@@ -407,11 +407,35 @@ a constructed tree is a clean "input missing / empty / zero-length" condition wi
 repo. Where that only proved module resolution (a script importing a sibling), a targeted probe was
 built instead. Every row below is an EXECUTED exit code, not a reading.
 
-**Headline: 3 of the 5 blocking CI gates could pass while measuring nothing.**
-`.github/workflows/ci.yml` blocks on exactly five: `browser-baseline --check` (the reference,
-guarded), `snippet-gate` (VACUOUS — fixed), `facts --check` (VACUOUS — fixed),
-`regen-spec-index --check` (narrow by design, and the narrow claim bites), and
-`s34-census --check-new` (two blind spots — closed in Build B above).
+> **⚠ CORRECTED IN THE FIX ROUND.** The headline below originally read *"3 of the 5 blocking CI
+> gates could pass while measuring nothing"*. That was wrong twice, and both errors are the exact
+> class this branch exists to stop. Struck text is kept so the correction is auditable.
+
+**Headline: of the 6 blocking CI gates, 3 could report `PASS` having measured nothing — and 1 more
+measured the wrong property.**
+`.github/workflows/ci.yml` blocks on exactly six script gates (re-read from the merged workflow,
+not from memory — `ci.yml:146,148,150,152,163,165`):
+
+| gate | ci.yml | state when this branch was cut | now |
+|---|---|---|---|
+| `browser-baseline.ts --check` | :146 | guarded — the reference implementation | unchanged |
+| `snippet-gate.js` | :148 | **VACUOUS** | fixed on this branch |
+| `facts.ts --check` | :150 | **VACUOUS** | fixed on this branch |
+| `regen-spec-index.ts --check` | :152 | narrow **by design**, and the narrow claim bites | unchanged, deliberately |
+| `delta-lint.ts` | :163 | **did not exist** — landed on `main` mid-branch | **VACUOUS → fixed in the fix round (2)** |
+| `s34-census.ts --check-new` | :165 | **measured the wrong property** | fixed on this branch (Build B) |
+
+**Error 1 — a wrong denominator.** "5" was true when the branch was cut and false by the time it
+landed: `delta-lint` became a sixth blocking gate while this branch was open. A count of gates is
+not a constant.
+
+**Error 2 — two different defects counted as one.** The original three were `snippet-gate`,
+`facts`, and `s34-census`. But `s34-census` was never vacuous: it measured something, and what it
+measured was the wrong property — the SHAPE of a provenance note rather than whether the note
+RESOLVED. **A gate that measures nothing and a gate that measures the wrong thing are not the same
+failure, and the second is the more dangerous**, because it produces a real-looking number that
+survives review. Collapsing them into one headline number destroyed exactly the distinction this
+branch was cut to draw.
 
 | script | can it pass while measuring nothing? | executed evidence | verdict |
 |---|---|---|---|
@@ -424,8 +448,8 @@ guarded), `snippet-gate` (VACUOUS — fixed), `facts --check` (VACUOUS — fixed
 | `issue-debt.ts` | **NO** | missing ledgers → every issue unhomed → `2 open · 0 homed · 2 OWED`, exit 1; `gh` down → `UNAVAILABLE`, exit 0 with "NOT-VERIFIED is a distinct state from 0 OWED" | **GUARDED.** Also carries a truncation guard with auto-widen to a reported ceiling. Best of the debt family. |
 | `threads.ts` | yes (reporter) | no BRIEF declares a probe → `thread-board: no BRIEF.md declares a DONE-PROBE: yet`, exit 0 | **REPORTER, no gate mode.** Cannot distinguish "no change dirs at all" from "dirs exist, none declares a probe" — same line for both. FILED (F7, minor). |
 | `dpa-debt.ts` | yes (reporter) | missing queue → `dpa-debt — queue not found at <path>`, exit 0 | **REPORTER, no failing exit path at all** (one `process.exit`, and it is 0). Names the missing path, so not silent. FILED (F6). |
-| `delta-lint.ts` | **YES** | see below — three separate zero-population shapes all → `PASS`, exit 0 | **VACUOUS. Not on `main`** (sibling branch `fix/s354-…`). FILED (F8). |
-| `state.ts` | **YES** | known-gaps with zero `@gap` tokens: `--write` recorded `HIGH 0 / MED 0 / LOW 0 / Nominal 0`, exit 0; `--check` → `PASS — all @generated sections current`, **exit 0** | **VACUOUS.** Same mechanism as `facts.ts`. FILED (F9) — see the fix note below. |
+| `delta-lint.ts` | **YES → FIXED** | see below — three separate zero-population shapes all → `PASS`, exit 0 | **VACUOUS — FIXED in the fix round.** It reached `main` (`1127bab9`) as a 6th blocking gate while this branch was open, so F8 stopped being someone else's branch and became this landing's problem. Now refuses, exit 2. |
+| `state.ts` | **YES → FIXED (both halves)** | known-gaps with zero `@gap` tokens: `--write` recorded `HIGH 0 / MED 0 / LOW 0 / Nominal 0`, exit 0; `--check` → `PASS — all @generated sections current`, **exit 0** | **VACUOUS — FIXED.** Same mechanism as `facts.ts`. ⚠ The first cut fixed only the known-gaps half: the master-list half was written as `recentSessions(8).trim().length === 0`, which **can never be true** (both returns are non-empty), so it was unreachable dead code asserted as covered. Closed in the fix round (1), bite-proven both directions. Not a CI gate — a boot/wrap gate. |
 | `corpus-emit-differential.ts` | **NO** | zero-artifact diff → `FINDING [VACUOUS] compared ZERO artifacts — this run verified NOTHING.` + `VERDICT: NOT A VALID COMPARISON`, **exit 2**; self-diff → `FINDING [INCOMPARABLE] both sides are the SAME revision … clean by construction and proves nothing`, exit 2; typo'd flag → exit 2 | **BEST-GUARDED IN THE SET**, stronger than the reference. Caveat: the CAPTURE half writes a 0-source manifest at exit 0; the DIFF half catches it, which is the point that matters. |
 | `perf-regression-check.ts` | **YES** | every corpus key renamed → `[SKIP] … unknown corpus name` ×8 then `no regressions detected`, **exit 0**; `corpora: {}` → `no regressions detected` with no SKIP lines at all, **exit 0** | **VACUOUS.** |
 | `benchmark-perf-baseline.ts` | **YES** | no corpora resolvable → `[SKIP]` ×8, then `wrote: …/perf-baseline.json` with `corpora: {}`, **exit 0** | **VACUOUS, and it COMPOUNDS**: that empty baseline then makes `perf-regression-check` report "no regressions detected" forever. Proven end-to-end. |
@@ -568,8 +592,18 @@ exit 0
 
 `SUPPORT` is `${ROOT}/../scrml-support`. From a git worktree under `.claude/worktrees/<agent>/`
 that resolves to `.claude/worktrees/scrml-support`, which does not exist — while the real sibling
-holds **288 deep-dives**. `walk()` returns `[]` for a missing dir, so the scan silently empties and
-the tick prints anyway.
+holds **322 deliberation artifacts** (`295` deep-dives + `27` debates — BOTH entries of
+`SCAN_ROOTS`). `walk()` returns `[]` for a missing dir, so the scan silently empties and the tick
+prints anyway.
+
+> **⚠ CORRECTED IN THE FIX ROUND.** That figure originally read **288 deep-dives**. It was wrong,
+> and it was wrong *against this document's own evidence*: the executed transcript twelve lines
+> below prints `322 artifacts scanned`. Two mistakes compounded — a stale count, and counting only
+> `docs/deep-dives` when `SCAN_ROOTS` has two entries. Re-derived independently rather than copied
+> from the transcript: `find …/docs/deep-dives -name '*.md' | wc -l` → **295**, `find
+> …/docs/debates -name '*.md' | wc -l` → **27**, total **322**. **A prose number contradicting the
+> executed output printed beside it is precisely how a wrong figure becomes the next session's
+> premise — which is this branch's entire thesis, committed by the branch itself.**
 
 It is `scripts/boot.ts:311`, a **boot probe** — the PA reads that tick as evidence at session start,
 and every dispatched agent runs from a worktree. This is the brief's opening thesis, live.
@@ -599,9 +633,23 @@ GREEN (a root from which the sibling DOES resolve):
   exit 1
 ```
 
-The live path is intact — and it exits 1 for the RIGHT reason, over a real population. **There are
-5 genuinely OWED corpus-zero dispositions that the worktree-hollow gate has been hiding.** Routed to
+The live path is intact — and it exits 1 for the RIGHT reason, over a real population. **There were
+5 genuinely OWED corpus-zero dispositions that the worktree-hollow gate had been hiding.** Routed to
 the PA as F5; disposing them is a per-artifact reading, not this dispatch's call.
+
+> **⚠ STATUS MOVED — re-measured in the fix round.** All five have since been disposed:
+> `scrml-support@5fe251f` (2026-08-22, *"corpus-zero(S365): dispose all 5 in-epoch artifacts — and
+> 2 of the 5 are vocabulary false positives"*) added a closing `@corpus-zero` marker to each.
+> Re-measured against the live sibling by feeding the real population through this branch's own
+> exported pure `classify()` — **322 scanned · 44 with a phrase · 5 in scope · 0 OWED · 0
+> VIOLATION**, every one of the five now `closingMarkers=1`.
+>
+> **The number in the verification brief reads "5 corpus-zero OWED"; the correct current reading is
+> "5 IN SCOPE, 0 OWED".** Those are different fields and the distinction is load-bearing: `inScope`
+> is the population carrying a corpus-zero phrase in-epoch, `owed` is the subset with no closing
+> marker. **The count did not drift — the debt was PAID**, within a day, by a sibling session acting
+> on this branch's own finding. That is the fix working end-to-end, and it is also why "5 OWED"
+> must not be carried forward as a standing figure.
 
 The path-resolution half is FILED, not fixed: making `SUPPORT` worktree-aware is a decision about
 where the sibling repo lives, which is not mine to make. The guard turns a silent false-pass into a
@@ -614,13 +662,13 @@ loud "I could not scan", which exposes that question rather than papering over i
 | id | finding | why not fixed here | reproducer |
 |---|---|---|---|
 | **F1** | 106 of 883 conformance cases emit some code more than once, invisibly — extremes `W-STDLIB-SEED-FAILCLOSED=23`, `E-ERROR-005=2` for one uncovered variant. Some legitimate (one diagnostic per site), some likely real double fires. | Deciding which of the 106 are defects is a per-case ruling. The instrument to see them now exists. | `loadCases()` + `compile().counts`, filter `n > 1`. |
-| **F2** | `docs/known-gaps.md:588` carries a PA-VERIFIED enumeration of "the harness's complete `expect` vocabulary" and is now one key stale (`codeCounts`). | Brief forbids touching that file. | Read the line. |
-| **F3** | `I-MATCH-PROMOTABLE`'s §34 row (SPEC.md:19618) cites `compiler/src/lint-promotable.ts`, which does not exist; the emitter is `compiler/src/lint-i-match-promotable.js`. | A SPEC edit, and a legacy row the diff-scoped gate is correctly silent on. | Touch that row → the new gate names it. |
+| **F2 — CLOSED (fix round, condition 3)** | `docs/known-gaps.md:588` carries a PA-VERIFIED enumeration of "the harness's complete `expect` vocabulary" and is now one key stale (`codeCounts`). | **Restriction lifted for that one line.** Fixed, and re-earned bidirectionally: every key in the doc confirmed present in `ExpectedCase`, every key in `ExpectedCase.expect` confirmed present in the doc. | Read the line. |
+| **F3 — CLOSED (fix round, condition 4)** | `I-MATCH-PROMOTABLE`'s §34 row (SPEC.md:19618) cites `compiler/src/lint-promotable.ts`, which does not exist; the emitter is `compiler/src/lint-i-match-promotable.js`. | **Fixed.** The gate being correctly silent on an untouched row is exactly what made it a landmine: it arms on the next innocent reflow. Swept afterwards — 0 unresolvable provenance paths remain. | Touch that row → the new gate names it. |
 | **F4** | The emitter scan still over-counts ~19 codes whose only non-comment mention is a cross-reference inside ANOTHER diagnostic's message string. | The same syntax carries two LIVE emission shapes; separating them needs per-code adjudication, not a regex. | Table in Build B above. |
-| **F5** | **5 genuinely OWED corpus-zero dispositions** in `scrml-support/docs/deep-dives`, hidden by the worktree-hollow gate. Also: `SUPPORT = ${ROOT}/../scrml-support` does not resolve from a worktree at all. | Disposition is a per-artifact reading; the path question is a decision about repo layout. | `bun scripts/corpus-zero-debt.ts --check` from a root where the sibling resolves. |
+| **F5 — PARTLY CLOSED** | **5 genuinely OWED corpus-zero dispositions** in `scrml-support/docs/deep-dives`, hidden by the worktree-hollow gate. Also: `SUPPORT = ${ROOT}/../scrml-support` does not resolve from a worktree at all. | **Disposition half CLOSED by others**: all 5 disposed at `scrml-support@5fe251f` (2026-08-22) — the fix worked end-to-end within a day. **Re-measured in the fix round: 5 in scope, 0 OWED.** The path question (`SUPPORT` not resolving from a worktree) remains a repo-layout decision and stays FILED. | `bun scripts/corpus-zero-debt.ts --check` from a root where the sibling resolves. |
 | **F6** | `dpa-debt.ts` has exactly one `process.exit`, and it is `0`. No failing path exists, and a missing queue reports as a normal run. | It is a reporter with no gate mode; adding one is a design call. It does name the missing path. | Move `handOffs/dpa-queue.md` → `queue not found`, exit 0. |
 | **F7** | `threads.ts` cannot distinguish "no change dirs exist at all" from "dirs exist, none declares a DONE-PROBE" — identical output for both. | Minor; needs a denominator in the message ("N BRIEF.md scanned, 0 declare a probe"). | Empty tree vs a tree with a probe-less BRIEF.md → same line. |
-| **F8** | **`delta-lint.ts` reports PASS over a log that still contains the duplicate it exists to catch**, when the entry format drifts. Three zero-population shapes all green. | Not on `main` — it lives on `origin/fix/s354-nested-program-artifact-gap`. Pulling that branch in to patch it is the wrong trade. | Full four-case transcript in the audit section above. Fix is ~4 lines: refuse `seen.size === 0` over a non-empty file. |
+| **F8 — CLOSED (fix round, condition 2)** | **`delta-lint.ts` reports PASS over a log that still contains the duplicate it exists to catch**, when the entry format drifts. Three zero-population shapes all green. | **It reached `main` (`1127bab9`) as a 6th blocking gate while this branch was open**, so the trade changed: no branch-pull needed, and leaving it meant landing beside a vacuous gate. Fixed, all three rows bite-proven. | Full four-case transcript in the audit section above. Fix is ~4 lines: refuse `seen.size === 0` over a non-empty file. |
 | **F9** | `regen-spec-index.ts --check` cannot see the rot class it was written for — all 65 row ranges corrupted, still "totals OK". | **Deliberate and documented** (pa-base §8, cry-wolf). Gating them would re-litigate a ruling under cover of a bug fix. Recorded because the gap between "why the script exists" and "what the gate checks" is worth an operator's eye. | `sed -E 's/\| [0-9]+-[0-9]+ \| [0-9]+ \|/\| 1-1 \| 1 \|/'` on SPEC-INDEX.md → exit 0. |
 | **F10** | `corpus-emit-differential.ts`'s CAPTURE half writes a 0-source manifest at exit 0. | The DIFF half catches it with an explicit `FINDING [VACUOUS]`, which is the point that matters. Noted for completeness. | Capture against an empty roots dir. |
 
@@ -921,3 +969,57 @@ the reason the resolver exists.
 **No bucket moved.** Verified by executing the census against `HEAD`'s SPEC and against the
 fixed SPEC and diffing the two outputs — byte-identical (`diff` exit 0). Correct: the bucket
 depends on whether the CODE appears in executable source, not on whether the cited path resolves.
+
+### (5) LOW-but-cheap — the branch's own numbers were wrong — **DONE**
+
+Cheap to fix, and the least skippable of the five: *a wrong instrument number becomes next
+session's premise*, which is the sentence this whole branch is built on. Every figure was
+**re-derived first-hand**, not copied from the reviewer's note — a relayed premise is exactly
+the failure mode being corrected.
+
+**The unscanned-artifact figure: 288 → 322.** Independently re-derived:
+
+```
+$ find …/scrml-support/docs/deep-dives -name '*.md' -type f | wc -l   ->  295
+$ find …/scrml-support/docs/debates    -name '*.md' -type f | wc -l   ->   27
+                                                              total  ->  322
+```
+
+Two compounding mistakes: a stale count, and counting only `docs/deep-dives` when `SCAN_ROOTS`
+has **two** entries. **And the document contradicted its own evidence** — the executed transcript
+twelve lines below the wrong prose prints `322 artifacts scanned`. Corrected in `progress.md` AND
+in `scripts/corpus-zero-debt.ts`, whose own new source comment carried the same wrong figure.
+
+**The headline: "3 of 5" → "3 of 6 vacuous, plus 1 measuring the wrong property".** Re-read from
+the merged workflow rather than from memory — `ci.yml:146,148,150,152,163,165` — six blocking
+script gates, not five. Two independent errors:
+1. **A stale denominator.** `delta-lint` became a 6th blocking gate *while this branch was open*.
+2. **Two different defects counted as one.** `s34-census` was never vacuous. It measured
+   something; it measured the WRONG PROPERTY — the shape of a provenance note, never whether the
+   note resolved. **A gate that measures nothing and a gate that measures the wrong thing are
+   different failures, and the second is the more dangerous**, because it yields a real-looking
+   number that survives review. The original headline collapsed exactly the distinction the branch
+   was cut to draw.
+
+**"5 corpus-zero OWED" → "5 IN SCOPE, 0 OWED".** Re-measured by feeding the real sibling
+population through this branch's own exported pure `classify()` (the script's `SUPPORT` still
+cannot resolve from a worktree — that half stays FILED — so the population was supplied directly
+rather than by symlinking anything into the main checkout):
+
+```
+scanned 322 · withHits 44 · inScope 5 · OWED 0 · VIOLATIONS 0
+  all five now closingMarkers=1
+```
+
+`inScope` and `owed` are different fields. **The count did not drift — the debt was PAID**:
+`scrml-support@5fe251f` (2026-08-22, *"corpus-zero(S365): dispose all 5 in-epoch artifacts"*)
+disposed all five, within a day, acting on this branch's own finding. That is the fix working
+end-to-end; it is also why "5 OWED" must not be carried forward as a standing figure.
+
+**Audit table + FILED table reconciled.** `delta-lint` moved from *"VACUOUS. Not on `main`"* to
+*"VACUOUS — FIXED"*; `state.ts` from *"VACUOUS"* to *"FIXED (both halves)"* with the dead-code
+miss named; F2/F3/F8 marked CLOSED with the condition that closed them, F5 PARTLY CLOSED
+(disposition half closed by others, path half still open).
+
+Struck claims are annotated in place rather than deleted, so the correction is auditable — a
+progress doc that silently rewrites its own wrong numbers teaches nothing.
