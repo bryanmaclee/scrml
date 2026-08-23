@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S367 — 2026-08-23 (peter · P-Tech1 Windows) — cross-file imported markup-fn mounting in `<each>` interps (g-each residual 2), via a shared markup-return scan + a `returnsMarkup` import-graph fixpoint
+
+Took S364 buildable item 2 and closed the cross-file IMPORTED residual of `g-each-nested-markup-interp-stringifies`. An imported `${badge(it.name)}` in a nested `<each>` interp was emitting `textContent = String(badge(...))` → `[object HTMLSpanElement]` (silent wrong render); the markup-returning-fn detector was same-file only.
+
+- **#658 ⭐ g-each residual 2 (cross-file imported markup fns) RESOLVED.** Root re-derived past the filed "thread the exportRegistry" direction, which was **incomplete** — the registry entry carries no fn body, and no imported AST is reachable from codegen's ctx. The fix mirrors the existing `isAsync` rail: `module-resolver.js` precomputes a `returnsMarkup` flag per markup-returning export; codegen seeds the per-file markup-fn set with the imported names carrying it before the transitive fixpoint. **Convergent, single-source:** the markup-return scan moved to a shared `compiler/src/markup-return-scan.js` imported by both `emit-each.ts` and `module-resolver.js`; `propagateReturnsMarkup` is one graph-level fixpoint over both re-export and call edges (monotone, bounded by the export count), so an imported/re-exported/wrapped markup fn mounts at any depth. Fail-safe (a string-returning import stays a text node) and nesting-aware (a nested markup fn never flags a same-named export).
+- **Four S239 rounds hardened it**, each catching a real issue before landing: r1 a one-hop miss → the import-graph fixpoint; r2 the re-exported-wrapper miss → both edges in one pass; r3 a collector name-collision (name-keyed + nesting-blind) → no descent into fn bodies; r4 cleanup (removed a redundant registry re-export inheritance, corrected an inaccurate "byte-identical" claim, documented residuals). Nine-case merge-blocker + an executed-DOM browser test (a real `<span>` renders cross-file). Residuals documented: `export *` barrels (pre-existing general limitation), bare markup-typed struct fields (bryan-lane), mixed-return restricted-parent + member-access + default imports (narrow shared latents).
+- **Scope note (recorded):** triaged "small compute," this became a cross-module inference pass; the convergence was right once committed but the scope blow-up should have been flagged to the operator around review round 2. **Final state:** main @ `82fb7e68`, coherence 0/0, cloud `gate` green (rebased twice past the fast-moving main — S368-bryan live). Conformance 1597/0, unit 17756/0, integration fail name-set identical to base.
+
 ## S366 — 2026-08-22 (peter · P-Tech1 Windows) — heading-drift sweep (20 gap headings realigned to verified markers) + a bare-fn library-mode codegen fix; SUCCESSOR to the LIVE-but-AFK S365-bryan
 
 Booted Profile A as a successor to S365-bryan (his board read LIVE but "FINAL for this stretch"; he left `main` clean at #647 and went AFK) — worked strictly non-intersecting peter-lane, leaving his four held branches, five operator decisions, dpa-036, and his `pr-reviews.md`/delta-log footprint untouched. Two PRs landed.
@@ -6236,6 +6244,14 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### 2026-08-23 — S369 (peter): library-mode fn match object-arm returns its value, and a mis-fired review's "regression" proved false
+
+Two PRs landed and three new gaps were filed. The compiler fix closes a silent-wrong codegen hole; the session's sharpest lesson was catching a review that reviewed the wrong commit and a "regression" that wasn't one.
+
+- **#661** — review floor 3 → 0. The inherent S367/S368 wrap tail drained: #658 (the each-interp cross-file imported markup-fn mount) re-verified independently by execution — a fresh distinct repro (a local wrapper of an imported markup fn mounts via the transitive fixpoint; an imported string fn stays a text node), both directions. #660/#659 were docs-only carve-outs.
+- **#664** — `g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED) resolved. A library-mode `fn` whose `match` arm body is a brace-delimited object literal (`1 :> { x: 1 }`, including empty `{}`) emitted the arm bare — JS read a labeled-statement block, the IIFE fell through, and the fn silently returned `undefined`. The filed locus was a hypothesis; the real locus is the shared value-IIFE emitter `emitIifeBlockArmBody`, where the object arm now lowers in return position (mirroring the bare-value arm and the decl/tilde path). Three correctly-targeted S239 rounds additionally fixed the empty-`{}` void, the object-arm auto-await parity, and a multi-scrutinee await-header strand. 7-case bite-proven merge-blocker; full suite 22668/0.
+- **Filed, not fixed (3 gaps):** `g-library-mode-multi-scrutinee-match-misparsed-as-single` (MED — `match a, b` in a library fn mis-parses to the single-scrutinee path → `E-CODEGEN-INVALID-LOGIC`) and `g-match-structuredbody-empty-object-arm-voids` (LOW, repro-owed) were surfaced by the S239 pass and confirmed pre-existing. `g-each-nested-in-fn-body-markup-fn-stringifies` (MED) came from a mis-fired review that reviewed #658 instead of #664 and called a nested-markup-fn bug a regression — reproduced on the pre-#658 base, it was identical, so it is pre-existing, not a regression; its real blocker is that the each mounting set is null during fn-body emission.
 
 ### 2026-08-22/23 — S365: five inherited branches landed, and the session's sharpest findings were against its own work
 
