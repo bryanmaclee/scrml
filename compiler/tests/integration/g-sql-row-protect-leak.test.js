@@ -2121,3 +2121,120 @@ describe("§14.8.9 round 9 — the baseline-CSRF `Response` passthrough is floor
     expectFiredAndProtecting(result);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// ROUND 9 — the unparsed-truncation diagnostic states what the compiler KNOWS.
+//
+// `ESCAPE_HATCH_SQL_RE` is `/\?\s*\{/`, a deliberate OVER-approximation, so it
+// also matches a ternary whose branches are object literals: `n ? { } : { }`
+// re-joins from tokens as `? { }`. The old message asserted the match as fact —
+// "and a `?{}` inside it cannot be resolved", lead remedy "move the `?{}` out of
+// that expression" — so a protect-active file containing such a ternary got a
+// build error naming a construct that is not in its source. Fail-CLOSED, so a
+// correctness defect rather than a confidentiality one, but a diagnostic that
+// misnames its own root cause is itself a defect.
+//
+// ROUND 9 ALSO TRIED TO NARROW THE PREDICATE TO `/\?\{/` AND THAT IS UNSOUND.
+// It is recorded here as an executable pin because the argument for it is
+// seductive: every stage that RECOGNISES the opener requires adjacency
+// (`tokenizer.ts` twice, `block-splitter.js` once, whose next branch takes a bare
+// `?` as a ternary). But this predicate does not see source — it sees an
+// `escape-hatch`'s `raw`, which on the `!{}`-arm path is a LOSSY TOKEN RE-JOIN
+// that spaces every token pair apart. Measured:
+//
+//   C-style `for` header:  "( let i = 0 ; i < ?{"          <- adjacency SURVIVES
+//   `!{}` arm handler:     "…let u = ? { `SELECT * FROM users…` } . get ( )"
+//
+// so `/\?\{/` silently disarms the `!{}`-arm leak pinned above. A backtick
+// discriminator is unsound too: SPEC §44 defines the `?{…}` body as a
+// JS-EXPRESSION context (a backtick merely OPENS a template literal) and
+// `tokenizeSQL` carries an explicit non-backtick fallback.
+//
+// The durable fix is UPSTREAM — preserve `?{` adjacency when an unparsed region's
+// `raw` is reconstructed — and it belongs to the block splitter / ast-builder,
+// not to this gate. Until then the over-approximation stays and the MESSAGE is
+// what gets fixed.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 round 9 — the unparsed-truncation message claims only what it knows", () => {
+  const forHeader = (cond) =>
+    "      export server function stats(n) {\n" +
+    "        let acc = 0\n" +
+    "        for (let i = 0; " + cond + "; i++) { acc = acc + 1 }\n" +
+    "        return acc\n" +
+    "      }";
+
+  // --- the OVER-REPORT, pinned as accepted-and-documented ------------------
+
+  test("a ternary with object-literal branches still REPORTS (fail-closed is preserved)", () => {
+    const { result } = compileSource(protectProgram(forHeader("i < n ? { } : { }")));
+    // Deliberately NOT changed to silent: narrowing the predicate to make this
+    // shape compile disarms the `!{}`-arm leak. See the block comment above.
+    expect(fires(result)).toBe(true);
+  });
+
+  test("...but it no longer ASSERTS a `?{}` that is not in the source", () => {
+    const { result } = compileSource(protectProgram(forHeader("i < n ? { } : { }")));
+    const d = e004(result);
+    // The old wording, gone. Both halves: the false statement of fact...
+    expect(d.message).not.toContain("a `?{}` inside it cannot be resolved");
+    // ...and the imperative that sent the author to move a `?{}` that is absent.
+    expect(d.message).not.toContain("Resolution: move the `?{}` out of that expression");
+  });
+
+  test("...it names the REAL root cause and the remedy that always applies", () => {
+    const { result } = compileSource(protectProgram(forHeader("i < n ? { } : { }")));
+    const d = e004(result);
+    // What the compiler knows.
+    expect(d.message).toContain("has no tree form");
+    // What it merely could not rule out — stated as such.
+    expect(d.message).toContain("could not be ruled out");
+    // The remedy that applies whether or not a query is present, stated first.
+    expect(d.message).toContain("rewrite the expression into a form the compiler can parse");
+    // And the over-approximation is disclosed to the author rather than hidden.
+    expect(d.message).toContain("can fire on an expression that holds no query");
+    // Still not the depth-cap remedy — that would be the other wrong cause.
+    expect(d.message).not.toContain("reduce the expression nesting");
+  });
+
+  // --- the fail-CLOSED direction the predicate exists for -------------------
+
+  test("FIRES — a REAL `?{}` in the same unparseable `for` header (adjacency survives)", () => {
+    const { result } = compileSource(protectProgram(
+      forHeader("i < ?{`SELECT count(*) AS c FROM users`}.get().c"),
+    ));
+    expect(fires(result)).toBe(true);
+    expect(e004(result).message).toContain("has no tree form");
+  });
+
+  test("FIRES — a REAL `?{}` projecting the PROTECTED column in a `for` header", () => {
+    const { result } = compileSource(protectProgram(
+      forHeader("i < ?{`SELECT * FROM users`}.get().id"),
+    ));
+    expect(fires(result)).toBe(true);
+  });
+
+  // The anti-regression pin for the narrowing attempt. `? { ` WITH the space is
+  // how a real `?{}` reaches this predicate on the `!{}`-arm path, so a
+  // predicate that demands adjacency fails OPEN there. Asserted directly on the
+  // regex, so a future edit to it goes red HERE with the reason attached rather
+  // than only in a distant end-to-end fixture.
+  test("the predicate must match a SPACE-SEPARATED `? {` — narrowing it fails OPEN", () => {
+    // The `!{}`-arm re-join, verbatim from a dump of `escapeHatchSurface`'s input.
+    const armRejoin = "e - > {\nlet u = ? { `SELECT * FROM users WHERE id = ${id}` } . get ( )\nreturn new Response ( JSON . stringify ( u ) )\n}";
+    expect(/\?\s*\{/.test(armRejoin)).toBe(true);
+    expect(/\?\{/.test(armRejoin)).toBe(false); // <- why the `\s*` is load-bearing
+  });
+
+  test("the `?{}` narrowing did not disarm the OTHER escape-hatch surfaces", () => {
+    // `couldHoldEgress` is a separate test on the same text: a `Response` in an
+    // unparseable region still reaches the gate.
+    const { result } = compileSource(protectProgram(
+      "      export server function getUser(id) {\n" +
+      "        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()\n" +
+      "        return new Response(JSON.stringify(u), { status: 200 + ~0 })\n" +
+      "      }",
+    ));
+    expect(fires(result)).toBe(true);
+  });
+});

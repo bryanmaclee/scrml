@@ -497,7 +497,63 @@ function escapeHatchSurface(raw: unknown): {
   };
 }
 
-/** `?{` — a `?{}` query. The tokenizer may space the two apart. */
+/**
+ * `?{` — a `?{}` query opener. The `\s*` IS load-bearing; do not remove it.
+ *
+ * ROUND 9 tried to remove it and the attempt is recorded here because the
+ * reasoning that motivated it is seductive and WRONG.
+ *
+ * The tempting argument: the `?{` opener requires the `{` to IMMEDIATELY follow
+ * the `?` at every stage that RECOGNISES it — `tokenizer.ts`'s interpolation
+ * opener (`raw[pos + 1] === "{"`), its standalone attribute-position brace block
+ * (same test), and `block-splitter.js`'s sigil opener (`ch(1) === "{"`, whose
+ * very next branch takes a bare depth-0 `?` as a TERNARY). All three are true.
+ * The conclusion drawn from them — that `?{` and `? {` are therefore disjoint in
+ * the text this predicate sees — does not follow, because THIS PREDICATE DOES
+ * NOT SEE SOURCE. It sees an `escape-hatch` node's `raw`, which on at least one
+ * path is a LOSSY TOKEN RE-JOIN that inserts a space between every pair of
+ * tokens and so destroys the very adjacency the argument rests on. Measured, by
+ * dumping `raw` for the two shapes:
+ *
+ *   C-style `for` header:  "( let i = 0 ; i < ?{"            <- adjacency SURVIVES
+ *   `!{}` arm handler:     "…let u = ? { `SELECT * FROM users…` } . get ( )"
+ *                                      ^^^ adjacency DESTROYED
+ *
+ * Narrowing to `/\?\{/` therefore fails OPEN: it silently disarms
+ * `FIRES — a protected `?{}` hidden inside an `!{}` arm fails the body CLOSED`,
+ * a leak this branch already pinned. It was caught by that test, which is why
+ * the test exists.
+ *
+ * A backtick discriminator (`/\?\s*\{\s*` + backtick/) was considered next and is
+ * ALSO unsound: SPEC §44's scanner defines the body of `?{…}` as a JS-EXPRESSION
+ * context in which a backtick merely OPENS a template literal, and
+ * `tokenizeSQL`'s own else-branch is an explicit "non-backtick fallback: treat
+ * rest as raw". A backtick is the common spelling, not the grammar.
+ *
+ * So the predicate stays a deliberate OVER-approximation, and its errors stay in
+ * the fail-CLOSED direction: a ternary whose branches are object literals
+ * (`n ? { } : { }`) re-joins as `? { }` and reports. That over-report is real and
+ * is documented at the diagnostic (see `TRUNCATED_EGRESS_KIND_UNPARSED`) rather
+ * than papered over — the message no longer ASSERTS that a `?{}` is present,
+ * because it cannot know that.
+ *
+ * WHY A TEXT TEST AT ALL (Rule 7 / invariant 55). Because the structural route is
+ * genuinely unavailable, and that too was MEASURED rather than asserted: an
+ * `escape-hatch` node has no tree BY CONSTRUCTION — it exists precisely because
+ * the parser could not build one — and the `?{}` inside it is not extracted as a
+ * `sql` node anywhere the walk can reach. Substituting `couldHoldSql: false` and
+ * compiling a protect-active fn with a REAL `?{`SELECT * FROM users`}` in a
+ * C-style `for` header plus a manual `Response` sends the gate SILENT (no
+ * `E-PROTECT-004`, no `I-PROTECT-STRIP-001`), while the same query in an ordinary
+ * binding still fires through the tree's co-occurrence arm. There is no better
+ * oracle to prefer; the tree's answer for this node IS a string.
+ *
+ * THE DURABLE FIX IS UPSTREAM, and it is not this file's to make: preserve `?{`
+ * adjacency when an unparsed region's `raw` is reconstructed, so the opener stays
+ * lexically distinguishable from a ternary. Then — and only then — `/\?\{/`
+ * becomes both sound and precise. Tracked as a follow-on; the owning stages are
+ * the block splitter / ast-builder, not the protect gate.
+ */
 const ESCAPE_HATCH_SQL_RE = /\?\s*\{/;
 /** The `Response` identifier, in ANY member-chain spelling. */
 const ESCAPE_HATCH_RESPONSE_RE = /(^|[^A-Za-z0-9_$])Response([^A-Za-z0-9_$]|$)/;
@@ -935,14 +991,36 @@ const TRUNCATED_RESOLUTION_DEPTH =
   "Resolution: reduce the expression nesting in this function (extract " +
   "sub-expressions into named bindings) so the structural analysis can reach the " +
   "whole body.";
+// The unparsed-truncation message states what the compiler KNOWS (this
+// expression has no tree) and what it merely CANNOT RULE OUT (a `?{}` inside
+// it). It used to state the second as fact — "and a `?{}` inside it cannot be
+// resolved", with the lead remedy "move the `?{}` out of that expression".
+//
+// That is a claim the compiler is not entitled to make. `ESCAPE_HATCH_SQL_RE` is
+// a deliberate OVER-approximation over a lossy token re-join (see its note), so
+// it also matches a ternary whose branches are object literals — `n ? { } : { }`
+// re-joins as `? { }`. On that shape the old message named a `?{}` that is not in
+// the source and sent the author to move it, i.e. to fix something that does not
+// exist. Fail-CLOSED, so a correctness defect rather than a confidentiality one,
+// but a diagnostic that misnames its own root cause is itself a defect.
+//
+// The root cause IS the missing tree, and the remedy that always applies is
+// "rewrite it into a form the compiler can parse" — so that one leads. The `?{}`
+// remedy is kept, and kept in SPEC's own words (§34, E-PROTECT-004: "move the
+// `?{}` out of that expression, or rewrite it into a parseable form"), but is now
+// stated CONDITIONALLY, which is the true shape of the compiler's knowledge.
 const TRUNCATED_EGRESS_KIND_UNPARSED = (snippet: string): string =>
   "a body the compiler could not analyse in full — the expression `" + snippet +
-  "` has no tree form (the parser fell back to a source-text escape hatch), and a " +
-  "`?{}` inside it cannot be resolved";
+  "` has no tree form (the parser fell back to a source-text escape hatch), so a " +
+  "`?{}` inside it could not be ruled out";
 const TRUNCATED_RESOLUTION_UNPARSED =
-  "Resolution: move the `?{}` out of that expression into a named binding, or " +
-  "rewrite the expression into a form the compiler can parse — while it has no " +
-  "tree, the gate cannot see which columns the query projects.";
+  "Resolution: rewrite the expression into a form the compiler can parse. (If it " +
+  "does contain a query, move the `?{}` out of that expression into a named " +
+  "binding.) While the expression has no tree, the gate cannot see whether it " +
+  "queries at all, let alone which columns a query would project — so it reports " +
+  "rather than passing an unexamined region. This can fire on an expression that " +
+  "holds no query: the check is a deliberate over-approximation and errs toward " +
+  "refusing a build rather than shipping a protected column.";
 
 /**
  * One E-PROTECT-004 detection, resolved against the whole file's function set.
