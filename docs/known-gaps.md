@@ -9445,10 +9445,32 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > report the throw. **Merge-blocker proof:** baseline `bun test exit=0` 93/0 -> sabotage `exit=1` 89/3 ->
 > restore `exit=0` 93/0.
 >
-> **Direction of change:** `newly-accepting` at the RUNTIME level (previously-DOA pages now run), `inert` at
-> the LANGUAGE level. Newly-rejecting ONLY for programs whose client bundle was already guaranteed-dead.
-> **MEASURED** corpus migration across `samples/` `examples/` `conformance/` `stdlib/` `compiler/tests/`
-> `benchmarks/` `docs/`: **0 files** (62 candidates compiled individually; assumed-zero was not accepted).
+> **Direction of change: NEWLY-REJECTING.** Corrected in adversarial review — the first filing said
+> "`newly-accepting` at the runtime level, `inert` at the language level", and **`inert` was wrong**.
+> Limb 2 adds an error, so source that previously compiled can now be refused; that is
+> newly-rejecting by definition, and no measurement makes it something else. The review's own
+> reproducer proved the point concretely: a string literal containing `_scrml_stdlib.wombat` was
+> rejected on a program with no stdlib import at all. That was a defect (fixed — see the FP note
+> below), but it could only exist BECAUSE the branch rejects.
+>
+> The accompanying facts, kept distinct from the classification:
+>   * previously-DOA pages now run (a runtime improvement, not a classification);
+>   * **measured migration 0**, over a conservative 63-file superset of at-risk files out of 171
+>     stdlib importers across `samples/ examples/ conformance/ stdlib/ compiler/tests/ benchmarks/
+>     docs/`, each compiled individually.
+>
+> **Migration-zero is a BLAST-RADIUS fact, not a classification.** It says how much existing code the
+> rejection touches today; it says nothing about whether the change rejects. Filing it as `inert`
+> conflated the two and would have let a rejecting change land without the scrutiny a rejecting
+> change is owed.
+>
+> **A limitation of that measurement, recorded because it is the reusable part.** The at-risk
+> pre-filter was IMPORT-based — it selected files importing an unwired module or a submodule. The
+> string-literal FP fires with NO import at all, so that filter could not have found it, and did not:
+> it was found by a hand-written reproducer in review. A pre-filter derived from the INTENDED trigger
+> cannot find a fire caused by an UNINTENDED one. The filter has since been widened to include any
+> `.scrml` carrying `_scrml_stdlib.` text (63 files, still 0 hits; the single corpus file that matches
+> has it inside a `//` comment naming the already-wired `auth`).
 >
 > **TWO FURTHER DEFECTS of the same class were found and fixed here, both by execution:**
 >

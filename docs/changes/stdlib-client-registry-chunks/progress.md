@@ -145,9 +145,11 @@ unwired module or any submodule — the only files on which the gate CAN fire �
 individually. **HITS = 0.** (First, mis-sited, version of the gate gave HITS = 22; that is what
 exposed correction 1.)
 
-**Direction of change:** `newly-accepting` at the RUNTIME level (previously-DOA pages now run),
-`inert` at the LANGUAGE level. Newly-rejecting only for programs whose emitted client bundle was
-already guaranteed-dead.
+**Direction of change: NEWLY-REJECTING** (corrected in review; the original `inert at the language
+level` was wrong — limb 2 adds an error, so source that compiled can now be refused, and no
+measurement makes that something else). Separately, and NOT part of the classification:
+previously-DOA pages now run, and measured migration is 0 over a conservative 63-file superset of
+at-risk files out of 171 stdlib importers. Migration-zero is a blast-radius fact.
 
 **Next**: full-suite comparison vs the clean baseline; conformance; close the gap entry.
 
@@ -219,3 +221,115 @@ the PATH in the stack before attributing it.
    own; not worth a collision for a comment.
 
 **Blockers**: none. All three limbs complete.
+
+---
+
+## 2026-08-23 — LAND-CONDITIONAL review round
+
+Five items back from the adversarial pass. All five closed; the HIGH is closed with its own bite
+proof in both directions.
+
+### HIGH — string-literal false fire (`ee85ebe0`)
+
+**Reproduced independently before changing anything**, per the repro-first rule — I did not take the
+reviewer's reproducer on trust. Valid scrml, ZERO stdlib imports:
+
+    <tip> = "the registry slot is _scrml_stdlib.wombat"
+
+-> exit 1, hard error naming `scrml:wombat` (a module that has never existed), instructing the
+adopter to add `stdlib-wombat` to `RUNTIME_CHUNK_ORDER` in the compiler's own source.
+
+**This is the class I already fixed once and closed only the instance.** Excising the runtime span
+handled the runtime's own `_scrml_stdlib.NAME` comment; ANY `_scrml_stdlib.` text in a non-code
+position still read as a registry access. Fixed with `maskStringLiteralSpans` — the helper BOTH
+sibling stdlib scans already use (`:2941` chunk prune, `:3763` read-line prune) and that mine was
+the only one of the three to omit. Applied AFTER the runtime excision, because the RT markers are
+line comments the `indexOf` must still find.
+
+**Scope MEASURED, not assumed** (probe matrix, every fixture valid scrml with no stdlib import):
+
+| position | before | after |
+|---|---|---|
+| string literal, one name | FIRES | clean |
+| string literal, two names | FIRES | clean |
+| single-quoted string | FIRES | clean |
+| adopter `//` comment | clean | clean |
+| regex literal | clean | clean |
+
+So string literals were the entire live FP surface — scrml comments do not survive into emitted
+client JS and no emitted regex carries the token — and masking them closes the class without
+reaching for a heavier code/comment fence. I checked the comment and regex positions rather than
+assuming the reported shape was the only one.
+
+**Bite proof, gate** (exit codes measured DIRECTLY, never through a pipe):
+baseline `exit=0` silent -> de-register `stdlib-format` -> `exit=1` fires -> restore -> `exit=0` silent.
+
+**Bite proof, new FP tests** (`bun test` exit measured directly):
+baseline `exit=0` 36/0 -> delete the mask line -> `exit=1` **32/4**, the 4 red being exactly the FP
+cases -> restore -> `exit=0` 36/0.
+
+**21-module execution matrix UNCHANGED**: 12 execute OK (+ `scrml:compiler` verified separately =
+13), 8 refused loudly with exit 1, 0 silent DOA.
+
+### Test file moved INTO the commit gate (`ee85ebe0`)
+
+`.git/hooks/pre-commit:39` runs `compiler/tests/{unit,integration,conformance}` + root `*.test.js`.
+`compiler/tests/browser/` is NOT in that set — so the merge-blocker proving this feature is not DOA
+was itself outside the merge gate. Verified by reading the hook, not by assuming.
+
+Browser-tier placement is **not** load-bearing: 14 integration tests already register happy-dom the
+same way, including this feature's own predecessor
+`integration/bug-18-scrml-stdlib-client-import.test.js`. So I moved the WHOLE file
+(`browser/browser-stdlib-client-registry.test.js` -> `integration/stdlib-client-registry.test.js`)
+rather than only the newest regression — all 37 tests now run on every commit. Relative import depth
+is identical between the two tiers, so no path edits were needed.
+
+### Source location on the diagnostic (`035773f2`) — the "optional" item, taken
+
+A hard error with no `-->` line is not something to ship, especially beside a sibling WARNING that
+has one. Two things were wrong and the SECOND is what actually suppressed it:
+
+1. no span was captured — now recorded at the lowering site in `emit-imports` (the only place the
+   import AST node is in hand) and carried to the gate through a module-name -> span map, because
+   the gate must fire against the FINAL emitted text, which has no source positions;
+2. `commands/compile.js:formatError` reads TOP-LEVEL `filePath` / `line` / `column`, **not**
+   `span.*`. Verified by inspecting the emitted diagnostic object: `span.file` was correctly set and
+   `filePath` was `undefined`, so the `-->` branch could never be taken.
+
+Now renders `--> …/fs.scrml:2:12` with the source-context caret on the import line. The test pins the
+EXACT line (2), not `> 0` — a `> 0` assertion would pass against the old hard-coded 1 — and asserts
+the top-level fields, because asserting only `span.*` would go green while the adopter still saw
+nothing.
+
+**Pre-existing, NOT fixed here, recorded so it is findable:** item (2) affects every `CGError` raised
+in `emit-client.ts` (`E-CG-001` / `E-CG-006` render the same way). Fixing it globally is a
+shared-formatter change beyond this dispatch.
+
+### Stale attributions (`035773f2`)
+
+`runtime-chunks.ts:163` and `:341` credited the code to `(api.js)`, a leftover from the pre-move
+placement; it lives in `emit-client.ts`. Swept src + SPEC.md + SPEC-INDEX.md + known-gaps.md rather
+than fixing only the two reported lines — those two were the only occurrences.
+
+### Direction-of-change corrected
+
+The reviewer is right and my original wording was wrong. `inert at the language level` cannot be
+true of a branch that adds an error: source that previously compiled can now be refused. The FP
+above is the proof — it could only exist because the branch rejects.
+
+Corrected to **newly-rejecting**, with the blast-radius fact kept separate: measured migration 0 over
+a conservative 63-file superset of at-risk files out of 171 stdlib importers.
+
+**And a limitation of my own measurement, recorded because it is the reusable part:** the original
+at-risk pre-filter was IMPORT-based, so it could not have found a fire that needs no import — and it
+did not; the FP came from a hand-written reproducer in review. **A pre-filter derived from the
+INTENDED trigger cannot find a fire caused by an UNINTENDED one.** Filter since widened to include
+any `.scrml` carrying `_scrml_stdlib.` text (63 files, still 0 hits; the one corpus match has it
+inside a `//` comment naming the already-wired `auth`).
+
+### Process note against myself
+
+One commit this round landed as a pure rename with **0 insertions** because I wrote
+`git add <old-path> <new-path> 2>/dev/null` — the stale path made `git add` fail, the redirect
+swallowed the error, and NOTHING was staged. Caught by checking `git show --stat` after the commit
+rather than trusting the exit code, and amended. Do not swallow `git add` stderr.
