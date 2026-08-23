@@ -27,6 +27,7 @@ import { resolve, dirname, join, posix } from "path";
 import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { toPosix, PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
+import { collectMarkupReturningFnNames, resolveImportedMarkupLocalNames } from "./markup-return-scan.js";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -198,6 +199,19 @@ export function buildImportGraph(fileASTs) {
     const imports = [];
     const exports = [];
 
+    // g-each-nested-markup-interp-stringifies residual 2 — the set of fn NAMES
+    // in this module whose body returns markup (direct + transitive). Computed
+    // once per file with the SAME shared collector codegen uses, so an exported
+    // markup fn is flagged `returnsMarkup` on its registry entry and mounts
+    // across files exactly like a same-file one. Fail-safe: a string-returning
+    // fn is never in the set, so an imported fn is never over-wrapped. Only the
+    // EXPORTS carry the flag, so a file with no exports needs no scan (the seed
+    // pass below re-scans exporting files with their imported-markup seed).
+    const _markupFnNames =
+      (file.ast?.exports?.length ?? 0) > 0
+        ? collectMarkupReturningFnNames(file.ast)
+        : new Set();
+
     // Collect imports from AST
     const astImports = file.ast?.imports || [];
     for (const imp of astImports) {
@@ -357,6 +371,14 @@ export function buildImportGraph(fileASTs) {
             // AST export-decl carries `isAsync:true` (set by the ast-builder
             // `export async function|fn` peek-ahead path).
             ...(exp.isAsync ? { isAsync: true } : {}),
+            // g-each residual 2 — flag an exported markup-returning fn (keyed by
+            // its source-side LOCAL name, which is the function-decl name the
+            // collector records) so codegen mounts a cross-file `${badge(it)}`.
+            ...(_markupFnNames.has(
+              localFor && localFor.has(name) ? localFor.get(name) : name,
+            )
+              ? { returnsMarkup: true }
+              : {}),
           });
         }
       }
@@ -365,7 +387,91 @@ export function buildImportGraph(fileASTs) {
     graph.set(filePath, { imports, exports });
   }
 
+  // g-each residual 2 (cross-module CLOSURE) — propagate `returnsMarkup` ACROSS
+  // the import graph to a fixpoint, so an EXPORTED wrapper of an imported markup
+  // fn (`import {badge}; export fn wrap(n){ return badge(n) }`) — at any depth —
+  // is itself flagged. The per-file pass above only sees same-file fns; here we
+  // re-scan each exporting file SEEDED with the markup fns it imports (resolved
+  // from the current export flags), until no export's flag flips. Mirrors the
+  // re-export inheritance fixpoint in buildExportRegistry. Fail-safe + monotone
+  // (flags only ever turn on), so it converges; a guard caps pathological input.
+  propagateReturnsMarkup(graph, fileASTs);
+
   return { graph, errors };
+}
+
+/** Is `name` flagged `returnsMarkup` among `exports` (array of graph export records)? */
+function exportsFlagMarkup(exports, name) {
+  return Array.isArray(exports) && exports.some((e) => e.name === name && e.returnsMarkup === true);
+}
+
+/**
+ * ONE complete fixpoint that widens `returnsMarkup` across the import graph over
+ * BOTH edge kinds, so an exported markup fn mounts across files no matter how it
+ * is composed:
+ *   - CALL edge — a file's exported fn returns a call to an IMPORTED markup fn
+ *     (`import {badge}; export fn wrap(n){ return badge(n) }`). Re-scan the file
+ *     with the imported markup names seeded into the shared collector.
+ *   - RE-EXPORT edge — `export { badge } from './badges'` inherits the source's
+ *     flag (the graph-level analogue of buildExportRegistry Pass 2, computed here
+ *     so the CALL edge above can see a wrapper of a re-exported markup fn).
+ * The per-file pass only sees same-file fns; these two edges close the rest.
+ * Fail-safe + MONOTONE (a flag only ever turns on), so it converges; the loop is
+ * bounded by the total export count (an upper bound on the longest edge chain),
+ * which is a provable completeness bound, not an arbitrary cap.
+ */
+function propagateReturnsMarkup(graph, fileASTs) {
+  const astOf = new PathKeyedMap();
+  for (const file of fileASTs) {
+    const fp = file.filePath || file.ast?.filePath;
+    if (fp && file.ast) astOf.set(fp, file.ast);
+  }
+  let totalExports = 0;
+  for (const [, entry] of graph) totalExports += entry?.exports?.length ?? 0;
+  const maxIter = totalExports + 2; // monotone → converges within one pass per flag
+  // Memo: a file's CALL-edge seed only GROWS across iterations; when it is
+  // unchanged the re-scan would flag nothing new, so skip it (avoids re-walking
+  // stabilized files every outer pass).
+  const lastSeedKey = new PathKeyedMap();
+  let changed = true;
+  let guard = 0;
+  while (changed && guard++ < maxIter) {
+    changed = false;
+    for (const [filePath, entry] of graph) {
+      if (!entry || !Array.isArray(entry.exports) || entry.exports.length === 0) continue;
+      // RE-EXPORT edge — a named `export { x } from './src'` inherits src's flag.
+      // (`export *` has name "*" and no per-name resolution — the pre-existing
+      // barrel limitation; it simply never seeds.)
+      for (const exp of entry.exports) {
+        if (exp.returnsMarkup || !exp.reExportSource) continue;
+        const srcExports = graph.get(exp.reExportSource)?.exports;
+        if (exportsFlagMarkup(srcExports, exp.localName ?? exp.name)) {
+          exp.returnsMarkup = true;
+          changed = true;
+        }
+      }
+      // CALL edge — re-scan this file seeded with its imported markup fns. Uses
+      // the same shared resolver codegen uses (against graph export records here),
+      // so same-file and cross-file classify identically.
+      const ast = astOf.get(filePath);
+      if (!ast) continue;
+      const seed = resolveImportedMarkupLocalNames(entry.imports, (absSource, importedName) =>
+        exportsFlagMarkup(graph.get(absSource)?.exports, importedName),
+      );
+      if (seed.size === 0) continue; // no imported markup fn → nothing new here
+      const seedKey = [...seed].sort().join(" ");
+      if (lastSeedKey.get(filePath) === seedKey) continue; // seed unchanged → skip re-scan
+      lastSeedKey.set(filePath, seedKey);
+      const set = collectMarkupReturningFnNames(ast, seed);
+      for (const exp of entry.exports) {
+        const localName = exp.localName ?? exp.name;
+        if (!exp.returnsMarkup && set.has(localName)) {
+          exp.returnsMarkup = true;
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -563,6 +669,10 @@ export function buildExportRegistry(graph) {
         // Set only when the export declared `async`; absent otherwise so the
         // value-map doesn't grow `isAsync: false` boilerplate.
         ...(exp.isAsync ? { isAsync: true } : {}),
+        // g-each residual 2 — propagate the markup-returning flag so codegen
+        // mounts a cross-file `${importedFn(it)}`. Absent unless true (no
+        // `returnsMarkup: false` boilerplate), same discipline as `isAsync`.
+        ...(exp.returnsMarkup ? { returnsMarkup: true } : {}),
         _reExportSource: exp.reExportSource ?? null,
         _localName: exp.localName ?? name,
       });
@@ -593,6 +703,10 @@ export function buildExportRegistry(graph) {
         // S89 §13.2 Sub-Phase B Step 2 — re-exports inherit `isAsync` so a
         // re-exporter file's auto-await classification matches the source.
         if (sourceEntry.isAsync) entry.isAsync = true;
+        // NOTE: `returnsMarkup` re-export inheritance is NOT done here — the
+        // buildImportGraph `propagateReturnsMarkup` fixpoint already stamps it on
+        // the graph re-export records (which this registry is built from), so the
+        // value-map above captured it. One mechanism, not two (g-each residual 2).
         changed = true;
       }
     }
