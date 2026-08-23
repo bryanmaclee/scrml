@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 46 |
-| MED | 150 |
+| MED | 151 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9293,3 +9293,26 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > ⚑ **The code identity is NOT settled:** the dpa-036 follow-up poll attributes the PascalCase gate to `E-TYPE-UNKNOWN-NAME`; my probe observed `E-DG-002` firing. Either that code fires first and masks it, or the attribution is wrong. **Resolve which before scoping a fix.**
 >
 > This is the evidence base for dpa-036 call #1 and it makes the case *stronger*: you cannot widen a check whose failures are indistinguishable from its successes, because you cannot tell whether the widening worked.
+
+### g-program-attrs-silently-discarded-at-top-level — nine §4.12.2 `<program>` attributes are accepted and then silently DROPPED at top level, and `W-ATTR-001`'s message is measurably false on `<program>` — `NEW S365-bryan (surfaced when the Q4 build round REFUTED the PA's ruling premise); MED; open`
+<!-- @gap id=g-program-attrs-silently-discarded-at-top-level sev=MED status=open locus=compiler/src/validators/attribute-allowlist.ts:143(runAttributeAllowlistFile — has file.ast and therefore the top-level/nested discriminator already in hand via collectTopLevelPrograms; the allowlist lookup is position-blind)+compiler/src/attribute-registry.js prov=rationale:S365-bryan-the-PA-ruled-a-position-aware-REJECTION-on-the-premise-that-4-12-2-restricts-route-port-health-to-nested-position-the-dispatched-agent-read-4-12-2-and-REFUTED-it-so-the-real-defect-is-silent-discard-not-wrongful-acceptance -->
+> **⚑ S365-bryan: this entry exists because MY RULING'S PREMISE WAS FALSE, and the correction is the finding.**
+>
+> **What I ruled, and why it was wrong.** I escalated a reviewer's LOW finding to a ruling on the premise that *"§4.12.2 lists `route=`/`port=`/`health=` as **nested** attributes,"* making top-level acceptance newly-accepting. **§4.12.2 does not say that.** Its title is "Nested `<program>` Attributes", its only position column is **"Valid in nested?"**, and **all twelve rows say YES** — it is silent about top level, not prohibitive.
+>
+> **SPEC has three distinct ways to mark position, and these three use none of them:**
+> - `story=` → **`YES (nested only)`**, with its diagnostic named inline (`W-STORY-ON-TOP-LEVEL`)
+> - `capabilities=` → **`YES (and top-level)`** — an annotation that is *only informative if a plain YES is silent* about top level
+> - `name=` → an explicit **MUST NOT** sentence (`SPEC.md:746`) plus `W-PROGRAM-TOP-LEVEL-NAME` plus §4.12.9 and §34 rows
+>
+> **And the nested-only reading is refuted, not merely unsupported.** `lang=` and `build=` are plain-YES rows of the same table, and SPEC makes `lang=` canonical at TOP level — §23.6 contrasts a library's `<foreign lang>` with *"a `<program lang>`"*, and `E-FOREIGN-LANG-IN-PROGRAM` exists to steer authors **to** the top-level form. A blanket "plain-YES means nested-only" rule would reject a shape SPEC itself publishes.
+>
+> **There is also no closed attribute set for `<program>` at all** — §40.8 lists app-wide attributes descriptively, and **no `E-PROGRAM-INVALID-ATTR` exists** (contrast `<page>`, which has a closed five-element set enforced by `E-PAGE-INVALID-ATTR`).
+>
+> **The real defect, measured.** `<program route="/api/v1" port="9001" health="/health">` at top level → **exit 0**, and `/api/v1`, `9001`, `/health` appear **zero times** across the emitted `.client.js` / `.css` / `.html` / runtime. Silently discarded. And `<program frobnicate="zzz">` fires `W-ATTR-001` claiming the attribute *"is currently forwarded to the rendered HTML as-is"* — **neither token appears in any artifact**, so restoring `W-ATTR-001` is not the answer at any scope.
+>
+> **Scope is NINE, not three.** Six more §4.12.2 attributes were already registered position-blind before this branch — `lang=`, `mode=`, `build=`, `callchar=`, `autostart=`, `capabilities=` — each equally silent at top level. **"The three" is an artifact of the false premise.**
+>
+> **Migration measured 0** by a structural AST scan (2460 files parsed, 1413 `<program>` nodes, 1350 top-level / 63 nested, zero top-level carrying the three). ⚑ The scan's FIRST version reported `<program> nodes: 0` across all 2460 files and would have printed the same headline zero — it read `buildAST(...).nodes` when `buildAST` returns the FileAST at `.ast`. **A green-looking broken probe, caught only because 1413 nodes in a 2460-file corpus is obviously not zero.**
+>
+> **The rulable axis, restated honestly:** *should a `<program>` attribute the compiler silently discards draw a diagnostic — and does that reach all nine position-blind registrations or only the three?* `lang=`/`build=` must be excluded by name. Mechanism if ruled: one `Set` + one membership test at `attribute-allowlist.ts:143` (position is already in hand via `collectTopLevelPrograms`), plus a new code with accurate text.
