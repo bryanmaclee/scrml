@@ -1,0 +1,1262 @@
+# progress — instrument-integrity-2026-08-22
+
+Branch `instrument-integrity`, cut from `origin/main` = `a0e30329`.
+
+> **The bar this dispatch is held to is its own thesis.** A check that cannot fail
+> is worse than no check, because it is read as evidence. So every claim below is
+> an EXECUTED result with an exit code, not a reading of the source.
+
+---
+
+## SETUP — recorded baselines
+
+| gate | baseline | exit |
+|---|---|---|
+| `bun conformance/run.ts` | 883/883 cases pass | 0 |
+| `bun scripts/s34-census.ts` | 809 rows · STRUCK 34 · PINNED 343 · IMPL-SITES 320 · DECLARED-AHEAD 14 · RUNTIME-SURFACED 3 · FALSE-CLAIM 95 | 0 |
+| `bun scripts/s34-census.ts --check-new --base origin/main` | `no new/changed §34 rows vs origin/main — PASS` | 0 |
+
+`bun install` + `bun run pretest` both run (a fresh worktree carries no
+gitignored `samples/compilation-tests/dist/`, which is the ENV-GAP the brief
+warns about).
+
+---
+
+## BRIEF CORRECTIONS — two premises did not survive execution
+
+Recorded first because both changed what got built.
+
+### C1. `E-NESTED-PROGRAM-CONTEXT-NOMINAL` does not exist on `main`
+
+The brief instructs: add `codeCounts` to the two capability cases *"asserting
+`E-NESTED-PROGRAM-CONTEXT-NOMINAL: 1`, which is the assertion that would have
+caught the double-fire."* Executed:
+
+```
+$ grep -rn "E-NESTED-PROGRAM-CONTEXT-NOMINAL" . --exclude-dir=node_modules --exclude-dir=.git
+docs/changes/instrument-integrity-2026-08-22/BRIEF.md:34:   <- my own archived brief, and nothing else
+```
+
+The code exists only on `origin/nested-program-r4-work`, which is NOT an ancestor
+of `origin/main`. Compiled both cases and counted the real emission:
+
+```
+$ bun <probe> conformance/cases/capability/inheritance-inherit-covers
+{ "E-FOREIGN-SIDECAR-NOMINAL": 1, "W-PROGRAM-SPA-INFERRED": 1 }
+
+$ bun <probe> conformance/cases/capability/inheritance-closest-wins-no-union
+{ "E-FOREIGN-SIDECAR-NOMINAL": 1, "W-PROGRAM-SPA-INFERRED": 1, "W-FOREIGN-UNDECLARED-CAPABILITY": 1 }
+```
+
+Asserting `E-NESTED-PROGRAM-CONTEXT-NOMINAL: 1` as written would have made both
+ratified cases fail on the spot, for a code that has no emitter.
+
+**Where the premise came from, and what the invariant actually is.** The origin is
+`f1424aff:docs/changes/nested-program-artifact-emission-2026-08-19/progress.md`
+(round-4 record, on the r4 branch). Round 2, RESIDUAL 2:
+
+> I did NOT route it to `E-NESTED-PROGRAM-CONTEXT-NOMINAL` because that would
+> **double-fire in the two ratified capability conformance cases.**
+
+So it was never a regression that shipped. It is a routing that was *declined*
+because it would double-fire — and nothing in the corpus would have caught it if
+someone had routed it anyway. The invariant, from round 4 item 7:
+
+> **ONE DIAGNOSTIC PER UNBUILT DECLARATION, never two, never none.**
+
+| shape | fires |
+|---|---|
+| sidecar WITH `use foreign:` | `E-FOREIGN-SIDECAR-NOMINAL` (§23.4), only |
+| sidecar WITHOUT `use foreign:` | `E-NESTED-PROGRAM-CONTEXT-NOMINAL`, only |
+
+**What was built instead.** The two capability cases are both the CLAIMED shape
+(`use foreign:` present), so the code the invariant pins there is
+`E-FOREIGN-SIDECAR-NOMINAL`, at exactly 1. That assertion is live and biting on
+`main` today, and it is precisely the one that goes red if a second
+unbuilt-context diagnostic is routed to the declaration site.
+
+**Deliberately NOT added: `"E-NESTED-PROGRAM-CONTEXT-NOMINAL": 0`.** It would be
+a forward-pin for when the r4 branch lands — but on `main` today it is a key that
+cannot fail, for a code with no emitter, in a dispatch whose whole thesis is that
+such keys are worse than nothing. **→ FILED for the PA:** when
+`origin/nested-program-r4-work` lands, add `"E-NESTED-PROGRAM-CONTEXT-NOMINAL": 0`
+to the `codeCounts` of both capability cases. At that point the key bites.
+
+### C2. `scripts/delta-lint.ts` is not on `main` either
+
+It is in the audit list of 16. Executed:
+
+```
+$ git merge-base --is-ancestor d3d53ef7 origin/main   # the commit that adds it
+NO
+$ git branch -a --contains d3d53ef7
+  fix/s354-nested-program-artifact-gap
+```
+
+Audited anyway, from a scratch copy of the sibling branch's version, executed
+against this tree. Result in the table below; a FIX cannot be landed from this
+branch without dragging the sibling's in-flight work with it, so its finding is
+FILED rather than fixed.
+
+---
+
+## BUILD A — `conformance/run.ts` cardinality (`codeCounts`)
+
+### What was blind, measured
+
+`conformance/adapters/impl1-ts.ts` destroyed cardinality before any case could
+see it: `byCode` is a map and `codes` is `Object.keys(byCode).sort()`. A code
+firing once and a code firing twenty-three times were the identical observation.
+
+Censused the whole corpus for the size of the blind spot — how many ratified
+cases emit some code more than once, entirely invisibly:
+
+```
+=== 106 of 883 cases emit at least one code MORE THAN ONCE
+derived/e-derived-server-only-reach-neg        W-STDLIB-SEED-FAILCLOSED=23
+error/implicit-tx-explicit-begin               W-SQL-ROW-UNTYPED=4
+block-grammar/block-029-leading-equals-...     E-MARKUP-001=3
+control-flow/ctrl-010-else-on-for-in-if-chain  E-DG-002=3
+error-boundary/e005-nested-inner-no-fallback   E-ERROR-005=2
+...  (106 total)
+```
+
+### What was built
+
+- `impl1-ts.ts` — `CompileResult` gains `counts: Record<string, number>`, the
+  per-code occurrence count across BOTH streams. Incremented BEFORE the
+  severity de-dup's early return, or a code fired twice as an error would count
+  once.
+- `run.ts` — optional `expect.codeCounts`, checked EXACTLY. `0` is legal and
+  meaningful (a strictly stronger `notCodes`). Unlisted codes stay
+  unconstrained, so it composes with the superset contract instead of replacing
+  it. A malformed value (non-integer / negative) is a HARD failure, never a
+  skip — a cardinality assertion that silently does nothing is the exact hollow
+  shape this key exists to close.
+- `CaseResult.countMismatches` feeds `pass` and prints under `codeCounts:`.
+- **Both bridge tests updated** (`conformance/conformance-corpus.test.js`,
+  `compiler/tests/conformance/corpus-bridge.test.js`). Both assert per-FIELD, not
+  on `r.pass` — so without this the new assertion would have been invisible to
+  `bun test` and green under the pre-commit hook. That would have shipped a
+  hollow gate inside the fix for hollow gates.
+- Schema documented in `conformance/README.md` (the canonical corpus-format doc;
+  SPEC carries no `expected.json` schema — verified by grep for
+  `notCodePrefixes`/`expected.json` in `compiler/SPEC.md`, zero hits).
+
+### Bite proof — both halves
+
+**GREEN** (assertion true — `E-FOREIGN-SIDECAR-NOMINAL` fires exactly once):
+
+```
+$ bun conformance/run.ts | tail -2
+conformance (impl#1): 883/883 cases pass
+exit 0
+```
+
+**RED** (defect constructed — flip the same key to `2`):
+
+```
+$ sed -i 's/"E-FOREIGN-SIDECAR-NOMINAL": 1/"E-FOREIGN-SIDECAR-NOMINAL": 2/' \
+    conformance/cases/capability/inheritance-inherit-covers/expected.json
+$ bun conformance/run.ts ; echo "exit $?"
+FAIL  capability/inheritance-inherit-covers
+        codeCounts: code 'E-FOREIGN-SIDECAR-NOMINAL' fired 1 time(s), expected exactly 2
+
+conformance (impl#1): 882/883 cases pass, 1 FAILED
+exit 1
+```
+
+**GREEN restored** — flipped back to `1`, 883/883, exit 0.
+
+**Second RED — a bite on a REAL double fire, not an arithmetic mismatch.** The
+above proves the key compares numbers. This proves it catches the actual
+regression class. `error-boundary/e005-nested-inner-no-fallback` is a ratified,
+currently-PASSING case whose `E-ERROR-005` fires TWICE. Copied it verbatim to a
+scratch dir and added only `codeCounts: {"E-ERROR-005": 1}`:
+
+```
+$ bun <one-case-runner> <scratch>/dbl
+FAIL  <scratch>/dbl
+      codeCounts: code 'E-ERROR-005' fired 2 time(s), expected exactly 1
+```
+
+Same source, same `codes` / `notCodes` / `severity` — all of which PASS, in the
+live corpus, right now. Only `codeCounts` sees the second fire.
+
+### Back-compatibility — PROVEN, not asserted
+
+The claim is that a case without the key behaves exactly as before. Proof is a
+byte-diff of the per-case verdict vector across all 883 cases, before the runner
+change and after it (with no case yet using the key):
+
+```
+$ grep -E "^(PASS|FAIL)  " conf-baseline.txt      > verdicts-baseline.txt      # 883 lines
+$ grep -E "^(PASS|FAIL)  " conf-after-runner.txt  > verdicts-after-runner.txt  # 883 lines
+$ diff verdicts-baseline.txt verdicts-after-runner.txt
+BACK-COMPAT PROVEN: all 883 per-case verdicts byte-identical
+```
+
+(The raw logs differ only in `mkdtemp` names and two stack-trace line numbers
+inside a pre-existing caught throw — neither is a verdict.)
+
+**Why additive is the right shape here, plainly.** `codeCounts` widens the
+schema of the §62.2 versioned contract, so the question "does this invalidate the
+existing corpus?" has to be answered rather than assumed. It does not: the key is
+opt-in per case and per code. 883 cases carry no `codeCounts` and are checked by
+the identical code path they were before. The 106 cases that DO multi-fire keep
+passing, because the key constrains only codes a case names. Making counts
+mandatory or corpus-wide-exact would have been a breaking change to 106 ratified
+cases and would have converted an unknown number of intended multi-fires into
+failures — that is a separate ruling, not a schema widening.
+
+### Filed, not fixed
+
+**F1 — 106 of 883 cases multi-fire a code, and no one has ever looked.** The
+extremes are `W-STDLIB-SEED-FAILCLOSED=23` in one case and `E-ERROR-005=2` for a
+single uncovered variant. Some of that is certainly legitimate (one diagnostic
+per offending site); some of it looks like a genuine double fire that has been
+invisible since the corpus was founded. Now that the instrument exists, the
+population is enumerable. Reproducer: `conformance/run.ts`'s `loadCases()` +
+`compile().counts`, filter `n > 1`. Routing call, not a fix — deciding which of
+the 106 are defects is a per-case ruling.
+
+**F2 — `docs/known-gaps.md:588` is now one key stale.** It carries a PA-VERIFIED
+enumeration of "the harness's complete `expect` vocabulary" and does not list
+`codeCounts`. The brief forbids touching that file, so: flagged for the PA.
+
+---
+
+## BUILD B — `s34-census.ts`, two blind spots
+
+### B1 — comment-as-emitter
+
+**Chosen: comment-span exclusion. The precise push-position match was tried,
+measured, and REJECTED on evidence.** The brief permits the fallback if
+push-position "is not tractable"; that is a claim I had to earn rather than
+assume, so here is the measurement.
+
+There is no single syntactic push shape in this codebase. Counting quoted-literal
+`code:` pushes across the three impl trees gives **233 sites** against **320
+codes** the raw scan credits with an emitter — so the property-literal form is a
+minority of live emission shapes. The rest split three ways, and two of them are
+syntactically identical to each other:
+
+| shape | example | is it an emitter? |
+|---|---|---|
+| `code: "E-X"` property | `{ code: "E-MARKUP-001", … }` | YES |
+| the code inside the MESSAGE template | `` `E-DBAUTH-NO-TENANT-COLUMN: db-authoritative table(s) …` `` (`commands/db-migrate.js:616`) | **YES** — that is how the CLI surfaces it |
+| the code inside the MESSAGE template | `"[scrml] W-NAV-CHUNK-LOAD-FAILED: cross-chunk soft navigation…"` (`runtime-template.js:2908`) | **YES** — the runtime's own diagnostic |
+| the code inside a DIFFERENT diagnostic's message | `` `(A tighter sibling of E-CHANNEL-004; §34.)` `` | NO — a cross-reference |
+| the code inside a DIFFERENT diagnostic's message | `` `becomes E-WHITESPACE-001 in P3.` `` | NO — names a FUTURE code |
+
+Rows 2-3 and rows 4-5 are the same syntax. Separating them needs semantics, not a
+regex. A strict push-position match excluded 18-19 codes, and hand-checking them
+found **real emitters among the excluded** (`E-DBAUTH-NO-TENANT-COLUMN`,
+`W-NAV-CHUNK-LOAD-FAILED`) — i.e. it would have moved LIVE codes into FALSE-CLAIM
+and inflated the freeze denominator. That is trap **T3**, which this script's own
+header already records costing 17 false dead-code claims once before. Shipping it
+would have traded a known over-count for an unknown under-count, which is the
+worse of the two errors: an over-count wastes a fire-attempt, an under-count
+deletes a real diagnostic from the contract.
+
+Comment exclusion, by contrast, has **zero false-negative risk by construction** —
+a comment cannot fire a diagnostic, so the change can only remove claims, never
+real emitters.
+
+Implemented as a mode-tracking `stripComments()` (line + block, string- and
+template-aware, so `"http://…"` and `/* */` inside a literal are not mistaken for
+comment openers), applied to `.ts/.js/.mjs` before the token match.
+
+**Effect on the census (same tree, both scripts):**
+
+| bucket | old scan | new scan |
+|---|---|---|
+| IMPL-SITES | 320 | **299** |
+| DECLARED-AHEAD | 14 | **18** |
+| FALSE-CLAIM | 95 | **112** |
+
+21 codes lost an emitter they never had. 32 catalogued codes were measured to have
+a hit whose every occurrence is a comment.
+
+**Bite proof — two-sided.** `E-TYPE-027` is a FALSE-CLAIM code with zero mentions
+in any impl tree. Injected two comments naming it into `compiler/src/type-system.ts`:
+
+```
+=== [0] CLEAN TREE, fixed scan
+  IMPL-SITES=299  DECLARED-AHEAD=18  FALSE-CLAIM=112
+
+=== injecting two COMMENTS naming E-TYPE-027 into compiler/src/type-system.ts
+
+=== [1] DEFECT PRESENT, OLD scan (bare token, counts comments)
+  IMPL-SITES=321  DECLARED-AHEAD=14  FALSE-CLAIM=94     <- RED: two comments promoted the row
+
+=== [2] DEFECT PRESENT, NEW scan (comment spans stripped)
+  IMPL-SITES=299  DECLARED-AHEAD=18  FALSE-CLAIM=112    <- GREEN: identical to clean
+
+=== [3] CLEAN TREE again, fixed scan
+  IMPL-SITES=299  DECLARED-AHEAD=18  FALSE-CLAIM=112
+```
+
+Two comments, and the old scan moves a row out of the honest bucket. That
+reproduces the brief's `323/14 -> 321/16` shape on this tree as `321/14 -> 299/18`.
+
+### B2 — provenance that resolves
+
+The §34.0 gate tested the SHAPE of a provenance note (`emitted at` + a backticked
+path) and never asked whether the note pointed at anything.
+
+**Found by execution, on `main`, before writing the check.** Ran the candidate
+resolver across all 811 catalogued rows: 55 name a symbol, 219 name a path.
+
+- **symbols failing: 0** (after one refinement — `E-SCHEMA-011` names the Postgres
+  catalog `pg_constraint`, prose in backticks, not a JS symbol. Excluded via a
+  lowercase_snake filter; this codebase has no lowercase_snake function names and
+  `_scrml_*` keeps its leading underscore. It was the ONLY false positive in 811 rows.)
+- **paths failing: 1, and it is REAL** —
+
+```
+I-MATCH-PROMOTABLE  ->  `compiler/src/lint-promotable.ts`
+$ ls compiler/src/lint-promotable.ts
+ls: cannot access 'compiler/src/lint-promotable.ts': No such file or directory
+$ ls compiler/src/ | grep -i promot
+lint-i-fn-promotable.js
+lint-i-match-promotable.js      <- the actual emitter
+lint-w-each-promotable.js
+```
+
+The row (SPEC.md:19618) claims "Emitted at `compiler/src/lint-promotable.ts` and
+consumed by `compiler/src/commands/promote.js`". The second path exists; the first
+does not. A rename staled the note and nothing checked. Exactly the defect class
+the brief describes, sitting in the catalog today.
+
+Implemented: for each NEW/CHANGED row, every backticked repo path must exist on
+disk, and every symbol named by the two conventions §34 actually uses
+(`` `path` `sym` `` adjacency, or "via `sym`" / "in `sym`") must appear in
+EXECUTABLE source — comments stripped, reusing B1's machinery, so a function
+deleted but still eulogised in a comment cannot launder the claim. The resolution
+check runs BEFORE the spec-ahead `continue`: a Nominal row citing a deleted file
+is still a stale claim.
+
+**Diff-scoping held.** The brief is emphatic that `--check-new` must stay silent
+on the legacy corpus, and the stale `I-MATCH-PROMOTABLE` row is the live test of
+that: it is a legacy row, the gate sees it, and the gate says nothing.
+
+```
+$ bun scripts/s34-census.ts --check-new --base origin/main
+§34.0 gate: no new/changed §34 rows vs origin/main — PASS      exit 0
+```
+
+**Bite proof — two-sided.** Injected three new §34 rows: one whose provenance
+resolves, one naming a nonexistent file, one naming a renamed function.
+
+```
+=== [1] DEFECT PRESENT, OLD gate (shape-only regex)
+§34.0 gate: 3 new/changed §34 row(s), all well-formed — PASS
+    exit=0                                            <- RED: passed BOTH false claims
+
+=== [2] DEFECT PRESENT, NEW gate (provenance must resolve)
+§34.0 gate FAILED — 2 problem(s) across 3 new/changed §34 row(s):
+  E-BITE-BADPATH — STALE PROVENANCE: names `compiler/src/does-not-exist.ts`, which does not exist
+  E-BITE-BADSYM  — STALE PROVENANCE: names symbol `checkPrintArgsRENAMED`, which appears in no executable source
+    exit=1
+
+=== [3] remove ONLY the two bad rows, keep the good one
+§34.0 gate: 1 new/changed §34 row(s), all well-formed (provenance resolves) — PASS
+    exit=0                                            <- GREEN: the honest row is unaffected
+
+=== [4] clean tree
+§34.0 gate: no new/changed §34 rows vs origin/main — PASS
+    exit=0                                            <- legacy corpus still silent
+```
+
+**Third proof, for a claim made in the shipped comment.** The code asserts that a
+symbol surviving only in a comment does not satisfy the check. Proving rather than
+asserting it — added `// checkGhostRenamedFn was removed in S300; kept here as a
+breadcrumb.` and a row naming that symbol:
+
+```
+E-BITE-GHOST — STALE PROVENANCE: names symbol `checkGhostRenamedFn`, which appears in no executable source
+    exit=1
+```
+
+### Filed, not fixed
+
+**F3 — `I-MATCH-PROMOTABLE`'s §34 row names a file that does not exist.**
+SPEC.md:19618, `compiler/src/lint-promotable.ts`; the real emitter is
+`compiler/src/lint-i-match-promotable.js`. Legacy row, so the diff-scoped gate is
+correctly silent on it. It is a one-word SPEC edit but it is a SPEC edit, and the
+brief scopes this dispatch to the instruments. Reproducer: the gate itself — touch
+that row and the gate names it.
+
+**F4 — the emitter scan still over-counts by one residual class.** With comments
+stripped, ~19 codes' only remaining mention is a cross-reference INSIDE another
+diagnostic's message string (`E-CHANNEL-004`, `E-CHANNEL-INSIDE-PROGRAM`,
+`E-WHITESPACE-001`, `E-REACTIVE-004`, `W-DEPRECATED-001`, `E-CPS-NEEDS-FAILABLE`,
+`E-STATE-BLOCK-BARE-WRITE-DECL`, `W-SCHEMA-002`, …). Those rows are credited with
+an emitter they do not have. NOT fixed here because the same syntax carries two
+LIVE emission shapes (the message-prefix convention in `commands/*.js` and
+`runtime-template.js`), and separating them needs per-code adjudication of ~19
+rows — a ruling, not a regex. Reproducer is in the table above.
+
+---
+
+## AUDIT — the vacuity table
+
+**Method.** Every target derives its `ROOT` from its own file location, so a copy of the script in
+a constructed tree is a clean "input missing / empty / zero-length" condition without touching the
+repo. Where that only proved module resolution (a script importing a sibling), a targeted probe was
+built instead. Every row below is an EXECUTED exit code, not a reading.
+
+> **⚠ CORRECTED IN THE FIX ROUND.** The headline below originally read *"3 of the 5 blocking CI
+> gates could pass while measuring nothing"*. That was wrong twice, and both errors are the exact
+> class this branch exists to stop. Struck text is kept so the correction is auditable.
+
+**Headline: of the 6 blocking CI gates, 3 could report `PASS` having measured nothing — and 1 more
+measured the wrong property.**
+`.github/workflows/ci.yml` blocks on exactly six script gates (re-read from the merged workflow,
+not from memory — `ci.yml:146,148,150,152,163,165`):
+
+| gate | ci.yml | state when this branch was cut | now |
+|---|---|---|---|
+| `browser-baseline.ts --check` | :146 | guarded — the reference implementation | unchanged |
+| `snippet-gate.js` | :148 | **VACUOUS** | fixed on this branch |
+| `facts.ts --check` | :150 | **VACUOUS** | fixed on this branch |
+| `regen-spec-index.ts --check` | :152 | narrow **by design**, and the narrow claim bites | unchanged, deliberately |
+| `delta-lint.ts` | :163 | **did not exist** — landed on `main` mid-branch | **VACUOUS → fixed in the fix round (2)** |
+| `s34-census.ts --check-new` | :165 | **measured the wrong property** | fixed on this branch (Build B) |
+
+**Error 1 — a wrong denominator.** "5" was true when the branch was cut and false by the time it
+landed: `delta-lint` became a sixth blocking gate while this branch was open. A count of gates is
+not a constant.
+
+**Error 2 — two different defects counted as one.** The original three were `snippet-gate`,
+`facts`, and `s34-census`. But `s34-census` was never vacuous: it measured something, and what it
+measured was the wrong property — the SHAPE of a provenance note rather than whether the note
+RESOLVED. **A gate that measures nothing and a gate that measures the wrong thing are not the same
+failure, and the second is the more dangerous**, because it produces a real-looking number that
+survives review. Collapsing them into one headline number destroyed exactly the distinction this
+branch was cut to draw.
+
+| script | can it pass while measuring nothing? | executed evidence | verdict |
+|---|---|---|---|
+| `browser-baseline.ts` | **NO** | empty tree → `HARNESS DID NOT RUN — no \`N pass\` line` / `Refusing to record or compare an empty set (that is the hollow-gate shape)`, **exit 1** | **REFERENCE.** Three layers: a `ranOk` harness-ran check, a `parseOk` check against bun's OWN reported failure count, and an empty-set refusal. |
+| `facts.ts` | **YES → FIXED** | tree with no source: `0 lines across 0 files`, `0 conformance cases`, `0 CLI verbs`; `--write` recorded all of it; `--check` → `PASS — all derived facts current`. **exit 0 at all three steps** | **VACUOUS — FIXED.** Now refuses, exit 2. |
+| `regen-spec-index.ts` | **NO, for what it claims** | totals corrupted → `SPEC-INDEX totals are STALE`, exit 1; totals anchor deleted → `ERROR: … missing or malformed`, exit 1 | **NARROW BY DESIGN.** All 65 row ranges corrupted to `1-1 \| 1` → still `totals OK`, exit 0 — but the header states the ranges are *deliberately* ungated ("they drift by design between amendments and a gate that cries wolf gets bypassed then deleted"). Filed as a residual, NOT fixed. |
+| `snippet-gate.js` | **YES → FIXED** | corpus discovering zero files → `no .scrml files discovered`, **exit 0** | **VACUOUS — FIXED.** Now refuses, exit 1. |
+| `review-debt.ts` | yes, but **LABELLED** | `gh` unreachable → `review-debt: UNAVAILABLE (…)` + "review debt NOT verified this session. Say so in the boot report.", exit 0 | **DELIBERATE + HONEST.** Documented ("a probe that breaks the boot is a probe that gets removed"). NOT-VERIFIED is a distinct printed state from 0 OWED. Not a defect. |
+| `corpus-zero-debt.ts` | **YES** | empty scan dirs → `0 artifacts scanned · … · 0 OWED · 0 VIOLATION` + `✅ no corpus-zero debt`, **exit 0** in `--check` | **VACUOUS.** Mitigated: it prints its denominator AND already carries "a clean scan is NOT proof of a clean corpus". FILED (F5). |
+| `issue-debt.ts` | **NO** | missing ledgers → every issue unhomed → `2 open · 0 homed · 2 OWED`, exit 1; `gh` down → `UNAVAILABLE`, exit 0 with "NOT-VERIFIED is a distinct state from 0 OWED" | **GUARDED.** Also carries a truncation guard with auto-widen to a reported ceiling. Best of the debt family. |
+| `threads.ts` | yes (reporter) | no BRIEF declares a probe → `thread-board: no BRIEF.md declares a DONE-PROBE: yet`, exit 0 | **REPORTER, no gate mode.** Cannot distinguish "no change dirs at all" from "dirs exist, none declares a probe" — same line for both. FILED (F7, minor). |
+| `dpa-debt.ts` | yes (reporter) | missing queue → `dpa-debt — queue not found at <path>`, exit 0 | **REPORTER, no failing exit path at all** (one `process.exit`, and it is 0). Names the missing path, so not silent. FILED (F6). |
+| `delta-lint.ts` | **YES → FIXED** | see below — three separate zero-population shapes all → `PASS`, exit 0 | **VACUOUS — FIXED in the fix round.** It reached `main` (`1127bab9`) as a 6th blocking gate while this branch was open, so F8 stopped being someone else's branch and became this landing's problem. Now refuses, exit 2. |
+| `state.ts` | **YES → FIXED (both halves)** | known-gaps with zero `@gap` tokens: `--write` recorded `HIGH 0 / MED 0 / LOW 0 / Nominal 0`, exit 0; `--check` → `PASS — all @generated sections current`, **exit 0** | **VACUOUS — FIXED.** Same mechanism as `facts.ts`. ⚠ The first cut fixed only the known-gaps half: the master-list half was written as `recentSessions(8).trim().length === 0`, which **can never be true** (both returns are non-empty), so it was unreachable dead code asserted as covered. Closed in the fix round (1), bite-proven both directions. Not a CI gate — a boot/wrap gate. |
+| `corpus-emit-differential.ts` | **NO** | zero-artifact diff → `FINDING [VACUOUS] compared ZERO artifacts — this run verified NOTHING.` + `VERDICT: NOT A VALID COMPARISON`, **exit 2**; self-diff → `FINDING [INCOMPARABLE] both sides are the SAME revision … clean by construction and proves nothing`, exit 2; typo'd flag → exit 2 | **BEST-GUARDED IN THE SET**, stronger than the reference. Caveat: the CAPTURE half writes a 0-source manifest at exit 0; the DIFF half catches it, which is the point that matters. |
+| `perf-regression-check.ts` | **YES** | every corpus key renamed → `[SKIP] … unknown corpus name` ×8 then `no regressions detected`, **exit 0**; `corpora: {}` → `no regressions detected` with no SKIP lines at all, **exit 0** | **VACUOUS.** |
+| `benchmark-perf-baseline.ts` | **YES** | no corpora resolvable → `[SKIP]` ×8, then `wrote: …/perf-baseline.json` with `corpora: {}`, **exit 0** | **VACUOUS, and it COMPOUNDS**: that empty baseline then makes `perf-regression-check` report "no regressions detected" forever. Proven end-to-end. |
+| `source-text-regex-census.ts` | yes (reporter) | empty `compiler/src` → `files / lines : 0 / 0`, `POST-AST … : 0`, exit 0 | **REPORTER, self-declared "DETECTION, not a gate".** Prints its denominator first, so a zero cannot be misread. Not a defect. |
+| `dock-health.ts` | yes (by design) | empty corpus → `corpus: 0 .scrml file(s) · compiled 0`, exit 0 | **REPORTER, self-declared "ADVISORY, NEVER GATING … Always exit 0".** Prints its denominator. Not a defect. |
+
+### `delta-lint.ts` — the sharpest of the audit findings
+
+Three zero-population shapes, all reporting PASS. The middle one is the dangerous one: **a real
+duplicate is present and the gate says PASS**, because the entry separator drifted.
+
+```
+=== [0] CONTROL — a healthy log with a real duplicate
+    exit=1   delta-lint FAILED — 1 NEW duplicated sequence number(s) across 3 entries
+
+=== [1] ENTRY-FORMAT DRIFT — the '·' separator becomes '-' (the duplicate is STILL THERE)
+    exit=0   delta-lint — 0 entries in the live scope (from line 2), 0 distinct sequence numbers, max [0] — PASS
+
+=== [2] TRAILING SESSION HEADER — the live scope is empty by construction
+    exit=0   delta-lint — 0 entries in the live scope (from line 7), … — PASS
+
+=== [3] EMPTY FILE
+    exit=0   delta-lint — 0 entries in the live scope (from line 1), … — PASS
+```
+
+Shape [1] is not hypothetical for this script specifically: its own header states the `ENTRY` regex
+must agree with `flogence src/ports/bridge-tool.scrml`, and "a divergence here is a silently
+different population". A bridge-side format change empties the live scope and the gate goes green.
+Shape [2] is one blank `## Session` header away at any wrap.
+
+**FILED, not fixed** — the script is not on `main`, and pulling the sibling branch's in-flight work
+into this one to patch it is exactly the wrong trade. Fix is ~4 lines: refuse when
+`seen.size === 0` while the file is non-empty.
+
+---
+
+## FIXED — four vacuous instruments, each with a two-sided bite proof
+
+The brief's rule: fix where the gate is vacuous and the fix is small and obvious; file the rest.
+Four qualified. Every one mirrors `scripts/browser-baseline.ts`'s refusal, which is this repo's
+reference pattern for the shape.
+
+### 1. `snippet-gate.js` — BLOCKING CI GATE
+
+RED (before): `bun scripts/snippet-gate.js docs/does-not-exist` → *"no .scrml files discovered in
+the declared corpus"*, **exit 0**. It gates 110 public snippets including all of `docs/website`,
+which its own header calls "the most-read public surface we ship". Rename that directory and the
+gate leaves silently while CI stays green.
+
+GREEN (after):
+```
+$ bun scripts/snippet-gate.js docs/does-not-exist
+snippet-gate: NO .scrml FILES DISCOVERED — refusing to report success.
+  A gate that compiled nothing has verified nothing (that is the hollow-gate shape).
+  corpus: docs/does-not-exist
+    DOES NOT EXIST  docs/does-not-exist
+exit 1
+$ bun scripts/snippet-gate.js
+snippet-gate: 110 passed, 0 failed (110 total).      exit 0   <- live path unchanged
+```
+Tolerating ONE absent root is preserved (documented, deliberate — "a row may pre-date its
+directory"). Discovering nothing AT ALL is now the refusal.
+
+### 2. `facts.ts` — BLOCKING CI GATE
+
+RED (before): a tree with no source in it → `0 lines across 0 files`, `0 conformance cases`,
+`0 CLI verbs`; `--write` recorded it; `--check` said *"PASS — all derived facts current"*.
+**exit 0 at all three steps.**
+
+GREEN (after): refuses at print, write and check, listing all ten zero counters, **exit 2** — a code
+distinct from 1 because this is not "the facts are stale", it is "the instrument is not measuring
+the repo". Live path unchanged: `PASS — all derived facts current`, exit 0.
+
+### 3. `state.ts` — the PA-state projection
+
+RED (before): a `known-gaps.md` holding its anchors and zero `@gap` tokens → `--write` recorded
+`HIGH 0 / MED 0 / LOW 0 / Nominal 0` at exit 0; `--check` then reported *"PASS — all @generated
+sections current"* at exit 0.
+
+GREEN (after): **exit 2** at both `--write` and `--check`, and the probe confirms the previously-
+recorded values are left untouched (nothing was written). Live path unchanged.
+
+The predicate is deliberately `tokens.length === 0` over a NON-EMPTY ledger, not `high === 0`. A
+repo can legitimately have zero open HIGHs; a parser that sees no population at all over a
+6,000-line ledger cannot be right. `gapCounts()` already threw on an *unclassifiable* status — this
+closes the *no markers at all* hole beside it.
+
+### 4. `benchmark-perf-baseline.ts` + `perf-regression-check.ts` — the compounding pair
+
+This one is a chain, and the chain was proven end-to-end before the fix:
+
+```
+BEFORE
+  benchmark-perf-baseline  no corpora resolvable -> [SKIP] x8 -> wrote perf-baseline.json
+                           with  corpora: {}                                     exit 0
+  perf-regression-check    reading that baseline -> "no regressions detected"    exit 0
+  perf-regression-check    every corpus key renamed -> [SKIP] x8 ->
+                           "no regressions detected"                             exit 0
+
+AFTER
+  benchmark-perf-baseline  "MEASURED ZERO CORPORA — refusing to write a baseline"  exit 2
+                           (and no file is written at all)
+  perf-regression-check    "COMPARED ZERO CORPORA — this run verified NOTHING;
+                            refusing to report a verdict"                          exit 2
+                           corpora: {}      -> "The baseline itself lists NO corpora"
+                           7 listed, 0 met  -> "lists 7 … and NONE could be measured"
+  perf-regression-check    real baseline, real corpora -> still DETECTS regressions, exit 1
+```
+
+The last line is the load-bearing half of the proof: the guard did not blunt the live path. The
+control run flags real per-stage regressions (`trucking-dispatch RS +755%`), so the check still
+bites where it should. **Both exit 2, not 1** — an inconclusive run is a distinct state from a clean
+one, which is the whole point.
+
+**Side observation, NOT this dispatch's scope:** that control run shows large per-stage deltas
+against the recorded baseline. This script is in no workflow and no hook, so nothing has been
+reading it. The numbers are machine- and load-sensitive and this box was running a test suite, so
+they are NOT a regression claim — but a perf baseline nothing runs is worth a look.
+
+### Deliberately NOT fixed
+
+`regen-spec-index.ts`'s ungated row ranges. The naive read is "vacuous — all 65 ranges corrupted and
+it still says OK", and that is what the execution shows. But the header states the exclusion is
+deliberate, with the reason: *"they drift by design between amendments and a gate that cries wolf
+gets bypassed then deleted (`pa-base v2.4` §8)"*. Gating them would be re-litigating a ruling under
+cover of a bug fix. Filed as a residual (F10) with the observation that the class which actually
+rotted — a 3,140-line stale index, which is the script's stated reason for existing — is the class
+that remains ungated.
+
+### 5. `corpus-zero-debt.ts` — hollow RIGHT NOW, in this checkout, not hypothetically
+
+This is the one finding that was not a constructed condition. Run in the worktree, unmodified:
+
+```
+$ bun scripts/corpus-zero-debt.ts --check
+corpus-zero-debt — 0 artifacts scanned · 0 carry a corpus-zero phrase · 0 in scope · 0 OWED · 0 VIOLATION
+  ✅ no corpus-zero debt — every in-epoch deliberation artifact is disposed.
+exit 0
+```
+
+`SUPPORT` is `${ROOT}/../scrml-support`. From a git worktree under `.claude/worktrees/<agent>/`
+that resolves to `.claude/worktrees/scrml-support`, which does not exist — while the real sibling
+holds **322 deliberation artifacts** (`295` deep-dives + `27` debates — BOTH entries of
+`SCAN_ROOTS`). `walk()` returns `[]` for a missing dir, so the scan silently empties and the tick
+prints anyway.
+
+> **⚠ CORRECTED IN THE FIX ROUND.** That figure originally read **288 deep-dives**. It was wrong,
+> and it was wrong *against this document's own evidence*: the executed transcript twelve lines
+> below prints `322 artifacts scanned`. Two mistakes compounded — a stale count, and counting only
+> `docs/deep-dives` when `SCAN_ROOTS` has two entries. Re-derived independently rather than copied
+> from the transcript: `find …/docs/deep-dives -name '*.md' | wc -l` → **295**, `find
+> …/docs/debates -name '*.md' | wc -l` → **27**, total **322**. **A prose number contradicting the
+> executed output printed beside it is precisely how a wrong figure becomes the next session's
+> premise — which is this branch's entire thesis, committed by the branch itself.**
+
+It is `scripts/boot.ts:311`, a **boot probe** — the PA reads that tick as evidence at session start,
+and every dispatched agent runs from a worktree. This is the brief's opening thesis, live.
+
+**Fixed** with this repo's own established boot-probe shape (`review-debt.ts` / `issue-debt.ts`):
+NOT-VERIFIED is a distinct printed state from zero debt; report loudly but do NOT break the boot in
+report mode ("a probe that breaks the boot is a probe that gets removed"); a `--check` that verified
+nothing is not a pass.
+
+**Bite proof — and the GREEN half found real debt.**
+
+```
+RED (this worktree, where ../scrml-support does not resolve):
+  ⚠️ NOT VERIFIED — scanned ZERO artifacts, so this run proves NOTHING.
+     A zero scan and a clean corpus print the same tick; they are not the same fact.
+     UNRESOLVED  …/agent-a4cfd2ab232fddafc/../scrml-support/docs/deep-dives
+     UNRESOLVED  …/agent-a4cfd2ab232fddafc/../scrml-support/docs/debates
+  exit 1
+
+GREEN (a root from which the sibling DOES resolve):
+  corpus-zero-debt — 322 artifacts scanned · 44 carry a corpus-zero phrase ·
+                     5 in scope (authored ≥ 2026-08-16) · 5 OWED · 0 VIOLATION
+  ⚠️ OWED — corpus-zero raised in an in-epoch deliberation artifact, no @corpus-zero marker:
+     docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md  L15
+     docs/deep-dives/d1-no-editions-earned-or-assumed-dpa-034-2026-08-19.md  L183
+     … (5 total)
+  exit 1
+```
+
+The live path is intact — and it exits 1 for the RIGHT reason, over a real population. **There were
+5 genuinely OWED corpus-zero dispositions that the worktree-hollow gate had been hiding.** Routed to
+the PA as F5; disposing them is a per-artifact reading, not this dispatch's call.
+
+> **⚠ STATUS MOVED — re-measured in the fix round.** All five have since been disposed:
+> `scrml-support@5fe251f` (2026-08-22, *"corpus-zero(S365): dispose all 5 in-epoch artifacts — and
+> 2 of the 5 are vocabulary false positives"*) added a closing `@corpus-zero` marker to each.
+> Re-measured against the live sibling by feeding the real population through this branch's own
+> exported pure `classify()` — **322 scanned · 44 with a phrase · 5 in scope · 0 OWED · 0
+> VIOLATION**, every one of the five now `closingMarkers=1`.
+>
+> **The number in the verification brief reads "5 corpus-zero OWED"; the correct current reading is
+> "5 IN SCOPE, 0 OWED".** Those are different fields and the distinction is load-bearing: `inScope`
+> is the population carrying a corpus-zero phrase in-epoch, `owed` is the subset with no closing
+> marker. **The count did not drift — the debt was PAID**, within a day, by a sibling session acting
+> on this branch's own finding. That is the fix working end-to-end, and it is also why "5 OWED"
+> must not be carried forward as a standing figure.
+
+The path-resolution half is FILED, not fixed: making `SUPPORT` worktree-aware is a decision about
+where the sibling repo lives, which is not mine to make. The guard turns a silent false-pass into a
+loud "I could not scan", which exposes that question rather than papering over it.
+
+---
+
+## FILED — findings routed to the PA, not closed here
+
+| id | finding | why not fixed here | reproducer |
+|---|---|---|---|
+| **F1** | 106 of 883 conformance cases emit some code more than once, invisibly — extremes `W-STDLIB-SEED-FAILCLOSED=23`, `E-ERROR-005=2` for one uncovered variant. Some legitimate (one diagnostic per site), some likely real double fires. | Deciding which of the 106 are defects is a per-case ruling. The instrument to see them now exists. | `loadCases()` + `compile().counts`, filter `n > 1`. |
+| **F2 — CLOSED (fix round, condition 3)** | `docs/known-gaps.md:588` carries a PA-VERIFIED enumeration of "the harness's complete `expect` vocabulary" and is now one key stale (`codeCounts`). | **Restriction lifted for that one line.** Fixed, and re-earned bidirectionally: every key in the doc confirmed present in `ExpectedCase`, every key in `ExpectedCase.expect` confirmed present in the doc. | Read the line. |
+| **F3 — CLOSED (fix round, condition 4)** | `I-MATCH-PROMOTABLE`'s §34 row (SPEC.md:19618) cites `compiler/src/lint-promotable.ts`, which does not exist; the emitter is `compiler/src/lint-i-match-promotable.js`. | **Fixed.** The gate being correctly silent on an untouched row is exactly what made it a landmine: it arms on the next innocent reflow. Swept afterwards — 0 unresolvable provenance paths remain. | Touch that row → the new gate names it. |
+| **F4** | The emitter scan still over-counts ~19 codes whose only non-comment mention is a cross-reference inside ANOTHER diagnostic's message string. | The same syntax carries two LIVE emission shapes; separating them needs per-code adjudication, not a regex. | Table in Build B above. |
+| **F5 — PARTLY CLOSED** | **5 genuinely OWED corpus-zero dispositions** in `scrml-support/docs/deep-dives`, hidden by the worktree-hollow gate. Also: `SUPPORT = ${ROOT}/../scrml-support` does not resolve from a worktree at all. | **Disposition half CLOSED by others**: all 5 disposed at `scrml-support@5fe251f` (2026-08-22) — the fix worked end-to-end within a day. **Re-measured in the fix round: 5 in scope, 0 OWED.** The path question (`SUPPORT` not resolving from a worktree) remains a repo-layout decision and stays FILED. | `bun scripts/corpus-zero-debt.ts --check` from a root where the sibling resolves. |
+| **F6** | `dpa-debt.ts` has exactly one `process.exit`, and it is `0`. No failing path exists, and a missing queue reports as a normal run. | It is a reporter with no gate mode; adding one is a design call. It does name the missing path. | Move `handOffs/dpa-queue.md` → `queue not found`, exit 0. |
+| **F7** | `threads.ts` cannot distinguish "no change dirs exist at all" from "dirs exist, none declares a DONE-PROBE" — identical output for both. | Minor; needs a denominator in the message ("N BRIEF.md scanned, 0 declare a probe"). | Empty tree vs a tree with a probe-less BRIEF.md → same line. |
+| **F8 — CLOSED (fix round, condition 2)** | **`delta-lint.ts` reports PASS over a log that still contains the duplicate it exists to catch**, when the entry format drifts. Three zero-population shapes all green. | **It reached `main` (`1127bab9`) as a 6th blocking gate while this branch was open**, so the trade changed: no branch-pull needed, and leaving it meant landing beside a vacuous gate. Fixed, all three rows bite-proven. | Full four-case transcript in the audit section above. Fix is ~4 lines: refuse `seen.size === 0` over a non-empty file. |
+| **F9** | `regen-spec-index.ts --check` cannot see the rot class it was written for — all 65 row ranges corrupted, still "totals OK". | **Deliberate and documented** (pa-base §8, cry-wolf). Gating them would re-litigate a ruling under cover of a bug fix. Recorded because the gap between "why the script exists" and "what the gate checks" is worth an operator's eye. | `sed -E 's/\| [0-9]+-[0-9]+ \| [0-9]+ \|/\| 1-1 \| 1 \|/'` on SPEC-INDEX.md → exit 0. |
+| **F10** | `corpus-emit-differential.ts`'s CAPTURE half writes a 0-source manifest at exit 0. | The DIFF half catches it with an explicit `FINDING [VACUOUS]`, which is the point that matters. Noted for completeness. | Capture against an empty roots dir. |
+| **F11** *(new, fix round)* | `conformance/run.ts` — the `severity` and `notCodePrefixes` `expect` keys have the SAME hollow-container hole `codeCounts` just had: `null` / `{}` / `[]` all silently disable the assertion (verified by execution, not read from source). `notCodePrefixes: {}` additionally throws an uncaught `for..of` error instead of producing a diagnostic. | **It is a ruling, not a copy.** `notCodePrefixes: []` plausibly means "no families forbidden" — coherent, and identical in effect to omitting the key. Whether an empty optional container is an ERROR or a NO-OP should be decided ONCE for the whole `expect` vocabulary, not settled key-by-key inside a fix round. | Set each key to `null` / `{}` / `[]` on any case and run `runCase` — `pass` stays `true`. |
+
+---
+
+## VERIFICATION BAR
+
+`main` moved during the dispatch (`a0e30329` → `d2f16aca`, one commit: `emit-library.ts` + its
+integration test + a regenerated `docs/FACTS.md` count). **Merged, not file-delta'd**, per the
+brief. No overlap with any instrument file; the merge was clean.
+
+### Full gate set, post-merge, on the real tree
+
+| gate | before | after |
+|---|---|---|
+| `browser-baseline --check` | exit 0 | **exit 0** — `PASS — browser failure name set matches the baseline (48 asserted, 0 of 2 env-excluded observed)` |
+| `snippet-gate` | exit 0 (110 passed) | **exit 0** — `110 passed, 0 failed (110 total)` |
+| `facts --check` | exit 0 | **exit 0** — `PASS — all derived facts current` |
+| `regen-spec-index --check` | exit 0 | **exit 0** — `SPEC-INDEX totals OK — Total lines: 37,293 \| Total sections: 65 + appendices` |
+| `s34-census --check-new --base origin/main` | exit 0 | **exit 0** — `no new/changed §34 rows vs origin/main — PASS` |
+| `s34-census` (census) | exit 0 | **exit 0** — buckets shifted by the T7 fix (see Build B) |
+| `state --check` | exit 0 | **exit 0** — both `@generated` sections PASS |
+| `conformance/run.ts` | 883/883, exit 0 | **883/883, exit 0** |
+| `issue-debt --check` | exit 0 | **exit 0** — `✅ every open issue has a home` |
+| `dpa-debt` | exit 0 | **exit 0** — `✓ nothing owed` |
+| `threads` | exit 0 | **exit 0** |
+| `source-text-regex-census` (+ `--selftest`) | exit 0 | **exit 0** |
+| `corpus-zero-debt --check` | exit 0 (**hollow — 0 scanned, green tick**) | **exit 1 — INTENDED.** Now says `NOT VERIFIED — scanned ZERO artifacts`. Not a regression: it is the fix reporting honestly. In no workflow and no hook, so nothing is blocked. |
+
+**Zero gates regressed.** The single exit-code change is `corpus-zero-debt`, and it changed from a
+false green to an honest red.
+
+### Pre-commit suite
+
+Ran on every commit (never `--no-verify`, `core.hooksPath` untouched):
+**28,964 tests across 1,260 files · 0 fail · 86 skip · 1 todo · 129,420 expect() calls.**
+Identical before and after.
+
+### ENV-GAP ruled out, not assumed
+
+`compiler/tests/browser/render-by-tag-nested-compound-bug60.browser.test.js` fails 5/5 in the
+post-commit hook. Ruled out as mine by execution rather than by argument: `git checkout origin/main
+-- compiler/ conformance/`, re-ran, got the identical **5 fail**, then restored. **PRE-EXISTING on
+`origin/main`.** (`bun install` + `bun run pretest` were both run at setup — a fresh worktree
+carries no gitignored `samples/compilation-tests/dist/`.)
+
+### A note on this dispatch's own method
+
+Two things nearly went in wrong, and both were caught by executing rather than reasoning:
+
+1. **The brief's target code did not exist.** Following it literally would have red-lined two
+   ratified conformance cases for a code with no emitter. Caught by compiling the cases and counting.
+2. **A design decision was nearly filed as a defect.** `regen-spec-index`'s ungated row ranges look
+   exactly like vacuity under execution — all 65 corrupted, still green. Reading the header first
+   showed the exclusion is deliberate with a stated rationale. Gating them would have been
+   re-litigating a ruling under cover of a bug fix.
+
+The second is the one worth keeping: **"the gate does not catch X" and "the gate deliberately does
+not catch X" produce identical evidence.** An audit that only executes will call the second a bug.
+
+---
+---
+
+# FIX ROUND — post-adversarial-review, same day
+
+Verdict returned: **LAND, conditional on five named follow-ups.** Two of the five are
+defects in gates that are *already blocking CI on `main`* — which is the same failure
+class this branch was cut to close, found inside the branch that closes it.
+
+Brief archived verbatim at `FIX-ROUND-BRIEF.md` (same directory).
+
+The bar is unchanged and it is this branch's own thesis: **every claim below is an
+executed result with a directly-measured exit code (`cmd; echo $?`), never a reading of
+the source and never a status read through a pipe.**
+
+## STEP 0 — merge `origin/main`
+
+`main` moved past the merge-base and now carries `scripts/delta-lint.ts` plus a 6th
+blocking CI gate that did not exist when this branch was cut. Condition (2) is a defect
+in that new gate, so it is unreachable without the merge.
+
+```
+$ git merge origin/main --no-edit
+Merge made by the 'ort' strategy.
+ 10 files changed, 676 insertions(+), 17 deletions(-)
+```
+
+**Zero conflicts.** The `docs/FACTS.md` / `docs/known-gaps.md` collisions the brief
+warned about did not materialise — this branch had not touched either file's
+`@generated` blocks (that restriction is the reason condition (3) exists as a
+follow-up rather than as original work).
+
+**`handOffs/delta-log.md` sequence handling.** No hand-resolution was needed and none
+was performed. `main` brought in `.gitattributes` with `handOffs/delta-log.md
+merge=union`, so both sides' appends were kept automatically; this branch contributed
+no delta-log entries, so there was no side to yield. Verified rather than assumed —
+and verified by the gate that exists for exactly this:
+
+```
+$ bun scripts/delta-lint.ts; echo $?
+delta-lint — 9 baselined duplicate(s) carried as known debt: [721] [722] [1079] [1080] [1081] [1173] [1174] [1524] [1525]
+delta-lint — 1394 entries in the live scope (from line 875), 1385 distinct sequence numbers, max [1686] — PASS
+0
+```
+
+`delta-lint --fix` was **not** run on the merge result, per the brief: its heuristic
+keeps first-in-file order, which is blind to which side is already published.
+
+## The five conditions
+
+Recorded below as each one closes.
+
+### (1) HIGH — `scripts/state.ts`: the master-list half of the guard was unreachable — **DONE**
+
+The reviewer's reading was exactly right. `recentSessions()` has two returns and both are
+non-empty: the zero-population path returns the sentinel `_(no session-wrap commits found)_`,
+the normal path returns joined lines. `sessions.trim().length === 0` could therefore never be
+true. The hollow write-then-check chain this branch closed for `known-gaps.md` survived intact
+one field over — and `progress.md` above asserted it as covered. **That is this branch's own
+thesis landing on the branch itself: a check that cannot fail, read as evidence.**
+
+**Reproduced before fixing**, with the session population emptied by pointing git at a scratch
+repo with no commits (`GIT_DIR` override — the worktree's own `.git` was never moved, and no
+`git stash` was used anywhere in this dispatch):
+
+```
+$ GIT_DIR=<empty-repo>/.git bun scripts/state.ts --write; echo $?
+  regenerated @generated:recent-sessions in master-list.md
+0                        <- exit 0. Eight lines of forensic index replaced by the sentinel.
+
+$ GIT_DIR=<empty-repo>/.git bun scripts/state.ts --check; echo $?
+  PASS — all @generated sections current.
+0                        <- the gate agreeing with the hollow value, exactly as predicted.
+```
+
+**Fix.** The degenerate value has a name, so test for the name — and give it *one* name:
+`NO_SESSIONS_SENTINEL` is now a named const referenced by both the producer and the guard.
+Inlining it at two sites is precisely how the guard went dead the first time, so the fix
+removes the duplication rather than adding a second literal. `|| sessions.length === 0` is
+kept alongside the sentinel test: it is dead today, but it stops being dead the moment
+someone changes the zero-path return, and it costs nothing.
+
+**Bite proof** (exit codes measured directly with `; echo $?`, never through a pipe):
+
+| population | invocation | pre-fix | post-fix |
+|---|---|---|---|
+| **EMPTY** (git log yields no wrap commits) | `--write` | **exit 0** — records the sentinel over the index | **exit 2 — REFUSES**, `master-list.md` untouched (`git diff --stat` empty) |
+| **EMPTY**, over the hollow write | `--check` | **exit 0 — `PASS`** | **exit 2 — REFUSES** (guard fires before the comparison) |
+| **REAL** (the actual repo) | `--check` | exit 0 `PASS` | **exit 0 `PASS`** |
+| **REAL** | `--write` | idempotent | **exit 0, `no changes (already current)`** |
+
+Both halves of the guard now bite. The known-gaps half was already proven in the round above;
+this is the half that was asserted rather than proven.
+
+### (2) HIGH — `scripts/delta-lint.ts` was vacuous on a zero population — **DONE**
+
+This is the finding that matters most, because of where it was found: **inside the PR whose
+entire purpose was to stop a silent entry-drop, a gate that silently dropped the entire
+population and reported `PASS`.** It landed on `main` as a blocking CI gate between this
+branch being cut and this fix round, which is why STEP 0 merges before touching it.
+
+All three reviewer rows reproduced first-hand before any edit, exit codes measured directly:
+
+```
+$ bun scripts/delta-lint.ts; echo $?      # duplicate present, canonical `·`
+delta-lint FAILED — 1 NEW duplicated sequence number(s) across 1395 entries:
+1                                          <- correct
+
+$ bun scripts/delta-lint.ts; echo $?      # SAME duplicate, separator drifted `·` -> `-`
+delta-lint — baseline lists 9 duplicate(s) that no longer occur; shrink handOffs/delta-log-dupes.baseline.json
+delta-lint — 0 entries in the live scope (from line 875), 0 distinct sequence numbers, max [0] — PASS
+0                                          <- PASS over a file containing the defect
+
+$ bun scripts/delta-lint.ts; echo $?      # empty file
+delta-lint — 0 entries in the live scope (from line 1), 0 distinct sequence numbers, max [0] — PASS
+0
+```
+
+**A second-order harm the review did not name, surfaced by executing it.** In the blind state
+the gate does not merely pass — it prints *"baseline lists 9 duplicate(s) that no longer occur;
+**shrink** `handOffs/delta-log-dupes.baseline.json`"*. It advises DELETING the debt ledger that
+records nine real collisions, on the strength of having measured nothing. The blinder the
+parser got, the more confident the advice.
+
+**Fix — the existing idiom, not a sixth pattern.** `refuseDegenerateScope()` mirrors
+`facts.ts:refuseDegenerateMeasurement()` and `state.ts:refuseDegenerateProjection()`: same
+`MEASURED ZERO — refusing…` banner, same "a zero here is a broken measurement, not a fact"
+prose, same **exit 2** distinct from the substantive exit 1.
+
+**One deliberate difference from the brief's wording, stated because it is a judgement call.**
+The brief says *"refuse when the live scope yields zero entries **while the file has content**"*.
+The guard implemented refuses on zero **unconditionally**, which is a superset. Reason: the
+brief's own row 3 is the empty file, and it must go RED — a truncated log is the *worst* case
+this gate covers, not an exemption from it. `facts.ts` sets the precedent: it refuses any
+counter reading 0 with no "…but only if the directory exists" qualifier. `raw.trim().length`
+is still consulted, but only to *diagnose*, never to decide.
+
+The diagnosis names the root cause rather than the symptom, because the two shapes have
+different fixes:
+- **bracketed but unparsed** → the ENTRY SHAPE drifted; `state.ts` and the flogence bridge
+  parse the same regex, so they are reading an empty log too. The message prints the count of
+  `[NNNN]`-leading lines and the regex it failed against.
+- **nothing bracketed** → truncation, or a stray `## Session ` header that moved `SCOPE_START`
+  past every entry.
+
+**Bite proof** (`cmd; echo $?`, direct, never piped):
+
+| `handOffs/delta-log.md` | pre-fix | post-fix |
+|---|---|---|
+| real NEW duplicate, canonical `·` | exit 1 — `FAILED … 1 NEW duplicated sequence number(s)` | **exit 1**, identical, names both line numbers |
+| **same duplicate**, separator drifted `·` → `-` | **exit 0 — `0 entries … — PASS`** | **exit 2 — REFUSES**, `1399 line(s) … DO start with [NNNN] but none matched … the ENTRY SHAPE has drifted` |
+| **empty file** | **exit 0 — `PASS`** | **exit 2 — REFUSES**, `The file is empty. The log has been truncated to nothing.` |
+| pristine (restored) | exit 0 — `1394 entries … 1385 distinct … max [1686] — PASS` | **exit 0**, byte-identical output |
+
+The duplicate-detection path is untouched: row 1 is character-for-character what it was.
+The only removed line in the whole diff is the read site, split so the guard can size the file.
+
+### (3) MEDIUM — the PA-VERIFIED `expect` enumeration went false on landing — **DONE**
+
+`docs/known-gaps.md:588` carries a **PA-VERIFIED** enumeration of the harness's *complete*
+`expect` vocabulary. This branch adds `codeCounts` to that interface, so the moment it lands
+the enumeration becomes an authority-stamped list that is missing a key — and the next session
+reads the stamp, not the interface. The original brief forbade touching this file, which is why
+the branch filed it rather than fixing it; that restriction is lifted for this line only.
+
+**Checked bidirectionally rather than just inserting the one key.** A stamp that says
+*complete* has to be re-earned, not patched:
+- every key in the doc's list → confirmed present in `ExpectedCase` (all 14);
+- every key in `ExpectedCase.expect` → confirmed present in the doc's list.
+
+`codeCounts` was the ONLY divergence. It is now listed, in interface order (after `severity`,
+before the runtime half `input`), and the stamp reads `PA-VERIFIED at S319, RE-VERIFIED
+key-by-key against the interface at S365` — provenance for both the original claim and the
+re-check, so a future reader can see which one they are trusting.
+
+**The gap itself is unchanged and stays open.** A parenthetical says so explicitly: a per-code
+occurrence count is not the content of an artifact, so
+`g-conformance-cannot-assert-emitted-route-path` is not narrowed by `codeCounts`. Recorded
+because "a new assertion key landed" is exactly the shape a future session would mistake for
+"that gap is smaller now."
+
+Line 588 is prose, not inside an `@generated` anchor pair — verified by executing both
+regenerators rather than by reading the anchors:
+
+```
+$ bun scripts/state.ts --check; echo $?   ->  0
+$ bun scripts/facts.ts --check; echo $?   ->  0
+```
+
+### (4) MEDIUM — `compiler/SPEC.md:19618` was a live CI landmine — **DONE**
+
+The `I-MATCH-PROMOTABLE` row cited `compiler/src/lint-promotable.ts`. That file does not exist;
+the emitter is `compiler/src/lint-i-match-promotable.js`. This branch's own
+`s34-census.ts --check-new` provenance resolver is a BLOCKING gate, and it uses that very row as
+its motivating example in a source comment — **so the branch shipped a gate armed against a
+defect it left in place.** The next PR to so much as reflow that line fails for something it did
+not cause: the pa-base §8 cry-wolf shape that gets a gate bypassed and then deleted.
+
+**Emitter identified by grepping fire sites, not by inferring from the filename.** Three
+`code: "I-MATCH-PROMOTABLE"` construction sites at `lint-i-match-promotable.js:577, 604, 626`,
+dispatched from `api.js:2231` (Stage 6.4). The row's *other* citation,
+`compiler/src/commands/promote.js`, was checked too and is correct — so only the one path moved.
+
+**Bite proof.** The first attempt at a RED proof was wrong and is recorded because the failure
+mode is instructive: reverting the path made the line **identical to `origin/main`**, so the
+gate correctly reported `no new/changed §34 rows — PASS`. A diff-scoped gate cannot fire on a
+row nobody touched — that is its design, not a defect. The real landmine only arms when the row
+is CHANGED, so the proof has to simulate the innocent edit:
+
+| `compiler/SPEC.md` state | `bun scripts/s34-census.ts --check-new --base origin/main` | exit |
+|---|---|---|
+| stale path, line otherwise untouched | `no new/changed §34 rows vs origin/main — PASS` | 0 (gate not armed — correct) |
+| **stale path + an innocent reflow** (`The lint` → `This lint`) | **`§34.0 gate FAILED — I-MATCH-PROMOTABLE — STALE PROVENANCE: names `compiler/src/lint-promotable.ts`, which does not exist`** | **1** |
+| **fixed path + the same innocent reflow** | `1 new/changed §34 row(s), all well-formed (provenance resolves) — PASS` | **0** |
+| fixed path (landed state) | `1 new/changed §34 row(s), all well-formed (provenance resolves) — PASS` | **0** |
+
+Rows 2 and 3 are the whole finding: the identical innocent edit fails before the fix and passes
+after it.
+
+**Swept for siblings rather than assuming it was the only one.** The same `PATH_REF` regex run
+over EVERY code-shaped table row in `SPEC.md` — a deliberate SUPERSET of the census's §34-range
+selection (1227 rows swept vs the census's 809 catalogued codes), because the question was "are
+there other armed landmines" and a superset can only over-report:
+
+```
+swept 1227 catalogued §34 rows — 0 unresolvable backticked repo path(s), 0 distinct
+```
+
+**Zero remain.** `I-MATCH-PROMOTABLE` was the only one, and it is disarmed.
+
+**The census's own comments were de-staled in the same commit.** Two sites in
+`scripts/s34-census.ts` asserted in the PRESENT tense that the row "cites `lint-promotable.ts`,
+which does not exist". After the fix those sentences are false about this tree — a comment
+asserting a falsehood about the current tree is the exact rot the resolver exists to stop.
+Both are now past-tense with the S365 correction named, and the example is kept because it is
+the reason the resolver exists.
+
+**No bucket moved.** Verified by executing the census against `HEAD`'s SPEC and against the
+fixed SPEC and diffing the two outputs — byte-identical (`diff` exit 0). Correct: the bucket
+depends on whether the CODE appears in executable source, not on whether the cited path resolves.
+
+### (5) LOW-but-cheap — the branch's own numbers were wrong — **DONE**
+
+Cheap to fix, and the least skippable of the five: *a wrong instrument number becomes next
+session's premise*, which is the sentence this whole branch is built on. Every figure was
+**re-derived first-hand**, not copied from the reviewer's note — a relayed premise is exactly
+the failure mode being corrected.
+
+**The unscanned-artifact figure: 288 → 322.** Independently re-derived:
+
+```
+$ find …/scrml-support/docs/deep-dives -name '*.md' -type f | wc -l   ->  295
+$ find …/scrml-support/docs/debates    -name '*.md' -type f | wc -l   ->   27
+                                                              total  ->  322
+```
+
+Two compounding mistakes: a stale count, and counting only `docs/deep-dives` when `SCAN_ROOTS`
+has **two** entries. **And the document contradicted its own evidence** — the executed transcript
+twelve lines below the wrong prose prints `322 artifacts scanned`. Corrected in `progress.md` AND
+in `scripts/corpus-zero-debt.ts`, whose own new source comment carried the same wrong figure.
+
+**The headline: "3 of 5" → "3 of 6 vacuous, plus 1 measuring the wrong property".** Re-read from
+the merged workflow rather than from memory — `ci.yml:146,148,150,152,163,165` — six blocking
+script gates, not five. Two independent errors:
+1. **A stale denominator.** `delta-lint` became a 6th blocking gate *while this branch was open*.
+2. **Two different defects counted as one.** `s34-census` was never vacuous. It measured
+   something; it measured the WRONG PROPERTY — the shape of a provenance note, never whether the
+   note resolved. **A gate that measures nothing and a gate that measures the wrong thing are
+   different failures, and the second is the more dangerous**, because it yields a real-looking
+   number that survives review. The original headline collapsed exactly the distinction the branch
+   was cut to draw.
+
+**"5 corpus-zero OWED" → "5 IN SCOPE, 0 OWED".** Re-measured by feeding the real sibling
+population through this branch's own exported pure `classify()` (the script's `SUPPORT` still
+cannot resolve from a worktree — that half stays FILED — so the population was supplied directly
+rather than by symlinking anything into the main checkout):
+
+```
+scanned 322 · withHits 44 · inScope 5 · OWED 0 · VIOLATIONS 0
+  all five now closingMarkers=1
+```
+
+`inScope` and `owed` are different fields. **The count did not drift — the debt was PAID**:
+`scrml-support@5fe251f` (2026-08-22, *"corpus-zero(S365): dispose all 5 in-epoch artifacts"*)
+disposed all five, within a day, acting on this branch's own finding. That is the fix working
+end-to-end; it is also why "5 OWED" must not be carried forward as a standing figure.
+
+**Audit table + FILED table reconciled.** `delta-lint` moved from *"VACUOUS. Not on `main`"* to
+*"VACUOUS — FIXED"*; `state.ts` from *"VACUOUS"* to *"FIXED (both halves)"* with the dead-code
+miss named; F2/F3/F8 marked CLOSED with the condition that closed them, F5 PARTLY CLOSED
+(disposition half closed by others, path half still open).
+
+Struck claims are annotated in place rather than deleted, so the correction is auditable — a
+progress doc that silently rewrites its own wrong numbers teaches nothing.
+
+---
+
+## Reviewer extras — "worth fixing if cheap"
+
+Both were cheap. Both are done.
+
+### (a) `corpus-zero-debt.ts` — the guard was all-or-nothing across TWO scan roots — **DONE**
+
+`SCAN_ROOTS` has two entries and they are wildly unequal: **295** deep-dives to **27** debates.
+The S364 guard tested `artifacts.length === 0`, which fires only when **every** root is dead — so
+a single renamed directory left ~92% coverage printing the clean tick with no hint the rest was
+never opened.
+
+**Partial blindness is the harder case to catch, precisely because the denominator still looks
+healthy.** A zero is conspicuous; "2 artifacts scanned" reads like a small corpus.
+
+Reproduced on a constructed tree first (the branch's own method — the script derives `ROOT` from
+its own file location, so a copy in a scratch tree is a clean condition that touches no repo):
+
+```
+$ bun <copy>/scripts/corpus-zero-debt.ts --check      # 4 artifacts, both roots healthy
+  ✅ no corpus-zero debt — all 4 in-epoch deliberation artifact(s) disposed
+0
+$ mv <support>/docs/debates <support>/docs/debates-RENAMED
+$ bun <copy>/scripts/corpus-zero-debt.ts --check      # half the corpus gone
+  ✅ no corpus-zero debt — all 2 in-epoch deliberation artifact(s) disposed
+0                                                      <- still green. The denominator just got quieter.
+```
+
+**Fix.** Every root reports its own count, and a root yielding nothing is named whether or not its
+siblings did. `NOT VERIFIED` (all roots dead) and `PARTIALLY VERIFIED` (some dead) are distinct
+printed states, and the healthy tick now prints its per-root breakdown so the denominator is
+visible on the GREEN path too — a count you can only see when something breaks is not a denominator.
+
+**Bite proof** (`cmd; echo $?`, direct):
+
+| scan roots | mode | pre-fix | post-fix |
+|---|---|---|---|
+| both healthy (2 + 2) | `--check` | exit 0, `✅ … all 4` | **exit 0**, `✅ … all 4 … across all 2 scan roots (docs/deep-dives 2 · docs/debates 2)` |
+| **`docs/debates` renamed away** | `--check` | **exit 0**, `✅ … all 2` — silent | **exit 1**, `⚠️ PARTIALLY VERIFIED — 1 of 2 scan roots yielded ZERO artifacts` + `UNRESOLVED <path>` |
+| both roots gone | `--check` | exit 1, `NOT VERIFIED` | **exit 1**, `NOT VERIFIED` — unchanged |
+| `docs/debates` renamed away | report (no `--check`) | exit 0, silent | **exit 0**, same loud `PARTIALLY VERIFIED` block |
+
+The last row is the one that had to be checked rather than assumed: the report/check split is
+deliberate house policy ("a probe that breaks the boot is a probe that gets removed"), so the new
+state must be LOUD in report mode without breaking the boot. It is.
+
+**No unit test added, deliberately.** The guard lives in the `import.meta.main` entrypoint block
+that `compiler/tests/unit/corpus-zero-debt.test.js` explicitly avoids so the pure core needs no
+disk. Testing it would mean restructuring the module — that is not "cheap", and none of this
+branch's sibling guards (`facts.ts`, `state.ts`, `snippet-gate.js`, `delta-lint.ts`) are unit-tested
+either; they are bite-proven. Same standard applied here. The existing 20 tests still pass.
+
+### (b) `conformance/run.ts` — a hollow assertion inside the anti-hollow-assertion feature — **DONE**
+
+The `codeCounts` docstring promised *"a malformed value is a HARD failure rather than a skip — a
+cardinality assertion that silently does nothing is the exact hollow-gate shape this key was added
+to close."* It delivered exactly that for the **value** and nothing for the **container**, so the
+key could still be switched off in silence: `if (ex.codeCounts)` is falsy for `null` and `""`, and
+truthy-but-zero-keyed for `{}` and `[]`.
+
+**Fix: test PRESENCE, not truthiness.** An ABSENT key is the documented optional-and-additive case
+and stays free. A key that IS present must be a non-empty object of non-negative integers, or the
+case fails. *"I wrote the assertion and it asserted nothing"* is never a pass.
+
+**Bite proof** — `runCase` driven directly on `capability-inheritance-inherit-covers` (the real
+case, real compile), with the PRE-fix runner restored in place for the left column so its relative
+imports resolve. `pass` is the runner's own verdict:
+
+| `codeCounts` value | pre-fix | post-fix |
+|---|---|---|
+| `null` | **pass=true**, no mismatch | **pass=false** — `present but is not an object (got null)` |
+| `""` | **pass=true**, no mismatch | **pass=false** — `present but is not an object (got "")` |
+| `{}` | **pass=true**, no mismatch | **pass=false** — `present but EMPTY — it asserts nothing. Omit the key` |
+| `[]` | **pass=true**, no mismatch | **pass=false** — `present but is not an object (got [])` |
+| `{"E-FOREIGN-SIDECAR-NOMINAL": 1}` (honest) | pass=true | **pass=true** — unchanged |
+| `{"E-FOREIGN-SIDECAR-NOMINAL": 99}` (wrong count) | pass=false | **pass=false** — unchanged |
+| key omitted entirely | pass=true | **pass=true** — the optional case stays free |
+
+Rows 5-7 are the ones that had to hold: the fix must not turn an honest assertion, a genuine
+count mismatch, or a legitimately-absent key into anything different. None moved.
+
+**SURFACED, NOT FIXED — the two sibling keys have the identical hole.** Verified by execution on
+the same case rather than inferred from the source:
+
+```
+  severity        = null  -> pass=true    severity        = {}  -> pass=true    severity        = []  -> pass=true
+  notCodePrefixes = null  -> pass=true    notCodePrefixes = []  -> pass=true
+  notCodePrefixes = {}    -> UNCAUGHT THROW (for..of over a non-iterable), not a diagnostic
+```
+
+Not fixed here for two reasons, and the second is the real one:
+1. The brief scopes this item to `codeCounts` and says not to improve gates beyond the named fixes.
+2. **It is not a mechanical copy — it is a ruling.** For `codeCounts` the brief RULED that an empty
+   container is an error. For `notCodePrefixes`, `[]` plausibly means *"no prefix families are
+   forbidden"*, which is a coherent thing to write and identical in effect to omitting the key.
+   Whether an empty optional container is an ERROR or a NO-OP is a harness-authoring decision with
+   a real argument on both sides, and it should be decided once for the whole `expect` vocabulary
+   rather than settled key-by-key inside a fix round. The `notCodePrefixes: {}` uncaught throw is a
+   separate, smaller defect: a malformed container should produce a diagnostic, not a stack trace.
+
+**Routed to the PA as F11.**
+
+---
+
+## FIX ROUND — verification
+
+Every exit code below measured directly (`cmd; echo $?`). Nothing read through a pipe: `cmd | tail`
+reports `tail`'s status, which is a success signal that cannot fail.
+
+### The six blocking CI gates, plus `state.ts`
+
+| gate | exit |
+|---|---|
+| `bun scripts/browser-baseline.ts --check` | 0 |
+| `bun scripts/snippet-gate.js` | 0 |
+| `bun scripts/facts.ts --check` | 0 |
+| `bun scripts/regen-spec-index.ts --check` | 0 |
+| `bun scripts/delta-lint.ts` | 0 |
+| `bun scripts/s34-census.ts --check-new --base origin/main` | 0 |
+| `bun scripts/state.ts --check` (boot/wrap gate, not CI) | 0 |
+
+> **A near-miss worth recording, because it is this branch's thesis pointed at my own method.**
+> The first attempt at that table looped `for g in "scripts/facts.ts --check" …; do bun $g; done`
+> and printed **exit=1 for all four**. The shell here is zsh, which does **not** word-split an
+> unquoted parameter — so `bun` received one argument, a filename containing a space, and failed on
+> every row. **A measurement harness that is broken produces a uniform, plausible-looking result.**
+> Had the expected answer been "all red" instead of "all green" I would have believed it. The
+> defect was caught only because the same two gates had exited 0 fifteen minutes earlier.
+
+### Conformance
+
+```
+$ bun conformance/run.ts; echo $?
+conformance (impl#1): 883/883 cases pass
+0
+```
+
+### `bun run test` — a CONTROLLED A/B, not a comparison against a remembered number
+
+The brief's baseline is 55 fail (4 timeout-shaped + 51 assertion). This environment produces **53**.
+Rather than argue about the gap, both sides were measured **back-to-back in the same tree, same
+environment**: the seven fix-round files were checked out at `437052c4` (the merge commit — post
+`origin/main` merge, pre every fix), the full suite run, then restored to `HEAD` and re-run.
+
+| | pass | fail | files |
+|---|---|---|---|
+| **BEFORE** (`437052c4`, pre-fix-round) | 30151 | **53** | 1383 |
+| **AFTER** (`HEAD`, all seven fixes) | 30151 | **53** | 1383 |
+
+```
+$ comm -13 names.BEFORE.txt names.AFTER.txt      # NEW failures
+(nothing)
+$ comm -23 names.BEFORE.txt names.AFTER.txt      # disappeared failures
+(nothing)
+```
+
+**The failing NAME SET is byte-identical. Zero branch-only new failures; zero masked.**
+
+**Timeouts vs assertions, distinguished** — this harness prints the same `(fail) <name>` for both,
+so they were separated by duration, not by eye. Exactly **4** failures exceed 5000 ms, all ~10.3 s,
+all dev-watcher: `dev-compile-throw-fail-closed` §1/§2/§3 and `dev-watcher-churn-starvation`.
+The other **49** are assertion failures: 48 browser-tier + 1 unit-tier.
+
+**On the 55 vs 53 gap — not mine, and provably not the merge.** The merge is the only other thing
+this dispatch did to the tree, and `git diff --name-only d1a1857e 437052c4` is
+`.gitattributes` · `ci.yml` · four docs · three `handOffs/` files · `scripts/delta-lint.ts`.
+**No file any test loads.** And the BEFORE run already reads 53 *before any fix commit*. So the two
+missing failures belong to the brief's baseline measurement (a different `samples/compilation-tests/dist/`
+state or two flakes), not to anything on this branch. Recorded rather than explained away.
+
+**The lone unit-tier failure is a whole-suite interaction, verified rather than assumed:**
+
+```
+$ bun test compiler/tests/unit/esm-script-tag-module-format.test.js
+ 9 pass  0 fail                      <- green in isolation
+```
+It fails only inside the 1383-file run — the documented cross-file global-state leak. Present
+identically in BEFORE and AFTER.
+
+### Every probe this branch changed, re-derived
+
+| figure | brief's expectation | measured | verdict |
+|---|---|---|---|
+| double-emitting conformance cases | 106 of 883 | **106 of 883** (extremes `W-STDLIB-SEED-FAILCLOSED=23`) | ✔ |
+| conformance cases | 883 | **883**, all passing | ✔ |
+| gated public snippets | 110 | **110 passed, 0 failed** | ✔ |
+| §34 rows / codes | 811 rows / 809 codes | **811 physical code-shaped rows in 19113..19993; 809 distinct codes** — the 2-row gap is `E-DEPRECATED-001` and `E-MARKUP-003`, each appearing twice | ✔ (and the mechanism named) |
+| corpus-zero | "5 OWED" | **5 IN SCOPE · 0 OWED** | ✖ **corrected** — see condition (5). The debt was PAID by `scrml-support@5fe251f`, not drifted. |
+
+### `git status` at report time: clean.
+
+### A SECOND merge of `origin/main` — and the collision it was hiding
+
+The final coherence check (`git rev-list --left-right --count origin/main...HEAD`) read **2 behind,
+17 ahead**, and `git diff origin/main..HEAD -- handOffs/delta-log.md` showed **4 DELETIONS**.
+`origin/main` had advanced *during this dispatch* — worktrees share the object DB and remote-tracking
+refs, so a sibling's `fetch` moved `origin/main` from `77a7b381` (merged at STEP 0) to `09d133ff`
+without this dispatch doing anything.
+
+**The two new commits touch `docs/known-gaps.md` — the same file condition (3) edits.**
+
+```
+$ git log --oneline HEAD..origin/main
+09d133ff docs(S365): F1 fix verified + two corrections to my own brief; 2 gaps; review floor 0 (#645)
+36bb8ddb docs/s365 s239 verdicts (#644)
+$ git diff --name-only HEAD...origin/main
+docs/known-gaps.md · docs/pr-reviews.md · handOffs/delta-log.md
+```
+
+**That is a live work-loss hazard, not a bookkeeping detail.** A wholesale
+`git checkout instrument-integrity -- docs/known-gaps.md` at landing would have silently destroyed
+main's 52 new lines — the *exact* accident recorded in delta-log `[1686]` earlier the same day
+("the paired `git checkout HEAD -- docs/known-gaps.md` destroyed that file's auto-merge — Peter's
+two new gap entries silently gone"). **Resolved on this branch rather than left for the lander to
+discover**: merged again, so git's own machinery did the union.
+
+`docs/known-gaps.md` **auto-merged cleanly** — my one-line `codeCounts` edit at :588 and main's two
+new gap entries occupy different regions. Both sides verified present by execution, not by reading
+the merge summary:
+
+```
+$ grep -c "codeCounts" docs/known-gaps.md              -> 1     (mine survived)
+$ git diff --stat HEAD~1..HEAD -- docs/known-gaps.md   -> 52 insertions  (main's arrived)
+```
+
+`handOffs/delta-log.md` took the union driver again; **no collision, no renumbering, nothing
+hand-resolved** — `1398 entries · 1389 distinct · max [1690] — PASS`. The `@generated` blocks
+needed no regeneration (main had already regenerated them and the merge took its side; my edit was
+prose): `state.ts --check` exit 0, `facts.ts --check` exit 0.
+
+**All seven gates re-run against the new base, all exit 0**, including
+`s34-census --check-new --base origin/main` → `1 new/changed §34 row(s), all well-formed
+(provenance resolves) — PASS`. Branch is now **0 behind / 18 ahead**; `origin/main` is fully
+contained, so the file-delta landing is safe on every one of the nine files.

@@ -4,10 +4,11 @@
   "language-version": "1.0",
   "spec": "§23.5.4, §23.5.5",
   "source-test": "compiler/tests/unit/capability-declaration.test.js",
-  "rationale": "§23.5.4: if a nested `<program>` does not declare `capabilities=`, the governing set is the CLOSEST ancestor that does — here the outer non-empty `network`. A foreign construct under a non-empty inherited set is declared, so the §23.5.5 presence-nudge stays silent. E-FOREIGN-SIDECAR-NOMINAL co-occurs (the §23.4 sidecar runtime is Nominal).",
+  "rationale": "§23.5.4: if a nested `<program>` does not declare `capabilities=`, the governing set is the CLOSEST ancestor that does — here the outer non-empty `network`. A foreign construct under a non-empty inherited set is declared, so the §23.5.5 presence-nudge stays silent. E-FOREIGN-SIDECAR-NOMINAL co-occurs (the §23.4 sidecar runtime is Nominal). `codeCounts` pins it at EXACTLY 1: the §23.4 carve-out exists so a CLAIMED sidecar draws one diagnostic and not two, and `codes`/`notCodes` are both set-valued and cannot read that. Route a second unbuilt-context diagnostic at the DECLARATION site and this case fires the pair — which is the regression `codeCounts` is here to catch.",
   "expect": {
     "codes": ["E-FOREIGN-SIDECAR-NOMINAL"],
     "notCodes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-ATTR-001"],
-    "severity": { "E-FOREIGN-SIDECAR-NOMINAL": "error" }
+    "severity": { "E-FOREIGN-SIDECAR-NOMINAL": "error" },
+    "codeCounts": { "E-FOREIGN-SIDECAR-NOMINAL": 1 }
   }
 }

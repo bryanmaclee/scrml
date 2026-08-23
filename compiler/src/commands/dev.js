@@ -20,6 +20,7 @@ import { resolve, dirname, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
+import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -175,6 +176,63 @@ let registeredRoutes = [];
 /** @type {{ open: Function, message: Function, close: Function } | null} */
 let registeredWsHandlers = null;
 
+// §40.3/§40.8 — THE `handle()` onion, exported by the one compiled module that
+// declares it (`_scrml_mw_pipeline`), rebuilt on every recompile alongside the
+// routes.
+//
+// `handle()` is a literal onion: SPEC §40.3.4 says it "applies to all HTTP
+// requests handled by the compiled server — including statically-served assets".
+// `scrml dev` is the dispatcher the adopter actually hits while developing, so
+// it mounts the same onion the built server does — otherwise a custom-path
+// interception would work under `scrml build` and 404 under `scrml dev`.
+//
+// EXACTLY ONE runs per request. The onion is application-scope (§40.8 makes the
+// <program> middleware attributes app-scope and declares the top-level <program>
+// once per application, in the entry file), so composing several by module load
+// order — which is filename-sorted — would let a RENAME decide which handle()
+// wins a contested path, and would run every module's PRE on every other
+// module's page. More than one candidate is E-MW-007, surfaced through the same
+// compile-failure channel `scrml build` fails on (dev/prod parity).
+/** @type {Array<(downstream: Function) => Function>} */
+let registeredOnions = [];
+
+/**
+ * Test/introspection accessor for the currently mounted §40.3 onion. Still an
+ * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
+ * null check; the one-per-server invariant is enforced in `loadServerRoutes`.
+ */
+export function getRegisteredOnions() {
+  return registeredOnions;
+}
+
+/**
+ * Test/introspection accessor for the currently registered routes. Returns the
+ * LIVE array `loadServerRoutes` populates and the fetch handler dispatches over.
+ */
+export function getRegisteredRoutes() {
+  return registeredRoutes;
+}
+
+/**
+ * §40.3 — run `downstream` (the remainder of the dev dispatch: route match →
+ * static file → 404) through every mounted `handle()` onion. Returns
+ * `downstream(req)` unchanged when the program defines no `handle()` and no
+ * `<program>` middleware attribute, so a non-middleware dev session behaves
+ * exactly as it did pre-§40.3.
+ *
+ * Exported for the dev-server unit tests.
+ *
+ * @param {Request} req
+ * @param {(request: Request) => Promise<Response>} downstream
+ * @returns {Promise<Response>}
+ */
+export function runThroughOnions(req, downstream) {
+  if (registeredOnions.length === 0) return downstream(req);
+  // §40.8 — one application, one onion. `loadServerRoutes` never mounts more
+  // than one, so this is a single wrap, not a fold.
+  return registeredOnions[0](downstream)(req);
+}
+
 // ---------------------------------------------------------------------------
 // Compile-failure state (adopter-#517)
 //
@@ -226,15 +284,22 @@ export function getCompileFailure() {
  * WebSocket handlers shape (as emitted by emit-channel.ts):
  *   export const _scrml_ws_handlers = { open(ws), message(ws, raw), close(ws, code, reason) }
  *
+ * §40.3 handle() onion shape (as emitted by emit-server.ts):
+ *   export const _scrml_mw_pipeline = _scrml_mw_wrap   // wrap(downstream) -> handler
+ *
  * Bun caches ES module imports by specifier. To force a reload after
  * recompilation we append a `?t=<timestamp>` cache-buster to the import URL.
+ *
+ * Exported so the unit tests can mount a REAL compiled module's exports without
+ * starting a dev server (same reason as `noteCompileResult`).
  *
  * @param {string} outputDir
  * @returns {Promise<void>}
  */
-async function loadServerRoutes(outputDir) {
+export async function loadServerRoutes(outputDir) {
   registeredRoutes = [];
   registeredWsHandlers = null;
+  registeredOnions = [];
 
   // F-COMPILE-001 Option A: outputDir may be a tree when sources have nested
   // subdirectories. Walk recursively for *.server.js entries.
@@ -243,6 +308,10 @@ async function loadServerRoutes(outputDir) {
 
   const cacheBuster = Date.now();
   const allWsHandlers = [];
+  // §40.3/§40.8 — every module that hosts a request onion, with the `.scrml`
+  // source that DECLARES it (emit-server stamps `_scrml_mw_declared_in`). One is
+  // mounted; more than one is E-MW-007, reported against every competing source.
+  const onionCandidates = [];
 
   for (const { absPath, relPath } of serverFiles) {
     // Absolute file URL with cache-buster so Bun re-evaluates on each reload.
@@ -258,6 +327,21 @@ async function loadServerRoutes(outputDir) {
 
     for (const exportName of Object.keys(mod)) {
       const value = mod[exportName];
+
+      // §40.3 — the handle() onion mount point. A FUNCTION, so it would fall
+      // through the object-shape guard below and never be seen; collect it first.
+      if (exportName === "_scrml_mw_pipeline" && typeof value === "function") {
+        onionCandidates.push({
+          filename: relPath,
+          middlewareNames: [exportName],
+          middlewareDeclaredIn: typeof mod._scrml_mw_declared_in === "string"
+            ? mod._scrml_mw_declared_in
+            : null,
+          pipeline: value,
+        });
+        continue;
+      }
+
       if (!value || typeof value !== "object") continue;
 
       // WebSocket handlers export — collect separately, NOT as a route.
@@ -275,6 +359,28 @@ async function loadServerRoutes(outputDir) {
       ) {
         registeredRoutes.push(value);
       }
+    }
+  }
+
+  // §40.3/§40.8 — mount THE application onion. `scrml build` fails on a second
+  // one; dev surfaces the identical diagnostic through the compile-failure
+  // channel (which serves the real error at every request) instead of silently
+  // guessing — a dev/prod split here is exactly what the onion work set out to
+  // remove.
+  {
+    const { onion, error } = selectRequestOnion(onionCandidates);
+    if (error) {
+      const diag = {
+        stage: "BUILD",
+        filePath: error.sources[0],
+        code: error.code,
+        message: error.message,
+        severity: "error",
+      };
+      noteCompileResult({ errors: [diag], warnings: [] });
+      console.error(`[dev] ${formatOnionConflict(error)}`);
+    } else if (onion) {
+      registeredOnions = [onion.pipeline];
     }
   }
 
@@ -581,12 +687,70 @@ export function broadcastReload() {
   }
 }
 
-const HOT_RELOAD_SCRIPT = `<script>
-(function(){var es=new EventSource("/_scrml/live-reload");es.addEventListener("reload",function(){location.reload()});es.onerror=function(){es.close();setTimeout(function(){es=new EventSource("/_scrml/live-reload")},2000)};})();
-</script>`;
+/**
+ * The URL the hot-reload client is served from. Inside `/_scrml/`, the namespace
+ * the dev server already owns (`/_scrml/live-reload`, `/_scrml/log`,
+ * `/_scrml/fn/*`), so it cannot collide with an author route.
+ */
+export const HOT_RELOAD_SRC = "/_scrml/hot-reload.js";
 
 /**
- * Inject hot-reload script into HTML before </body> or at end.
+ * The hot-reload client itself. Served AS A FILE at `HOT_RELOAD_SRC`, not
+ * inlined into the page.
+ *
+ * It used to be an inline `<script>`. Once the §40.3 `handle()` onion was
+ * mounted around top-level `scrml dev` dispatch, a `<program headers="strict">`
+ * app's own `handle()` began setting `Content-Security-Policy: default-src
+ * 'self'` (§39.2.5) on dev's HTML responses too — and a browser refuses an
+ * inline script under that policy with no nonce or hash. Hot reload was dead for
+ * every strict-headers app in dev: exactly the "compiler-emitted content refused
+ * by the compiler-pinned CSP" defect this arc set out to remove.
+ *
+ * A same-origin `<script src>` satisfies `default-src 'self'` with no nonce, no
+ * hash, and no CSP widening — the same resolution §38's transition keyframes
+ * took (inline `<style>` injection → an emitted stylesheet).
+ */
+const HOT_RELOAD_JS = `// scrml dev — hot reload client (served at ${HOT_RELOAD_SRC}).
+(function () {
+  var RELOAD_URL = "/_scrml/live-reload";
+  var RETRY_MS = 2000;
+  var es = new EventSource(RELOAD_URL);
+
+  es.addEventListener("reload", function () {
+    location.reload();
+  });
+
+  // The dev server restarts on a port change and drops the stream; reconnect so
+  // the page is not stranded without hot reload.
+  es.onerror = function () {
+    es.close();
+    setTimeout(function () {
+      es = new EventSource(RELOAD_URL);
+    }, RETRY_MS);
+  };
+})();
+`;
+
+const HOT_RELOAD_SCRIPT = `<script src="${HOT_RELOAD_SRC}"></script>`;
+
+/**
+ * The `Response` for `HOT_RELOAD_SRC`. Served BEFORE the compile-failure
+ * short-circuit and before the `handle()` onion — it is the dev server, not the
+ * compiled one, and the compile-error overlay carries the same tag so the page
+ * auto-refreshes the moment the compile succeeds again.
+ * @returns {Response}
+ */
+export function createHotReloadScriptResponse() {
+  return new Response(HOT_RELOAD_JS, {
+    headers: {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
+/**
+ * Inject the hot-reload `<script src>` tag into HTML before </body> or at end.
  * @param {string} html
  * @returns {string}
  */
@@ -751,6 +915,164 @@ export function resolveRootEntryCandidate(opts, serveDir) {
 }
 
 /**
+ * §40.3 — the remainder of the `scrml dev` request pipeline: registered-route
+ * match → static file → 404. This is exactly what `resolve(request)` runs
+ * inside an author's `handle()`.
+ *
+ * Split out of the `fetch` closure so the onion can wrap it (see
+ * `runThroughOnions`). Exported for the dev-server unit tests.
+ *
+ * @param {Request} req
+ * @param {object} server        Bun server handle (WS upgrade routes need it)
+ * @param {string} serveDir      dist directory served as static files
+ * @param {object} opts          dev options (entry-candidate resolution)
+ * @returns {Promise<Response>}
+ */
+export async function devDispatch(req, server, serveDir, opts) {
+  const url = new URL(req.url);
+  const pathname = url.pathname;
+
+  // ------------------------------------------------------------------
+  // Route dispatch — check registered server routes BEFORE static files.
+  //
+  // Match on path (exact) and method (case-insensitive). The path values
+  // emitted by CG look like "/_scrml/fn/functionName" so no prefix strip
+  // is needed — they match the raw pathname directly.
+  //
+  // WebSocket upgrade routes (isWebSocket: true) receive server as the
+  // second argument so they can call server.upgrade(req).
+  // ------------------------------------------------------------------
+  for (const route of registeredRoutes) {
+    if (
+      route.path === pathname &&
+      route.method.toUpperCase() === req.method.toUpperCase()
+    ) {
+      try {
+        // Channel WS upgrade routes need server ref to call server.upgrade()
+        if (route.isWebSocket) return await route.handler(req, server);
+        return await route.handler(req);
+      } catch (err) {
+        console.error(`[dev] Route handler error for ${req.method} ${pathname}: ${err.message}`);
+        return new Response(
+          JSON.stringify({ error: "Internal server error", detail: err.message }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Static file fallback
+  //
+  // mpa-shell-clean-urls (2026-05-17): with the build now stripping
+  // `pages/` from dist paths (api.js pathFor), URLs map directly to
+  // dist files. Resolution order:
+  //   1. exact file (`/foo/bar.js` → `dist/foo/bar.js`)
+  //   2. with .html suffix (`/foo` → `dist/foo.html`)
+  //   3. as directory index (`/foo` → `dist/foo/index.html`)
+  //   4. as trailing-slash directory index (`/foo/` → `dist/foo/index.html`)
+  //   5. (root only) any .html file in dist root
+  // Step 3 + 4 are new — pre-fix only steps 1 + 2 + 5 existed; with
+  // the path strip, nested pages (`pages/foo/index.scrml` →
+  // `dist/foo/index.html`) need directory-index resolution for
+  // `/foo` to land on the right file.
+  // ------------------------------------------------------------------
+  // Normalize trailing slash to fold `/foo/` into `/foo` for the
+  // first probe (the trailing-slash form still resolves via the
+  // directory-index candidate below).
+  const trimmedPathname = (pathname !== "/" && pathname.endsWith("/"))
+    ? pathname.slice(0, -1)
+    : pathname;
+  let staticPathname = trimmedPathname === "/" ? "/index.html" : trimmedPathname;
+
+  // Try, in order: exact file, with .html, as dir/index.html.
+  const candidates = [
+    join(serveDir, staticPathname),
+    join(serveDir, `${staticPathname}.html`),
+    join(serveDir, staticPathname, "index.html"),
+  ];
+
+  for (const candidate of candidates) {
+    const file = Bun.file(candidate);
+    // Bun.file() is lazy — check existence via statSync
+    try {
+      const st = statSync(candidate);
+      if (st.isFile()) {
+        // Inject hot-reload script into HTML responses
+        if (candidate.endsWith(".html")) {
+          const html = await file.text();
+          return new Response(injectHotReloadScript(html), {
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+          });
+        }
+        // adopter-#82 — attach cache headers to static assets + honor
+        // conditional requests. FIX 3 (RFC 7232 §6): If-None-Match, when
+        // present, is authoritative — a mismatch means CHANGED, so we do NOT
+        // fall through to If-Modified-Since (which could 304 a same-second
+        // stale edit). Evaluate IMS only when INM is absent.
+        const headers = devCacheHeaders(candidate, st);
+        const inm = req.headers.get("if-none-match");
+        if (headers.ETag && inm) {
+          if (inm === headers.ETag) return new Response(null, { status: 304, headers });
+        } else if (headers.ETag) {
+          const ims = req.headers.get("if-modified-since");
+          const since = ims ? Date.parse(ims) : NaN;
+          if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
+            return new Response(null, { status: 304, headers });
+          }
+        }
+        return new Response(file, { headers });
+      }
+    } catch { /* not found */ }
+  }
+
+  // Root-only HTML resolution.
+  //
+  // BUG-2 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): PREFER the
+  // compiled entry `<entryBase>.html` for the single-input case BEFORE the
+  // "first .html in dist root" fallback. `scrml dev` does not clean its
+  // output dir, so a leftover `test.html` from a prior session can sit
+  // beside a fresh `req.html`; the old "first .html" scan would serve the
+  // STALE app. When dev compiles a single input file, that file's `.html`
+  // is the canonical index.
+  if (pathname === "/") {
+    const entryCandidate = resolveRootEntryCandidate(opts, serveDir);
+    if (entryCandidate) {
+      try {
+        if (statSync(entryCandidate).isFile()) {
+          const file = Bun.file(entryCandidate);
+          const html = await file.text();
+          return new Response(injectHotReloadScript(html), {
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+          });
+        }
+      } catch { /* entry not emitted yet — fall through to scan */ }
+    }
+
+    // Fallback: serve the first .html file found — handles directory /
+    // multi-input dev mode where there is no single unambiguous entry,
+    // and the common single-file case when the entry candidate is absent.
+    try {
+      // Sort so the "first .html" is deterministic across OS / filesystem
+      // readdir order (g-residual-order-bearing-readdir): two machines must
+      // pick the SAME fallback entry, not whatever the FS returns first.
+      const entries = readdirSync(serveDir).sort();
+      const htmlFile = entries.find(e => e.endsWith(".html"));
+      if (htmlFile) {
+        const fallbackPath = join(serveDir, htmlFile);
+        const file = Bun.file(fallbackPath);
+        const html = await file.text();
+        return new Response(injectHotReloadScript(html), {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+        });
+      }
+    } catch { /* no serve dir yet */ }
+  }
+
+  return new Response("Not found", { status: 404 });
+}
+
+/**
  * Build the Bun.serve() config object including WebSocket support when channels exist.
  *
  * Called initially and after each recompile to update routes/ws handlers.
@@ -778,6 +1100,16 @@ export function buildServeConfig(opts, serveDir) {
       // SSE hot-reload endpoint
       if (pathname === "/_scrml/live-reload") {
         return createSseResponse();
+      }
+
+      // The hot-reload CLIENT. A same-origin `<script src>` rather than an
+      // inline script, so `<program headers="strict">`'s pinned
+      // `default-src 'self'` (§39.2.5) — which the mounted handle() onion now
+      // sets on dev's HTML responses too — accepts it. Served here, ahead of
+      // the compile-failure short-circuit, so the error overlay's copy of the
+      // tag resolves while the project does not compile.
+      if (pathname === HOT_RELOAD_SRC) {
+        return createHotReloadScriptResponse();
       }
 
       // §20.6 (F2=B) — client log() forwarding endpoint. In development the
@@ -818,143 +1150,35 @@ export function buildServeConfig(opts, serveDir) {
       }
 
       // ------------------------------------------------------------------
-      // Route dispatch — check registered server routes BEFORE static files.
+      // §40.3 — everything below this point (route match → static file → 404)
+      // is the handle() onion's DOWNSTREAM. `handle()` PRE runs for EVERY app
+      // request, so a custom-path interception with no author `route=` works
+      // under `scrml dev` exactly as it does under `scrml build`.
       //
-      // Match on path (exact) and method (case-insensitive). The path values
-      // emitted by CG look like "/_scrml/fn/functionName" so no prefix strip
-      // is needed — they match the raw pathname directly.
+      // The dev-infra endpoints above (`/_scrml/live-reload`, `/_scrml/log`,
+      // the CORS preflight, the compile-failure short-circuit) returned
+      // earlier ON PURPOSE — they are the dev server, not the compiled one,
+      // and SPEC §40.3.4 scopes handle() to "the compiled server".
       //
-      // WebSocket upgrade routes (isWebSocket: true) receive server as the
-      // second argument so they can call server.upgrade(req).
+      // WebSocket upgrades are the ONE exclusion: SPEC §40.3.4 says "handle()
+      // does NOT apply to WebSocket upgrade requests. WebSocket lifecycle
+      // handlers use <channel> (§38)." A successful server.upgrade() signals
+      // "do not return a response" by returning undefined, while §40.3.2 types
+      // resolve() as returning a Response — routing an upgrade through the onion
+      // would manufacture one AFTER the protocol switch. Same as the pre-§40.3
+      // behaviour (the `_scrml_route_ws_*` export was never wrapped either).
       // ------------------------------------------------------------------
       for (const route of registeredRoutes) {
         if (
+          route.isWebSocket &&
           route.path === pathname &&
           route.method.toUpperCase() === req.method.toUpperCase()
         ) {
-          try {
-            // Channel WS upgrade routes need server ref to call server.upgrade()
-            if (route.isWebSocket) return await route.handler(req, server);
-            return await route.handler(req);
-          } catch (err) {
-            console.error(`[dev] Route handler error for ${req.method} ${pathname}: ${err.message}`);
-            return new Response(
-              JSON.stringify({ error: "Internal server error", detail: err.message }),
-              { status: 500, headers: { "Content-Type": "application/json" } },
-            );
-          }
+          return await route.handler(req, server);
         }
       }
 
-      // ------------------------------------------------------------------
-      // Static file fallback
-      //
-      // mpa-shell-clean-urls (2026-05-17): with the build now stripping
-      // `pages/` from dist paths (api.js pathFor), URLs map directly to
-      // dist files. Resolution order:
-      //   1. exact file (`/foo/bar.js` → `dist/foo/bar.js`)
-      //   2. with .html suffix (`/foo` → `dist/foo.html`)
-      //   3. as directory index (`/foo` → `dist/foo/index.html`)
-      //   4. as trailing-slash directory index (`/foo/` → `dist/foo/index.html`)
-      //   5. (root only) any .html file in dist root
-      // Step 3 + 4 are new — pre-fix only steps 1 + 2 + 5 existed; with
-      // the path strip, nested pages (`pages/foo/index.scrml` →
-      // `dist/foo/index.html`) need directory-index resolution for
-      // `/foo` to land on the right file.
-      // ------------------------------------------------------------------
-      // Normalize trailing slash to fold `/foo/` into `/foo` for the
-      // first probe (the trailing-slash form still resolves via the
-      // directory-index candidate below).
-      const trimmedPathname = (pathname !== "/" && pathname.endsWith("/"))
-        ? pathname.slice(0, -1)
-        : pathname;
-      let staticPathname = trimmedPathname === "/" ? "/index.html" : trimmedPathname;
-
-      // Try, in order: exact file, with .html, as dir/index.html.
-      const candidates = [
-        join(serveDir, staticPathname),
-        join(serveDir, `${staticPathname}.html`),
-        join(serveDir, staticPathname, "index.html"),
-      ];
-
-      for (const candidate of candidates) {
-        const file = Bun.file(candidate);
-        // Bun.file() is lazy — check existence via statSync
-        try {
-          const st = statSync(candidate);
-          if (st.isFile()) {
-            // Inject hot-reload script into HTML responses
-            if (candidate.endsWith(".html")) {
-              const html = await file.text();
-              return new Response(injectHotReloadScript(html), {
-                headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-              });
-            }
-            // adopter-#82 — attach cache headers to static assets + honor
-            // conditional requests. FIX 3 (RFC 7232 §6): If-None-Match, when
-            // present, is authoritative — a mismatch means CHANGED, so we do NOT
-            // fall through to If-Modified-Since (which could 304 a same-second
-            // stale edit). Evaluate IMS only when INM is absent.
-            const headers = devCacheHeaders(candidate, st);
-            const inm = req.headers.get("if-none-match");
-            if (headers.ETag && inm) {
-              if (inm === headers.ETag) return new Response(null, { status: 304, headers });
-            } else if (headers.ETag) {
-              const ims = req.headers.get("if-modified-since");
-              const since = ims ? Date.parse(ims) : NaN;
-              if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
-                return new Response(null, { status: 304, headers });
-              }
-            }
-            return new Response(file, { headers });
-          }
-        } catch { /* not found */ }
-      }
-
-      // Root-only HTML resolution.
-      //
-      // BUG-2 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): PREFER the
-      // compiled entry `<entryBase>.html` for the single-input case BEFORE the
-      // "first .html in dist root" fallback. `scrml dev` does not clean its
-      // output dir, so a leftover `test.html` from a prior session can sit
-      // beside a fresh `req.html`; the old "first .html" scan would serve the
-      // STALE app. When dev compiles a single input file, that file's `.html`
-      // is the canonical index.
-      if (pathname === "/") {
-        const entryCandidate = resolveRootEntryCandidate(opts, serveDir);
-        if (entryCandidate) {
-          try {
-            if (statSync(entryCandidate).isFile()) {
-              const file = Bun.file(entryCandidate);
-              const html = await file.text();
-              return new Response(injectHotReloadScript(html), {
-                headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-              });
-            }
-          } catch { /* entry not emitted yet — fall through to scan */ }
-        }
-
-        // Fallback: serve the first .html file found — handles directory /
-        // multi-input dev mode where there is no single unambiguous entry,
-        // and the common single-file case when the entry candidate is absent.
-        try {
-          // Sort so the "first .html" is deterministic across OS / filesystem
-          // readdir order (g-residual-order-bearing-readdir): two machines must
-          // pick the SAME fallback entry, not whatever the FS returns first.
-          const entries = readdirSync(serveDir).sort();
-          const htmlFile = entries.find(e => e.endsWith(".html"));
-          if (htmlFile) {
-            const fallbackPath = join(serveDir, htmlFile);
-            const file = Bun.file(fallbackPath);
-            const html = await file.text();
-            return new Response(injectHotReloadScript(html), {
-              headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-            });
-          }
-        } catch { /* no serve dir yet */ }
-      }
-
-      return new Response("Not found", { status: 404 });
+      return runThroughOnions(req, (request) => devDispatch(request, server, serveDir, opts));
     },
   };
 

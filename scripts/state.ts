@@ -347,6 +347,9 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
 
 // ── WRITE mode (Fork 3B) ─────────────────────────────────────────────────────
 function runWrite(): number {
+  // The write path is where a hollow value becomes PERMANENT — guard it first.
+  refuseDegenerateProjection();
+  refuseUnparsedDeltaEntries();
   // Group sections by file so each file is read/written once (idempotent across multiple sections).
   const byFile = new Map<string, GenSection[]>();
   for (const s of GEN_SECTIONS) {
@@ -395,7 +398,60 @@ function runWrite(): number {
 // (a different seam), so the future pa.md wrap-gate should NOT block doc-currency on map staleness —
 // it prints the maps line for visibility but does not gate on it yet. (TODO future pa.md wrap-gate:
 // decide whether to promote maps-behind to a hard fail once map-refresh joins the wrap flow.)
+/**
+ * REFUSE A DEGENERATE PROJECTION (S364).
+ *
+ * `gapCounts()` already fails loudly on an UNCLASSIFIABLE marker status — but not on NO MARKERS AT
+ * ALL, which is the shape a truncation or a marker-syntax drift produces. Measured: a
+ * known-gaps.md holding its anchors and zero `@gap` tokens made `--write` record
+ * `HIGH 0 / MED 0 / LOW 0 / Nominal 0` at exit 0, after which `--check` reported
+ * "PASS — all @generated sections current" at exit 0. The projection agreed with itself about
+ * nothing, forever.
+ *
+ * `high === 0` is a legitimate state (a repo can genuinely have no open HIGHs). ZERO TOKENS
+ * PARSED from a non-empty ledger is not — it means the parser stopped seeing the population, not
+ * that the population emptied. Same for the session index. Exit 2, distinct from the staleness
+ * exit 1: this is "the instrument is not reading the ledger", not "the ledger moved on".
+ *
+ * Sibling of the guard in scripts/facts.ts; both mirror scripts/browser-baseline.ts's refusal.
+ */
+function refuseDegenerateProjection(): void {
+  const problems: string[] = [];
+
+  const gapsText = readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
+  const g = gapCounts();
+  if (g.tokens.length === 0 && gapsText.trim().length > 0) {
+    problems.push(
+      `docs/known-gaps.md is ${gapsText.length} bytes but yielded ZERO @gap markers — ` +
+        `the marker parser sees no population at all`,
+    );
+  }
+
+  // NOT `.length === 0`: recentSessions() never returns an empty string. Its zero-population path
+  // returns NO_SESSIONS_SENTINEL, so the empty-string test was unreachable and this half of the
+  // guard was dead from the day it was written. The degenerate value has a name; test for the name.
+  const sessions = recentSessions(8).trim();
+  if (sessions.length === 0 || sessions === NO_SESSIONS_SENTINEL) {
+    problems.push(
+      `master-list.md's recent-session index yielded ZERO session-wrap anchors ` +
+        `(the parser scanned 600 commits and matched none) — the session parser sees no population at all`,
+    );
+  }
+
+  if (problems.length === 0) return;
+  console.error("state: MEASURED ZERO — refusing to record or compare.\n");
+  for (const p of problems) console.error(`  ${p}`);
+  console.error(
+    `\n  A count of zero over a NON-EMPTY ledger is a broken projection, not a fact. Recording it\n` +
+      `  would make --check agree with the hollow value forever (the hollow-gate shape).\n` +
+      `  Most likely cause: a marker-syntax drift, a truncated ledger, or running outside the repo.`,
+  );
+  process.exit(2);
+}
+
 function runCheck(): number {
+  refuseDegenerateProjection();
+  refuseUnparsedDeltaEntries();
   const stale: string[] = [];
   const missing: string[] = [];
   const ok: string[] = [];
@@ -499,6 +555,18 @@ function sessionNumOf(subj: string): string | null {
   const m = subj.match(/\(s(\d+)\)/i);
   return m ? m[1] : null;
 }
+/**
+ * What `recentSessions()` yields when the git log surfaces NO session-wrap commits at all.
+ *
+ * Named rather than inlined because `refuseDegenerateProjection()` compares against it, and a
+ * literal duplicated across a producer and its guard is exactly how that guard went dead the first
+ * time: the guard was written as `sessions.trim().length === 0`, but this function has only two
+ * returns and BOTH are non-empty — so the condition could never be true. Zero sessions took the
+ * sentinel path, `--write` recorded the sentinel over the forensic index, and `--check` then
+ * agreed with it at exit 0 forever. One constant, two references, no drift.
+ */
+const NO_SESSIONS_SENTINEL = "_(no session-wrap commits found)_";
+
 function recentSessions(n: number): string {
   const r = sh("git", ["log", "--pretty=%h %s", "-n", "600"]);
   const seen = new Set<string>();
@@ -514,7 +582,7 @@ function recentSessions(n: number): string {
     picked.push({ sha, subj });
     if (picked.length >= n) break;
   }
-  if (picked.length === 0) return "_(no session-wrap commits found)_";
+  if (picked.length === 0) return NO_SESSIONS_SENTINEL;
   const lines: string[] = [];
   for (const { sha, subj } of picked) {
     const pushed = sh("git", ["merge-base", "--is-ancestor", sha, "origin/main"]).ok
@@ -568,21 +636,91 @@ function mapsStaleness() {
 // ── delta-log projection (the volatile PA-state stream) ─────────────────────────
 // Parse handOffs/delta-log.md: the LATEST `## Session` section's `[N] kind · body` entries.
 // Returns recent rulings + recent activity + the last seq. Pure file-read projection (no test run).
-function deltaLog() {
-  let text = "";
-  try { text = readFileSync(`${ROOT}/handOffs/delta-log.md`, "utf8"); } catch { return null; }
-  const parts = text.split(/^## Session /m);
-  const latest = parts[parts.length - 1] ?? text;
-  const sessHeader = "S" + (latest.split("\n")[0] ?? "").trim();
+//
+// KEEP IN LOCKSTEP WITH scripts/delta-lint.ts (S365). The gate and this projection MUST measure the
+// same population: the gate is what certifies that no entry is silently dropped from what this
+// function feeds. When they diverged — the convention drifted to `[NNNN] <emoji> <kind> · body` and
+// neither regex accepted it — FOUR live entries ([561] [562] [565] [727]) vanished from BOTH the
+// duplicate check and the digest, while the gate printed PASS at exit 0.
+//
+// The optional marker is captured and DISCARDED here on purpose: `kind` drives the rulings and
+// activity filters below (`kind.includes("rule")`, `/disp|land|find|state/`), so folding an emoji
+// into it would leave those four entries parsed-but-mis-bucketed — a quieter version of the same
+// drop. See scripts/delta-lint.ts for why the widen is deliberately narrow.
+const DELTA_ENTRY = /^\[(?<seq>\d+)\]\s+(?:(?<marker>[^\w\s]\S*)\s+)?(?<kind>\S+)\s+·\s+(?<body>.*)$/;
+const DELTA_BRACKETED = /^\[\d+\]/;
+
+/**
+ * The delta-log parser, PURE and EXPORTED (S365) — same reason parseGapMarkers is: "a gate that
+ * cannot be exercised from a test is the pa-base §8 unproven gate; making the parser importable is
+ * what lets its silent-drop guard be pinned" (S307, twelve lines up the file). This parser had the
+ * silent drop, so it gets the same treatment.
+ */
+export function parseDeltaLog(text: string) {
+  // Line-indexed scoping (was: split on /^## Session /m). Same scope — the LAST session section —
+  // but it yields real FILE line numbers, which the unparsed-line diagnostic below needs in order to
+  // name an offending line the operator can go and look at.
+  const all = text.split("\n");
+  const lastHeader = all.reduce((acc, ln, i) => (/^## Session /.test(ln) ? i : acc), -1);
+  const sessHeader =
+    "S" + (lastHeader >= 0 ? all[lastHeader].replace(/^## Session /, "") : (all[0] ?? "")).trim();
+  const scopeStart = lastHeader + 1;
+
   const entries: { seq: number; kind: string; body: string }[] = [];
-  for (const ln of latest.split("\n")) {
-    const m = ln.match(/^\[(\d+)\]\s+(\S+)\s+·\s+(.*)$/);
-    if (m) entries.push({ seq: parseInt(m[1], 10), kind: m[2], body: m[3] });
+  const unparsed: number[] = [];                   // bracketed but unmatched — FILE line numbers (1-based)
+  let bracketed = 0;
+  for (let i = scopeStart; i < all.length; i++) {
+    if (!DELTA_BRACKETED.test(all[i])) continue;
+    bracketed++;
+    const m = all[i].match(DELTA_ENTRY);
+    if (!m) { unparsed.push(i + 1); continue; }
+    entries.push({ seq: parseInt(m.groups!.seq, 10), kind: m.groups!.kind, body: m.groups!.body });
   }
   const lastSeq = entries.length ? entries[entries.length - 1].seq : null;
   const rulings = entries.filter((e) => e.kind.includes("rule")).slice(-5);
   const activity = entries.filter((e) => /disp|land|find|state/.test(e.kind)).slice(-6);
-  return { sessHeader, lastSeq, rulings, activity, total: entries.length };
+  // `entries` is returned alongside the two filtered slices so the parse itself is assertable —
+  // rulings/activity are `.slice(-5)`/`.slice(-6)` views, and pinning a parser only through
+  // truncated views is how a capture regression hides. No caller is obliged to read it.
+  return { sessHeader, lastSeq, entries, rulings, activity, total: entries.length, bracketed, unparsed, scopeStart };
+}
+
+function deltaLog() {
+  let text = "";
+  try { text = readFileSync(`${ROOT}/handOffs/delta-log.md`, "utf8"); } catch { return null; }
+  return parseDeltaLog(text);
+}
+
+/**
+ * REFUSE A PARTIALLY-PARSED DELTA-LOG (S365) — sibling of refuseDegenerateProjection().
+ *
+ * refuseDegenerateProjection() catches a population that reads ZERO. This catches one that reads
+ * SOME, which is both likelier and quieter: partial blindness READS HEALTHIER the more entries
+ * still parse, so the digest simply shows fewer rulings and nobody notices. That is not a
+ * hypothetical — it was the live state of `handOffs/delta-log.md` while `scripts/delta-lint.ts`,
+ * the gate built to prevent exactly this, reported clean.
+ *
+ * The invariant is the gate's: every line in the live scope opening with `[NNNN]` is either PARSED
+ * or REPORTED. Exit 2 — "the instrument is not reading the ledger", not "the ledger moved on".
+ */
+function refuseUnparsedDeltaEntries(): void {
+  const dl = deltaLog();
+  if (!dl || dl.unparsed.length === 0) return;
+
+  console.error("state: PARTIAL PARSE — refusing to project a delta-log it can only half see.\n");
+  console.error(
+    `  handOffs/delta-log.md: ${dl.bracketed} line(s) in the live scope (from line ${dl.scopeStart + 1}) ` +
+      `start with [NNNN],\n  but only ${dl.total} matched the entry shape. ` +
+      `${dl.unparsed.length} line(s) are being dropped from the digest:`,
+  );
+  for (const ln of dl.unparsed) console.error(`    line ${ln}`);
+  console.error(
+    `\n  Those entries are absent from the rulings/activity projection and from \`delta-seq\`.\n` +
+      `  scripts/delta-lint.ts parses the SAME shape and refuses on the same condition — repair the\n` +
+      `  offending lines, or widen DELTA_ENTRY here AND the gate's ENTRY together. They must stay in\n` +
+      `  lockstep or the gate certifies a population the digest never sees.`,
+  );
+  process.exit(2);
 }
 
 function fmtEntry(e: { seq: number; kind: string; body: string }): string {
@@ -656,6 +794,13 @@ function digest(): string {
 }
 
 function runDigest(): number {
+  // S365: the digest IS the delta-log's consumer of record — the PA reads it at session-start and
+  // trusts it when the head stamp matches. Writing a digest whose rulings/activity silently omit
+  // entries is the hollow-projection shape, so the same refusal that guards --write and --check
+  // guards the digest write too. (Only the delta-log guard: whether the digest should also carry
+  // refuseDegenerateProjection()'s known-gaps/session-anchor checks is a separate, pre-existing
+  // question and is NOT settled here.)
+  refuseUnparsedDeltaEntries();
   const out = digest();
   const path = `${ROOT}/handOffs/digest.md`;
   writeFileSync(path, out + "\n");

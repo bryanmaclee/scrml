@@ -13,13 +13,15 @@
  *   §5  broadcastReload() sends "event: reload" to all connected clients
  *   §6  broadcastReload() removes dead controllers silently (enqueue throws)
  *   §7  broadcastReload() is a no-op when sseClients is empty
- *   §8  injectHotReloadScript() inserts script before </body>
- *   §9  injectHotReloadScript() appends script when </body> is absent
+ *   §8  injectHotReloadScript() inserts the tag before </body>
+ *   §9  injectHotReloadScript() appends the tag when </body> is absent
  *   §10 injectHotReloadScript() inserts before the LAST </body> (nested docs)
- *   §11 injected script contains EventSource('/_scrml/live-reload')
- *   §12 injected script calls location.reload() on reload event
+ *   §11 the SERVED hot-reload client contains EventSource('/_scrml/live-reload')
+ *   §12 the SERVED hot-reload client calls location.reload() on reload event
  *   §13 broadcastReload() sends to multiple clients
  *   §14 sseClients is a Set (can check size externally)
+ *   §18 the hot-reload client is a same-origin <script src>, NOT inline —
+ *       `default-src 'self'` (§39.2.5) refuses an inline script with no nonce
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
@@ -27,10 +29,16 @@ import {
   createSseResponse,
   broadcastReload,
   injectHotReloadScript,
+  createHotReloadScriptResponse,
+  HOT_RELOAD_SRC,
   sseClients,
   deriveWatchFiles,
   resolveRootEntryCandidate,
+  loadServerRoutes,
+  buildServeConfig,
+  noteCompileResult,
 } from "../../src/commands/dev.js";
+import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -194,10 +202,10 @@ describe("§7 broadcastReload() no-op on empty clients", () => {
 // ---------------------------------------------------------------------------
 
 describe("§8 injectHotReloadScript() before </body>", () => {
-  test("inserts script before </body>", () => {
+  test("inserts the <script src> tag before </body>", () => {
     const html = "<html><body><h1>Hello</h1></body></html>";
     const result = injectHotReloadScript(html);
-    const scriptIdx = result.indexOf("<script>");
+    const scriptIdx = result.indexOf(`<script src="${HOT_RELOAD_SRC}">`);
     const bodyCloseIdx = result.indexOf("</body>");
     expect(scriptIdx).toBeGreaterThan(-1);
     expect(scriptIdx).toBeLessThan(bodyCloseIdx);
@@ -219,7 +227,7 @@ describe("§9 injectHotReloadScript() appends when no </body>", () => {
     const html = "<h1>Bare fragment</h1>";
     const result = injectHotReloadScript(html);
     expect(result.startsWith(html)).toBe(true);
-    expect(result).toContain("<script>");
+    expect(result).toContain(`<script src="${HOT_RELOAD_SRC}">`);
   });
 });
 
@@ -233,33 +241,31 @@ describe("§10 injectHotReloadScript() uses last </body>", () => {
     const html = "<html><body><p>inner</p></body><body><p>outer</p></body></html>";
     const result = injectHotReloadScript(html);
     const lastBodyClose = result.lastIndexOf("</body>");
-    const scriptIdx = result.lastIndexOf("<script>");
+    const scriptIdx = result.lastIndexOf(`<script src="${HOT_RELOAD_SRC}">`);
     expect(scriptIdx).toBeLessThan(lastBodyClose);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §11 — injected script references /_scrml/live-reload
+// §11 — the SERVED hot-reload client references /_scrml/live-reload
 // ---------------------------------------------------------------------------
 
-describe("§11 injected script EventSource URL", () => {
-  test("script contains EventSource with correct URL", () => {
-    const html = "<html><body></body></html>";
-    const result = injectHotReloadScript(html);
-    expect(result).toContain("/_scrml/live-reload");
-    expect(result).toContain("EventSource");
+describe("§11 served hot-reload client EventSource URL", () => {
+  test("the served script body contains EventSource with the correct URL", async () => {
+    const js = await createHotReloadScriptResponse().text();
+    expect(js).toContain("/_scrml/live-reload");
+    expect(js).toContain("EventSource");
   });
 });
 
 // ---------------------------------------------------------------------------
-// §12 — injected script calls location.reload()
+// §12 — the SERVED hot-reload client calls location.reload()
 // ---------------------------------------------------------------------------
 
-describe("§12 injected script reload behavior", () => {
-  test("script contains location.reload()", () => {
-    const html = "<html><body></body></html>";
-    const result = injectHotReloadScript(html);
-    expect(result).toContain("location.reload()");
+describe("§12 served hot-reload client reload behavior", () => {
+  test("the served script body contains location.reload()", async () => {
+    const js = await createHotReloadScriptResponse().text();
+    expect(js).toContain("location.reload()");
   });
 });
 
@@ -446,6 +452,91 @@ describe("§17 resolveRootEntryCandidate() prefers the compiled entry", () => {
       expect(candidate).not.toContain("aaa-stale");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §18 — `headers="strict"` + `scrml dev`: the hot-reload client must be a
+//       same-origin `<script src>`, never an inline script.
+//
+// Once the §40.3 `handle()` onion was mounted around top-level `scrml dev`
+// dispatch, a `<program headers="strict">` app's own `handle()` began setting
+// `Content-Security-Policy: default-src 'self'` (§39.2.5) on dev's HTML
+// responses. A browser refuses an inline `<script>` under that policy with no
+// nonce and no hash, so hot reload was dead for every strict-headers app in dev
+// — compiler-emitted content refused by the compiler-pinned CSP, the exact
+// defect class this arc set out to remove.
+//
+// This EXECUTES the dev server's own dispatch (`buildServeConfig().fetch`) on a
+// REAL compiled strict-headers app and inspects the actual response, rather than
+// asserting on the template string.
+// ---------------------------------------------------------------------------
+
+describe("§18 headers=strict — the dev hot-reload client satisfies default-src 'self'", () => {
+  /** Compile a `<program headers="strict">` app and mount it the way `scrml dev` does. */
+  async function serveStrictApp() {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-dev-csp-"));
+    const src = join(dir, "app.scrml");
+    writeFileSync(src, ['<program headers="strict">', "  <h1>Hi</h1>", "</program>", ""].join("\n"));
+    const outputDir = join(dir, "dist");
+    const result = compileScrml({ inputFiles: [src], write: true, outputDir, log: () => {} });
+    const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
+    noteCompileResult({ errors: [], warnings: [] });
+    await loadServerRoutes(outputDir);
+    return { dir, errors, config: buildServeConfig({ port: 0 }, outputDir) };
+  }
+
+  /** Clear the module-private dev registries so sibling test files start clean. */
+  async function resetDevRegistries() {
+    const empty = mkdtempSync(join(tmpdir(), "scrml-dev-csp-empty-"));
+    await loadServerRoutes(empty);
+    noteCompileResult({ errors: [], warnings: [] });
+    rmSync(empty, { recursive: true, force: true });
+  }
+
+  test("the served page pins the CSP and carries ZERO inline scripts", async () => {
+    const { dir, errors, config } = await serveStrictApp();
+    try {
+      expect(errors).toEqual([]);
+      const res = await config.fetch(
+        new Request("http://localhost/", { headers: { accept: "text/html" } }),
+        { upgrade: () => false },
+      );
+      expect(res.status).toBe(200);
+      // The onion really is mounted — this is the policy that used to refuse us.
+      expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
+
+      const body = await res.text();
+      // A `<script>` with no `src=` is what `default-src 'self'` refuses.
+      const inline = body.match(/<script(?![^>]*\bsrc=)[^>]*>/g) || [];
+      expect(inline).toEqual([]);
+      // ...and the hot-reload client is present as a same-origin external script.
+      expect(body).toContain(`<script src="${HOT_RELOAD_SRC}"></script>`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      await resetDevRegistries();
+    }
+  });
+
+  test("the referenced script URL actually serves an executable client", async () => {
+    const { dir, config } = await serveStrictApp();
+    try {
+      const res = await config.fetch(
+        new Request(`http://localhost${HOT_RELOAD_SRC}`),
+        { upgrade: () => false },
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("javascript");
+      const js = await res.text();
+      expect(js).toContain("EventSource");
+      expect(js).toContain("location.reload()");
+      // It is executed by the browser as a classic script — so it must PARSE.
+      // (S265: "the marker is present" is not the same claim as "it runs".)
+      expect(() => new Function(js)).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      await resetDevRegistries();
     }
   });
 });

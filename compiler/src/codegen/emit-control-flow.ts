@@ -2062,6 +2062,25 @@ function emitMultiScrutineeMatch(
   }
 
   lines.push(`})()`);
+
+  // IIFE-header async scan — mirror the single-scrutinee path (emitMatchExpr,
+  // ~:2469). An arm body may inject `await` into this otherwise-sync client IIFE:
+  // a server call in a block-tail arm (the pre-existing `_awaitMatchArmServerCalls`
+  // at ~:2121) OR — since the object-literal arm now also routes through that same
+  // wrap — a server call inside an object arm (`(a,b) :> { rows: queryUsers() }`).
+  // The header set at the top of this function is statically sync for client mode,
+  // so without this scan a client multi-scrutinee match with such an arm stranded
+  // an `await` in a non-async function → E-CODEGEN-INVALID-LOGIC. Read the emitted
+  // bytes (not a re-derived predicate) exactly as the single-scrutinee path does:
+  // any `await` in code position makes the IIFE `await (async function(){…})()`.
+  // Fail-safe direction matches the sibling scan — a false positive is a needless
+  // (valid) async IIFE; a false negative is a broken bundle.
+  const _multiBodyHasAwait = lines
+    .slice(1)
+    .some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
+  lines[0] = (matchMode === "server" || _multiBodyHasAwait)
+    ? `await (async function() {`
+    : `(function() {`;
   return lines.join("\n");
 }
 
@@ -2096,16 +2115,41 @@ function emitIifeBlockArmBody(
   opts: any,
 ): string {
   const inner = result.trim().slice(1, -1).trim();
-  if (!inner) return prelude ? `{ ${prelude.trimEnd()} }` : `{}`;
-  // Object-literal arm (`1 :> { x: 1 }`) — a VALUE, not a statement block. The
-  // decl path (emit-logic.ts:emitMatchExprDecl) uses the same parser-based
-  // `_matchArmResultIsBlockBody` gate to keep object literals off the block
-  // lowering; mirror it here so object-literal arms stay BYTE-IDENTICAL to the
-  // pre-fix `rewriteBlockBody(inner)` emission (the non-regression fence). Only a
-  // genuine `{ statement* expression? }` block reaches the tail-lift below.
+  // Object-literal arm (`1 :> { x: 1 }`, INCLUDING the empty object `1 :> {}`) —
+  // a VALUE expression, not a statement block (`_matchArmResultIsBlockBody`
+  // returns false: the scrml parser resolves it to an `object` node). It MUST be
+  // emitted in RETURN position, because an object literal emitted BARE (`{ x: 1 }`
+  // / `{}`) is read by JS as a labeled-statement block / empty block — the IIFE
+  // then falls off its end and the fn silently returns `undefined`
+  // (g-library-fn-match-object-or-block-arm-body-returns-undefined; the pre-fix
+  // `{ rewriteBlockBody(inner) }` emission had exactly this defect). This check
+  // runs BEFORE the empty-`inner` guard below so an empty OBJECT `{}` returns `{}`
+  // (parity with the decl path) rather than being intercepted as a void block.
+  // Mirror the bare-value arm path (`return emitExprField(...)`, ~:2415) and the
+  // decl/tilde path (emit-logic.ts:4984 — `_scrml_tilde = { x: 1 }`, expression
+  // position), which already lower this shape correctly (cross-mode parity, §18).
+  // `emitExprField` over the WHOLE `result` lowers the object literal (rewriting
+  // any `@name` reactive get inside it) exactly as the decl RHS and value-arm
+  // paths do, and the result is wrapped in `_awaitMatchArmServerCalls` — the SAME
+  // auto-await (§13.2 / §19.9.3) the decl path (:4984) and the block-tail path
+  // (~:2121) apply, so a server call inside the object (`{ rows: queryUsers() }`)
+  // is awaited, not shipped as a bare Promise. `_awaitMatchArmServerCalls` is a
+  // no-op when no server call / async scope is present. Only a genuine
+  // `{ statement* expression? }` block reaches the tail-lift below.
   if (!_matchArmResultIsBlockBody(result)) {
-    return `{ ${prelude}${rewriteBlockBody(inner, null, engineCtx, matchMode)} }`;
+    const objRhs = _awaitMatchArmServerCalls(emitExprField(null, result, matchCtx), opts ?? {});
+    return `{ ${prelude}return ${objRhs}; }`;
   }
+  // Empty-inner fallthrough guard → §18.5 void. NB: an empty OBJECT `{}` / `{ }`
+  // never reaches here — it is an `object` node, intercepted by the return-position
+  // branch above; do NOT move this guard back before that branch or `{}` silently
+  // returns undefined again (the exact regression this ordering exists to prevent).
+  // With the object branch ahead of it, this is now near-unreachable: a block with
+  // any content (`{ ; }`, comment-only) has non-empty `inner`, and truly-empty
+  // braces are objects. It is kept as a defensive fallback for the lone residual
+  // case — empty-brace input the expr parser FAILS to resolve to an object node
+  // (so `_matchArmResultIsBlockBody` returns true) — which then voids, correctly.
+  if (!inner) return prelude ? `{ ${prelude.trimEnd()} }` : `{}`;
   const plan = planBlockArmLift(inner);
   if (plan.tail === null) {
     // No trailing value expression → §18.5 void. Emit the block verbatim

@@ -96,10 +96,26 @@ function discover(roots) {
 
 const files = discover(corpus);
 
+// REFUSE AN EMPTY CORPUS (S364). This previously exited 0 — a gate reporting
+// success while compiling nothing. It is a BLOCKING CI check, so the failure
+// mode was: rename `docs/website`, and the most-read public surface leaves the
+// gate silently while CI stays green. The gate's own header already records this
+// exact class one directory over ("the S101 README gate has reported green since
+// 2026-05-18 while checking nothing"); it had the shape itself.
+//
+// Zero discovered files is never a legitimate success. It means a declared root
+// was renamed away, the extension filter drifted, or an explicit path argument
+// was wrong — every one of which is a thing to hear about. Mirrors
+// scripts/browser-baseline.ts's refusal, which is the reference pattern here.
 if (files.length === 0) {
-  console.log("snippet-gate: no .scrml files discovered in the declared corpus.");
-  console.log(`  corpus: ${corpus.join(", ")}`);
-  process.exit(0);
+  console.error("snippet-gate: NO .scrml FILES DISCOVERED — refusing to report success.");
+  console.error("  A gate that compiled nothing has verified nothing (that is the hollow-gate shape).");
+  console.error(`  corpus: ${corpus.join(", ")}`);
+  for (const r of corpus) {
+    console.error(`    ${existsSync(r) ? "exists but holds no .scrml" : "DOES NOT EXIST"}  ${r}`);
+  }
+  console.error("  Most likely cause: a declared corpus root was renamed or moved.");
+  process.exit(1);
 }
 
 if (listOnly) {

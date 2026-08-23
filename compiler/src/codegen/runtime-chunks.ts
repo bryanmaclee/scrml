@@ -8,7 +8,7 @@
  * feature group. Chunks are assembled in `emit-client.ts` based on what the
  * compiled scrml file actually uses.
  *
- * Always-included chunks: 'core', 'scope', 'errors', 'transitions'
+ * Always-included chunks: 'core', 'scope', 'errors'
  * (Pre-populated in makeCompileContext() in context.ts.)
  *
  * Conditionally-included chunks: all others.
@@ -49,7 +49,9 @@
  *                 timing still flows through the `_scrml_throttle_state` +
  *                 `_scrml_reactive_debounced`/`_scrml_reactive_throttled` path.)
  *   meta          _scrml_meta_emit, _scrml_tracking_stack, _scrml_meta_effect
- *   transitions   Transition CSS injection IIFE (scrml-fade/slide/fly animations)
+ *   (transitions  RETIRED — the §38 keyframes moved to the emitted stylesheet,
+ *                 codegen/emit-transition-css.ts. An inline <style> is refused
+ *                 under `headers="strict"`'s `default-src 'self'`, §39.2.5.)
  *   errors        _ScrmlError, NetworkError, ValidationError, SQLError, AuthError, etc.
  *   input         _scrml_input_keyboard/mouse/gamepad_create/destroy
  *   equality      _scrml_structural_eq
@@ -135,7 +137,6 @@ export const RUNTIME_CHUNK_ORDER = [
   'vendor-ref',
   'modules',
   'meta',
-  'transitions',
   'errors',
   'input',
   'equality',
@@ -233,7 +234,6 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   "vendor-ref":   "§41 vendor-unit reference registry (chunk: 'vendor-ref')",
   modules:        "§21.3 cross-file module registry (chunk: 'modules')",
   meta:           '§22.5 meta.emit() runtime',
-  transitions:    'Transition CSS injection',
   errors:         '§19 Built-in error types',
   input:          '§35.1 Global input state registry',
   equality:       '§45 Structural equality',

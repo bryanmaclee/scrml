@@ -67,6 +67,7 @@ exists (the browser-harness is a working prototype of two-thirds of it):
     "notCodes":       ["E-IMPORT-006"],      // ABSENCE (exact code)
     "notCodePrefixes":["E-FORMFOR-"],        // ABSENCE of a whole family (glob)
     "severity":       { "W-CG-001": "warning" }, // per-code §34 partition assertion
+    "codeCounts":     { "E-ERROR-005": 1 },  // EXACT per-code occurrence count (optional)
     // (b) runtime-effect half ----------------------------------------------
     "input":       [{ "click": "#inc" }, { "click": "#inc" }],
     "state":       { "count": 2 },           // merged {cells, derived} ⊇ this
@@ -93,6 +94,19 @@ exists (the browser-harness is a working prototype of two-thirds of it):
   FAILS (it is a warning), catching the `result.errors.filter(...)` silent-pass
   trap. The adapter unions codes across BOTH streams (a `W-`/`I-` code lands only
   in `result.warnings`).
+- `codeCounts` — per-code **EXACT OCCURRENCE COUNT**, the one assertion here that
+  is not set-valued. `codes` and `notCodes` both compare SETS, so a code firing
+  TWICE is literally the same observation as a code firing once, and a double
+  fire cannot be expressed at all. `codeCounts: {"E-ERROR-005": 1}` asserts the
+  code fired exactly once. `0` is legal and meaningful (a strictly stronger
+  `notCodes`); codes NOT listed stay unconstrained, so the key composes with the
+  superset contract rather than replacing it.
+
+  **OPTIONAL and purely ADDITIVE** — a case without the key is checked exactly as
+  it was before the key existed. Reach for it when the contract says *how many*:
+  §4.12.3's nested-program rule is "ONE diagnostic per unbuilt declaration, never
+  two, never none", and the "never two" half has no other home in this harness.
+  A malformed value (non-integer, negative) is a HARD failure, never a skip.
 
 ### (b) Runtime-half matching
 

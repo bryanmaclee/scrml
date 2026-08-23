@@ -63,7 +63,6 @@ export interface CompileContext {
    *   - 'core'        — _scrml_reactive_get/set/subscribe (used everywhere)
    *   - 'scope'       — _scrml_register_cleanup, _scrml_destroy_scope (used by timers, meta, input)
    *   - 'errors'      — built-in error classes (NetworkError, ValidationError, etc.)
-   *   - 'transitions' — CSS animation injection IIFE (small, needed by any conditional display)
    *
    * All other chunks are conditionally added by detectRuntimeChunks() in
    * emit-client.ts based on AST feature usage.
@@ -83,7 +82,7 @@ export interface CompileContext {
    *
    * SPEC §21.8 + §51.0.D — cross-file engine import via `<EngineName/>`.
    */
-  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
+  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; returnsMarkup?: boolean }>> | null;
   /**
    * known-gaps-#6 (S152) — MOD's `importGraph` plumbed into codegen so the
    * cross-file client module-loading lowering (Approach B, §21.3) can:
@@ -253,11 +252,12 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // Always-included runtime chunks. Additional chunks are added by
     // detectRuntimeChunks() in emit-client.ts based on feature usage.
     //
-    // 'transitions' is always included because the animation keyframes
-    // are needed by any conditional display with transition directives,
-    // and detecting transition usage from the AST requires inspecting
-    // the binding registry which may not be populated at context creation time.
-    usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope', 'errors', 'transitions']),
+    // 'transitions' was here too, always shipped, because the §38 animation
+    // keyframes were injected by a runtime IIFE. They now ship in the emitted
+    // stylesheet instead (codegen/emit-transition-css.ts) — an inline <style>
+    // is refused under `headers="strict"`'s `default-src 'self'` (§39.2.5) —
+    // so the chunk no longer exists.
+    usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope', 'errors']),
     // C15 — MOD exportRegistry, optional. Defaults to null for tests that
     // bypass the full pipeline; the C15 cross-file mount walker short-circuits
     // when null.
