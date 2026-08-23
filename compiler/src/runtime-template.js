@@ -459,15 +459,39 @@ function _indent(text) {
     .join("\n");
 }
 
-// Inline a stdlib chunk for each shim that ships in compiler/runtime/stdlib/.
-// `store` is intentionally excluded — its shim is a bun:sqlite wrapper with
-// no browser-callable surface; client-side use is meaningless. Server-side
-// access continues through the `bundleStdlibForRun` path (api.js) which
-// copies the shim to `<outputDir>/_scrml/store.js`.
-const _STDLIB_AUTH_CHUNK   = _loadStdlibChunk("auth");
-const _STDLIB_CRYPTO_CHUNK = _loadStdlibChunk("crypto");
-const _STDLIB_DATA_CHUNK   = _loadStdlibChunk("data");
-const _STDLIB_HOST_CHUNK   = _loadStdlibChunk("host");
+// Inline a stdlib chunk for each shim in compiler/runtime/stdlib/ that has a
+// browser-meaningful surface.
+//
+// MEMBERSHIP IS DERIVED, NOT CURATED (S368). A module gets a client registry
+// chunk when it is NOT an escalation-server-only module under the §12.2
+// Trigger 3 two-limb criterion (route-inference.ts:ESCALATION_SERVER_ONLY_MODULES):
+//   (a) HOST REACH      — the shim reaches `Bun.*` / `process.*` / an import of
+//                         `bun` / `bun:*` / `node:*`; or
+//   (b) CREDENTIAL      — it accepts or transmits a secret that must not reach
+//                         a client, even with no host reach at all.
+// A module failing EITHER limb has no browser-meaningful surface and gets no
+// chunk. See runtime-chunks.ts:RUNTIME_CHUNK_ORDER for the per-module reasons,
+// and note that the absence of a chunk is now a COMPILE-TIME diagnostic
+// (`E-STDLIB-CLIENT-CHUNK-MISSING`) rather than a silent load-time TypeError.
+//
+// `auth` and `crypto` are escalation-server-only by the criterion yet carry a
+// chunk. That is PRE-EXISTING (S95 Bug 18) and deliberately left alone here:
+// removing a chunk is a behaviour REMOVAL, out of scope for this dispatch.
+// The shim loader strips their external `bun` imports, so a client-side call
+// ReferenceErrors loudly at the CALL rather than killing the page at load.
+const _STDLIB_AUTH_CHUNK     = _loadStdlibChunk("auth");
+const _STDLIB_COMPILER_CHUNK = _loadStdlibChunk("compiler");
+const _STDLIB_CRYPTO_CHUNK   = _loadStdlibChunk("crypto");
+const _STDLIB_DATA_CHUNK     = _loadStdlibChunk("data");
+const _STDLIB_FORMAT_CHUNK   = _loadStdlibChunk("format");
+const _STDLIB_HOST_CHUNK     = _loadStdlibChunk("host");
+const _STDLIB_HTTP_CHUNK     = _loadStdlibChunk("http");
+const _STDLIB_MATH_CHUNK     = _loadStdlibChunk("math");
+const _STDLIB_RANDOM_CHUNK   = _loadStdlibChunk("random");
+const _STDLIB_REGEX_CHUNK    = _loadStdlibChunk("regex");
+const _STDLIB_ROUTER_CHUNK   = _loadStdlibChunk("router");
+const _STDLIB_TEST_CHUNK     = _loadStdlibChunk("test");
+const _STDLIB_TIME_CHUNK     = _loadStdlibChunk("time");
 
 /**
  * scrml reactive runtime — shared runtime library.
@@ -6296,7 +6320,7 @@ function _scrml_log(side, loc) {
   }
 }
 
-${_STDLIB_AUTH_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_HOST_CHUNK}`;
+${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**
  * Runtime filename used in external mode.
