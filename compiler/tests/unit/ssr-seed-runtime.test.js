@@ -34,6 +34,8 @@ function createRuntime() {
       _scrml_ssr_seeded,
       _scrml_reactive_get,
       _scrml_reactive_set,
+      _scrml_ssr_seed_from_document,
+      _scrml_nav_extract_seed,
     };
   `);
   return wrapper();
@@ -104,4 +106,69 @@ describe("§52.8 ssr-b-substrate runtime: _scrml_ssr_seeded (fetch-skip guard)",
     expect(rt._scrml_reactive_get("zero")).toBe(0);
     expect(rt._scrml_reactive_get("flag")).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The seed is identified by its emitted WIRE FORM, not by its id.
+//
+// `id` is a document-wide namespace an author shares. Reading the seed with a
+// bare `getElementById("__scrml_ssr_state")` meant a page that happens to carry
+// its own `<div id="__scrml_ssr_state">` had that element's text content parsed
+// as the server-authoritative seed and applied over the cell store. The soft-nav
+// extractor read the same way — on a FETCHED document.
+// ---------------------------------------------------------------------------
+
+describe("§52.8 the seed reader matches the emitted wire form, not the id", () => {
+  /** Put `html` in the live document's <head> and return the document. */
+  function seedDoc(html) {
+    document.head.innerHTML = html;
+    return document;
+  }
+
+  const REAL = '<script type="application/json" id="__scrml_ssr_state">{"count":7}</script>';
+
+  test("the real data block IS read", () => {
+    const rt = createRuntime();
+    expect(rt._scrml_ssr_seed_from_document(seedDoc(REAL))).toEqual({ count: 7 });
+  });
+
+  const impostors = [
+    ['a <div> wearing the id', '<div id="__scrml_ssr_state">{"count":999}</div>'],
+    ['a <template> wearing the id', '<template id="__scrml_ssr_state">{"count":999}</template>'],
+    ['a <script> with no type=', '<script id="__scrml_ssr_state">{"count":999}</script>'],
+    ['a <script type="module">', '<script type="module" id="__scrml_ssr_state">{"count":999}</script>'],
+  ];
+
+  for (const [label, html] of impostors) {
+    test(`${label} is NOT read as the seed`, () => {
+      const rt = createRuntime();
+      expect(rt._scrml_ssr_seed_from_document(seedDoc(html))).toBeUndefined();
+    });
+
+    test(`${label} does not seed a SOFT NAV either`, () => {
+      const rt = createRuntime();
+      globalThis.window.__scrml_ssr_state = { count: 1 };
+      const fetched = new DOMParser().parseFromString(
+        `<!doctype html><html><head>${html}</head><body></body></html>`,
+        "text/html",
+      );
+      rt._scrml_nav_extract_seed(fetched);
+      // No seed in the target document → the live seed is CLEARED, never replaced
+      // with the impostor's payload.
+      expect(globalThis.window.__scrml_ssr_state).toBeNull();
+    });
+  }
+
+  test("a soft nav to a document with the REAL block still replaces the seed", () => {
+    const rt = createRuntime();
+    globalThis.window.__scrml_ssr_state = { count: 1 };
+    const fetched = new DOMParser().parseFromString(
+      `<!doctype html><html><head>${REAL}</head><body></body></html>`,
+      "text/html",
+    );
+    rt._scrml_nav_extract_seed(fetched);
+    expect(globalThis.window.__scrml_ssr_state).toEqual({ count: 7 });
+  });
+
+  afterEach(() => { document.head.innerHTML = ""; });
 });

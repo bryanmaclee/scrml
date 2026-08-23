@@ -2776,7 +2776,15 @@ function _scrml_nav_extract_seed(doc) {
   var el = doc && typeof doc.getElementById === "function"
     ? doc.getElementById("__scrml_ssr_state")
     : null;
-  if (el) {
+  // Match on the emitted WIRE FORM, not the id alone — an ordinary
+  // <div id="__scrml_ssr_state"> in the FETCHED document must not be parsed as
+  // the seed. The 'ssr' chunk applies the identical test in
+  // _scrml_ssr_is_seed_element; it is repeated rather than shared because soft
+  // nav must not depend on a chunk a seedless page tree-shakes away (see above).
+  if (el
+    && String(el.tagName || "").toUpperCase() === "SCRIPT"
+    && typeof el.getAttribute === "function"
+    && String(el.getAttribute("type") || "").toLowerCase() === "application/json") {
     try { window.__scrml_ssr_state = JSON.parse(el.textContent || "null"); }
     catch (e) { /* malformed seed — keep the prior seed rather than crash */ }
     return;
@@ -6067,7 +6075,7 @@ function _scrml_map_decode(x) {
 // §52.8 SSR pre-render seed (chunk: 'ssr')
 //
 // B-substrate (ssr-b-substrate). The compiler-emitted SSR HTML-composition route
-// (emit-server.ts) injects <script>window.__scrml_ssr_state={…}</script> before
+// (emit-server.ts) injects the seed data block (WIRE FORMAT below) before
 // </head>, carrying the server-authoritative cell values redacted at the §14.8.9
 // egress sink. _scrml_ssr_seed_apply() runs BEFORE the mount fetch decisions and
 // the engine hydration (emit-reactive-wiring Step 4c) so each seeded cell is
@@ -6089,9 +6097,21 @@ function _scrml_ssr_seed_from_document(doc) {
   var el = (doc && typeof doc.getElementById === "function")
     ? doc.getElementById("__scrml_ssr_state")
     : null;
-  if (!el) return undefined;                      // this document carries no seed
+  if (!_scrml_ssr_is_seed_element(el)) return undefined; // no seed in this document
   try { return JSON.parse(el.textContent || "null"); }
   catch (e) { return undefined; }                 // malformed — behave as unseeded
+}
+// The seed is identified by its WIRE FORM, not by its id alone: an id is a
+// document-wide namespace an author shares, so a page carrying its own
+// <div id="__scrml_ssr_state"> would otherwise have its text content parsed as
+// the server-authoritative seed and applied over the cell store. Requiring the
+// exact emitted shape — a <script type="application/json"> — means only what
+// emit-server actually wrote can seed the page.
+function _scrml_ssr_is_seed_element(el) {
+  return !!el
+    && String(el.tagName || "").toUpperCase() === "SCRIPT"
+    && typeof el.getAttribute === "function"
+    && String(el.getAttribute("type") || "").toLowerCase() === "application/json";
 }
 // Hoist the seed onto window the moment this chunk loads. EAGER, not lazy:
 // the runtime script sits at the end of <body>, so <head>'s data block is
