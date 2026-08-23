@@ -1950,3 +1950,174 @@ describe("§14.8.9 channel/SSE runtime wire shapes — the published bytes are c
     expect(_scrml_protect_redact([1, 2, 3])).toEqual([1, 2, 3]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ROUND 9 — the BASELINE-CSRF arm's `Response` passthrough is gated on both
+// confidentiality floors, and the pin EXECUTES the emitted handler.
+//
+// The passthrough (`if (_scrml_result instanceof Response) return _scrml_result;`)
+// is a §40.3.5 CORRECTNESS fix: without it a body's deliberate 403 is re-enveloped
+// as `200 {}`. On a protect-active app it is ALSO a §14.8.9 LEAK, because a
+// `Response` is opaque to the redact — the shipped `_scrml_protect_redact` returns
+// any `Response` unchanged (see its own `instanceof Response` line). So an ungated
+// passthrough writes a hand-built `Response` carrying a protected column straight
+// to the wire, and the §14.8.9 gate cannot compensate on the shapes it cannot
+// RESOLVE — the RESIDUAL pins above (`let R = Response`, `globalThis[k]`, a call
+// through a value or a member) are exactly those shapes.
+//
+// Reaching this arm needs `authMiddlewareEntry == null`, and a protect-active file
+// is auto-escalated to auth="required" (route-inference.ts:6073) UNLESS it carries
+// an explicit `auth="optional"` / `auth="none"`. That is not a contrived shape: it
+// is the LOGIN-PAGE shape — `examples/23-trucking-dispatch/pages/auth/login.scrml`
+// is `<page auth="optional">` over `<db protect="password_hash">`, and its
+// `loginServer` / `registerServer` are two of the handlers this arm emits.
+//
+// These tests GREP NOTHING for their verdict. They compile, stub only the emitted
+// module's external edges (the bun SQL handle, auth, CSRF), import the module and
+// invoke the REAL handler, then read the bytes off the returned `Response`.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 round 9 — the baseline-CSRF `Response` passthrough is floor-gated (EXECUTED)", () => {
+  const PROTECTED_ROW = { id: 1, name: "ada", passwordHash: "$argon2id$SECRET" };
+  const PASSTHROUGH_LINE = "if (_scrml_result instanceof Response) return _scrml_result;";
+
+  // Built by concatenation, not a template literal: the fixture is scrml source
+  // and is full of backticks and `${`, which a JS template literal would eat.
+  const baselineArmProgram = (serverBody, opts) =>
+    '<program auth="optional">\n\n' +
+    "  <schema>\n" +
+    "    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}\n" +
+    "  </schema>\n\n" +
+    '  <db src="app.db"' +
+    (opts && opts.protect === false ? "" : ' protect="passwordHash"') +
+    ' tables="users">\n\n' +
+    "    ${\n" +
+    serverBody +
+    "\n    }\n\n" +
+    "  </db>\n\n" +
+    "  <div><p>hi</p></div>\n" +
+    "</program>";
+
+  // The RESIDUAL the branch itself pins: the gate cannot resolve a local
+  // rebinding of `Response`, so it is SILENT and the fn ships.
+  const RESIDUAL_FN = [
+    "      function getUser(id) {",
+    "        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()",
+    "        let R = Response",
+    "        return new R(JSON.stringify(u))",
+    "      }",
+  ].join("\n");
+
+  // §40.3.5's own worked example: a deliberate 403 the envelope must not eat.
+  const DENY_FN = [
+    "      function addItem(id) {",
+    "        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()",
+    '        return new Response("Forbidden", { status: 403 })',
+    "      }",
+  ].join("\n");
+
+  /** Which CSRF arm did this module take? Read off the emitted marker, not guessed. */
+  const armOf = (js) =>
+    js.includes("CSRF validation (compiler-generated, baseline double-submit cookie)")
+      ? "baseline-csrf"
+      : js.includes("CSRF validation (compiler-generated, auth path")
+        ? "auth-path"
+        : "neither";
+
+  /** Import the EMITTED module and invoke the real handler. */
+  async function executeHandler(serverJs, handlerName) {
+    let js = serverJs
+      .replace(/^import \{ SQL \} from "bun";$/m, "")
+      .replace(
+        /^const _scrml_sql = new SQL\([^)]*\);$/m,
+        "const _scrml_sql = (..._a) => Promise.resolve([" + JSON.stringify(PROTECTED_ROW) + "]);",
+      );
+    // Function declarations are mutable bindings, so the module is re-edged from
+    // its own tail without rewriting any emitted line under test.
+    if (/function _scrml_auth_check\b/.test(js)) js += "\n_scrml_auth_check = () => null;";
+    if (/function _scrml_validate_csrf\b/.test(js)) js += "\n_scrml_validate_csrf = () => true;";
+    js += "\nexport { " + handlerName + " as __handler };\n";
+
+    const dir = mkdtempSync(join(tmpdir(), "scrml-r9-exec-"));
+    const f = join(dir, "handler.mjs");
+    writeFileSync(f, js);
+    const mod = await import(f);
+    const res = await mod.__handler(
+      new Request("http://localhost/_scrml/x", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: 1 }),
+      }),
+    );
+    return { status: res.status, body: await res.text() };
+  }
+
+  // Anti-vacuity. If a later change stops these fixtures reaching the
+  // baseline-CSRF arm, every assertion below still passes while measuring the
+  // WRONG arm — the pre-existing non-baseline twin, which is UNGATED. Pin the arm.
+  test("the fixtures really do take the BASELINE-CSRF arm (anti-vacuity)", () => {
+    expect(armOf(compileSource(baselineArmProgram(RESIDUAL_FN)).serverJs)).toBe("baseline-csrf");
+    expect(armOf(compileSource(baselineArmProgram(DENY_FN, { protect: false })).serverJs)).toBe("baseline-csrf");
+  });
+
+  test("EXECUTED, protect-active: the unresolvable `Response` residual ships NO protected column", async () => {
+    const { result, serverJs } = compileSource(baselineArmProgram(RESIDUAL_FN));
+    // The premise: the gate is SILENT here. If a later arc teaches it to resolve
+    // `let R = Response`, this goes red together with the RESIDUAL pins above —
+    // that coupling is the point, not a flake.
+    expect(fires(result)).toBe(false);
+    expectCompiledAndProtecting(result);
+    // THE WIRE FIRST. This assertion is the finding; the emitted-text one below
+    // is corroboration. Ordered this way deliberately — when the gate is removed
+    // both go red, and the failure an engineer reads should be the leaked
+    // password hash, not a missing substring.
+    const { status, body } = await executeHandler(serverJs, "_scrml_handler_getUser_1");
+    // The protected column's NAME and its VALUE, and the un-protected sibling
+    // value too — the whole ROW must fail to serialize, not just one field.
+    expect(body).not.toContain("passwordHash");
+    expect(body).not.toContain("$argon2id$");
+    expect(body).not.toContain("SECRET");
+    expect(body).not.toContain("ada");
+    expect(status).toBe(200);
+    // ...and the mechanism: the gated line is ABSENT on a protect-active app.
+    expect(serverJs).not.toContain(PASSTHROUGH_LINE);
+
+    // NOT asserted: `body === "{}"`. That is TRUE under bun's native `Response`
+    // and FALSE in a full-suite run, where happy-dom (registered globally by
+    // sibling browser tests) supplies a `Response` with enumerable own fields,
+    // so `JSON.stringify` yields
+    // `{"body":{},"bodyUsed":false,...,"status":200,...}` instead. Measured, not
+    // guessed — this test failed exactly that way in the pre-commit suite while
+    // passing standalone.
+    //
+    // ⚠ RESIDUAL worth naming: the containment here is that `JSON.stringify` of a
+    // `Response` exposes nothing sensitive, and that is an IMPLEMENTATION
+    // property, not a guarantee. Both implementations measured keep the BODY
+    // opaque (a stream with no enumerable own properties), which is where the
+    // protected column lives — so the floor holds on both. But a `Response`
+    // whose body were an enumerable own property would leak straight through
+    // this path. The durable fix is the §14.8.9 gate RESOLVING these callee
+    // shapes (`let R = Response` et al) so they never ship at all; the gate is
+    // the control, and `JSON.stringify`'s opacity is only a backstop.
+  });
+
+  test("EXECUTED, NO floor active: §40.3.5's deliberate 403 still survives the envelope", async () => {
+    const { serverJs } = compileSource(baselineArmProgram(DENY_FN, { protect: false }));
+    // The correctness fix is untouched where no confidentiality floor is active.
+    expect(serverJs).toContain(PASSTHROUGH_LINE);
+    const { status, body } = await executeHandler(serverJs, "_scrml_handler_addItem_1");
+    expect(status).toBe(403);
+    expect(body).toBe("Forbidden");
+    // The fail-open shape the passthrough closes, named so a regression reads as
+    // what it is rather than as a status-code nit.
+    expect(body).not.toBe("{}");
+  });
+
+  test("the compensating control is REAL: a RESOLVABLE manual `Response` is refused loudly", () => {
+    // Floor-gating the passthrough is only defensible because a protect-active
+    // author who hand-builds a `Response` is REFUSED at compile time rather than
+    // silently downgraded to `200 {}`. Asserted, not assumed.
+    const { result } = compileSource(baselineArmProgram(DENY_FN));
+    expect(fires(result)).toBe(true);
+    expectFiredAndProtecting(result);
+  });
+});

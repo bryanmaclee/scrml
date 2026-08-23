@@ -4034,7 +4034,53 @@ export function generateServerJs(
       // Placed AFTER the `_envelope` COMMIT (an early return must not strand an
       // open transaction) and BEFORE the JSON envelope (which would otherwise
       // have already destroyed the `Response`). Both orderings are load-bearing.
-      lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
+      //
+      // ...AND GATED ON BOTH CONFIDENTIALITY FLOORS BEING INACTIVE (round 9).
+      // The guard above is a §40.3.5 CORRECTNESS fix, and on a protect-active or
+      // tenant-active app it is also a §14.8.9/§14.8.10 CONFIDENTIALITY
+      // REGRESSION, because a `Response` is opaque to `_egressRedact`: the
+      // shipped `_scrml_protect_redact` returns any `Response` unchanged. So on
+      // a floor-active app the two properties are in direct conflict at this one
+      // exit and only one of them can hold:
+      //
+      //   passthrough ON  -> a hand-built `Response` carrying a protected column
+      //                      is written to the wire VERBATIM.
+      //   passthrough OFF -> `JSON.stringify(<a Response>)` is `"{}"`, so the
+      //                      row never serializes (the DENY-becomes-200 defect
+      //                      returns, but nothing confidential leaves).
+      //
+      // The §14.8.9 gate (E-PROTECT-004) is the compensating control that is
+      // supposed to make this moot by REFUSING such a body at compile time — but
+      // it is fail-closed only over the shapes it can RESOLVE, and its own
+      // residual paragraph (see `protect-egress.ts`, and the `RESIDUAL
+      // (documented, carry-forward)` pins in `g-sql-row-protect-leak.test.js`)
+      // records the ones it cannot: a local rebinding `let R = Response`, a
+      // dynamic key `globalThis[k]`, a call through a value or a member. On
+      // those the gate is SILENT at exit 0, so the passthrough is the only thing
+      // deciding, and an unconditional passthrough decides fail-OPEN.
+      //
+      // MEASURED, executing the emitted baseline handler on both sides with the
+      // pinned `let R = Response; return new R(JSON.stringify(u))` residual, at
+      // exit 0 with zero E-PROTECT-004:
+      //   ungated: 200 {"id":1,"name":"ada","passwordHash":"$argon2id$SECRET"}
+      //   gated:   200 {}
+      //
+      // A confidentiality FLOOR does not yield to a status-code correctness fix,
+      // so the floor wins where they collide — and it costs the correctness fix
+      // NOTHING outside a floor-active app, which is where §40.3.5's worked
+      // example lives. A floor-active app that genuinely wants to own its own
+      // egress is served by the gate REFUSING it loudly (E-PROTECT-004), not by
+      // this line shipping it silently.
+      //
+      // ⚠ The pre-existing twin on the non-baseline arm below is UNGATED and has
+      // the same shape. It is out of scope for this round and filed separately;
+      // do not conclude from its comment ("placed BEFORE the redact
+      // deliberately") that an ungated passthrough is settled — that note
+      // reasons about redaction MANGLING a `Response`, and never considered that
+      // the envelope's destruction of it was the containment.
+      if (!_protectActive && !_tenantActive) {
+        lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
+      }
       // M-7C-D-12 Track 2 (§57 Wire Format): when the declared return type
       // is `T | not` (absence is a legitimate variant), wrap the success
       // result through `_scrml_wire_encode` so scrml-absence serializes as
