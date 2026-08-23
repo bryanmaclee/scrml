@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 41 |
-| MED | 147 |
+| HIGH | 43 |
+| MED | 149 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9163,3 +9163,53 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 <!-- @gap id=g-emitobjectkey-proto-emitted-bare-prototype-setter sev=LOW status=open locus=compiler/src/codegen/emit-expr.ts:1271-1273(emitObjectKey) route=bryan prov=rationale:S356-peter-ROUTED-TO-BRYAN-the-satellites-implied-fix-quote-__proto__-is-a-NO-OP-PA-VERIFIED-in-node-{"__proto__":42}-creates-NO-own-property-Object.hasOwn-false-same-as-bare-only-a-COMPUTED-{["__proto__"]:v}-makes-an-own-property-so-the-fix-forces-a-LANGUAGE-SEMANTICS-decision-should-a-scrml-__proto__-object-key-set-the-prototype-JS-default-or-be-an-own-data-property-that-is-bryans-lane-per-the-HARD-BOUNDARY-not-peter-compute-LOW-real-world-negligible -->
 <!-- @reconfirm S359-peter 2026-08-21: SURVIVES #590/#592 (which rewrote emitObjectKey). Locus exact on HEAD (emit-expr.ts:1271-1273 — `__proto__` matches BARE_OBJECT_KEY as an identifier → bare). Reproduced END-TO-END: `let obj = { __proto__: 42, name: "x" }` compiles CLEAN (no diagnostic) → emits `let obj = {__proto__: 42, name: "x"};` (prototype-setter, no own property). Security angle negligible — the vector is a LITERAL author-typed `__proto__:` key (author-controlled), not an attacker computed key (a computed `{[k]:v}` with k="__proto__" makes an OWN property, not this bug). Routing + LOW + bryan-lane all stand; no peter action. -->
 <!-- ============ end S356-peter review-floor drain findings ============ -->
+
+<!-- ============ S365-bryan — S239 pass on nested-program-r4-work ============ -->
+
+### g-nested-program-nameless-bypasses-4-12-3-refusal — deleting `name=` from a nested `<program>` bypasses the ENTIRE §4.12.3 unbuilt-execution-context refusal, so a Nominal sidecar/wasm declaration compiles to exit 0 instead of hard-erroring — `NEW S365-bryan (found by the S239 pass on nested-program-r4-work; PA-REPRODUCED both halves); HIGH; open`
+<!-- @gap id=g-nested-program-nameless-bypasses-4-12-3-refusal sev=HIGH status=open locus=compiler/src/nested-program-kind.ts:150-163(classifyNestedProgram — rows 1-3 gated on hasName) prov=rationale:S365-bryan-S239-review-finding-PA-reproduced-with-name-hard-errors-E-NESTED-PROGRAM-CONTEXT-NOMINAL-FAILED-delete-one-attribute-and-the-identical-element-compiles-exit-0-with-only-an-unrelated-SPA-info-lint-the-classifiers-rationale-a-nameless-one-is-unreachable-by-construction-is-FALSE-the-body-is-not-unreachable-it-compiles-INTO-THE-PARENT -->
+> **⚑ S365-bryan: PA-REPRODUCED on the branch worktree, both halves, plus a REFINEMENT the review did not have.**
+>
+> **Half 1 — the refusal is bypassed unconditionally.** `<program name="ml" lang="go" port="9001" health="/health">` → `error [E-NESTED-PROGRAM-CONTEXT-NOMINAL]` + `FAILED — 1 error`. The **identical element with `name=` deleted** → `Compiled 1 file`, exit 0, and the only diagnostic is an unrelated `W-PROGRAM-SPA-INFERRED` info lint. `W-PROGRAM-001` does not fire either (it requires *neither* `name=` *nor* `lang=` *nor* `db=`), so the author gets nothing at all. Same for `<program mode="wasm" lang="rust">` without `name=`.
+>
+> **Half 2 — the body leaks into the parent, but ONLY when it is scrml-parseable.** This is the refinement: my first reproducer used a raw-Go body (`func predict(x int) int { return x * 2 }`) and **nothing leaked** — the parser discards it, so `grep predict` on the client bundle is empty. With a scrml-parseable body the leak is real and immediate: `${ function predict(x) { return x * 2 } }` + `<div>GO SIDECAR MARKUP</>` emits `function _scrml_predict_1(x)` into `*.client.js` AND renders `GO SIDECAR MARKUP` into the parent's HTML. **So the accurate statement is: the refusal-bypass is unconditional; the body-leak is conditional on the sidecar body containing scrml-parseable content.** Do not scope the fix from the leak — scope it from the bypass.
+>
+> **NOT a regression** — `a0e30329` gates the splice on `nameAttr` too, so `nested-program-r4-work` inherits this rather than causing it. It is filed because that branch **ratifies the fail-closed guarantee into SPEC §4.12.3 while its own classifier does not deliver it**, and SPEC marks `name=` on a nested `<program>` only as a **SHOULD**.
+>
+> **Fix direction:** classify on the execution-context attributes (`lang=` / `mode=` / `route=` / `db=` / `port=`), not on `name=` presence. The refusal is about the CONTEXT being unbuilt; the name is addressing metadata and should not gate a safety check. Newly-REJECTING (a program that compiled now errors) → reversible, owes a measured corpus migration before landing.
+
+### g-delta-lint-gate-vacuous-on-zero-population — the `delta-lint` blocking CI gate reports PASS over a delta-log containing the exact duplicate it exists to catch, whenever its parser matches zero entries — `NEW S365-bryan (found by the S239 pass on instrument-integrity; PA-REPRODUCED against the gate I had landed hours earlier and vouched for); HIGH; open`
+<!-- @gap id=g-delta-lint-gate-vacuous-on-zero-population sev=HIGH status=open locus=scripts/delta-lint.ts(the live-scope entry parser + the PASS path — no degenerate-population guard) prov=rationale:S365-bryan-S239-finding-4-PA-reproduced-exit-codes-measured-directly-not-through-a-pipe-canonical-separator-with-a-real-duplicate-exit-1-correct-same-duplicate-with-the-separator-drifted-from-middot-to-hyphen-exit-0-PASS-empty-file-exit-0-PASS -->
+> **⚑ S365-bryan: PA-REPRODUCED, and this is a defect in a gate I landed the same session and recorded as bite-proven.**
+>
+> | input | delta-lint result |
+> |---|---|
+> | real duplicate, canonical `·` separator | **exit 1** — correct, RED |
+> | **the same duplicate still present**, separator drifted `·` → `-` | **exit 0**, prints `0 entries in the live scope (from line 875), 0 distinct sequence numbers, max [0] — PASS` |
+> | **empty file** | **exit 0**, `PASS` |
+>
+> The parser matches nothing, concludes there is nothing to check, and reports PASS over a file holding the very defect it was built for. This is the pa-base §8 *"a gate reports green while verifying nothing"* shape — **shipped inside PR #581, whose entire purpose was to stop a delta-log entry being silently dropped from the flogence digest.**
+>
+> **Why my own bite proof missed it, recorded because the lesson is the reusable part.** The proof I ran was real: during #581's land-merge the gate went RED on four genuine sequence collisions, named them with line numbers, and returned GREEN after I renumbered. Both directions — but **both inside the canonical format.** A gate proven only on well-formed input is unproven against the degenerate case, and the degenerate case is precisely where hollowness hides. *Proving a gate bites is not the same as proving it cannot be silenced.*
+>
+> ⚑ **Also recorded: my first measurement of this read `exit=0` for ALL THREE rows**, because I piped the command into `tail` and read `$?` — which is `tail`'s status, not the gate's. That is the S354 miss #4 (*"a success signal that cannot fail"*) recurring in the very act of testing a gate for hollowness. Measure exit codes directly.
+>
+> **Fix direction:** refuse when the live scope yields zero entries while the file has content — the same degenerate-measurement guard the `instrument-integrity` branch already applies to `facts.ts`, `state.ts`, `snippet-gate.js`, `benchmark-perf-baseline.ts` and `perf-regression-check.ts`. Reuse that idiom rather than minting a sixth. Routed into the instrument-integrity fix round (it is a blocking CI gate, so it is urgent).
+
+### g-spec-silent-on-which-requests-ratelimit-counts — §39.2.4/§40 never state which requests `ratelimit=` counts, and that silence is what let a HIGH ship: `handle()` has an explicit "including statically-served assets" carve-in, `ratelimit=` has no scoping sentence at all — `NEW S365-bryan (surfaced by the F1 fix round; the agent corrected the PA's governing-sentence citation and was right); MED; open`
+<!-- @gap id=g-spec-silent-on-which-requests-ratelimit-counts sev=MED status=open locus=compiler/SPEC.md:22648(§40.3.4 gives handle() the carve-in)+searched:§39.2.4,§40.2,§40.3.3,§4.15-E-PAGE-INVALID-ATTR-no-sentence-scopes-the-limiters-request-set prov=rationale:S365-bryan-the-PA-cited-SPEC-1080-per-route-only-and-E-PAGE-INVALID-ATTRs-per-route-attribute-set-as-the-governing-sentence-for-which-REQUESTS-are-counted-the-dispatched-agent-checked-it-and-those-sentences-are-a-DECLARATION-SCOPE-taxonomy-which-attributes-may-sit-on-page-vs-program-not-a-request-counting-rule-PA-VERIFIED-the-correction-by-reading-both-sites-in-full -->
+> **⚑ S365-bryan: the PA's own citation was over-read, and the correction is the finding.**
+>
+> I briefed the F1 ratelimit fix as a **conformance restoration** on the strength of `SPEC.md:1080` (*"`ratelimit=` (per-route only)"*) and the `E-PAGE-INVALID-ATTR` row (*"the per-route attribute set `{ db=, auth=, csrf=, ratelimit=, keep-alive }`"*). The dispatched agent checked the citation and pushed back. **It is right.** Read in full, that row continues *"App-wide attributes like `title=`, `description=`, `version=`, `cors=`, `log=`, `headers=` belong on `<program>` … not on a per-route container"* — it is a **declaration-scope taxonomy** (where an attribute may be written), not a statement about which requests a limiter counts.
+>
+> **The genuinely decisive ground is different and stronger:** §40.3.4 (`SPEC.md:22648`) gives `handle()` an explicit carve-in — *"applies to all HTTP requests handled by the compiled server — **including statically-served assets** and the `/_scrml_ws/` upgrade routes"* — and **`ratelimit=` is given no such sentence anywhere.** Combined with the fact that `main` counted route traffic only, the fix is a **regression restoration**, which needs no ruling either way. Rule 4 lands in the same place; the route to it was wrong.
+>
+> **The gap:** the normative text is silent on the exact question that produced a HIGH defect. §40.2/§40.3.3 are *ordering* statements (CORS → rate limit → CSRF → route handler); nothing says which requests enter that pipeline for counting purposes. **Fix direction:** one sentence in §39.2.4 stating the limiter's request set explicitly, mirroring §40.3.4's carve-in so the asymmetry between `handle()` and `ratelimit=` is deliberate on the page rather than inferred from behaviour.
+
+### g-happydom-global-drops-cookie-header-in-full-suite — registering happy-dom globally replaces `Headers` with one that drops the forbidden `Cookie` header, so an emitted server's double-submit CSRF check answers 403 in a full-suite run and 200 standalone — `NEW S365-bryan (found by the F1 fix round while drafting an executing regression test); MED; open`
+<!-- @gap id=g-happydom-global-drops-cookie-header-in-full-suite sev=MED status=open locus=compiler/tests/browser(the GlobalRegistrator.register() sites — registered globally and never unregistered, so the global Headers leaks into every later test file in the same run) prov=rationale:S365-bryan-F1-fix-round-probed-directly-native-Request-Cookie-a-eq-b-after-GlobalRegistrator-register-Cookie-null-while-X-CSRF-Token-survives-cost-3-phantom-failures-in-a-first-test-draft-that-vanished-standalone -->
+> **⚑ S365-bryan: PROBED DIRECTLY by the F1 fix round, not inferred.** A native `Request` returns `Cookie: "a=b"`; after `GlobalRegistrator.register()` the same read returns `null`, while `X-CSRF-Token` survives — happy-dom's `Headers` enforces the fetch-spec forbidden-header list that a server-side runtime must not.
+>
+> **Consequence:** earlier browser tests register happy-dom globally and never unregister, so any later test in the same run that drives an emitted server with cookie auth sees no cookie. The double-submit CSRF check then answers **403 where a standalone run answers 200**. It cost three phantom failures in a first test draft, which vanished when run alone.
+>
+> **Same class as the known happy-dom global-state leak** ([[g-browser-tier-happydom-global-state-leak]] family) — an environmental leak, not a regression, and the F1 tests were re-pinned onto the limiter's own signal (reached-consistently vs 429) rather than the incidental CSRF status. Filed because it is a **live trap for the next author** who writes an executing server test with cookie auth and reads the failure as a product bug.
