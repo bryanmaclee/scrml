@@ -1127,3 +1127,92 @@ Not fixed here for two reasons, and the second is the real one:
    separate, smaller defect: a malformed container should produce a diagnostic, not a stack trace.
 
 **Routed to the PA as F11.**
+
+---
+
+## FIX ROUND — verification
+
+Every exit code below measured directly (`cmd; echo $?`). Nothing read through a pipe: `cmd | tail`
+reports `tail`'s status, which is a success signal that cannot fail.
+
+### The six blocking CI gates, plus `state.ts`
+
+| gate | exit |
+|---|---|
+| `bun scripts/browser-baseline.ts --check` | 0 |
+| `bun scripts/snippet-gate.js` | 0 |
+| `bun scripts/facts.ts --check` | 0 |
+| `bun scripts/regen-spec-index.ts --check` | 0 |
+| `bun scripts/delta-lint.ts` | 0 |
+| `bun scripts/s34-census.ts --check-new --base origin/main` | 0 |
+| `bun scripts/state.ts --check` (boot/wrap gate, not CI) | 0 |
+
+> **A near-miss worth recording, because it is this branch's thesis pointed at my own method.**
+> The first attempt at that table looped `for g in "scripts/facts.ts --check" …; do bun $g; done`
+> and printed **exit=1 for all four**. The shell here is zsh, which does **not** word-split an
+> unquoted parameter — so `bun` received one argument, a filename containing a space, and failed on
+> every row. **A measurement harness that is broken produces a uniform, plausible-looking result.**
+> Had the expected answer been "all red" instead of "all green" I would have believed it. The
+> defect was caught only because the same two gates had exited 0 fifteen minutes earlier.
+
+### Conformance
+
+```
+$ bun conformance/run.ts; echo $?
+conformance (impl#1): 883/883 cases pass
+0
+```
+
+### `bun run test` — a CONTROLLED A/B, not a comparison against a remembered number
+
+The brief's baseline is 55 fail (4 timeout-shaped + 51 assertion). This environment produces **53**.
+Rather than argue about the gap, both sides were measured **back-to-back in the same tree, same
+environment**: the seven fix-round files were checked out at `437052c4` (the merge commit — post
+`origin/main` merge, pre every fix), the full suite run, then restored to `HEAD` and re-run.
+
+| | pass | fail | files |
+|---|---|---|---|
+| **BEFORE** (`437052c4`, pre-fix-round) | 30151 | **53** | 1383 |
+| **AFTER** (`HEAD`, all seven fixes) | 30151 | **53** | 1383 |
+
+```
+$ comm -13 names.BEFORE.txt names.AFTER.txt      # NEW failures
+(nothing)
+$ comm -23 names.BEFORE.txt names.AFTER.txt      # disappeared failures
+(nothing)
+```
+
+**The failing NAME SET is byte-identical. Zero branch-only new failures; zero masked.**
+
+**Timeouts vs assertions, distinguished** — this harness prints the same `(fail) <name>` for both,
+so they were separated by duration, not by eye. Exactly **4** failures exceed 5000 ms, all ~10.3 s,
+all dev-watcher: `dev-compile-throw-fail-closed` §1/§2/§3 and `dev-watcher-churn-starvation`.
+The other **49** are assertion failures: 48 browser-tier + 1 unit-tier.
+
+**On the 55 vs 53 gap — not mine, and provably not the merge.** The merge is the only other thing
+this dispatch did to the tree, and `git diff --name-only d1a1857e 437052c4` is
+`.gitattributes` · `ci.yml` · four docs · three `handOffs/` files · `scripts/delta-lint.ts`.
+**No file any test loads.** And the BEFORE run already reads 53 *before any fix commit*. So the two
+missing failures belong to the brief's baseline measurement (a different `samples/compilation-tests/dist/`
+state or two flakes), not to anything on this branch. Recorded rather than explained away.
+
+**The lone unit-tier failure is a whole-suite interaction, verified rather than assumed:**
+
+```
+$ bun test compiler/tests/unit/esm-script-tag-module-format.test.js
+ 9 pass  0 fail                      <- green in isolation
+```
+It fails only inside the 1383-file run — the documented cross-file global-state leak. Present
+identically in BEFORE and AFTER.
+
+### Every probe this branch changed, re-derived
+
+| figure | brief's expectation | measured | verdict |
+|---|---|---|---|
+| double-emitting conformance cases | 106 of 883 | **106 of 883** (extremes `W-STDLIB-SEED-FAILCLOSED=23`) | ✔ |
+| conformance cases | 883 | **883**, all passing | ✔ |
+| gated public snippets | 110 | **110 passed, 0 failed** | ✔ |
+| §34 rows / codes | 811 rows / 809 codes | **811 physical code-shaped rows in 19113..19993; 809 distinct codes** — the 2-row gap is `E-DEPRECATED-001` and `E-MARKUP-003`, each appearing twice | ✔ (and the mechanism named) |
+| corpus-zero | "5 OWED" | **5 IN SCOPE · 0 OWED** | ✖ **corrected** — see condition (5). The debt was PAID by `scrml-support@5fe251f`, not drifted. |
+
+### `git status` at report time: clean.
