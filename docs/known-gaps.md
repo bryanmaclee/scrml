@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 45 |
-| MED | 149 |
+| HIGH | 46 |
+| MED | 151 |
 | LOW | 68 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9247,3 +9247,74 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **The tail is the realistic drift site** (a new writer appends there), so this is the live configuration of the hazard rather than a contrived one.
 >
 > **Compounds with a rule already recorded this session:** `--fix` was ALREADY known to renumber the wrong side on a merge (it keeps first-in-file order, which is blind to which side is already published — delta-log `[1686]`, and I warned Peter about it by inbox the same day). So the verb now has two independent ways to damage the file it maintains. **Recommend `--fix` be gated on a clean parse — refuse to renumber anything while `bracketed !== total`** — and, separately, that the merge-orientation hazard be handled by making `--fix` refuse outright on a file with unmerged-side ambiguity rather than by operator memory.
+
+<!-- ============ S365-bryan — Q5 ruling + the Q1 arc's measurements ============ -->
+
+### g-auth-required-does-not-protect-the-served-html-document — `<program auth="required">` renders page content into a static HTML file and serves it to anonymous requests at 200, against §52.13's verbatim "every request to this scope SHALL be authenticated" — `NEW S365-bryan (surfaced by the handle-onion S239 pass, PA-REPRODUCED on main); HIGH; open`
+<!-- @gap id=g-auth-required-does-not-protect-the-served-html-document sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(the static-asset serving path in the emitted _server.js — _scrml_auth_check is emitted into the per-route server file and NOT into the dispatch that serves the document) prov=spec:§52.13-every-request-to-this-scope-SHALL-be-authenticated-unauthenticated-requests-are-redirected-to-loginRedirect -->
+> **⚑ S365-bryan: PA-REPRODUCED on `main` by building and driving the emitted server.**
+>
+> ```
+> <program auth="required">
+>   <page><h1>SECRET DASHBOARD</h1></page>
+> </program>
+> ```
+> `scrml build`, then unauthenticated requests through the emitted `_server.js`:
+>
+> | request | result |
+> |---|---|
+> | `GET /secure.html` | **200**, full document, `SECRET DASHBOARD` present in the body |
+> | `GET /` | 404 |
+>
+> `_scrml_auth_check` is emitted **1× into `secure.server.js`** and **0× into `_server.js`** — the gate guards server *functions*, and the path that serves the document has no auth check at all.
+>
+> **The governing sentence is unambiguous** (§52.13, verbatim): *"`auth="required"` — **every request to this scope SHALL be authenticated**; unauthenticated requests are redirected to `loginRedirect=` (default `/login`)."* A request for the page's own document is a request to that scope. **This is a BUG against a normative SHALL, not a design nuance** — it is not softened to a doc gap.
+>
+> **Bound the claim honestly:** what leaks here is *statically-rendered markup*. A page whose content arrives from a gated server fn would not leak that data by this path. But for any page whose content is in its markup — which is the ordinary case — the content is the document.
+>
+> **Related, not the same:** the S239 pass on `handle-onion` found that an unauthenticated `GET` to a `handle()`-intercepted custom path returns 200 while an unauthenticated route returns 302. That is ruled **correct-for-a-raw-escape** (S365) and is a different question. This entry is about the compiler's own emitted document.
+
+### g-type-annotation-checking-is-three-defects-wearing-one-behavior — a mistyped annotation is silent for three unrelated reasons, and the guard that exists is gated to PascalCase, so the lowercase primitive namespace is unwatched — `NEW S365-bryan (Q1 arc measurement; PA-REPRODUCED, and it CORRECTS the PA's own first reading); MED; open`
+<!-- @gap id=g-type-annotation-checking-is-three-defects-wearing-one-behavior sev=MED status=open locus=compiler/src/type-system.ts(the literal-check hardcoded primitive set + isUnrecognizedTypeNameAtom's PascalCase gate + the unwired argument position) prov=dd:scrml-support/docs/deep-dives/type-system-assignability-dpa-036-2026-08-22.md -->
+> **⚑ S365-bryan: measured by execution during the dpa-036 ratification arc. The PA's first reading was WRONG and the correction is the finding.**
+>
+> I first reported *"a bogus type name is silently accepted at every position probed."* That is half wrong. Measured, cell-annotation position:
+>
+> | annotation | result |
+> |---|---|
+> | `notAType`, `strng` | **SILENT** |
+> | `NotAType`, `Custmoer` | **FIRES** (observed code: `E-DG-002`) |
+>
+> The guard is **gated to PascalCase**, so it watches the namespace where a typo is *least* consequential — a typo'd `Custmoer` also fails at its use sites — and is structurally blind to the lowercase primitive namespace, where `strng` silently becomes `asIs`.
+>
+> **Three unrelated defects produce one observable behaviour:**
+> 1. `let n: integer = "nope"` — the name resolves correctly (`integer`/`int`/`bool`/`date` are builtins); the **literal check's hardcoded `{number, string, boolean}` set** declined.
+> 2. `let n: strng = "nope"` — the name never resolved; the **PascalCase gate** declined to ask.
+> 3. `f("nope")` for `fn f(x: number)` — the **argument position is unwired** (also the return position, and operand typing does not exist).
+>
+> ⚑ **The code identity is NOT settled:** the dpa-036 follow-up poll attributes the PascalCase gate to `E-TYPE-UNKNOWN-NAME`; my probe observed `E-DG-002` firing. Either that code fires first and masks it, or the attribution is wrong. **Resolve which before scoping a fix.**
+>
+> This is the evidence base for dpa-036 call #1 and it makes the case *stronger*: you cannot widen a check whose failures are indistinguishable from its successes, because you cannot tell whether the widening worked.
+
+### g-program-attrs-silently-discarded-at-top-level — nine §4.12.2 `<program>` attributes are accepted and then silently DROPPED at top level, and `W-ATTR-001`'s message is measurably false on `<program>` — `NEW S365-bryan (surfaced when the Q4 build round REFUTED the PA's ruling premise); MED; open`
+<!-- @gap id=g-program-attrs-silently-discarded-at-top-level sev=MED status=open locus=compiler/src/validators/attribute-allowlist.ts:143(runAttributeAllowlistFile — has file.ast and therefore the top-level/nested discriminator already in hand via collectTopLevelPrograms; the allowlist lookup is position-blind)+compiler/src/attribute-registry.js prov=rationale:S365-bryan-the-PA-ruled-a-position-aware-REJECTION-on-the-premise-that-4-12-2-restricts-route-port-health-to-nested-position-the-dispatched-agent-read-4-12-2-and-REFUTED-it-so-the-real-defect-is-silent-discard-not-wrongful-acceptance -->
+> **⚑ S365-bryan: this entry exists because MY RULING'S PREMISE WAS FALSE, and the correction is the finding.**
+>
+> **What I ruled, and why it was wrong.** I escalated a reviewer's LOW finding to a ruling on the premise that *"§4.12.2 lists `route=`/`port=`/`health=` as **nested** attributes,"* making top-level acceptance newly-accepting. **§4.12.2 does not say that.** Its title is "Nested `<program>` Attributes", its only position column is **"Valid in nested?"**, and **all twelve rows say YES** — it is silent about top level, not prohibitive.
+>
+> **SPEC has three distinct ways to mark position, and these three use none of them:**
+> - `story=` → **`YES (nested only)`**, with its diagnostic named inline (`W-STORY-ON-TOP-LEVEL`)
+> - `capabilities=` → **`YES (and top-level)`** — an annotation that is *only informative if a plain YES is silent* about top level
+> - `name=` → an explicit **MUST NOT** sentence (`SPEC.md:746`) plus `W-PROGRAM-TOP-LEVEL-NAME` plus §4.12.9 and §34 rows
+>
+> **And the nested-only reading is refuted, not merely unsupported.** `lang=` and `build=` are plain-YES rows of the same table, and SPEC makes `lang=` canonical at TOP level — §23.6 contrasts a library's `<foreign lang>` with *"a `<program lang>`"*, and `E-FOREIGN-LANG-IN-PROGRAM` exists to steer authors **to** the top-level form. A blanket "plain-YES means nested-only" rule would reject a shape SPEC itself publishes.
+>
+> **There is also no closed attribute set for `<program>` at all** — §40.8 lists app-wide attributes descriptively, and **no `E-PROGRAM-INVALID-ATTR` exists** (contrast `<page>`, which has a closed five-element set enforced by `E-PAGE-INVALID-ATTR`).
+>
+> **The real defect, measured.** `<program route="/api/v1" port="9001" health="/health">` at top level → **exit 0**, and `/api/v1`, `9001`, `/health` appear **zero times** across the emitted `.client.js` / `.css` / `.html` / runtime. Silently discarded. And `<program frobnicate="zzz">` fires `W-ATTR-001` claiming the attribute *"is currently forwarded to the rendered HTML as-is"* — **neither token appears in any artifact**, so restoring `W-ATTR-001` is not the answer at any scope.
+>
+> **Scope is NINE, not three.** Six more §4.12.2 attributes were already registered position-blind before this branch — `lang=`, `mode=`, `build=`, `callchar=`, `autostart=`, `capabilities=` — each equally silent at top level. **"The three" is an artifact of the false premise.**
+>
+> **Migration measured 0** by a structural AST scan (2460 files parsed, 1413 `<program>` nodes, 1350 top-level / 63 nested, zero top-level carrying the three). ⚑ The scan's FIRST version reported `<program> nodes: 0` across all 2460 files and would have printed the same headline zero — it read `buildAST(...).nodes` when `buildAST` returns the FileAST at `.ast`. **A green-looking broken probe, caught only because 1413 nodes in a 2460-file corpus is obviously not zero.**
+>
+> **The rulable axis, restated honestly:** *should a `<program>` attribute the compiler silently discards draw a diagnostic — and does that reach all nine position-blind registrations or only the three?* `lang=`/`build=` must be excluded by name. Mechanism if ruled: one `Set` + one membership test at `attribute-allowlist.ts:143` (position is already in hand via `collectTopLevelPrograms`), plus a new code with accurate text.
