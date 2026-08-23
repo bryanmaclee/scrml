@@ -253,6 +253,35 @@ describe("headers=strict — the SSR state seed survives default-src 'self'", ()
     expect(accounts.map((r) => r.name)).toEqual(["Alice", "Bob"]);
   });
 
+  test("EXECUTING: a row value containing </script> stays INERT inside the data block", async () => {
+    // The `<` -> \u003c escape is what keeps revealed string data from closing the
+    // block early. It is valid in JSON as well as in JS, so moving the seed to a
+    // data block did not weaken it — but a data block is parsed as raw text up to
+    // `</script`, so this is the assertion that has to hold.
+    const POISON = "</script><script>window.__PWNED = true;</scr" + "ipt>";
+    const { serverJs, html, clientJs } = compile(SEEDED_APP);
+    const firstPaint = await composeFirstPaint(serverJs, html, [{ id: 1, name: POISON }]);
+
+    // The payload never contains a literal `<`; the escape is in the JSON text.
+    const seedTagBody = /id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(firstPaint)[1];
+    expect(seedTagBody).not.toContain("<");
+    expect(seedTagBody).toContain("u003c");
+
+    delete window.__PWNED;
+    runUnderStrictCsp(firstPaint, `${SCRML_RUNTIME}\n${clientJs}\n`);
+
+    // Round-trips EXACTLY, and nothing in it executed.
+    expect(window.__scrml_ssr_state.accounts[0].name).toBe(POISON);
+    expect(window.__PWNED).toBeUndefined();
+    // The injected `<script>` did not become a real element: the document carries
+    // only the seed block itself (the runtime + client chunks are `src=` tags the
+    // emitted first paint references, not inline ones).
+    const inlineScripts = [...document.querySelectorAll("script")]
+      .filter((el) => !el.getAttribute("src"));
+    expect(inlineScripts.length).toBe(1);
+    expect(inlineScripts[0].id).toBe("__scrml_ssr_state");
+  });
+
   test("EXECUTING: the seed SAVES the /__serverLoad round trip; no seed still falls back to it", async () => {
     const { serverJs, html, clientJs } = compile(SEEDED_APP);
     const firstPaint = await composeFirstPaint(serverJs, html, DB_ROWS);
