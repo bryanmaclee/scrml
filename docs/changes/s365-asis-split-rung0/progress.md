@@ -287,3 +287,21 @@ not clobber the three shared docs. Do NOT `git checkout <branch> -- docs/known-g
 
 `bun.lock` + `package.json` carry the `typescript` devDependency the types gate requires; they must
 land together or `bun install --frozen-lockfile` fails in CI.
+
+---
+
+# FIX ROUND (dispatch 2) — adversarial verdict was DO-NOT-LAND
+
+Brief archived verbatim at `docs/changes/s365-asis-split-rung0/FIX-ROUND-BRIEF.md`.
+
+**Verdict summary as received:** the code passes and the SPEC text does not. Emit byte-identical
+across 2,724 artifacts; corpus diagnostic delta exactly one line. Five blocking items (B1-B5), all
+text-only, all in `compiler/SPEC.md`. Five ride-along items (S6-S10), small.
+
+**Base:** merged `origin/main` `c96e7012` (docs-only, three PA-owned shared docs) into
+`d63ba668` -> merge commit. No conflicts; file sets disjoint as the prior landing note predicted.
+
+## Running log — what went wrong as well as what worked
+
+(appended as work proceeds)
+
