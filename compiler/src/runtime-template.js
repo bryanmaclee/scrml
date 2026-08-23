@@ -1154,7 +1154,16 @@ function _scrml_wire_decode(value) {
 // deps in _scrml_reset, so a bundle without it degrades to a bare resolve rather than throwing.
 function _scrml_reset_apply(name, r) {
   if (r !== null && typeof r === "object" && typeof r.then === "function") {
-    r.then(function (v) { _scrml_reactive_set(name, v); }).catch(function (e) {
+    // Promise.resolve() FIRST. A bare r.then(...).catch(...) assumes .then returns
+    // a promise -- true for a real Promise, NOT true for an arbitrary thenable. A
+    // thenable of the form { then: (res) => res(99) } returns undefined from .then,
+    // so .catch is a TypeError thrown SYNCHRONOUSLY out of _scrml_reset and out of
+    // the adopter's event handler, aborting the rest of it. Adopting the thenable
+    // first is also what makes the comment above TRUE rather than merely plausible:
+    // await on that same value resolves to 99 without throwing, so this is the shape
+    // that genuinely mirrors the declaration path. S368.
+    // NB this file is itself a template literal -- no backticks, no dollar-brace.
+    Promise.resolve(r).then(function (v) { _scrml_reactive_set(name, v); }).catch(function (e) {
       if (typeof _scrml_error_boundary_log === "function") _scrml_error_boundary_log(name, e);
     });
   } else {
