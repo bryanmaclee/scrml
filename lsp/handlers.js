@@ -1124,6 +1124,7 @@ export const ERROR_DESCRIPTIONS = {
   "E-MW-002": "ratelimit= value does not match the canonical N/unit pattern (e.g., 100/minute). (SPEC §40)",
   "E-MW-005": "More than one handle() function in the same file. (SPEC §40)",
   "E-MW-006": "handle() defined outside file top-level ${ } logic. (SPEC §40)",
+  "E-MW-007": "More than one module in this build declares a request pipeline (a handle(), or a <program> attribute that emits a pipeline stage: cors= / log= other than \"off\" / ratelimit= / headers=\"strict\"). The onion is application-scope — a compiled server mounts exactly one. (SPEC §40.3.4)",
   "W-ATTR-001": "Attribute not recognized on a scrml-special element (informational; forwarded to HTML as-is). (SPEC §52.13)",
   "W-ATTR-002": "Attribute value-shape not recognized — silently accepted but no compile-time effect. (SPEC §52.13)",
   "E-ATTR-013": "class: directive value is invalid (bare identifier, string literal, or empty). class: requires a boolean expression. (SPEC §5.5.2)",

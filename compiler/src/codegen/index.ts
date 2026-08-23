@@ -56,6 +56,7 @@ import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-proven
 import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
+import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
@@ -1729,6 +1730,37 @@ export function runCG(input: CgInput): CgOutput {
   const _programAnySessionWrite = files.some((f) => astUsesSessionWrite(f));
   for (const f of files) (f as any)._programAnySessionWrite = _programAnySessionWrite;
 
+  // §38 transition keyframes — the APP-WIDE union + the shell entry that carries it.
+  //
+  // A §20.8.2 soft navigation swaps the target route's markup into the SHELL's
+  // live document and never loads the target page's stylesheet, so a page-scoped
+  // `@keyframes scrml-fade-in` is unreachable for every soft-navigated route —
+  // and soft nav is the DEFAULT (`_scrml_link_click_handler` intercepts every
+  // same-origin `<a href>`). Emitting the union into the entry stylesheet, which
+  // every composed per-page document already links, restores the pre-retirement
+  // "always present in the live document" guarantee with no runtime change.
+  //
+  // Entry = the first file with a top-level `<program>` (§40.8: exactly one per
+  // application) — the same rule the shell-composition post-pass below applies.
+  // No `<program>` in the compile unit → no shell → no outlet → no soft nav, so
+  // every file keeps its own scope and the union is never emitted anywhere.
+  const _transitionUnion = new Set<string>();
+  let _transitionUnionOwner: string | null = null;
+  {
+    for (const f of files) {
+      const fp = (f as any)?.filePath as string | undefined;
+      if (!fp) continue;
+      const a = fileAnalyses.get(fp);
+      for (const t of collectUsedTransitions(a ? (a as any).nodes : [])) _transitionUnion.add(t);
+      if (
+        _transitionUnionOwner === null &&
+        ((f as any)?.ast?.hasProgramRoot === true || (f as any)?.hasProgramRoot === true)
+      ) {
+        _transitionUnionOwner = fp;
+      }
+    }
+  }
+
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
   // in emit would otherwise leave the last file's token installed in this
@@ -2014,7 +2046,7 @@ export function runCG(input: CgInput): CgOutput {
         structuralDeclNames: collectStructuralDeclNames(fileAST),
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
-        usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
+        usedRuntimeChunks: new Set(['core', 'scope', 'errors']),
         // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
         // discriminate cross-file engine mount sites from local components / HTML.
         exportRegistry: exportRegistryInput,
@@ -2092,6 +2124,17 @@ export function runCG(input: CgInput): CgOutput {
       const cssParts: string[] = [];
       if (userCss) cssParts.push(userCss);
       if (tailwindCss) cssParts.push(tailwindCss);
+      // §38 transition keyframes. These ship in the file's own stylesheet — a
+      // same-origin <link rel="stylesheet"> — rather than the runtime's former
+      // inline <style> injection, which `<program headers="strict">`'s pinned
+      // `default-src 'self'` CSP (§39.2.5) refuses to apply. Null for a file
+      // with no transition directive, so most stylesheets are unchanged.
+      // The shell entry carries the APP-WIDE union (soft nav swaps every route
+      // into ITS document); every other file carries only its own directives.
+      const transitionCss: string | null = renderTransitionCss(
+        filePath === _transitionUnionOwner ? _transitionUnion : collectUsedTransitions(nodes),
+      );
+      if (transitionCss) cssParts.push(transitionCss);
       const css: string | null = cssParts.length > 0 ? cssParts.join("\n") : null;
 
       // Create per-file EncodingContext (§47) and set it on the compile context

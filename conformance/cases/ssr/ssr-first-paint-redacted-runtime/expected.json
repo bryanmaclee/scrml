@@ -19,7 +19,7 @@
       "contains": [
         "<li data-scrml-key=\"1\" class=\"row\">Alice</li>",
         "<li data-scrml-key=\"2\" class=\"row\">Bob</li>",
-        "window.__scrml_ssr_state="
+        "<script type=\"application/json\" id=\"__scrml_ssr_state\">"
       ],
       "notContains": ["SECRET", "passwordHash"]
     },

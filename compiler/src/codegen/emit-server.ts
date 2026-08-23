@@ -2911,11 +2911,28 @@ export function generateServerJs(
   }
 
   // §39 Compiler-auto middleware infrastructure
-  const _scrml_hasMW: boolean = middlewareConfig != null;
-  const _scrml_hasCors: boolean = _scrml_hasMW && middlewareConfig.cors != null;
-  const _scrml_hasLog: boolean = _scrml_hasMW && middlewareConfig.log != null && middlewareConfig.log !== 'off';
-  const _scrml_hasRatelimit: boolean = _scrml_hasMW && middlewareConfig.ratelimit != null;
-  const _scrml_hasSecureHeaders: boolean = _scrml_hasMW && middlewareConfig.headers === 'strict';
+  //
+  // `middlewareConfig` is the raw `<program>` attribute bag, and it is WIDER than
+  // the request pipeline: compute-program-config also lands `batch-in-list-cap=`
+  // (§8.10.6 SQL batching), `idempotency-store=` / `idempotency-ttl=` (§19.9.6),
+  // `cors-max-age=` (inert without `cors=`) and `channel-reconnect=` (§38.3.1
+  // WebSocket) in the same object. NONE of those emits an onion stage.
+  //
+  // So `middlewareConfig != null` is NOT the pipeline predicate. Using it as one
+  // made a file whose only `<program>` attribute is `batch-in-list-cap="999"`
+  // export `_scrml_mw_pipeline` — an onion with no stages and no `handle()` — and
+  // two such files in one build were then rejected as E-MW-007 "declares the
+  // request pipeline in 2 different sources", naming attributes neither file has.
+  const _scrml_mwAttrsPresent: boolean = middlewareConfig != null;
+  const _scrml_hasCors: boolean = _scrml_mwAttrsPresent && middlewareConfig.cors != null;
+  const _scrml_hasLog: boolean = _scrml_mwAttrsPresent && middlewareConfig.log != null && middlewareConfig.log !== 'off';
+  const _scrml_hasRatelimit: boolean = _scrml_mwAttrsPresent && middlewareConfig.ratelimit != null;
+  const _scrml_hasSecureHeaders: boolean = _scrml_mwAttrsPresent && middlewareConfig.headers === 'strict';
+  // THE REQUEST PIPELINE — exactly the four attributes that emit an onion stage,
+  // which is what §40.3.4's sentence and E-MW-007's message already say. `log="off"`
+  // and a non-`strict` `headers=` declare no stage and so declare no pipeline.
+  const _scrml_hasMW: boolean =
+    _scrml_hasCors || _scrml_hasLog || _scrml_hasRatelimit || _scrml_hasSecureHeaders;
   const _scrml_handleNode: any | null = _scrml_handleNodeEarly;
 
   if (_scrml_hasMW || _scrml_handleNode) {
@@ -2977,6 +2994,44 @@ export function generateServerJs(
       lines.push("  return null;");
       lines.push("}");
       lines.push("");
+      // F1 (S355) — `ratelimit=` is scoped to ROUTE requests, not every request.
+      //
+      // SPEC classifies `ratelimit=` as one of the PER-ROUTE concerns (§4.15 line
+      // 1080 / E-PAGE-INVALID-ATTR: the `<page>` attribute set is "db=, auth=,
+      // csrf=, ratelimit=, keep-alive" — per-route — as opposed to the app-wide
+      // attributes that live only on `<program>`), and §40.2 fixes the order as
+      // "CORS -> rate limit -> CSRF -> route handler". `handle()` gets an explicit
+      // carve-in at §40.3.4 ("applies to all HTTP requests handled by the compiled
+      // server -- including statically-served assets"); the limiter gets no such
+      // sentence, and MUST NOT inherit one just because it now shares the onion.
+      //
+      // Counting every request instead broke the app's own boot: one ordinary page
+      // load is HTML + CSS + runtime + client bundle, so `ratelimit="3/min"` 429'd
+      // the client bundle on the FIRST visit.
+      //
+      // The predicate mirrors THIS module's dispatch exactly — same exact-case
+      // method compare the route loop uses, so "counted" and "routed" can never
+      // disagree. It reads the module's own `routes`, which is what scopes the
+      // limiter per module: a sibling module's page is not this module's route, so
+      // it is not counted against this module's budget.
+      //
+      // WebSocket upgrades are excluded per §40.3.4 ("handle() does NOT apply to
+      // WebSocket upgrade requests") — both hosts dispatch them before the onion.
+      lines.push("// §4.15/§40.2 — `ratelimit=` is a PER-ROUTE concern: only requests a");
+      lines.push("// registered route will serve are counted. Static assets (this page's own");
+      lines.push("// CSS / client bundle / runtime) and 404s are not — otherwise one ordinary");
+      lines.push("// page load would spend the whole budget before the app could boot.");
+      lines.push("// Mirrors the route loop below (exact-case method) so 'counted' and");
+      lines.push("// 'routed' always agree. WebSocket upgrades are excluded per §40.3.4.");
+      lines.push("function _scrml_is_rate_limited_route(req) {");
+      lines.push("  const url = new URL(req.url, 'http://localhost');");
+      lines.push("  for (const route of routes) {");
+      lines.push("    if (route.isWebSocket) continue;");
+      lines.push("    if (route.path === url.pathname && route.method === req.method) return true;");
+      lines.push("  }");
+      lines.push("  return false;");
+      lines.push("}");
+      lines.push("");
     }
 
     if (_scrml_hasSecureHeaders) {
@@ -3004,18 +3059,77 @@ export function generateServerJs(
       lines.push("");
     }
 
-    lines.push("// §39 Middleware pipeline wrapper");
+    // §40.3 — the onion wraps TOP-LEVEL DISPATCH, not a single route.
+    //
+    // `handle()` is a literal onion: SPEC §40.3.4 says it "applies to all HTTP
+    // requests handled by the compiled server — including statically-served
+    // assets", and §40.3.5 says an early return "short-circuits the pipeline and
+    // prevents the route handler from running". A per-route wrap could satisfy
+    // neither: a custom path with no author `route=` never reached a handler, so
+    // the PRE short-circuit was unreachable and the whole wrapper was dead code
+    // in a `handle()`-only program. `downstream` is therefore the host
+    // dispatcher's REMAINDER (route match → static file → 404), supplied by
+    // whoever mounts this module — the `fetch` aggregate below, the built
+    // server's `Bun.serve`, or `scrml dev`.
+    if (_scrml_handleNode) {
+      // The "nothing matched downstream" 404. Tagged in a WeakSet so the `fetch`
+      // aggregate below can turn an untouched one back into `null` and keep the
+      // documented `scrml(req) ?? myApi(req)` composition contract alive, while
+      // `resolve()` itself still honours §40.3.2 ("returns a Bun Response").
+      lines.push("// §40.3.2 — the 'no route matched' Response resolve() hands to handle().");
+      lines.push("// Tagged so the composable `fetch` export can map an untouched one back to null.");
+      lines.push("const _scrml_mw_no_match_set = new WeakSet();");
+      lines.push("function _scrml_mw_no_match() {");
+      lines.push("  const response = new Response('Not found', { status: 404 });");
+      lines.push("  _scrml_mw_no_match_set.add(response);");
+      lines.push("  return response;");
+      lines.push("}");
+      lines.push("");
+    }
+
+    lines.push("// §40.3 Middleware pipeline wrapper — wraps TOP-LEVEL dispatch.");
     lines.push("// Pipeline: CORS → rate-limit → handle() PRE → CSRF → route → handle() POST → headers → logging");
-    lines.push("function _scrml_mw_wrap(routeHandler) {");
+    lines.push("// `downstream(request)` is the rest of the dispatch (route match → static file → 404).");
+    lines.push("function _scrml_mw_wrap(downstream) {");
     lines.push("  return async function _scrml_mw_handler(_scrml_mw_req) {");
+
+    if (_scrml_hasCors) {
+      // §40.3.3 pins `[CORS preflight] → [rate limit] → handle() PRE`. The
+      // preflight was ONLY the `_scrml_cors_options_route` registry entry, which
+      // is downstream of `resolve()` now that the onion wraps top-level dispatch
+      // — so an author `handle()` ran on every browser preflight (measured: an
+      // OPTIONS request came back stamped by handle()). A `handle()` that
+      // early-returns 403 for unauthenticated requests would then block every
+      // preflight, and a preflight carries no credentials to satisfy it with.
+      //
+      // The route export stays: the §64 serve-target tool host matches `path:
+      // "/*"` (emit-tool.ts), so it is live THERE. The `_server.js` and
+      // `scrml dev` hosts match a path literally, so this stage is the one that
+      // answers for them — at the position §40.3.3 names.
+      //
+      // A preflight short-circuits at stage 1, so it reaches neither [logging]
+      // nor [security headers], exactly as an early return from any stage does.
+      lines.push("    // §40.3.3 order: [CORS preflight] is the FIRST stage — ahead of the rate");
+      lines.push("    // limiter and ahead of handle() PRE, so an author handle() never sees a");
+      lines.push("    // browser preflight (it carries no credentials to satisfy an auth check).");
+      lines.push("    if (_scrml_mw_req.method === 'OPTIONS') {");
+      lines.push("      return new Response(null, { status: 204, headers: _scrml_cors_headers() });");
+      lines.push("    }");
+    }
 
     if (_scrml_hasLog) {
       lines.push("    const _scrml_mw_t0 = Date.now();");
     }
 
     if (_scrml_hasRatelimit) {
-      lines.push("    const _scrml_rl = _scrml_check_ratelimit(_scrml_mw_req);");
-      lines.push("    if (_scrml_rl) return _scrml_rl;");
+      // F1 (S355) — per-route scope. Position is unchanged (§40.2/§40.3.3: rate
+      // limit still runs BEFORE handle() PRE); only the SET of counted requests is
+      // restored to route traffic. See `_scrml_is_rate_limited_route` above.
+      lines.push("    // §40.3.3 order: rate limit runs before handle() PRE — but only for route traffic.");
+      lines.push("    if (_scrml_is_rate_limited_route(_scrml_mw_req)) {");
+      lines.push("      const _scrml_rl = _scrml_check_ratelimit(_scrml_mw_req);");
+      lines.push("      if (_scrml_rl) return _scrml_rl;");
+      lines.push("    }");
     }
 
     if (_scrml_handleNode) {
@@ -3033,13 +3147,27 @@ export function generateServerJs(
       lines.push("    // handle() escape hatch body (§39.3) — wrapped in IIFE for return capture");
       lines.push("    const _scrml_mw_result = await (async () => {");
 
-      lines.push("      // resolve() = route dispatch (CSRF check is per-route)");
+      // §40.3.2 — "resolve(request) invokes the rest of the pipeline and returns
+      // a Bun Response". TOTAL by construction: a host dispatcher that signals
+      // "nothing matched" with a non-Response (the `fetch` aggregate's `null`
+      // composition contract) is normalized to a 404 here, so author POST-
+      // middleware (`response.headers.set(...)`) never sees a non-Response.
+      lines.push("      // resolve() = the rest of the dispatch (CSRF check is per-route)");
       lines.push("      const resolve = async (_scrml_resolve_req) => {");
-      lines.push("        return routeHandler(_scrml_resolve_req);");
+      lines.push("        const _scrml_resolved = await downstream(_scrml_resolve_req);");
+      lines.push("        // §40.3.2 — resolve() always yields a Response so handle() POST-middleware is total.");
+      lines.push("        return _scrml_resolved instanceof Response");
+      lines.push("          ? _scrml_resolved");
+      lines.push("          : _scrml_mw_no_match();");
       lines.push("      };");
 
       const handleParams: any[] = _scrml_handleNode.params ?? [];
       const requestParamName: string = typeof handleParams[0] === 'string' ? handleParams[0] : 'request';
+      // §40.3.2 types `resolve` as returning a `Response`, and every worked
+      // example binds it synchronously (`const response = resolve(request)`).
+      // The emitted `resolve` is async, so its call sites are auto-awaited under
+      // the author's own param name (`resolve` unless they renamed it).
+      const resolveParamName: string = typeof handleParams[1] === 'string' ? handleParams[1] : 'resolve';
 
       if (requestParamName !== '_scrml_mw_req') {
         lines.push(`      const ${requestParamName} = _scrml_mw_req;`);
@@ -3056,15 +3184,15 @@ export function generateServerJs(
           // the async IIFE above, so `await` is legal; inject it before the async
           // `<request>.formData()`/`.json()`/… Request-body reads the server-fn
           // auto-await (bare-name only) cannot see (adopter #471).
-          const awaited = injectHandleRequestAwaits(code, requestParamName);
+          const awaited = injectHandleRequestAwaits(code, requestParamName, resolveParamName);
           for (const line of awaited.split('\n')) lines.push('      ' + line);
         }
       }
 
       lines.push("    })();");
     } else {
-      lines.push("    // No handle() — direct route dispatch (CSRF check is per-route)");
-      lines.push("    const _scrml_mw_result = await routeHandler(_scrml_mw_req);");
+      lines.push("    // No handle() — straight through to the rest of the dispatch");
+      lines.push("    const _scrml_mw_result = await downstream(_scrml_mw_req);");
     }
 
     if (_scrml_hasSecureHeaders) {
@@ -3088,6 +3216,35 @@ export function generateServerJs(
     lines.push("    return _scrml_mw_result;");
     lines.push("  };");
     lines.push("}");
+    lines.push("");
+
+    // §40.3 — the mount point for a HOST dispatcher. `scrml build`'s generated
+    // `_server.js` and `scrml dev` both import this by name and hand it their own
+    // remainder-of-dispatch, so `handle()` PRE runs for EVERY request they serve
+    // (not only the ones that happen to match a registered route). Exported as a
+    // function, so the `{ path, method, handler }` route scanners in both hosts
+    // skip it by shape; both also name-skip it explicitly.
+    lines.push("// §40.3 — top-level onion mount point for the host dispatcher.");
+    lines.push("// `scrml build` / `scrml dev` call this with their remainder-of-dispatch");
+    lines.push("// (route match → static file → 404); handle() PRE then sees EVERY request.");
+    lines.push("export const _scrml_mw_pipeline = _scrml_mw_wrap;");
+    // §40.3/§40.8 — the SOURCE that declares this onion. The request onion is
+    // APPLICATION-scope, not per-module: §40.3.4 says `handle()` "applies to all
+    // HTTP requests handled by the compiled server — including statically-served
+    // assets", and §40.8 makes the `<program>` middleware attributes app-scope and
+    // declares the top-level `<program>` exactly ONCE per application, in the
+    // entry file. So a compiled server mounts exactly ONE onion, and the source
+    // that declares it is the source an author reads the precedence off.
+    //
+    // Composing several by module order would make a RENAME decide which
+    // `handle()` wins a contested path (the module list is filename-sorted), and
+    // would run every module's PRE on every other module's page. Both hosts
+    // therefore mount one onion and name THIS file when the declaration is
+    // contested (E-MW-007).
+    lines.push("// §40.3/§40.8 — the source that DECLARES this onion. The onion is");
+    lines.push("// application-scope, so a compiled server mounts exactly one; the host");
+    lines.push("// names this file if a build presents more than one (E-MW-007).");
+    lines.push(`export const _scrml_mw_declared_in = ${JSON.stringify(_pathBasename(filePath))};`);
     lines.push("");
   }
 
@@ -3555,7 +3712,10 @@ export function generateServerJs(
       lines.push(`export const ${routeName} = {`);
       lines.push(`  path: ${JSON.stringify(path)},`);
       lines.push(`  method: "GET",`);
-      lines.push(`  handler: ${(_scrml_hasMW || _scrml_handleNode != null) ? `_scrml_mw_wrap(${handlerName})` : handlerName},`);
+      // §40.3 — NO per-route `_scrml_mw_wrap` here. The onion now wraps top-level
+      // dispatch (see the wrapper emission above + the `fetch` aggregate below);
+      // wrapping here too would run `handle()` PRE twice on a route match.
+      lines.push(`  handler: ${handlerName},`);
       lines.push(`};`);
       lines.push("");
 
@@ -4403,9 +4563,13 @@ export function generateServerJs(
       lines.slice(_sessHandlerStartIdx).some((l) =>
         l.includes("_scrml_req._scrml_sess.") || _SESSION_BARE_TEXT_RE.test(l));
     const _sessHandlerUsesSession = _webAppShape && _sessHandlerRefsSession;
-    let _sessRegHandler = (_scrml_hasMW || _scrml_handleNode != null)
-      ? `_scrml_mw_wrap(${handlerName})`
-      : handlerName;
+    // §40.3 — NO per-route `_scrml_mw_wrap` here either. The onion moved up to
+    // top-level dispatch, so the cookie-session wrapper is now the ONLY per-route
+    // wrapper and is therefore the outermost PER-ROUTE layer; the middleware onion
+    // sits outside it, at the dispatcher. Resulting order on a route match:
+    //   handle() PRE → route match → _scrml_session_cookie_wrap → handler
+    //   → cookie commit → handle() POST → security headers → logging.
+    let _sessRegHandler = handlerName;
     if (_sessHandlerUsesSession) {
       _sessRegHandler = `_scrml_session_cookie_wrap(${_sessRegHandler})`;
       // §20.5 (i29e, S239 FIX 6) — record this wrapped handler's line range as an
@@ -5218,12 +5382,25 @@ export function generateServerJs(
       }
       if (_hasSsrSeed) {
         // Inline the server-authoritative state seed before </head> so the client
-        // hydrates BEFORE mount (kills the fetch RTT). String.fromCharCode(92) is a
-        // backslash: a `<` in the JSON becomes the JS escape so the embedded value
-        // can never break out of the <script> (a `</script>` in revealed string
-        // data stays inert).
+        // hydrates BEFORE mount (kills the fetch RTT).
+        //
+        // The seed ships as a NON-EXECUTABLE data block:
+        //   <script type="application/json" id="__scrml_ssr_state">{…}</script>
+        // A `type` the browser does not recognise as a script language is a DATA
+        // block per HTML: the UA never executes it, so `<program headers="strict">`'s
+        // pinned `default-src 'self'` CSP (§39.2.5) has nothing to refuse. The client
+        // runtime reads it with `document.getElementById(...)` + `JSON.parse` (the
+        // 'ssr' runtime chunk). An executable `<script>window.__scrml_ssr_state=…`
+        // would be refused outright under that CSP, which silently cost the page its
+        // whole SSR seed — and §39.2.5's "override via handle()" escape does not
+        // cover compiler-emitted content, so the author could not fix it.
+        //
+        // String.fromCharCode(92) is a backslash: every `<` in the JSON becomes the
+        // `\u003c` JSON escape, which parses back to `<` and guarantees the payload
+        // can never contain the `</script` that would end the data block early (a
+        // `</script>` inside revealed string data stays inert).
         lines.push(`  const _scrml_seed_json = JSON.stringify(_scrml_ssr_state).replace(/</g, String.fromCharCode(92) + "u003c");`);
-        lines.push(`  const _scrml_seed_tag = "<script>window.__scrml_ssr_state=" + _scrml_seed_json + ";</script>";`);
+        lines.push(`  const _scrml_seed_tag = '<script type="application/json" id="__scrml_ssr_state">' + _scrml_seed_json + "</script>";`);
         // FUNCTION replacer: the seed JSON embeds server-authority cell/row values; a
         // string 2nd-arg would honor $&/$'/$`/$$ in that data and duplicate/corrupt the
         // page tail. (The </head> boundary is a literal string, not a regex, so a $ in
@@ -5367,19 +5544,61 @@ export function generateServerJs(
   while ((m = routeNameRe.exec(emitted)) !== null) {
     collected.push(m[1]);
   }
-  if (collected.length > 0) {
+  // §40.3 — a `handle()`-only program (no route= anywhere, no server fn) used to
+  // collect ZERO routes and therefore emit NO dispatcher at all: the middleware
+  // wrapper was defined and called zero times, 100% dead code. The onion is
+  // top-level dispatch, so the aggregate now emits whenever the program has a
+  // request pipeline, routes or not.
+  const _emitAggregate: boolean =
+    collected.length > 0 || _scrml_hasMW || _scrml_handleNode != null;
+  const _wrapAggregate: boolean = _scrml_hasMW || _scrml_handleNode != null;
+
+  if (_emitAggregate) {
     lines.push("// --- S35 insight 22: aggregate routes + WinterCG fetch handler ---");
     lines.push(`export const routes = [${collected.join(", ")}];`);
     lines.push("");
-    lines.push("export async function fetch(request) {");
-    lines.push("  const url = new URL(request.url, 'http://localhost');");
-    lines.push("  for (const r of routes) {");
-    lines.push("    if (r.path === url.pathname && r.method === request.method) {");
-    lines.push("      return r.handler(request);");
-    lines.push("    }");
-    lines.push("  }");
-    lines.push("  return null;");
-    lines.push("}");
+    if (_wrapAggregate) {
+      // Route matching is the ONION'S DOWNSTREAM here, not the entry point.
+      // `handle()` PRE runs first for every request; only `resolve(request)`
+      // reaches this loop. `null` on no match keeps the documented composition
+      // contract (`scrml(req) ?? myApi(req)`) — `_scrml_mw_wrap` normalizes that
+      // to a tagged 404 before the author's `handle()` body ever sees it, and
+      // `fetch` maps an untouched tagged 404 back to `null` below.
+      lines.push("// Route dispatch — the DOWNSTREAM of the §40.3 handle() onion.");
+      lines.push("async function _scrml_route_dispatch(request) {");
+      lines.push("  const url = new URL(request.url, 'http://localhost');");
+      lines.push("  for (const r of routes) {");
+      lines.push("    if (r.path === url.pathname && r.method === request.method) {");
+      lines.push("      return r.handler(request);");
+      lines.push("    }");
+      lines.push("  }");
+      lines.push("  return null;");
+      lines.push("}");
+      lines.push("");
+      lines.push("// §40.3 — handle() PRE wraps ALL top-level dispatch: every request enters");
+      lines.push("// the onion first, and only resolve(request) continues to route matching.");
+      lines.push("const _scrml_fetch_pipeline = _scrml_mw_wrap(_scrml_route_dispatch);");
+      lines.push("");
+      lines.push("export async function fetch(request) {");
+      lines.push("  const response = await _scrml_fetch_pipeline(request);");
+      if (_scrml_handleNode) {
+        lines.push("  // An untouched 'nothing matched' 404 reads as 'not mine' so this module");
+        lines.push("  // still composes as `scrml(req) ?? myApi(req)`.");
+        lines.push("  if (response && _scrml_mw_no_match_set.has(response)) return null;");
+      }
+      lines.push("  return response;");
+      lines.push("}");
+    } else {
+      lines.push("export async function fetch(request) {");
+      lines.push("  const url = new URL(request.url, 'http://localhost');");
+      lines.push("  for (const r of routes) {");
+      lines.push("    if (r.path === url.pathname && r.method === request.method) {");
+      lines.push("      return r.handler(request);");
+      lines.push("    }");
+      lines.push("  }");
+      lines.push("  return null;");
+      lines.push("}");
+    }
     lines.push("");
   }
 

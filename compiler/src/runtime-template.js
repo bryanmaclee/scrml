@@ -2763,20 +2763,29 @@ function _scrml_nav_fetch_and_swap(path, restore) {
     });
 }
 
-// Extract the target document's SSR state seed (the SSR doc injects
-// <script>window.__scrml_ssr_state={…}</script>; DOMParser does NOT execute it,
-// so parse the JSON out of the script text). Replaces the live seed wholesale so
-// a stale prior-route seed does not leak into the new region.
+// Extract the target document's SSR state seed. The SSR doc carries it as
+// <script type="application/json" id="__scrml_ssr_state">{…}</script> — a data
+// block, so there is nothing to execute either here or in the live document
+// (that is what keeps it legal under headers="strict", §39.2.5). Replaces the
+// live seed wholesale so a stale prior-route seed does not leak into the new
+// region. Parsed locally rather than through the 'ssr' chunk's reader: soft nav
+// ships in a different runtime chunk and must not depend on one that a page
+// with no server-authority cell tree-shakes away.
 function _scrml_nav_extract_seed(doc) {
   if (typeof window === "undefined") return;
-  var scripts = doc.querySelectorAll("script");
-  var prefix = "window.__scrml_ssr_state=";
-  for (var i = 0; i < scripts.length; i++) {
-    var text = scripts[i].textContent || "";
-    var at = text.indexOf(prefix);
-    if (at === -1) continue;
-    var json = text.slice(at + prefix.length).replace(/;\\s*$/, "");
-    try { window.__scrml_ssr_state = JSON.parse(json); }
+  var el = doc && typeof doc.getElementById === "function"
+    ? doc.getElementById("__scrml_ssr_state")
+    : null;
+  // Match on the emitted WIRE FORM, not the id alone — an ordinary
+  // <div id="__scrml_ssr_state"> in the FETCHED document must not be parsed as
+  // the seed. The 'ssr' chunk applies the identical test in
+  // _scrml_ssr_is_seed_element; it is repeated rather than shared because soft
+  // nav must not depend on a chunk a seedless page tree-shakes away (see above).
+  if (el
+    && String(el.tagName || "").toUpperCase() === "SCRIPT"
+    && typeof el.getAttribute === "function"
+    && String(el.getAttribute("type") || "").toLowerCase() === "application/json") {
+    try { window.__scrml_ssr_state = JSON.parse(el.textContent || "null"); }
     catch (e) { /* malformed seed — keep the prior seed rather than crash */ }
     return;
   }
@@ -3685,27 +3694,14 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
 }
 
 
-// --- Transition CSS injection (§38 transition directives) ---
-// Inject transition keyframes and classes into the document head once.
-(function() {
-  if (typeof document === "undefined") return;
-  const style = document.createElement("style");
-  style.textContent = [
-    "@keyframes scrml-fade-in { from { opacity: 0 } to { opacity: 1 } }",
-    "@keyframes scrml-fade-out { from { opacity: 1 } to { opacity: 0 } }",
-    ".scrml-enter-fade { animation: scrml-fade-in 300ms ease }",
-    ".scrml-exit-fade { animation: scrml-fade-out 300ms ease }",
-    "@keyframes scrml-slide-in { from { transform: translateY(-20px); opacity: 0 } to { transform: none; opacity: 1 } }",
-    "@keyframes scrml-slide-out { from { transform: none; opacity: 1 } to { transform: translateY(-20px); opacity: 0 } }",
-    ".scrml-enter-slide { animation: scrml-slide-in 300ms ease }",
-    ".scrml-exit-slide { animation: scrml-slide-out 300ms ease }",
-    "@keyframes scrml-fly-in { from { transform: translateX(-100%); opacity: 0 } to { transform: none; opacity: 1 } }",
-    "@keyframes scrml-fly-out { from { transform: none; opacity: 1 } to { transform: translateX(100%); opacity: 0 } }",
-    ".scrml-enter-fly { animation: scrml-fly-in 300ms ease }",
-    ".scrml-exit-fly { animation: scrml-fly-out 300ms ease }",
-  ].join("\\n");
-  document.head.appendChild(style);
-})();
+// --- Transition CSS (§38 transition directives) ---
+// RETIRED from the runtime. The scrml-enter-* / scrml-exit-* keyframes used
+// to be injected here as an inline <style>; <program headers="strict"> pins
+// default-src 'self' (§39.2.5) and a browser REFUSES to apply an inline style
+// under it, so a strict-headers app silently lost every §38 transition. They now
+// ship in the file's own stylesheet (codegen/emit-transition-css.ts), which is a
+// same-origin <link rel="stylesheet"> and needs no CSP widening. Emitted only
+// for the transitions a file actually uses.
 
 // --- §19 Built-in error types ---
 // Each error type is a class extending Error with .type and .cause fields.
@@ -6079,7 +6075,7 @@ function _scrml_map_decode(x) {
 // §52.8 SSR pre-render seed (chunk: 'ssr')
 //
 // B-substrate (ssr-b-substrate). The compiler-emitted SSR HTML-composition route
-// (emit-server.ts) injects <script>window.__scrml_ssr_state={…}</script> before
+// (emit-server.ts) injects the seed data block (WIRE FORMAT below) before
 // </head>, carrying the server-authoritative cell values redacted at the §14.8.9
 // egress sink. _scrml_ssr_seed_apply() runs BEFORE the mount fetch decisions and
 // the engine hydration (emit-reactive-wiring Step 4c) so each seeded cell is
@@ -6089,6 +6085,44 @@ function _scrml_map_decode(x) {
 // host, no server in the request path), window.__scrml_ssr_state is absent and
 // both helpers are no-ops — the ordinary fetch path runs unchanged (graceful
 // degradation, never a crash).
+//
+// WIRE FORMAT — the seed is a NON-EXECUTABLE data block:
+//   <script type="application/json" id="__scrml_ssr_state">{…}</script>
+// A type the browser does not recognise as a script language is DATA, never
+// executed, so <program headers="strict">'s pinned default-src 'self' CSP
+// (§39.2.5) has nothing to refuse. The executable form this replaced
+// (<script>window.__scrml_ssr_state=…</script>) was refused outright under
+// that CSP and the page silently lost its whole seed.
+function _scrml_ssr_seed_from_document(doc) {
+  var el = (doc && typeof doc.getElementById === "function")
+    ? doc.getElementById("__scrml_ssr_state")
+    : null;
+  if (!_scrml_ssr_is_seed_element(el)) return undefined; // no seed in this document
+  try { return JSON.parse(el.textContent || "null"); }
+  catch (e) { return undefined; }                 // malformed — behave as unseeded
+}
+// The seed is identified by its WIRE FORM, not by its id alone: an id is a
+// document-wide namespace an author shares, so a page carrying its own
+// <div id="__scrml_ssr_state"> would otherwise have its text content parsed as
+// the server-authoritative seed and applied over the cell store. Requiring the
+// exact emitted shape — a <script type="application/json"> — means only what
+// emit-server actually wrote can seed the page.
+function _scrml_ssr_is_seed_element(el) {
+  return !!el
+    && String(el.tagName || "").toUpperCase() === "SCRIPT"
+    && typeof el.getAttribute === "function"
+    && String(el.getAttribute("type") || "").toLowerCase() === "application/json";
+}
+// Hoist the seed onto window the moment this chunk loads. EAGER, not lazy:
+// the runtime script sits at the end of <body>, so <head>'s data block is
+// already parsed — and a later soft nav replaces window.__scrml_ssr_state with
+// the TARGET document's seed (_scrml_nav_extract_seed), which a lazy hoist
+// reading the ORIGINAL document would clobber.
+(function () {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  var _seed = _scrml_ssr_seed_from_document(document);
+  if (_seed !== undefined) window.__scrml_ssr_state = _seed;
+})();
 function _scrml_ssr_seeded(name) {
   return typeof window !== "undefined"
     && window.__scrml_ssr_state != null
