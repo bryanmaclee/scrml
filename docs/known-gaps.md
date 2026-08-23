@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 46 |
-| MED | 151 |
+| MED | 152 |
 | LOW | 68 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9318,3 +9318,21 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Migration measured 0** by a structural AST scan (2460 files parsed, 1413 `<program>` nodes, 1350 top-level / 63 nested, zero top-level carrying the three). ⚑ The scan's FIRST version reported `<program> nodes: 0` across all 2460 files and would have printed the same headline zero — it read `buildAST(...).nodes` when `buildAST` returns the FileAST at `.ast`. **A green-looking broken probe, caught only because 1413 nodes in a 2460-file corpus is obviously not zero.**
 >
 > **The rulable axis, restated honestly:** *should a `<program>` attribute the compiler silently discards draw a diagnostic — and does that reach all nine position-blind registrations or only the three?* `lang=`/`build=` must be excluded by name. Mechanism if ruled: one `Set` + one membership test at `attribute-allowlist.ts:143` (position is already in hand via `collectTopLevelPrograms`), plus a new code with accurate text.
+
+### g-spec-h4-heading-numbering-drifted — 36 SPEC h4 headings carried a major number differing from their enclosing h3 (27 after this session's 9-heading repair), so a §X.Y.Z citation cannot be resolved by heading lookup — `NEW S365-bryan (surfaced by the handle-onion fix round, which repaired 9 of them and left 32 comment citations dangling); MED; open`
+<!-- @gap id=g-spec-h4-heading-numbering-systemically-drifted sev=MED status=open locus=compiler/SPEC.md(36-before/27-after h4 headings whose major differs from the enclosing h3 — e.g. `#### 38.5.1` under `### 39.5`, `#### 39.2.1` under `### 40.2`) prov=rationale:S365-bryan-the-handle-onion-fix-round-needed-40-3-4-to-resolve-and-found-the-heading-said-39-3-4-while-85-citations-said-40-3-x-it-renumbered-the-HEADINGS-root-over-position-which-is-the-right-direction-but-leaves-the-inverse-population-dangling -->
+> **⚑ S365-bryan: PA-VERIFIED both halves.**
+>
+> **After the fix round's renumber, inside SPEC.md the citations are sound:** every cited `§40.3.x` / `§41.2.x` / `§41.3.x` now has a heading, and **zero** stale `§39.3.x` remain in SPEC. 1337 headings scanned.
+>
+> **And `§39.3.x` citations outside SPEC are now dangling — three independent counts disagree because they counted different things: the fix round said 34, I said 32 (`compiler/src` + `compiler/tests` + `lsp` + `docs`), the re-review counted 41 lines across 19 files including 2 in `conformance/cases/**/expected.json`. Take the re-review's, and state the scope with the number.** The originally-recorded 32 — in `compiler/src/` comments, tests, and `lsp/` — e.g. `route-inference.ts:108`, `:4422`, `:5517`. Measured: **§39.3.1 through §39.3.5 have no heading at all** now. They were *correct before* the renumber. (The fix round reported 34; my count is 32 — noting the discrepancy rather than adopting either number blind.)
+>
+> **The renumber itself was the right call and is not the defect.** The headings were the typo: 85 citations said `§40.3.x` while the headings said `39.3.x` under an enclosing `### 40.3`. Fixing 85 by breaking 32 is root-over-position. The defect is that this is **one instance of a systemic drift** — the fix round measured **141 h4 headings** whose major differs from their enclosing h3, repo-wide, and repaired nine only because this branch's citations depended on them.
+>
+> ⚑ **CORRECTED S365-bryan, and the correction is itself the lesson.** The fix round's `progress.md` reported **141** drifted headings and I banked that number verbatim in the first version of this entry. **Independently measured — by me and, separately, by the S239 re-review — it is 36 on `origin/main` and 27 after the 9-heading repair.** The round's figure is wrong by ~4×. The **delta of 9 is exact in both measurements**, which is the reliable part. *Method, so the next reader can re-run it rather than inherit a number:* walk the file, track the most recent `### <maj>.<min>` heading, and count `#### <maj>.<min>.<n>` headings whose `<maj>` differs from it (701 h4 headings scanned).
+>
+> **This is the fifth relayed figure to fail in one session.** The rule that keeps holding: a number I did not run does not go in a durable artifact.
+>
+> **Why it matters beyond tidiness:** a §-citation is the project's primary durable pointer into the normative source (this session already found a `known-gaps.md:6429` line-number citation rotted for the same reason — line numbers shift, so §-refs are supposed to be the stable alternative). If a §-ref cannot be resolved by heading lookup, the stable alternative is not stable either.
+>
+> **Fix direction, two parts, separable:** (a) mechanical sweep of the 32 dangling comment citations `§39.3.x → §40.3.x` — zero behavioural risk, verify the mapping is uniform first; (b) a decision on the remaining 141, which is a bigger call: renumber the headings to match their parents, or accept the drift and stop treating h4 numbers as addressable. **Do not do (b) piecemeal per-branch** — that is how 9 got fixed and 32 got broken in one commit.
