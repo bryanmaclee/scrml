@@ -42,6 +42,11 @@ import {
   tokenizeCSS as _defaultTokenizeCSS,
   tokenizeError as _defaultTokenizeError,
   tokenizePassthrough as _defaultTokenizePassthrough,
+  // S368 (bare-call at a default-logic body-top) — the tokenizer's KEYWORDS set
+  // is "the single source of truth for what the tokenizer reserves" (its own
+  // doc comment). The bare-call recognizer fences against THAT set rather than
+  // against a hand-listed one, so the fence cannot drift from the language.
+  KEYWORDS as SCRML_KEYWORDS,
 } from "./tokenizer.ts";
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
@@ -755,6 +760,113 @@ const TOPLEVEL_AT_WRITE_RE =
  */
 const TOPLEVEL_ON_LIFECYCLE_RE =
   /^\s*on\s+(?:mount|dismount)\s*\{/;
+
+/**
+ * S368 — a bare CALL leading a text run at the IMMEDIATE default-logic body-top
+ * of `<program>` / `<page>` / `<channel>`. Fires `E-CALL-NOT-IN-LOGIC-CONTEXT`.
+ *
+ * ── The rule (SPEC §40.8, S368 amendment) ────────────────────────────────────
+ * §40.8 default-logic mode auto-lifts DECLARATIONS only. Everything outside the
+ * lift set previously fell through to `result.push(block)` and was emitted as
+ * page TEXT — which is RIGHT for prose and WRONG for logic. A CALL is a scrml
+ * logic form by the identical reasoning that already rejects a bare WRITE at
+ * this same position (`E-WRITE-NOT-IN-LOGIC-CONTEXT`, S122 Option-2: "auto-lifts
+ * DECLARATIONS only … writes ARE logic; logic goes in `${...}`").
+ *
+ * Measured pre-fix: `<program>\nloadData()\n<p>hi</>\n</program>` compiled at
+ * exit 0 and shipped the literal string `loadData()` into the emitted HTML. The
+ * function never ran and nothing said so.
+ *
+ * ── ⚑ THE DISCRIMINATOR IS scrml's GRAMMAR, NOT JS's ─────────────────────────
+ * Operator-ruled S368, verbatim: *"There is lots of valid js that dose not work
+ * in scrml … 'valid js' is not a consideration one way or another."* scrml is
+ * NOT a JS superset. So this recognizer does NOT ask whether a run parses as JS,
+ * and no part of its design rests on that question. The rule is stated purely in
+ * scrml's own terms:
+ *
+ *   - `ident(` / `obj.method(`  — a scrml CALL form  → logic → diagnose.
+ *   - a bare word, a sentence, prose — not any scrml logic form → text → leave.
+ *
+ * The ruling is `c` of three: (a) "lift every text run" was REJECTED (it
+ * contradicts S122 and breaks prose, which renders at this position and is a
+ * working shape); (b) "diagnose every non-declaration run" was REJECTED (it
+ * over-reaches into prose). Hence CALL-SHAPE-SPECIFIC.
+ *
+ * ── Why a source-text regex here is not a Rule-7 violation ───────────────────
+ * Rule 7 forbids asking the source TEXT what the parsed tree already knows. At
+ * this gate there IS no parsed tree to ask: the run is a BS `text` block, and it
+ * is precisely because nothing lifts it that it never reaches the parser. Every
+ * sibling gate in this function (TOPLEVEL_AT_WRITE_RE, TOPLEVEL_ON_LIFECYCLE_RE,
+ * BARE_CONTROL_FLOW_IN_MARKUP_RE) is a source-text recognizer for the same
+ * structural reason.
+ *
+ * ── Shape of the pattern ─────────────────────────────────────────────────────
+ * Leading non-whitespace token is an identifier — or a dotted member path — with
+ * the `(` IMMEDIATELY attached. The attachment is load-bearing: it is what keeps
+ * natural prose such as `Loading (please wait)` out (a space before `(` never
+ * matches), and it is the canonical scrml call spelling.
+ *
+ * The identifier charset is `[A-Za-z_$][A-Za-z0-9_$]*` — matched to scrml's OWN
+ * identifier charset (`tokenizer.ts` `isIdentStart`/`isIdentPart`), NOT to JS
+ * `\w`, which excludes `$`. See invariant 46: a keyword fence in a scrml-facing
+ * regex is `(?![A-Za-z0-9_$])`, never `\b`.
+ */
+const TOPLEVEL_BARE_CALL_RE =
+  /^\s*([A-Za-z_$][A-Za-z0-9_$]*)((?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\(/;
+
+/**
+ * S368 — scrml keywords that ARE canonical CALL forms, so a leading occurrence
+ * of one is a call and not a statement/operator head.
+ *
+ * Derived from SPEC, not from judgment: each of these six is spelled `name(` in
+ * SPEC.md's own normative prose (`reset(` §6.8.2 · `broadcast(`/`disconnect(`
+ * §35 · `cleanup(` · `navigate(` · `animationFrame(` §6.7.5–6.7.7). Every OTHER
+ * member of the tokenizer's KEYWORDS set is a statement or operator head whose
+ * following `(` is a HEAD-paren, not an argument list — `if (`, `for (`,
+ * `while (`, `switch (`, `typeof (`, `return (` and so on — and a head-paren is
+ * not a call.
+ *
+ * Error direction, deliberately: a keyword head we decline to treat as a call is
+ * a MISSED fire, which is the pre-S368 status quo (silent text) and therefore not
+ * a regression; a keyword head we WRONGLY treat as a call is a FALSE fire that
+ * breaks a working shape. Fencing on the whole KEYWORDS set minus this
+ * SPEC-derived allow-list takes the safe direction on every member at once.
+ */
+const SCRML_BUILTIN_CALL_KEYWORDS = new Set([
+  "animationFrame",
+  "broadcast",
+  "cleanup",
+  "disconnect",
+  "navigate",
+  "reset",
+]);
+
+/**
+ * S368 — classify a default-logic body-top text run as a scrml CALL form.
+ *
+ * Returns the callee source text (e.g. `loadData`, `store.refresh`) when the run
+ * leads with a call, or `null` when it does not. `null` means "this run is text"
+ * — prose, a bare word, a sentence — and the caller leaves it alone.
+ *
+ * @param {string} raw — the BS text block's raw source
+ * @returns {string | null}
+ */
+function matchTopLevelBareCall(raw) {
+  if (typeof raw !== "string") return null;
+  const m = TOPLEVEL_BARE_CALL_RE.exec(raw);
+  if (!m) return null;
+  const head = m[1];
+  const rest = m[2] || "";
+  // A reserved word leading the run is a statement/operator head, not a callee —
+  // EXCEPT the six SPEC-spelled builtin call forms. Membership is checked on the
+  // whole head token (the regex already consumed a maximal identifier), so this
+  // is an exact-token fence, not a prefix match: `iffy(` has head `iffy`, which
+  // is not in KEYWORDS, and correctly reads as a call.
+  if (SCRML_KEYWORDS.has(head) && !SCRML_BUILTIN_CALL_KEYWORDS.has(head)) {
+    return null;
+  }
+  return head + rest;
+}
 
 /**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).
@@ -1835,6 +1947,60 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         _bareDeclLift: true,
       });
       continue;
+    }
+
+    // S368 — reject + recover: a bare CALL leading a text run at the IMMEDIATE
+    // default-logic body-top of `<program>` / `<page>` / `<channel>`. Fires
+    // `E-CALL-NOT-IN-LOGIC-CONTEXT` (§34, §40.8). See TOPLEVEL_BARE_CALL_RE for
+    // the rule, the ruling, and the scrml-grammar discriminator.
+    //
+    // Gated `isDefaultLogicBody === true` — the PRECISE §40.8 surface, matching
+    // E-WRITE-NOT-IN-LOGIC-CONTEXT's discrimination exactly. This gate sits
+    // BELOW the decl-lift gates on purpose, so the shapes those gates already
+    // claim never reach it:
+    //   - `function f() { helper() }`  — BARE_DECL_RE lifts the whole run, so a
+    //     call INSIDE a function body is not this diagnostic.
+    //   - `${ loadData() }`            — a `logic` block, not a `text` block;
+    //     liftBareDeclarations never recurses into logic children.
+    //   - a run LED by a decl (`<n> = 1` / `function f(){}`) that merely
+    //     CONTAINS a call on a later line — the leading decl lifts the whole run.
+    //   - `<db>` / `<state>` bodies    — isDefaultLogicBody is false there.
+    //   - any deeper markup body       — isDefaultLogicBody is false there.
+    //
+    // RECOVER by dropping the text block, mirroring E-CONTROL-FLOW-IN-MARKUP
+    // below: a rejected construct ships NEITHER its source text nor any inner
+    // `${...}` into the DOM. (The error is fatal, so nothing is emitted anyway;
+    // dropping keeps the non-fatal collector paths honest too.)
+    if (block.type === "text" && isDefaultLogicBody) {
+      const callee = matchTopLevelBareCall(block.raw);
+      if (callee) {
+        const lead = /^\s*/.exec(block.raw)[0];
+        const newlinesBefore = (lead.match(/\n/g) || []).length;
+        const lastNlIdx = lead.lastIndexOf("\n");
+        const baseStart = (block.span && typeof block.span.start === "number") ? block.span.start : 0;
+        const span = {
+          file: filePath,
+          start: baseStart + lead.length,
+          end: baseStart + block.raw.length,
+          line: ((block.span && typeof block.span.line === "number") ? block.span.line : 1) + newlinesBefore,
+          col: lastNlIdx === -1
+            ? ((block.span && typeof block.span.col === "number") ? block.span.col : 1) + lead.length
+            : (lead.length - lastNlIdx),
+        };
+        errors.push(new TABError(
+          "E-CALL-NOT-IN-LOGIC-CONTEXT",
+          `E-CALL-NOT-IN-LOGIC-CONTEXT: bare \`${callee}(...)\` call at ` +
+          `default-logic body-top. Default-logic mode (SPEC §40.8) auto-lifts ` +
+          `DECLARATIONS only (\`<x> = ...\`, \`function f() {}\`) — NOT calls. ` +
+          `A call is logic; wrap it in \`\${...}\`: \`\${ ${callee}(...) }\`. ` +
+          `Left bare it is emitted as page TEXT and never runs. ` +
+          `Alternative: if this was meant to be display text, put it inside a ` +
+          `markup element, e.g. \`<p>${callee}(...)</>\`.`,
+          span,
+        ));
+        // RECOVER: drop the raw text block so the call source never reaches the DOM.
+        continue;
+      }
     }
 
 
