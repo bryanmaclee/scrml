@@ -9379,3 +9379,11 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Why it is filed rather than fixed.** It is not a cosmetic miss: §7.5.2's normative statement is that an un-annotated `let`/`const` declaration SHALL NOT bind `asIs` as the result of a defeated inference, and at this position it still does. But wiring the sidecar means deciding how a `match`- / `if`-as-expression's ARM types unify before the declaration binds — that is rung-1 scoping work, not a guard tweak, and doing it inside a text-fix round would ship an unreviewed typing rule.
 >
 > **Pinned in the test suite** at `compiler/tests/unit/s365-asis-unknown-split.test.js` ("a `match`-as-expression initializer is NOT reached by the guard"), asserting `gaps.length === 0` with an explicit ⚑ FLIP marker — so the fix turns a green test red and the rung's author cannot land it without noticing.
+>
+> **Carved out of the SPEC's SHALL in the S365 fix round (rung 1).** §7.5.2 and §14.7 both stated,
+> unqualified, that an un-annotated `let` / `const` declaration SHALL NOT bind `asIs` from a
+> defeated inference — a SHALL this gap makes unsatisfiable at 55 sites, and therefore a false
+> claim inside the §62.2 contract. Both statements now carry an EXCEPT clause naming this position
+> and pointing here, and §7.5.2 carries the reproduction above. **The gap is unchanged and still
+> open** — the SPEC was corrected to describe the implementation, not the other way round. When the
+> sidecar position is wired, BOTH carve-outs must be removed alongside the ⚑ FLIP test.
