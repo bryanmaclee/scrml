@@ -17,9 +17,25 @@
  * change and no CSP widening. It also drops the injection IIFE (and its
  * `document.head.appendChild` at load) from the runtime.
  *
- * Emission is scoped to the transitions the FILE actually uses. A page with no
- * `transition:` / `in:` / `out:` directive emits nothing at all, so the vast
- * majority of compiled stylesheets are byte-identical to before.
+ * Emission is scoped to the transitions the FILE actually uses, with ONE
+ * deliberate exception: the `<program>` shell entry emits the APP-WIDE UNION.
+ *
+ * The exception exists because a §20.8.2 SOFT navigation swaps the target
+ * route's markup into the SHELL's live document and never loads the target
+ * page's stylesheet (`_scrml_nav_sync_head` syncs <title>/description/canonical
+ * only). A page-scoped stylesheet therefore cannot reach a soft-navigated
+ * `scrml-enter-fade`, and soft nav is the DEFAULT path — `_scrml_link_click_handler`
+ * intercepts every same-origin `<a href>`. Putting the union in the entry
+ * stylesheet restores the pre-retirement guarantee (the keyframes are present in
+ * the live document however the route was reached) with no runtime change, no
+ * stylesheet-load race ahead of the swap, and no CSP widening: every composed
+ * per-page document already links `<entryBase>.css` (see the entry-CSS-link
+ * post-pass in codegen/index.ts), and an own-document page with no shell has no
+ * `[data-scrml-outlet]`, so its navigations are hard ones served by its own CSS.
+ *
+ * A page with no `transition:` / `in:` / `out:` directive ANYWHERE in the build
+ * still emits nothing at all, so the vast majority of compiled stylesheets are
+ * byte-identical to before.
  */
 
 /** The §38 transition types the compiler recognises. Mirrors `SUPPORTED_TRANSITIONS` in emit-html.ts. */
@@ -104,10 +120,14 @@ export function collectUsedTransitions(nodes: unknown): Set<string> {
 }
 
 /**
- * The CSS for the transitions this file uses, or `null` when it uses none.
+ * The CSS for a GIVEN set of transition types, or `null` for the empty set.
+ *
+ * Takes the set rather than the AST so the caller decides the scope: the shell
+ * entry is handed the APP-WIDE union (see the module note above), every other
+ * file its own `collectUsedTransitions(nodes)`. Both call sites are the
+ * `transitionCss` binding in `codegen/index.ts`.
  */
-export function generateTransitionCss(nodes: unknown): string | null {
-  const used = collectUsedTransitions(nodes);
+export function renderTransitionCss(used: Set<string>): string | null {
   if (used.size === 0) return null;
 
   const out: string[] = ["/* §38 transition directives */"];
@@ -116,3 +136,4 @@ export function generateTransitionCss(nodes: unknown): string | null {
   }
   return out.join("\n");
 }
+
