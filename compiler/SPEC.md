@@ -6243,7 +6243,7 @@ merely told it exists, which they previously could not be.
   `match`-as-expression or an `if`-as-expression, which the guard does not reach (carve-out below).
   Those two positions are what rung 0 converts, and they are the whole of what this section makes
   provable.
-- ⛑ **The `match`- / `if`-as-expression initializer is carved out because the guard does not reach
+- ⚑ **The `match`- / `if`-as-expression initializer is carved out because the guard does not reach
   it — a disclosed gap, not a design choice.** `const r = match x { … }` and
   `const q = if (…) { lift … }` carry their initializer in a `matchExpr` / `ifExpr` SIDECAR and set
   `init: ""`, so `initExpr` is never populated — and `initExpr` IS the guard's precondition. The
@@ -6267,7 +6267,7 @@ merely told it exists, which they previously could not be.
   walk over 2,362 tracked `.scrml` files: **55 un-annotated declarations across 41 files** — 50
   `matchExpr`, 5 `ifExpr`, 0 `forExpr`. Filed as
   `g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard` in `docs/known-gaps.md`,
-  and pinned in `compiler/tests/unit/s365-asis-unknown-split.test.js` with an explicit ⛑ FLIP
+  and pinned in `compiler/tests/unit/s365-asis-unknown-split.test.js` with an explicit ⚑ FLIP
   marker so closing it turns a green test red. It is stated as an EXCEPTION rather than left inside
   the SHALL because a normative SHALL the implementation does not hold is a false claim inside the
   §62.2 contract — the same defect §7.5.1 was amended to remove one section earlier. Closing it
@@ -8292,8 +8292,8 @@ match value {
 `asIs` is a keyword meaning "accept any type, but resolve before scope exit or return." It is analogous to TypeScript's `unknown`, not `any`.
 
 - A value of type `asIs` SHALL be resolved (narrowed to a concrete type) before it is returned from a function or goes out of scope.
-- Using an `asIs` value past the point where resolution is required, without resolving it, SHALL be a compile error (E-TYPE-030).
-- Component bare props follow `asIs` rules: the compiler infers the concrete type constraint from how the prop is used inside the component body (Section 15.2). This is the RESOLUTION-OBLIGATED `asIs` of the first two bullets, not a shrug — see the ⚑ note below, which reconciles it with S365.
+- Using an `asIs` value past the point where resolution is required, without resolving it, SHALL be a compile error (E-TYPE-030). ⚑ **That obligation is SPECIFIED, not implemented.** MEASURED on this tree: `grep -rn '"E-TYPE-030"' compiler/src compiler/native-parser` → **zero push sites**, and §34 has booked the code *"Reserved / spec-ahead, S263 — no fire site: the `asIs` resolution-obligation tracker … is unbuilt"* since S263. Said here so this SHALL is not read as a claim about the current implementation — §62.2 makes an unsatisfiable SHALL a false claim inside the contract.
+- Component bare props follow `asIs` rules: the compiler infers the concrete type constraint from how the prop is used inside the component body (Section 15.2). Because the obligation in the previous bullet is unbuilt, that inference failing is SILENT today — see the ⚑ note below, which states what rung 0 does and does not reach, and why.
 
 **`asIs` is a signature (S365, dpa-036 call 1).** Writing `asIs` is a statement that a human
 considered the type and chose not to name it. The compiler failing to determine a type is a
@@ -8314,16 +8314,40 @@ tracked `.scrml` files. Filed as
 `g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard` in `docs/known-gaps.md`;
 §7.5.2 carries the reproduction and the rung-1 scoping reason it is filed rather than fixed.
 
-> ⚑ **Other positions still bind `asIs` without an author. They are rungs 1-3, and two of them are
-> normative in this SPEC today — they are not defects and this note is not a deprecation.**
+> ⚑ **Other positions still bind `asIs` without an author. They are rungs 1-3, and this note is not
+> a deprecation — it records which positions rung 0's narrowing does NOT reach, and on what basis.**
 >
-> - The **component bare prop** (third bullet above, §15.2). Its `asIs` is the resolution-obligated
->   kind this section opens with: the compiler constrains it from use inside the component body and
->   `E-TYPE-030` fires if it cannot be resolved before the prop is returned or leaves scope. It is
->   never silent, so it does not have the property §7.5.2 exists to remove, and §7.5.2's narrowing
->   does not touch it.
-> - The **`_{ … }` foreign slice** (§23.2.3), where opacity is deliberate and writing `_{ }` IS the
->   signature.
+> - The **`_{ … }` foreign slice** (§23.2.3) is excluded ON PRINCIPLE, and is not a defect: opacity
+>   is deliberate and writing `_{ }` IS the signature, so §7.5.2's narrowing is not meant to reach
+>   it. (§7.5.2's matching `W-TYPE-031-UNPROVEN` carve-out is CONDITIONAL on the position admitting
+>   a foreign slice — see that section; it is not a blanket exemption for the syntax.)
+> - The **component bare prop** (third bullet above, §15.2) is excluded ON SCOPE, not on principle.
+>   Rung 0's narrowing is structural: it converts `inferExprType`'s return value and the
+>   un-annotated `let` / `const` declaration binding, and a bare prop is NEITHER position — it is
+>   one of the "other positions" this note opens by naming.
+>
+>   **The justification previously given here — that `E-TYPE-030` fires, so the bare prop "is never
+>   silent" — was FALSE, and is withdrawn.** MEASURED: `grep -rn '"E-TYPE-030"' compiler/src
+>   compiler/native-parser` → **zero push sites** (the only occurrence anywhere in the sources is a
+>   prose comment), and §34 books the code as spec-ahead with no fire site. EXECUTED:
+>
+>   ```scrml
+>   <program>
+>   ${
+>       const Card = <div mystery>
+>           <h2>${mystery}</>
+>       </>
+>   }
+>
+>   <Card mystery="1"/>
+>   </program>
+>   ```
+>
+>   → compiles with **zero type diagnostics**; so does the same component with `mystery` never read
+>   in the body. The bare prop therefore DOES have the property §7.5.2 exists to remove, and has it
+>   today. It is stated here rather than papered over. A later rung owns it, and there are two
+>   ways to close it: build §15.2's resolution obligation so `E-TYPE-030` actually fires, or extend
+>   §7.5.2's narrowing to the prop-declaration position.
 >
 > One further position is a plain gap, disclosed here rather than papered over: an **un-annotated
 > function parameter** binds `asIs` with nobody having signed for it, and a `match` on it then
