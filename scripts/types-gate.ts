@@ -74,12 +74,15 @@
 // catalog, and for the same reason (a gate instantly red for reasons no change caused gets bypassed,
 // then deleted). It asserts one thing: **that the population does not grow silently.**
 //
-// PROMOTION IS NOT TAKEN HERE. Wiring this into the blocking `gate` job is an operator-level call.
-// It lands runnable and green-against-its-own-baseline; whether `.github/workflows/ci.yml` should
-// require it is bryan's, and it wants a decision on the nine live `never` failures first (fix them,
-// or record them and drain). One line adds it:
-//     - name: Types gate (the compiler's own TypeScript diagnostics do not grow silently)
-//       run: bun scripts/types-gate.ts --check
+// WHERE IT RUNS (S365 fix round). It landed runnable and NOTHING RAN IT, while `ci.yml`'s header
+// advertised a layer named "types (always-on local)" that did not exist — this script's own thesis,
+// reproduced one level up. It is now wired into the NON-BLOCKING `tracking` job in
+// `.github/workflows/ci.yml`, as a `continue-on-error` step placed first (a failed step halts even a
+// continue-on-error job, so it must not be able to suppress the tracking signals below it).
+//
+// PROMOTION INTO THE BLOCKING `gate` JOB IS STILL NOT TAKEN. That is an operator-level call and it
+// wants a decision on the nine live `never` failures first (fix them, or record them and drain).
+// One line moves it: the same step, without `continue-on-error`, under `gate`.
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname, relative } from "path";
