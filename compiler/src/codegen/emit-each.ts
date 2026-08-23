@@ -846,6 +846,55 @@ function eachRcdataValueExpr(children: any[], iterVarName: string): string | nul
   return terms.length > 0 ? terms.join(" + ") : `""`;
 }
 
+// g-each-inline-value-form-if-interp-dropped — build the RAW ternary string for a
+// §17.6 value-form `if … { a } else { b }` (with else-if cascade) whose branches
+// are each EXACTLY one NON-markup value `bare-expr`. Returns null when the node is
+// not a value-form `if` (no `else`, a multi-statement branch, or a markup-valued
+// branch — the last left to the GITI-032 markup-value path). Mirrors
+// emit-control-flow.ts `_emitIfValueExprInner` in SHAPE, but emits the RAW
+// sub-expression text via `emitStringFromTree` (NOT `emitExprField`), so the
+// downstream `lowerEachExpr` performs the `@.`/`@cell`/iter-var lowering UNIFORMLY
+// — the identical single-lowering path the bare-expr interp already uses.
+// ⚠ This is a NARROWER subset of `isValueFormControlFlowStmt` (emit-html.ts), NOT
+// lock-step: it additionally REJECTS a markup-valued branch (via
+// `exprNodeHasMarkupValue`), which that classifier accepts. That is intentional —
+// the each-interp path does not consume the HTML-pass slot allocation, and a
+// markup branch needs the (still-open) GITI-032 markup-value-in-each lowering, not
+// a raw `emitStringFromTree` of a `<span>`. A future change to the accepted branch
+// SHAPES (e.g. permitting `lift`/a new value statement) must be reflected in all
+// three copies (here, emit-control-flow `_emitIfValueExprInner`, emit-html
+// `isValueFormIfStmt`) or they diverge — the standing near-duplicate-predicate
+// hazard; a shared shape-walker parameterized by the leaf emitter would fold them.
+function _eachValueFormIfRaw(node: any): string | null {
+  if (!node || node.kind !== "if-stmt") return null;
+  const thenStr = _eachSoleBareExprRaw(node.consequent ?? node.body ?? null);
+  if (thenStr == null) return null;
+  const alt = node.alternate;
+  if (!alt) return null; // §17.6 value-form requires an else on every path
+  const altArr: any[] = Array.isArray(alt) ? alt : [alt];
+  let elseStr: string | null;
+  if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
+    elseStr = _eachValueFormIfRaw(altArr[0]); // else-if → nested ternary
+  } else {
+    elseStr = _eachSoleBareExprRaw(altArr);
+  }
+  if (elseStr == null) return null;
+  const condNode = node.condExpr ?? null;
+  const cond = condNode ? emitStringFromTree(condNode) : String(node.condition ?? node.test ?? "");
+  if (!cond || !cond.trim()) return null;
+  return `(${cond} ? ${thenStr} : ${elseStr})`;
+}
+
+/** A branch that is EXACTLY one NON-markup value `bare-expr` → its RAW string; else null. */
+function _eachSoleBareExprRaw(stmts: any): string | null {
+  if (!Array.isArray(stmts) || stmts.length !== 1) return null;
+  const only = stmts[0];
+  if (!only || only.kind !== "bare-expr") return null;
+  if (exprNodeHasMarkupValue(only.exprNode)) return null; // markup branch → GITI-032 path
+  const s: string = only.exprNode ? emitStringFromTree(only.exprNode) : (only.expr ?? "");
+  return (s && s.trim()) ? s : null;
+}
+
 function emitEachInterpExprToJs(
   inner: string,
   iterVarName: string,
@@ -1362,6 +1411,18 @@ function renderTemplateChildToJs(
           ? String(stmt.expr)
           : (stmt.exprNode ? emitStringFromTree(stmt.exprNode) : "");
         inner = _exprText.replace(/\s*\.\s*/g, ".");
+      } else if (stmt.kind === "if-stmt") {
+        // g-each-inline-value-form-if-interp-dropped — a §17.6 value-form
+        // `${ if cond { a } else { b } }` (else-if cascade) as the SOLE interp
+        // content lowers to a ternary, exactly like the top-level path
+        // (emit-html.ts isValueFormControlFlowStmt → emit-control-flow.ts
+        // emitIfValueExpr). Without this it is neither a `bare-expr` nor carries
+        // `stmt.raw`, so it fell to `inner = ""` and was SILENTLY DROPPED.
+        // `_eachValueFormIfRaw` returns null for a non-value-form `if` (no else /
+        // multi-statement branch) OR a MARKUP-valued branch — the latter is a
+        // still-open RESIDUAL here (NOT routed anywhere): it is captured in
+        // `_droppedCFStmt` so the skip below WARNS instead of dropping silently.
+        inner = _eachValueFormIfRaw(stmt) ?? "";
       } else if (typeof stmt.raw === "string") {
         inner = stmt.raw;
       } else {
