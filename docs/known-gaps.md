@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 46 |
-| MED | 155 |
+| HIGH | 48 |
+| MED | 156 |
 | LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2321,6 +2321,14 @@ Adopter issue **#161** (pjoliver11). Two distinct `emit-each.ts` per-item-templa
 - **(B) fn-returning-markup-in-each → `[object HTMLSpanElement]`.** The each-render emits `_scrml_each_tn.textContent = String(rowMarkup(it.name))` — `String()` of the returned DOM node. The mount-not-stringify guard EXISTS in the runtime (`scrml-runtime.js:~295` carries the exact comment "stringify it to '[object HTMLSpanElement]'; render it into the element instead") but is not applied on the `<each>` path.
 
 Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode ships a green build with an empty list and no diagnostic. Also reported (possibly separate): a `snippet` prop rendered nothing even OUTSIDE `<each>` — split out if it doesn't fold in. Fix = `emit-each.ts` per-item template must (A) route PascalCase tags through the component-expander (as the non-each path does) and (B) mount a markup-valued `${}` result instead of `String()`-into-textContent. — `NEW S284 (#161); HIGH; RESOLVED S284 (item-root scope)`
+
+### g-each-inline-value-form-if-interp-dropped — a §17.6 value-form `${ if cond { a } else { b } }` (else-if cascade) inside an `<each>` body was SILENTLY DROPPED (rendered empty) — the identical form works at top level — `NEW S369-peter (dog-food find — a fresh order-dashboard app); MED; RESOLVED S369-peter`
+<!-- @gap id=g-each-inline-value-form-if-interp-dropped sev=MED status=resolved locus=compiler/src/codegen/emit-each.ts(the logic-child interp handler now lowers a value-form if-stmt to a raw ternary via _eachValueFormIfRaw → the shared lowerEachExpr → a live per-item text node; was neither bare-expr nor stmt.raw so it fell to inner="" → the empty-interp skip) prov=rationale:S369-dogfood-order-dashboard-if-total-gt-50-big-else-small-in-each-renders-empty-top-level-identical-form-lowers-to-reactive-ternary RESOLVED:S369-peter-value-form-if-ternary-in-each -->
+> **⚑ RESOLVED S369-peter (dog-food find).** Writing a fresh order-dashboard app (enum status, reactive filter, derived total, `<match>` block badges), a `<span>${ if o.total > 50 { "big" } else { "small" } }</span>` inside `<each>` rendered EMPTY for every row (happy-dom verified). Two-sided discriminator: the IDENTICAL value-form `if` at TOP level lowers to a reactive ternary (`k > 50 ? "big" : "small"`); inside `<each>` it emitted `// each: empty logic interpolation skipped`. Root: the each-interp emitter (emit-each.ts logic-child handler) extracts `inner` only from a `bare-expr`/`stmt.raw`; a §17.6 value-form control-flow node is neither, so `inner=""` → skipped. Fix: lower a value-form `if` to the RAW ternary (`_eachValueFormIfRaw`, built from `emitStringFromTree` sub-expr text, mirroring emit-control-flow `_emitIfValueExprInner` in SHAPE — a narrower markup-rejecting subset), so the shared `lowerEachExpr` does the `@.`/`@cell`/iter-var lowering uniformly and it renders as a live per-item text node. R26-verified in happy-dom (renders "small"/"big" per row, reactive across filter changes). Merge-blocker `compiler/tests/integration/each-inline-value-form-if-interp.test.js` (6 cases, bite-proven: 3 fail pre-fix). S239 pass RAN (correctness clean; its cleanup findings applied — honest comments; the residual silent-drops filed below). Full suite 22673/0. Peter-lane (each codegen, no language surface). **RESIDUALS → [[g-each-inline-value-form-match-or-markup-branch-interp-dropped]].**
+
+### g-each-inline-value-form-match-or-markup-branch-interp-dropped — a value-form `${ match … }`, OR a value-form `if` whose branch VALUE is markup, inside an `<each>` body is still SILENTLY DROPPED (renders empty, no diagnostic) — `NEW S369-peter (residuals of the value-form-if fix above, surfaced by its S239 pass); MED; open`
+<!-- @gap id=g-each-inline-value-form-match-or-markup-branch-interp-dropped sev=MED status=open locus=compiler/src/codegen/emit-each.ts(the value-form-if fix lowers a non-markup value-form if only; a value-form match-stmt and a markup-valued if branch return null from _eachValueFormIfRaw → the empty-interp skip, silently) prov=rationale:S369-S239-review-finding-value-form-match-in-each-and-if-with-span-branch-both-emit-empty-logic-interpolation-skipped-no-error-PA-repro -->
+> **⚑ S369-peter: two residuals of [[g-each-inline-value-form-if-interp-dropped]], PA-reproduced.** After the value-form-`if` fix, two shapes still render empty with NO diagnostic (the S239 pass flagged the silent-drop it re-cements): (1) a value-form `${ match r.n { 10 :> "ten" _ :> "other" } }` in an each interp; (2) a value-form `if` whose branch VALUE is markup (`${ if c { <span>big</span> } else { "small" } }`). Both are pinned as RESIDUAL PINs in the merge-blocker test (assert the skip). ⚠ This creates a *works-then-silently-breaks* trap: the non-markup value-form `if` now works, so an adopter trusts it, then a markup-branch or a `match` variant silently fails. **Fix direction (peter-lane, two parts): (a) LOWER these shapes — a value-form `match` via a raw equality cascade (mirror `emitMatchExpr` arm conditions), a markup-branch value-form `if` via the (open) GITI-032 markup-value-in-each path; AND (b) make the recognized-but-unlowered case LOUD** — a `W-EACH-VALUE-FORM-CONTROL-FLOW-DROPPED` warning (built + verified at S369 but held back: shipping a new emitted code wants its §34 catalog row + emitter provenance, deferred to this fix so the code + catalog land together, per the #416 nested-`if`-warning precedent). Repro-first re-derive before building.
 
 ### g-each-nested-in-fn-body-markup-fn-stringifies — a markup fn DEFINED INSIDE another fn's body, consumed by a nested `<each>` in that SAME body, stringifies to `[object HTMLSpanElement]` — PRE-EXISTING (NOT a #658 regression), two-part root — `NEW S369-peter (surfaced by the mis-fired S239 pass on #664 that reviewed #658; PA-verified PRE-EXISTING on the pre-#658 base 772c0fb2 — the "regression" framing was FALSE); MED; open`
 <!-- @gap id=g-each-nested-in-fn-body-markup-fn-stringifies sev=MED status=open locus=compiler/src/codegen/emit-each.ts(_eachMarkupFnNames is NULL when a fn-body-nested each is emitted — that emission runs in a pass outside the 3555..3690 set/clear window) + compiler/src/markup-return-scan.js(collectMarkupReturningFnNames does not descend into fn bodies, so a nested markup fn is never collected) prov=rationale:S369-repro-fn-other-contains-nested-fn-badge-returning-markup-plus-nested-each-badge-it-emits-textContent-String-badge-it-MOUNTS-false-identical-on-pre-658-base -->
@@ -9426,6 +9434,95 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > says *"bug-class swept"* and its merge-blocker test pins the matching arm. The sibling arm, three lines away
 > in the same emitted IIFE, was never compiled. A fix round should re-derive which arm paths reach
 > `emitIifeBlockArmBody` and cover every one, rather than the arm the reproducer happened to use.
+## §S368 — filed S368-bryan (hand-authoring dogfood: the §40.8 default-logic body)
+
+> Surfaced by **bryan writing scrml by hand** — the first human-authored scrml in the project's history, and
+> therefore the first ergonomic signal the corpus has ever produced. Every claim below is PA-measured by
+> compiling and reading the emitted artifact.
+>
+> ⚑ **My first characterisation of this was WRONG in two places** and was overturned by the build round's
+> first-hand re-derivation, which I then re-measured myself. What follows is the corrected version; the
+> superseded framing (*"the `//` comment is the trigger"* / *"`/* */` is clean"*) is recorded in
+> `docs/changes/default-logic-line-comment/progress.md` so the error is legible rather than silently rewritten.
+
+### g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration — a comment splits a default-logic text run so the statement loses the declaration that made it lift, and ships as page text at exit 0 with its diagnostics deleted — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration sev=HIGH status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the terminal result.push(block); the eight ^-anchored lift gates)+compiler/src/block-splitter(emits a // comment as its own child, which flushes the run) prov=adopter:bryan-hand-authoring-S368-first-human-written-scrml -->
+> **PA-measured, four shapes, current `main`:**
+>
+> | shape | code in `<body>`? | what it establishes |
+> |---|---|---|
+> | bare call, **no declaration in the run**, no comment | **LEAKS** | the comment was never the root — see the sibling entry below |
+> | bare call **with a declaration in the run**, no comment | clean | a declaration is what makes the run lift |
+> | same **plus a `//` comment between them** | **LEAKS** | the comment FLUSHES the run, severing the statement from its declaration |
+> | **`/* block */` above a `fn` declaration** | **LEAKS the declaration itself** | a second, STRICTLY MORE SEVERE direction |
+>
+> **The mechanism.** A text run at a default-logic root lifts only if it matches one of **eight `^`-anchored
+> regexes**. Comments defeat them in two opposite directions: a `//` comment is emitted as its own child and
+> **FLUSHES** the run, splitting one authored run in two; a `/* */` comment stays *inside* the run, so the run
+> now begins with `/*` and the anchored gate **cannot match at all** — which loses the whole declaration.
+> `/* c */` above a `fn` ships the entire function into `<body>` at exit 0.
+>
+> **⚑ The masking limb — why this is HIGH.** In bryan's original file the swallowed statement is `log(@wop);`
+> where `@wop`'s declaration is commented out. `E-STATE-UNDECLARED` **does not fire**, because the statement
+> was never compiled. Remove the comment and the same file exits **1** with the error. **A defect that turns
+> code into text also deletes every diagnostic that code would have raised**, so the blast radius is not
+> bounded by any one rule.
+>
+> **⚑ This is the THIRD report of one root cause.** Two gate regexes already in the tree — `TILDE_TOKEN_RE` and
+> `TOPLEVEL_ON_LIFECYCLE_RE` — are one-shape workarounds for it, and their own doc comments say so. The fix
+> normalises the gates' **input** rather than adding a ninth regex.
+>
+> **⚑ And the compiler routes authors INTO this mode.** `W-PROGRAM-REDUNDANT-LOGIC` fires on a `${…}` wrapper
+> containing declarations and says verbatim: *"Remove the redundant `${...}` for cleaner source. See SPEC
+> §40.8."* The wrapped form is the one that WORKS.
+
+### g-default-logic-bare-call-is-unspecified-and-ships-as-page-text — a bare call at a `<program>` default-logic root matches no auto-lift gate, so it is emitted as page text at exit 0; §40.8 is silent on the shape — `NEW S368-bryan; HIGH; open; OPERATOR RULING OWED`
+<!-- @gap id=g-default-logic-bare-call-is-unspecified-and-ships-as-page-text sev=HIGH status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the eight ^-anchored lift gates)+compiler/SPEC.md§40.8 prov=adopter:bryan-hand-authoring-S368-split-out-from-the-comment-defect-by-first-hand-re-derivation -->
+> **PA-measured.** `<program>` + `log("M1");` + markup — **no comment, no declaration** — emits the literal text
+> `log("M1");` into `<body>` at **exit 0, zero diagnostics**.
+>
+> This is the residue after the comment defect above is fixed, and it is **not a bug fix — it is a RULING.**
+> §40.8 (`SPEC.md:22813-22814`) enumerates what auto-lifts (declarations), carves out writes with a diagnostic,
+> and is **silent on a bare call**. Per the governing-sentence gate, *"searched §40.8 — no governing sentence
+> found"* is a FINDING that converts this from a fix into an operator decision.
+>
+> **The fork:**
+> - **(a) lift every text run** — closes it, but prose written directly in a `<program>` body then starts
+>   parsing as logic, which is a real authoring cost.
+> - **(b) diagnose non-declaration runs** — also closes it, but must then reject `const bias = 1.2` followed by
+>   `log(x)`, which compiles today, or the diagnostic cannot be explained.
+>
+> Either needs SPEC text. Nobody should guess.
+>
+> **⚑ Class sweep — the corpus count did NOT move (base 69 = head 69), and every instance sits OUTSIDE §40.8.**
+> Read from source rather than by regex. Four live members worth naming:
+> - **`on mount { loadDashboard() }` ships as page text** — `samples/htmx-debate-dashboard.scrml:143`, inside a
+>   `<db>` state-block body where `isDefaultLogicBody` is deliberately false. **The mount hook never runs and
+>   nothing says so.**
+> - ~25 bare `@name = expr` writes emitted as text (`gauntlet-r10-bun-admin`, `samples/dashboard`).
+> - `stdlib/http/index.scrml` leaks 8 lines of `export function` / `const` / `for` into its own body.
+>
+> So the §40.8 comment limb is closable by code; **the silent-code-as-text CLASS has at least four more live
+> members elsewhere**, covered by neither the fix nor this ruling.
+
+### g-selfhost-smoke-resolves-projectroot-to-MAIN-so-worktree-agents-read-a-live-tree — a worktree agent's suite imports the MAIN checkout's compiler source, so a concurrent edit there fails its tests with its own name on them — `NEW S368-bryan; MED; open`
+<!-- @gap id=g-selfhost-smoke-resolves-projectroot-to-MAIN-so-worktree-agents-read-a-live-tree sev=MED status=open locus=compiler/tests/integration/self-host-smoke.test.js:35-51(findMainProjectRoot parses `git worktree list --porcelain` and takes the FIRST entry) prov=rationale:two-independent-agents-hit-this-in-one-session-and-a-third-verified-the-mechanism-from-source -->
+> `findMainProjectRoot()` parses `git worktree list --porcelain` and takes the **first** entry — the MAIN
+> checkout — **by design**, because the gitignored `compiler/self-host/dist/` only exists there. The
+> block-splitter parity test then `import`s `resolve(projectRoot, "compiler/src/block-splitter.js")` **from
+> MAIN, not from the worktree.**
+>
+> Consequence: **a worktree agent cannot trust a self-host test result while another agent is editing main.**
+> Hit independently by two agents in one session; a third verified the mechanism from source and confirmed the
+> attribution was correct rather than convenient. Both saw a red `Self-host: block-splitter parity` naming
+> `splitBlocks`, which reads exactly like their own regression.
+>
+> Compounding it: an **empty** `WIP` start commit defeats the pre-commit hook's docs-only skip
+> (`[ -n "$STAGED" ]` is false), so it runs the full suite for nothing — and that is where one agent met this.
+>
+> Fix direction: make the dependency explicit (fail loudly when the resolved root is not the running worktree),
+> or vendor the artifacts the test needs. Interim: dispatch briefs should say the first commit must be a real
+> docs-only one, and that a self-host failure needs its path checked before it is attributed.
 ### g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard — `const r = match x { … }` and `const q = if (…) { lift … }` carry their initializer in a `matchExpr` / `ifExpr` SIDECAR, never in `initExpr`, so §7.5.2's `W-TYPE-031-UNPROVEN` guard — whose precondition IS `initExpr` — skips them entirely and a defeated inference still silently produces `asIs`; `inferExprType`'s `case "match-expr"` arm is consequently UNREACHABLE from its only production call site — `NEW S365 (adversarial pass on the rung-0 branch; PA-relayed, then independently reproduced and re-measured in the fix round); MED; open (deliberately NOT fixed in the fix round — scoped out; it is the ruling's stated invariant not holding at a position rung 0 claims to own)`
 <!-- @gap id=g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard sev=MED status=open locus=compiler/src/type-system.ts:10575(the guard reads `initExpr` and returns when it is absent)+compiler/src/ast-builder.js:7994,8108(let/const-decl attach `matchExpr` and set `init: ""`, leaving `initExpr` undefined) prov=rationale:S365-fix-round-the-rung-0-normative-claim-is-that-an-un-annotated-let-const-declaration-shall-not-bind-asIs-from-a-defeated-inference-and-at-this-position-it-still-does-silently -->
 > **⚑ Reproduced and MEASURED in the fix round, not relayed.**
