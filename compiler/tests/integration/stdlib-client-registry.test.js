@@ -62,6 +62,7 @@ function compile(source, baseName) {
   const out = {
     errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"),
     codes: (result.errors ?? []).map((e) => e.code),
+    raw: result.errors ?? [],
     clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
     runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
   };
@@ -407,6 +408,46 @@ ${decl}
     // file as the FP cases so the two can never drift apart.
     const compiled = compile(clientProgram("fs", "readFileSync"), "app");
     expect(compiled.codes).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §3c — the error is ACTIONABLE: it names the import the adopter wrote.
+// ---------------------------------------------------------------------------
+
+describe("§3c E-STDLIB-CLIENT-CHUNK-MISSING carries a real source location", () => {
+  test("the diagnostic points at the import line, not at line 1", () => {
+    // The gate necessarily fires against the FINAL emitted TEXT, which carries no
+    // source positions, so the import's span is captured at the lowering site and
+    // carried forward. Before that, an adopter got a HARD ERROR with no `-->`
+    // line and no position at all, while the sibling stdlib WARNING printed in
+    // the same run had both.
+    //
+    // Asserts TOP-LEVEL `filePath`/`line`, not `span.*`, because
+    // `commands/compile.js:formatError` reads the top-level fields — a CGError
+    // that fills only `span` renders with no source line. That asymmetry is the
+    // actual defect this pins, so the assertion has to sit where the formatter
+    // looks.
+    const compiled = compile(
+      `\${
+    import { readFileSync } from 'scrml:fs'
+
+    @out = ""
+}
+<p>\${@out}</>
+<button click=\${ @out = readFileSync("x") }>go</>
+`,
+      "app",
+    );
+    const diag = compiled.raw.find((e) => e.code === "E-STDLIB-CLIENT-CHUNK-MISSING");
+    expect(diag).toBeDefined();
+    expect(typeof diag.filePath).toBe("string");
+    expect(diag.filePath.endsWith("app.scrml")).toBe(true);
+    // The import is on source line 2. Pinning the exact line (not merely
+    // "> 0") is what stops a regression to the old hard-coded 1.
+    expect(diag.line).toBe(2);
+    expect(diag.span.file.endsWith("app.scrml")).toBe(true);
+    expect(diag.span.line).toBe(2);
   });
 });
 

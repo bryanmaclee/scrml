@@ -2090,6 +2090,16 @@ export function generateClientJs(ctx: CompileContext): string {
   // by CHX at the consumer site, not resolved via ES module bindings, so
   // emitting a JS import for them either produces a SyntaxError (bare kebab)
   // or a module-link error (no matching export on the channel-file side).
+  // Source spans of the `scrml:` imports this file lowers, keyed by module name.
+  //
+  // Captured HERE because this is the only place the import AST node is in hand;
+  // `E-STDLIB-CLIENT-CHUNK-MISSING` fires much later, against the FINAL emitted
+  // TEXT (it has to — see that gate's note on why the emit site is the wrong
+  // place to judge), and emitted text carries no source positions. Without this
+  // the adopter got a hard error with no `-->` file:line at all while the
+  // W-STDLIB-* warning printed beside it had one.
+  const stdlibImportSpans = new Map<string, any>();
+
   clientStage(ctx, "emit-imports", () => {
   const allImports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
   for (const stmt of allImports) {
@@ -2108,6 +2118,9 @@ export function generateClientJs(ctx: CompileContext): string {
           .map((s) => (s.imported === s.local ? s.imported : `${s.imported}: ${s.local}`))
           .join(", ");
 
+        if (!stdlibImportSpans.has(stdlibMatch) && stmt.span) {
+          stdlibImportSpans.set(stdlibMatch, stmt.span);
+        }
         lines.push(`const { ${destructured} } = _scrml_stdlib.${stdlibMatch};`);
         continue;
       }
@@ -3923,14 +3936,31 @@ export function generateClientJs(ctx: CompileContext): string {
               + `compiler/src/codegen/runtime-chunks.ts and load it in `
               + `compiler/src/runtime-template.js.`;
         const what = names.length > 0 ? `\`${names.join(", ")}\` from ` : ``;
-        errors.push(new CGError(
+        // Point at the IMPORT the adopter wrote, not at line 1. Falls back to
+        // the file head when the span is unavailable (a synthesised AST, or a
+        // direct `_scrml_stdlib.<mod>` member access with no import to blame).
+        const impSpan = stdlibImportSpans.get(mod);
+        const line = impSpan?.line ?? impSpan?.startLine ?? 1;
+        const col = impSpan?.col ?? impSpan?.column ?? impSpan?.startCol ?? 1;
+        const err = new CGError(
           "E-STDLIB-CLIENT-CHUNK-MISSING",
           `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
           + `in the browser. A client bundle is a classic script, so the import lowers to `
           + `\`_scrml_stdlib.${mod}\`, and no runtime chunk defines that property — the bundle would `
           + `throw at load and the whole page would be dead on arrival. ${why}`,
-          { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-        ));
+          { file: filePath, start: impSpan?.start ?? 0, end: impSpan?.end ?? 0, line, col },
+        );
+        // The compile formatter reads TOP-LEVEL `filePath` / `line` / `column`
+        // (`commands/compile.js:formatError`), NOT `span.*` — so a CGError that
+        // only fills `span` prints with no `-->` source line at all. Verified by
+        // inspecting the emitted diagnostic object: `span.file` was set and
+        // `filePath` was `undefined`. Stamping both keeps this error's output at
+        // parity with the sibling stdlib WARNING in the same run, which an
+        // adopter sees side by side.
+        (err as any).filePath = filePath;
+        (err as any).line = line;
+        (err as any).column = col;
+        errors.push(err);
       }
     });
   }

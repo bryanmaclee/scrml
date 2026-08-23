@@ -160,7 +160,7 @@ export const RUNTIME_CHUNK_ORDER = [
   // registry property is `undefined` and that destructure is a load-time
   // `TypeError` that kills the WHOLE page, not just the call. Membership here
   // is therefore the property that decides whether a client stdlib import
-  // works at all, and `E-STDLIB-CLIENT-CHUNK-MISSING` (api.js) reads THIS LIST
+  // works at all, and `E-STDLIB-CLIENT-CHUNK-MISSING` (emit-client.ts) reads THIS LIST
   // — the same artifact — rather than probing for a shim file on disk.
   //
   // MEMBERSHIP IS DERIVED, NOT CURATED. A module is client-registered when it
@@ -338,7 +338,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
 // STDLIB_CLIENT_CHUNK_MODULES — the `scrml:<name>` module names that HAVE a
 // client registry chunk, derived from RUNTIME_CHUNK_ORDER itself.
 //
-// Derived, never hand-listed: `E-STDLIB-CLIENT-CHUNK-MISSING` (api.js) and the
+// Derived, never hand-listed: `E-STDLIB-CLIENT-CHUNK-MISSING` (emit-client.ts) and the
 // chunk activation in `detectRuntimeChunks` (emit-client.ts) must read the SAME
 // artifact that decides the outcome. A second hand-maintained list would rot
 // out of sync with the first, which is the exact failure this export exists to
