@@ -9366,8 +9366,8 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **by executing the emitted bundle**, not by grepping emitted text — the "emitted ≠ runs" discipline
 > this project has been bitten by at S265, S268 and the ESM U3 landing.
 
-### g-stdlib-client-registry-chunk-missing-for-17-of-21-modules — a client-side `scrml:NAME` import compiles clean, emits a shim nothing loads, and throws `TypeError` at page load with ZERO diagnostics — `NEW S368-bryan; HIGH; open`
-<!-- @gap id=g-stdlib-client-registry-chunk-missing-for-17-of-21-modules sev=HIGH status=open locus=compiler/src/codegen/runtime-chunks.ts:154-157(RUNTIME_CHUNK_ORDER declares only stdlib-auth/crypto/data/host)+compiler/src/api.js:474-488(the W-STDLIB-SHIM-MISSING gate keys on existsSync of the shim FILE, which is the wrong property) prov=adopter:bryan-hit-this-writing-scrml-by-hand-S368 -->
+### g-stdlib-client-registry-chunk-missing-for-17-of-21-modules — a client-side `scrml:NAME` import compiles clean, emits a shim nothing loads, and throws `TypeError` at page load with ZERO diagnostics — `NEW S368-bryan; HIGH; RESOLVED S368`
+<!-- @gap id=g-stdlib-client-registry-chunk-missing-for-17-of-21-modules sev=HIGH status=resolved locus=compiler/src/codegen/runtime-chunks.ts(RUNTIME_CHUNK_ORDER now carries 13 stdlib chunks + hasStdlibClientChunk)+compiler/src/codegen/emit-client.ts(E-STDLIB-CLIENT-CHUNK-MISSING, post-prune scan of the FINAL client text)+compiler/src/runtime-template.js(9 new _loadStdlibChunk calls) prov=adopter:bryan-hit-this-writing-scrml-by-hand-S368 -->
 > **PA-REPRODUCED BY EXECUTION on `main` @ `772c0fb2`.** Not relayed, not inferred from source reading.
 >
 > **Symptom.** A program that does `import { slug } from 'scrml:format'` and uses `slug` in client-reachable
@@ -9416,6 +9416,60 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > outcome** — a client-reachable `scrml:NAME` import whose module has no registry chunk must be a diagnostic,
 > not silence. Without limb 2 the next module added hides exactly the same way. (3) A merge-blocker case that
 > **executes** the emitted bundle, since a grep-level assertion cannot see this class.
+>
+> ---
+>
+> **RESOLVED S368.** All three limbs landed; every claim below was verified BY EXECUTION of the emitted
+> bundle (happy-dom, runtime + client as two classic scripts in ONE shared scope), never by grep.
+>
+> **Limb 1 — 9 client chunks added**, taking the wired set 4 -> 13: `compiler` `format` `http` `math`
+> `random` `regex` `router` `test` `time`. Membership is DERIVED, not curated: a module is client-registered
+> iff it is NOT an escalation-server-only module under the §12.2 Trigger 3 two-limb criterion
+> (`route-inference.ts:ESCALATION_SERVER_ONLY_MODULES`) — (a) host reach into `Bun.*` / `process.*` /
+> `bun` / `bun:*` / `node:*`, or (b) credential handling. The 8 left out — `cron` `fs` `mcp` `oauth` `path`
+> `process` `redis` `store` — each carry a one-line reason at the deliberately-absent block. Post-fix sweep:
+> **12 of 21 modules execute clean, up from 4**; the other 8 are now a compile ERROR rather than a dead page.
+>
+> **Limb 2 — `E-STDLIB-CLIENT-CHUNK-MISSING`** (new §34 row, severity Error). The gate calls
+> `hasStdlibClientChunk`, which reads `RUNTIME_CHUNK_ORDER` itself, so the obligation and its probe are now
+> the SAME artifact. Error and not warning because the compiler can PROVE the artifact is dead — there is no
+> runtime configuration under which destructuring `undefined` succeeds, and the throw is at LOAD, so the whole
+> page dies. **Bite proof** (exit codes measured directly, never through a pipe): baseline `exit=0`, code
+> silent -> de-register `stdlib-format` -> `exit=1`, code fires -> restore -> `exit=0`, code silent.
+>
+> **Limb 3 — `compiler/tests/browser/browser-stdlib-client-registry.test.js`** (31 tests). Executes every
+> client-registered module's bundle; asserts the registry entry carries real exports (an EMPTY object would
+> also "load"); pins the classification PARTITION (every shim on disk is client-registered XOR
+> escalation-server-only — no unclassified third state, which is what stops the next module hiding); and
+> carries an INSTRUMENT-INTEGRITY control that feeds the harness a deliberately-DOA bundle and requires it to
+> report the throw. **Merge-blocker proof:** baseline `bun test exit=0` 93/0 -> sabotage `exit=1` 89/3 ->
+> restore `exit=0` 93/0.
+>
+> **Direction of change:** `newly-accepting` at the RUNTIME level (previously-DOA pages now run), `inert` at
+> the LANGUAGE level. Newly-rejecting ONLY for programs whose client bundle was already guaranteed-dead.
+> **MEASURED** corpus migration across `samples/` `examples/` `conformance/` `stdlib/` `compiler/tests/`
+> `benchmarks/` `docs/`: **0 files** (62 candidates compiled individually; assumed-zero was not accepted).
+>
+> **TWO FURTHER DEFECTS of the same class were found and fixed here, both by execution:**
+>
+> 1. **Submodule specifiers lower to a DIVISION.** `import { verifyJwt } from 'scrml:auth/jwt'` lowers to
+>    `const { verifyJwt } = _scrml_stdlib.auth/jwt;`, which JavaScript parses as `_scrml_stdlib.auth / jwt` —
+>    measured DOA with `ReferenceError: jwt is not defined`, even though `_scrml_stdlib.auth` IS defined. The
+>    gate matches EXACTLY (no submodule root-inheritance) and refuses it.
+> 2. **Submodule reads escaped the unused-import prune entirely.** `pruneUnusedClientImports`'s region regex
+>    matched the module segment as `[A-Za-z0-9_$]*` with NO slash, so `_scrml_stdlib.compiler/bs;` was never
+>    recognised as a removable region and survived into the client bundle **even when the only use was inside a
+>    `server function`** — every such page was DOA with `ReferenceError: bs is not defined`. Found because the
+>    new gate turned `stdlib-shim-resolution.test.js` §4 red on all 13 `scrml:compiler/<stage>` cases; that test
+>    asserted `errors == []` while reading only the emitted SERVER file, so it had been sitting on top of a dead
+>    client bundle. Regex widened with a `(?:/[A-Za-z0-9_$]+)*` tail; those pages now compile AND execute.
+>
+> **Note for whoever reads the original filing above:** its "17 of 21" framing is accurate but the mechanism is
+> narrower than the real class. The class is **the client import lowering was UNCONDITIONAL while the chunk
+> activation was CONDITIONAL on the same array** — so a server-only module reaching client emission was equally
+> dead, with zero diagnostics. That is why limb 2 scans the FINAL emitted client text rather than the emit site:
+> gating at the emit site rejected 21 CORRECT files (`examples/23-trucking-dispatch/**`, which use `scrml:store`
+> only inside `?{}`-escalated server fns and are correctly pruned) — measured, then corrected.
 >
 > **Not a duplicate.** `g-stdlib-import-leaks-client` (RESOLVED) is the inverse — a *server-only* stdlib import
 > failing to be stripped FROM the client. `g-stdlib-runtime-chunk-dead-weight` (RESOLVED) is a chunk shipping when
