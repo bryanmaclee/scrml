@@ -6212,12 +6212,14 @@ literal set and unknown type NAMES first, then position 3 (argument), then 4 (re
 `E-TYPE-ANY-FORBIDDEN` row has said so since S174 — *"Use a concrete type, or `asIs` for a
 deliberate, named untyped escape hatch."*
 
-**`asIs` SHALL NOT also mean that the compiler did not look.** Until S365 it did. When expression
-inference could not type a declaration's initializer it gave up by producing `asIs` — the same
-value — so a gap in the type checker was spelled identically to a developer's deliberate opt-out.
-The consequence is the property this section exists to remove: **absence of a diagnostic and success
-were the same observation.** An author had no way to tell "scrml checked this and I signed for it"
-from "scrml never looked", and neither did scrml.
+**`asIs` SHALL NOT also mean that the compiler did not look.** That is the DIRECTION this section
+sets, and rung 0 makes it true at the ONE position the normative statements below name — it is not
+yet true everywhere, and the ⚑ note below says where it is not. Until S365 it was true nowhere.
+When expression inference could not type a declaration's initializer it gave up by producing
+`asIs` — the same value — so a gap in the type checker was spelled identically to a developer's
+deliberate opt-out. The consequence is the property this section exists to remove: **absence of a
+diagnostic and success were the same observation.** An author had no way to tell "scrml checked
+this and I signed for it" from "scrml never looked", and neither did scrml.
 
 **The split.**
 
@@ -6235,8 +6237,34 @@ merely told it exists, which they previously could not be.
 
 **Normative statements.**
 
-- Type inference SHALL NOT produce `asIs`. `asIs` SHALL arise only from an author's annotation, or
-  from a construct the SPEC explicitly designates as an authored untyped boundary (§14.7, §23.2.3).
+- `inferExprType` — the compiler's syntactic expression-type inference (`compiler/src/type-system.ts`)
+  — SHALL NOT return `asIs`, and an un-annotated `let` / `const` declaration SHALL NOT bind `asIs`
+  as the result of a defeated inference. Those two positions are what rung 0 converts, and they are
+  the whole of what this section makes provable.
+- ⚑ **That is NOT a global invariant over the compiler, and SHALL NOT be read as one.** Other paths
+  still bind `asIs` with no author behind it. `tAsIs()` has 101 call sites in
+  `compiler/src/type-system.ts`; rung 0 converts exactly one of them. The visible case is an
+  un-annotated function PARAMETER — this six-line program compiles today and reports a hatch its
+  author never wrote:
+
+  ```scrml
+  ${
+      function eat(powerUp) {
+          match powerUp {
+              .Mushroom(n) :> n
+              .Star        :> 0
+          }
+      }
+  }
+  ```
+
+  → ``error [E-TYPE-025]: Cannot match on `asIs`-typed subject.`` The parameter `powerUp`
+  was bound to `asIs` by the compiler, not by the author, and the diagnostic then blames the author
+  for a hatch that is not in the source. Closing the remaining positions — parameters, return types,
+  operands, the builtin-method catalog — is rungs 1-3 (§7.5.1). Until they land, this section's
+  guarantee is scoped to `inferExprType` and to the declaration site, and it is stated that way on
+  purpose: a normative SHALL that the implementation does not hold is a false claim inside the
+  §62.2 contract, which is precisely the defect §7.5.1 was amended to remove one section earlier.
 - Where inference is defeated, the resolved type SHALL be `unknown`, and that `unknown` SHALL carry
   the AST expression node kind at which inference stopped.
 - The compiler SHALL emit `W-TYPE-031-UNPROVEN` (**warning** — non-fatal; the compile succeeds and
@@ -6245,15 +6273,32 @@ merely told it exists, which they previously could not be.
   `match` over an `unknown` subject SHALL fire `E-TYPE-025` exactly as over an `asIs` subject
   (§18.8.2) — the split changes WHY a subject is unresolved, never WHETHER it is.
 - The diagnostic SHALL NOT fire where an annotation is present (the author stated the type), nor for
-  a `?{ … }` SQL initializer (`W-SQL-ROW-UNTYPED` owns that path, §14.8), nor for a `_{ … }` foreign
-  initializer (§23.2.3 opacity is deliberate and writing `_{ }` is the signature).
+  a `?{ … }` SQL initializer (`W-SQL-ROW-UNTYPED` owns that path, §14.8), nor for a `_={ … }=`
+  foreign initializer in a position where the language ADMITS one (§23.2.3 opacity is deliberate and
+  writing `_{ }` is the signature).
+- ⚑ **The `_={ … }=` carve-out is keyed to the declaration's attached foreign slice (§23.2.2), and
+  the parser attaches that slice at a `_={ … }=` initializer inside a FUNCTION BODY.** A `_={ … }=`
+  written at bare logic-statement scope — directly in a `${ }` block, outside any function — is not
+  admitted there at all: the slice is not attached, the construct does not lower, and
+  `E-CODEGEN-INVALID-LOGIC` is the governing diagnostic. `W-TYPE-031-UNPROVEN` also fires on that
+  shape, and that is incidental to a construct the compiler has already rejected, not a defect in
+  this carve-out.
 
-**Enforced by construction, not by review.** Inference returns `Result<ResolvedType, InferenceGap>`,
-an `InferenceGap` cannot be constructed without naming an AST node kind, and the switch over node
-kinds ends in a `never` fallthrough. Adding an expression form to scrml without teaching inference
-about it is therefore a **type error in scrml's own compiler**, not a silent new `asIs` at some
-adopter's declaration site. This is the point of the design: the coverage invariant is checked by a
-type checker rather than by a reviewer's attention.
+  **The carve-out is deliberately NOT widened to cover it.** Widening it would have to key
+  suppression on the generic `escape-hatch` expression node — which is the parser's catch-all for
+  every form it did not structure, and today carries regular-expression literals and parse-failure
+  fallbacks as well as foreign slices. Suppressing on that node would make the compiler silent at
+  positions where nobody signed for anything, re-creating inside the fix the exact collapse this
+  section exists to remove. Admitting `_={ … }=` at bare logic-statement scope is a separate
+  question about §23.2.2, and it belongs there.
+
+**Enforced by construction, not by review.** Inference returns `InferenceResult` — a discriminated
+union of `{ ok: true, type }` and `{ ok: false, gap }`, so a caller cannot read a type without first
+branching on whether there is one. An `InferenceGap` cannot be constructed without naming an AST
+node kind, and the switch over node kinds ends in a `never` fallthrough. Adding an expression form
+to scrml without teaching inference about it is therefore a **type error in scrml's own compiler**,
+not a silent new `asIs` at some adopter's declaration site. This is the point of the design: the
+coverage invariant is checked by a type checker rather than by a reviewer's attention.
 
 > **The counterpart obligation.** That guarantee is worth exactly as much as the checker that runs
 > it. When this landed, nothing in the repository type-checked `compiler/src` at all — and the first
@@ -8216,15 +8261,33 @@ match value {
 
 - A value of type `asIs` SHALL be resolved (narrowed to a concrete type) before it is returned from a function or goes out of scope.
 - Using an `asIs` value past the point where resolution is required, without resolving it, SHALL be a compile error (E-TYPE-030).
-- Component bare props follow `asIs` rules: the compiler infers the concrete type constraint from how the prop is used inside the component body (Section 15.2).
+- Component bare props follow `asIs` rules: the compiler infers the concrete type constraint from how the prop is used inside the component body (Section 15.2). This is the RESOLUTION-OBLIGATED `asIs` of the first two bullets, not a shrug — see the ⚑ note below, which reconciles it with S365.
 
-**`asIs` is a signature (S365, dpa-036 call 1).** `asIs` SHALL arise only from an author — an
-annotation, or a construct this SPEC explicitly designates as an authored untyped boundary (the
-`_{ … }` foreign slice, §23.2.3). **Type inference SHALL NOT produce it.** Writing `asIs` is a
-statement that a human considered the type and chose not to name it; the compiler failing to
-determine a type is a different fact and carries a different value, `unknown`, which is loud and
+**`asIs` is a signature (S365, dpa-036 call 1).** Writing `asIs` is a statement that a human
+considered the type and chose not to name it. The compiler failing to determine a type is a
+different fact, and since S365 it carries a different value — `unknown` — which is loud and
 counted. See §7.5.2 for the split, the diagnostic (`W-TYPE-031-UNPROVEN`), and the by-construction
-mechanism that keeps inference structurally incapable of borrowing this hatch.
+mechanism.
+
+Rung 0 makes that split real at ONE position, and this SPEC claims that position and no more:
+**`inferExprType` SHALL NOT return `asIs`, and an un-annotated `let` / `const` declaration SHALL
+NOT bind `asIs` as the result of a defeated inference.**
+
+> ⚑ **Other positions still bind `asIs` without an author. They are rungs 1-3, and two of them are
+> normative in this SPEC today — they are not defects and this note is not a deprecation.**
+>
+> - The **component bare prop** (third bullet above, §15.2). Its `asIs` is the resolution-obligated
+>   kind this section opens with: the compiler constrains it from use inside the component body and
+>   `E-TYPE-030` fires if it cannot be resolved before the prop is returned or leaves scope. It is
+>   never silent, so it does not have the property §7.5.2 exists to remove, and §7.5.2's narrowing
+>   does not touch it.
+> - The **`_{ … }` foreign slice** (§23.2.3), where opacity is deliberate and writing `_{ }` IS the
+>   signature.
+>
+> One further position is a plain gap, disclosed here rather than papered over: an **un-annotated
+> function parameter** binds `asIs` with nobody having signed for it, and a `match` on it then
+> reports `E-TYPE-025` naming a hatch the author never wrote. §7.5.2 carries the six-line
+> reproduction. Rung 1 owns it.
 
 Both kinds are UNRESOLVED, and every rule in this section that turns on "is this value resolved?"
 reads them identically — `unknown` is not a weaker `asIs`, it is the same absence of a type with an
@@ -19343,7 +19406,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | W-SERVER-IMPORT-UNEMITTED | §21, §12.2 | A compiled server bundle imports `from "./X.server.js"` but the import would fail at runtime: either (a) `X.scrml` has no server content so no `.server.js` is emitted (runtime `Cannot find module`), or (b) `X.server.js` IS emitted but does not export an imported name — e.g. a server-CALLED pure helper that route-infers into a handler (`auth.server.js` emits `export const __ri_route_rolePath`, not `export const rolePath`) → runtime missing-export. Non-fatal — green compile / `node --check` pass; the import only fails when the server bundle is RUN (the "compiled-green ≠ works" class). Companion to the emit-server tree-shake (`g-pure-module-server-emit` Fix A) which prunes the client-only-used import; this cross-file invariant catches the residual server-USED shapes emit-server cannot see (it has no sibling-emission knowledge). **Fires:** post-emit cross-file scan over `cgResult.outputs` in `compiler/src/api.js` (S208, Fix B). | Warning |
 | E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement **(Reserved / spec-ahead, S263 — no fire site: the `asIs` resolution-obligation tracker, analogous to the built `lin`/`~` tracker, is unbuilt. Excluded from the freeze fireable set.)** | Error |
-| E-TYPE-031 | §7.5.1, §15.3, §15.10, §53.4 | **General assignability failure — a value is assigned to a position whose declared type it does not satisfy.** *(Section list reconciled S365, dpa-036 call 4. This row previously named only §15.3/§15.10 and described the code as "Prop value fails declared type constraint" — the PROP case only — while NINE normative sites across the SPEC already used it for general assignment: §7.5 ×2, §14.6 `using (expr)` value constraints, four §15 prop/state/fn-prop sites, and §18 if-as-expression binding ×2. The registry and the normative text disagreed about the code's own scope, which is the §34.0 defect one level up: a catalog that mis-books a code cannot be used to look it up. The code's fire behaviour is UNCHANGED by this reconciliation — only the booking is corrected.)* The **provable** fire domain is enumerated at §7.5.1: today that is the annotated `let`/`const` declaration position, plus the prop (§15.3/§15.10), validator (§53.4) and `using`-constraint paths that own their own checks. Where inference is DEFEATED rather than contradicted, the compiler emits `W-TYPE-031-UNPROVEN` instead (§7.5.2) — the two codes are complements, not alternatives: 031 is "I proved it does not fit", W-031-UNPROVEN is "I could not prove anything". (Emitted at `compiler/src/type-system.ts:10112` (declaration position) and `compiler/src/symbol-table.ts:4334`, in `checkValidator` (validator position).) | Error |
+| E-TYPE-031 | §7.5.1, §15.3, §15.10, §15.11, §17.6, §55.1 | **General assignability failure — a value is assigned to a position whose declared type it does not satisfy.** *(Section list reconciled S365, dpa-036 call 4; the reconciliation's own figures and citations CORRECTED in the S365 fix round, which is why they are now stated with their measurement method attached. This row previously named only §15.3/§15.10 and described the code as "Prop value fails declared type constraint" — the PROP case only — while the SPEC's normative text already used it far more widely. MEASURED (`grep -n 'E-TYPE-031' compiler/SPEC.md`, excluding this §34 row and the `W-TYPE-031-UNPROVEN` row): **18 mentions across 12 distinct sections** — §7.5, §7.5.1, §7.5.2, §15.3 (the `using (expr)` value constraint), §15.10, §15.11.2, §15.11.4, §15.11.7, §15.12, §17.6.3 and §17.6.4 (if-as-expression binding), and §55.1. The earlier reconciliation note said "NINE normative sites" and mis-booked three of them — it placed the `using (expr)` constraint at §14.6, which is *Pattern Matching*, and if-as-expression binding at §18, which is *Pattern Matching and Enums* and begins well after those lines. The registry and the normative text disagreed about the code's own scope, which is the §34.0 defect one level up: a catalog that mis-books a code cannot be used to look it up — and a correction that mis-books it differently is the same defect wearing a newer date. The code's fire behaviour is UNCHANGED by either pass; only the booking is corrected.)* The **provable** fire domain is narrower than the section list, and is stated here from the emitters rather than from the prose. MEASURED (`grep -rn '"E-TYPE-031"' compiler/src`): **18 push sites, and exactly two positions** — (a) the annotated `let`/`const` declaration position, one site, `compiler/src/type-system.ts:10364`; and (b) the validator predicate/arity/arg-shape path, seventeen sites, all in `compiler/src/symbol-table.ts` `checkValidator` and its `checkArgShape` helper, whose own messages cite §55.1 and §55.10. **The prop-passing position (§15.3/§15.10) and the `using`-constraint position have ZERO push sites in `compiler/src` and do not fire today** — they are specified, not implemented, exactly as §7.5.1's measured table already records for positions 2-5. An earlier draft of this row named them as part of the provable domain; that was a false claim inside the §62.2 contract, and it contradicted §7.5.1 in the same commit. Where inference is DEFEATED rather than contradicted, the compiler emits `W-TYPE-031-UNPROVEN` instead (§7.5.2) — the two codes are complements, not alternatives: 031 is "I proved it does not fit", W-031-UNPROVEN is "I could not prove anything". (Emitted at `compiler/src/type-system.ts:10364` (declaration position) and `compiler/src/symbol-table.ts:4334` `checkValidator` (validator position). ⛑ Line numbers in §34 provenance notes are advisory: `scripts/s34-census.ts` resolves the PATH and the SYMBOL but strips `:N`, so a stale line number passes the gate — which is how `:10112` survived here. Trust the symbol.) | Error |
 | W-TYPE-031-UNPROVEN | §7.5.2 | A `let` / `const` declaration carries **no** type annotation and expression inference could not determine its type, so the declaration's resolved type is `unknown`. The message names the AST expression node kind at which inference stopped (e.g. `call`, `member`, `binary`, `ternary`, `lit`). **This is the compiler reporting a gap in ITSELF, not a defect in the program:** the program compiles and emits exactly as before, no previously-performed check is skipped, and the process exit status is unchanged. It exists because before S365 a defeated inference produced `asIs` — the SAME value §14.7 reserves for a deliberate, developer-signed escape hatch — so *absence of a diagnostic* and *success* were the same observation, and an unproven type was indistinguishable from a signed-for one. Resolution, and there are exactly two, both one edit: **prove it** by annotating the declaration (`x: T = …`), or **sign for it** by annotating `asIs`, which is silent by design (§14.7). Does NOT fire when an annotation is present, for a `?{ … }` SQL initializer (`W-SQL-ROW-UNTYPED` owns that path), or for a `_{ … }` foreign initializer (§23.2.3 opacity IS the signature). Partitions into `result.warnings` (non-fatal; CLI exit unchanged). ⚑ EXPECT A LARGE COUNT ON FIRST CONTACT and read it as a measurement, not a regression — it is the first observation of debt that was always present: 9,954 occurrences across 490 of 2,362 tracked `.scrml` files at introduction, 82.5% of it in the B4 self-host/native-parser trees, and 55% of ALL occurrences at one node kind (`call`). The §7.5.1 widenings retire it. (Catalog addition S365 — dpa-036 call 1; emitted at `compiler/src/type-system.ts:10496`, gap classified by `inferExprType` at `compiler/src/type-system.ts:484`.) | Warning |
 | E-TYPE-ANY-FORBIDDEN | §14.1.1 | The literal type-token `any` appears in a type-annotation position (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` parameter or return type, and the recursive leaf positions). `any` is not a scrml type — there is no `any` (S174 hard line; TypeScript's type-checking opt-out has no scrml equivalent). Use a concrete type, or `asIs` for a deliberate, named untyped escape hatch. Symmetric with `E-TYPE-UNKNOWN-NAME` (§14.1.2) — an undefined type NAME is rejected at the identical loci via the same locus traversal. (Catalog addition S174; loci broadened S174 follow-on; emitted at `compiler/src/type-system.ts` `checkAnyTypeForbidden`.) | Error |
 | E-TYPE-UNKNOWN-NAME | §14.1.2 | An unrecognized (typo'd or undefined) type NAME appears in a type-annotation position — the SAME loci as `E-TYPE-ANY-FORBIDDEN` (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` param + return, and recursive leaf positions: inline-struct field, array element, map VALUE, union member, snippet param, lifecycle post-type). The name resolves against the file's `typeRegistry` per §53.14.5 (forward-reference-safe placeholder pass); cross-file imports resolve via §21.8 / the §21.3 imported-types seed, and an imported specifier name is exempt even in single-file mode. `asIs` is the never-fires escape hatch. Carve-outs: a map KEY is owned by `E-MAP-KEY-NOT-COMPARABLE` (§59.4, no double-fire); a machine name (§51.3) and `<db>`-block-scoped annotations are exempt. Before this rule the name collapsed SILENTLY to `asIs` (the broader leak §14.1.1 deferred). Emitted at the decl-binding sites (NOT `resolveTypeExpr`, which is span-free) by `compiler/src/type-system.ts` `checkUnknownTypeNames` (run AFTER the imported-types seed). (Catalog addition S174 follow-on.) | Error |
