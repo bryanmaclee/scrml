@@ -79,3 +79,16 @@ here — out of scope for a fix round.
   standalone. Probed directly: native `Cookie` -> "a=b", happy-dom -> null.
   Pre-existing environmental leak, NOT a regression. The route assertions now pin
   the limiter (reached vs 429) instead of the incidental CSRF status.
+
+## Gate (final, at 6695bc1f)
+- `bun test compiler/tests/` — 30170 pass / 216 skip / 1 todo / **53 fail**.
+  Baseline at b70db793 (fix + test removed): 30161 / 216 / 1 / **53 fail**.
+  Failing NAME SETs are IDENTICAL — `comm` shows zero new, zero fixed.
+  All 53 are browser / happy-dom / dev-watcher, pre-existing on main.
+  Zero timeouts in the run (`grep -c "timed out after"` = 0), so all 53 are
+  assertion failures, not the timeout-wearing-a-fail-name trap.
+- `bun conformance/run.ts` — **883/883 pass**, exit 0.
+- Pre-commit hook (unit + integration + conformance, `--bail`) ran green on the
+  fix commit. No `--no-verify`, no hook edits.
+
+## Status: COMPLETE
