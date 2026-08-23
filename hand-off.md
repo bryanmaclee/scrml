@@ -100,8 +100,12 @@ findings, all text:
 
 - **main** `c96e7012` before this wrap; coherence 0/0; both repos clean.
 - **Gaps: HIGH 46 · MED 152 · LOW 68.** Seven filed this session, all PA-reproduced before filing.
-- **Debts: review floor 0 (drained twice) · corpus-zero 0 · issue-debt 0 · dPA 0 UNRUN / 0 ADVISORY**
-  (`dpa-036` ratified this session).
+- **Debts: review floor 0 (drained twice; the wrap PRs are the inherent tail) · corpus-zero 0 ·
+  issue-debt 0 · dPA 0 UNRUN / 0 ADVISORY.** ⚑ That last figure was FALSE when first written —
+  `dpa-036` was ratified into `user-voice`, the delta-log and the build brief, but the QUEUE ROW
+  was never flipped, so `dpa-debt` correctly read 1 ADVISORY. Caught by re-running the probes
+  after the hand-off was drafted. **A ruling recorded everywhere except the drain path is, to the
+  probe, not ruled.** Fixed; the row now carries all four dispositions inline.
 - **Branches held:** `nested-program-r4-work` (Q4 re-ruling) · `raw-egress-r8-work` (never landed) ·
   `feat/s365-asis-split-rung0` (SPEC text, fix round in flight).
 - **Worktrees RETAINED — do not sweep.** The sweep probe is recorded but unproven.
