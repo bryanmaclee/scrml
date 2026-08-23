@@ -671,6 +671,7 @@ loud "I could not scan", which exposes that question rather than papering over i
 | **F8 — CLOSED (fix round, condition 2)** | **`delta-lint.ts` reports PASS over a log that still contains the duplicate it exists to catch**, when the entry format drifts. Three zero-population shapes all green. | **It reached `main` (`1127bab9`) as a 6th blocking gate while this branch was open**, so the trade changed: no branch-pull needed, and leaving it meant landing beside a vacuous gate. Fixed, all three rows bite-proven. | Full four-case transcript in the audit section above. Fix is ~4 lines: refuse `seen.size === 0` over a non-empty file. |
 | **F9** | `regen-spec-index.ts --check` cannot see the rot class it was written for — all 65 row ranges corrupted, still "totals OK". | **Deliberate and documented** (pa-base §8, cry-wolf). Gating them would re-litigate a ruling under cover of a bug fix. Recorded because the gap between "why the script exists" and "what the gate checks" is worth an operator's eye. | `sed -E 's/\| [0-9]+-[0-9]+ \| [0-9]+ \|/\| 1-1 \| 1 \|/'` on SPEC-INDEX.md → exit 0. |
 | **F10** | `corpus-emit-differential.ts`'s CAPTURE half writes a 0-source manifest at exit 0. | The DIFF half catches it with an explicit `FINDING [VACUOUS]`, which is the point that matters. Noted for completeness. | Capture against an empty roots dir. |
+| **F11** *(new, fix round)* | `conformance/run.ts` — the `severity` and `notCodePrefixes` `expect` keys have the SAME hollow-container hole `codeCounts` just had: `null` / `{}` / `[]` all silently disable the assertion (verified by execution, not read from source). `notCodePrefixes: {}` additionally throws an uncaught `for..of` error instead of producing a diagnostic. | **It is a ruling, not a copy.** `notCodePrefixes: []` plausibly means "no families forbidden" — coherent, and identical in effect to omitting the key. Whether an empty optional container is an ERROR or a NO-OP should be decided ONCE for the whole `expect` vocabulary, not settled key-by-key inside a fix round. | Set each key to `null` / `{}` / `[]` on any case and run `runCase` — `pass` stays `true`. |
 
 ---
 
@@ -1076,3 +1077,53 @@ that `compiler/tests/unit/corpus-zero-debt.test.js` explicitly avoids so the pur
 disk. Testing it would mean restructuring the module — that is not "cheap", and none of this
 branch's sibling guards (`facts.ts`, `state.ts`, `snippet-gate.js`, `delta-lint.ts`) are unit-tested
 either; they are bite-proven. Same standard applied here. The existing 20 tests still pass.
+
+### (b) `conformance/run.ts` — a hollow assertion inside the anti-hollow-assertion feature — **DONE**
+
+The `codeCounts` docstring promised *"a malformed value is a HARD failure rather than a skip — a
+cardinality assertion that silently does nothing is the exact hollow-gate shape this key was added
+to close."* It delivered exactly that for the **value** and nothing for the **container**, so the
+key could still be switched off in silence: `if (ex.codeCounts)` is falsy for `null` and `""`, and
+truthy-but-zero-keyed for `{}` and `[]`.
+
+**Fix: test PRESENCE, not truthiness.** An ABSENT key is the documented optional-and-additive case
+and stays free. A key that IS present must be a non-empty object of non-negative integers, or the
+case fails. *"I wrote the assertion and it asserted nothing"* is never a pass.
+
+**Bite proof** — `runCase` driven directly on `capability-inheritance-inherit-covers` (the real
+case, real compile), with the PRE-fix runner restored in place for the left column so its relative
+imports resolve. `pass` is the runner's own verdict:
+
+| `codeCounts` value | pre-fix | post-fix |
+|---|---|---|
+| `null` | **pass=true**, no mismatch | **pass=false** — `present but is not an object (got null)` |
+| `""` | **pass=true**, no mismatch | **pass=false** — `present but is not an object (got "")` |
+| `{}` | **pass=true**, no mismatch | **pass=false** — `present but EMPTY — it asserts nothing. Omit the key` |
+| `[]` | **pass=true**, no mismatch | **pass=false** — `present but is not an object (got [])` |
+| `{"E-FOREIGN-SIDECAR-NOMINAL": 1}` (honest) | pass=true | **pass=true** — unchanged |
+| `{"E-FOREIGN-SIDECAR-NOMINAL": 99}` (wrong count) | pass=false | **pass=false** — unchanged |
+| key omitted entirely | pass=true | **pass=true** — the optional case stays free |
+
+Rows 5-7 are the ones that had to hold: the fix must not turn an honest assertion, a genuine
+count mismatch, or a legitimately-absent key into anything different. None moved.
+
+**SURFACED, NOT FIXED — the two sibling keys have the identical hole.** Verified by execution on
+the same case rather than inferred from the source:
+
+```
+  severity        = null  -> pass=true    severity        = {}  -> pass=true    severity        = []  -> pass=true
+  notCodePrefixes = null  -> pass=true    notCodePrefixes = []  -> pass=true
+  notCodePrefixes = {}    -> UNCAUGHT THROW (for..of over a non-iterable), not a diagnostic
+```
+
+Not fixed here for two reasons, and the second is the real one:
+1. The brief scopes this item to `codeCounts` and says not to improve gates beyond the named fixes.
+2. **It is not a mechanical copy — it is a ruling.** For `codeCounts` the brief RULED that an empty
+   container is an error. For `notCodePrefixes`, `[]` plausibly means *"no prefix families are
+   forbidden"*, which is a coherent thing to write and identical in effect to omitting the key.
+   Whether an empty optional container is an ERROR or a NO-OP is a harness-authoring decision with
+   a real argument on both sides, and it should be decided once for the whole `expect` vocabulary
+   rather than settled key-by-key inside a fix round. The `notCodePrefixes: {}` uncaught throw is a
+   separate, smaller defect: a malformed container should produce a diagnostic, not a stack trace.
+
+**Routed to the PA as F11.**

@@ -252,19 +252,44 @@ export function runCase(c: LoadedCase): CaseResult {
   // so a double fire is visible. A malformed value is a HARD failure rather than
   // a skip — a cardinality assertion that silently does nothing is the exact
   // hollow-gate shape this key was added to close.
+  //
+  // THE CONTAINER IS CHECKED, NOT JUST THE VALUE (S365 review). The paragraph above promised a
+  // malformed VALUE is a hard failure — and the first cut delivered exactly that and no more, so
+  // the CONTAINER could still turn the whole assertion off in silence:
+  //   "codeCounts": null   -> falsy, block skipped, case green
+  //   "codeCounts": ""     -> falsy, block skipped, case green
+  //   "codeCounts": {}     -> truthy, zero keys, loop never runs, case green
+  //   "codeCounts": []     -> truthy, zero keys, loop never runs, case green
+  // A hollow assertion inside the anti-hollow-assertion feature. So PRESENCE is what is tested,
+  // not truthiness: an ABSENT key is the documented optional-and-additive case and stays free,
+  // while a key that is present must be a non-empty object of non-negative integers or the case
+  // FAILS. "I wrote the key and it asserted nothing" is never a pass.
   const countMismatches: string[] = [];
-  if (ex.codeCounts) {
-    for (const code of Object.keys(ex.codeCounts)) {
-      const want = ex.codeCounts[code];
-      if (typeof want !== "number" || !Number.isInteger(want) || want < 0) {
-        countMismatches.push(
-          "codeCounts['" + code + "'] is not a non-negative integer (got " + JSON.stringify(want) + ")",
-        );
-        continue;
-      }
-      const got = counts[code] ?? 0;
-      if (got !== want) {
-        countMismatches.push("code '" + code + "' fired " + got + " time(s), expected exactly " + want);
+  if ("codeCounts" in ex) {
+    const cc = ex.codeCounts as unknown;
+    if (cc === null || typeof cc !== "object" || Array.isArray(cc)) {
+      countMismatches.push(
+        "codeCounts is present but is not an object (got " + JSON.stringify(cc) + ") — " +
+          "a present-but-malformed container silently disables the whole cardinality assertion",
+      );
+    } else if (Object.keys(cc).length === 0) {
+      countMismatches.push(
+        "codeCounts is present but EMPTY — it asserts nothing. Omit the key (it is optional) " +
+          "rather than writing an assertion that cannot fail",
+      );
+    } else {
+      for (const code of Object.keys(cc)) {
+        const want = (cc as Record<string, unknown>)[code];
+        if (typeof want !== "number" || !Number.isInteger(want) || want < 0) {
+          countMismatches.push(
+            "codeCounts['" + code + "'] is not a non-negative integer (got " + JSON.stringify(want) + ")",
+          );
+          continue;
+        }
+        const got = counts[code] ?? 0;
+        if (got !== want) {
+          countMismatches.push("code '" + code + "' fired " + got + " time(s), expected exactly " + want);
+        }
       }
     }
   }
