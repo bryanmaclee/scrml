@@ -18,9 +18,26 @@ none landed, five operator decisions pending.** All five branches are now resolv
 
 ### 1. ⚠️ ONE DISPATCH IN FLIGHT — claimed, not lost
 
-**`feat/s365-asis-split-rung0` @ `d63ba668`** — a SPEC-text fix round is RUNNING against it
-(agent brief archived at `docs/changes/s365-asis-split-rung0/FIX-ROUND-BRIEF.md`). If it completed
-after this wrap, **its work is on that branch — check the branch tip before assuming anything.**
+**`feat/s365-asis-split-rung0` @ `915eee4d`** — the SPEC-text fix round **COMPLETED after the wrap**.
+All five blockers fixed plus four ride-alongs; one position deferred and filed. **It owes a
+RE-REVIEW at `915eee4d` before it lands** — a fix round invalidates the review that produced it,
+and the prior LAND verdict was against `d63ba668`. Do not land it on the strength of that verdict.
+
+**What it proved, and this is the reason to trust the diff:** count-neutrality **twice** — this
+round's own edits are byte-identical across a full 2,362-file census (399 codes, 9,954 gaps, 490
+files), and against `origin/main` the *only* delta across all 398 shared codes is
+`W-TYPE-031-UNPROVEN: 0 → 9954`. It also merged `origin/main` twice mid-round, including the wrap,
+resolving a `docs/known-gaps.md` collision by keeping **both** entries.
+
+**Three findings from it that outlive the branch:**
+- **`s34-census` structurally cannot catch a wrong LINE.** Its resolver strips `:N`, so
+  `type-system.ts:10112` — pointing at an `E-ERROR-010` fragment — **resolved and passed the gate.**
+  Paths and symbols are checked; line numbers are not. Widening it is an untaken tooling call.
+- **`write: false` test helpers are blind to every emit-pass diagnostic.** `E-CODEGEN-INVALID-LOGIC`
+  is raised at emit: `write:false` → `[]`, `write:true` → the real code. The CLI showed it, the
+  harness did not. Generalises well beyond this branch.
+- **`docs/FACTS.md` stales on *any* source edit** (its `@generated` table reads `compiler/src` LOC),
+  so regeneration belongs in the same commit as the edit — it went stale twice in one round.
 
 **The branch is DO-NOT-LAND on SPEC text only.** The code is the cleanest thing this session
 produced: **2,724 emitted artifacts byte-identical to main**, and the corpus diagnostic delta is
@@ -100,8 +117,12 @@ findings, all text:
 
 - **main** `c96e7012` before this wrap; coherence 0/0; both repos clean.
 - **Gaps: HIGH 46 · MED 152 · LOW 68.** Seven filed this session, all PA-reproduced before filing.
-- **Debts: review floor 0 (drained twice) · corpus-zero 0 · issue-debt 0 · dPA 0 UNRUN / 0 ADVISORY**
-  (`dpa-036` ratified this session).
+- **Debts: review floor 0 (drained twice; the wrap PRs are the inherent tail) · corpus-zero 0 ·
+  issue-debt 0 · dPA 0 UNRUN / 0 ADVISORY.** ⚑ That last figure was FALSE when first written —
+  `dpa-036` was ratified into `user-voice`, the delta-log and the build brief, but the QUEUE ROW
+  was never flipped, so `dpa-debt` correctly read 1 ADVISORY. Caught by re-running the probes
+  after the hand-off was drafted. **A ruling recorded everywhere except the drain path is, to the
+  probe, not ruled.** Fixed; the row now carries all four dispositions inline.
 - **Branches held:** `nested-program-r4-work` (Q4 re-ruling) · `raw-egress-r8-work` (never landed) ·
   `feat/s365-asis-split-rung0` (SPEC text, fix round in flight).
 - **Worktrees RETAINED — do not sweep.** The sweep probe is recorded but unproven.
