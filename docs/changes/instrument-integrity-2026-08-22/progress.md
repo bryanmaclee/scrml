@@ -1216,3 +1216,47 @@ identically in BEFORE and AFTER.
 | corpus-zero | "5 OWED" | **5 IN SCOPE · 0 OWED** | ✖ **corrected** — see condition (5). The debt was PAID by `scrml-support@5fe251f`, not drifted. |
 
 ### `git status` at report time: clean.
+
+### A SECOND merge of `origin/main` — and the collision it was hiding
+
+The final coherence check (`git rev-list --left-right --count origin/main...HEAD`) read **2 behind,
+17 ahead**, and `git diff origin/main..HEAD -- handOffs/delta-log.md` showed **4 DELETIONS**.
+`origin/main` had advanced *during this dispatch* — worktrees share the object DB and remote-tracking
+refs, so a sibling's `fetch` moved `origin/main` from `77a7b381` (merged at STEP 0) to `09d133ff`
+without this dispatch doing anything.
+
+**The two new commits touch `docs/known-gaps.md` — the same file condition (3) edits.**
+
+```
+$ git log --oneline HEAD..origin/main
+09d133ff docs(S365): F1 fix verified + two corrections to my own brief; 2 gaps; review floor 0 (#645)
+36bb8ddb docs/s365 s239 verdicts (#644)
+$ git diff --name-only HEAD...origin/main
+docs/known-gaps.md · docs/pr-reviews.md · handOffs/delta-log.md
+```
+
+**That is a live work-loss hazard, not a bookkeeping detail.** A wholesale
+`git checkout instrument-integrity -- docs/known-gaps.md` at landing would have silently destroyed
+main's 52 new lines — the *exact* accident recorded in delta-log `[1686]` earlier the same day
+("the paired `git checkout HEAD -- docs/known-gaps.md` destroyed that file's auto-merge — Peter's
+two new gap entries silently gone"). **Resolved on this branch rather than left for the lander to
+discover**: merged again, so git's own machinery did the union.
+
+`docs/known-gaps.md` **auto-merged cleanly** — my one-line `codeCounts` edit at :588 and main's two
+new gap entries occupy different regions. Both sides verified present by execution, not by reading
+the merge summary:
+
+```
+$ grep -c "codeCounts" docs/known-gaps.md              -> 1     (mine survived)
+$ git diff --stat HEAD~1..HEAD -- docs/known-gaps.md   -> 52 insertions  (main's arrived)
+```
+
+`handOffs/delta-log.md` took the union driver again; **no collision, no renumbering, nothing
+hand-resolved** — `1398 entries · 1389 distinct · max [1690] — PASS`. The `@generated` blocks
+needed no regeneration (main had already regenerated them and the merge took its side; my edit was
+prose): `state.ts --check` exit 0, `facts.ts --check` exit 0.
+
+**All seven gates re-run against the new base, all exit 0**, including
+`s34-census --check-new --base origin/main` → `1 new/changed §34 row(s), all well-formed
+(provenance resolves) — PASS`. Branch is now **0 behind / 18 ahead**; `origin/main` is fully
+contained, so the file-delta landing is safe on every one of the nine files.
