@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 45 |
-| MED | 154 |
+| HIGH | 48 |
+| MED | 156 |
 | LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9394,6 +9394,127 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > sentence in §6.8 describing settle timing for a server-fn-backed init/default — NOT a code change. Making
 > `reset` async would change every call site, which is the very thing this fix exists to avoid.
 
+### g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier — #664 fixed the matching arm and left the `else` arm emitting `return x;`, which is a SILENT wrong value whenever the key name is in scope — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(emitIifeBlockArmBody — the object-literal branch #664 fixed handles the matching arm only; the else/wildcard arm takes a different path) prov=review:docs/pr-reviews.md-#664 -->
+> **Found by the S313 review floor, PA-reproduced by EXECUTING the emitted library module.** Not a regression
+> from #664 — a **partial fix**, established by compiling the same fixture at #664's merge parent.
+>
+> ```scrml
+> export fn pick(n: number, x: number) {
+>     return match n {
+>         1 :> { x: 1 }
+>         else :> { x: 0 }
+>     }
+> }
+> ```
+>
+> | | matching arm | `else` arm |
+> |---|---|---|
+> | **pre-#664** (`5dbc0727`) | `{ x : 1 }` — labeled statement, falls through → `undefined` | `else { return x; }` |
+> | **post-#664** (on `main`) | `return { x : 1 };` ✅ **fixed** | `else { return x; }` ❌ **unchanged** |
+>
+> The `else` arm's object literal `{ x: 0 }` lowers to **`return x;`** — the bare identifier, not the object.
+>
+> **⚑ It is SILENT when the key name is in scope.** With `x` as a parameter the emitted module compiles at
+> **exit 0** and, executed: `pick(1, 77)` → `{"x":1}` (correct) while **`pick(9, 77)` → `77`**, where `{"x":0}`
+> was written. A caller gets a plausible value of the wrong type with no diagnostic anywhere.
+>
+> When the key name is NOT in scope it fails loudly (`E-SCOPE-001: Undeclared identifier \`x\``, exit 1), which
+> is why the shape was survivable — the loud half masked the silent half.
+>
+> **This is the verify-the-CLASS-not-the-instance lesson, in the PR that cited it.** #664's own description
+> says *"bug-class swept"* and its merge-blocker test pins the matching arm. The sibling arm, three lines away
+> in the same emitted IIFE, was never compiled. A fix round should re-derive which arm paths reach
+> `emitIifeBlockArmBody` and cover every one, rather than the arm the reproducer happened to use.
+## §S368 — filed S368-bryan (hand-authoring dogfood: the §40.8 default-logic body)
+
+> Surfaced by **bryan writing scrml by hand** — the first human-authored scrml in the project's history, and
+> therefore the first ergonomic signal the corpus has ever produced. Every claim below is PA-measured by
+> compiling and reading the emitted artifact.
+>
+> ⚑ **My first characterisation of this was WRONG in two places** and was overturned by the build round's
+> first-hand re-derivation, which I then re-measured myself. What follows is the corrected version; the
+> superseded framing (*"the `//` comment is the trigger"* / *"`/* */` is clean"*) is recorded in
+> `docs/changes/default-logic-line-comment/progress.md` so the error is legible rather than silently rewritten.
+
+### g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration — a comment splits a default-logic text run so the statement loses the declaration that made it lift, and ships as page text at exit 0 with its diagnostics deleted — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration sev=HIGH status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the terminal result.push(block); the eight ^-anchored lift gates)+compiler/src/block-splitter(emits a // comment as its own child, which flushes the run) prov=adopter:bryan-hand-authoring-S368-first-human-written-scrml -->
+> **PA-measured, four shapes, current `main`:**
+>
+> | shape | code in `<body>`? | what it establishes |
+> |---|---|---|
+> | bare call, **no declaration in the run**, no comment | **LEAKS** | the comment was never the root — see the sibling entry below |
+> | bare call **with a declaration in the run**, no comment | clean | a declaration is what makes the run lift |
+> | same **plus a `//` comment between them** | **LEAKS** | the comment FLUSHES the run, severing the statement from its declaration |
+> | **`/* block */` above a `fn` declaration** | **LEAKS the declaration itself** | a second, STRICTLY MORE SEVERE direction |
+>
+> **The mechanism.** A text run at a default-logic root lifts only if it matches one of **eight `^`-anchored
+> regexes**. Comments defeat them in two opposite directions: a `//` comment is emitted as its own child and
+> **FLUSHES** the run, splitting one authored run in two; a `/* */` comment stays *inside* the run, so the run
+> now begins with `/*` and the anchored gate **cannot match at all** — which loses the whole declaration.
+> `/* c */` above a `fn` ships the entire function into `<body>` at exit 0.
+>
+> **⚑ The masking limb — why this is HIGH.** In bryan's original file the swallowed statement is `log(@wop);`
+> where `@wop`'s declaration is commented out. `E-STATE-UNDECLARED` **does not fire**, because the statement
+> was never compiled. Remove the comment and the same file exits **1** with the error. **A defect that turns
+> code into text also deletes every diagnostic that code would have raised**, so the blast radius is not
+> bounded by any one rule.
+>
+> **⚑ This is the THIRD report of one root cause.** Two gate regexes already in the tree — `TILDE_TOKEN_RE` and
+> `TOPLEVEL_ON_LIFECYCLE_RE` — are one-shape workarounds for it, and their own doc comments say so. The fix
+> normalises the gates' **input** rather than adding a ninth regex.
+>
+> **⚑ And the compiler routes authors INTO this mode.** `W-PROGRAM-REDUNDANT-LOGIC` fires on a `${…}` wrapper
+> containing declarations and says verbatim: *"Remove the redundant `${...}` for cleaner source. See SPEC
+> §40.8."* The wrapped form is the one that WORKS.
+
+### g-default-logic-bare-call-is-unspecified-and-ships-as-page-text — a bare call at a `<program>` default-logic root matches no auto-lift gate, so it is emitted as page text at exit 0; §40.8 is silent on the shape — `NEW S368-bryan; HIGH; open; OPERATOR RULING OWED`
+<!-- @gap id=g-default-logic-bare-call-is-unspecified-and-ships-as-page-text sev=HIGH status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the eight ^-anchored lift gates)+compiler/SPEC.md§40.8 prov=adopter:bryan-hand-authoring-S368-split-out-from-the-comment-defect-by-first-hand-re-derivation -->
+> **PA-measured.** `<program>` + `log("M1");` + markup — **no comment, no declaration** — emits the literal text
+> `log("M1");` into `<body>` at **exit 0, zero diagnostics**.
+>
+> This is the residue after the comment defect above is fixed, and it is **not a bug fix — it is a RULING.**
+> §40.8 (`SPEC.md:22813-22814`) enumerates what auto-lifts (declarations), carves out writes with a diagnostic,
+> and is **silent on a bare call**. Per the governing-sentence gate, *"searched §40.8 — no governing sentence
+> found"* is a FINDING that converts this from a fix into an operator decision.
+>
+> **The fork:**
+> - **(a) lift every text run** — closes it, but prose written directly in a `<program>` body then starts
+>   parsing as logic, which is a real authoring cost.
+> - **(b) diagnose non-declaration runs** — also closes it, but must then reject `const bias = 1.2` followed by
+>   `log(x)`, which compiles today, or the diagnostic cannot be explained.
+>
+> Either needs SPEC text. Nobody should guess.
+>
+> **⚑ Class sweep — the corpus count did NOT move (base 69 = head 69), and every instance sits OUTSIDE §40.8.**
+> Read from source rather than by regex. Four live members worth naming:
+> - **`on mount { loadDashboard() }` ships as page text** — `samples/htmx-debate-dashboard.scrml:143`, inside a
+>   `<db>` state-block body where `isDefaultLogicBody` is deliberately false. **The mount hook never runs and
+>   nothing says so.**
+> - ~25 bare `@name = expr` writes emitted as text (`gauntlet-r10-bun-admin`, `samples/dashboard`).
+> - `stdlib/http/index.scrml` leaks 8 lines of `export function` / `const` / `for` into its own body.
+>
+> So the §40.8 comment limb is closable by code; **the silent-code-as-text CLASS has at least four more live
+> members elsewhere**, covered by neither the fix nor this ruling.
+
+### g-selfhost-smoke-resolves-projectroot-to-MAIN-so-worktree-agents-read-a-live-tree — a worktree agent's suite imports the MAIN checkout's compiler source, so a concurrent edit there fails its tests with its own name on them — `NEW S368-bryan; MED; open`
+<!-- @gap id=g-selfhost-smoke-resolves-projectroot-to-MAIN-so-worktree-agents-read-a-live-tree sev=MED status=open locus=compiler/tests/integration/self-host-smoke.test.js:35-51(findMainProjectRoot parses `git worktree list --porcelain` and takes the FIRST entry) prov=rationale:two-independent-agents-hit-this-in-one-session-and-a-third-verified-the-mechanism-from-source -->
+> `findMainProjectRoot()` parses `git worktree list --porcelain` and takes the **first** entry — the MAIN
+> checkout — **by design**, because the gitignored `compiler/self-host/dist/` only exists there. The
+> block-splitter parity test then `import`s `resolve(projectRoot, "compiler/src/block-splitter.js")` **from
+> MAIN, not from the worktree.**
+>
+> Consequence: **a worktree agent cannot trust a self-host test result while another agent is editing main.**
+> Hit independently by two agents in one session; a third verified the mechanism from source and confirmed the
+> attribution was correct rather than convenient. Both saw a red `Self-host: block-splitter parity` naming
+> `splitBlocks`, which reads exactly like their own regression.
+>
+> Compounding it: an **empty** `WIP` start commit defeats the pre-commit hook's docs-only skip
+> (`[ -n "$STAGED" ]` is false), so it runs the full suite for nothing — and that is where one agent met this.
+>
+> Fix direction: make the dependency explicit (fail loudly when the resolved root is not the running worktree),
+> or vendor the artifacts the test needs. Interim: dispatch briefs should say the first commit must be a real
+> docs-only one, and that a self-host failure needs its path checked before it is attributed.
 ## §S368 — filed S368-bryan (hand-authoring dogfood: the client-side stdlib import path)
 
 > Both entries below were surfaced by **bryan writing scrml by hand** and reproduced by the PA

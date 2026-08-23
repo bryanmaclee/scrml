@@ -1,0 +1,23 @@
+import { randomInt } from 'scrml:random'
+<program>
+
+ //  <wts> = [1,2,0.3]
+   const bias = 1.2
+
+      log("bitches!")
+//   function fill_weights(){
+//      return randomInt(1,6)
+//      }
+
+   fn do_thing (a: number, b: number){
+      return a *b
+   }
+   fn word(wrd: string){ return wrd;}
+
+//   <wop> = do_thing(2,3)
+//   <wop> = randomInt(1,4)
+   log(@wop);
+
+   <p>hey ${word("shit")}</>
+   
+</program>
