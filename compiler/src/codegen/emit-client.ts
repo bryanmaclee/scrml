@@ -4,7 +4,7 @@ import { toPosix } from "../path-canonical.js";
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
+import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
@@ -18,6 +18,9 @@ import { emitLogicNode } from "./emit-logic.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
+// §12.2 Trigger 3 membership — read (never re-derived) so the client-chunk
+// diagnostic can say WHY a module is absent instead of just that it is.
+import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
@@ -2104,6 +2107,7 @@ export function generateClientJs(ctx: CompileContext): string {
         const destructured = kept
           .map((s) => (s.imported === s.local ? s.imported : `${s.imported}: ${s.local}`))
           .join(", ");
+
         lines.push(`const { ${destructured} } = _scrml_stdlib.${stdlibMatch};`);
         continue;
       }
@@ -3674,7 +3678,20 @@ export function generateClientJs(ctx: CompileContext): string {
     // (2) stdlib reads `const { a, b: c } = _scrml_stdlib.<mod>;` (#5 ss19).
     // Each destructure entry is `local` or `imported: local`; the name client
     // code actually reads is the LOCAL (post-`:`) binding.
-    const stdlibRe = /^const\s+\{([^}]*)\}\s*=\s*_scrml_stdlib\.[A-Za-z_$][A-Za-z0-9_$]*\s*;?\s*$/gm;
+    //
+    // The `(?:\/…)*` tail is load-bearing (S368): the module segment used to be
+    // `[A-Za-z0-9_$]*` with NO slash, so a SUBMODULE read
+    // (`_scrml_stdlib.compiler/bs;`) never matched and was therefore never a
+    // removable region — it survived into the client bundle even when the import
+    // was reached ONLY from a `server function`. Since that text parses as the
+    // DIVISION `_scrml_stdlib.compiler / bs`, every such page was DEAD ON
+    // ARRIVAL with `ReferenceError: bs is not defined`. Measured by execution on
+    // the exact fixture `stdlib-shim-resolution.test.js` §4 compiles — a test
+    // that asserted `errors == []` and checked only the emitted SERVER file, so
+    // it could not see the dead client bundle it was producing. Matching the
+    // submodule shape lets the prune do its job, which is also what keeps
+    // E-STDLIB-CLIENT-CHUNK-MISSING from firing on a legitimate server-only use.
+    const stdlibRe = /^const\s+\{([^}]*)\}\s*=\s*_scrml_stdlib\.[A-Za-z_$][A-Za-z0-9_$]*(?:\/[A-Za-z0-9_$]+)*\s*;?\s*$/gm;
     while ((m = stdlibRe.exec(code)) !== null) {
       const names = m[1]
         .split(",")
@@ -3782,6 +3799,117 @@ export function generateClientJs(ctx: CompileContext): string {
     result += code.slice(cursor);
     return result;
   })(clientCode));
+
+  // -------------------------------------------------------------------------
+  // §41 CLIENT REGISTRY GATE (S368) — E-STDLIB-CLIENT-CHUNK-MISSING.
+  //
+  // A client bundle is a CLASSIC script and cannot resolve a bare specifier, so
+  // `import { x } from 'scrml:NAME'` lowers to `const { x } = _scrml_stdlib.NAME;`.
+  // That read resolves IF AND ONLY IF the `stdlib-NAME` chunk is in
+  // RUNTIME_CHUNK_ORDER — nothing else assigns `_scrml_stdlib.NAME`. So
+  // membership in that array is the property that decides whether a client
+  // stdlib import works, and `hasStdlibClientChunk` reads THAT ARRAY. The gate
+  // and the outcome cannot drift apart because they are the same artifact.
+  //
+  // THE DEFECT THIS CLOSES (S368, reproduced by execution, 17 of 21 modules):
+  // the lowering was UNCONDITIONAL while the chunk activation was CONDITIONAL on
+  // the same array. When they disagreed the compile exited 0, wrote a complete
+  // artifact set, and the browser died at bundle load with `TypeError: Cannot
+  // destructure property 'x' from null or undefined value` — killing the WHOLE
+  // page, not just the call. The pre-existing `W-STDLIB-SHIM-MISSING` (api.js)
+  // could not see it: that probes "does a shim FILE exist on disk", true for all
+  // 21 modules, so it never fires. An obligation and the probe that reads it
+  // must resolve to the SAME artifact.
+  //
+  // WHY IT SCANS THE FINAL TEXT AND NOT THE EMIT SITE — MEASURED, and the first
+  // placement was WRONG. Emitting the diagnostic beside the `lines.push` looks
+  // like the co-located choice, but that push is NOT the final word: the
+  // `post-prune-unused-imports` stage directly above DROPS a lowered read whose
+  // names no client code references. `examples/23-trucking-dispatch` imports
+  // `scrml:store` and uses it only inside a `?{}`-escalated server fn, so the
+  // read is emitted and then pruned, and the shipped bundle is CORRECT. Gating
+  // at the push rejected 21 correct files. Scanning post-prune asks the only
+  // question that matters — does a read SURVIVE into the artifact — and those
+  // 21 files compile clean again.
+  //
+  // Deliberately fires for a SUBMODULE too (`scrml:auth/jwt` -> the read
+  // `_scrml_stdlib.auth/jwt`, which JS parses as the DIVISION
+  // `_scrml_stdlib.auth / jwt`): measured DOA with `ReferenceError: jwt is not
+  // defined` even though `_scrml_stdlib.auth` is defined.
+  //
+  // Skipped in testMode for one reason and it is not convenience: testMode
+  // disables the prune above (synthetic minimal-body fixtures have no client
+  // body to reference their imports), so in that mode a surviving read does not
+  // mean a SHIPPING read and the question the gate asks is unanswerable. Every
+  // real compilation runs the prune.
+  if (!ctx.testMode) {
+    clientStage(ctx, "stdlib-client-chunk-gate", () => {
+      // Both shapes that reach the registry: the lowered destructure emitted by
+      // `emit-imports`, and a DIRECT member access (set algebra lowers to
+      // `_scrml_stdlib.data.union(...)` with no read line at all).
+      // INPUT FIX, NOT PATTERN FIX (the ss33 lesson, mirrored verbatim from the
+      // prune stage directly above): by this point the assembled runtime has
+      // ALREADY been spliced into `clientCode`, and the runtime's own preamble
+      // carries the line comment
+      //     // `const { x } = _scrml_stdlib.NAME;` (browser cannot resolve …)
+      // which this scan matched, inventing a module literally named `NAME` and
+      // failing three otherwise-clean files. MEASURED, not theorised. Excise the
+      // runtime span first so the scan sees only emitted CLIENT code — the same
+      // corpus a pre-splice scan would see. `\n;\n` (not a space-fill, not an
+      // excision) keeps the non-whitespace barrier the runtime used to provide.
+      const RT_START = "// --- scrml reactive runtime ---";
+      const RT_END = "// --- end scrml reactive runtime ---";
+      let scanTarget = clientCode;
+      const rtS = scanTarget.indexOf(RT_START);
+      if (rtS !== -1) {
+        const rtE = scanTarget.indexOf(RT_END, rtS);
+        if (rtE !== -1) {
+          scanTarget = scanTarget.slice(0, rtS) + "\n;\n" + scanTarget.slice(rtE + RT_END.length);
+        }
+      }
+
+      const seen = new Map<string, string[]>();
+      const readRe = /const\s*\{([^}]*)\}\s*=\s*_scrml_stdlib\.([A-Za-z_$][A-Za-z0-9_$/]*)\s*;?/g;
+      let m: RegExpExecArray | null;
+      while ((m = readRe.exec(scanTarget)) !== null) {
+        const names = m[1].split(",").map((x) => x.trim().split(":")[0].trim()).filter(Boolean);
+        const prev = seen.get(m[2]) ?? [];
+        seen.set(m[2], prev.concat(names));
+      }
+      const directRe = /_scrml_stdlib\.([A-Za-z_$][A-Za-z0-9_$/]*)/g;
+      while ((m = directRe.exec(scanTarget)) !== null) {
+        if (!seen.has(m[1])) seen.set(m[1], []);
+      }
+
+      for (const [mod, names] of seen) {
+        if (hasStdlibClientChunk(mod)) continue;
+        const serverOnly = isEscalationServerOnlyModule(`scrml:${mod}`);
+        const why = mod.includes("/")
+          ? `Submodule specifiers have no client registry entry — the emitted read `
+            + `\`_scrml_stdlib.${mod}\` parses as a division, not a member access. Import from `
+            + `the root module \`scrml:${mod.split("/")[0]}\` instead.`
+          : serverOnly
+            ? `\`scrml:${mod}\` is server-only (§12.2 Trigger 3): its implementation reaches a `
+              + `host API that does not exist in a browser, or handles a credential that must not `
+              + `reach a client. Move this use into a server function — a use reached only from `
+              + `server code is pruned from the client bundle and does not fire this error.`
+            : `\`scrml:${mod}\` has no client registry chunk. If it is client-safe, add `
+              + `\`stdlib-${mod}\` to RUNTIME_CHUNK_ORDER + CHUNK_MARKERS in `
+              + `compiler/src/codegen/runtime-chunks.ts and load it in `
+              + `compiler/src/runtime-template.js.`;
+        const what = names.length > 0 ? `\`${names.join(", ")}\` from ` : ``;
+        errors.push(new CGError(
+          "E-STDLIB-CLIENT-CHUNK-MISSING",
+          `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
+          + `in the browser. A client bundle is a classic script, so the import lowers to `
+          + `\`_scrml_stdlib.${mod}\`, and no runtime chunk defines that property — the bundle would `
+          + `throw at load and the whole page would be dead on arrival. ${why}`,
+          { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        ));
+      }
+    });
+  }
+
   clientStage(ctx, "post-protected-field-scan", () => {
   // §14.8.9 server->client confidentiality BACKSTOP: a protected DB field must
   // NOT reach the client bundle. A genuine leak is an ACCESS of the protected
