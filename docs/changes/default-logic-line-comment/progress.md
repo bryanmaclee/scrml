@@ -198,3 +198,95 @@ removing leaked source text and inter-comment whitespace from the emitted body. 
    — the `*/` is read as a closer. Upstream of the lift entirely; fired identically before the fix.
 3. **A `//` on the SAME LINE as a closer eats the closer.** `<p>the // operator divides</>` yields
    `E-CTX-001` + `E-CTX-003`. Identical before and after; verified at the merge-base.
+
+---
+
+## 2026-08-23 — verification, and the DONE-PROBE that does NOT pass
+
+### Test results
+
+| gate | base `569d19e1` | head | delta |
+|---|---|---|---|
+| pre-commit scope (`unit`+`integration`+`conformance`+`compiler/tests/*.test.js`) | 29067 pass / 86 skip / 1 todo / **0 fail** | 29079 pass / 86 skip / 1 todo / **0 fail** | +12 pass (the 12 new tests) |
+| `bun conformance/run.ts` | — | **883/883** | — |
+| full `bun run test` (incl. browser) | 30357 pass / **55 fail** | 30370 pass / **53 fail** | **0 NEW, 2 fixed** |
+
+The full-suite failure SETS were diffed line-by-line, not compared by count — a count can hide a
+swap. `comm -13` (new in head) is **empty**. The two that stopped failing are the TodoMVC
+`dist not compiled` env-gap pair, which passed only because the differential capture had compiled
+`benchmarks/` into place; that is a run-order artifact, not a code effect. All 53 remaining are
+pre-existing browser-suite failures reproduced at the merge-base.
+
+### ⚑ THE BRIEF'S DONE-PROBE DOES NOT PASS, AND THAT IS A REPORTED RESULT, NOT AN OVERSIGHT
+
+```
+bun compiler/bin/scrml.js compile docs/changes/default-logic-line-comment/repro-minimal.scrml ...
+  -> exit 0, and `log("M1")` is STILL in repro-minimal.html
+```
+
+`repro-minimal.scrml` is the ONE shape in the whole matrix that contains **no declaration anywhere**:
+
+```scrml
+<program>
+// c
+log("M1");
+<p>ok</>
+</program>
+```
+
+Measured during triage and re-verified: **this shape leaks with NO comment at all.** The comment is
+not what breaks it. A lone bare call matches none of the eight gates on its own, so nothing can
+trigger the lift. The brief's minimal reproducer therefore attributes to `//` a failure the bare
+call produces by itself, and closing "the comment case" was never going to close it.
+
+Everything the comment DID break is closed — including `repro-original.scrml`, the operator's actual
+hand-written file, which now reports `E-STATE-UNDECLARED` on `@wop` at **exit 1**.
+
+Closing the residue is a LANGUAGE-DESIGN ruling, not a bug fix, and I did not make it unilaterally:
+
+- SPEC §40.8 (`compiler/SPEC.md:22813-22814`) says default-logic mode auto-lifts **DECLARATIONS
+  only** and enumerates them exhaustively. The S123 amendment carves WRITES out with
+  `E-WRITE-NOT-IN-LOGIC-CONTEXT` on the reasoning *"writes ARE logic; logic goes in `${...}`"*.
+  **SPEC is silent on a bare CALL statement at default-logic body-top** — it is in neither list.
+- The compiler ALREADY compiles bare calls at that position whenever a declaration in the same run
+  triggers the lift. So "the trigger is declaration-shaped leading content; the lifted body then
+  admits arbitrary statements" is the de-facto model.
+- **Option (a) — lift every text run at a default-logic root.** Closes the residue, but genuine
+  display prose in a `<program>` body would start parsing as logic. Needs a SPEC amendment.
+- **Option (b) — diagnose a non-declaration text run.** Symmetric with the existing
+  `E-WRITE-NOT-IN-LOGIC-CONTEXT` / `E-CONTROL-FLOW-IN-MARKUP` precedents, but it would have to
+  reject `const bias = 1.2` + `log(x)` too — which compiles cleanly today — or the diagnostic
+  becomes unexplainable ("why is this an error here but not two lines up?"). Needs a §34 code.
+
+Both are PA/user rulings. Surfaced, not guessed.
+
+### The CLASS is broader than the surface fixed — measured, uncapped
+
+A corpus-wide scan of all **1841 emitted HTML artifacts** for code-shaped lines inside `<body>`:
+
+```
+base (before fix):  69 line(s) across 22 artifact(s)
+head (after  fix):  69 line(s) across 22 artifact(s)
+```
+
+**Unchanged.** Every corpus instance of "source shipped as page text" sits OUTSIDE the §40.8
+default-logic surface this fix covers. (Some of the 69 are prose false-positives of the scan's
+`bare-call` pattern — "Weight (lbs)", "Price (cents)". The genuinely code-shaped ones are below and
+were confirmed by reading the source, not inferred from the regex.)
+
+Confirmed live members of the class, all pre-existing, all OUT OF SCOPE here:
+
+1. **`on mount { loadDashboard() }` shipped as page text** — `samples/htmx-debate-dashboard.scrml:143`.
+   It sits directly in a `< db>` STATE-block body, which is deliberately NOT a default-logic surface
+   (`isDefaultLogicBody === false`), so `TOPLEVEL_ON_LIFECYCLE_RE` cannot fire. **The mount hook
+   never runs and nothing says so.** The GITI-029 fix covers the `<program>`/`<page>`/`<channel>`
+   position only.
+2. **Bare `@name = expr` writes shipped as page text** — ~25 lines in
+   `samples/compilation-tests/gauntlet-r10-bun-admin.scrml` and `samples/dashboard.scrml`. The
+   Unit-CC diagnostic exists for exactly this shape but does not reach these positions.
+3. **`export function` bodies shipped as page text** — `stdlib/http/index.scrml` leaks 8 lines of
+   `const`/`for`/`if` into its emitted body.
+4. **Bare `for (…) {` at file top level** — `samples/rust-dev-debate-dashboard.scrml` (already RED).
+
+That is the honest answer to "sweep the CLASS": the §40.8 comment limb is closed; the class has at
+least four more live members at other positions, and the corpus count did not move.
