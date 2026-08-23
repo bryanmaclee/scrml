@@ -81,7 +81,7 @@ import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 // type error here, not a silent `asIs` at some adopter's decl site.
 import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
-import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls } from "./codegen/collect.ts";
+import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -8248,7 +8248,11 @@ function validateMarkupAttributes(
 
 /**
  * Returns true if the fileAST has a <program> node with a db= attribute.
- * Used to check E-AUTH-005: server @var requires a server context.
+ *
+ * NOTE: this is only ONE of the two ways a file can carry a server context — see
+ * `hasServerContext` below, which is what the E-AUTH-005 check consults. This
+ * predicate alone is file-local and says nothing about a multi-file app whose
+ * single <program> lives in another file.
  */
 function hasProgramDbAttr(fileAST: FileAST): boolean {
   const nodes = (fileAST.nodes as ASTNodeLike[] | undefined)
@@ -8260,6 +8264,35 @@ function hasProgramDbAttr(fileAST: FileAST): boolean {
   if (!programNode) return false;
   const attrs = (programNode as ASTNodeLike).attrs as Array<{name: string; value: unknown}> | undefined;
   return !!(attrs && attrs.some((a: {name: string; value: unknown}) => a.name === "db"));
+}
+
+/**
+ * §52.11 — does this file have a SERVER CONTEXT for the purposes of E-AUTH-005?
+ *
+ * SPEC §52.11 states the trigger as a `<var server>` declaration "inside a
+ * client-only component (a component with no server context)". Two distinct
+ * shapes satisfy "has a server context", and BOTH must be honoured:
+ *
+ *   1. `<program db=...>` in THIS file — the single-file app shape. This is what
+ *      conformance `auth-005-neg` exercises.
+ *   2. A `<db src=...>` state block in this file — the canonical MULTI-FILE page
+ *      shape (SPEC §40.8 / S85 Q2: exactly one `<program>`, in the ENTRY file;
+ *      page/component files carry none). Such a file has no `<program>` node at
+ *      all, so shape 1 can never hold for it, however legitimate its server side.
+ *
+ * Before this predicate the check consulted shape 1 only, so EVERY `<var server>`
+ * in a multi-file page fired E-AUTH-005 — and the diagnostic's own remedy ("add
+ * db= to the enclosing <program>") was unreachable, because the layout forbids a
+ * `<program>` there. Since §52.4.2 pt 5 makes `<var server>` the only route to an
+ * SSR-prerendered cell, that over-fire made server-rendered page data structurally
+ * unavailable to every multi-file app.
+ *
+ * Shape 2 delegates to `fileHasDbStateContext`, which keys on the same AST shape
+ * `collectDbScopes` uses to build the file's real SQL connections — so this
+ * predicate agrees with what codegen actually emits rather than restating it.
+ */
+function hasServerContext(fileAST: FileAST): boolean {
+  return hasProgramDbAttr(fileAST) || fileHasDbStateContext(fileAST);
 }
 
 /**
@@ -11183,8 +11216,10 @@ function annotateNodes(
           if (isServer) {
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
 
-            // E-AUTH-005: server @var requires a server context (db= on <program>) (§52.11)
-            if (!hasProgramDbAttr(fileAST)) {
+            // E-AUTH-005: server @var requires a server context (§52.11) — either a
+            // `<program db=>` in this file OR a `<db src=>` block (the multi-file
+            // page shape, which has no `<program>` of its own). See hasServerContext.
+            if (!hasServerContext(fileAST)) {
               errors.push(new TSError(
                 "E-AUTH-005",
                 `E-AUTH-005: 'server @${n.name as string}' declared in a client-only context. ` +

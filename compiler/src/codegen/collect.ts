@@ -83,6 +83,38 @@ export function getNodes(fileAST: FileAST): Node[] {
   return fileAST.nodes ?? (fileAST.ast ? fileAST.ast.nodes : []);
 }
 
+/**
+ * §52.11 — does this file establish a SERVER (data) context of its own?
+ *
+ * True when the file contains a `<db src=...>` state block anywhere in its node
+ * tree. That is AST Form 2 — `{ kind: "state", stateType: "db" }` — the SAME shape
+ * `collectDbScopes` (emit-server.ts) recognises when it builds the file's SQL
+ * connection scopes. The two MUST agree: a file for which codegen emits a real
+ * database connection is, by definition, not a client-only context.
+ *
+ * Consumed by the E-AUTH-005 check (type-system.ts). Under the canonical v0.3
+ * multi-file layout (SPEC §40.8 / S85 Q2) a page or component file has NO
+ * `<program>` of its own — the single program lives in the entry file — so the
+ * absence of a `<program db=>` node in THIS file is not evidence of a client-only
+ * context. A `<db src=>` block is positive evidence to the contrary.
+ */
+export function fileHasDbStateContext(fileAST: FileAST): boolean {
+  let found = false;
+  const walk = (nodes: unknown): void => {
+    if (found || !Array.isArray(nodes)) return;
+    for (const node of nodes as Node[]) {
+      if (found) return;
+      if (!node || typeof node !== "object") continue;
+      const n = node as unknown as { kind?: string; stateType?: string; children?: unknown; body?: unknown };
+      if (n.kind === "state" && n.stateType === "db") { found = true; return; }
+      walk(n.children);
+      walk(n.body);
+    }
+  };
+  walk(getNodes(fileAST));
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // Markup node collection
 // ---------------------------------------------------------------------------
