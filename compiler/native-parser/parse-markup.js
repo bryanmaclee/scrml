@@ -2222,6 +2222,105 @@ const CHANNEL_NAME_ATTR_RE = /\bname\s*=\s*"([^"]*)"/;
 // `TILDE_TOKEN_RE` on `parentType === "state"`).
 const TILDE_TOKEN_RE = /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/;
 
+// stripLeadingCommentsNative — calculation. VERBATIM behavioural mirror of
+// ast-builder.js `stripLeadingComments` (S368). Returns `raw` with any leading
+// run of comments (and surrounding whitespace) removed, for LIFT-GATE TESTING
+// ONLY — the lifted body keeps its comments.
+//
+// Every gate regex above is `^`-anchored with only `\s*` permitted before its
+// keyword, so a LEADING comment blocks the match and the declaration leaks as
+// page text. Only a leading position is scanned, so a `//` or `/*` inside a
+// string literal is unreachable by construction.
+function stripLeadingCommentsNative(raw) {
+    if (typeof raw !== "string") return "";
+    let pos = 0;
+    const len = raw.length;
+    for (;;) {
+        while (pos < len && /\s/.test(raw[pos])) pos = pos + 1;
+        if (raw[pos] === "/" && raw[pos + 1] === "/") {
+            const nl = raw.indexOf("\n", pos);
+            if (nl === -1) return "";
+            pos = nl + 1;
+            continue;
+        }
+        if (raw[pos] === "/" && raw[pos + 1] === "*") {
+            const close = raw.indexOf("*/", pos + 2);
+            if (close === -1) return "";
+            pos = close + 2;
+            continue;
+        }
+        return raw.slice(pos);
+    }
+}
+
+// coalesceCommentRunNative — calculation. VERBATIM behavioural mirror of
+// ast-builder.js `coalesceCommentSeparatedRun` (S368). The native trampoline,
+// like BS, emits a `//` line comment as its own `Comment` block, SPLITTING one
+// authored run into two `Text` blocks. A statement that was riding a run whose
+// LEADING content was a declaration then becomes the head of a fresh run,
+// matches no gate, and is left as inert text.
+//
+// Returns `{ span, raw, consumed }` covering the whole authored run. Merging is
+// performed only across BYTE-CONTIGUOUS siblings, mirroring the live oracle:
+// the lifted block anchors its body at the first block's span start, so a gap
+// would skew every downstream sub-node span.
+//
+// The live side appends a newline when the run ends in an unterminated `//`
+// comment, to protect the synthetic `${...}` wrapper's closing `}`. The native
+// side parses `bodyText` directly with no wrapper, so it has no `}` to protect
+// and deliberately omits that guard.
+function matchesAnyLiftGateNative(probe, parentType) {
+    if (parentType !== "markup") {
+        if (BARE_DECL_RE.test(probe)) return true;
+        if (TOPLEVEL_STATE_DECL_RE.test(probe)) return true;
+    }
+    if (parentType === "state" && TILDE_TOKEN_RE.test(probe)) return true;
+    return false;
+}
+
+function coalesceCommentRunNative(blocks, i, source, parentType) {
+    const first = blocks[i];
+    const startSpan = first.span;
+    let committedEnd = (startSpan !== undefined && startSpan !== null && typeof startSpan.end === "number")
+        ? startSpan.end : null;
+    let consumed = 0;
+    let end = committedEnd;
+    let pendingCount = 0;
+    let j = i + 1;
+    while (j < blocks.length) {
+        const next = blocks[j];
+        if (next === undefined || next === null) break;
+        if (next.kind !== "Comment" && next.kind !== "Text") break;
+        const nSpan = next.span;
+        const start = (nSpan !== undefined && nSpan !== null && typeof nSpan.start === "number")
+            ? nSpan.start : null;
+        if (end === null || start === null || start !== end) break;
+        // MERGE ONLY WHAT WOULD OTHERWISE BE SILENTLY DROPPED — mirrors the live
+        // oracle. A following text fragment that clears a lift gate ON ITS OWN
+        // lifts correctly today as its own logic node; absorbing it would
+        // consolidate two nodes into one and diverge from live for no benefit.
+        if (next.kind === "Text"
+            && matchesAnyLiftGateNative(stripLeadingCommentsNative(sliceBlockRaw(source, nSpan)), parentType)) {
+            break;
+        }
+        end = nSpan.end;
+        pendingCount = pendingCount + 1;
+        // Commit only at a rescued TEXT fragment; a trailing comment-only tail
+        // is left alone (relocating a comment rescues no statement).
+        if (next.kind === "Text") {
+            committedEnd = nSpan.end;
+            consumed = consumed + pendingCount;
+            pendingCount = 0;
+        }
+        j = j + 1;
+    }
+    if (consumed === 0) {
+        return { span: startSpan, raw: sliceBlockRaw(source, startSpan), consumed: 0 };
+    }
+    const merged = { ...startSpan, end: committedEnd };
+    return { span: merged, raw: sliceBlockRaw(source, merged), consumed };
+}
+
 // isProgramFamilyRoot — predicate. The three markup roots whose direct-child
 // body is a declaration site (the live `liftBareDeclarations` `childContext`
 // = "state" set): `<program>` (SPEC §40.8 default-logic mode), `<channel>`
@@ -2254,10 +2353,17 @@ function sliceBlockRaw(source, span) {
 // The block REUSES the Text block's span (the live synthetic logic block
 // reuses the text block's span verbatim — ast-builder.js L1151). `_synthetic`
 // marks the disposition for downstream observability.
-function synthLiftedLogicBlock(textBlock, source, ctx) {
+// S368 — `bodyTextOverride` carries the COALESCED run text when a `//` comment
+// split one authored run into several blocks. The node's SPAN stays the first
+// block's span verbatim, exactly as the live oracle does (it sets
+// `span: block.span` while building `raw` from the merged run), so the two
+// pipelines agree on node coordinates as well as on body text.
+function synthLiftedLogicBlock(textBlock, source, ctx, bodyTextOverride) {
     const k = blockKinds();
     const span = textBlock.span;
-    const bodyText = sliceBlockRaw(source, span);
+    const bodyText = (typeof bodyTextOverride === "string")
+        ? bodyTextOverride
+        : sliceBlockRaw(source, span);
     const block = makeBlockNode(k.LogicEscape, span, null);
     block.bodyText = bodyText;
     // Parse the body. `ctx` is the live parse-context — `parseLogicBody
@@ -2693,27 +2799,51 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
                 }
             }
 
+            // S368 — LIFT-GATE NORMALISATION, in lockstep with the live oracle
+            // (ast-builder.js). `liftRun.raw` is the authored run with the
+            // Comment-block flush undone; `liftProbe` is that run with leading
+            // comments removed so the `^`-anchored gates below reach their
+            // keyword. Both collapse to the single block's raw when no comment
+            // is in play, so the no-comment path is unchanged.
+            //
+            // Placed AFTER the two PAIRING branches (which index `blocks[i+1]`
+            // for the component body); coalescing declines when the merged run
+            // trails with a pairing shape so those branches keep their pairing.
+            let liftRaw = raw;
+            let liftExtra = 0;
+            const liftRun = coalesceCommentRunNative(blocks, i, source, parentType);
+            if (
+                liftRun.consumed > 0 &&
+                BARE_EXPORT_AT_END_RE.test(liftRun.raw) === false &&
+                BARE_DECL_NAME_EQ_AT_END_RE.test(liftRun.raw) === false
+            ) {
+                liftRaw = liftRun.raw;
+                liftExtra = liftRun.consumed;
+            }
+            const liftProbe = stripLeadingCommentsNative(liftRaw);
+            const liftBody = liftExtra > 0 ? liftRaw : undefined;
+
             // BARE_DECL_RE — `type` / `export` / `import` / `fn` /
             // `server fn` / `let` / `const` decl keywords. Fires at any
             // declaration-site parent.
-            if (BARE_DECL_RE.test(raw)) {
-                result.push(synthLiftedLogicBlock(block, source, ctx));
-                i = i + 1;
+            if (BARE_DECL_RE.test(liftProbe)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx, liftBody));
+                i = i + 1 + liftExtra;
                 continue;
             }
             // TOPLEVEL_STATE_DECL_RE — a `<Ident ...>` opener then `=`/`:`.
-            if (TOPLEVEL_STATE_DECL_RE.test(raw)) {
-                result.push(synthLiftedLogicBlock(block, source, ctx));
-                i = i + 1;
+            if (TOPLEVEL_STATE_DECL_RE.test(liftProbe)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx, liftBody));
+                i = i + 1 + liftExtra;
                 continue;
             }
             // TILDE_TOKEN_RE — a bare `~` pipeline token. The live oracle
             // gates this on `parentType === "state"` (a `<program>` /
             // `<page>` / `<channel>` direct-child body) — NOT plain file
             // top-level — to avoid lifting prose markup that contains `~`.
-            if (parentType === "state" && TILDE_TOKEN_RE.test(raw)) {
-                result.push(synthLiftedLogicBlock(block, source, ctx));
-                i = i + 1;
+            if (parentType === "state" && TILDE_TOKEN_RE.test(liftProbe)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx, liftBody));
+                i = i + 1 + liftExtra;
                 continue;
             }
         }

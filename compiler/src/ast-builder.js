@@ -843,6 +843,146 @@ const BARE_DECL_NAME_EQ_AT_END_RE =
 const USE_FOREIGN_LIFT_RE = /^\s*use\s+foreign:/;
 
 // ---------------------------------------------------------------------------
+// S368 — §40.8 default-logic LIFT-GATE normalisation: comments are not content.
+//
+// Every lift gate above is a `^`-ANCHORED regex over one BS text block's raw.
+// That makes both of them wrong in the presence of a source comment, in two
+// OPPOSITE directions — and only the first had ever been reported:
+//
+//   1. FLUSH (`// line comment`). BS extracts a line comment as its own
+//      `comment` child, which SPLITS one authored run into two text blocks. A
+//      statement that was riding a run whose LEADING content was a declaration
+//      becomes the leading content of a fresh run, matches NO gate, and falls
+//      through to `result.push(block)` — shipped into the DOM as page text with
+//      zero diagnostics. This also suppresses every diagnostic the statement
+//      would have raised (an undeclared `@name` read in it never reaches TS, so
+//      `E-STATE-UNDECLARED` never fires) — the defect converts code to text, and
+//      text raises nothing.
+//
+//   2. ANCHOR DEFEAT (`/* block comment */`). BS keeps a block comment INSIDE
+//      the text run, so the run now begins with `/*`. Every gate permits only
+//      `\s*` before its keyword, so the comment blocks the match and the
+//      DECLARATION ITSELF leaks: a leading `/* c */` before `fn f(){...}` ships
+//      the whole function declaration into `<body>` as literal text, exit 0.
+//
+// `TILDE_TOKEN_RE` (§32 Gap 6) and `TOPLEVEL_ON_LIFECYCLE_RE` (GITI-029) were
+// both added to work around direction 1 for one shape each — see their doc
+// comments, which name the comment flush verbatim. Adding a ninth shape regex
+// would be the third patch to the same root cause. Instead, normalise the INPUT
+// the eight existing gates see: hand them the un-fragmented, un-prefixed run
+// they were each written to match. No gate regex changes.
+//
+// The normalisation is used for the GATE DECISION and for the lifted `${...}`
+// raw ONLY. When no gate fires the ORIGINAL blocks are pushed unchanged, so a
+// comment that is not part of a lifted run never starts rendering as page text.
+// ---------------------------------------------------------------------------
+
+/**
+ * Return `raw` with any leading run of comments (and the whitespace around
+ * them) removed, for LIFT-GATE TESTING ONLY. The emitted logic-block raw keeps
+ * its comments — `parseLogicBody` handles both comment forms.
+ *
+ * Only a LEADING position is scanned, so a `//` or `/*` inside a string literal
+ * is unreachable by construction (a string literal cannot precede the first
+ * non-whitespace token). An unterminated block comment consumes the remainder,
+ * which correctly yields no gate match.
+ */
+function stripLeadingComments(raw) {
+  let pos = 0;
+  const len = raw.length;
+  for (;;) {
+    while (pos < len && /\s/.test(raw[pos])) pos++;
+    if (raw[pos] === "/" && raw[pos + 1] === "/") {
+      const nl = raw.indexOf("\n", pos);
+      if (nl === -1) return "";
+      pos = nl + 1;
+      continue;
+    }
+    if (raw[pos] === "/" && raw[pos + 1] === "*") {
+      const close = raw.indexOf("*/", pos + 2);
+      if (close === -1) return "";
+      pos = close + 2;
+      continue;
+    }
+    return raw.slice(pos);
+  }
+}
+
+/**
+ * Coalesce the run of consecutive `text` / `comment` siblings beginning at
+ * `blocks[i]` back into the single authored run BS split apart, undoing the
+ * direction-1 flush.
+ *
+ * Returns `{ raw, consumed }` where `raw` is the verbatim source text of the
+ * whole run and `consumed` is the number of ADDITIONAL blocks folded in (0 when
+ * there is nothing to coalesce). Merging is performed only across blocks that
+ * are byte-CONTIGUOUS in the source — the lifted block keeps `span` at the
+ * first block's start, and every downstream sub-node span is rebased as
+ * `span.start + offsetWithinRaw`, so a gap would silently skew every span in
+ * the run. A non-contiguous sibling therefore ends the run rather than being
+ * merged.
+ */
+function matchesAnyLiftGate(probe, parentType, isDefaultLogicBody) {
+  if (parentType !== "markup") {
+    if (USE_FOREIGN_LIFT_RE.test(probe)) return true;
+    if (BARE_DECL_RE.test(probe)) return true;
+    if (TOPLEVEL_STATE_DECL_RE.test(probe)) return true;
+  }
+  if (parentType === "state" && TILDE_TOKEN_RE.test(probe)) return true;
+  if (isDefaultLogicBody && TOPLEVEL_AT_WRITE_RE.test(probe)) return true;
+  if (isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(probe)) return true;
+  return false;
+}
+
+function coalesceCommentSeparatedRun(blocks, i, parentType, isDefaultLogicBody) {
+  let raw = blocks[i].raw;
+  let consumed = 0;
+  let lastWasUnterminatedComment = false;
+  let end = blocks[i].span && typeof blocks[i].span.end === "number" ? blocks[i].span.end : null;
+  let pendingRaw = "";
+  let pendingCount = 0;
+  let pendingUnterminated = false;
+  for (let j = i + 1; j < blocks.length; j++) {
+    const next = blocks[j];
+    if (next.type !== "comment" && next.type !== "text") break;
+    const start = next.span && typeof next.span.start === "number" ? next.span.start : null;
+    if (end === null || start === null || start !== end) break;
+    // MERGE ONLY WHAT WOULD OTHERWISE BE SILENTLY DROPPED. A following text
+    // fragment that clears a lift gate ON ITS OWN is not a victim of the flush
+    // — it lifts correctly today, on its own iteration, as its own logic node.
+    // Absorbing it here would consolidate two logic nodes into one and move the
+    // emitted artifact for no benefit. Stop before it; the loop reaches it next.
+    if (next.type === "text" && matchesAnyLiftGate(stripLeadingComments(next.raw), parentType, isDefaultLogicBody)) {
+      break;
+    }
+    // Comments are buffered rather than absorbed immediately: a trailing run of
+    // comments with no rescued text after it is not worth pulling into the
+    // lifted block (it would only relocate the comment, never rescue a
+    // statement). They are committed only once a rescued text fragment follows.
+    pendingRaw += next.raw;
+    pendingCount++;
+    pendingUnterminated = next.type === "comment" && !next.raw.endsWith("\n");
+    end = next.span.end;
+    if (next.type === "text") {
+      raw += pendingRaw;
+      consumed += pendingCount;
+      lastWasUnterminatedComment = pendingUnterminated;
+      pendingRaw = "";
+      pendingCount = 0;
+    }
+  }
+  // A run ENDING in an unterminated `//` comment (only reachable when the
+  // comment is the last thing in the body, with no trailing newline) would
+  // swallow the synthetic wrapper's closing `}`. BS normally includes the
+  // newline in a comment's raw, so this guard is narrow by construction — kept
+  // minimal so the lifted body text stays byte-identical to the source
+  // everywhere else (the native-parser mirror slices the span directly and has
+  // no `}` to protect).
+  if (lastWasUnterminatedComment) raw += "\n";
+  return { raw, consumed };
+}
+
+// ---------------------------------------------------------------------------
 // P2 Form 1 desugaring helpers — body-root absorbs outer attrs (SPEC §21.2)
 //
 // Goal: make `export <Name outerAttrs>{body}</Name>` produce an AST byte-
@@ -1647,16 +1787,54 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
       }
     }
 
+    // S368 — §40.8 lift-gate normalisation. `liftRaw` is the authored run with
+    // any BS comment-flush undone; `liftProbe` is that run with leading comments
+    // removed so the `^`-anchored gates below reach their keyword. Both collapse
+    // to `block.raw` when there is no comment in play, so the no-comment path is
+    // byte-identical to pre-S368. See `coalesceCommentSeparatedRun` above.
+    //
+    // Deliberately placed AFTER the two PAIRING gates (bare-`export` + `const
+    // Name =`), which consume a FOLLOWING markup sibling and must keep indexing
+    // against the original block list; they are not implicated in this defect.
+    //
+    // `liftExtra` is the count of sibling blocks folded into `liftRaw`; a gate
+    // that fires MUST advance `i` past them or they would be emitted twice.
+    let liftRaw = block.raw;
+    let liftExtra = 0;
+    if (block.type === "text" && parentType !== "markup") {
+      const run = coalesceCommentSeparatedRun(blocks, i, parentType, isDefaultLogicBody);
+      liftRaw = run.raw;
+      liftExtra = run.consumed;
+      // The two PAIRING gates above own any run that TRAILS with bare `export`
+      // or `const Name =` — they consume the FOLLOWING markup block as the
+      // component body. Those gates test the individual block, so a coalesced
+      // run that reaches such a trailer would be lifted here as a plain
+      // declaration (`${ ... const Name = }`) and the markup body would never be
+      // paired — `E-CODEGEN-INVALID-LOGIC` on a shape that compiles cleanly
+      // without the comment. Decline to coalesce and let the loop reach the
+      // trailing text block on a later iteration, where the pairing gate owns it.
+      if (
+        liftExtra > 0 &&
+        (BARE_EXPORT_AT_END_RE.test(liftRaw) || BARE_DECL_NAME_EQ_AT_END_RE.test(liftRaw))
+      ) {
+        liftRaw = block.raw;
+        liftExtra = 0;
+      }
+    }
+    const liftProbe = liftExtra > 0 || block.type === "text"
+      ? stripLeadingComments(liftRaw)
+      : liftRaw;
+
     // §23.4 — `use foreign:name { fn-list }` sidecar declaration. Lift the text
     // block to a `${...}` logic block (mirrors the BARE_DECL_RE lift below) so it
     // reaches parseLogicBody's `use` handler, which fails closed with the honest
     // E-FOREIGN-SIDECAR-NOMINAL — instead of leaking the line (and any following
     // bare `server function`) as literal HTML. ONLY the `use foreign:` form
     // routes here; plain `use scrml:ui` / CSS `use`/`using` are untouched.
-    if (block.type === "text" && parentType !== "markup" && USE_FOREIGN_LIFT_RE.test(block.raw)) {
+    if (block.type === "text" && parentType !== "markup" && USE_FOREIGN_LIFT_RE.test(liftProbe)) {
       result.push({
         type: "logic",
-        raw: "${" + block.raw + "}",
+        raw: "${" + liftRaw + "}",
         span: block.span,
         depth: block.depth,
         children: [],
@@ -1666,16 +1844,17 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         _synthetic: true,
         _bareDeclLift: true,
       });
+      i += liftExtra;
       continue;
     }
 
     // Convert text blocks that start with a bare declaration keyword.
     // Suppressed when parentType === "markup" (i.e. inside non-program
     // markup) — text there is prose content, not a declaration.
-    if (block.type === "text" && parentType !== "markup" && BARE_DECL_RE.test(block.raw)) {
+    if (block.type === "text" && parentType !== "markup" && BARE_DECL_RE.test(liftProbe)) {
       result.push({
         type: "logic",
-        raw: "${" + block.raw + "}",
+        raw: "${" + liftRaw + "}",
         span: block.span,
         depth: block.depth,
         children: [],       // text blocks have no block children
@@ -1691,6 +1870,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // blocks carry `_synthetic` but DO have a real `${` and need the +2).
         _bareDeclLift: true,
       });
+      i += liftExtra;
       continue;
     }
 
@@ -1706,10 +1886,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // BARE_DECL_RE's policy: lift fires at true top level and inside
     // <program> direct text children (parentType === "state"), not inside
     // arbitrary markup elements.
-    if (block.type === "text" && parentType !== "markup" && TOPLEVEL_STATE_DECL_RE.test(block.raw)) {
+    if (block.type === "text" && parentType !== "markup" && TOPLEVEL_STATE_DECL_RE.test(liftProbe)) {
       result.push({
         type: "logic",
-        raw: "${" + block.raw + "}",
+        raw: "${" + liftRaw + "}",
         span: block.span,
         depth: block.depth,
         children: [],
@@ -1726,6 +1906,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // blocks carry `_synthetic` but DO have a real `${` and need the +2).
         _bareDeclLift: true,
       });
+      i += liftExtra;
       continue;
     }
 
@@ -1745,10 +1926,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // Gated on parentType === "state" (= <program>, <page>, <channel> direct
     // children — see liftBareDeclarations's parentType propagation above)
     // to avoid lifting prose markup that happens to contain `~`.
-    if (block.type === "text" && parentType === "state" && TILDE_TOKEN_RE.test(block.raw)) {
+    if (block.type === "text" && parentType === "state" && TILDE_TOKEN_RE.test(liftProbe)) {
       result.push({
         type: "logic",
-        raw: "${" + block.raw + "}",
+        raw: "${" + liftRaw + "}",
         span: block.span,
         depth: block.depth,
         children: [],
@@ -1765,6 +1946,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // blocks carry `_synthetic` but DO have a real `${` and need the +2).
         _bareDeclLift: true,
       });
+      i += liftExtra;
       continue;
     }
 
@@ -1780,10 +1962,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // bare `@x = []` is the canonical V5-strict reactive-cell declaration
     // for the state-block grammar (e.g., `<db>` direct-child `@products =
     // []` is intentional, not a Unit CC violation).
-    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_AT_WRITE_RE.test(block.raw)) {
+    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_AT_WRITE_RE.test(liftProbe)) {
       result.push({
         type: "logic",
-        raw: "${" + block.raw + "}",
+        raw: "${" + liftRaw + "}",
         span: block.span,
         depth: block.depth,
         children: [],
@@ -1800,6 +1982,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // blocks carry `_synthetic` but DO have a real `${` and need the +2).
         _bareDeclLift: true,
       });
+      i += liftExtra;
       continue;
     }
 
@@ -1817,10 +2000,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // to a cleanup call). Gated `isDefaultLogicBody` — the precise §40.8 surface
     // (a directive only desugars at a default-logic root); the regex requires
     // `on` + `mount`/`dismount` + `{` so prose never matches.
-    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(block.raw)) {
+    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(liftProbe)) {
       result.push({
         type: "logic",
-        raw: "${" + block.raw + "}",
+        raw: "${" + liftRaw + "}",
         span: block.span,
         depth: block.depth,
         children: [],
@@ -1834,6 +2017,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // to NOT advance bodyOffset past the (non-existent) `${`.
         _bareDeclLift: true,
       });
+      i += liftExtra;
       continue;
     }
 

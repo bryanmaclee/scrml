@@ -1,5 +1,5 @@
 {
-  "__NOTE__": "S286 baseline-regen (chunk-ns finish): 17 fixtures' native-vs-reference residuals were regenerated to the current merged-tree counts. This canary classifies PARSED FileASTs (splitBlocks+buildAST vs nativeParseFile) BEFORE codegen, so the BUG-6 chunk-namespacing rename cannot affect it \u2014 verified byte-identical to fe1ad047 (parser, native-parser, allowlist, and all fixtures unchanged on the rename branch). The drift is main's pre-existing #162-class ast-builder change (E-STMT-MISSING-SEMICOLON) accumulating against the base-era allowlist; the native (self-host) parser has not tracked it (B4 self-host is deferred post-v1.0.0 per pa.md). This key is metadata; the per-fixture gate keys off the corpus relpaths and ignores it (allowlist hygiene tolerates it as one non-corpus entry).",
+  "__NOTE__": "S286 baseline-regen (chunk-ns finish): 17 fixtures' native-vs-reference residuals were regenerated to the current merged-tree counts. This canary classifies PARSED FileASTs (splitBlocks+buildAST vs nativeParseFile) BEFORE codegen, so the BUG-6 chunk-namespacing rename cannot affect it \u2014 verified byte-identical to fe1ad047 (parser, native-parser, allowlist, and all fixtures unchanged on the rename branch). The drift is main's pre-existing #162-class ast-builder change (E-STMT-MISSING-SEMICOLON) accumulating against the base-era allowlist; the native (self-host) parser has not tracked it (B4 self-host is deferred post-v1.0.0 per pa.md). This key is metadata; the per-fixture gate keys off the corpus relpaths and ignores it (allowlist hygiene tolerates it as one non-corpus entry).  ||  S368 (default-logic comment normalisation): ONE row moved \u2014 samples/rust-dev-debate-dashboard.scrml. The live \u00a740.8 lift gates no longer let a source comment defeat them, so a text run this pre-existing-RED sample previously left as inert page text now lifts into a logic block and its structural `<x> = expr` state-decls reach the parser. The native mirror got the same normalisation (native-parser/parse-markup.js coalesceCommentRunNative + stripLeadingCommentsNative) and that alone took the corpus from 20+ over-budget fixtures to this one. The residual is NOT the comment fix: it is the documented native parseLogicBody state-decl gap (live `state-decl` vs native `bare-expr` \u2014 the P4-1/P5-1 unit's concern, called out in parse-markup.js's own liftBareBlocks scope comment), now reached on more nodes because more code is parsed instead of being dropped as text. SPAN-COORD MOVED DOWN 118 -> 89 (an improvement, recorded per this file's own upward/downward rule). The sample fails E-TYPE-026 x4 both before and after \u2014 verified by direct compile, not inferred.",
   "compiler/self-host/ast.scrml": {
     "COUNT-LENGTH": 27,
     "EXTRA-FIELD": 382,
@@ -6384,12 +6384,12 @@
     "SPAN-COORD": 2
   },
   "samples/rust-dev-debate-dashboard.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 55,
-    "FIELD-SHAPE": 47,
-    "KIND-NAME": 18,
-    "MISSING-FIELD": 212,
-    "SPAN-COORD": 118
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 83,
+    "FIELD-SHAPE": 58,
+    "KIND-NAME": 23,
+    "MISSING-FIELD": 238,
+    "SPAN-COORD": 89
   },
   "samples/rust-dev-lin-lift-edge-cases.scrml": {
     "COUNT-LENGTH": 1,
