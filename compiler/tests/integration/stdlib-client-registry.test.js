@@ -1,5 +1,5 @@
 /**
- * browser-stdlib-client-registry.test.js — §41 client stdlib registry, EXECUTED.
+ * stdlib-client-registry.test.js — §41 client stdlib registry, EXECUTED.
  *
  * WHY THIS FILE EXECUTES INSTEAD OF GREPPING, and it is the whole point.
  *
@@ -24,6 +24,16 @@
  * a deliberately-broken bundle and requires the harness to REPORT the failure,
  * because a harness that silently swallows a throw would report green forever
  * and this whole file would be theatre.
+ *
+ * WHY THIS LIVES IN integration/ AND NOT browser/, which is where it started.
+ * `.git/hooks/pre-commit` runs `compiler/tests/{unit,integration,conformance}`
+ * plus root `*.test.js` — `compiler/tests/browser/` is NOT in that set. So the
+ * whole point of this file (a merge-blocker that proves the feature is not DOA)
+ * was silently outside the merge gate. The browser tier is not load-bearing for
+ * anything here: 14 integration tests already register happy-dom the same way,
+ * including this feature's own predecessor
+ * `integration/bug-18-scrml-stdlib-client-import.test.js`. Moving the file — not
+ * just the newest regression — is what actually puts the evidence in the gate.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -325,6 +335,78 @@ h1 "submodule server-only smoke"
       "app",
     );
     expect(compiled.codes).not.toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §3b — NON-CODE POSITIONS. `_scrml_stdlib.` in prose is not a registry access.
+// ---------------------------------------------------------------------------
+
+describe("§3b the gate does not false-fire on `_scrml_stdlib.` text in a non-code position", () => {
+  // THE REGRESSION THAT SHIPPED AND WAS CAUGHT IN REVIEW. The gate scans emitted
+  // client TEXT, so any occurrence of `_scrml_stdlib.` read as a registry access
+  // — including one inside a STRING LITERAL the adopter wrote as a display
+  // label. The result was a HARD ERROR on valid scrml with ZERO stdlib imports,
+  // naming a module that has never existed and instructing the adopter to go
+  // edit `RUNTIME_CHUNK_ORDER` in the compiler's own source.
+  //
+  // `wombat` is deliberately a name no stdlib module has ever had: if this test
+  // ever fails, the message says `scrml:wombat` and nobody can mistake it for a
+  // real module resolution problem.
+  //
+  // This is the SECOND instance of one class — the first was the runtime's own
+  // `_scrml_stdlib.NAME` comment matching, fixed by excising the runtime span.
+  // Fixing an instance is not fixing a class, which is why the assertions below
+  // sweep the non-code positions rather than pinning the one reported shape.
+  const cases = [
+    ["a single name in a string literal", `<tip> = "the registry slot is _scrml_stdlib.wombat"`],
+    ["TWO names in one string literal", `<tip> = "slots: _scrml_stdlib.otter and _scrml_stdlib.stoat"`],
+    ["a name in a single-quoted string", `<tip> = 'slot _scrml_stdlib.badger here'`],
+  ];
+
+  for (const [label, decl] of cases) {
+    test(`${label} does NOT fire E-STDLIB-CLIENT-CHUNK-MISSING`, () => {
+      const compiled = compile(
+        `<program>
+<out> = ""
+${decl}
+<p>\${@out}\${@tip}</>
+<button click=\${ @out = @tip }>go</>
+</program>
+`,
+        "app",
+      );
+      expect(compiled.codes).not.toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
+      expect(compiled.errors).toEqual([]);
+    });
+  }
+
+  test("the label still reaches the bundle intact — masking is a SCAN view, not a rewrite", () => {
+    // The fix masks the scan's INPUT, so it must not alter the emitted output.
+    // Without this, a "fix" that stripped the literal from the artifact would
+    // pass every assertion above while corrupting what the user sees.
+    const compiled = compile(
+      `<program>
+<out> = ""
+<tip> = "the registry slot is _scrml_stdlib.wombat"
+<p>\${@out}\${@tip}</>
+<button click=\${ @out = @tip }>go</>
+</program>
+`,
+      "app",
+    );
+    expect(compiled.errors).toEqual([]);
+    expect(compiled.clientJs).toContain("the registry slot is _scrml_stdlib.wombat");
+    const run = execBundle(compiled);
+    expect(run.ok ? "loaded" : `DOA: ${run.error.message}`).toBe("loaded");
+  });
+
+  test("masking did not blind the gate — a REAL chunkless import still fires", () => {
+    // The other half of the bite. A mask wide enough to silence the FP could
+    // also silence the genuine case; this pins that it does not, in the same
+    // file as the FP cases so the two can never drift apart.
+    const compiled = compile(clientProgram("fs", "readFileSync"), "app");
+    expect(compiled.codes).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
   });
 });
 

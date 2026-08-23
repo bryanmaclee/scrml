@@ -3868,6 +3868,31 @@ export function generateClientJs(ctx: CompileContext): string {
         }
       }
 
+      // AND MASK STRING LITERALS — the SAME input fix, generalised. Excising the
+      // runtime span alone fixed the INSTANCE (the runtime's own
+      // `_scrml_stdlib.NAME` comment) and left the CLASS open: any `_scrml_stdlib.`
+      // text in a NON-CODE position still read as a registry access. Measured on
+      // valid scrml with ZERO stdlib imports —
+      //     <tip> = "the registry slot is _scrml_stdlib.wombat"
+      // compiled to a HARD ERROR naming a module that has never existed, and told
+      // the adopter to go add `stdlib-wombat` to the compiler's own source. A
+      // display label is not a registry access.
+      //
+      // MUST run AFTER the runtime excision, not before: the RT markers are line
+      // comments that the `indexOf` above has to still find. Same ordering, same
+      // reason, and the same helper as BOTH sibling stdlib scans — the chunk
+      // prune (`prune-server-only-stdlib-chunks`) and the read-line prune
+      // (`pruneUnusedClientImports`), which were already masking and which this
+      // gate was the only one of the three to omit.
+      //
+      // Scope, MEASURED rather than assumed (probe matrix, all valid scrml with no
+      // stdlib import): a string literal FIRED (both single- and multi-name), while
+      // an adopter `//` comment and a regex literal were ALREADY clean — scrml
+      // comments do not survive into emitted client JS, and no emitted regex
+      // carries the token. So string literals were the whole live FP surface, and
+      // masking them closes it without reaching for a heavier code/comment fence.
+      scanTarget = maskStringLiteralSpans(scanTarget);
+
       const seen = new Map<string, string[]>();
       const readRe = /const\s*\{([^}]*)\}\s*=\s*_scrml_stdlib\.([A-Za-z_$][A-Za-z0-9_$/]*)\s*;?/g;
       let m: RegExpExecArray | null;
