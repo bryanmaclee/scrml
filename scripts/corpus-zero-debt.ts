@@ -309,8 +309,60 @@ if (import.meta.main) {
     console.log(`  <!-- @corpus-zero role=blast-radius|data|load-bearing disposition=overruled by=S<N>-<who> date=<ISO> note=<what> -->`);
   }
 
-  if (!s.owed.length && !s.violations.length) {
-    console.log(`  ✅ no corpus-zero debt — every in-epoch deliberation artifact is disposed.`);
+  // NOT-VERIFIED IS A DISTINCT STATE FROM ZERO DEBT (S364).
+  //
+  // Scanning zero artifacts previously produced the identical "✅ no corpus-zero debt" a genuinely
+  // clean corpus produces. That is not hypothetical: `SUPPORT` is `<repo>/../scrml-support`, which
+  // does NOT resolve from a git worktree under `.claude/worktrees/<agent>/` — so every dispatched
+  // agent, and the boot probe in scripts/boot.ts:311, read a green tick over 322 unscanned
+  // deliberation artifacts (295 deep-dives + 27 debates — BOTH entries of SCAN_ROOTS; the figure
+  // first written here said "288 deep-dives", which was stale AND counted only one of the two
+  // roots). A probe read as evidence must never report a clean bill of health for a scan that
+  // did not happen.
+  //
+  // EXIT SHAPE follows this repo's own established boot-probe pattern (review-debt.ts /
+  // issue-debt.ts): report loudly, do NOT break the boot in report mode — "a probe that breaks the
+  // boot is a probe that gets removed" — but a `--check` that verified nothing is not a pass.
+  // PER-ROOT, NOT ALL-OR-NOTHING (S365 review). The guard above was written as
+  // `artifacts.length === 0`, which only fires when EVERY root is dead. SCAN_ROOTS has two, and
+  // they are wildly unequal — 295 deep-dives to 27 debates — so ONE renamed or moved directory
+  // left ~92% coverage printing the clean tick with no hint that the rest was never opened.
+  // Measured on a constructed tree: 4 artifacts across both roots → `✅ no corpus-zero debt`,
+  // exit 0; `docs/debates` renamed → `✅ no corpus-zero debt — all 2 …`, STILL exit 0 under
+  // `--check`. Half the corpus vanished and the denominator merely got quieter.
+  //
+  // PARTIAL blindness is the harder case to notice precisely because the number still looks
+  // healthy — a zero is at least conspicuous. So every root reports its own count, and a root
+  // that yields nothing is named whether or not its siblings did.
+  const perRoot = SCAN_ROOTS.map((root) => ({
+    root,
+    path: `${SUPPORT}/${root}`,
+    n: artifacts.filter((a) => a.path === root || a.path.startsWith(`${root}/`)).length,
+  }));
+  const dead = perRoot.filter((r) => r.n === 0);
+
+  if (dead.length) {
+    if (artifacts.length === 0) {
+      console.log(`\n  ⚠️ NOT VERIFIED — scanned ZERO artifacts, so this run proves NOTHING.`);
+      console.log(`     A zero scan and a clean corpus print the same tick; they are not the same fact.`);
+    } else {
+      console.log(`\n  ⚠️ PARTIALLY VERIFIED — ${dead.length} of ${SCAN_ROOTS.length} scan roots yielded ZERO artifacts.`);
+      console.log(`     ${artifacts.length} artifact(s) WERE scanned, so any tick above covers part of the corpus`);
+      console.log(`     and none of the rest. A partial scan and a clean corpus print the same tick.`);
+    }
+    for (const r of perRoot) {
+      const state = r.n > 0 ? `${String(r.n).padStart(5)} scanned`
+        : existsSync(r.path) ? `    0 EMPTY  `
+        : `   UNRESOLVED`;
+      console.log(`     ${state}  ${r.path}`);
+    }
+    console.log(`     Most likely cause: running from a git worktree, where \`../scrml-support\` does not`);
+    console.log(`     resolve to the sibling repo — or a scan root renamed out from under SCAN_ROOTS.`);
+    console.log(`     Corpus-zero debt NOT verified — say so in the boot report.`);
+    if (args.has("--check")) process.exit(1);
+  } else if (!s.owed.length && !s.violations.length) {
+    console.log(`  ✅ no corpus-zero debt — all ${artifacts.length} in-epoch deliberation artifact(s) disposed`);
+    console.log(`     across all ${SCAN_ROOTS.length} scan roots (${perRoot.map((r) => `${r.root} ${r.n}`).join(" · ")}).`);
   }
 
   if (args.has("--check") && (s.owed.length > 0 || s.violations.length > 0)) process.exit(1);

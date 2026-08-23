@@ -347,6 +347,8 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
 
 // ── WRITE mode (Fork 3B) ─────────────────────────────────────────────────────
 function runWrite(): number {
+  // The write path is where a hollow value becomes PERMANENT — guard it first.
+  refuseDegenerateProjection();
   // Group sections by file so each file is read/written once (idempotent across multiple sections).
   const byFile = new Map<string, GenSection[]>();
   for (const s of GEN_SECTIONS) {
@@ -395,7 +397,59 @@ function runWrite(): number {
 // (a different seam), so the future pa.md wrap-gate should NOT block doc-currency on map staleness —
 // it prints the maps line for visibility but does not gate on it yet. (TODO future pa.md wrap-gate:
 // decide whether to promote maps-behind to a hard fail once map-refresh joins the wrap flow.)
+/**
+ * REFUSE A DEGENERATE PROJECTION (S364).
+ *
+ * `gapCounts()` already fails loudly on an UNCLASSIFIABLE marker status — but not on NO MARKERS AT
+ * ALL, which is the shape a truncation or a marker-syntax drift produces. Measured: a
+ * known-gaps.md holding its anchors and zero `@gap` tokens made `--write` record
+ * `HIGH 0 / MED 0 / LOW 0 / Nominal 0` at exit 0, after which `--check` reported
+ * "PASS — all @generated sections current" at exit 0. The projection agreed with itself about
+ * nothing, forever.
+ *
+ * `high === 0` is a legitimate state (a repo can genuinely have no open HIGHs). ZERO TOKENS
+ * PARSED from a non-empty ledger is not — it means the parser stopped seeing the population, not
+ * that the population emptied. Same for the session index. Exit 2, distinct from the staleness
+ * exit 1: this is "the instrument is not reading the ledger", not "the ledger moved on".
+ *
+ * Sibling of the guard in scripts/facts.ts; both mirror scripts/browser-baseline.ts's refusal.
+ */
+function refuseDegenerateProjection(): void {
+  const problems: string[] = [];
+
+  const gapsText = readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
+  const g = gapCounts();
+  if (g.tokens.length === 0 && gapsText.trim().length > 0) {
+    problems.push(
+      `docs/known-gaps.md is ${gapsText.length} bytes but yielded ZERO @gap markers — ` +
+        `the marker parser sees no population at all`,
+    );
+  }
+
+  // NOT `.length === 0`: recentSessions() never returns an empty string. Its zero-population path
+  // returns NO_SESSIONS_SENTINEL, so the empty-string test was unreachable and this half of the
+  // guard was dead from the day it was written. The degenerate value has a name; test for the name.
+  const sessions = recentSessions(8).trim();
+  if (sessions.length === 0 || sessions === NO_SESSIONS_SENTINEL) {
+    problems.push(
+      `master-list.md's recent-session index yielded ZERO session-wrap anchors ` +
+        `(the parser scanned 600 commits and matched none) — the session parser sees no population at all`,
+    );
+  }
+
+  if (problems.length === 0) return;
+  console.error("state: MEASURED ZERO — refusing to record or compare.\n");
+  for (const p of problems) console.error(`  ${p}`);
+  console.error(
+    `\n  A count of zero over a NON-EMPTY ledger is a broken projection, not a fact. Recording it\n` +
+      `  would make --check agree with the hollow value forever (the hollow-gate shape).\n` +
+      `  Most likely cause: a marker-syntax drift, a truncated ledger, or running outside the repo.`,
+  );
+  process.exit(2);
+}
+
 function runCheck(): number {
+  refuseDegenerateProjection();
   const stale: string[] = [];
   const missing: string[] = [];
   const ok: string[] = [];
@@ -499,6 +553,18 @@ function sessionNumOf(subj: string): string | null {
   const m = subj.match(/\(s(\d+)\)/i);
   return m ? m[1] : null;
 }
+/**
+ * What `recentSessions()` yields when the git log surfaces NO session-wrap commits at all.
+ *
+ * Named rather than inlined because `refuseDegenerateProjection()` compares against it, and a
+ * literal duplicated across a producer and its guard is exactly how that guard went dead the first
+ * time: the guard was written as `sessions.trim().length === 0`, but this function has only two
+ * returns and BOTH are non-empty — so the condition could never be true. Zero sessions took the
+ * sentinel path, `--write` recorded the sentinel over the forensic index, and `--check` then
+ * agreed with it at exit 0 forever. One constant, two references, no drift.
+ */
+const NO_SESSIONS_SENTINEL = "_(no session-wrap commits found)_";
+
 function recentSessions(n: number): string {
   const r = sh("git", ["log", "--pretty=%h %s", "-n", "600"]);
   const seen = new Set<string>();
@@ -514,7 +580,7 @@ function recentSessions(n: number): string {
     picked.push({ sha, subj });
     if (picked.length >= n) break;
   }
-  if (picked.length === 0) return "_(no session-wrap commits found)_";
+  if (picked.length === 0) return NO_SESSIONS_SENTINEL;
   const lines: string[] = [];
   for (const { sha, subj } of picked) {
     const pushed = sh("git", ["merge-base", "--is-ancestor", sha, "origin/main"]).ok

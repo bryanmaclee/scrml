@@ -129,6 +129,9 @@ async function main() {
   console.log("");
 
   let regressionsFound = 0;
+  // Corpora actually MEASURED, not merely listed in the baseline. A corpus whose inputs cannot be
+  // resolved is `[SKIP]`ped below and contributes nothing — see the refusal after the loop.
+  let corporaCompared = 0;
   const corpusReport: { corpus: string; stage: string; baselineMs: number; currentMs: number; deltaPct: number }[] = [];
 
   for (const [corpusName, corpusBaseline] of Object.entries(baseline.corpora)) {
@@ -172,6 +175,7 @@ async function main() {
     }
 
     if (totals.length === 0) continue;
+    corporaCompared++;
 
     const currentTotal = median(totals);
     const totalDeltaPct = ((currentTotal - corpusBaseline.totalMs) / corpusBaseline.totalMs) * 100;
@@ -213,8 +217,28 @@ async function main() {
   }
 
   console.log("");
+  // REFUSE A COMPARISON OVER NOTHING (S364). A corpus whose inputs no longer resolve is `[SKIP]`ped
+  // and the loop continues, so with EVERY corpus renamed this printed eight `[SKIP]` lines and then
+  // "no regressions detected", exit 0. With `corpora: {}` in the baseline it printed no SKIP lines
+  // at all — just the clean bill of health. Both measured.
+  //
+  // "No regressions detected" over zero comparisons is a false statement, not a cautious one. Exit 2
+  // (distinct from the 1 a real regression earns) — the run is INCONCLUSIVE, not clean.
+  if (corporaCompared === 0) {
+    const listed = Object.keys(baseline.corpora).length;
+    console.error(`  COMPARED ZERO CORPORA — this run verified NOTHING; refusing to report a verdict.`);
+    if (listed === 0) {
+      console.error(`  The baseline itself lists NO corpora — it was written by a run that measured nothing.`);
+      console.error(`  Re-record with \`bun run scripts/benchmark-perf-baseline.ts\` (which now refuses to`);
+      console.error(`  write an empty baseline, so this file predates that guard).`);
+    } else {
+      console.error(`  The baseline lists ${listed} corpus/corpora and NONE of them could be measured (see [SKIP] above).`);
+      console.error(`  Most likely cause: the corpus directories were renamed, moved, or are absent.`);
+    }
+    process.exit(2);
+  }
   if (regressionsFound === 0) {
-    console.log(`  no regressions detected (all stages within ${tolerancePct}% of baseline)`);
+    console.log(`  no regressions detected — ${corporaCompared} corpus/corpora compared, all stages within ${tolerancePct}% of baseline`);
     process.exit(0);
   }
 
