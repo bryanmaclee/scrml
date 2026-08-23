@@ -146,8 +146,42 @@ describe("C10 §C10.0 — Chunk wiring", () => {
     expect(RUNTIME_CHUNKS.messages).toContain("_SCRML_TAG_TO_VALIDATOR");
   });
 
-  test("RUNTIME_CHUNK_ORDER has 30 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 4 'stdlib-*' chunks added by Bug 18 S95 + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\")", () => {
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(30);
+  test("RUNTIME_CHUNK_ORDER has 39 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 13 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\")", () => {
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(39);
+  });
+
+  // S368 — the stdlib slice of the order is the CLIENT CONTRACT: a client-side
+  // `import … from 'scrml:NAME'` lowers to `const {…} = _scrml_stdlib.NAME;`, so
+  // membership here is what decides whether that destructure resolves at load.
+  // Pinned as a SET, not a count, so adding or removing a module has to state
+  // which module — a bare count would let a swap pass silently.
+  test("the stdlib client-chunk set is exactly the client-safe modules", () => {
+    const stdlibChunks = RUNTIME_CHUNK_ORDER.filter((n) => n.startsWith("stdlib-"));
+    expect([...stdlibChunks].sort()).toEqual([
+      "stdlib-auth",
+      "stdlib-compiler",
+      "stdlib-crypto",
+      "stdlib-data",
+      "stdlib-format",
+      "stdlib-host",
+      "stdlib-http",
+      "stdlib-math",
+      "stdlib-random",
+      "stdlib-regex",
+      "stdlib-router",
+      "stdlib-test",
+      "stdlib-time",
+    ]);
+  });
+
+  // The escalation-server-only modules (§12.2 Trigger 3) MUST NOT get a client
+  // chunk — their shims reach Bun.*/process.*/node:* or handle a credential, so
+  // an inlined browser copy could not work. `auth`/`crypto` are the deliberate
+  // pre-existing exceptions (S95 Bug 18); see runtime-chunks.ts for why.
+  test("host-reaching / credential-handling modules have NO client chunk", () => {
+    for (const mod of ["cron", "fs", "mcp", "oauth", "path", "process", "redis", "store"]) {
+      expect(RUNTIME_CHUNK_ORDER).not.toContain(`stdlib-${mod}`);
+    }
   });
 });
 

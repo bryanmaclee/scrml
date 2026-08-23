@@ -146,15 +146,62 @@ export const RUNTIME_CHUNK_ORDER = [
   'map',
   'ssr',
   'log',
+  // ---------------------------------------------------------------------
   // Stdlib registry chunks — inlined from compiler/runtime/stdlib/<name>.js
-  // via _scrml_stdlib.<name>. Activated per-file by detectRuntimeChunks when
-  // the source file imports from the matching `scrml:<name>` specifier.
-  // Server-only stdlibs (store) are intentionally absent — the server path
-  // continues to use the bundleStdlibForRun + rewriteStdlibImports route.
+  // via `_scrml_stdlib.<name>`. Activated per-file by `detectRuntimeChunks`
+  // (emit-client.ts) when the source file imports from the matching
+  // `scrml:<name>` specifier, and pruned post-emit when the lowered read line
+  // survives no client use.
+  //
+  // THIS LIST IS THE CLIENT CONTRACT, NOT A CONVENIENCE (S368). A client-side
+  // `import { x } from 'scrml:NAME'` lowers UNCONDITIONALLY to
+  // `const { x } = _scrml_stdlib.NAME;` (emit-client.ts) — a classic script
+  // cannot resolve a bare specifier. If `stdlib-NAME` is not in this list, the
+  // registry property is `undefined` and that destructure is a load-time
+  // `TypeError` that kills the WHOLE page, not just the call. Membership here
+  // is therefore the property that decides whether a client stdlib import
+  // works at all, and `E-STDLIB-CLIENT-CHUNK-MISSING` (api.js) reads THIS LIST
+  // — the same artifact — rather than probing for a shim file on disk.
+  //
+  // MEMBERSHIP IS DERIVED, NOT CURATED. A module is client-registered when it
+  // is NOT an escalation-server-only module under the §12.2 Trigger 3 two-limb
+  // criterion (route-inference.ts:ESCALATION_SERVER_ONLY_MODULES):
+  //   (a) HOST REACH — the shim reaches `Bun.*` / `process.*` / an import of
+  //       `bun` / `bun:*` / `node:*`, none of which exist in a browser; or
+  //   (b) CREDENTIAL HANDLING — it accepts or transmits a secret that must not
+  //       reach a client, even with no host reach at all.
+  //
+  // DELIBERATELY ABSENT — each fails a limb, so a client chunk would ship a
+  // body that cannot work. The server path is unaffected: it keeps using the
+  // `bundleStdlibForRun` + `rewriteStdlibImports` route to `_scrml/<name>.js`.
+  //   cron    — (a) wraps Bun.cron; an in-process scheduler has no browser meaning.
+  //   fs      — (a) node:fs / Bun.file; there is no browser filesystem.
+  //   mcp     — (a) node:fs / node:path / node:url in the shim body.
+  //   oauth   — (b) puts `client_secret` in the token-exchange body; its own
+  //             module header reads "SERVER-SIDE ONLY".
+  //   path    — (a) `import nodePath from "node:path"`, and the shim loader
+  //             strips DEFAULT imports, so every export would ReferenceError.
+  //   process — (a) process.{argv,cwd,env,exit,platform,memoryUsage}.
+  //   redis   — (a) `import { redis } from "bun"` (BARE specifier); network-bound.
+  //   store   — (a) bun:sqlite wrapper; client-side use is meaningless.
+  //
+  // `auth` and `crypto` are escalation-server-only by the criterion yet carry a
+  // chunk. PRE-EXISTING (S95 Bug 18), left alone deliberately: removing a chunk
+  // is a behaviour removal, out of scope for the S368 dispatch that added the
+  // rest of this list.
   'stdlib-auth',
+  'stdlib-compiler',
   'stdlib-crypto',
   'stdlib-data',
+  'stdlib-format',
   'stdlib-host',
+  'stdlib-http',
+  'stdlib-math',
+  'stdlib-random',
+  'stdlib-regex',
+  'stdlib-router',
+  'stdlib-test',
+  'stdlib-time',
 ] as const;
 
 export type RuntimeChunkName = (typeof RUNTIME_CHUNK_ORDER)[number];
@@ -272,11 +319,68 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // once. The previous chunk's content ends with the closing `}` of the
   // preceding IIFE (or, for the FIRST stdlib, with the engine chunk's last
   // function), so the boundary is at a syntactically clean position.
-  "stdlib-auth":   "--- chunk: stdlib-auth ---",
-  "stdlib-crypto": "--- chunk: stdlib-crypto ---",
-  "stdlib-data":   "--- chunk: stdlib-data ---",
-  "stdlib-host":   "--- chunk: stdlib-host ---",
+  "stdlib-auth":     "--- chunk: stdlib-auth ---",
+  "stdlib-compiler": "--- chunk: stdlib-compiler ---",
+  "stdlib-crypto":   "--- chunk: stdlib-crypto ---",
+  "stdlib-data":     "--- chunk: stdlib-data ---",
+  "stdlib-format":   "--- chunk: stdlib-format ---",
+  "stdlib-host":     "--- chunk: stdlib-host ---",
+  "stdlib-http":     "--- chunk: stdlib-http ---",
+  "stdlib-math":     "--- chunk: stdlib-math ---",
+  "stdlib-random":   "--- chunk: stdlib-random ---",
+  "stdlib-regex":    "--- chunk: stdlib-regex ---",
+  "stdlib-router":   "--- chunk: stdlib-router ---",
+  "stdlib-test":     "--- chunk: stdlib-test ---",
+  "stdlib-time":     "--- chunk: stdlib-time ---",
 };
+
+// ---------------------------------------------------------------------------
+// STDLIB_CLIENT_CHUNK_MODULES — the `scrml:<name>` module names that HAVE a
+// client registry chunk, derived from RUNTIME_CHUNK_ORDER itself.
+//
+// Derived, never hand-listed: `E-STDLIB-CLIENT-CHUNK-MISSING` (api.js) and the
+// chunk activation in `detectRuntimeChunks` (emit-client.ts) must read the SAME
+// artifact that decides the outcome. A second hand-maintained list would rot
+// out of sync with the first, which is the exact failure this export exists to
+// prevent (the S368 defect was a gate reading "does a shim FILE exist" while
+// the outcome was decided by "is the chunk in RUNTIME_CHUNK_ORDER").
+// ---------------------------------------------------------------------------
+
+export const STDLIB_CLIENT_CHUNK_MODULES: ReadonlySet<string> = new Set(
+  RUNTIME_CHUNK_ORDER
+    .filter((name) => name.startsWith("stdlib-"))
+    .map((name) => name.slice("stdlib-".length)),
+);
+
+/**
+ * True when a client-side `import … from 'scrml:<moduleName>'` will resolve at
+ * bundle load — i.e. the registry read `emit-client.ts` emits for it names a
+ * property the assembled runtime actually defines.
+ *
+ * Takes the module NAME (the text AFTER `scrml:`), because that is verbatim
+ * what emit-client.ts splices into `_scrml_stdlib.${moduleName}`.
+ *
+ * MATCHING IS EXACT — a SUBMODULE DOES NOT INHERIT ITS ROOT'S CHUNK, and the
+ * reason is a second load-time defect measured at S368:
+ *
+ *     import { verifyJwt } from 'scrml:auth/jwt'
+ *       lowers to →  const { verifyJwt } = _scrml_stdlib.auth/jwt;
+ *
+ * which JavaScript parses as the DIVISION `_scrml_stdlib.auth / jwt`, so the
+ * bundle dies at load with `ReferenceError: jwt is not defined` — measured by
+ * execution, whole page DOA. `_scrml_stdlib.auth` being defined does not save
+ * it. Root-matching here would therefore wave through an emission that is
+ * unconditionally broken, which is precisely the emit-vs-gate disagreement this
+ * function exists to close. Exact matching refuses it and the adopter gets a
+ * compile-time diagnostic instead of a blank page.
+ *
+ * (The submodule LOWERING itself is a separate defect — the registry has no
+ * nested namespace to read. Refusing it is correct and sufficient here;
+ * teaching the registry about submodules is its own arc.)
+ */
+export function hasStdlibClientChunk(moduleName: string): boolean {
+  return STDLIB_CLIENT_CHUNK_MODULES.has(moduleName);
+}
 
 // ---------------------------------------------------------------------------
 // buildRuntimeChunks — splits SCRML_RUNTIME into named chunk strings.
