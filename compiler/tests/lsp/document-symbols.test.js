@@ -177,11 +177,24 @@ describe("LSP L1 — buildDocumentSymbols", () => {
     // which is fully valid during the `:>`-canonical deprecation window — an
     // advisory nudge, not a structural diagnostic. (Same class as the lints
     // above; corpus arm-arrow migration is deferred, so the fixture keeps `=>`.)
+    // Also filter the S365 W-TYPE-031-UNPROVEN lint (SPEC §7.5.2): the fixture's
+    // `let wasSmall = @state == .Small` is an un-annotated declaration whose
+    // initializer is a `binary` comparison, and operand/comparison typing does
+    // not exist yet (§7.5.1 position 5). The warning reports a gap in the
+    // COMPILER, not in the fixture — same advisory class as the four above.
+    // ⚑ NOTE FOR WHOEVER ADDS THE SIXTH: this list is a DENYLIST of advisory
+    // codes guarding an `errs.length === 0` assertion, so every new non-error
+    // lint that touches this fixture breaks this test until it is named here.
+    // That is a maintenance tax, and five entries in it is the signal that a
+    // severity-based filter would be the better mechanism. Deliberately NOT
+    // changed here — switching the predicate silently changes what this test
+    // asserts, which is a bigger edit than the one this landing needed.
     const errs = diagnostics.filter(d =>
       d.code !== "W-DEAD-FUNCTION" &&
       d.code !== "W-DEPRECATED-SERVER-MODIFIER" &&
       d.code !== "W-PROGRAM-SPA-INFERRED" &&
-      d.code !== "W-MATCH-ARROW-LEGACY"
+      d.code !== "W-MATCH-ARROW-LEGACY" &&
+      d.code !== "W-TYPE-031-UNPROVEN"
     );
     expect(errs.length).toBe(0);
     // Should at minimum surface the three enum types. Post-v0.2.0 rewrite
