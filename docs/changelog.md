@@ -6245,6 +6245,14 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-23 — S369 (peter): library-mode fn match object-arm returns its value, and a mis-fired review's "regression" proved false
+
+Two PRs landed and three new gaps were filed. The compiler fix closes a silent-wrong codegen hole; the session's sharpest lesson was catching a review that reviewed the wrong commit and a "regression" that wasn't one.
+
+- **#661** — review floor 3 → 0. The inherent S367/S368 wrap tail drained: #658 (the each-interp cross-file imported markup-fn mount) re-verified independently by execution — a fresh distinct repro (a local wrapper of an imported markup fn mounts via the transitive fixpoint; an imported string fn stays a text node), both directions. #660/#659 were docs-only carve-outs.
+- **#664** — `g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED) resolved. A library-mode `fn` whose `match` arm body is a brace-delimited object literal (`1 :> { x: 1 }`, including empty `{}`) emitted the arm bare — JS read a labeled-statement block, the IIFE fell through, and the fn silently returned `undefined`. The filed locus was a hypothesis; the real locus is the shared value-IIFE emitter `emitIifeBlockArmBody`, where the object arm now lowers in return position (mirroring the bare-value arm and the decl/tilde path). Three correctly-targeted S239 rounds additionally fixed the empty-`{}` void, the object-arm auto-await parity, and a multi-scrutinee await-header strand. 7-case bite-proven merge-blocker; full suite 22668/0.
+- **Filed, not fixed (3 gaps):** `g-library-mode-multi-scrutinee-match-misparsed-as-single` (MED — `match a, b` in a library fn mis-parses to the single-scrutinee path → `E-CODEGEN-INVALID-LOGIC`) and `g-match-structuredbody-empty-object-arm-voids` (LOW, repro-owed) were surfaced by the S239 pass and confirmed pre-existing. `g-each-nested-in-fn-body-markup-fn-stringifies` (MED) came from a mis-fired review that reviewed #658 instead of #664 and called a nested-markup-fn bug a regression — reproduced on the pre-#658 base, it was identical, so it is pre-existing, not a regression; its real blocker is that the each mounting set is null during fn-body emission.
+
 ### 2026-08-22/23 — S365: five inherited branches landed, and the session's sharpest findings were against its own work
 
 Booted onto a four-day backlog: five branches complete and pushed, none landed, five operator

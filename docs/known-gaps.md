@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 45 |
-| MED | 153 |
+| MED | 154 |
 | LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2321,6 +2321,10 @@ Adopter issue **#161** (pjoliver11). Two distinct `emit-each.ts` per-item-templa
 - **(B) fn-returning-markup-in-each → `[object HTMLSpanElement]`.** The each-render emits `_scrml_each_tn.textContent = String(rowMarkup(it.name))` — `String()` of the returned DOM node. The mount-not-stringify guard EXISTS in the runtime (`scrml-runtime.js:~295` carries the exact comment "stringify it to '[object HTMLSpanElement]'; render it into the element instead") but is not applied on the `<each>` path.
 
 Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode ships a green build with an empty list and no diagnostic. Also reported (possibly separate): a `snippet` prop rendered nothing even OUTSIDE `<each>` — split out if it doesn't fold in. Fix = `emit-each.ts` per-item template must (A) route PascalCase tags through the component-expander (as the non-each path does) and (B) mount a markup-valued `${}` result instead of `String()`-into-textContent. — `NEW S284 (#161); HIGH; RESOLVED S284 (item-root scope)`
+
+### g-each-nested-in-fn-body-markup-fn-stringifies — a markup fn DEFINED INSIDE another fn's body, consumed by a nested `<each>` in that SAME body, stringifies to `[object HTMLSpanElement]` — PRE-EXISTING (NOT a #658 regression), two-part root — `NEW S369-peter (surfaced by the mis-fired S239 pass on #664 that reviewed #658; PA-verified PRE-EXISTING on the pre-#658 base 772c0fb2 — the "regression" framing was FALSE); MED; open`
+<!-- @gap id=g-each-nested-in-fn-body-markup-fn-stringifies sev=MED status=open locus=compiler/src/codegen/emit-each.ts(_eachMarkupFnNames is NULL when a fn-body-nested each is emitted — that emission runs in a pass outside the 3555..3690 set/clear window) + compiler/src/markup-return-scan.js(collectMarkupReturningFnNames does not descend into fn bodies, so a nested markup fn is never collected) prov=rationale:S369-repro-fn-other-contains-nested-fn-badge-returning-markup-plus-nested-each-badge-it-emits-textContent-String-badge-it-MOUNTS-false-identical-on-pre-658-base -->
+> **⚑ S369-peter: PA-VERIFIED PRE-EXISTING (NOT a #658 regression), TWO-PART root.** Repro: `<program>${}{ <rows>:string[]=[..]; fn other(){ fn badge(x){ return <span>${}{x}</span> } return <ul><each in=@rows as it key=it><li>${}{badge(it)}</li></each></ul> } }...`. The nested `${badge(it)}` emits `textContent = String(badge(it))` → `[object HTMLSpanElement]` (silent-wrong, clean compile). **Verified identical on the pre-#658 base `772c0fb2`** (MOUNTS: false there too) — so the mis-fired review's "regression from the pre-S367 collector" claim is FALSE; this is a pre-existing limitation. **Two independent root causes, BOTH must be fixed:** (1) `collectMarkupReturningFnNames` (markup-return-scan.js) does NOT descend into fn bodies, so a nested markup fn is never in the name set (a fix here needs a scope-aware / two-mode collector: module-resolver's EXPORT classification must stay module-scope-only or a nested `fn X` falsely flags a same-named string EXPORT — the line-197 fail-safe test in g-each-cross-file-imported-markup-fn-mount.test.js); (2) the DEEPER blocker — `_eachMarkupFnNames` (emit-each.ts:253, set at :3555 / cleared at :3690) is **NULL** when a fn-body-nested each is emitted, because that emission runs in a separate pass outside the set/clear window (PA-instrumented at emit-each.ts:1406 — `set? false`). So even with the collector fixed (PA-tried `includeNested` — badge WAS collected, still stringified), the interp still stringifies; the mounting set must be wired into the fn-body emission pass. Fail-safe (wrong render, not a crash) and edge-case. Related family: [[g-each-nested-markup-interp-stringifies]]. Repro-first re-derive before building. Peter-lane (codegen mount wiring, no language surface).
 
 ### g-each-nested-markup-interp-stringifies — a markup-RETURNING fn call in an `<each>` interp: same-file fns in nested/ternary/match/mid-text positions now MOUNT (S297); RESIDUAL = `:`-shorthand body + cross-file/transitive/struct-field markup values still stringify
 <!-- @gap id=g-each-nested-markup-interp-stringifies sev=MED status=open prov=rationale:S367-peter-closed-the-CROSS-FILE-IMPORTED-residual-shared-markup-return-scan-plus-returnsMarkup-import-graph-fixpoint-incl-exported-wrappers-at-any-depth;remaining-residuals-are-export-star-barrels-PRE-EXISTING-general-limitation-and-bare-markup-typed-struct-fields-bryan-lane -->
@@ -9390,6 +9394,38 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > sentence in §6.8 describing settle timing for a server-fn-backed init/default — NOT a code change. Making
 > `reset` async would change every call site, which is the very thing this fix exists to avoid.
 
+### g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier — #664 fixed the matching arm and left the `else` arm emitting `return x;`, which is a SILENT wrong value whenever the key name is in scope — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(emitIifeBlockArmBody — the object-literal branch #664 fixed handles the matching arm only; the else/wildcard arm takes a different path) prov=review:docs/pr-reviews.md-#664 -->
+> **Found by the S313 review floor, PA-reproduced by EXECUTING the emitted library module.** Not a regression
+> from #664 — a **partial fix**, established by compiling the same fixture at #664's merge parent.
+>
+> ```scrml
+> export fn pick(n: number, x: number) {
+>     return match n {
+>         1 :> { x: 1 }
+>         else :> { x: 0 }
+>     }
+> }
+> ```
+>
+> | | matching arm | `else` arm |
+> |---|---|---|
+> | **pre-#664** (`5dbc0727`) | `{ x : 1 }` — labeled statement, falls through → `undefined` | `else { return x; }` |
+> | **post-#664** (on `main`) | `return { x : 1 };` ✅ **fixed** | `else { return x; }` ❌ **unchanged** |
+>
+> The `else` arm's object literal `{ x: 0 }` lowers to **`return x;`** — the bare identifier, not the object.
+>
+> **⚑ It is SILENT when the key name is in scope.** With `x` as a parameter the emitted module compiles at
+> **exit 0** and, executed: `pick(1, 77)` → `{"x":1}` (correct) while **`pick(9, 77)` → `77`**, where `{"x":0}`
+> was written. A caller gets a plausible value of the wrong type with no diagnostic anywhere.
+>
+> When the key name is NOT in scope it fails loudly (`E-SCOPE-001: Undeclared identifier \`x\``, exit 1), which
+> is why the shape was survivable — the loud half masked the silent half.
+>
+> **This is the verify-the-CLASS-not-the-instance lesson, in the PR that cited it.** #664's own description
+> says *"bug-class swept"* and its merge-blocker test pins the matching arm. The sibling arm, three lines away
+> in the same emitted IIFE, was never compiled. A fix round should re-derive which arm paths reach
+> `emitIifeBlockArmBody` and cover every one, rather than the arm the reproducer happened to use.
 ## §S368 — filed S368-bryan (hand-authoring dogfood: the §40.8 default-logic body)
 
 > Surfaced by **bryan writing scrml by hand** — the first human-authored scrml in the project's history, and
