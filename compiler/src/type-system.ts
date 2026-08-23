@@ -10434,6 +10434,82 @@ function annotateNodes(
             resolvedType = _hostType;
           }
         }
+        // §7.5 (S365, dpa-036 call 1) — THE asIs/unknown SPLIT, at the one site
+        // in the compiler where inference is definitionally what is happening:
+        // a `let`/`const` with no annotation, whose type can come from nothing
+        // but its initializer.
+        //
+        // Everything above this line is the CONTEXTUAL cascade — the SQL
+        // projection row, a known `fn` signature's return type, the host-method
+        // table. Each can only ADD information. If `resolvedType` is STILL
+        // `asIs` here, the whole compiler looked and could not tell, and until
+        // S365 it said so by handing back the developer's escape hatch — the
+        // one value §14.7 reserves for "a human signed for this". That made
+        // *absence of a diagnostic* and *success* the same observation.
+        //
+        // Now the give-up produces `unknown` carrying the AST node kind that
+        // defeated inference, and says so out loud. It is a WARNING: the program
+        // still compiles and the adopter is billed nothing.
+        //
+        // ⚑ THE SWAP IS NOT FREE, AND TWO SITES PROVED IT. `asIs` and `unknown`
+        // are interchangeable at MOST consumers (`fieldTypeAssignable`,
+        // `classifyMapKey`, the §57 serializability classifier all list the two
+        // kinds together) — but not all, and both exceptions were found by
+        // execution, not by reading:
+        //   • `codegen/index.ts` fired E-CG-001 on ANY `unknown` in `nodeTypes`,
+        //     treating it as a leaked internal sentinel. That gate is the reason
+        //     inference used to give up via `tAsIs()` in the first place. It is
+        //     now reason-aware (an `inference-gap` unknown is expected).
+        //   • the §18.8.2 match-subject gate fired E-TYPE-025 on `asIs` only, so
+        //     the swap would have silently retired it for un-annotated subjects.
+        //     It now covers `unknown` too.
+        // Anything else that special-cases `asIs` in VALUE position needs the
+        // same treatment; annotation-resolution sites do not, because
+        // `resolveTypeExpr` still yields `asIs` and is untouched here.
+        //
+        // THREE CARVE-OUTS, each because somebody DID sign:
+        //   • an annotation is present — the author stated the type. (An
+        //     annotation that FAILS to resolve, `let x: strng = …`, is a
+        //     type-NAME gap owned by E-TYPE-UNKNOWN-NAME / rung 1, not an
+        //     expression-inference gap. Not this diagnostic's business.)
+        //   • a `?{ … }` SQL initializer — the projection typer owns the
+        //     graceful-degrade path and already names it (W-SQL-ROW-UNTYPED).
+        //   • a `_{ … }` foreign initializer — §23.2.3 opacity is deliberate,
+        //     and writing `_{ }` IS the signature. §14.7's named hatch, used as
+        //     designed.
+        if (
+          !letAnnot &&
+          resolvedType.kind === "asIs" &&
+          !((n as Record<string, unknown>).sqlNode) &&
+          !((n as Record<string, unknown>).foreignNode)
+        ) {
+          const gapInit = (n as any).initExpr as ExprNode | undefined;
+          if (gapInit && typeof gapInit === "object" && typeof gapInit.kind === "string") {
+            const inferredResult = inferExprType(gapInit);
+            if (!inferredResult.ok) {
+              const gap = inferredResult.gap;
+              resolvedType = tUnknown({ source: "inference-gap", gap });
+              const gapSpan = (n.span as Span | undefined)
+                ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+              const gapName = ((n as ASTNodeLike).name as string | undefined) ?? "<anonymous>";
+              errors.push(new TSError(
+                "W-TYPE-031-UNPROVEN",
+                `W-TYPE-031-UNPROVEN: the type of \`${gapName}\` is UNPROVEN — inference stopped at ` +
+                `${gap.detail} (AST node kind \`${gap.nodeKind}\`), line ${gapSpan.line}. ` +
+                `This is the compiler reporting a gap in ITSELF, not a defect in your program: ` +
+                `\`${gapName}\` compiles and runs exactly as before, and no assignability check ` +
+                `has been skipped that was previously performed. ` +
+                `It is reported because an unproven type and a deliberate one used to look ` +
+                `identical (§7.5, §14.7). ` +
+                `To prove it, annotate the declaration — \`${gapName}: <type> = …\`. ` +
+                `To state that it is deliberately untyped, annotate it \`asIs\`, which is silent by ` +
+                `design (§14.7 — the named escape hatch).`,
+                gapSpan,
+                "warning",
+              ));
+            }
+          }
+        }
         // §2a — E-SCOPE-001 on undeclared identifiers inside the initializer
         // expression. Runs BEFORE the let/const name binding so a self-
         // reference in the init (e.g. `let x = x + 1`) reports against the
@@ -17106,11 +17182,28 @@ function checkMatchDiagnostics(
     return;
   }
 
-  if (subjectType.kind === "asIs") {
+  // §18.8.2 — `match` requires a RESOLVED subject.
+  //
+  // §7.5 (S365, dpa-036 call 1) — `unknown` is included here, and deliberately.
+  // The asIs/unknown split changed WHY a subject is unresolved, never WHETHER it
+  // is: an inference-gap `unknown` is exactly as un-narrowed as a developer's
+  // `asIs`, so the same guidance applies and the code must keep firing. Omitting
+  // it would silently retire E-TYPE-025 for every un-annotated `let p = powerUp`
+  // — the split buying a REGRESSION, which it must never do. (Caught by
+  // `gauntlet-s24/match-type-narrowing.test.js`; the second phrasing below is the
+  // gap case, which can say something more useful than the hatch case can.)
+  if (subjectType.kind === "asIs" || subjectType.kind === "unknown") {
+    const unresolvedIsGap = subjectType.kind === "unknown" &&
+      (subjectType as UnknownType).reason.source === "inference-gap";
     errors.push(new TSError(
       "E-TYPE-025",
-      "E-TYPE-025: Cannot match on `asIs`-typed subject. `match` requires a typed subject (enum, union, or primitive). " +
-      "Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching.",
+      unresolvedIsGap
+        ? "E-TYPE-025: Cannot match on an UNPROVEN subject — inference stopped at " +
+          `${((subjectType as UnknownType).reason as { gap: InferenceGap }).gap.detail}, so the subject has no ` +
+          "resolved type. `match` requires a typed subject (enum, union, or primitive). " +
+          "Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching."
+        : "E-TYPE-025: Cannot match on `asIs`-typed subject. `match` requires a typed subject (enum, union, or primitive). " +
+          "Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching.",
       span,
     ));
     return;

@@ -1808,9 +1808,28 @@ export function runCG(input: CgInput): CgOutput {
       stampCompoundDeepSetTargets(fileAST as Record<string, unknown>);
 
       // Check for unknown types in nodeTypes
+      //
+      // §7.5 (S365, dpa-036 call 1) — this gate is now REASON-AWARE, and the
+      // narrowing is the whole reason `UnknownType` carries a `reason`.
+      //
+      // Before S365 an `unknown` reaching codegen had exactly one meaning: the
+      // type system leaked an internal sentinel, which is a compiler defect, and
+      // firing E-CG-001 on it is correct. That is ALSO why inference used to give
+      // up by returning `tAsIs()` rather than `tUnknown()` — the honest value was
+      // already spoken for by this gate, so the give-up path borrowed the
+      // developer's escape hatch instead, and the asIs/unknown collapse followed.
+      //
+      // `reason.source === "inference-gap"` is the ONE new, deliberate producer:
+      // expression inference could not type a declaration's initializer, said so
+      // out loud (`W-TYPE-031-UNPROVEN`, warning — see type-system.ts), and the
+      // program is required to compile and run exactly as it did before. It is
+      // not a defect and must not be reported as one.
+      //
+      // Every OTHER reason still fires E-CG-001 unchanged. This is strictly a
+      // narrowing: no `unknown` that fired before this change stops firing.
       if ((fileAST as any).nodeTypes) {
         for (const [nodeId, type] of (fileAST as any).nodeTypes as Map<string, any>) {
-          if (type && type.kind === "unknown") {
+          if (type && type.kind === "unknown" && type.reason?.source !== "inference-gap") {
             errors.push(new CGError(
               "E-CG-001",
               `E-CG-001: Internal: node '${nodeId}' has an unrecognized type. ` +
