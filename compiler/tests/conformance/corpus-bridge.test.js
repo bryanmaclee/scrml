@@ -50,6 +50,7 @@ describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
       expect(r.forbidden).toEqual([]); // no forbidden code fired
       expect(r.prefixViolations).toEqual([]); // no forbidden family-prefix fired
       expect(r.severityMismatches).toEqual([]); // each asserted code's severity matches
+      expect(r.countMismatches).toEqual([]); // each asserted code fired exactly N times
       // (b) runtime half — only when the case declares one.
       if (runtime) {
         const failures = await runCaseRuntime(c);

@@ -240,6 +240,52 @@ const args = process.argv.slice(2);
 const write = args.includes("--write");
 const check = args.includes("--check");
 
+/**
+ * REFUSE A DEGENERATE MEASUREMENT (S364).
+ *
+ * Every counter here walks a directory and every walk begins `if (!existsSync(p)) return;`, so a
+ * missing tree yields 0 in silence rather than an error. The consequence was measured, not
+ * theorised: pointed at a tree with no source in it, this script reported `0 lines across 0 files`,
+ * `0 conformance cases`, `0 CLI verbs`, `--write` recorded all of that into docs/FACTS.md without
+ * complaint, and `--check` then said "PASS — all derived facts current." Exit 0 at all three steps.
+ *
+ * That is precisely the rot this script exists to prevent, committed by the script itself: FACTS.md
+ * is the anti-rot instrument for figures public documents cite, and it would publish "0 CLI verbs"
+ * as a current fact. It is also a BLOCKING CI gate, so the hollow record would then pass forever.
+ *
+ * A zero is never a legitimate value for any of these in a working checkout. Exit 2 — distinct from
+ * 1 — because this is not "the facts are stale", it is "the instrument is not measuring the repo".
+ * Mirrors scripts/browser-baseline.ts's refusal to record an empty set.
+ */
+function refuseDegenerateMeasurement(): void {
+  const src = compilerSource();
+  const counted: [string, number][] = [
+    ["live compiler source — files", src.files],
+    ["live compiler source — lines", src.lines],
+    ["test files", testFiles()],
+    ["specification lines", specLines()],
+    ["conformance cases", conformanceCases()],
+    ["standard-library modules", stdlibModules().length],
+    ["CLI verbs", cliVerbs().length],
+    ["LSP capabilities", lspProviders().length],
+    ["editor integrations", editorIntegrations().length],
+    ["deploy targets", deployTargets().length],
+    ["public code samples under the compile gate", gatedSnippets()],
+  ];
+  const zero = counted.filter(([, n]) => n === 0);
+  if (zero.length === 0) return;
+  console.error("facts: MEASURED ZERO — refusing to print, record or compare.\n");
+  for (const [label, n] of zero) console.error(`  ${label}: ${n}`);
+  console.error(
+    `\n  A count of zero is not a fact about this repo, it is a broken measurement — every counter\n` +
+      `  here treats a missing directory as an empty one. Recording it would publish a false figure\n` +
+      `  and then make --check agree with it forever (the hollow-gate shape).\n` +
+      `  Most likely cause: running outside the repo root, or a source tree renamed/absent.`,
+  );
+  process.exit(2);
+}
+refuseDegenerateMeasurement();
+
 if (!write && !check) {
   console.log("scrml — derived public facts (PRINT mode)\n");
   for (const sec of GEN_SECTIONS) console.log(sec.produce() + "\n");

@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S366 — 2026-08-22 (peter · P-Tech1 Windows) — heading-drift sweep (20 gap headings realigned to verified markers) + a bare-fn library-mode codegen fix; SUCCESSOR to the LIVE-but-AFK S365-bryan
+
+Booted Profile A as a successor to S365-bryan (his board read LIVE but "FINAL for this stretch"; he left `main` clean at #647 and went AFK) — worked strictly non-intersecting peter-lane, leaving his four held branches, five operator decisions, dpa-036, and his `pr-reviews.md`/delta-log footprint untouched. Two PRs landed.
+
+- **#648 — heading-drift sweep: 20 stale `### ` gap headings realigned to their verified `@gap` markers.** The S356-parked sweep unblocked when bryan's #581 landed; `headingMarkerDrift()` had grown 16→20 as S358→S365 fixes flipped markers while headings stayed stale. **The work was verification, not the flip** — a `marker=resolved` over a live bug is the dangerous direction. 14 flips rested on explicit `RESOLVED <sha>` verify-then-close notes or recent peter landings; **5 SUSPECT markers** (batch-flipped in S218/S220 bookkeeping chores with no resolution note — incl. `g-request-is-some`, whose marker flipped via #511's *different* facet) were **first-hand re-compiled on HEAD** and all confirmed genuinely resolved (structured request routing / invoked handlers / reactive wiring / an existing browser gate). 1 reverse drift (`G-DBAUTH-DOCS`: the "do not mark your `users` table" worked example was never written → heading flipped back to `open`). **Zero marker changes** (gap-counts byte-identical, `state.ts --check` PASS); drift now 0. No false-resolved hiding behind a stale heading.
+- **#649 — `g-library-bare-fn-no-trailing-newline-brace-strip` RESOLVED (LOW, S364 buildable item 1).** A single-fn library file with no trailing newline lost its own closing `}` and tripped E-CODEGEN-INVALID-LOGIC. Root (repro-first + instrumented, not the filed locus taken on trust): `emit-library.ts` stripped the `${…}` logic-wrapper prefix and a trailing `}` as a pair, but the back-strip fired on any `endsWith("}")` — a bare-fn file (SPEC §21.5, no wrapper) ends in the fn's own `}`, and the common case survived only because a trailing newline left it non-final. Fix: pair the strips — drop the trailing `}` only inside the `startsWith("${")` branch. Wrapped path byte-identical. Bug-class swept (single/two bare fns, inner-brace bodies, typed-match bare fn — all compile + run). Merge-blocker (4 cases, two-sided, `validateEmit:true` so it pins the E-CODEGEN symptom) verified to bite. S239 `/code-review high`: production code sound, one test-fidelity finding applied. LOW 69→68.
+- **Final state:** main @ `c2874d6c` (#649), coherence 0/0, cloud `gate` green on both merges (`tracking` red = known non-required fs.watch baseline). Gaps HIGH 45 · MED 149 · LOW 68 · Nominal 7. Integration+conformance clean; 6 baseline fails (self-host×3/self-compilation/session — none codegen, stash-verified pre-existing across prior sessions). Maps unchanged (surgical codegen edit, no new modules). **Next boot (peter):** S364 buildable list items 2 (each-interp IMPORTED-fn residual, a #627 follow-on) + 3 (`g-library-fn-match-object-or-block-arm-body-returns-undefined` MED, cross-mode parity with #641), or dog-food a fresh shape.
+
 ## S362 — 2026-08-22 (peter · P-Tech1 Windows) — two S361-annotated peter-lane MED buildables closed (request-ref event-handler seam · reactive-attr drop on registry-absent render elements); the convergent request-ref substrate fix routed to bryan
 
 Booted Profile A clean off S361's wrap; drained the review floor (#628/#629 carve-out). Worked the S361-annotated peter-lane MED buildables — two landed, each repro-first + root-derived on HEAD, each with the S239 adversarial pass catching real issues before landing.
@@ -6228,6 +6236,56 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### 2026-08-19 → 08-22 — S354: five branches in hand, five decisions pending, and the instruments audited
+
+A four-day recovery session (successor to a crashed S353). **Output was diagnosis, not landing** —
+nothing merged but PR #578 on day one. Two compiler arcs ran to round 8 and round 4; a retrofit
+census and an instrument-integrity pass ran alongside. Five branches are complete and pushed, none
+landed; five operator decisions are pending. Full pickup state in `hand-off.md`.
+
+- **§14.8.9 raw-egress** — the all-literal exemption took **three formulations and five leaks**
+  before being **dropped** (ruling `[1676]`); `E-PROTECT-004` returns to co-occurrence with the
+  §40.3.5 false positive accepted and pinned as a conformance case. Branch `raw-egress-r8-work`,
+  floor 0 code-deltas across 1,905 shared sources.
+- **Nested `<program>`** — worker bundles were generated and dropped on the floor; a `handle()`-only
+  program emitted 100% dead code. Two Nominal codes **consolidated** (ruling `[1669]`), `E-FOREIGN-010`
+  built from a SHALL that had zero fire sites. Branch `nested-program-r4-work`.
+- **`handle()` is a literal onion** (ruling `[1677]`) — the onion now wraps top-level dispatch in all
+  three dispatchers. Also fixed: `resolve()` was never awaited, breaking the SPEC's own worked example.
+- **Instrument integrity** — `codeCounts` added to the conformance contract (**106 of 883 cases
+  already double-fire invisibly**); `corpus-zero-debt` was printing a clean board over **288 unscanned
+  artifacts** from any worktree; **3 of 5 blocking CI gates could pass while measuring nothing**.
+- **The delta-log sequence** — seven collisions in one session, root-caused to a *"single-writer rule"*
+  that stopped being true. Fixed with `merge=union` + a CI-gated `delta-lint` (PR #581).
+- **Standing direction change `[1678]`** — the time-investment restraint is withdrawn; size is no
+  longer a valid deferral reason. ~77 deferred items re-derived on merit.
+### 2026-08-22 (S364-peter — ARC 4 converged + routed, then the decl-match sibling landed with an S239-caught HIGH)
+
+Took the S363 pickup (ARC 4, the markup-value attr-interp scanner) then worked the peter-lane buildable
+list in order. **ARC 4 turned out to be a route, not a land:** first-hand re-derivation on HEAD showed the
+S363 "3-scanner + 1-emit" seam map was materially off — the true root is one convergent substrate,
+non-uniform `${…}`-interpolation-awareness across ≥4 tokenizer/parser string layers (violating SPEC
+§4.18.4/§1244's "single meaning across the language"). That is a central-lexer / SPEC-uniformity change =
+bryan's lane, so it was routed turnkey (a pushed prereq branch with two verified sub-fixes + a queue brief +
+inbox note) rather than enumerate-patched. Then the next buildable — a top-level library-mode `const/let =
+match` leaking raw — was fixed and landed; the S239 adversarial pass caught a real HIGH (a value-IIFE
+lowering silently returned `undefined` for object/block arm bodies) that was fixed before merge.
+
+- **#641** — `g-library-mode-toplevel-decl-match-leaks` (MED) RESOLVED. A top-level library-mode
+  `const/let X = match …` is not a function-decl, so the #636 fn-router never touched it and the raw `match`
+  leaked (E-CODEGEN-INVALID-LOGIC). A `const` doesn't hoist, so it's lowered in place (a splice in
+  `pruneServerFnsAndLowerGuarded`) through the browser tilde decl path — deliberately not a value-IIFE,
+  which lowers a brace-delimited arm body as a statement block → silent `undefined`. Handles both the
+  non-export (`const-decl`+`matchExpr`) and export (`export-decl`+split `match-stmt`) parser shapes.
+  R26-verified across object/enum/string arms + adjacency; multi-scrutinee/destructure fail loud.
+- **Routed to bryan** — the `${…}`-interpolation-uniformity convergent arc (branch
+  `route/s364-markup-interp-uniformity-prereq` + bryan-lane queue group-4 item K + inbox note).
+- **Review floor drained to 0** (the S363 tail: #636/#637 code S239-already-sound + #638/#639 continuity).
+- **2 new gaps filed** — `g-match-decl-span-overshoots-next-statement` (LOW, parser span accuracy) and
+  `g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED — the #636 fn path still has the
+  object-arm silent-undefined the decl fix sidesteps).
+- Gaps: HIGH 37 · MED 147 · LOW 69 · Nominal 7. Cloud `gate` green on #641.
 
 ### 2026-08-22 (S363-peter — the four fragile arcs: two fixed, one routed, one mapped — and three of the four filed traces were wrong on HEAD)
 

@@ -6,6 +6,11 @@
  *   (a) CODES   — emitted ⊇ expect.codes  AND  emitted ∩ expect.notCodes = ∅
  *       (SUPERSET, not exact: real compiles emit incidental codes the source
  *       conf tests ignore; presence, not line/col — SCOPE OQ3).
+ *       Both halves are SET-valued and therefore blind to CARDINALITY. The
+ *       optional `expect.codeCounts` is the exact-count escape: it asserts a
+ *       named code fired exactly N times, which is the only assertion here that
+ *       can see a DOUBLE FIRE. Opt-in and additive — a case without the key is
+ *       checked exactly as before.
  *
  *   (b) RUNTIME — when expect carries any of { input, dom, domAnchored, state }:
  *       compile + execute the artifact in a DOM (adapter `run()`), drive the
@@ -58,6 +63,22 @@ export interface ExpectedCase {
      *  assert a code fires AS error vs warning; the adapter's byCode honors the
      *  partition (a W-/I- code never lands in the errors stream). */
     severity?: Record<string, "error" | "warning" | "info">;
+    /** Per-code EXACT OCCURRENCE COUNT — the cardinality assertion.
+     *
+     *  `codes` is a SUPERSET presence check and `notCodes` an absence check, so
+     *  both are set-valued: a code that fires TWICE is indistinguishable from one
+     *  that fires once. That is a real blind spot, not a theoretical one — the
+     *  §4.12.3 nested-program contract is "ONE diagnostic per unbuilt
+     *  declaration, never two, never none", and nothing in a set-based harness
+     *  can read the "never two" half.
+     *
+     *  `codeCounts` is checked EXACTLY: the listed code must fire exactly N
+     *  times. `N: 0` is a legal and meaningful assertion (a strictly stronger
+     *  `notCodes`). Codes NOT listed are unconstrained — the key is per-code, not
+     *  a whole-emission exact-match, so it composes with the superset contract.
+     *
+     *  OPTIONAL and ADDITIVE: a case without the key behaves exactly as before. */
+    codeCounts?: Record<string, number>;
     // (b) runtime-effect half:
     input?: InputStep[];
     /** Whole-tree canonical normalized <body> (OQ1 default mode). */
@@ -123,6 +144,7 @@ export interface CaseResult {
   forbidden: string[]; // notCodes that DID fire
   prefixViolations: string[]; // emitted codes matching a forbidden family prefix
   severityMismatches: string[]; // codes whose §34 severity != the asserted one
+  countMismatches: string[]; // codes whose OCCURRENCE COUNT != the asserted one
   runtimeHalfPending: boolean;
   /** Runtime (b) half failures (empty when the case has no runtime half or it passed). */
   runtimeFailures: string[];
@@ -196,7 +218,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 /** Run one case's CODES (a) half through impl#1 and diff against the contract. */
 export function runCase(c: LoadedCase): CaseResult {
-  const { codes: emitted, byCode } = compile(c.source, c.auxFiles);
+  const { codes: emitted, byCode, counts } = compile(c.source, c.auxFiles);
   const emittedSet = new Set(emitted);
   const ex = c.expected.expect;
   const missing = ex.codes.filter((code) => !emittedSet.has(code));
@@ -225,6 +247,53 @@ export function runCase(c: LoadedCase): CaseResult {
     }
   }
 
+  // codeCounts — EXACT per-code cardinality. The one assertion in this harness
+  // that is not set-valued: it reads how many times the compiler pushed the code,
+  // so a double fire is visible. A malformed value is a HARD failure rather than
+  // a skip — a cardinality assertion that silently does nothing is the exact
+  // hollow-gate shape this key was added to close.
+  //
+  // THE CONTAINER IS CHECKED, NOT JUST THE VALUE (S365 review). The paragraph above promised a
+  // malformed VALUE is a hard failure — and the first cut delivered exactly that and no more, so
+  // the CONTAINER could still turn the whole assertion off in silence:
+  //   "codeCounts": null   -> falsy, block skipped, case green
+  //   "codeCounts": ""     -> falsy, block skipped, case green
+  //   "codeCounts": {}     -> truthy, zero keys, loop never runs, case green
+  //   "codeCounts": []     -> truthy, zero keys, loop never runs, case green
+  // A hollow assertion inside the anti-hollow-assertion feature. So PRESENCE is what is tested,
+  // not truthiness: an ABSENT key is the documented optional-and-additive case and stays free,
+  // while a key that is present must be a non-empty object of non-negative integers or the case
+  // FAILS. "I wrote the key and it asserted nothing" is never a pass.
+  const countMismatches: string[] = [];
+  if ("codeCounts" in ex) {
+    const cc = ex.codeCounts as unknown;
+    if (cc === null || typeof cc !== "object" || Array.isArray(cc)) {
+      countMismatches.push(
+        "codeCounts is present but is not an object (got " + JSON.stringify(cc) + ") — " +
+          "a present-but-malformed container silently disables the whole cardinality assertion",
+      );
+    } else if (Object.keys(cc).length === 0) {
+      countMismatches.push(
+        "codeCounts is present but EMPTY — it asserts nothing. Omit the key (it is optional) " +
+          "rather than writing an assertion that cannot fail",
+      );
+    } else {
+      for (const code of Object.keys(cc)) {
+        const want = (cc as Record<string, unknown>)[code];
+        if (typeof want !== "number" || !Number.isInteger(want) || want < 0) {
+          countMismatches.push(
+            "codeCounts['" + code + "'] is not a non-negative integer (got " + JSON.stringify(want) + ")",
+          );
+          continue;
+        }
+        const got = counts[code] ?? 0;
+        if (got !== want) {
+          countMismatches.push("code '" + code + "' fired " + got + " time(s), expected exactly " + want);
+        }
+      }
+    }
+  }
+
   return {
     id: c.expected.id,
     relDir: c.relDir,
@@ -232,12 +301,14 @@ export function runCase(c: LoadedCase): CaseResult {
       missing.length === 0 &&
       forbidden.length === 0 &&
       prefixViolations.length === 0 &&
-      severityMismatches.length === 0,
+      severityMismatches.length === 0 &&
+      countMismatches.length === 0,
     emitted,
     missing,
     forbidden,
     prefixViolations,
     severityMismatches,
+    countMismatches,
     runtimeHalfPending: c.expected["runtime-half-pending"] === true,
     runtimeFailures: [],
     hasRuntimeHalf: hasRuntimeHalf(c),
@@ -378,6 +449,9 @@ async function main(): Promise<void> {
       }
       for (const f of r.severityMismatches) {
         console.log(`        severity: ${f}`);
+      }
+      for (const f of r.countMismatches) {
+        console.log(`        codeCounts: ${f}`);
       }
       for (const f of r.runtimeFailures) {
         console.log(`        runtime: ${f}`);
