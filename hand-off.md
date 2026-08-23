@@ -1,16 +1,114 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. THREE wrap blocks are current: -->
-<!--   S366-peter (below) — the peter lane: 2 PRs landed (#648 heading -->
-<!--     sweep · #649 bare-fn codegen fix); `main` @ c2874d6c 0/0.     -->
-<!--   S354-bryan (2nd block) — the bryan lane, STILL PENDING: five    -->
-<!--     branches in hand, five operator decisions, dpa-036 ADVISORY.  -->
-<!--     S365-bryan advanced main through #647 but did NOT resolve     -->
-<!--     these — read this block for bryan's live lane.                -->
-<!--   S364-peter (3rd block) — prior peter wrap (history).            -->
-<!-- Read S366 for peter-pickup + S354 for bryan-pending. Mechanical   -->
-<!-- stream: delta-log [1692]-[1693] (this session); bryan S365 =      -->
-<!-- [1686]-[1691] (on main, board S365-bryan not a hand-off block).   -->
+<!-- hand-off.md — live session state. WRAPPED at S365-bryan.        -->
+<!--   S365-bryan (below) — the bryan lane. The four-day five-branch -->
+<!--     backlog is CLEARED. Four operator decisions remain, and     -->
+<!--     ONE dispatch is in flight (see PICKUP §1).                  -->
+<!--   S366-peter (next block) — the peter lane (history).           -->
+<!-- Mechanical stream: delta-log [1686]-[1704].                     -->
 <!-- ============================================================= -->
+
+# scrml — Session 365 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-22 → 08-23. Booted onto S354's backlog: **five branches complete and pushed,
+none landed, five operator decisions pending.** All five branches are now resolved.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ ONE DISPATCH IN FLIGHT — claimed, not lost
+
+**`feat/s365-asis-split-rung0` @ `d63ba668`** — a SPEC-text fix round is RUNNING against it
+(agent brief archived at `docs/changes/s365-asis-split-rung0/FIX-ROUND-BRIEF.md`). If it completed
+after this wrap, **its work is on that branch — check the branch tip before assuming anything.**
+
+**The branch is DO-NOT-LAND on SPEC text only.** The code is the cleanest thing this session
+produced: **2,724 emitted artifacts byte-identical to main**, and the corpus diagnostic delta is
+exactly one line (`+9954 W-TYPE-031-UNPROVEN`, all 397 other codes unchanged). Five blocking
+findings, all text:
+
+1. §7.5.2 + §14.7's headline *"Type inference SHALL NOT produce `asIs`"* is **refuted by a 6-line
+   program on the branch itself** — an un-annotated fn param still yields `asIs` (`E-TYPE-025`).
+   `tAsIs()` has 101 call sites; this converts one.
+2. §14.7 contradicts an unamended bullet two lines above it (`SPEC.md:8219`).
+3. The `_{ }` carve-out is unconditional in text, conditional in code (guard is `!(n.foreignNode)`;
+   no sidecar at program scope).
+4. The §34 `E-TYPE-031` row cites `type-system.ts:10112` (that line is an **E-ERROR-010** fragment;
+   the real push is **10364**), three wrong section refs, and asserts a fire domain with **zero code
+   behind two of its three positions**.
+5. `Result<ResolvedType, InferenceGap>` — the type is named `InferenceResult`.
+
+### 2. ⚠️ FOUR OPERATOR DECISIONS PENDING
+
+1. **`dpa-036` call 5 — the warning→error flip at v1.** HELD deliberately. The numbers now support
+   deciding: **9,954 warnings across 490 of 2,362 files.** The review's false-positive analysis:
+   **3.6% hard FP** (Tier A — bool/`not`/template literals, comparison results: 362 sites an adopter
+   refutes at a glance), 12.3% including one-lookup-away, **87.7% genuine**. Tier A is the
+   credibility risk, not the volume — §8 cry-wolf keys on refutable-at-a-glance.
+2. **The Q4 re-ruling** (the top-level `<program>` attribute question). **My original ruling's
+   premise was REFUTED** — §4.12.2 is silent about top-level, not prohibitive, and `lang=` is a
+   plain-YES row SPEC makes canonical at top level. The honest axis: *should an attribute the
+   compiler silently DISCARDS draw a diagnostic, and does that reach all **nine** position-blind
+   registrations or only three?* `lang=`/`build=`/`capabilities=` must be excluded by name.
+   `nested-program-r4-work` is held on this and nothing else.
+3. **The nine live `never` fallthrough failures** — fix-vs-drain. Each is a real silent-fallthrough
+   bug (`MarkupValueExpr` in the union, handled by no switch).
+4. **`raw-egress-r8-work` has still never landed** — complete through round 8, S239-passed in
+   rounds 4/6/8. Peter's security HIGH "B" is **sequenced behind it** (fixing that crash unmasks a
+   live `passwordHash` leak), so this branch blocks his lane.
+
+### 3. FINDINGS THAT MUST NOT BE LOST
+
+- **The same gate went hollow TWICE in one session.** `delta-lint` — total blindness (fixed), then
+  **partial** blindness (fixed): it was silently dropping four real entries from the live log AND
+  from the digest projection. *A gate proven only on well-formed input is unproven against the
+  degenerate case.*
+- **`delta-lint --fix` has two independent corruption modes**, both filed HIGH and **one still
+  open**: it renumbers the wrong side on a merge (first-in-file order is blind to which side is
+  published), and under partial blindness it renumbers onto an invisible number then reports PASS.
+- **There is no TypeScript build**, and `ci.yml:4` advertises one. The `never` idiom was already
+  deployed and already red.
+- **`auth="required"` does not protect the app's own HTML document** — unauthenticated
+  `GET /secure.html` returns **200 with the content**, against §52.13's verbatim *"every request to
+  this scope SHALL be authenticated."* Filed HIGH; a BUG, not a doc gap.
+- **A working worktree-sweep probe exists** (owed since S268) — but **nothing was swept**, because
+  it owes a bite proof. Both obvious probes are structurally wrong under squash-merge.
+- **flogence's `bridge-tool.scrml:25` still carries the narrow delta-log regex** — a third copy
+  across two repos, still dropping the same four entries. Routed to its inbox.
+
+## ⚑ MISSES (mine)
+
+1. **★ I over-read a governing sentence and ruled on it.** Q4 rested on "§4.12.2 lists these as
+   nested attributes"; the table is *titled* Nested Attributes and is **silent** about top level.
+   The dispatched agent stopped on my brief's own trigger and was right.
+2. **★ Three relayed premises failed, and the pattern is sharper than "I relay badly":** all three
+   were me reading a sentence that had the right WORDS for a DIFFERENT QUESTION. The
+   governing-sentence gate caught all three — because the brief must quote the sentence, an agent
+   could check it.
+3. **★ Five relayed FIGURES failed** (141 headings → 36; mutation counts 5/2/4 → 9/5/2; three
+   different stale-citation counts). Rule: a number I did not run does not go in a durable artifact.
+4. **★ I ran `git stash` mid-merge** to test a warning's provenance. It could not stash unmerged
+   paths, the paired `checkout HEAD --` **destroyed `docs/known-gaps.md`'s auto-merge**, and the
+   stray `pop` targeted an unrelated stash. Recovered by aborting and redoing from a script.
+5. **★ I asserted a mechanism whose enforcer did not exist** — the `never` fallthrough needs a
+   TypeScript build; there was none.
+6. **★ I surfaced bare opaque tokens all session** (`#1`/`#3`, `Q1`-`Q9`, `F1`-`F8`) against an
+   explicit contract rule, and bryan had to ask *"what is 1? what is 2? … do I need to continue?"*
+   The fourth question also exposed a dropped item — call 4 had never been surfaced at all.
+
+## 🧷 STATE
+
+- **main** `c96e7012` before this wrap; coherence 0/0; both repos clean.
+- **Gaps: HIGH 46 · MED 152 · LOW 68.** Seven filed this session, all PA-reproduced before filing.
+- **Debts: review floor 0 (drained twice) · corpus-zero 0 · issue-debt 0 · dPA 0 UNRUN / 0 ADVISORY**
+  (`dpa-036` ratified this session).
+- **Branches held:** `nested-program-r4-work` (Q4 re-ruling) · `raw-egress-r8-work` (never landed) ·
+  `feat/s365-asis-split-rung0` (SPEC text, fix round in flight).
+- **Worktrees RETAINED — do not sweep.** The sweep probe is recorded but unproven.
+- **Peter's inbox: 5 live pings** — 3 stamps owed, 2 security HIGHs held (one sequenced behind
+  raw-egress-r8), 1 routed arc unstarted. Deliberately NOT filed to `read/`.
+
+---
 
 # scrml — Session 366 (peter · P-Tech1 Windows) — WRAP
 
