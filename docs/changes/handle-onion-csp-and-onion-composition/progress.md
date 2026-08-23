@@ -209,3 +209,65 @@ Findings to close:
 
 ## Log
 - [start] crash anchor: brief + this append.
+
+## FIX ROUND 2 — outcome
+
+All eight findings closed. Six commits, `5710c74b..e212f207`.
+
+| finding | verdict | landed in |
+|---|---|---|
+| HIGH-1 §38 transitions lost on soft nav | FIXED | `d94edd4f` |
+| HIGH-2 `headers="strict"` + dev refuses hot reload | FIXED | `f09860ca` |
+| MEDIUM-3 `E-MW-007` over-fires | FIXED | `b9eaac6f` |
+| MEDIUM-4 CORS preflight below `handle()` PRE | FIXED | `ac22ba74` |
+| MEDIUM-5 / LOW-7 SPEC text + `§40.3.4` anchor | FIXED | `faa82f11` |
+| LOW-8 SSR-seed element guard | FIXED (both readers) | `e212f207` |
+| LOW-9 `docs/FACTS.md` stale | FIXED (+ a false CLI-verb count) | `e212f207` |
+| LOW-10 stale wire-format prose | FIXED | `e212f207` |
+
+### HIGH-1 — shape chosen: the app-wide union into the shell entry's stylesheet
+
+Not the `_scrml_nav_sync_head` stylesheet sync. That is the right fix to a BIGGER,
+PRE-EXISTING hole — per-page Tailwind and `#{}` CSS are lost on soft nav on BOTH trees
+(measured: `bg-blue-500` used only by the route lands only in `anim.css`, which soft nav
+never loads) — but doing it correctly needs a stylesheet-load await ahead of the swap
+(else the animation fires before the rules apply, which is the same failure) plus an
+evict policy for the outgoing route's sheet. That is a new engine in the always-shipped
+nav path. Deferred, surfaced.
+
+A/B — the shell document after installing exactly the stylesheets `index.html` links:
+
+|  | before | after |
+|---|---|---|
+| `index.html` stylesheet links | `["index.css"]` | `["index.css"]` |
+| live `@keyframes` in the document | `[]` | `["scrml-fade-in","scrml-fade-out"]` |
+| `getComputedStyle(.scrml-enter-fade).animation` | `""` | `"scrml-fade-in 300ms ease"` |
+
+### HIGH-2 — A/B through `buildServeConfig().fetch` on a compiled `headers="strict"` app
+
+|  | before | after |
+|---|---|---|
+| `GET /` CSP | `default-src 'self'` | `default-src 'self'` |
+| `GET /` inline `<script>` (no `src`) | 1 (refused, no nonce) | 0 |
+| `GET /` hot-reload tag | absent | `<script src="/_scrml/hot-reload.js">` |
+| `GET /_scrml/hot-reload.js` | 404 | 200 `text/javascript`, parses |
+
+### Gate
+
+- `bun run test`: 30 498 tests / 1 390 files — **53 fail**, identical NAME SET to the
+  459003df baseline. NEW failures: **none**. The four ~10.5 s dev-watcher failures are
+  assertion failures ("initial bundle never served 200 with marker"), not timeouts, and
+  carry the identical reason on both trees.
+- `bun conformance/run.ts`: **883/883**, exit 0.
+- The pre-commit gate ran on every commit in this round; none used `--no-verify`.
+
+### Deferred, surfaced (not closed here)
+
+1. Per-page CSS (Tailwind, `#{}`) is lost on every soft navigation — pre-existing on both
+   trees, wider than §38. Needs a `_scrml_nav_sync_head` stylesheet sync with a load-await
+   and an evict policy. PA ruling.
+2. SPEC.md h4 numbering: 141 headings still carry a major number differing from their
+   enclosing h3. Nine fixed here because this branch's citations depend on them.
+3. 34 stale `§39.3.x` citations remain in comments/tests after the §40.3 renumber.
+4. `bun scripts/claim-gate.js` crashes pre-existing (`existsSync is not defined`,
+   `scripts/claim-gate.js:82`). Not in the gate.
