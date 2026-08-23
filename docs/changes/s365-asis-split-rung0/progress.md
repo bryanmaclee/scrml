@@ -408,3 +408,134 @@ Positions where a value binds `asIs` with **no author behind it**, after rung 0:
 | E-TYPE-031 SPEC mentions | `grep -n 'E-TYPE-031' compiler/SPEC.md` minus the two §34 rows | 18 mentions, 12 distinct sections |
 | S9 corpus scope | structural AST walk, un-annotated decls with a `matchExpr`/`ifExpr`/`forExpr` sidecar and no `initExpr` | **55 sites / 41 files** (50 / 5 / 0) |
 | `tAsIs()` call sites | `grep -c 'tAsIs()' compiler/src/type-system.ts` | 101 |
+
+
+---
+
+# RUNG 1 — TEXT-ONLY FIX ROUND (branch `feat/s365-asis-split-rung1`, base `915eee4d`)
+
+**Verdict fixed: DO-NOT-LAND on SPEC TEXT ONLY, four normative-text defects.** The code half was
+already verified clean and was NOT touched — this round changed `compiler/SPEC.md`,
+`docs/known-gaps.md`, and the two generated files, and nothing else.
+
+## Blocker 1 (BLOCKING) — §7.5.2 / §14.7's narrowed SHALL was false
+
+**Reproduced BEFORE writing text**, on this tree, with a positive control in the same file:
+
+| source | result |
+|---|---|
+| `const r = match x { 1 :> 10  else :> 20 }` (un-annotated) | **zero diagnostics** — compiles completely clean |
+| `const q = if (x > 0) { lift 1 } else { lift 2 }` (un-annotated) | **no `W-TYPE-031-UNPROVEN`** |
+| `const c = someUnknownCall(x)` — POSITIVE CONTROL, same file | `W-TYPE-031-UNPROVEN` **fires** |
+| `match r { … }` downstream of the first row | `E-TYPE-025: Cannot match on `asIs`-typed subject` |
+
+That last row is the proof the earlier round did not run: the diagnostic names **`asIs`**, not
+`unknown`. So the declaration really does bind `asIs` from a defeated inference, silently — the
+exact thing the SHALL forbade. The control proves the guard is live and this position is skipped,
+not that the guard is broken.
+
+**Fix.** Both statements (§7.5.2's normative bullet, §14.7's headline claim) now carry an EXCEPT
+clause naming the `match`- / `if`-as-expression initializer position, cross-referencing
+`g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard`. §7.5.2 additionally
+carries the reproduction, the 55-sites/41-files measurement, the sidecar cause, and the rung-1
+scoping reason it is filed rather than fixed. Wording reused from the gap entry per the brief.
+
+## Blocker 2 (BLOCKING) — a ⚑ note asserted a diagnostic with no fire site
+
+The note excluded the component bare prop because *"`E-TYPE-030` fires … It is never silent."*
+Falsified three ways:
+
+1. `grep -rn '"E-TYPE-030"' compiler/src compiler/native-parser` → **0 push sites** (the only
+   occurrence anywhere is a prose comment in `type-system.ts`).
+2. §34 in the same file has booked it *"Reserved / spec-ahead, S263 — no fire site"* since S263.
+3. **EXECUTED**: `const Card = <div mystery> <h2>${mystery}</> </>` + `<Card mystery="1"/>` →
+   **zero type diagnostics**. Same with `mystery` never read in the body. It IS silent.
+
+**Fix — the exclusion got a TRUE basis, it is not left open for the operator.** The exclusion rests
+on **SCOPE**: rung 0's narrowing is structural — it converts `inferExprType`'s return value and the
+un-annotated `let` / `const` declaration binding, and a bare prop is NEITHER position. What was
+false was the *reason given* and the *classification*. The note now withdraws the false claim
+explicitly, states the scope basis, and moves the bare prop from "not a defect" to a disclosed gap,
+because today it does have the property §7.5.2 exists to remove. Two closure routes are named.
+
+⚑ **In-section consistency fix, same commit.** §14.7 bullet 2 IS the `E-TYPE-030` SHALL. Writing
+"E-TYPE-030 is unbuilt" two lines beneath an unqualified SHALL that says it fires would have
+shipped blocker 3's defect shape inside blocker 2's fix. It is now marked SPECIFIED-not-implemented,
+matching how §34 has booked it since S263. Pre-existing; no behaviour change.
+
+## Blocker 3 (HIGH) — the §34 row's carve-out was unconditional
+
+**Reproduced both ways**, under `<program lang="ts">`:
+
+| shape | codes |
+|---|---|
+| `_={ … }=` initializer INSIDE a function body | *(no `W-TYPE-031-UNPROVEN`)* — carve-out applies |
+| `_={ … }=` at bare logic-statement scope, directly in `${ }` | `W-TYPE-031-UNPROVEN` **+** `E-CODEGEN-INVALID-LOGIC` |
+
+**Fix.** The row now states the carve-out conditionally, matching §7.5.2 — which said so in the
+same commit that shipped the unconditional row. The two-way measurement is recorded in the row, and
+the row says the unconditional phrasing was a draft error. The catalog is the lookup surface; a row
+that contradicts its own governing section is the §34.0 defect one level up.
+
+## Blocker 4 (HIGH) — four fresh wrong line citations
+
+| cited | actual | symbol at the real site |
+|---|---|---|
+| `type-system.ts:484` (`inferExprType`) | **569** | `inferExprType` |
+| `type-system.ts:10496` (`W-TYPE-031-UNPROVEN`) | **10600** | `annotateNodes` |
+| `type-system.ts:10364` (`E-TYPE-031` decl, ×2) | **10453** | `annotateNodes` |
+| `type-system.ts:17199` (`E-TYPE-025`, ×2) | **17303** | `checkMatchDiagnostics` |
+| `symbol-table.ts:4334` (`checkValidator`) | **4334** | correct as written |
+
+**STRATEGY CHOSEN: drop `:N`, cite FILE + SYMBOL. Not re-measure.** Four reasons, in order of
+weight:
+
+1. `scripts/s34-census.ts`'s `PATH_REF` ends `(?::\d+)?` — it strips `:N` and checks only the PATH
+   and the SYMBOL. A line number is the ONE part of a provenance note CI can never falsify, so it
+   rots silently and forever. The symbol IS checked against `treeIdents`. Dropping `:N` converts an
+   unverifiable claim into a verified one.
+2. This is the THIRD rot in these same rows — `:10112` last round, four more this round. Re-measuring
+   reproduces the failure mode; dropping removes it.
+3. The row's own standing instruction already read *"Trust the symbol."*
+4. `type-system.ts` gained 467 lines on this branch alone and is under concurrent edit; any number
+   measured now is stale before the branch lands.
+
+Two `@gap` `locus=` line numbers in `docs/known-gaps.md` were **left as-is**: they are
+machine-readable gap metadata in a different format, outside the §34 provenance convention, and all
+three were re-verified accurate against the final tree (`type-system.ts:10575` = the `gapInit` read;
+`ast-builder.js:7994,8108` = the `let`/`const` `matchExpr` sidecar attachments with `init: ""`;
+`runtime-template.js:1168` = a different, pre-existing gap's init-arm).
+
+## Verification
+
+| gate | result |
+|---|---|
+| `bun test compiler/tests/{unit,integration,conformance}` | **22,723 pass / 0 fail** / 70 skip / 1 todo — identical to the branch's pre-existing figure |
+| `bun conformance/run.ts` | **883/883** — identical |
+| `bun run scripts/regen-spec-index.ts --check` | **exit 0** |
+| `bun scripts/facts.ts --check` | **exit 0** |
+| `bun scripts/s34-census.ts --check-new --base origin/main` | **exit 0** — 4 changed rows, provenance resolves |
+
+Zero behavioural delta, as required: not one line of `compiler/src` was touched.
+
+## What went wrong, for the next round
+
+1. **The pre-commit suite failed on an EMPTY start commit, from the MAIN tree.**
+   `compiler/tests/integration/self-host-smoke.test.js` resolves `findMainProjectRoot()` on purpose
+   (the gitignored `compiler/self-host/dist/` only exists in main), so a worktree agent's suite
+   imports `/scrml/compiler/src/api.js` — the LIVE tree, mid-edit by concurrent agents. It failed
+   with a parse error at a line whose content had already changed by the time I read it. ENV-GAP,
+   not a regression; green on re-run. ⚑ **A worktree agent cannot trust a self-host test result
+   while another agent is editing main** — and an *empty* commit defeats the hook's docs-only skip
+   (`[ -n "$STAGED" ]`), so it runs the full suite for no reason. Make the first commit a real
+   docs-only one.
+
+2. **Every text claim in this round was written from an execution, not from the brief.** The brief's
+   blocker-2 reproducer used `mystery=1` unquoted, which dies at `E-SCOPE-001` before reaching the
+   type layer; the real probe needs `mystery="1"` and a `<program>` wrapper. Blocker 3 needs
+   `<program lang="ts">` or it dies at `E-FOREIGN-003`. Both would have produced a "confirmed"
+   write-up from a run that never tested the claim. Relayed premises fail; execute them.
+
+3. **The §34 census gate is a real reviewer and it is cheap.** It caught nothing here because the
+   symbols were measured first — but it is the only thing standing between a provenance note and
+   rot, and it is worth running on every §34 edit, not just in CI.
