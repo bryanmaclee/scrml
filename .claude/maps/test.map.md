@@ -1,48 +1,49 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
-# bryan S343/S345/S346).** Ancestry CHECKED (invariant 48); the watermark IS `origin/main`'s tip at
-# generation (MAP-STAMP RULE, primary.map.md).
-# **+5 test files, ZERO deleted — 1,339 -> 1,344.** Conformance corpus **FLAT at 883**. SPEC
-# byte-identical, so the §34 catalog is FLAT at 809.
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
+# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
+# `origin/main`.
 #
-# ⚠ **THE COUNTING CAVEAT CARRIES.** `docs/FACTS.md`'s `test files` counts **`*.test.js` under
-# `compiler/tests` only** — it EXCLUDES the 15 `*.test.ts` files in the same tree, so a
-# `git ls-files` sweep over `*.test.*` returns a legitimately different, larger number. **This map
-# uses the FACTS definition throughout. State which derivation produced a count.**
+# **+39 test files, ZERO deleted — 1,339 -> 1,378** (`*.test.js` under `compiler/tests`, FACTS.md
+# mechanically derived). Conformance corpus **FLAT at 883** for the third window running. The §34
+# catalog moved **809 -> 810** (`E-MW-007`), so error.map.md is NOT flat this window even though the
+# corpus is.
 #
-# **THE TESTING LESSON OF THIS WINDOW: THE PER-TEST BUDGET YOU BELIEVE IS NOT THE ONE IN FORCE, AND A
-# TIMEOUT WEARS AN ASSERTION FAILURE'S CLOTHES.** `bunfig.toml` carried `[test] timeout = 10000` from
-# the initial split until S346 — **and bun does not read `[test].timeout`** (bun 1.3.14, verified: a
-# 6 s synchronous test under that file reported `timed out after 5000ms`; the `root` key in the same
-# file IS honoured, so the file loads). The effective budget was ALWAYS bun's default **5000 ms**,
-# locally and in CI. Worse: **a synchronous test that overruns still runs to completion — its
-# assertions PASS — and bun then reports it as `(fail) <name>`, the SAME marker an assertion failure
-# produces**, with the tell (`^ this test timed out after 5000ms.`) on a line the name-set gate's
-# `spawnSync` capture swallowed. That is how `flagship driver/hos … engine mount really does sit
-# inside an if= template` joined the browser failure set intermittently in cloud and burned THREE
-# sessions on compile-order/stray-file/module-state theories while the emitted HTML was fine the
-# whole time. The fix (#537) is three-sided: the whole-app compile moved into a `beforeAll` with an
-# EXPLICIT 60 s budget declared at the site; the ghost-lint hot path that made the compile slow
-# enough to overrun became a forward-only cursor (`makeSkipCursor` — 343 ms and, JIT-poisoned, 5.9 s
-# of the compile, gone); and `browser-baseline.ts` now prints a REASON EXCERPT beside every new
-# failure name. **Rule: a multi-second test declares its own `{ timeout }` at the site, with a
-# comment; and when a bun test "fails", read for the timeout tell before trusting the assertion.**
+# **THE HEADLINE IS NOT THE COUNT — IT IS THAT THE CONFORMANCE `expect` VOCABULARY IS NOW GOVERNED,
+# AND THAT FIVE GATES WERE MEASURING NOTHING.**
 #
-# **THE SECOND LESSON IS HERMETICITY, four fixes in one file** (`flagship-hos-engine-under-if`,
-# #531/#534/#527): a UNIQUE `mkdtemp` output dir per run (the fixed `/tmp` path was rmSync'd under
-# concurrent readers); the app walk SORTED at every level (readdir order is a property of the runner
-# IMAGE); the compile failing LOUD with codes + outputDir (was: a downstream bare `.toBe(true)`
-# naming nothing); and the emitted artifacts LOCATED by suffix search, never assumed at
-# `driver/hos.*` (`computeOutputBaseDir` derives layout from the input list's COMMON ANCESTOR, so
-# one stray `.scrml` shifts every relative path — and `read()` returned `""` for the missing path).
-# `browser-todomvc` got the same class of fix (#530): read the runtime file the PAGE references, not
-# whatever readdir returns first.
+#   · **`conformance/run.ts` gained `EXPECT_SHAPES` + `validateExpectContainers` (#652, +298 lines).**
+#     Every container in a case's `expect` block is validated against a declared shape BEFORE the
+#     case runs. The full vocabulary is now enumerable in one place — see the new section below.
+#     `validateExpectContainers` is **EXPORTED on purpose**, with the reason written at the site: *"a
+#     validator that can only be reached by running the whole corpus is indistinguishable from one
+#     that never fires."* Driven by `compiler/tests/conformance/expect-container-policy.test.js`
+#     (NEW, 316 lines).
 #
-# **CARRIED AND STILL THE RULE: `expected.json`'s `codes` / `notCodes` are the assertion; the
-# `rationale` prose is not.** Zero conformance movement this window to re-verify it against.
+#   · **#646 — "five gates that reported green while measuring nothing."** This is the window's
+#     governing lesson and it generalises past conformance: a gate that parses a population, silently
+#     drops the part it cannot parse, and reports PASS on the remainder is worse than no gate.
+#     `scripts/state.ts` and `scripts/delta-lint.ts` both gained an **unconditional
+#     `bracketed !== parsed` refusal** — if the number of `[NNNN]`-bracketed lines in scope does not
+#     equal the number the regex matched, the instrument REFUSES (exit 2) instead of reporting on a
+#     subset. **Exit 2 is deliberately distinct from exit 1 and is NOT reachable as a PASS:** 1 means
+#     "the log is wrong", 2 means "the instrument is broken".
+#
+# ⚠ **THE COUNTING CAVEAT CARRIES, UNCHANGED.** `docs/FACTS.md`'s `test files` figure counts
+# **`*.test.js` under `compiler/tests` only** — it EXCLUDES the **15** `*.test.ts` files in the same
+# tree, and it excludes `conformance/`. A "how many tests" question has three different right answers
+# depending on which population you mean; name the population.
+#
+# ⚠ **INVARIANT 56 CARRIES AND IS STILL THE FIRST THING TO CHECK ON ANY `(fail)`.** bun does not read
+# `bunfig.toml [test] timeout`; the real per-test budget is bun's default **5000 ms** everywhere. A
+# synchronous test that overruns still runs its assertions to completion — they PASS — and bun then
+# reports `(fail) <name>`, **the same marker an assertion failure produces**. Declare `{ timeout }` at
+# the site for anything multi-second. Several old test comments still cite "the bunfig default 10s",
+# a number that was NEVER in force (non-compliance.report.md N11).
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -58,14 +59,14 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1344** `*.test.js` total)
+## Test Categories (compiler/tests/, **1378** `*.test.js` total, +39 this window)
 
 Fresh recursive recount at `c93a692c`, all 9 categories individually re-verified; agrees with
-`docs/FACTS.md` (`test files | 1,344`), **which is the citable authority — do not hardcode a
+`docs/FACTS.md` (`test files | 1,378`), **which is the citable authority — do not hardcode a
 competing number.** Net **+5** this pass, decomposing as **unit +4**, **integration +1** (conformance
 / browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged). **ZERO deletions,
 third window running.** The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level =
-**1344**.
+**1378**.
 
 Carried: the conformance-TIER row (132) counts `compiler/tests/conformance/*.test.js` — the
 artifact-level harnesses — and is a DIFFERENT number from the 883 conformance CASES under
@@ -187,6 +188,47 @@ NOT new** (it dates to the S231 D3 suite, `e86a76d0`; only three cases were adde
 were authored as part of a REVERT, not a feature. When you back something out, the corpus is where
 you record that the back-out was intentional — otherwise the next agent reads the missing emission as
 a gap and re-lands it.
+
+
+## THE CONFORMANCE `expect` VOCABULARY IS NOW A DECLARED TABLE (NEW #652, `conformance/run.ts:179`)
+
+Before this window the `expect` block's key set was implicit — a typo'd container name was silently ignored and the case passed while asserting nothing. `EXPECT_SHAPES` makes the whole vocabulary enumerable and `validateExpectContainers(ex)` refuses anything outside it, naming the known keys in the diagnostic.
+
+| key | kind | empty | half |
+|---|---|---|---|
+| `codes` | stringArray | — | (a) codes |
+| `notCodes` | stringArray | — | (a) codes |
+| `notCodePrefixes` | stringArray | — | (a) codes |
+| `severity` | record, values `error`/`warning`/`info` | **reject** | (a) codes |
+| `codeCounts` | record | **reject** | (a) codes |
+| `input` | objectArray | — | (b) runtime |
+| `dom` | string | — | (b) runtime |
+| `domAnchored` | objectArray | — | (b) runtime |
+| `state` | record | **reject** | (b) runtime |
+| `serverStub` | record | **allow** | (b) runtime — a MOCK TABLE, not an assertion |
+| `serverDb` | record | **allow** | (b) runtime — a SEED, not an assertion |
+| `sqlEngine` | enum `stub` \| `real` | — | (b) runtime |
+| `ssr` | boolean | — | (b) runtime |
+| `firstPaint` | record | **reject** | (b) runtime |
+| `stdout` | string | — | (b) runtime |
+
+**The `empty` column is the load-bearing one.** An empty `{}` is REJECTED for every container that is an ASSERTION (`severity`, `codeCounts`, `state`, `firstPaint`) — an empty assertion asserts nothing and reads green. It is ALLOWED only for `serverStub` and `serverDb`, which are inputs (a mock table and a seed), where empty is a meaningful value.
+
+**`validateExpectContainers` is EXPORTED and is driven directly by `compiler/tests/conformance/expect-container-policy.test.js`** (NEW, 316 lines). The reason is written at the export site and is the window's generalisable rule: *a validator that can only be reached by running the whole corpus is indistinguishable from one that never fires.* Called from the case runner at `run.ts:418`.
+
+⚠ **Related, and it is the standing trap when auditing conformance coverage: a grep-match for an E-code inside a case directory is NOT proof the case asserts it.** The hit may be rationale PROSE. Read the `expected.json` and confirm the code appears in a `codes` / `notCodes` container before recording "already covered".
+
+## INSTRUMENT INTEGRITY — the `bracketed !== parsed` refusal (NEW #646/#652)
+
+**Five gates were reporting green while measuring nothing** (#646). The fix pattern is worth copying into any new probe that parses a population out of a text file:
+
+- `scripts/delta-lint.ts` (NEW this window) counts `[NNNN]`-bracketed lines in the live scope and separately counts regex matches. **`refuseUnparsedEntries()` / `refuseDegenerateScope()` exit 2 if the two disagree, or if the scope is empty.**
+- `scripts/state.ts` gained the same guard — `refuseUnparsedDeltaEntries()` (`:706`), called from `runWrite` (`:352`), `runCheck` (`:454`) and `runDigest` (`:803`); `parseDeltaLog` (`:659`) returns `bracketed`, `unparsed` and `scopeStart` so the diagnostic can print REAL file line numbers.
+- **Exit codes are partitioned on purpose: 1 = "the log is wrong", 2 = "the instrument is broken".** Neither is reachable as a PASS.
+- **What made it necessary:** the shared entry shape was `[NNNN] <kind> · <body>` (three tokens) while the writing convention had drifted to `[NNNN] <emoji> <kind> · <body>` (four). The narrow regex could not parse the four-token form, so four live entries (`[561] [562] [565] [727]`) were invisible to the gate AND to the digest. The regex now carries an OPTIONAL marker token (`delta-lint.ts:72`).
+- **Pre-existing debt is BASELINED, not enforced** — `handOffs/delta-log-dupes.baseline.json` carries nine known collisions so the gate is not instantly red for reasons no change caused; only a NEW duplicate fails. The baseline may shrink and must never grow silently.
+- **The companion is `.gitattributes` `merge=union` on the delta log.** It trades a merge conflict for a duplicate, which is only the right trade because this gate is loud about duplicates. **The two land together; neither is sufficient alone.**
+- **Deliberately NOT a monotonicity check** — under union-merge two sessions' entries interleave by content, not by number. Enforcing order would fail every honest concurrent merge.
 
 ## THE BROWSER TIER IS NOW GATED — and the mechanism generalizes
 
@@ -337,7 +379,7 @@ status**, so it is a real gate. Its parser is exported + `import.meta.main`-gate
 that guard is testable (`compiler/tests/unit/gap-marker-parser-s307.test.js`).
 
 ## CI test-tier mapping (see build.map.md for the full workflow)
-`gate` (blocking, 12 steps): unit + conformance + the 14 root-level `*.test.js` + the TodoMVC
+`gate` (blocking, **13 steps** — `bun scripts/delta-lint.ts` added #652): unit + conformance + the root-level `*.test.js` (**where the parser-conformance canary is actually gated**) + the TodoMVC
 gauntlet compile-and-parse check + **browser NAME-SET** + snippet-gate + facts `--check` +
 SPEC-INDEX totals `--check` + **§34.0 row-provenance**. Checkout is `fetch-depth: 0` (the §34.0 gate
 needs merge-base).
@@ -455,7 +497,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout
 
 ## Links
 - [primary.map.md](./primary.map.md)

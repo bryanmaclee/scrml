@@ -1,25 +1,23 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# **RE-WALKED over `4f034e13` -> `c93a692c` — the `.github/` zero-diff streak ENDED this window.**
-# Ancestry CHECKED (invariant 48); the watermark IS `origin/main`'s tip at generation (MAP-STAMP
-# RULE, primary.map.md).
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **RE-WALKED over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654).** Ancestry CHECKED
+# (invariant 48); outbound MAP-STAMP check run (primary.map.md): the source diff `merge-base..HEAD`
+# is EMPTY and `c96e7012` is an ancestor of `origin/main`.
 #
-# **ONE workflow change, ONE trigger, ZERO steps/secrets/required-checks: `ci.yml`'s `push` trigger
-# is now scoped `branches: [main]` (#532, S345).** WHY: an unscoped `push` ran the gate TWICE per PR
-# — branch-push run + PR run, BOTH reporting under the required check name `gate`, so with any
-# intermittent in the suite a PR needed TWO independent clean runs, and two runs on one SHA under one
-# check name read as a contradiction ("push fails, pull_request passes") that invites a wrong
-# root-cause. STILL GATED, unchanged: every PR (via `pull_request`) and every push to `main`
-# (post-merge trunk check). Branch protection, the required `gate` check, `enforce_admins=true` —
-# untouched. **HONEST COST: a feature branch with NO open PR gets no CI until a PR exists**;
-# `workflow_dispatch` (#454) re-fires any post-#454 ref on demand.
+# **`.github/` moved by exactly 15 lines, all in `ci.yml`, and NOTHING infrastructural changed —
+# no new job, no new secret, no new runner, no new required check.** The two edits are a new
+# BLOCKING STEP inside the existing `gate` job (`bun scripts/delta-lint.ts`, #652) and a STEP NAME
+# correction in the tracking job (the "within-node parser-parity + canary" step never ran the
+# canary — `g-ci-does-not-run-root-level-test-files`). Both belong to build.map.md; they are noted
+# here only so a reader who diffs `.github/` does not conclude the deployment surface moved.
 #
-# Carried and re-verified: `workflow_dispatch` remains the dropped-webhook recovery lever (and is
-# PROSPECTIVE — it fails 422 on a ref cut before #454); `advisory-review` stays DISABLED;
-# `cloud-maps` Stage 2 stays DELETED (no scheduled map refresh — a stamp is exactly as old as the
-# last wrap).
+# **Three workflows on `main`, count unchanged: `ci.yml`, `advisory-review.yml`, `cloud-maps.yml`.**
+# Jobs, runners, secrets, branch protection and `enforce_admins=true` are ALL zero-diff. The `push`
+# trigger stays scoped `branches: [main]` (#532) and the `windows` job's `PUPPETEER_SKIP_DOWNLOAD`
+# carries. `package.json` zero-diff (eleven windows); version stays `0.7.1`.
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
 
@@ -36,7 +34,7 @@ None. No Dockerfile / docker-compose.yml anywhere in the repo.
 ## CI/CD
 Provider: GitHub Actions.
 Workflows — **THREE, all on `main`; only `ci.yml` changed this window (#532)**:
-- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**12 steps, unchanged**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **Triggers NOW: push `branches: [main]` (NEW #532 — see header), `pull_request`, and `workflow_dispatch: {}` (#454)** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
+- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**13 steps — +1 this window, `bun scripts/delta-lint.ts` (#652)**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **Triggers NOW: push `branches: [main]` (NEW #532 — see header), `pull_request`, and `workflow_dispatch: {}` (#454)** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
 - `.github/workflows/advisory-review.yml` — 1 job: `ai-review`. **DISABLED — `workflow_dispatch` only**, with a required `pr` input. The `pull_request:` trigger is gone.
 - `.github/workflows/cloud-maps.yml` — 1 job: `regen`, still scheduled daily 09:17 UTC + `workflow_dispatch`. **Stage 2 (the project-mapper agent) was DELETED**; Stages 1 / 1b / 3 (deterministic, free) remain. `id-token: write` was dropped with it.
 
@@ -64,7 +62,7 @@ the App-token approach was replaced by the fine-grained `MAPS_PAT` at `b5ec120b`
 Do not go looking for an App install.
 
 ## Tags
-#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever
+#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows
 
 ## Links
 - [primary.map.md](./primary.map.md)

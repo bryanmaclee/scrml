@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 46 |
-| MED | 152 |
-| LOW | 68 |
+| MED | 153 |
+| LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -9336,3 +9336,24 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Why it matters beyond tidiness:** a §-citation is the project's primary durable pointer into the normative source (this session already found a `known-gaps.md:6429` line-number citation rotted for the same reason — line numbers shift, so §-refs are supposed to be the stable alternative). If a §-ref cannot be resolved by heading lookup, the stable alternative is not stable either.
 >
 > **Fix direction, two parts, separable:** (a) mechanical sweep of the 32 dangling comment citations `§39.3.x → §40.3.x` — zero behavioural risk, verify the mapping is uniform first; (b) a decision on the remaining 141, which is a bigger call: renumber the headings to match their parents, or accept the drift and stop treating h4 numbers as addressable. **Do not do (b) piecemeal per-branch** — that is how 9 got fixed and 32 got broken in one commit.
+
+### g-maps-staleness-is-warn-only-so-a-112-commit-drift-fails-nothing — `state.ts --check` reports map staleness as WARN and exits 0, and the contract's pre-dispatch maps-currency check is advisory, so the maps silently drifted 112 commits with every gate green — `NEW S365-bryan (found by the wrap-6c maps refresh; PA-REPRODUCED); MED; open`
+<!-- @gap id=g-maps-staleness-is-warn-only-so-a-112-commit-drift-fails-nothing sev=MED status=open locus=scripts/state.ts(the maps-watermark line — emits "[WARN-only — not gated; project-mapper seam]" and does not affect the exit code)+searched:.github/workflows/ci.yml,scripts/git-hooks,.git/hooks-no-gate-anywhere prov=rationale:S365-bryan-the-maps-refresh-printed-maps-112-commits-behind-HEAD-at-the-start-of-its-run-and-NOTHING-FAILED-anywhere-in-the-toolchain -->
+> **⚑ S365-bryan: PA-REPRODUCED.** `bun scripts/state.ts --check` prints, verbatim:
+> `maps: N commits behind HEAD (watermark …, HEAD …)  [WARN-only — not gated; project-mapper seam]` and **exits 0**.
+>
+> At the start of this session's wrap-6c refresh it read **112 commits behind** — PRs #539 through #654, 127 files, +11,377/−762 — and no gate anywhere went red.
+>
+> **Why this is not cosmetic.** `pa-scrml-overlay.md {{maps_fills}}` requires a **currency check before every dispatch** (`git rev-parse HEAD` vs the map SHA → refresh or name the post-map landings), on the stated grounds that *"a stale map is worse than no map."* That obligation is real and the only thing that surfaces a breach is advisory. **This is the "an obligation and its probe must resolve to the same artifact" shape** (pa-base §10, the contract's most-repeated failure): the rule is named, the check runs, the check passes, and the conclusion is false.
+>
+> **The blast radius is dispatch quality, which is invisible.** A dev agent handed a 112-commit-stale map gets loci that have moved. This session saw exactly that twice — a brief naming `emit-server.ts` for a concern that lives in `select-request-onion.js` (a module that did not exist at the map's stamp), and a reviewer finding `_blockTailIsValueExpr` drifted `:4653 → :4700`.
+>
+> **Fix direction — deliberately NOT a hard CI gate** (§8 cry-wolf: a gate instantly red over an existing drift gets bypassed then deleted). Options: make it a **detection probe the boot report states** the way `review-debt`/`corpus-zero-debt`/`issue-debt` are stated — the PA names the number and drains it or says why not — or gate only the **pre-dispatch** path, where the map is actually consumed. **Detection over control** is this project's recorded preference on exactly this trade.
+
+### g-s34-census-bucket-shift-is-instrument-change-not-regression — the FALSE-CLAIM bucket moved 95 → 112 and IMPL-SITES 320 → 300 against a +1 catalog because the census itself changed, and nothing labels it — `NEW S365-bryan (relayed from the wrap-6c mapper, NOT independently reproduced); LOW; open`
+<!-- @gap id=g-s34-census-bucket-shift-is-instrument-change-not-regression sev=LOW status=open locus=scripts/s34-census.ts(the comment-stripping change landed in #646, +143 lines — it reclassifies rows without emitting a "the instrument changed" marker) prov=rationale:S365-bryan-RELAYED-from-the-project-mapper-run-flagged-because-anyone-diffing-this-census-against-the-S346-numbers-reads-twenty-regressions-that-did-not-happen -->
+> **⚑ RELAYED-UNVERIFIED — I did not reproduce this myself.** Recorded because the failure mode is a *misreading by a future session*, which is exactly the kind of thing that is cheap to prevent and expensive to discover.
+>
+> #646 changed `s34-census.ts` (comment-stripping, +143 lines), which **reclassifies rows** — a code whose only "impl site" was a comment moves from IMPL-SITES to FALSE-CLAIM. Against a catalog that grew by **one**, the buckets moved 95 → 112 and 320 → 300. **Anyone comparing this run to the S346 figures reads twenty regressions that never occurred.**
+>
+> **This is the instrument-integrity thesis pointed at its own remedy:** the fix that made the census truthful also made its own history incomparable, and nothing in the output says so. Fix direction: emit an instrument-version or a "buckets reclassified at #646" note in the census header, so a cross-run diff is legible.
