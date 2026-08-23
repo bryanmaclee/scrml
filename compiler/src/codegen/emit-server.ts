@@ -3093,6 +3093,30 @@ export function generateServerJs(
     lines.push("function _scrml_mw_wrap(downstream) {");
     lines.push("  return async function _scrml_mw_handler(_scrml_mw_req) {");
 
+    if (_scrml_hasCors) {
+      // §40.3.3 pins `[CORS preflight] → [rate limit] → handle() PRE`. The
+      // preflight was ONLY the `_scrml_cors_options_route` registry entry, which
+      // is downstream of `resolve()` now that the onion wraps top-level dispatch
+      // — so an author `handle()` ran on every browser preflight (measured: an
+      // OPTIONS request came back stamped by handle()). A `handle()` that
+      // early-returns 403 for unauthenticated requests would then block every
+      // preflight, and a preflight carries no credentials to satisfy it with.
+      //
+      // The route export stays: the §64 serve-target tool host matches `path:
+      // "/*"` (emit-tool.ts), so it is live THERE. The `_server.js` and
+      // `scrml dev` hosts match a path literally, so this stage is the one that
+      // answers for them — at the position §40.3.3 names.
+      //
+      // A preflight short-circuits at stage 1, so it reaches neither [logging]
+      // nor [security headers], exactly as an early return from any stage does.
+      lines.push("    // §40.3.3 order: [CORS preflight] is the FIRST stage — ahead of the rate");
+      lines.push("    // limiter and ahead of handle() PRE, so an author handle() never sees a");
+      lines.push("    // browser preflight (it carries no credentials to satisfy an auth check).");
+      lines.push("    if (_scrml_mw_req.method === 'OPTIONS') {");
+      lines.push("      return new Response(null, { status: 204, headers: _scrml_cors_headers() });");
+      lines.push("    }");
+    }
+
     if (_scrml_hasLog) {
       lines.push("    const _scrml_mw_t0 = Date.now();");
     }
