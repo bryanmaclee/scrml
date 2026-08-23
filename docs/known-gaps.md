@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 48 |
-| MED | 156 |
+| MED | 157 |
 | LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9523,3 +9523,166 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > Fix direction: make the dependency explicit (fail loudly when the resolved root is not the running worktree),
 > or vendor the artifacts the test needs. Interim: dispatch briefs should say the first commit must be a real
 > docs-only one, and that a self-host failure needs its path checked before it is attributed.
+## §S368 — filed S368-bryan (hand-authoring dogfood: the client-side stdlib import path)
+
+> Both entries below were surfaced by **bryan writing scrml by hand** and reproduced by the PA
+> **by executing the emitted bundle**, not by grepping emitted text — the "emitted ≠ runs" discipline
+> this project has been bitten by at S265, S268 and the ESM U3 landing.
+
+### g-stdlib-client-registry-chunk-missing-for-17-of-21-modules — a client-side `scrml:NAME` import compiles clean, emits a shim nothing loads, and throws `TypeError` at page load with ZERO diagnostics — `NEW S368-bryan; HIGH; RESOLVED S368`
+<!-- @gap id=g-stdlib-client-registry-chunk-missing-for-17-of-21-modules sev=HIGH status=resolved locus=compiler/src/codegen/runtime-chunks.ts(RUNTIME_CHUNK_ORDER now carries 13 stdlib chunks + hasStdlibClientChunk)+compiler/src/codegen/emit-client.ts(E-STDLIB-CLIENT-CHUNK-MISSING, post-prune scan of the FINAL client text)+compiler/src/runtime-template.js(9 new _loadStdlibChunk calls) prov=adopter:bryan-hit-this-writing-scrml-by-hand-S368 -->
+> **PA-REPRODUCED BY EXECUTION on `main` @ `772c0fb2`.** Not relayed, not inferred from source reading.
+>
+> **Symptom.** A program that does `import { slug } from 'scrml:format'` and uses `slug` in client-reachable
+> code **compiles clean** (exit 0, one informational lint), emits a complete artifact set, and then the page is
+> **dead on arrival**: `TypeError: Cannot destructure property 'slug' from null or undefined value` at bundle load.
+>
+> **Mechanism.** The browser bundle is a classic script and cannot resolve bare specifiers, so a stdlib import
+> lowers to a global-registry read — `const { slug } = _scrml_stdlib.format;`. That registry is populated by
+> runtime chunks inlined into the emitted runtime, and `RUNTIME_CHUNK_ORDER` declares exactly **four**:
+> `stdlib-auth`, `stdlib-crypto`, `stdlib-data`, `stdlib-host`. `runtime-template.js:538` ships
+> `const _scrml_stdlib = {};`. For the other **17 of 21** modules the destructure hits `undefined`.
+>
+> **Control vs subject, both EXECUTED (happy-dom global + the two classic scripts in HTML order):**
+>
+> | import | registry chunk in emitted runtime | bundle executes? |
+> |---|---|---|
+> | `scrml:data` (wired) | `_scrml_stdlib.data =` PRESENT | **OK** |
+> | `scrml:format` + `scrml:math` | **ABSENT** | `TypeError: Cannot destructure property 'slug'` |
+>
+> **Swept the six modules the PRIMER documents as client-usable — 6 of 6 broken:** `format` · `math` ·
+> `random` · `regex` · `time` · `router`. Each emits `_scrml_stdlib.<mod>` in the client bundle with no
+> matching registry chunk. **`scrml:router` is the sharp one** — `navigate`/`currentPath`/`onNavigate` is an
+> inherently *client* API that cannot run on the client.
+>
+> **The server path is CORRECT and is not in scope.** A server-classified use emits a real ES import,
+> `import { formatCurrency } from "./_scrml/format.js";`, into the `.server.js`. That is why `_scrml/<name>.js`
+> is written at all. On the client side that same file is emitted and **referenced by nothing** — a grep of the
+> whole output directory for `_scrml/format` returns zero hits, including the HTML `<script>` tags.
+>
+> **⚑ Why no gate caught it — the obligation and its probe resolve to DIFFERENT artifacts** (pa-base §10, this
+> contract's most-repeated failure). `W-STDLIB-SHIM-MISSING` (`api.js:474-488`) fires on
+> `!existsSync(compiler/runtime/stdlib/<name>.js)` — *does a shim file exist on disk*. All 21 exist, so it never
+> fires. The property that decides whether a **client** import works is *is `stdlib-<name>` in
+> `RUNTIME_CHUNK_ORDER`*, and only 4 are. The gate runs, passes, and its conclusion is false. Same shape as the
+> review floor binding MERGED PRs while `gh pr list` read OPEN ones.
+>
+> **Corroboration that this is long-standing:** `examples/25-triage-board.scrml:28` carries a comment reverting
+> `import { sortBy } from 'scrml:data'` *"per Bug 18 — scrml:NAME capability imports emit as unresolved ES module
+> imports and fail at runtime with a SyntaxError."* The stated mechanism is stale (it is a registry read now, not
+> an ES import) but the symptom it records never went away, and the workaround (vanilla `.sort()`) is still in the
+> file.
+>
+> **Fix direction (additive, and the second limb is the load-bearing one).** (1) Register the remaining
+> client-safe modules in `RUNTIME_CHUNK_ORDER` + `CHUNK_MARKERS`, keeping the genuinely server-only ones out by
+> design and saying so in the comment. (2) **Re-point the gate at the property that actually decides the
+> outcome** — a client-reachable `scrml:NAME` import whose module has no registry chunk must be a diagnostic,
+> not silence. Without limb 2 the next module added hides exactly the same way. (3) A merge-blocker case that
+> **executes** the emitted bundle, since a grep-level assertion cannot see this class.
+>
+> ---
+>
+> **RESOLVED S368.** All three limbs landed; every claim below was verified BY EXECUTION of the emitted
+> bundle (happy-dom, runtime + client as two classic scripts in ONE shared scope), never by grep.
+>
+> **Limb 1 — 9 client chunks added**, taking the wired set 4 -> 13: `compiler` `format` `http` `math`
+> `random` `regex` `router` `test` `time`. Membership is DERIVED, not curated: a module is client-registered
+> iff it is NOT an escalation-server-only module under the §12.2 Trigger 3 two-limb criterion
+> (`route-inference.ts:ESCALATION_SERVER_ONLY_MODULES`) — (a) host reach into `Bun.*` / `process.*` /
+> `bun` / `bun:*` / `node:*`, or (b) credential handling. The 8 left out — `cron` `fs` `mcp` `oauth` `path`
+> `process` `redis` `store` — each carry a one-line reason at the deliberately-absent block. Post-fix sweep:
+> **12 of 21 modules execute clean, up from 4**; the other 8 are now a compile ERROR rather than a dead page.
+>
+> **Limb 2 — `E-STDLIB-CLIENT-CHUNK-MISSING`** (new §34 row, severity Error). The gate calls
+> `hasStdlibClientChunk`, which reads `RUNTIME_CHUNK_ORDER` itself, so the obligation and its probe are now
+> the SAME artifact. Error and not warning because the compiler can PROVE the artifact is dead — there is no
+> runtime configuration under which destructuring `undefined` succeeds, and the throw is at LOAD, so the whole
+> page dies. **Bite proof** (exit codes measured directly, never through a pipe): baseline `exit=0`, code
+> silent -> de-register `stdlib-format` -> `exit=1`, code fires -> restore -> `exit=0`, code silent.
+>
+> **Limb 3 — `compiler/tests/browser/browser-stdlib-client-registry.test.js`** (31 tests). Executes every
+> client-registered module's bundle; asserts the registry entry carries real exports (an EMPTY object would
+> also "load"); pins the classification PARTITION (every shim on disk is client-registered XOR
+> escalation-server-only — no unclassified third state, which is what stops the next module hiding); and
+> carries an INSTRUMENT-INTEGRITY control that feeds the harness a deliberately-DOA bundle and requires it to
+> report the throw. **Merge-blocker proof:** baseline `bun test exit=0` 93/0 -> sabotage `exit=1` 89/3 ->
+> restore `exit=0` 93/0.
+>
+> **Direction of change: NEWLY-REJECTING.** Corrected in adversarial review — the first filing said
+> "`newly-accepting` at the runtime level, `inert` at the language level", and **`inert` was wrong**.
+> Limb 2 adds an error, so source that previously compiled can now be refused; that is
+> newly-rejecting by definition, and no measurement makes it something else. The review's own
+> reproducer proved the point concretely: a string literal containing `_scrml_stdlib.wombat` was
+> rejected on a program with no stdlib import at all. That was a defect (fixed — see the FP note
+> below), but it could only exist BECAUSE the branch rejects.
+>
+> The accompanying facts, kept distinct from the classification:
+>   * previously-DOA pages now run (a runtime improvement, not a classification);
+>   * **measured migration 0**, over a conservative 63-file superset of at-risk files out of 171
+>     stdlib importers across `samples/ examples/ conformance/ stdlib/ compiler/tests/ benchmarks/
+>     docs/`, each compiled individually.
+>
+> **Migration-zero is a BLAST-RADIUS fact, not a classification.** It says how much existing code the
+> rejection touches today; it says nothing about whether the change rejects. Filing it as `inert`
+> conflated the two and would have let a rejecting change land without the scrutiny a rejecting
+> change is owed.
+>
+> **A limitation of that measurement, recorded because it is the reusable part.** The at-risk
+> pre-filter was IMPORT-based — it selected files importing an unwired module or a submodule. The
+> string-literal FP fires with NO import at all, so that filter could not have found it, and did not:
+> it was found by a hand-written reproducer in review. A pre-filter derived from the INTENDED trigger
+> cannot find a fire caused by an UNINTENDED one. The filter has since been widened to include any
+> `.scrml` carrying `_scrml_stdlib.` text (63 files, still 0 hits; the single corpus file that matches
+> has it inside a `//` comment naming the already-wired `auth`).
+>
+> **TWO FURTHER DEFECTS of the same class were found and fixed here, both by execution:**
+>
+> 1. **Submodule specifiers lower to a DIVISION.** `import { verifyJwt } from 'scrml:auth/jwt'` lowers to
+>    `const { verifyJwt } = _scrml_stdlib.auth/jwt;`, which JavaScript parses as `_scrml_stdlib.auth / jwt` —
+>    measured DOA with `ReferenceError: jwt is not defined`, even though `_scrml_stdlib.auth` IS defined. The
+>    gate matches EXACTLY (no submodule root-inheritance) and refuses it.
+> 2. **Submodule reads escaped the unused-import prune entirely.** `pruneUnusedClientImports`'s region regex
+>    matched the module segment as `[A-Za-z0-9_$]*` with NO slash, so `_scrml_stdlib.compiler/bs;` was never
+>    recognised as a removable region and survived into the client bundle **even when the only use was inside a
+>    `server function`** — every such page was DOA with `ReferenceError: bs is not defined`. Found because the
+>    new gate turned `stdlib-shim-resolution.test.js` §4 red on all 13 `scrml:compiler/<stage>` cases; that test
+>    asserted `errors == []` while reading only the emitted SERVER file, so it had been sitting on top of a dead
+>    client bundle. Regex widened with a `(?:/[A-Za-z0-9_$]+)*` tail; those pages now compile AND execute.
+>
+> **Note for whoever reads the original filing above:** its "17 of 21" framing is accurate but the mechanism is
+> narrower than the real class. The class is **the client import lowering was UNCONDITIONAL while the chunk
+> activation was CONDITIONAL on the same array** — so a server-only module reaching client emission was equally
+> dead, with zero diagnostics. That is why limb 2 scans the FINAL emitted client text rather than the emit site:
+> gating at the emit site rejected 21 CORRECT files (`examples/23-trucking-dispatch/**`, which use `scrml:store`
+> only inside `?{}`-escalated server fns and are correctly pruned) — measured, then corrected.
+>
+> **Not a duplicate.** `g-stdlib-import-leaks-client` (RESOLVED) is the inverse — a *server-only* stdlib import
+> failing to be stripped FROM the client. `g-stdlib-runtime-chunk-dead-weight` (RESOLVED) is a chunk shipping when
+> unused. `g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence` (open HIGH) is the prune keeping a
+> chunk it should drop. None of the three covers "17 modules have no chunk at all."
+
+### g-stdlib-internal-reexport-noise-reaches-the-adopter — importing ONE stdlib function emits 23 warnings about scrml's own stdlib plumbing, and tells the adopter to go debug it — `NEW S368-bryan; MED; open`
+<!-- @gap id=g-stdlib-internal-reexport-noise-reaches-the-adopter sev=MED status=open locus=searched:compiler/src/api.js,compiler/src/route-inference.ts,stdlib/data/index.scrml — the W-STDLIB-SEED-FAILCLOSED emitter resolves stdlib re-exports at adopter-compile time and surfaces its own failures as adopter-facing warnings; the exact emit site is not yet traced prov=adopter:bryan-hit-this-writing-scrml-by-hand-S368 -->
+> **PA-REPRODUCED on `main` @ `772c0fb2`.** An **eight-line** program importing exactly one function
+> (`import { unique } from 'scrml:data'`) compiles with **24 diagnostics: 23 × `W-STDLIB-SEED-FAILCLOSED`**
+> plus one informational lint.
+>
+> Every one of the 23 is about **scrml's own stdlib internals** — e.g. *"server-only re-export `pick`
+> (re-exported from `./transform.scrml` in `…/stdlib/data/index.scrml`) could not be resolved to a terminal
+> `{kind, isAsync}`"* — for symbols the adopter never imported (`pick`, `omit`, `mapKeys`, `mapValues`,
+> `groupBy`, `indexBy`, …). The message closes with **"Check the re-export source module compiles cleanly,"**
+> which instructs the adopter to debug the compiler's own stdlib. They cannot, and it is not theirs.
+>
+> **Why this is filed separately from the DOA gap above:** that one is a correctness defect, this one is an
+> **authoring-experience** defect, and they are independent. Fixing the registry chunks would leave this noise
+> exactly as it is. A first-import experience of 23 warnings naming internal files is precisely the
+> "cry-wolf" shape §8 warns about — an adopter who learns to scroll past stdlib warnings will scroll past a real
+> one.
+>
+> **Deliberately NOT over-claimed.** Whether the underlying re-export resolution is genuinely broken is
+> **unverified** — `stdlib/data/transform.scrml` fails a standalone compile with `E-CTX-003`, but the PRIMER
+> states stdlib modules are import-only and not standalone-compile targets, so that failure may be an artifact of
+> the probe rather than a defect. **What IS established is the adopter-facing surface**: 23 warnings, none
+> actionable by the person compiling. Fix direction is the same either way — a stdlib-internal resolution failure
+> is a compiler-team signal and belongs behind a debug flag or a build-time self-check, not in an adopter's
+> terminal.

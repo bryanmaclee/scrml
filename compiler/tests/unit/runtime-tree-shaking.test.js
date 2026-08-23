@@ -267,7 +267,26 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 30 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 39 chunks", () => {
+    // 39 chunks post-S368 (stdlib-client-registry): 9 client-safe 'stdlib-<name>'
+    // chunks added — compiler, format, http, math, random, regex, router, test,
+    // time — taking the stdlib slice from 4 to 13.
+    //
+    // WHY THIS COUNT IS LOAD-BEARING, not bookkeeping: a CLIENT-side
+    // `import { x } from 'scrml:NAME'` lowers to `const { x } = _scrml_stdlib.NAME;`
+    // (a classic script cannot resolve a bare specifier), and `_scrml_stdlib.NAME`
+    // is defined by the 'stdlib-NAME' chunk and nothing else. Before S368 the
+    // other 17 of 21 shims had no chunk, so that destructure hit `undefined` and
+    // the page was DEAD ON ARRIVAL — `TypeError: Cannot destructure property 'x'
+    // from null or undefined value` at bundle load, with the compile exiting 0.
+    //
+    // Membership is DERIVED from the §12.2 Trigger 3 two-limb criterion
+    // (route-inference.ts:ESCALATION_SERVER_ONLY_MODULES): a module gets a client
+    // chunk iff it has NO host reach (Bun.*/process.*/node:*/bun) and handles NO
+    // credential. cron/fs/mcp/oauth/path/process/redis/store stay out by that
+    // criterion; a client-reachable import of one is refused at compile time by
+    // E-STDLIB-CLIENT-CHUNK-MISSING instead of dying at load.
+    //
     // 30 chunks post-CSP-seed round: the 'transitions' chunk RETIRED. Its only
     // content was the inline-<style> injection IIFE for the §38 keyframes, which
     // a browser refuses to apply under `headers="strict"`'s pinned
@@ -334,6 +353,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(30);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(39);
   });
 });
