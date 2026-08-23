@@ -6245,6 +6245,15 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-23 — S369 (peter): a dog-food arc — three silent-wrong bugs found by running fresh apps, fixed end-to-end
+
+After landing item-3 (below), the session turned to dog-fooding: writing fresh adopter apps (an order dashboard, a nested project board, a signup form), running them in happy-dom, and watching for silent-wrong output. It paid out — three silent-wrong bugs, each a pattern adopters write constantly, none of which were in the gap ledger. The recurring lesson: dog-fooding beats mining the ledger, because these bugs are invisible until an app exercises them.
+
+- **#670 — a value-form `${ if … }` interpolation inside `<each>` rendered empty.** The each-interp emitter extracted its value only from a bare-expr; a §17.6 value-form control-flow node fell to the "empty interpolation skipped" path. Now lowered to a live per-item ternary through the shared each-scope path.
+- **#672 — `${ if valid { "" } else { "error" } }` (an empty-string branch) rendered nothing.** The logic-body parser's blank-token skip was swallowing an empty-string `""` literal as if it were whitespace, so the branch parsed empty and the whole `if` collapsed to a discarded statement. Now STRING tokens are excluded from the skip (both parser loops). An extremely common pattern — conditional text where one branch is empty.
+- **#673 — a value-form `if` whose condition is a fn-call didn't update reactively.** The effect-vs-static decision string-scanned the lowered value for a reactive read — blind to a cell read hidden inside the called fn — so `${ if isOn() … }` fell to a static one-shot while `${ if @c … }` updated. Now a value-form is reactive when its control-flow AST contains a call node.
+- **Filed (turnkey, not fixed):** the value-form-match/markup-branch-in-each residuals, a `W-DEAD-FUNCTION` false-positive on `<each in=fn(...)>`, the library-mode multi-scrutinee mis-parse, and more — each with repro, root, and fix direction. The adversarial S239 pass earned its keep repeatedly (catching a second unpatched parser loop on #672; redirecting a coarse regex to an AST scan on #673). Note: the local full-suite count is unreliable on this Windows checkout (a temp-dir-lock flake in the server-fn/session/csrf tests, identical on the clean base) — the Linux cloud gate is the authority and passed clean on every PR.
+
 ### 2026-08-23 — S369 (peter): library-mode fn match object-arm returns its value, and a mis-fired review's "regression" proved false
 
 Two PRs landed and three new gaps were filed. The compiler fix closes a silent-wrong codegen hole; the session's sharpest lesson was catching a review that reviewed the wrong commit and a "regression" that wasn't one.
