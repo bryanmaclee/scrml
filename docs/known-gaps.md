@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 43 |
-| MED | 147 |
+| MED | 149 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9195,3 +9195,21 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > ⚑ **Also recorded: my first measurement of this read `exit=0` for ALL THREE rows**, because I piped the command into `tail` and read `$?` — which is `tail`'s status, not the gate's. That is the S354 miss #4 (*"a success signal that cannot fail"*) recurring in the very act of testing a gate for hollowness. Measure exit codes directly.
 >
 > **Fix direction:** refuse when the live scope yields zero entries while the file has content — the same degenerate-measurement guard the `instrument-integrity` branch already applies to `facts.ts`, `state.ts`, `snippet-gate.js`, `benchmark-perf-baseline.ts` and `perf-regression-check.ts`. Reuse that idiom rather than minting a sixth. Routed into the instrument-integrity fix round (it is a blocking CI gate, so it is urgent).
+
+### g-spec-silent-on-which-requests-ratelimit-counts — §39.2.4/§40 never state which requests `ratelimit=` counts, and that silence is what let a HIGH ship: `handle()` has an explicit "including statically-served assets" carve-in, `ratelimit=` has no scoping sentence at all — `NEW S365-bryan (surfaced by the F1 fix round; the agent corrected the PA's governing-sentence citation and was right); MED; open`
+<!-- @gap id=g-spec-silent-on-which-requests-ratelimit-counts sev=MED status=open locus=compiler/SPEC.md:22648(§40.3.4 gives handle() the carve-in)+searched:§39.2.4,§40.2,§40.3.3,§4.15-E-PAGE-INVALID-ATTR-no-sentence-scopes-the-limiters-request-set prov=rationale:S365-bryan-the-PA-cited-SPEC-1080-per-route-only-and-E-PAGE-INVALID-ATTRs-per-route-attribute-set-as-the-governing-sentence-for-which-REQUESTS-are-counted-the-dispatched-agent-checked-it-and-those-sentences-are-a-DECLARATION-SCOPE-taxonomy-which-attributes-may-sit-on-page-vs-program-not-a-request-counting-rule-PA-VERIFIED-the-correction-by-reading-both-sites-in-full -->
+> **⚑ S365-bryan: the PA's own citation was over-read, and the correction is the finding.**
+>
+> I briefed the F1 ratelimit fix as a **conformance restoration** on the strength of `SPEC.md:1080` (*"`ratelimit=` (per-route only)"*) and the `E-PAGE-INVALID-ATTR` row (*"the per-route attribute set `{ db=, auth=, csrf=, ratelimit=, keep-alive }`"*). The dispatched agent checked the citation and pushed back. **It is right.** Read in full, that row continues *"App-wide attributes like `title=`, `description=`, `version=`, `cors=`, `log=`, `headers=` belong on `<program>` … not on a per-route container"* — it is a **declaration-scope taxonomy** (where an attribute may be written), not a statement about which requests a limiter counts.
+>
+> **The genuinely decisive ground is different and stronger:** §40.3.4 (`SPEC.md:22648`) gives `handle()` an explicit carve-in — *"applies to all HTTP requests handled by the compiled server — **including statically-served assets** and the `/_scrml_ws/` upgrade routes"* — and **`ratelimit=` is given no such sentence anywhere.** Combined with the fact that `main` counted route traffic only, the fix is a **regression restoration**, which needs no ruling either way. Rule 4 lands in the same place; the route to it was wrong.
+>
+> **The gap:** the normative text is silent on the exact question that produced a HIGH defect. §40.2/§40.3.3 are *ordering* statements (CORS → rate limit → CSRF → route handler); nothing says which requests enter that pipeline for counting purposes. **Fix direction:** one sentence in §39.2.4 stating the limiter's request set explicitly, mirroring §40.3.4's carve-in so the asymmetry between `handle()` and `ratelimit=` is deliberate on the page rather than inferred from behaviour.
+
+### g-happydom-global-drops-cookie-header-in-full-suite — registering happy-dom globally replaces `Headers` with one that drops the forbidden `Cookie` header, so an emitted server's double-submit CSRF check answers 403 in a full-suite run and 200 standalone — `NEW S365-bryan (found by the F1 fix round while drafting an executing regression test); MED; open`
+<!-- @gap id=g-happydom-global-drops-cookie-header-in-full-suite sev=MED status=open locus=compiler/tests/browser(the GlobalRegistrator.register() sites — registered globally and never unregistered, so the global Headers leaks into every later test file in the same run) prov=rationale:S365-bryan-F1-fix-round-probed-directly-native-Request-Cookie-a-eq-b-after-GlobalRegistrator-register-Cookie-null-while-X-CSRF-Token-survives-cost-3-phantom-failures-in-a-first-test-draft-that-vanished-standalone -->
+> **⚑ S365-bryan: PROBED DIRECTLY by the F1 fix round, not inferred.** A native `Request` returns `Cookie: "a=b"`; after `GlobalRegistrator.register()` the same read returns `null`, while `X-CSRF-Token` survives — happy-dom's `Headers` enforces the fetch-spec forbidden-header list that a server-side runtime must not.
+>
+> **Consequence:** earlier browser tests register happy-dom globally and never unregister, so any later test in the same run that drives an emitted server with cookie auth sees no cookie. The double-submit CSRF check then answers **403 where a standalone run answers 200**. It cost three phantom failures in a first test draft, which vanished when run alone.
+>
+> **Same class as the known happy-dom global-state leak** ([[g-browser-tier-happydom-global-state-leak]] family) — an environmental leak, not a regression, and the F1 tests were re-pinned onto the limiter's own signal (reached-consistently vs 429) rather than the incidental CSRF status. Filed because it is a **live trap for the next author** who writes an executing server test with cookie auth and reads the failure as a product bug.
