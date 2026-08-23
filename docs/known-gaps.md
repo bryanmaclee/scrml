@@ -9393,3 +9393,36 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > synchronous-reset design. **The gap is that SPEC §6.8 does not state it.** Fix direction is a normative
 > sentence in §6.8 describing settle timing for a server-fn-backed init/default — NOT a code change. Making
 > `reset` async would change every call site, which is the very thing this fix exists to avoid.
+
+### g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier — #664 fixed the matching arm and left the `else` arm emitting `return x;`, which is a SILENT wrong value whenever the key name is in scope — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(emitIifeBlockArmBody — the object-literal branch #664 fixed handles the matching arm only; the else/wildcard arm takes a different path) prov=review:docs/pr-reviews.md-#664 -->
+> **Found by the S313 review floor, PA-reproduced by EXECUTING the emitted library module.** Not a regression
+> from #664 — a **partial fix**, established by compiling the same fixture at #664's merge parent.
+>
+> ```scrml
+> export fn pick(n: number, x: number) {
+>     return match n {
+>         1 :> { x: 1 }
+>         else :> { x: 0 }
+>     }
+> }
+> ```
+>
+> | | matching arm | `else` arm |
+> |---|---|---|
+> | **pre-#664** (`5dbc0727`) | `{ x : 1 }` — labeled statement, falls through → `undefined` | `else { return x; }` |
+> | **post-#664** (on `main`) | `return { x : 1 };` ✅ **fixed** | `else { return x; }` ❌ **unchanged** |
+>
+> The `else` arm's object literal `{ x: 0 }` lowers to **`return x;`** — the bare identifier, not the object.
+>
+> **⚑ It is SILENT when the key name is in scope.** With `x` as a parameter the emitted module compiles at
+> **exit 0** and, executed: `pick(1, 77)` → `{"x":1}` (correct) while **`pick(9, 77)` → `77`**, where `{"x":0}`
+> was written. A caller gets a plausible value of the wrong type with no diagnostic anywhere.
+>
+> When the key name is NOT in scope it fails loudly (`E-SCOPE-001: Undeclared identifier \`x\``, exit 1), which
+> is why the shape was survivable — the loud half masked the silent half.
+>
+> **This is the verify-the-CLASS-not-the-instance lesson, in the PR that cited it.** #664's own description
+> says *"bug-class swept"* and its merge-blocker test pins the matching arm. The sibling arm, three lines away
+> in the same emitted IIFE, was never compiled. A fix round should re-derive which arm paths reach
+> `emitIifeBlockArmBody` and cover every one, rather than the arm the reproducer happened to use.
