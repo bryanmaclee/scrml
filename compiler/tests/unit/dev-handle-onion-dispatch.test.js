@@ -20,6 +20,8 @@
  *   §3  end-to-end through buildServeConfig().fetch on a REAL compiled module:
  *       intercepted custom path / static file / unmatched 404 / dev-infra
  *   §4  PRE runs exactly once per request (observable counter, not source grep)
+ *   §6  a SECOND application's onion is E-MW-007 (§40.8) — dev refuses it the
+ *       same way `scrml build` does, and mounts neither
  */
 
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
@@ -34,6 +36,7 @@ import {
   loadServerRoutes,
   buildServeConfig,
   noteCompileResult,
+  getCompileFailure,
   devDispatch,
 } from "../../src/commands/dev.js";
 import { compileScrml } from "../../src/api.js";
@@ -245,5 +248,78 @@ describe("§5 devDispatch always returns a Response", () => {
     );
     expect(res).toBeInstanceOf(Response);
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6 — one application, one onion. `scrml dev` refuses a second the same way
+//      `scrml build` does (E-MW-007), through the compile-failure channel.
+// ---------------------------------------------------------------------------
+
+describe("§6 a second application's onion is E-MW-007 in dev too", () => {
+  const TWO = join(tmpdir(), `scrml-dev-two-apps-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  const APP = (tag) => `<program log="structured">
+
+  function handle(request, resolve) {
+    globalThis.__scrmlOnionSeen = (globalThis.__scrmlOnionSeen ?? "") + "${tag};"
+    const response = resolve(request)
+    response.headers.set("X-${tag}", "1")
+    return response
+  }
+
+  <div><h1>${tag}</h1></div>
+
+</program>
+`;
+
+  afterAll(() => {
+    if (existsSync(TWO)) rmSync(TWO, { recursive: true, force: true });
+    delete globalThis.__scrmlOnionSeen;
+  });
+
+  test("EXECUTING: two <program> modules each declaring handle() mount ZERO onions and serve the diagnostic", async () => {
+    mkdirSync(TWO, { recursive: true });
+    const alpha = join(TWO, "alpha.scrml");
+    const beta = join(TWO, "beta.scrml");
+    writeFileSync(alpha, APP("Alpha"));
+    writeFileSync(beta, APP("Beta"));
+    const result = compileScrml({ inputFiles: [alpha, beta], outputDir: TWO, write: true });
+    expect(result.errors ?? []).toEqual([]);
+
+    globalThis.__scrmlOnionSeen = "";
+    await loadServerRoutes(TWO);
+
+    // Neither is mounted — the host does not guess, and it does not run both.
+    expect(getRegisteredOnions()).toEqual([]);
+
+    // The failure is surfaced through the SAME channel a compile error uses, so
+    // `scrml dev` serves the real diagnostic at every request instead of quietly
+    // dropping the pipeline (parity with `scrml build`, which fails the build).
+    const failure = getCompileFailure();
+    expect(failure).not.toBeNull();
+    expect(failure.errors[0].code).toBe("E-MW-007");
+    expect(failure.errors[0].message).toContain("alpha.scrml");
+    expect(failure.errors[0].message).toContain("beta.scrml");
+
+    const { fetch } = buildServeConfig({ port: 0, inputFiles: [alpha] }, TWO);
+    const res = await fetch(new Request("http://localhost/alpha.html"), undefined);
+    // Neither handle() ran — pre-fix BOTH did, on BOTH documents.
+    expect(globalThis.__scrmlOnionSeen).toBe("");
+    expect(res.headers.get("X-Alpha")).toBeNull();
+    expect(res.headers.get("X-Beta")).toBeNull();
+    expect(await res.text()).toContain("E-MW-007");
+
+    // Recovery: with the second application removed the single onion mounts and
+    // serving resumes — the state is not sticky.
+    rmSync(join(TWO, "beta.server.js"), { force: true });
+    await loadServerRoutes(TWO);
+    noteCompileResult({ errors: [] });
+    expect(getRegisteredOnions().length).toBe(1);
+
+    const { fetch: fetch2 } = buildServeConfig({ port: 0, inputFiles: [alpha] }, TWO);
+    const res2 = await fetch2(new Request("http://localhost/alpha.html"), undefined);
+    expect(res2.headers.get("X-Alpha")).toBe("1");
+    expect(globalThis.__scrmlOnionSeen).toBe("Alpha;");
   });
 });

@@ -19,6 +19,7 @@ import { resolve, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
+import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -199,6 +200,14 @@ export function discoverServerRoutes(outputDir) {
     const routeNames = [];
     const wsHandlerNames = [];
     const middlewareNames = [];
+    // §40.3/§40.8 — the `.scrml` source that DECLARES this module's onion.
+    // emit-server.ts stamps it next to the mount point so the entry generator can
+    // NAME the competing sources when a build presents more than one application.
+    let middlewareDeclaredIn = null;
+    const declaredInMatch = /export\s+const\s+_scrml_mw_declared_in\s*=\s*("(?:[^"\\]|\\.)*")/.exec(source);
+    if (declaredInMatch) {
+      try { middlewareDeclaredIn = JSON.parse(declaredInMatch[1]); } catch { middlewareDeclaredIn = null; }
+    }
     // `_scrml_*` covers routes/session/endpoint/sse/cors/ws; `__ri_route_*` are
     // the inferred server-function RPC routes (a `?{}`/host-touching function
     // escalated to a route) — they do NOT carry the `_scrml_` prefix, so without
@@ -215,6 +224,8 @@ export function discoverServerRoutes(outputDir) {
         // `{ path, method, handler }` route: pushing it into `routes` would put a
         // bare function in the match loop and lose the onion entirely.
         middlewareNames.push(name);
+      } else if (name === "_scrml_mw_declared_in") {
+        // Provenance for the onion above, not a route. Captured separately.
       } else {
         routeNames.push(name);
       }
@@ -223,7 +234,7 @@ export function discoverServerRoutes(outputDir) {
     if (routeNames.length > 0 || wsHandlerNames.length > 0 || middlewareNames.length > 0) {
       // `filename` carries the relative path under outputDir so the generated
       // `_server.js` can import via `./${filename}` regardless of nesting.
-      result.push({ filename: relPath, routeNames, wsHandlerNames, middlewareNames });
+      result.push({ filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn });
     }
   }
 
@@ -270,18 +281,25 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   const wsModules = serverModules.filter(m => (m.wsHandlerNames ?? []).length > 0);
   const hasWs = wsModules.length > 0;
 
-  // §40.3 — modules that export the `handle()` onion mount point. Each is
-  // imported under a per-module alias (they all export the SAME name) and
-  // composed around top-level dispatch in module order: the FIRST module's
-  // onion is outermost, so its handle() PRE runs first and its POST last.
-  const onionAliasFor = new Map();
-  for (const mod of serverModules) {
-    if ((mod.middlewareNames ?? []).length > 0) {
-      onionAliasFor.set(mod, `_scrml_mw_pipeline_${onionAliasFor.size}`);
-    }
+  // §40.3/§40.8 — the ONE `handle()` onion this server mounts. The onion is
+  // application-scope (§40.3.4: it applies to every HTTP request the compiled
+  // server handles; §40.8: the <program> middleware attributes are app-scope and
+  // the top-level <program> is declared exactly once, in the entry file), so
+  // exactly one onion runs per request. `selectRequestOnion` reports E-MW-007
+  // rather than composing several by module order — which is filename-sorted, so
+  // a RENAME would silently decide which handle() wins a contested path.
+  const { onion: onionModule, error: onionError } = selectRequestOnion(serverModules);
+  if (onionError) {
+    const err = new Error(formatOnionConflict(onionError));
+    err.scrmlCode = onionError.code;
+    err.scrmlSources = onionError.sources;
+    throw err;
   }
-  const onionAliases = [...onionAliasFor.values()];
-  const hasOnion = onionAliases.length > 0;
+  const onionAliasFor = new Map();
+  // The alias keeps the emitted import readable and unambiguous even though the
+  // export name is the same in every module.
+  if (onionModule) onionAliasFor.set(onionModule, "_scrml_mw_pipeline_0");
+  const hasOnion = onionModule != null;
 
   lines.push("// scrml production server — compiler-generated");
   lines.push("// DO NOT EDIT. Regenerate with: scrml build");
@@ -322,10 +340,9 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
       // Drop names already imported by an earlier module
       const specifiers = allNames.filter(n => !seenNames.has(n));
       for (const n of specifiers) seenNames.add(n);
-      // §40.3 — every module that defines `handle()` (or any `<program>`
-      // middleware attribute) exports `_scrml_mw_pipeline` under the SAME name,
-      // so each is imported under a per-module ALIAS. De-duplicating by name
-      // here would silently drop every onion after the first.
+      // §40.3/§40.8 — the ONE application onion. It is imported under an ALIAS
+      // rather than its bare export name so the mount site reads unambiguously
+      // (every onion-hosting module exports the same `_scrml_mw_pipeline`).
       const alias = onionAliasFor.get(mod);
       if (alias) specifiers.push(`_scrml_mw_pipeline as ${alias}`);
       if (specifiers.length > 0) {
@@ -498,15 +515,12 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     for (const l of dispatchBody) lines.push(l);
     lines.push("}");
     lines.push("");
-    lines.push("// §40.3 — handle() PRE wraps ALL top-level dispatch. Composed in module");
-    lines.push("// order: the first module's onion is outermost.");
-    lines.push(`const _scrml_onions = [${onionAliases.join(", ")}];`);
+    lines.push("// §40.3/§40.8 — handle() PRE wraps ALL top-level dispatch. The onion is");
+    lines.push("// APPLICATION-scope, so there is exactly ONE and it runs once per request.");
+    lines.push(`// Declared in ${onionModule.middlewareDeclaredIn || onionModule.filename}.`);
     lines.push("function _scrml_onion_dispatch(req, server) {");
-    lines.push("  let next = (request) => _scrml_dispatch(request, server);");
-    lines.push("  for (let i = _scrml_onions.length - 1; i >= 0; i--) {");
-    lines.push("    next = _scrml_onions[i](next);");
-    lines.push("  }");
-    lines.push("  return next(req);");
+    lines.push("  const downstream = (request) => _scrml_dispatch(request, server);");
+    lines.push("  return _scrml_mw_pipeline_0(downstream)(req);");
     lines.push("}");
     lines.push("");
   }
@@ -885,7 +899,22 @@ export async function runBuild(args) {
     : null;
   // adopter-#82 FIX 1 — thread the exact content-addressed artifact set so the
   // emitted server serves `immutable` by membership, not by filename shape.
-  const serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
+  let serverEntry;
+  try {
+    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
+  } catch (err) {
+    // §40.3/§40.8 E-MW-007 — more than one application declared a request
+    // pipeline in this build. Report it as a build failure naming every
+    // competing source, NOT a stack trace: the server cannot pick one, and
+    // picking by filename order is the defect this diagnostic exists to stop.
+    if (err && err.scrmlCode) {
+      console.error(`\nBuild failed with 1 error(s):`);
+      console.error(`  ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
   const serverEntryPath = join(resolvedOutputDir, "_server.js");
   writeFileSync(serverEntryPath, serverEntry);
   if (mcpOpts) {

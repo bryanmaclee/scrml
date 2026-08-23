@@ -20,6 +20,7 @@ import { resolve, dirname, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
+import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -175,8 +176,9 @@ let registeredRoutes = [];
 /** @type {{ open: Function, message: Function, close: Function } | null} */
 let registeredWsHandlers = null;
 
-// §40.3 — the `handle()` onion(s) exported by the compiled modules
-// (`_scrml_mw_pipeline`), rebuilt on every recompile alongside the routes.
+// §40.3/§40.8 — THE `handle()` onion, exported by the one compiled module that
+// declares it (`_scrml_mw_pipeline`), rebuilt on every recompile alongside the
+// routes.
 //
 // `handle()` is a literal onion: SPEC §40.3.4 says it "applies to all HTTP
 // requests handled by the compiled server — including statically-served assets".
@@ -184,11 +186,21 @@ let registeredWsHandlers = null;
 // it mounts the same onion the built server does — otherwise a custom-path
 // interception would work under `scrml build` and 404 under `scrml dev`.
 //
-// Composed in load order: the first module's onion is OUTERMOST.
+// EXACTLY ONE runs per request. The onion is application-scope (§40.8 makes the
+// <program> middleware attributes app-scope and declares the top-level <program>
+// once per application, in the entry file), so composing several by module load
+// order — which is filename-sorted — would let a RENAME decide which handle()
+// wins a contested path, and would run every module's PRE on every other
+// module's page. More than one candidate is E-MW-007, surfaced through the same
+// compile-failure channel `scrml build` fails on (dev/prod parity).
 /** @type {Array<(downstream: Function) => Function>} */
 let registeredOnions = [];
 
-/** Test/introspection accessor for the currently mounted §40.3 onions. */
+/**
+ * Test/introspection accessor for the currently mounted §40.3 onion. Still an
+ * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
+ * null check; the one-per-server invariant is enforced in `loadServerRoutes`.
+ */
 export function getRegisteredOnions() {
   return registeredOnions;
 }
@@ -216,11 +228,9 @@ export function getRegisteredRoutes() {
  */
 export function runThroughOnions(req, downstream) {
   if (registeredOnions.length === 0) return downstream(req);
-  let next = downstream;
-  for (let i = registeredOnions.length - 1; i >= 0; i--) {
-    next = registeredOnions[i](next);
-  }
-  return next(req);
+  // §40.8 — one application, one onion. `loadServerRoutes` never mounts more
+  // than one, so this is a single wrap, not a fold.
+  return registeredOnions[0](downstream)(req);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +308,10 @@ export async function loadServerRoutes(outputDir) {
 
   const cacheBuster = Date.now();
   const allWsHandlers = [];
+  // §40.3/§40.8 — every module that hosts a request onion, with the `.scrml`
+  // source that DECLARES it (emit-server stamps `_scrml_mw_declared_in`). One is
+  // mounted; more than one is E-MW-007, reported against every competing source.
+  const onionCandidates = [];
 
   for (const { absPath, relPath } of serverFiles) {
     // Absolute file URL with cache-buster so Bun re-evaluates on each reload.
@@ -317,7 +331,14 @@ export async function loadServerRoutes(outputDir) {
       // §40.3 — the handle() onion mount point. A FUNCTION, so it would fall
       // through the object-shape guard below and never be seen; collect it first.
       if (exportName === "_scrml_mw_pipeline" && typeof value === "function") {
-        registeredOnions.push(value);
+        onionCandidates.push({
+          filename: relPath,
+          middlewareNames: [exportName],
+          middlewareDeclaredIn: typeof mod._scrml_mw_declared_in === "string"
+            ? mod._scrml_mw_declared_in
+            : null,
+          pipeline: value,
+        });
         continue;
       }
 
@@ -338,6 +359,28 @@ export async function loadServerRoutes(outputDir) {
       ) {
         registeredRoutes.push(value);
       }
+    }
+  }
+
+  // §40.3/§40.8 — mount THE application onion. `scrml build` fails on a second
+  // one; dev surfaces the identical diagnostic through the compile-failure
+  // channel (which serves the real error at every request) instead of silently
+  // guessing — a dev/prod split here is exactly what the onion work set out to
+  // remove.
+  {
+    const { onion, error } = selectRequestOnion(onionCandidates);
+    if (error) {
+      const diag = {
+        stage: "BUILD",
+        filePath: error.sources[0],
+        code: error.code,
+        message: error.message,
+        severity: "error",
+      };
+      noteCompileResult({ errors: [diag], warnings: [] });
+      console.error(`[dev] ${formatOnionConflict(error)}`);
+    } else if (onion) {
+      registeredOnions = [onion.pipeline];
     }
   }
 

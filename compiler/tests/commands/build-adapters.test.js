@@ -449,7 +449,9 @@ describe("§40.3 handle() onion in the production server entry", () => {
       'import { _scrml_route_home, _scrml_mw_pipeline as _scrml_mw_pipeline_0 } from "./index.server.js";',
     );
     expect(content).toContain("async function _scrml_dispatch(req, server) {");
-    expect(content).toContain("const _scrml_onions = [_scrml_mw_pipeline_0];");
+    // §40.8 — ONE application onion, wrapped once. Not a fold over a list.
+    expect(content).toContain("return _scrml_mw_pipeline_0(downstream)(req);");
+    expect(content).not.toContain("_scrml_onions");
     expect(content).toContain("return _scrml_onion_dispatch(req, server);");
     // The FULL remainder — route match, static file, AND the 404 — is downstream
     // of the onion, so resolve() returns a Response on every path.
@@ -462,15 +464,53 @@ describe("§40.3 handle() onion in the production server entry", () => {
     expect(fetchBody).not.toContain("for (const route of routes) {");
   });
 
-  test("each module's onion is imported under its OWN alias (same export name)", () => {
+  test("TWO applications in one build is E-MW-007 — never a filename-ordered composition", () => {
+    // §40.3.4 makes the onion apply to EVERY request the compiled server
+    // handles, and §40.8 declares the top-level <program> exactly once per
+    // application. Two onion-hosting modules is two applications in one server:
+    // the server cannot know which one governs a request that belongs to
+    // neither. Composing them ran every module's handle() PRE on every other
+    // module's page, and the composition order was the module list — which is
+    // FILENAME-sorted, so a rename silently changed which handle() won.
+    const twoApps = [
+      { filename: "a.server.js", routeNames: ["_scrml_route_a"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "a.scrml" },
+      { filename: "b.server.js", routeNames: ["_scrml_route_b"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "b.scrml" },
+    ];
+    let err = null;
+    try { generateServerEntry(twoApps); } catch (e) { err = e; }
+    expect(err).not.toBeNull();
+    expect(err.scrmlCode).toBe("E-MW-007");
+    // The diagnostic NAMES both competing sources — the author does not have to
+    // guess which file the compiler was looking at.
+    expect(err.scrmlSources).toEqual(["a.scrml", "b.scrml"]);
+    expect(err.message).toContain("a.scrml");
+    expect(err.message).toContain("b.scrml");
+
+    // RENAME INVARIANCE: swapping the order (as a rename would) changes the
+    // NAMES reported and nothing else. Pre-fix this flipped which handle() was
+    // outermost, silently.
+    const renamed = [
+      { filename: "aaa.server.js", routeNames: [], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "aaa.scrml" },
+      { filename: "a.server.js", routeNames: ["_scrml_route_a"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "a.scrml" },
+    ];
+    let err2 = null;
+    try { generateServerEntry(renamed); } catch (e) { err2 = e; }
+    expect(err2).not.toBeNull();
+    expect(err2.scrmlCode).toBe("E-MW-007");
+  });
+
+  test("the ONE application onion is imported under an alias and mounted once", () => {
     const content = generateServerEntry([
-      { filename: "a.server.js", routeNames: ["_scrml_route_a"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"] },
-      { filename: "b.server.js", routeNames: ["_scrml_route_b"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"] },
+      { filename: "a.server.js", routeNames: ["_scrml_route_a"], wsHandlerNames: [] },
+      { filename: "b.server.js", routeNames: ["_scrml_route_b"], wsHandlerNames: [], middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "b.scrml" },
     ]);
-    expect(content).toContain('_scrml_mw_pipeline as _scrml_mw_pipeline_0 } from "./a.server.js";');
-    expect(content).toContain('_scrml_mw_pipeline as _scrml_mw_pipeline_1 } from "./b.server.js";');
-    // Composed in module order — the first module's onion is outermost.
-    expect(content).toContain("const _scrml_onions = [_scrml_mw_pipeline_0, _scrml_mw_pipeline_1];");
+    // The alias is stable regardless of which module hosts the onion.
+    expect(content).toContain('_scrml_mw_pipeline as _scrml_mw_pipeline_0 } from "./b.server.js";');
+    expect(content).not.toContain('from "./a.server.js";\nimport { _scrml_mw_pipeline');
+    // The declaring SOURCE is named in the emitted server, so a reader of the
+    // artifact can see which .scrml owns the pipeline.
+    expect(content).toContain("// Declared in b.scrml.");
+    expect(content).toContain("return _scrml_mw_pipeline_0(downstream)(req);");
   });
 
   test("a WebSocket upgrade BYPASSES the onion (§40.3.4)", () => {

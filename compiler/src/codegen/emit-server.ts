@@ -3187,6 +3187,23 @@ export function generateServerJs(
     lines.push("// `scrml build` / `scrml dev` call this with their remainder-of-dispatch");
     lines.push("// (route match → static file → 404); handle() PRE then sees EVERY request.");
     lines.push("export const _scrml_mw_pipeline = _scrml_mw_wrap;");
+    // §40.3/§40.8 — the SOURCE that declares this onion. The request onion is
+    // APPLICATION-scope, not per-module: §40.3.4 says `handle()` "applies to all
+    // HTTP requests handled by the compiled server — including statically-served
+    // assets", and §40.8 makes the `<program>` middleware attributes app-scope and
+    // declares the top-level `<program>` exactly ONCE per application, in the
+    // entry file. So a compiled server mounts exactly ONE onion, and the source
+    // that declares it is the source an author reads the precedence off.
+    //
+    // Composing several by module order would make a RENAME decide which
+    // `handle()` wins a contested path (the module list is filename-sorted), and
+    // would run every module's PRE on every other module's page. Both hosts
+    // therefore mount one onion and name THIS file when the declaration is
+    // contested (E-MW-007).
+    lines.push("// §40.3/§40.8 — the source that DECLARES this onion. The onion is");
+    lines.push("// application-scope, so a compiled server mounts exactly one; the host");
+    lines.push("// names this file if a build presents more than one (E-MW-007).");
+    lines.push(`export const _scrml_mw_declared_in = ${JSON.stringify(_pathBasename(filePath))};`);
     lines.push("");
   }
 
