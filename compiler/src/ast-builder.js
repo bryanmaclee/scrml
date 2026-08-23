@@ -6049,7 +6049,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Skip comments
       if (tok.kind === "COMMENT") { consume(); continue; }
       // Skip whitespace tokens
-      if (tok.text.trim() === "" && tok.kind !== "EOF") { consume(); continue; }
+      // g-value-form-if-empty-string-branch-renders-nothing — skip BLANK
+      // (whitespace/newline) tokens, but NOT an empty-string STRING literal `""`,
+      // whose `.text` is empty content yet is a MEANINGFUL expression statement.
+      // Skipping it dropped `{ "" }` to an empty block → a value-form-`if` branch
+      // that then failed recognition and rendered nothing (SILENT-WRONG).
+      if (tok.text.trim() === "" && tok.kind !== "EOF" && tok.kind !== "STRING") { consume(); continue; }
 
       // §18.19 — an optional leading `|` arm separator before a whole-product
       // wildcard (`| _` / `| else`) or a product arm (`| ( p, p )`). The
@@ -11006,8 +11011,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Skip bare semicolons
     if (tok.kind === "PUNCT" && tok.text === ";") { consume(); continue; }
 
-    // Skip whitespace tokens (shouldn't appear — tokenizer strips them — but guard anyway)
-    if (tok.text.trim() === "" && tok.kind !== "EOF") { consume(); continue; }
+    // Skip whitespace tokens (shouldn't appear — tokenizer strips them — but guard anyway).
+    // g-value-form-if-empty-string-branch-renders-nothing — as with the nested-body
+    // loop above, do NOT skip an empty-string STRING literal `""` (blank `.text`,
+    // yet a MEANINGFUL expression statement); the two guards are patched in lockstep.
+    if (tok.text.trim() === "" && tok.kind !== "EOF" && tok.kind !== "STRING") { consume(); continue; }
 
     // GUARDED-EXPR (outer loop): error-effect BLOCK_REF after a node wraps previous node
     // If the current token is a BLOCK_REF to error-effect AND we have a previous node,
