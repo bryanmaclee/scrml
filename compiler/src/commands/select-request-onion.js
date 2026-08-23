@@ -7,11 +7,19 @@
  *   - §40.3.4 — `handle()` "applies to all HTTP requests handled by the compiled
  *     server — including statically-served assets". It is one onion around ALL
  *     dispatch, not one per module.
- *   - §40.8 — the `<program>` middleware attributes (`cors=` / `log=` /
- *     `headers=` / `ratelimit=` / `idempotency-*` / `channel-reconnect=`) are
- *     "app-scope (not per-route)", and an application "SHALL declare its
- *     top-level `<program>` element exactly ONCE, in the application's entry
- *     file".
+ *   - §40.8 — the `<program>` middleware attributes are "app-scope (not
+ *     per-route)", and an application "SHALL declare its top-level `<program>`
+ *     element exactly ONCE, in the application's entry file".
+ *
+ * WHAT COUNTS AS DECLARING ONE. A module hosts an onion when it declares a
+ * request-pipeline STAGE — `cors=`, `log=` (not `"off"`), `ratelimit=`,
+ * `headers="strict"` — or a `handle()`. It is NOT enough for the `<program>` to
+ * carry some attribute: `batch-in-list-cap=` (§8.10.6 SQL batching),
+ * `idempotency-store=` / `idempotency-ttl=` (§19.9.6), `cors-max-age=` (inert
+ * without `cors=`) and `channel-reconnect=` (§38.3.1 WebSocket) all share the
+ * same config bag and none of them emits an onion stage. The gate lives in
+ * emit-server (`_scrml_hasMW`); this module never sees a non-pipeline module
+ * because such a module exports no `_scrml_mw_pipeline`.
  *
  * So a compiled server mounts EXACTLY ONE onion, and it runs exactly once per
  * request. In the canonical v0.3 shape the question never arises: the entry file
@@ -66,8 +74,8 @@ export function selectRequestOnion(serverModules) {
       message:
         `this build declares the request pipeline in ${sources.length} different sources ` +
         `(${sources.join(", ")}), but a compiled server has exactly ONE request onion.\n` +
-        `  \`handle()\` and the <program> middleware attributes (cors= / log= / headers= / ` +
-        `ratelimit= / idempotency-* / channel-reconnect=) are APPLICATION-scope: §40.3.4 applies ` +
+        `  \`handle()\` and the <program> request-pipeline attributes (cors= / log= / ` +
+        `ratelimit= / headers="strict") are APPLICATION-scope: §40.3.4 applies ` +
         `the onion to every HTTP request the server handles, and §40.8 declares the top-level ` +
         `<program> exactly once per application, in the entry file.\n` +
         `  Two of them means two applications emitted into one server, and the server cannot know ` +

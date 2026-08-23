@@ -1217,6 +1217,79 @@ describe("MW-WRAP-002: dispatcher carries _scrml_mw_wrap when middleware present
 });
 
 // ---------------------------------------------------------------------------
+// MW-WRAP-003: `middlewareConfig != null` is NOT the request-pipeline predicate
+//
+// `middlewareConfig` is the raw `<program>` attribute bag and it is WIDER than
+// the request pipeline: `batch-in-list-cap=` (§8.10.6 SQL batching),
+// `idempotency-store=` / `idempotency-ttl=` (§19.9.6), `cors-max-age=` (inert
+// without `cors=`) and `channel-reconnect=` (§38.3.1 WebSocket) all land in the
+// same object and NONE of them emits an onion stage.
+//
+// Gating the onion on `middlewareConfig != null` made a file whose only
+// `<program>` attribute is `batch-in-list-cap="999"` export `_scrml_mw_pipeline`
+// — an onion with no stages and no `handle()`. Two such files in one build were
+// then rejected as E-MW-007 "declares the request pipeline in 2 different
+// sources", listing attributes neither file has.
+// ---------------------------------------------------------------------------
+
+describe("MW-WRAP-003: a non-pipeline <program> attribute emits NO onion", () => {
+  const nonPipelineConfigs = [
+    ["batch-in-list-cap= only (§8.10.6)", { cors: null, log: null, ratelimit: null, headers: null, batchInListCap: "999" }],
+    ["cors-max-age= without cors= (inert)", { cors: null, log: null, ratelimit: null, headers: null, corsMaxAge: "3600" }],
+    ["idempotency-store= only (§19.9.6)", { cors: null, log: null, ratelimit: null, headers: null, idempotencyStore: "sqlite" }],
+    ["channel-reconnect= only (§38.3.1 WS)", { cors: null, log: null, ratelimit: null, headers: null, channelReconnect: "5s" }],
+    ['log="off" declares no stage', { cors: null, log: "off", ratelimit: null, headers: null }],
+    ['a non-strict headers= declares no stage', { cors: null, log: null, ratelimit: null, headers: "off" }],
+  ];
+
+  for (const [label, middlewareConfig] of nonPipelineConfigs) {
+    test(`${label} — no _scrml_mw_wrap, no _scrml_mw_pipeline`, () => {
+      const { fnNode, routeMap } = makePostHandler("getData", [
+        makeReturnStmt('"ok"', span(110)),
+      ], [], { explicitMethod: "GET" });
+
+      const serverJs = getServerJs([makeLogicBlock([fnNode], span(90))], routeMap, middlewareConfig);
+
+      expect(serverJs).not.toContain("_scrml_mw_wrap");
+      expect(serverJs).not.toContain("_scrml_mw_pipeline");
+      expect(serverJs).not.toContain("_scrml_mw_declared_in");
+    });
+  }
+
+  test("end-to-end: a real `<program batch-in-list-cap>` file exports no onion", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mw-nonpipeline-"));
+    try {
+      const f = join(dir, "alpha.scrml");
+      writeFileSync(f, ['<program batch-in-list-cap="999">', "  <h1>Alpha</h1>", "</program>", ""].join("\n"));
+      const result = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "dist"), log: () => {} });
+      expect((result.errors ?? []).filter((e) => (e.severity ?? "error") === "error")).toEqual([]);
+      const serverJs = result.outputs.get(f)?.serverJs ?? "";
+      // No pipeline export means `selectRequestOnion` never sees this module as a
+      // candidate, so a SECOND such file cannot manufacture an E-MW-007.
+      expect(serverJs).not.toContain("_scrml_mw_pipeline");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the pipeline attributes DO still emit the onion", () => {
+    for (const middlewareConfig of [
+      { cors: "*", log: null, ratelimit: null, headers: null },
+      { cors: null, log: "structured", ratelimit: null, headers: null },
+      { cors: null, log: null, ratelimit: "100/min", headers: null },
+      { cors: null, log: null, ratelimit: null, headers: "strict" },
+    ]) {
+      const { fnNode, routeMap } = makePostHandler("getData", [
+        makeReturnStmt('"ok"', span(110)),
+      ], [], { explicitMethod: "GET" });
+      const serverJs = getServerJs([makeLogicBlock([fnNode], span(90))], routeMap, middlewareConfig);
+      expect(serverJs).toContain("function _scrml_mw_wrap(");
+      expect(serverJs).toContain("export const _scrml_mw_pipeline");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // MW-NONE-001: files without middleware attributes have no overhead
 // ---------------------------------------------------------------------------
 

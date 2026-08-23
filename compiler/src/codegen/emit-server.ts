@@ -2911,11 +2911,28 @@ export function generateServerJs(
   }
 
   // §39 Compiler-auto middleware infrastructure
-  const _scrml_hasMW: boolean = middlewareConfig != null;
-  const _scrml_hasCors: boolean = _scrml_hasMW && middlewareConfig.cors != null;
-  const _scrml_hasLog: boolean = _scrml_hasMW && middlewareConfig.log != null && middlewareConfig.log !== 'off';
-  const _scrml_hasRatelimit: boolean = _scrml_hasMW && middlewareConfig.ratelimit != null;
-  const _scrml_hasSecureHeaders: boolean = _scrml_hasMW && middlewareConfig.headers === 'strict';
+  //
+  // `middlewareConfig` is the raw `<program>` attribute bag, and it is WIDER than
+  // the request pipeline: compute-program-config also lands `batch-in-list-cap=`
+  // (§8.10.6 SQL batching), `idempotency-store=` / `idempotency-ttl=` (§19.9.6),
+  // `cors-max-age=` (inert without `cors=`) and `channel-reconnect=` (§38.3.1
+  // WebSocket) in the same object. NONE of those emits an onion stage.
+  //
+  // So `middlewareConfig != null` is NOT the pipeline predicate. Using it as one
+  // made a file whose only `<program>` attribute is `batch-in-list-cap="999"`
+  // export `_scrml_mw_pipeline` — an onion with no stages and no `handle()` — and
+  // two such files in one build were then rejected as E-MW-007 "declares the
+  // request pipeline in 2 different sources", naming attributes neither file has.
+  const _scrml_mwAttrsPresent: boolean = middlewareConfig != null;
+  const _scrml_hasCors: boolean = _scrml_mwAttrsPresent && middlewareConfig.cors != null;
+  const _scrml_hasLog: boolean = _scrml_mwAttrsPresent && middlewareConfig.log != null && middlewareConfig.log !== 'off';
+  const _scrml_hasRatelimit: boolean = _scrml_mwAttrsPresent && middlewareConfig.ratelimit != null;
+  const _scrml_hasSecureHeaders: boolean = _scrml_mwAttrsPresent && middlewareConfig.headers === 'strict';
+  // THE REQUEST PIPELINE — exactly the four attributes that emit an onion stage,
+  // which is what §40.3.4's sentence and E-MW-007's message already say. `log="off"`
+  // and a non-`strict` `headers=` declare no stage and so declare no pipeline.
+  const _scrml_hasMW: boolean =
+    _scrml_hasCors || _scrml_hasLog || _scrml_hasRatelimit || _scrml_hasSecureHeaders;
   const _scrml_handleNode: any | null = _scrml_handleNodeEarly;
 
   if (_scrml_hasMW || _scrml_handleNode) {
