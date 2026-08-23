@@ -1,25 +1,26 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# ⚑ **CURRENCY RE-VERIFIED AT `c93a692c` (S346), NOT RE-WALKED. TEN windows with no DB/migration
-# surface movement.** Zero-diff re-run at this HEAD: `schema-differ.js`, `commands/db-migrate.js`,
-# `codegen/db-authoritative.ts`, `sql-table-refs.js` — all zero-diff over `4f034e13..c93a692c`.
-# No SQL-adjacent change this window.
-# ⚑ **WATERMARK CORRECTED at the S341 pass and ADVANCED again this pass to `c93a692c`** — line 3 carries the ancestor-of-`origin/main` watermark,
-# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
-# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
-# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
-# communicating nothing this header does not already say.
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **CURRENCY RE-VERIFIED AT `c96e7012`, NOT RE-WALKED. ELEVEN windows with no DB/migration surface
+# movement.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md): the
+# source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of `origin/main`.
 #
-# ⚑ **CONTENT AS OF `115e8b1b` — CURRENCY RE-VERIFIED AT `4f034e13` (S341), and again at `c93a692c` (S346, header above), NOT RE-WALKED. NINE windows with
-# no DB/migration surface movement.** `115e8b1b` was one of only two stamps in this map set that was
-# ALREADY an ancestor of `origin/main` on arrival.
+# Zero-diff re-run at this HEAD over the full 111-commit window:
+# `git diff --name-only c93a692c..c96e7012 -- compiler/src/schema-differ.js
+# compiler/src/commands/db-migrate.js compiler/src/codegen/db-authoritative.ts
+# compiler/src/sql-table-refs.js` is **EMPTY**. No SQL-adjacent change this window.
 #
-# Zero-diff evidence, re-run at this HEAD: `schema-differ.js`, `commands/db-migrate.js`,
-# `codegen/db-authoritative.ts` and `sql-table-refs.js` are all zero-diff over `8863d457..4f034e13`.
-# **This window has no SQL-adjacent change at all** — the prior window's one (`E-SQL-006` §44.3 moving
-# to COMPILE time) is landed and carried; nothing new touches the DB path. See error.map.md.
+# ⚠ **ONE ADJACENT THING MOVED AND IT IS NOT A MIGRATION CHANGE — do not let it read as one.**
+# `<program batch-in-list-cap=>` (§8.10.6 SQL batching) is now explicitly named in the §40.3/§40.8
+# ONE-ONION rule as an attribute that does **NOT** declare a request pipeline
+# (`commands/select-request-onion.js`). That is a statement about the request onion, not about SQL
+# batching, and the batching behaviour is unchanged. See auth.map.md's §40.3 section.
+#
+# The stamp on line 3 is the CURRENCY ANCHOR `scripts/state.ts:mapsStaleness()` parses;
+# **"content as of X" below carries the provenance.** Only ONE line in this file may carry
+# `commit: <SHA>` — a second match would be read as the watermark.
 
 The conditional check (a real DB-migration-apply tool exists) fires because `scrml db-migrate`
 (§14.8.11.1) exists — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB
@@ -287,7 +288,7 @@ Also see error.map.md (the exact §34 fire sites) and schema.map.md (the lowerin
 inventory and `isEffectivelyImmutable`).
 
 ## Tags
-#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature
+#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage
 
 ## Links
 - [primary.map.md](./primary.map.md)

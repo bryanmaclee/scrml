@@ -1,45 +1,107 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
-# bryan S343/S345/S346).** Ancestry CHECKED FIRST (invariant 48):
-# `git merge-base --is-ancestor 4f034e13 c93a692c` passes, so the delta is bounded.
-# **The watermark IS `origin/main`'s tip at generation** (MAP-STAMP RULE, primary.map.md).
+# generated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`).
+# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
+# S347-S366, bryan S347-S365).** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check
+# passes (source diff `merge-base..HEAD` EMPTY, `c96e7012` an ancestor of `origin/main`).
 # scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, PLUS
-# re-verification of the carried findings at this HEAD (spot-executed, not carried on faith), PLUS
-# two S346-session findings routed in by the commissioning PA and INDEPENDENTLY verified here.
+# re-verification of the carried findings at this HEAD — **spot-EXECUTED, not carried on faith.**
 
 ## Summary — this pass
 
-**TWO new findings, both of the same species: a claim the repo BELIEVED, encoded in durable prose,
-that the code never backed.**
+**TWO new findings (N12, N13), and BOTH were produced by re-deriving a number rather than carrying
+it. Every carried finding was re-verified by EXECUTION at this HEAD; all still hold, and one
+(C4) needed its derivation method corrected even though its FIGURE was right.**
 
-**N10 — `docs/PA-SCRML-PRIMER.md` §13.5's sliver table, and its principle "PA should not dispatch
-implementation work against a doc-only surface", is UNDER AUDIT — flagged, NOT deleted.** bryan
-ratified at S346 that **corpus-emptiness is not evidence about whether to build** — a sliver-empty
-surface may be empty because nobody built the thing that would let anyone use it, so reading zero
-uses as "deprioritise" is circular. The audit charter lives at
-`scrml-support/docs/audits/sliding-doors-corpus-zero-2026-08-16/CHARTER.md` (verified present). Until
-the audit lands, treat every §13.5 row and the §13.5 general principle as CONTESTED input to
-prioritisation, not as a routing rule.
+**N12 — a SPEC-diff grep for new diagnostic codes returns THREE and TWO ARE FALSE. This mapper made
+the error first and caught it before publishing, which is why it is filed as a method finding.**
+`git diff <base>..<head> -- compiler/SPEC.md | grep '^+' | grep -oE 'E-[A-Z0-9]+-[0-9]+'` returns
+`E-MW-007`, `E-PROGRAM-002`, `E-IMPORT-005`. Only `E-MW-007` is new. `E-PROGRAM-002` was already in
+SPEC at `c93a692c` (mentions 1 -> 2) and `E-IMPORT-005` likewise (6 -> 7); the diff caught a new
+PROSE MENTION of an existing code. **A code is new only when
+`git show <base>:compiler/SPEC.md | grep -c '<CODE>'` is 0.** The two are not even the same kind of
+neighbour: `E-PROGRAM-002` has **no emit site at all** (SPEC `:22811` says "TBD"), while
+`E-IMPORT-005` is **fully live** and always was (`compiler/src/module-resolver.js:206`). Corrected in
+error.map.md and domain.map.md before publication; recorded here because the flawed method is the
+obvious one and will be reached for again.
 
-**N11 — "the bunfig default 10s per-test timeout" appears in THREE live test files, and that number
-was NEVER in force.** bun does not read `[test].timeout`; the real default is 5000 ms (#537 deleted
-the dead key and documented why in `bunfig.toml` itself). The comments now contradict the config file
-they cite. **This report's own map set carried the same false claim** — config.map.md printed
-`timeout = 10000ms` as live configuration and test.map.md echoed it; both corrected this pass, and
-the correction is logged in the corrections ledger below because it was wrong AT EVERY STAMP, not
-merely stale.
+**N13 — the §34 census's FALSE-CLAIM bucket moved 95 -> 112 and IMPL-SITES 320 -> 300 while the
+catalog moved +1. That is a RECLASSIFICATION by a changed instrument, and nothing labels it as
+one.** `scripts/s34-census.ts` gained +143 lines this window (#646) and now emits a disposition
+table (`BUILD-ARC 71 · HOME-NO-SHALL 27 · ORPHAN-INDEX 4 · NOMINAL-HOME 10`) it did not previously
+have. **The census prints the new buckets with no marker that the classifier changed**, so any
+reader diffing this run against the S346 run reads a -20 / +17 swing as twenty regressions and
+seventeen new broken diagnostics. It is neither. **Suggested disposition: the census should print
+its own classifier version, or the map is the only thing standing between a reader and a wrong
+conclusion.** Guarded in error.map.md this pass with an explicit "do not diff these across the
+instrument change" note.
 
-**All carried findings were re-verified at this HEAD; every one still holds.** Two needed line-ref
-maintenance (N8 — #524 shifted the census's baked print from `:136` to `:167`; the citation itself
-is still there and still the finding). One prior finding got WORSE in a precise way: the #528 PR
-title claims a close its diff does not deliver — recorded in known-gaps as
-`g-compilescrml-input-order-dependent-emission` (HIGH, open, PA-reproduced), tracked in primary
-invariant 58 rather than duplicated here.
+**RE-VERIFIED BY EXECUTION AT THIS HEAD — all carried findings still hold:**
 
-## NEW this pass
+| finding | re-verification run | verdict |
+|---|---|---|
+| **N6** route-inference.ts stale/contradicting doc comment | read `:3643-3660` — **TWO consecutive `/** Keys the derived-cell walk … */` blocks** still sit back to back, the second contradicting the first on the same function | **STILL LIVE** |
+| **N7** census `source files` is environment-dependent | printed **1940** here vs **1864** (S346, fresh worktree) vs **1858** (S341) — **same commit class, three different numbers** | **STILL LIVE, and this is the strongest evidence yet** |
+| **N8** `source-text-regex-census.ts` prints a baked `file:line` | `:170` still prints `type-system.ts:26048` | **STILL LIVE** |
+| **N9** `planBlockArmLift` called "the single §18.5 classifier" | phrase live at `docs/known-gaps.md:8508` and `:8515` **and now also at `emit-control-flow.ts:2078`** — the divergence gap it contradicts is marked RESOLVED, so the phrase and the ledger now disagree in the OPPOSITE direction from the original finding | **STILL LIVE, DIRECTION CHANGED — see below** |
+| **S331-N5** `route-inference.ts:3438` cites §6.6.20 | still `§6.6.20`; the section is §6.6.19 | **STILL LIVE** |
+| **C3** SPEC §52.15.5 describes `<div data-scrml-each-mount>` | still at SPEC `:32624`; code shows the div is retired for NESTED each (`runtime-template.js:2217`) but **still emitted for TOP-LEVEL each** (`emit-ssr-render.ts:411`) | **STILL LIVE, and NARROWER than recorded — see below** |
+| **C4** nine live `W-LINT-*` codes with no §34 row | re-derived: `W-LINT-016 017 018 019 020 021 022 023 024` — **NINE, confirmed** | **STILL LIVE, figure confirmed, METHOD corrected — see below** |
+| **C6** `docs/tutorial.md` hardcodes `v0.7.0` | **4 sites**; `package.json` is `0.7.1` | **STILL LIVE** |
+| **S322-N1** `g-auto-await-family-…-150-…` bakes 150 into an id measuring 142 | id unchanged at `docs/known-gaps.md:427` | **STILL LIVE** |
+
+### C4 — the FIGURE was right and the obvious METHOD is wrong in BOTH directions
+
+Nine is confirmed, but a naive `comm` of "codes appearing in `compiler/src/`" against "codes
+appearing anywhere in `compiler/SPEC.md`" returns **TEN**, and it is wrong twice over:
+
+- **It ADDS `W-LINT-009`, which is not a fire site.** The only occurrence is a COMMENT —
+  `lint-ghost-patterns.js:929`, *"(No separate entry for W-LINT-009 — W-LINT-004 subsumes it.)"*
+- **It DROPS `W-LINT-018`, which IS one.** The code appears in SPEC PROSE but has no §34 table row,
+  so "mentioned in SPEC" wrongly clears it.
+
+**The correct derivation bounds BOTH sides:** table rows only (`^\| W-LINT-[0-9]+ \|`) on the SPEC
+side, and an actual `code:` assignment on the source side. **A code's presence in a comment is not a
+fire, and its presence in prose is not a row.**
+
+### N9 — the finding INVERTED this window and the inversion is the interesting part
+
+The original finding was that `docs/known-gaps.md` calls `planBlockArmLift` "the single §18.5
+classifier" while a second, ad-hoc classifier demonstrably existed. **What changed: the gap that
+recorded the divergence (`g-match-block-iife-tail-classifier-diverges-from-shared-plan`) is now
+marked `RESOLVED S330-peter`, and the phrase has PROPAGATED INTO THE SOURCE** —
+`emit-control-flow.ts:2078` now also says "the single §18.5 classifier". Meanwhile
+`primary.map.md`'s own routing row still says the opposite: *"Grep `_blockTailIsValueExpr`
+(`emit-logic.ts:4653`), NOT `planBlockArmLift` — the latter finds only the two RAW-STRING routes."*
+**Three artifacts, two incompatible claims, and the source now carries one of them.**
+**Suggested disposition: needs a human to adjudicate by EXECUTION** — determine whether
+`planBlockArmLift` is genuinely the sole tail classifier at this HEAD, then make the gap ledger, the
+source comment and the primary routing row agree. Do not resolve it by reading.
+
+### C3 — narrower than recorded, and the record should say so
+
+`<div data-scrml-each-mount>` is **not** uniformly retired. `runtime-template.js:2217` describes the
+replacement as foster-safe "unlike the old `<div data-scrml-each-mount>`" (nested each), but
+`emit-ssr-render.ts:411` states *"Only a TOP-LEVEL each mounts to a static `data-scrml-each-mount`
+div"* and `runtime-template.js:3121` still does a `[data-scrml-each-mount]` querySelector.
+**Suggested disposition: amend the finding from "SPEC describes a retired attribute" to "SPEC
+describes it without the top-level/nested split the code makes."** The SPEC text at `:32624` is not
+false — it is under-specified.
+
+
+## S346-pass findings (N10-N11) — RE-VERIFIED at this HEAD, both still live
+
+**N10** (`docs/PA-SCRML-PRIMER.md` §13.5 under audit) — the audit charter is still the governing
+artifact and the S346 ruling stands: **corpus-zero is blast-radius evidence ONLY, never demand
+evidence.** This window ADDED an enforcement surface for it (`scripts/corpus-zero-debt.ts`, #552),
+which makes the distinction more load-bearing, not less — a probe that measures zero uses must not
+be read as a probe that measures zero need. Still FLAG, DO NOT DELETE.
+
+**N11** ("the bunfig default 10s per-test timeout") — still live in the test comments; the real
+budget is still bun's default 5000 ms and `bunfig.toml [test] timeout` is still deleted. Invariant
+56 carries.
 
 ### N10. `docs/PA-SCRML-PRIMER.md` §13.5 — the sliver table + the "doc-only surface" dispatch principle are UNDER AUDIT (S346 ruling)
 
@@ -357,7 +419,9 @@ Recorded here rather than fixed silently, because the corrections ARE findings.
 
 ---
 
-## Aspirational / archival content — this window's new docs, all correctly located
+## Aspirational / archival content — NO new mislocation this window
+
+**RE-DERIVED AT THIS HEAD: `git diff --name-status c93a692c..c96e7012 -- '*.md' | grep '^A'` outside `archive/`, `handOffs/` and `docs/changes/` returns NOTHING.** Across 111 commits this window added **zero** new `.md` files to `docs/` or the repo root — every added doc is a rotated hand-off, a `docs/changes/<id>/` dispatch record, or an archive entry. `docs/audits/` still holds **20** files, all dated 2026-05 to 2026-07, all carried from prior passes; **the location finding on that directory is UNCHANGED, not re-litigated** — deep-dives, debates, ADRs and gauntlet reports belong in `scrml-support`, and `docs/audits/` is the standing exception the PA has chosen not to move. No new doc crossed the line this window.
 
 **No new mislocation finding.** The window's added `.md` files partition cleanly:
 
@@ -414,35 +478,59 @@ every gate this repo runs. The question is no longer "does the marketing oversta
 
 ## Map currency at this stamp
 
-**EVERY stamp is `c93a692c`, the tip of `origin/main` at generation — trivially an ancestor.** The
-two-column convention carries: line 3 is the currency anchor; "content as of X" is walk provenance.
+**EVERY stamp is `c96e7012`, the tip of `origin/main` at generation — trivially an ancestor.** The
+working tip `c813d6bf` is a DOCS-ONLY wrap commit on `wrap/s365` (`docs/changelog.md`, `hand-off.md`,
+`handOffs/delta-log.md`), recorded on the `generated-at:` line. The two-column convention carries:
+line 3 is the currency anchor; "content as of X" is walk provenance. **Only ONE line per file carries
+`commit: <SHA>`** — `scripts/state.ts:mapsStaleness()` parses line 3 by regex and a second match
+would be read as the watermark.
 
 | Map | Stamp | Content as of | Re-walked? | Evidence |
 |---|---|---|---|---|
-| primary · structure · dependencies · domain · test · error · build · config · infra | `c93a692c` | `c93a692c` | **yes** | 15 source-bearing files moved (675+/35-), incl. `.github/` and `bunfig.toml` — the first `.github/` movement in three windows |
-| non-compliance | `c93a692c` | `c93a692c` | **yes** | this file |
-| schema | `c93a692c` | `fe14c9b2` | no — **currency verified** | `compiler/src/types` zero-diff over `4f034e13..c93a692c` (TEN windows); the window's API moves are function exports, not type shapes |
-| auth | `c93a692c` | `616688ea` | no — **currency verified** | `stdlib/` zero-diff; `emit-server.ts` moved by ONE line (an `export` keyword); dev.js #518 touches no session machinery |
-| migrations | `c93a692c` | `115e8b1b` | no — **currency verified** | `schema-differ.js` / `db-migrate.js` / `db-authoritative.ts` / `sql-table-refs.js` all zero-diff (TEN windows) |
+| primary · structure · dependencies · domain · test · error · build · infra · auth · non-compliance | `c96e7012` | `c96e7012` | **yes** | 127 files moved in the mapped roots; `emit-server.ts` +413, `dev.js` +953, three NEW `compiler/src/` modules |
+| schema | `c96e7012` | `c96e7012` | no — **currency verified** | `compiler/src/types` zero-diff; AND `git diff c93a692c..c96e7012 -- compiler/src/ \| grep '^+' \| grep -E 'export (interface\|type) '` returns NOTHING |
+| config | `c96e7012` | `c96e7012` | no — **currency verified** | `grep -cE 'process\.env\|Bun\.env'` over the window diff returns **0**; five new files checked individually, none reads an env var |
+| migrations | `c96e7012` | `c96e7012` | no — **currency verified** | `schema-differ.js` / `db-migrate.js` / `db-authoritative.ts` / `sql-table-refs.js` all zero-diff over the full 111 commits |
 
-**The watermark advanced `4f034e13` → `c93a692c`** — 22 commits, and this time the arithmetic is
-clean: the prior stamp WAS an ancestor (the S341 pass's MAP-STAMP RULE held on its first outing), so
-the interval below it is exactly the measured delta. `bun scripts/state.ts`'s behind-count guard has
-a compliant stamp on both ends of this window for the first time in four generations.
+⚠ **auth.map.md WAS RE-WALKED THIS PASS AFTER TEN CURRENCY-ONLY WINDOWS.** Its ten-window "zero-diff
+auth surface" streak ended: `emit-server.ts` moved +413 lines and the REQUEST PIPELINE was re-ordered
+(CORS preflight to stage 1) and re-scoped (`ratelimit=` back to per-route), with `handle()` moved
+from per-route to top-level dispatch. **Two of those three were fail-OPEN.** A currency-verify would
+have missed all of it — the streak was the reason to re-walk, not a reason to skip.
 
-**The carried residual stands:** `state.ts:545` checks ancestry against `HEAD`, not `origin/main`;
-the written rule is stricter. A compliant stamp satisfies both; a branch-tip stamp can satisfy the
-instrument and violate the rule.
+**The watermark advanced `c93a692c` → `c96e7012`** — **111 commits**, the largest interval in this
+map set's history, and the arithmetic is clean at both ends: the prior stamp WAS an ancestor
+(`merge-base --is-ancestor c93a692c c96e7012` passes) and the new one is
+(`merge-base --is-ancestor c96e7012 origin/main` passes). The outbound check per the MAP-STAMP RULE
+returned an EMPTY source diff.
+
+⚠ **THE WATERMARK MOVED UNDER THIS PASS, MID-RUN, AND THE CHECK CAUGHT IT.** At the start of this
+run `HEAD` was `c96e7012`; partway through, the operator committed `c813d6bf` on `wrap/s365`.
+Re-running `git merge-base HEAD origin/main` produced `c96e7012` and the outbound source diff was
+EMPTY (the new commit is docs-only), so the watermark is correct. **A pass that had read HEAD once at
+the start and stamped it would have written a NON-ANCESTOR branch tip — exactly the defect the
+MAP-STAMP RULE exists to prevent, arriving by a route the rule's own three-command procedure does
+cover but only if the procedure is run at WRITE time, not at read time.** Run the outbound check
+immediately before writing line 3, not at orientation.
+
+**The carried residual stands:** `state.ts` checks ancestry against `HEAD`, not `origin/main`; the
+written rule is stricter. A compliant stamp satisfies both; a branch-tip stamp can satisfy the
+instrument and violate the rule. ⚠ Also carried and now MEASURED: `bun scripts/state.ts --check`
+reports maps staleness as **WARN-only, not gated** — at the start of this run it printed
+`maps: 112 commits behind HEAD`, and nothing failed. **The maps-currency check that
+`pa-scrml-overlay.md {{maps_fills}}` requires before every dev dispatch is advisory, and a
+112-commit drift produced no failure anywhere in the toolchain.**
+
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps
+#non-compliance #project-mapper #cleanup #scrml #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness
 #heading-marker-drift-13 #bidirectional-drift #state-ts-detector-shipped #§6.6.20-does-not-exist
 #s34-census-fixed-everywhere #s320-n1-closed #w-lint-nine-not-eight #generated-md-under-reports-292
 #delete-the-generated-indexes #tutorial-v0.7.0 #spec-index-authored-half #website-over-claim-risk
-#809-codes-flat #883-conformance #1344-tests #watermark-advanced #bunfig-timeout-never-in-force #timeout-wears-fail-marker #pa-scrml-primer-13-5-under-audit #corpus-emptiness-not-evidence #sliding-doors-audit #inputfiles-order-open #528-title-overclaim
+#810-codes #883-conformance #1378-tests #watermark-advanced #bunfig-timeout-never-in-force #timeout-wears-fail-marker #pa-scrml-primer-13-5-under-audit #corpus-emptiness-not-evidence #sliding-doors-audit #inputfiles-order-open #528-title-overclaim
 
 ## Links
 - [primary.map.md](./primary.map.md)

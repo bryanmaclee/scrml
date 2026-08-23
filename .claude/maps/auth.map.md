@@ -1,52 +1,62 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# ⚑ **CURRENCY RE-VERIFIED AT `c93a692c` (S346), NOT RE-WALKED.** Over `4f034e13..c93a692c`:
-# `stdlib/` zero-diff; `compute-program-config.ts` zero-diff; `emit-server.ts` moved by exactly ONE
-# line and it is the `export` keyword on `localServerImportNameUsed` (the #515 import-prune predicate
-# unification), not an auth path; `commands/dev.js`'s #518 compile-failure serving touches no session
-# machinery. Every session/JWT/OAuth/CSRF claim below is carried and re-verified.
-# ⚑ **WATERMARK CORRECTED at the S341 pass and ADVANCED again this pass to `c93a692c`** — line 3 carries the ancestor-of-`origin/main` watermark,
-# per the MAP-STAMP RULE at the top of primary.map.md. The prior stamp `616688ea` was the tip of
-# `wrap/s331`, squash-merged onto main as `2391d483` — never an ancestor, so nothing it bounded was
-# actually bounded.
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **RE-WALKED over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
+# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
+# `origin/main`.
 #
-# ⚑ **CONTENT AS OF `616688ea` — CURRENCY VERIFIED AT `4f034e13` (S341), and again at `c93a692c` (S346, header above), NOT RE-WALKED.** The §20.5 session
-# surface, `compute-program-config.ts`, `emit-server.ts`'s session prologue and the
-# `scrml:auth`/`scrml:oauth` stdlib modules are **ZERO-DIFF this window** (`stdlib/` has no diff at
-# all; `emit-server.ts` moved by exactly ONE line and it is the §52.8 SSR-lint call signature at
-# `:5162`, not an auth path). Every session/JWT/OAuth/CSRF claim below is carried and re-verified.
+# ⚑ **THE TEN-WINDOW "AUTH SURFACE IS ZERO-DIFF" STREAK IS OVER. `emit-server.ts` moved +413/-…
+# lines and THE REQUEST PIPELINE ITSELF WAS RE-ORDERED AND RE-SCOPED. Read the new section
+# "§40.3 THE REQUEST ONION" below BEFORE touching anything request-scoped — three separate
+# things moved and two of them were fail-OPEN.**
 #
-# **ONE ROW MOVED, AND IT IS THE POSITION-COVERAGE ROW — corrected in place below.**
-# `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19) now fires on a derived cell in **ANY** position (#500), not
-# only a top-level one. Before #500 the collector descended exactly `node.body` and `node.children`,
-# so **SIX positions were measured still leaking** a real `Bun.password.hash(pw, { algorithm:
-# "argon2id" })` into the browser bundle at exit 0 with zero `.server.js`: a `for`-loop `lift` body, a
-# `while`-loop `lift` body, an `<each>` row body, an `<engine>` state-child body, a loop nested inside
-# a conditional, and the same shapes inside a `kind="tool"` program. **The confidentiality guarantee
-# this map described as landed at S331 was, for those six positions, not in effect.**
+#   1. **`handle()` NOW WRAPS TOP-LEVEL DISPATCH, NOT PER-ROUTE DISPATCH (#654, adopter #471).**
+#      §40.3.4 says the onion "applies to all HTTP requests handled by the compiled server —
+#      including statically-served assets". It was applied PER-ROUTE, so a `handle()` that
+#      intercepted a custom path 404'd before it ran. Emitted shape: `emit-server.ts` splits the
+#      pipeline remainder into a standalone `_scrml_dispatch(req, server)` and wraps it in
+#      `_scrml_onion_dispatch(req, server)` (`:521`); with NO onion the emitter still produces the
+#      byte-identical pre-onion `async fetch()`.
 #
-# **THE SCOPE SENTENCE STILL MATTERS MORE THAN THE FIX, and it is UNCHANGED. §12.2 escalation is
-# defined PER-FUNCTION and covers NO OTHER POSITION** (`SPEC.md:7312`, normative). §6.6.19 closes ONE
-# non-function position — now at every depth. **Two remain OPEN and undiagnosed on this same
-# confidentiality boundary:** a plain mutable-cell initialiser (`<hashed> = hashPassword(@pw)`) and a
-# markup interpolation (`${ hashPassword(@pw) }`). Both reach the same module from the same client
-# position. **The diagnostic's own text warns that deleting the `const` — the shortest edit that
-# silences it — is exactly the edit that restores the leak.** Do not read this landing as closing the
-# class.
+#   2. **THE CORS PREFLIGHT MOVED TO PIPELINE STAGE 1 — AHEAD OF RATE-LIMIT AND AHEAD OF
+#      `handle()` PRE (`emit-server.ts:3097-3115`).** §40.3.3 pins the order
+#      `[CORS preflight] → [rate limit] → handle() PRE`, but the preflight was ONLY the
+#      `_scrml_cors_options_route` registry entry — so **an author `handle()` ran on every browser
+#      preflight (MEASURED: an OPTIONS request came back stamped by `handle()`).** A `handle()`
+#      that enforces auth would reject the preflight, and **a preflight carries no credentials to
+#      satisfy an auth check with**, so the browser's real request never happens. The preflight now
+#      short-circuits at stage 1 and reaches neither `[logging]` nor `[rate limit]`.
 #
-# **AND THE FIX'S SHAPE IS ITSELF AN AUTH RULE (primary.map.md invariant 52).** The walk is now
-# STRUCTURAL — every array- and object-valued property descended by default, exclusions in a
-# two-clause deny-list (`skipDerivedWalkKey`). **For a confidentiality check the safe error direction
-# is descending one field TOO MANY** (worst case a loud, reversible spurious refusal) **never one too
-# few** (worst case a silent leak). If a position is ever missed again, **do not add a field name.**
+#   3. **`ratelimit=` IS ROUTE-SCOPED AGAIN (F1, S355 — `emit-server.ts:2997-3020`).** §4.15
+#      classifies `ratelimit=` among the PER-ROUTE concerns, not the app-wide ones. Applied to
+#      EVERY request it counted the HTML + CSS + runtime + client-bundle sub-requests of a single
+#      page load, so `ratelimit="3/min"` 429'd a first-time visitor on their own first page view.
+#      It now counts only requests a ROUTE serves.
 #
-# Carried and still true: #452's `Object.hasOwn` hardening of the session accessor (`emit-server.ts`)
-# closed the PROTOTYPE-CHAIN half of `g-session-get-reserved-key-read-disclosure` and left the own-key
-# READ POLICY open (ROUTED TO BRYAN); #460 gave §12.5's route-handler `Response` contract a normative
-# SPEC home. **Read the "Session read-side" block before touching the accessor — the ledger entry has
-# still not caught up (non-compliance.report.md).**
+# ⚑ **NEW FAIL-CLOSED GATE ON THE PIPELINE: `E-MW-007` (§40, `commands/select-request-onion.js:72`).**
+# A compiled server mounts EXACTLY ONE onion. Two modules declaring a request pipeline is two
+# applications in one server, and the compiler now refuses instead of guessing. **Read the
+# "one-onion rule" section below for what COUNTS as declaring one** — `cors=`, `log=` other than
+# `"off"`, `ratelimit=`, `headers="strict"` or a `handle()` do; `batch-in-list-cap=`,
+# `idempotency-store=`/`-ttl=`, `cors-max-age=` and `channel-reconnect=` do NOT (same config bag,
+# no pipeline stage).
+#
+# ⚑ **CSP: `<program headers="strict">` PINS `default-src 'self'` (§39.2.5) AND THAT NOW BINDS TWO
+# COMPILER-EMITTED THINGS IT PREVIOUSLY BROKE.** (a) The **SSR seed** is now a
+# `<script type="application/json" id="__scrml_ssr_state">` read via `JSON.parse` — not an inline
+# executable `<script>` (`runtime-template.js:2767-2788` and `:6090-6114`, BOTH seed readers
+# changed). (b) The **§38 transition keyframes** moved out of a runtime-injected inline `<style>`
+# into the emitted stylesheet (`codegen/emit-transition-css.ts`, NEW). Both were silently dead
+# under strict headers and the author had no escape — §39.2.5's "override via `handle()`" covers
+# author-loaded external origins, not compiler-emitted content.
+#
+# **CARRIED AND STILL TRUE:** `stdlib/` is zero-diff over this window (`git diff --name-only
+# c93a692c..c96e7012 -- stdlib/` is EMPTY — eleven windows). `compute-program-config.ts` zero-diff.
+# `protect-analyzer.ts` moved by 6 lines (#582's string-literal masking, not an auth-policy change).
+# Every session / JWT / OAuth / CSRF / protect-floor claim below is carried and re-verified.
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
 
@@ -197,6 +207,36 @@ Conformance fix-vs-prefix **1443/0** from a fresh PA process, executed handlers 
 **Standing rule for this family: every detector is PERMISSIVE BY DESIGN — a false POSITIVE only emits
 unused session infra; a false NEGATIVE re-opens a 500.**
 
+
+## §40.3 THE REQUEST ONION — one per compiled server, wrapping TOP-LEVEL dispatch (NEW, #654)
+
+**Where a request-pipeline task STARTS.** Not at per-route emit. The chain is:
+
+| Step | File | What it decides |
+|---|---|---|
+| 1. WHICH onion | `compiler/src/commands/select-request-onion.js` | `selectRequestOnion(serverModules)` → `{ onion, error }`. Zero candidates → `null` (no onion, byte-identical pre-onion output). One → mount it. **More than one → `E-MW-007`.** |
+| 2. HOW it wraps dispatch | `compiler/src/codegen/emit-server.ts:~454-521` | Splits the pipeline remainder into `_scrml_dispatch(req, server)`, wraps it in `_scrml_onion_dispatch(req, server)`. Emits `export const _scrml_mw_pipeline = _scrml_mw_wrap` + `export const _scrml_mw_declared_in = "<source>.scrml"`. |
+| 3. WHO mounts it (prod) | `compiler/src/commands/build.js:22, 284-302, 343-347` | Scans emitted modules for `_scrml_mw_pipeline`; imports the winner under the ALIAS `_scrml_mw_pipeline_0` (every hosting module exports the same NAME). Throws with `err.scrmlCode` / `err.scrmlSources` on conflict. |
+| 4. WHO mounts it (dev) | `compiler/src/commands/dev.js:23, 179-200, 311-383` | Rebuilds `registeredOnions` on every recompile; **mounts the SAME onion the built server does**, deliberately — a dev/prod split here is the exact defect the work removed. Conflict prints via `formatOnionConflict` at `:381`. |
+
+**WHAT COUNTS AS DECLARING AN ONION** (the gate is `_scrml_hasMW` in emit-server; a non-pipeline module exports no `_scrml_mw_pipeline` at all, so the selector never sees it):
+
+- **DOES declare one:** a `handle()`, or a `<program>` attribute that emits a pipeline STAGE — `cors=`, `log=` other than `"off"`, `ratelimit=`, `headers="strict"`.
+- **Does NOT:** `batch-in-list-cap=` (§8.10.6 SQL batching), `idempotency-store=` / `idempotency-ttl=` (§19.9.6), `cors-max-age=` (inert without `cors=`), `channel-reconnect=` (§38.3.1). **They share the same config bag as the stage attributes — reading "the `<program>` carries an attribute" as "it hosts an onion" is the mistake this list exists to prevent.**
+
+**WHY NOT COMPOSE MULTIPLE ONIONS** — the reasoning is in the module docblock and it is empirical, not aesthetic: composing means (a) every module's `handle()` PRE runs on every other module's page (**measured: two modules, two requests, four log lines, alpha's `handle()` stamping beta's document**), and (b) composition order is module-discovery order, which is **FILENAME-SORTED** — so renaming `api.scrml` to `zapi.scrml` would silently change which `handle()` won a contested path. Precedence must be readable off the source, and `<program>` is that.
+
+**In the canonical v0.3 shape the question never arises:** the entry file declares `<program>` (with the middleware attributes and/or `handle()`), and `pages/*.scrml` route files declare `<page>`, which emits no onion.
+
+**Introspection surface (dev only, and it exists so the behaviour is assertable):** `getRegisteredOnions()`, `getRegisteredRoutes()`, `runThroughOnions()`, `devDispatch`, `loadServerRoutes` — all exported from `commands/dev.js`.
+
+### §40.3.3 pipeline ORDER at this HEAD
+
+`[CORS preflight] → [logging] → [rate limit] → handle() PRE → _scrml_dispatch → handle() POST`
+
+- **Stage 1 is the CORS preflight and it SHORT-CIRCUITS** (`emit-server.ts:3115`, `if (_scrml_mw_req.method === 'OPTIONS')`). It reaches neither logging nor rate-limit, and **it does not reach `handle()`** — deliberately: a preflight carries no credentials, so an auth-enforcing `handle()` would reject it and the browser's real request would never be sent.
+- **`ratelimit=` is PER-ROUTE** (`:2997-3020`, §4.15/§40.2) — it counts only requests a route serves, not the HTML/CSS/runtime/bundle sub-requests of one page load.
+
 ## `<program>`-level declarative auth config
 | Field | Values | Purpose |
 |---|---|---|
@@ -320,7 +360,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity
 
 ## Links
 - [primary.map.md](./primary.map.md)
