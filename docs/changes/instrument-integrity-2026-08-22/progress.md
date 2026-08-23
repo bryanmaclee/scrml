@@ -1023,3 +1023,56 @@ miss named; F2/F3/F8 marked CLOSED with the condition that closed them, F5 PARTL
 
 Struck claims are annotated in place rather than deleted, so the correction is auditable — a
 progress doc that silently rewrites its own wrong numbers teaches nothing.
+
+---
+
+## Reviewer extras — "worth fixing if cheap"
+
+Both were cheap. Both are done.
+
+### (a) `corpus-zero-debt.ts` — the guard was all-or-nothing across TWO scan roots — **DONE**
+
+`SCAN_ROOTS` has two entries and they are wildly unequal: **295** deep-dives to **27** debates.
+The S364 guard tested `artifacts.length === 0`, which fires only when **every** root is dead — so
+a single renamed directory left ~92% coverage printing the clean tick with no hint the rest was
+never opened.
+
+**Partial blindness is the harder case to catch, precisely because the denominator still looks
+healthy.** A zero is conspicuous; "2 artifacts scanned" reads like a small corpus.
+
+Reproduced on a constructed tree first (the branch's own method — the script derives `ROOT` from
+its own file location, so a copy in a scratch tree is a clean condition that touches no repo):
+
+```
+$ bun <copy>/scripts/corpus-zero-debt.ts --check      # 4 artifacts, both roots healthy
+  ✅ no corpus-zero debt — all 4 in-epoch deliberation artifact(s) disposed
+0
+$ mv <support>/docs/debates <support>/docs/debates-RENAMED
+$ bun <copy>/scripts/corpus-zero-debt.ts --check      # half the corpus gone
+  ✅ no corpus-zero debt — all 2 in-epoch deliberation artifact(s) disposed
+0                                                      <- still green. The denominator just got quieter.
+```
+
+**Fix.** Every root reports its own count, and a root yielding nothing is named whether or not its
+siblings did. `NOT VERIFIED` (all roots dead) and `PARTIALLY VERIFIED` (some dead) are distinct
+printed states, and the healthy tick now prints its per-root breakdown so the denominator is
+visible on the GREEN path too — a count you can only see when something breaks is not a denominator.
+
+**Bite proof** (`cmd; echo $?`, direct):
+
+| scan roots | mode | pre-fix | post-fix |
+|---|---|---|---|
+| both healthy (2 + 2) | `--check` | exit 0, `✅ … all 4` | **exit 0**, `✅ … all 4 … across all 2 scan roots (docs/deep-dives 2 · docs/debates 2)` |
+| **`docs/debates` renamed away** | `--check` | **exit 0**, `✅ … all 2` — silent | **exit 1**, `⚠️ PARTIALLY VERIFIED — 1 of 2 scan roots yielded ZERO artifacts` + `UNRESOLVED <path>` |
+| both roots gone | `--check` | exit 1, `NOT VERIFIED` | **exit 1**, `NOT VERIFIED` — unchanged |
+| `docs/debates` renamed away | report (no `--check`) | exit 0, silent | **exit 0**, same loud `PARTIALLY VERIFIED` block |
+
+The last row is the one that had to be checked rather than assumed: the report/check split is
+deliberate house policy ("a probe that breaks the boot is a probe that gets removed"), so the new
+state must be LOUD in report mode without breaking the boot. It is.
+
+**No unit test added, deliberately.** The guard lives in the `import.meta.main` entrypoint block
+that `compiler/tests/unit/corpus-zero-debt.test.js` explicitly avoids so the pure core needs no
+disk. Testing it would mean restructuring the module — that is not "cheap", and none of this
+branch's sibling guards (`facts.ts`, `state.ts`, `snippet-gate.js`, `delta-lint.ts`) are unit-tested
+either; they are bite-proven. Same standard applied here. The existing 20 tests still pass.
