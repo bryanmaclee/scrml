@@ -81,6 +81,19 @@ function loadTodoMVC() {
   const clientJs = readFileSync(jsFile, "utf-8");
 
   let runtimeJs;
+  // Hollow-gate closure (g-todomvc-harness-dangling-runtime-ref-passes-silently): if app.html
+  // NAMES a specific runtime that is absent from dist/, the emitted page has a dangling
+  // <script src> and is DOA in a real browser. The old silent fallback to the SCRML_RUNTIME
+  // SOURCE template masked exactly that — a DOA compile stayed green because the harness quietly
+  // ran a known-good runtime the page never loads. Fail LOUD instead. The legacy SCRML_RUNTIME
+  // fallback is preserved only for the no-referenced-name readdir path (`referenced` null).
+  if (referenced && !existsSync(runtimeFile)) {
+    throw new Error(
+      `TodoMVC harness: app.html references ${runtimeName}, which is absent from dist/ — the ` +
+      `emitted page has a dangling <script src> and is DOA in a real browser. Recompile: ` +
+      `bun compiler/src/cli.js compile benchmarks/todomvc/app.scrml --output benchmarks/todomvc/dist/ --convert-legacy-css`,
+    );
+  }
   try {
     runtimeJs = readFileSync(runtimeFile, "utf-8");
   } catch {

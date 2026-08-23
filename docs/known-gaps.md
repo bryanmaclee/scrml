@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 46 |
+| HIGH | 45 |
 | MED | 153 |
-| LOW | 69 |
+| LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -392,8 +392,8 @@ executed on the platform it described.
 **Fix direction (proposed, not built, not a ruling):** run the drain against the **re-parsed AST** on the re-parse path rather than against handler text — then awaitable positions are real positions and no suppression is needed at all. Ranked above suppressing the single awaited site, because that would still require per-caller knowledge of whether the re-parse awaits, and would add a fourth special case to a subsystem whose whole problem is special cases.
 
 ### g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn — `reset(@cell)` on a cell whose init expression calls a server fn stores an unawaited Promise into the cell — compile exit 0, silent wrong value — `NEW S322-bryan (PA-reproduced on a shipped example); HIGH; open; BUILT+VERIFIED+ROUTED S360-peter (branch fix/s360-reset-init-await-parity @ 3540a2d7 — your S322 stamp owed)`
-<!-- @gap id=g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn sev=HIGH status=open locus=compiler/src/runtime-template.js:1168(init-arm)+:1163(default-arm) route=bryan prov=rationale:the-reset-path-re-invokes-the-init-thunk-but-unlike-the-declaration-path-it-never-awaits-the-result -->
-**S360-peter BUILT+VERIFIED+ROUTED (branch `fix/s360-reset-init-await-parity @ 3540a2d7` + inbox note).** Repro'd on examples/03-contact-book.scrml + functionally driven: the reset path (init arm :1168, default arm :1163) re-invoked the thunk but wrote the raw Promise → cell holds `[object Promise]`; the DECLARATION path settles async (fire-and-forget IIFE + await + error boundary) and stores the resolved value. Fix: `_scrml_reset_apply(name, r)` mirrors the declaration path (thenable → fire-and-forget settle; else direct write), both arms; `_scrml_reset` stays SYNCHRONOUS (no call-site change). Full suite 22413 pass. **The ledger's original route premise ("fix makes reset async → changes every call site → decide with S322 absorb ruling") is FALSE** — thenable-detection keeps reset sync; §6.8.1 "write the result" + §13.2 (result = resolved value) make the Promise-write a SHALL violation, not an unspecified area (the satellite read it Peter-lane). ROUTED anyway because bryan filed it flagged for the S322 ruling + it changes reset's runtime behavior — his stamp owed. VERIFY-ON-LANDING: `_scrml_error_boundary_log` chunk co-location (typeof-guarded, degrades safely).
+<!-- @gap id=g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn sev=HIGH status=resolved locus=compiler/src/runtime-template.js:1168(init-arm)+:1163(default-arm) route=bryan prov=rationale:the-reset-path-re-invokes-the-init-thunk-but-unlike-the-declaration-path-it-never-awaits-the-result -->
+**S360-peter BUILT+VERIFIED+ROUTED (branch `fix/s360-reset-init-await-parity @ 3540a2d7` + inbox note).** Repro'd on examples/03-contact-book.scrml + functionally driven: the reset path (init arm :1168, default arm :1163) re-invoked the thunk but wrote the raw Promise → cell holds `[object Promise]`; the DECLARATION path settles async (fire-and-forget IIFE + await + error boundary) and stores the resolved value. Fix: `_scrml_reset_apply(name, r)` mirrors the declaration path (thenable → fire-and-forget settle; else direct write), both arms; `_scrml_reset` stays SYNCHRONOUS (no call-site change). Full suite 22413 pass. **The ledger's original route premise ("fix makes reset async → changes every call site → decide with S322 absorb ruling") is FALSE** — thenable-detection keeps reset sync; §6.8.1 "write the result" + §13.2 (result = resolved value) make the Promise-write a SHALL violation, not an unspecified area (the satellite read it Peter-lane). ROUTED anyway because bryan filed it flagged for the S322 ruling + it changes reset's runtime behavior — his stamp owed. VERIFY-ON-LANDING: `_scrml_error_boundary_log` chunk co-location (typeof-guarded, degrades safely). **RESOLVED S368-bryan** — stamp verification reproduced the defect by EXECUTING the emitted runtime (base: cell holds `[object Promise]`; tip: the resolved array), and independently REFUTED the ledger's original blocker: `reset()` returns `undefined` on both revisions and the emitted client JS for a `reset`-calling program is byte-identical base-to-tip except the runtime-hash comment — **zero call sites change**. Landed with one correction: `r.then(...).catch(...)` → `Promise.resolve(r).then(...).catch(...)`, because a non-Promise thenable (`{then:(res)=>res(99)}`) made `.catch` a TypeError thrown SYNCHRONOUSLY out of the adopter's event handler (PA-reproduced; base did not throw, tip did). Accepted residual filed as [[g-reset-sync-read-after-reset-returns-the-stale-pre-reset-value]].
 
 **Reproduced, not relayed.** `compiler/src/runtime-template.js:1168`:
 
@@ -8629,9 +8629,18 @@ Found while re-verifying `g-block-analysis-emit-foreign-underscore` (enum erasur
 <!-- @gap id=g-match-decl-span-overshoots-next-statement sev=LOW status=open locus=compiler/src/ast-builder.js(the match-stmt / const-let-decl-with-matchExpr span end) prov=rationale:S364-decl-match-splice-instrumented-the-real-spans-const-A-eq-match-...-close-brace-at-43-but-node-span-end-50-seven-chars-into-the-next-line-const-B -->
 > **⚑ S364-peter: VERIFIED by instrumentation on HEAD.** For `const A = match 2 { 1 :> "one" _ :> "many" }\nconst B = …`, A's closing `}` is at offset 43 but A's `const-decl`/`matchExpr` node span END is 50 — SEVEN chars into B's line (`\nconst `). B's span is accurate (ends at its own `}`+newline). So the overshoot is on the NON-LAST decl of an adjacent pair; the span bleeds up to the next statement's identifier. **Impact:** benign for most consumers (the extra text is whitespace + the next keyword), but any tool that SPLICES on a decl/match span (the S364 decl-match library lowering did) will consume the next decl's leading keyword unless it trims. Worked around in `emit-library.ts` (trim each splice back to the match's own `}` via `lastIndexOf("}")`). **Fix direction:** end the match-stmt / decl-with-matchExpr span AT the match's closing `}`, not at the next token boundary. Parser-span accuracy = likely bryan-lane; filed with the exact offsets, low urgency (the one live consumer is defended).
 
-### g-library-fn-match-object-or-block-arm-body-returns-undefined — a library-mode `match` whose ARM BODY is a brace-delimited object literal / block (`1 :> { x: 1 }`) lowers the arm as a STATEMENT BLOCK in the value-IIFE → the fn silently returns `undefined` — `NEW S364-peter (found by the S239 pass on the decl-match fix — the #636 fn path has it; the decl fix AVOIDS it by using the tilde lowering); MED; open`
-<!-- @gap id=g-library-fn-match-object-or-block-arm-body-returns-undefined sev=MED status=open locus=compiler/src/codegen/emit-library-shared.ts(emitLibraryFnMember → the value-IIFE match lowering emits `return { x: 1 }` as a labeled statement block, not a returned object) prov=rationale:S364-S239-review-repro-export-fn-f-return-match-1-brace-x-colon-1-emits-if-match-1-brace-x-colon-1-labeled-block-fn-returns-undefined-browser-tilde-path-is-correct -->
+### g-library-fn-match-object-or-block-arm-body-returns-undefined — a library-mode `match` whose ARM BODY is a brace-delimited object literal / block (`1 :> { x: 1 }`) lowers the arm as a STATEMENT BLOCK in the value-IIFE → the fn silently returns `undefined` — `NEW S364-peter (found by the S239 pass on the decl-match fix — the #636 fn path has it; the decl fix AVOIDS it by using the tilde lowering); MED; RESOLVED S369-peter (return-position object literal in the shared value-IIFE emitter)`
+<!-- @gap id=g-library-fn-match-object-or-block-arm-body-returns-undefined sev=MED status=resolved locus=compiler/src/codegen/emit-control-flow.ts(emitIifeBlockArmBody → the object-literal branch now emits the arm in RETURN position: `return emitExprField(result)`) prov=rationale:S364-S239-review-repro-export-fn-f-return-match-1-brace-x-colon-1-emits-if-match-1-brace-x-colon-1-labeled-block-fn-returns-undefined-browser-tilde-path-is-correct RESOLVED:S369-peter-return-position-object-literal -->
+> **⚑ RESOLVED S369-peter.** Fix in `emit-control-flow.ts` `emitIifeBlockArmBody` (the SHARED value-IIFE match-arm emitter — NOT `emit-library-shared.ts` as the marker originally filed; that was a hypothesis, re-derived first-hand to the real locus). Root, confirmed on HEAD: the object-literal branch (`!_matchArmResultIsBlockBody(result)` — the scrml parser resolves `{ x: 1 }` to an `object` node) emitted the arm BARE as `{ x : 1 }`, which JS reads as a labeled-statement block → the IIFE falls through → silent `undefined`. Fix = emit the object-literal arm in RETURN position (`{ return ${emitExprField(null, result, matchCtx)}; }`), mirroring the bare-value arm path (`return emitExprField(...)`) and the decl/tilde path (`_scrml_tilde = { x: 1 }` — both expression position). Neither filed fix direction was taken verbatim (the value-arm return path is cleaner than re-routing the whole fn match through the tilde emitter, and does not need a paren-wrap since `return { … }` is already expression position). Two ADDITIONAL cross-mode-parity divergences surfaced by the S239 pass and fixed here: (1) the object-arm result is wrapped in `_awaitMatchArmServerCalls` (the same auto-await the decl path :4984 + the block-tail path apply — a server call inside the object is awaited, not shipped as a bare Promise); (2) the object-literal check runs BEFORE the empty-`inner` guard, so an empty object `{}` returns `{}` (was silently `undefined`). A THIRD S239 finding — the multi-scrutinee client IIFE (`emitMultiScrutineeMatch`) set its header statically sync with no `_bodyHasAwait` scan, so an awaited object/block arm stranded — was fixed by mirroring the single-scrutinee header scan (closes a pre-existing block-tail exposure my change would have widened to object arms). A GENUINE `{ statement* expression? }` block still routes through `planBlockArmLift` UNCHANGED — value-tail lifts, void-tail voids. **R26-verified at runtime** across single/multi-key objects · wildcard presence-binding object arms · empty object `{}` · value-tail blocks (still lift) · void-tail blocks (still void) · string arms (byte-identical fence). Full unit+integration+conformance 22668/0 (6 pre-existing self-host/session baseline fails, confirmed identical on the clean base); multi-scrutinee unit suite 26/0. **S239 adversarial pass RAN — 2 correctly-targeted rounds** (round 2 required because a fix round invalidates the review that produced it); its four findings: two fixed here (empty-object, multi-scrutinee await header), one non-issue (decl-path parity holds), and two genuinely-separate PRE-EXISTING bugs filed as new gaps ([[g-library-mode-multi-scrutinee-match-misparsed-as-single]] · [[g-match-structuredbody-empty-object-arm-voids]]). Merge-blocker `compiler/tests/integration/library-mode-fn-match-object-arm-lowering.test.js` (7 cases, bite-proven: 3 fail pre-fix). Peter-lane (cross-mode parity, no language surface). Nested-match-in-arm remains loud in both paths (pre-existing, out of scope).
 > **⚑ S364-peter: VERIFIED on HEAD, pre-existing in the #636 FN path (NOT the S364 decl fix, which sidesteps it).** `export fn f() { return match 1 { 1 :> { x: 1 } _ :> { y: 2 } } }` (library mode) emits `return (function() { … if (_scrml_match_1 === 1) { x : 1 } … })()` — the object literal `{ x: 1 }` is lowered as a LABELED STATEMENT BLOCK (`x:` a label, `1` an expression statement), so the IIFE returns `undefined`, SILENTLY (passes `--validate-emit`). The byte-identical browser decl path uses the TILDE lowering (`_scrml_tilde = { x: 1 }`, expression position) and is CORRECT. The value-IIFE (`return <arm>`) is the wrong lowering for a brace-delimited arm body. **The S364 decl-match fix ([[g-library-mode-toplevel-decl-match-leaks]]) deliberately routes through the tilde lowering (`emitLogicNode → emitMatchExprDecl`) precisely to avoid this — so decls are correct; the FN path (#636, `emitLibraryFnMember`) still uses the value-IIFE and remains broken.** Fix direction (peter-lane, cross-mode parity): route the fn-body match lowering through the tilde/expression-position path too, OR paren-wrap a brace-delimited arm result (`return ({ x: 1 })`). Block-body arms (`:> { … }`) want the tilde path either way. Repro two-sided (object arm → undefined vs a string arm → correct).
+
+### g-library-mode-multi-scrutinee-match-misparsed-as-single — a MULTI-scrutinee `match a, b { … }` inside a LIBRARY-mode `fn` is not routed through `emitMultiScrutineeMatch`, so the single-scrutinee emitter mishandles it (`const _scrml_match_1 = a , b` · `=== 2` · a trailing `_`) → `E-CODEGEN-INVALID-LOGIC` — `NEW S369-peter (surfaced by the S239 pass on the object-arm fix; PA-REPRODUCED on HEAD and on the clean base — pre-existing, NOT from that fix); MED; open`
+<!-- @gap id=g-library-mode-multi-scrutinee-match-misparsed-as-single sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(emitMatchExpr → node.scrutineeExprs/subjects is not populated for a library-mode fn match, so the ≥2-scrutinee branch at ~:2183 is never taken and the single-scrutinee IIFE lowers `a, b` as a comma expression) prov=rationale:S369-repro-export-fn-pair-a-int-b-int-return-match-a-b-1-2-obj-else-emits-const-scrml-match-1-eq-a-comma-b-and-if-eq-2-return-obj-trailing-underscore-E-CODEGEN-INVALID-LOGIC-identical-on-clean-base -->
+> **⚑ S369-peter: PA-REPRODUCED, pre-existing (NOT the object-arm fix).** `export fn pair(a: int, b: int) { return match a, b { 1, 2 :> { r: "both" } _, _ :> { r: "no" } } }` (library mode) emits `const _scrml_match_1 = a , b; if (_scrml_match_1 === 2) return { r : "both" } _; else …` → `E-CODEGEN-INVALID-LOGIC` (Unexpected token). The object-arm RETURN lowering is correct here (`return { r : "both" }`); the breakage is the SCRUTINEE handling — the multi-scrutinee node never carries `scrutineeExprs`/`subjects` in library mode, so `emitMatchExpr` falls to the single-scrutinee path and lowers `a, b` as a JS comma expression. Byte-identical on the clean base (confirmed via stash), so pre-existing, not a regression from the object-arm fix. Fix direction (peter-lane): ensure the library-mode fn-body match parse populates the multi-scrutinee node fields (or route a comma-header match to `emitMultiScrutineeMatch`). Repro-first re-derive before building.
+
+### g-match-structuredbody-empty-object-arm-voids — a `=>` block-form arm whose body is an EMPTY object `. A => {}` in the structuredBody (component/inline) path lowers to a bare `{}` → the arm returns `undefined` instead of `{}` (the empty-object sibling of the resolved `:>` value-form fix) — `NEW S369-peter (STRUCTURAL claim from the S239 pass; runtime-repro OWED — the library-mode `=>` form did not emit in my probe, so this is component/inline mode); LOW; open`
+<!-- @gap id=g-match-structuredbody-empty-object-arm-voids sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(emitMatchExpr structuredBody path ~:2363 — an empty structuredBody yields structuredInner='' → structuredEmit='{}' → §18.5 void, so an empty-object `=>` arm returns undefined not {}) prov=rationale:S369-S239-review-structural-only-structuredBody-empty-arm-emits-brace-brace-not-return-brace-brace-runtime-repro-owed-component-mode -->
+> **⚑ S369-peter: STRUCTURAL only — runtime-repro OWED (do not act before reproducing).** The S239 pass on the object-arm fix flagged that the sibling structuredBody arm path (`. A => {}`, AST-parsed block-form arms — distinct from the resolved `:>` value-form) emits an empty structuredBody as a bare `{}` (structuredInner='' → structuredEmit='{}'), returning `undefined` rather than `{}`. I could NOT reach it in library mode (the `=>` form did not emit `f`), so this is component/inline mode. Filed UNVERIFIED at runtime — a future session MUST reproduce first (the filed premise is a hypothesis; [[feedback-gap-report-fix-direction-can-be-wrong]]). If real, the fix mirrors the resolved `:>` case: emit an empty-object structuredBody arm in return position.
 
 ### g-server-fn-template-literal-base64-eq-false-e-fn-003 — a base64 `=` padding char on a server-fn template-literal continuation line trips a false `E-FN-003` — `NEW S335-peter (recorded from the S334 census-1 find; re-verify owed); MED; resolved`
 <!-- @gap id=g-server-fn-template-literal-base64-eq-false-e-fn-003 sev=MED status=resolved locus=compiler/src/type-system.ts:24030(the E-FN-003 outer-scope-mutation heuristic ASSIGN_RE fallback + its application ~24065) prov=rationale:S334-census-1-find-a-base64-equals-on-a-template-literal-continuation-line-reads-as-an-assignment-and-false-fires-E-FN-003-NOT-re-verified-on-S335-HEAD -->
@@ -9359,63 +9368,114 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 >
 > **This is the instrument-integrity thesis pointed at its own remedy:** the fix that made the census truthful also made its own history incomparable, and nothing in the output says so. Fix direction: emit an instrument-version or a "buckets reclassified at #646" note in the census header, so a cross-run diff is legible.
 
-### g-default-logic-line-comment-emits-following-statements-as-page-text — a `//` comment in a `<program>` default-logic body turns the surrounding statement run into verbatim page text, exit 0, no diagnostic, and it MASKS the errors those statements would have raised — `NEW S368-bryan; HIGH; open`
-<!-- @gap id=g-default-logic-line-comment-emits-following-statements-as-page-text sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(liftBareDeclarations + the §40.8 default-logic body path),compiler/src/block-splitter,compiler/src/tokenizer.ts — the auto-lift that implements §40.8 does not treat a `//` line comment as logic, so the contiguous run around it is classified as markup text; exact decision site not yet traced prov=adopter:bryan-hand-authoring-S368-first-human-written-scrml -->
-> **PA-REPRODUCED BY EXECUTION on `main` @ `772c0fb2`**, from bryan's own hand-written file (archived beside this
-> entry as `docs/changes/default-logic-line-comment/repro-original.scrml`).
+### g-reset-sync-read-after-reset-returns-the-stale-pre-reset-value — `reset(@cell)` on a server-fn-backed init settles asynchronously, so a synchronous read immediately after it returns the OLD value, and §6.8 does not say so — `NEW S368-bryan; LOW; open`
+<!-- @gap id=g-reset-sync-read-after-reset-returns-the-stale-pre-reset-value sev=LOW status=open locus=compiler/src/runtime-template.js:1155(_scrml_reset_apply — the fire-and-forget settle) prov=review:the-S368-stamp-verification-of-fix-s360-reset-init-await-parity -->
+> Surfaced while verifying `g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn` **by execution**.
+> Recorded as the **accepted residual of that fix**, not as an objection to it.
 >
-> **Symptom.** In a `<program>` body parsed in **§40.8 default-logic mode** (no explicit `${…}` wrapper), a `//`
-> line comment causes the contiguous run of statements around it to be emitted **verbatim into the page body as
-> text** instead of compiled. **Exit 0. Zero diagnostics.**
+> `_scrml_reset_apply` settles a thenable **fire-and-forget** so `_scrml_reset` can stay synchronous — which
+> is what keeps every existing call site unchanged, the property that makes the fix landable at all. The
+> consequence: a **synchronous read immediately after `reset(@cell)`** observes the *pre-reset* value.
 >
-> Minimal reproducer (`repro-minimal.scrml`) — four lines:
-> ```scrml
-> <program>
-> // c
-> log("M1");
-> <p>ok</>
-> </program>
-> ```
-> Emitted `<body>` contains the literal text `log("M1");`.
->
-> **Measured characterisation:**
->
-> | shape | result |
+> | | value read immediately after `reset(@items)` |
 > |---|---|
-> | `//` comment + 1 following statement | statement emitted verbatim |
-> | `//` comment + 3 following statements | **all three** emitted verbatim |
-> | statement BEFORE the comment + 1 after | **both** emitted verbatim — it poisons the run in both directions |
-> | same code inside an explicit `${ … }` block | **CLEAN** — compiles correctly |
-> | `/* block */` comment instead of `//` | **CLEAN** — correct error fires |
-> | with `fn` present vs absent | see the masking limb below |
+> | before the fix | `[object Promise]` |
+> | after the fix | the **stale pre-reset** array |
 >
-> So the trigger is **the `//` line comment in default-logic body position**, and the blast radius is the whole
-> contiguous statement run, not just the following line.
+> Both are wrong; the second is wrong in a *plausible-looking* way, which is why it earns a ledger entry.
+> An adopter writing `reset(@items); const n = @items.length` gets a number — just the old one — silently.
 >
-> **⚑ The masking limb — this is the part that makes it HIGH rather than MED.** In bryan's original file the
-> swallowed statement is `log(@wop);` where `@wop`'s declaration is **commented out**, so `@wop` is undeclared.
-> `E-STATE-UNDECLARED` **does not fire** — because the statement was never compiled. Measured: the same file with
-> the comment removed exits **1** with `E-STATE-UNDECLARED`; with the comment present it exits **0**, silent.
-> **A defect that converts code to text also suppresses every diagnostic that code would have raised**, so the
-> blast radius is not bounded by this one rule — any error in the swallowed run disappears with it.
+> **Defensible under §13.2** (the result IS the resolved value, and it does arrive) and inherent to any
+> synchronous-reset design. **The gap is that SPEC §6.8 does not state it.** Fix direction is a normative
+> sentence in §6.8 describing settle timing for a server-fn-backed init/default — NOT a code change. Making
+> `reset` async would change every call site, which is the very thing this fix exists to avoid.
+
+## §S368 — filed S368-bryan (hand-authoring dogfood: the §40.8 default-logic body)
+
+> Surfaced by **bryan writing scrml by hand** — the first human-authored scrml in the project's history, and
+> therefore the first ergonomic signal the corpus has ever produced. Every claim below is PA-measured by
+> compiling and reading the emitted artifact.
 >
-> Adding a `fn` declaration to the file suppresses the residual diagnostic too (comment-only → exit 1 with the
-> error still raised; comment + `fn` → exit 0, fully silent). Not yet traced; recorded as measured.
+> ⚑ **My first characterisation of this was WRONG in two places** and was overturned by the build round's
+> first-hand re-derivation, which I then re-measured myself. What follows is the corrected version; the
+> superseded framing (*"the `//` comment is the trigger"* / *"`/* */` is clean"*) is recorded in
+> `docs/changes/default-logic-line-comment/progress.md` so the error is legible rather than silently rewritten.
+
+### g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration — a comment splits a default-logic text run so the statement loses the declaration that made it lift, and ships as page text at exit 0 with its diagnostics deleted — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration sev=HIGH status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the terminal result.push(block); the eight ^-anchored lift gates)+compiler/src/block-splitter(emits a // comment as its own child, which flushes the run) prov=adopter:bryan-hand-authoring-S368-first-human-written-scrml -->
+> **PA-measured, four shapes, current `main`:**
 >
-> **⚑ And the compiler routes authors INTO the broken mode.** `W-PROGRAM-REDUNDANT-LOGIC` fires on a `${…}`
-> wrapper containing declarations and says, verbatim: *"bare top-level declarations auto-lift to the logic context
-> without explicit `${...}` wrapping. **Remove the redundant `${...}` for cleaner source.** See SPEC §40.8."*
-> The wrapped form is the one that WORKS. Following the lint's advice is what puts an author in the mode where a
-> comment silently deletes their code.
+> | shape | code in `<body>`? | what it establishes |
+> |---|---|---|
+> | bare call, **no declaration in the run**, no comment | **LEAKS** | the comment was never the root — see the sibling entry below |
+> | bare call **with a declaration in the run**, no comment | clean | a declaration is what makes the run lift |
+> | same **plus a `//` comment between them** | **LEAKS** | the comment FLUSHES the run, severing the statement from its declaration |
+> | **`/* block */` above a `fn` declaration** | **LEAKS the declaration itself** | a second, STRICTLY MORE SEVERE direction |
 >
-> **Provenance note (load-bearing for how this is prioritised).** bryan is the **first human ever to write scrml**
-> — the entire corpus is LLM-authored, so it carries no ergonomic feedback and, evidently, never exercised this
-> shape. Corpus-zero here bounds blast radius only; it is not evidence the shape is unusual. A comment above a
-> statement is not an exotic construct.
+> **The mechanism.** A text run at a default-logic root lifts only if it matches one of **eight `^`-anchored
+> regexes**. Comments defeat them in two opposite directions: a `//` comment is emitted as its own child and
+> **FLUSHES** the run, splitting one authored run in two; a `/* */` comment stays *inside* the run, so the run
+> now begins with `/*` and the anchored gate **cannot match at all** — which loses the whole declaration.
+> `/* c */` above a `fn` ships the entire function into `<body>` at exit 0.
 >
-> **Fix direction.** The §40.8 auto-lift must treat a `//` line comment as logic-context content, the way the
-> `${…}` path already does — the working path is one function over. Owed with it: (1) a merge-blocker case
-> asserting the minimal reproducer compiles the statement rather than emitting it; (2) a check on whether ANY
-> non-declaration content in default-logic mode can be silently reclassified as text, since a defect that turns
-> code into page text is a silent-wrong-output class and this is unlikely to be its only member; (3) re-examine
-> `W-PROGRAM-REDUNDANT-LOGIC`'s advice until the two modes are actually equivalent.
+> **⚑ The masking limb — why this is HIGH.** In bryan's original file the swallowed statement is `log(@wop);`
+> where `@wop`'s declaration is commented out. `E-STATE-UNDECLARED` **does not fire**, because the statement
+> was never compiled. Remove the comment and the same file exits **1** with the error. **A defect that turns
+> code into text also deletes every diagnostic that code would have raised**, so the blast radius is not
+> bounded by any one rule.
+>
+> **⚑ This is the THIRD report of one root cause.** Two gate regexes already in the tree — `TILDE_TOKEN_RE` and
+> `TOPLEVEL_ON_LIFECYCLE_RE` — are one-shape workarounds for it, and their own doc comments say so. The fix
+> normalises the gates' **input** rather than adding a ninth regex.
+>
+> **⚑ And the compiler routes authors INTO this mode.** `W-PROGRAM-REDUNDANT-LOGIC` fires on a `${…}` wrapper
+> containing declarations and says verbatim: *"Remove the redundant `${...}` for cleaner source. See SPEC
+> §40.8."* The wrapped form is the one that WORKS.
+
+### g-default-logic-bare-call-is-unspecified-and-ships-as-page-text — a bare call at a `<program>` default-logic root matches no auto-lift gate, so it is emitted as page text at exit 0; §40.8 is silent on the shape — `NEW S368-bryan; HIGH; open; OPERATOR RULING OWED`
+<!-- @gap id=g-default-logic-bare-call-is-unspecified-and-ships-as-page-text sev=HIGH status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the eight ^-anchored lift gates)+compiler/SPEC.md§40.8 prov=adopter:bryan-hand-authoring-S368-split-out-from-the-comment-defect-by-first-hand-re-derivation -->
+> **PA-measured.** `<program>` + `log("M1");` + markup — **no comment, no declaration** — emits the literal text
+> `log("M1");` into `<body>` at **exit 0, zero diagnostics**.
+>
+> This is the residue after the comment defect above is fixed, and it is **not a bug fix — it is a RULING.**
+> §40.8 (`SPEC.md:22813-22814`) enumerates what auto-lifts (declarations), carves out writes with a diagnostic,
+> and is **silent on a bare call**. Per the governing-sentence gate, *"searched §40.8 — no governing sentence
+> found"* is a FINDING that converts this from a fix into an operator decision.
+>
+> **The fork:**
+> - **(a) lift every text run** — closes it, but prose written directly in a `<program>` body then starts
+>   parsing as logic, which is a real authoring cost.
+> - **(b) diagnose non-declaration runs** — also closes it, but must then reject `const bias = 1.2` followed by
+>   `log(x)`, which compiles today, or the diagnostic cannot be explained.
+>
+> Either needs SPEC text. Nobody should guess.
+>
+> **⚑ Class sweep — the corpus count did NOT move (base 69 = head 69), and every instance sits OUTSIDE §40.8.**
+> Read from source rather than by regex. Four live members worth naming:
+> - **`on mount { loadDashboard() }` ships as page text** — `samples/htmx-debate-dashboard.scrml:143`, inside a
+>   `<db>` state-block body where `isDefaultLogicBody` is deliberately false. **The mount hook never runs and
+>   nothing says so.**
+> - ~25 bare `@name = expr` writes emitted as text (`gauntlet-r10-bun-admin`, `samples/dashboard`).
+> - `stdlib/http/index.scrml` leaks 8 lines of `export function` / `const` / `for` into its own body.
+>
+> So the §40.8 comment limb is closable by code; **the silent-code-as-text CLASS has at least four more live
+> members elsewhere**, covered by neither the fix nor this ruling.
+
+### g-selfhost-smoke-resolves-projectroot-to-MAIN-so-worktree-agents-read-a-live-tree — a worktree agent's suite imports the MAIN checkout's compiler source, so a concurrent edit there fails its tests with its own name on them — `NEW S368-bryan; MED; open`
+<!-- @gap id=g-selfhost-smoke-resolves-projectroot-to-MAIN-so-worktree-agents-read-a-live-tree sev=MED status=open locus=compiler/tests/integration/self-host-smoke.test.js:35-51(findMainProjectRoot parses `git worktree list --porcelain` and takes the FIRST entry) prov=rationale:two-independent-agents-hit-this-in-one-session-and-a-third-verified-the-mechanism-from-source -->
+> `findMainProjectRoot()` parses `git worktree list --porcelain` and takes the **first** entry — the MAIN
+> checkout — **by design**, because the gitignored `compiler/self-host/dist/` only exists there. The
+> block-splitter parity test then `import`s `resolve(projectRoot, "compiler/src/block-splitter.js")` **from
+> MAIN, not from the worktree.**
+>
+> Consequence: **a worktree agent cannot trust a self-host test result while another agent is editing main.**
+> Hit independently by two agents in one session; a third verified the mechanism from source and confirmed the
+> attribution was correct rather than convenient. Both saw a red `Self-host: block-splitter parity` naming
+> `splitBlocks`, which reads exactly like their own regression.
+>
+> Compounding it: an **empty** `WIP` start commit defeats the pre-commit hook's docs-only skip
+> (`[ -n "$STAGED" ]` is false), so it runs the full suite for nothing — and that is where one agent met this.
+>
+> Fix direction: make the dependency explicit (fail loudly when the resolved root is not the running worktree),
+> or vendor the artifacts the test needs. Interim: dispatch briefs should say the first commit must be a real
+> docs-only one, and that a self-host failure needs its path checked before it is attributed.
