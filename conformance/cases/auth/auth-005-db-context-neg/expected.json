@@ -1,0 +1,12 @@
+{
+  "id": "auth-005-db-context-neg",
+  "description": "A `<var server>` in a file with NO `<program>` at all, but WITH a `<db src=>` state block, does NOT fire E-AUTH-005: the `<db>` block IS the server context §52.11 asks for. This is the canonical MULTI-FILE page shape (§40.8 / S85 Q2 — exactly one `<program>`, in the entry file; page and component files carry none), so a file-local `<program db=>` search can never succeed for it however legitimate its server side.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-005.test.js",
+  "spec": "§52.4.4 / §52.11 / §40.8",
+  "rationale": "Complements auth-005-pos (no server context at all -> fires) and auth-005-neg (`<program db=>` -> silent) with the third shape: server context supplied by `<db src=>` rather than by `<program db=>`. Without this case the checker may regress to a `<program>`-only search, which made `<var server>` structurally unavailable to every multi-file page.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-AUTH-005"]
+  }
+}

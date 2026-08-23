@@ -6,8 +6,13 @@
  * Normative: SPEC §52.11. Server-authoritative variables require a server
  * context.
  *
- * Firing site: type-system.ts:4446. Triggered by a `state-decl` whose
- * `isServer` flag is true when `hasProgramDbAttr(fileAST)` returns false.
+ * Firing site: type-system.ts. Triggered by a `state-decl` whose `isServer`
+ * flag is true when `hasServerContext(fileAST)` returns false. TWO shapes
+ * satisfy "has a server context" and both are covered below:
+ *   1. `<program db=...>` in the file          -> NEG
+ *   2. a `<db src=...>` state block in the file -> DB-CONTEXT NEG
+ * Shape 2 is the canonical MULTI-FILE page shape (§40.8 / S85 Q2): the single
+ * `<program>` lives in the ENTRY file, so a page/component file has none at all.
  */
 import { describe, test, expect } from "bun:test";
 import { fileURLToPath } from "node:url";
@@ -50,6 +55,30 @@ describe("CONF-AUTH-005: server @var in client-only context", () => {
 }
 <p>x</>`;
     const { errors } = compile(src, "auth005-neg");
+    expect(errors.some(e => e.code === "E-AUTH-005")).toBe(false);
+  });
+
+  // Regression: before `hasServerContext`, the check searched only for a
+  // `<program db=>` node in THIS file. A multi-file page has no `<program>` at
+  // all (§40.8 / S85 Q2), so every `<var server>` in one fired E-AUTH-005 — and
+  // the diagnostic's own remedy ("add db= to the enclosing <program>") was
+  // unreachable, because the layout forbids a `<program>` there. Since §52.4.2
+  // pt 5 makes `<var server>` the only route to an SSR-prerendered cell, that
+  // over-fire made server-rendered page data unavailable to every multi-file app.
+  test("DB-CONTEXT NEG: `server @var` in a file with a <db src=> block and NO <program> does NOT fire E-AUTH-005", () => {
+    const src = `<db src="./items.db" tables="items">
+\${
+    function loadItems() {
+        ?{\`CREATE TABLE IF NOT EXISTS items (id integer primary key, label text)\`}.run()
+        return ?{\`SELECT id, label FROM items\`}.all()
+    }
+    server @items = loadItems()
+}
+<ul>
+    <each in=@items key=@.id><li>\${@.label}</li></each>
+</ul>
+</>`;
+    const { errors } = compile(src, "auth005-dbctx-neg");
     expect(errors.some(e => e.code === "E-AUTH-005")).toBe(false);
   });
 });
