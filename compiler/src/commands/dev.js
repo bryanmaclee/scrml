@@ -687,12 +687,70 @@ export function broadcastReload() {
   }
 }
 
-const HOT_RELOAD_SCRIPT = `<script>
-(function(){var es=new EventSource("/_scrml/live-reload");es.addEventListener("reload",function(){location.reload()});es.onerror=function(){es.close();setTimeout(function(){es=new EventSource("/_scrml/live-reload")},2000)};})();
-</script>`;
+/**
+ * The URL the hot-reload client is served from. Inside `/_scrml/`, the namespace
+ * the dev server already owns (`/_scrml/live-reload`, `/_scrml/log`,
+ * `/_scrml/fn/*`), so it cannot collide with an author route.
+ */
+export const HOT_RELOAD_SRC = "/_scrml/hot-reload.js";
 
 /**
- * Inject hot-reload script into HTML before </body> or at end.
+ * The hot-reload client itself. Served AS A FILE at `HOT_RELOAD_SRC`, not
+ * inlined into the page.
+ *
+ * It used to be an inline `<script>`. Once the §40.3 `handle()` onion was
+ * mounted around top-level `scrml dev` dispatch, a `<program headers="strict">`
+ * app's own `handle()` began setting `Content-Security-Policy: default-src
+ * 'self'` (§39.2.5) on dev's HTML responses too — and a browser refuses an
+ * inline script under that policy with no nonce or hash. Hot reload was dead for
+ * every strict-headers app in dev: exactly the "compiler-emitted content refused
+ * by the compiler-pinned CSP" defect this arc set out to remove.
+ *
+ * A same-origin `<script src>` satisfies `default-src 'self'` with no nonce, no
+ * hash, and no CSP widening — the same resolution §38's transition keyframes
+ * took (inline `<style>` injection → an emitted stylesheet).
+ */
+const HOT_RELOAD_JS = `// scrml dev — hot reload client (served at ${HOT_RELOAD_SRC}).
+(function () {
+  var RELOAD_URL = "/_scrml/live-reload";
+  var RETRY_MS = 2000;
+  var es = new EventSource(RELOAD_URL);
+
+  es.addEventListener("reload", function () {
+    location.reload();
+  });
+
+  // The dev server restarts on a port change and drops the stream; reconnect so
+  // the page is not stranded without hot reload.
+  es.onerror = function () {
+    es.close();
+    setTimeout(function () {
+      es = new EventSource(RELOAD_URL);
+    }, RETRY_MS);
+  };
+})();
+`;
+
+const HOT_RELOAD_SCRIPT = `<script src="${HOT_RELOAD_SRC}"></script>`;
+
+/**
+ * The `Response` for `HOT_RELOAD_SRC`. Served BEFORE the compile-failure
+ * short-circuit and before the `handle()` onion — it is the dev server, not the
+ * compiled one, and the compile-error overlay carries the same tag so the page
+ * auto-refreshes the moment the compile succeeds again.
+ * @returns {Response}
+ */
+export function createHotReloadScriptResponse() {
+  return new Response(HOT_RELOAD_JS, {
+    headers: {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
+/**
+ * Inject the hot-reload `<script src>` tag into HTML before </body> or at end.
  * @param {string} html
  * @returns {string}
  */
@@ -1042,6 +1100,16 @@ export function buildServeConfig(opts, serveDir) {
       // SSE hot-reload endpoint
       if (pathname === "/_scrml/live-reload") {
         return createSseResponse();
+      }
+
+      // The hot-reload CLIENT. A same-origin `<script src>` rather than an
+      // inline script, so `<program headers="strict">`'s pinned
+      // `default-src 'self'` (§39.2.5) — which the mounted handle() onion now
+      // sets on dev's HTML responses too — accepts it. Served here, ahead of
+      // the compile-failure short-circuit, so the error overlay's copy of the
+      // tag resolves while the project does not compile.
+      if (pathname === HOT_RELOAD_SRC) {
+        return createHotReloadScriptResponse();
       }
 
       // §20.6 (F2=B) — client log() forwarding endpoint. In development the
