@@ -9358,3 +9358,64 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > #646 changed `s34-census.ts` (comment-stripping, +143 lines), which **reclassifies rows** — a code whose only "impl site" was a comment moves from IMPL-SITES to FALSE-CLAIM. Against a catalog that grew by **one**, the buckets moved 95 → 112 and 320 → 300. **Anyone comparing this run to the S346 figures reads twenty regressions that never occurred.**
 >
 > **This is the instrument-integrity thesis pointed at its own remedy:** the fix that made the census truthful also made its own history incomparable, and nothing in the output says so. Fix direction: emit an instrument-version or a "buckets reclassified at #646" note in the census header, so a cross-run diff is legible.
+
+### g-default-logic-line-comment-emits-following-statements-as-page-text — a `//` comment in a `<program>` default-logic body turns the surrounding statement run into verbatim page text, exit 0, no diagnostic, and it MASKS the errors those statements would have raised — `NEW S368-bryan; HIGH; open`
+<!-- @gap id=g-default-logic-line-comment-emits-following-statements-as-page-text sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(liftBareDeclarations + the §40.8 default-logic body path),compiler/src/block-splitter,compiler/src/tokenizer.ts — the auto-lift that implements §40.8 does not treat a `//` line comment as logic, so the contiguous run around it is classified as markup text; exact decision site not yet traced prov=adopter:bryan-hand-authoring-S368-first-human-written-scrml -->
+> **PA-REPRODUCED BY EXECUTION on `main` @ `772c0fb2`**, from bryan's own hand-written file (archived beside this
+> entry as `docs/changes/default-logic-line-comment/repro-original.scrml`).
+>
+> **Symptom.** In a `<program>` body parsed in **§40.8 default-logic mode** (no explicit `${…}` wrapper), a `//`
+> line comment causes the contiguous run of statements around it to be emitted **verbatim into the page body as
+> text** instead of compiled. **Exit 0. Zero diagnostics.**
+>
+> Minimal reproducer (`repro-minimal.scrml`) — four lines:
+> ```scrml
+> <program>
+> // c
+> log("M1");
+> <p>ok</>
+> </program>
+> ```
+> Emitted `<body>` contains the literal text `log("M1");`.
+>
+> **Measured characterisation:**
+>
+> | shape | result |
+> |---|---|
+> | `//` comment + 1 following statement | statement emitted verbatim |
+> | `//` comment + 3 following statements | **all three** emitted verbatim |
+> | statement BEFORE the comment + 1 after | **both** emitted verbatim — it poisons the run in both directions |
+> | same code inside an explicit `${ … }` block | **CLEAN** — compiles correctly |
+> | `/* block */` comment instead of `//` | **CLEAN** — correct error fires |
+> | with `fn` present vs absent | see the masking limb below |
+>
+> So the trigger is **the `//` line comment in default-logic body position**, and the blast radius is the whole
+> contiguous statement run, not just the following line.
+>
+> **⚑ The masking limb — this is the part that makes it HIGH rather than MED.** In bryan's original file the
+> swallowed statement is `log(@wop);` where `@wop`'s declaration is **commented out**, so `@wop` is undeclared.
+> `E-STATE-UNDECLARED` **does not fire** — because the statement was never compiled. Measured: the same file with
+> the comment removed exits **1** with `E-STATE-UNDECLARED`; with the comment present it exits **0**, silent.
+> **A defect that converts code to text also suppresses every diagnostic that code would have raised**, so the
+> blast radius is not bounded by this one rule — any error in the swallowed run disappears with it.
+>
+> Adding a `fn` declaration to the file suppresses the residual diagnostic too (comment-only → exit 1 with the
+> error still raised; comment + `fn` → exit 0, fully silent). Not yet traced; recorded as measured.
+>
+> **⚑ And the compiler routes authors INTO the broken mode.** `W-PROGRAM-REDUNDANT-LOGIC` fires on a `${…}`
+> wrapper containing declarations and says, verbatim: *"bare top-level declarations auto-lift to the logic context
+> without explicit `${...}` wrapping. **Remove the redundant `${...}` for cleaner source.** See SPEC §40.8."*
+> The wrapped form is the one that WORKS. Following the lint's advice is what puts an author in the mode where a
+> comment silently deletes their code.
+>
+> **Provenance note (load-bearing for how this is prioritised).** bryan is the **first human ever to write scrml**
+> — the entire corpus is LLM-authored, so it carries no ergonomic feedback and, evidently, never exercised this
+> shape. Corpus-zero here bounds blast radius only; it is not evidence the shape is unusual. A comment above a
+> statement is not an exotic construct.
+>
+> **Fix direction.** The §40.8 auto-lift must treat a `//` line comment as logic-context content, the way the
+> `${…}` path already does — the working path is one function over. Owed with it: (1) a merge-blocker case
+> asserting the minimal reproducer compiles the statement rather than emitting it; (2) a check on whether ANY
+> non-declaration content in default-logic mode can be silently reclassified as text, since a defect that turns
+> code into page text is a silent-wrong-output class and this is unlikely to be its only member; (3) re-examine
+> `W-PROGRAM-REDUNDANT-LOGIC`'s advice until the two modes are actually equivalent.
