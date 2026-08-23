@@ -188,3 +188,24 @@ serving (the state is not sticky).
 | pre-commit hook | — | 28908 pass / 0 fail |
 
 Exit codes measured directly (`cmd; echo $?`), never through a pipe.
+
+---
+
+# FIX ROUND 2 (adversarial DO-NOT-LAND response)
+
+Brief archived verbatim at `FIX-ROUND-2-BRIEF.md` (same directory).
+
+Base for this round: `459003df` + merge of `origin/main` (80b1fce8).
+
+Findings to close:
+- HIGH-1 — §38 transition keyframes lost on soft navigation (per-page CSS not synced).
+- HIGH-2 — `headers="strict"` + `scrml dev` CSP refuses inline HOT_RELOAD_SCRIPT.
+- MEDIUM-3 — `E-MW-007` over-fires on `batch-in-list-cap=` / `cors-max-age=` only files.
+- MEDIUM-4 — CORS preflight moved below `handle()` PRE, contradicting SPEC 39.3.3.
+- MEDIUM-5 / LOW-7 — SPEC text under-describes; `40.3.4` citations have no heading.
+- LOW-8 — `_scrml_ssr_seed_from_document` needs SCRIPT + type guard.
+- LOW-9 — `docs/FACTS.md` test-file count stale.
+- LOW-10 — `runtime-template.js` stale inline-script wire-format prose.
+
+## Log
+- [start] crash anchor: brief + this append.
