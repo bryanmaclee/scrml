@@ -1,13 +1,90 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. TWO wrap blocks are current:  -->
-<!--   S354-bryan (below) — the bryan lane: five branches in hand,    -->
-<!--     five operator decisions pending, dpa-036 ADVISORY.           -->
-<!--   S364-peter (next block down) — the peter lane + the state of   -->
-<!--     `main` at #641/#642. Read BOTH before picking up.            -->
-<!-- Order is LANDING order (this block's PR #581 merged after #642), -->
-<!-- not session order. Mechanical stream: delta-log [1669]-[1685].   -->
-<!-- Body below the S364 block is S363 and older (history).           -->
+<!-- hand-off.md — live session state. THREE wrap blocks are current: -->
+<!--   S366-peter (below) — the peter lane: 2 PRs landed (#648 heading -->
+<!--     sweep · #649 bare-fn codegen fix); `main` @ c2874d6c 0/0.     -->
+<!--   S354-bryan (2nd block) — the bryan lane, STILL PENDING: five    -->
+<!--     branches in hand, five operator decisions, dpa-036 ADVISORY.  -->
+<!--     S365-bryan advanced main through #647 but did NOT resolve     -->
+<!--     these — read this block for bryan's live lane.                -->
+<!--   S364-peter (3rd block) — prior peter wrap (history).            -->
+<!-- Read S366 for peter-pickup + S354 for bryan-pending. Mechanical   -->
+<!-- stream: delta-log [1692]-[1693] (this session); bryan S365 =      -->
+<!-- [1686]-[1691] (on main, board S365-bryan not a hand-off block).   -->
 <!-- ============================================================= -->
+
+# scrml — Session 366 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+S366 booted as SUCCESSOR to the LIVE-but-AFK S365-bryan and worked strictly non-intersecting
+peter-lane. **Two PRs landed; the S356-parked heading-drift sweep is now DONE (drift 0).** The
+durable finding recurred a 5th session running: **the filed fix-direction — and my own root
+hypothesis — is a hypothesis to re-derive first-hand.** On the sweep, my "#511 fixed a different
+facet" guess about `g-request-is-some` was itself wrong (the value/bool/class-attr path routes
+cleanly on HEAD); on #649 the fix needed instrumentation, not the filed locus taken on trust.
+[[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-staleness-spot-check-catches-silently-fixed-gaps]]
+
+### B. peter's lane — the S364 buildable list, items 2 & 3 remain (take in order)
+1. ~~`g-library-bare-fn-no-trailing-newline-brace-strip` (LOW)~~ — **DONE this session (#649).**
+2. **each-interp IMPORTED-fn residual** (a #627 follow-on) — cross-file imported markup fns still
+   stringify in a nested `each` interp (exportRegistry threading into `collectMarkupReturningFnNames`).
+   NOT yet re-derived on HEAD — repro-first before building.
+3. **`g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED)** — the #636 FN path still
+   lowers a brace-delimited arm body (`1 :> {x:1}`) as a statement block → silent `undefined`; the
+   #641 decl fix sidesteps it via the tilde lowering, the FN path wants the same. **bryan re-confirmed
+   at S365 it reproduces live** (fn path returns `undefined` where #641's decl path returns `{x:1}`).
+   Clean peter-lane cross-mode parity.
+4. **Weigh before building / DOG-FOOD:** the durable S358→S364 finding holds — the cheap ledger veins
+   are worked out; after the library-mode follow-ons, fresh clean bugs come from dog-fooding a new
+   adopter program, not the ledger.
+
+### A. bryan's lane — UNCHANGED, still pending (read the S354-bryan block below)
+S365-bryan advanced `main` through #647 (review-floor drains, three S239 verdicts, instrument-integrity
+landed) but **did NOT resolve** the five branches / five operator decisions / dpa-036 ADVISORY carried
+from the S354 wrap — all still pending bryan + operator. Plus the S364-routed `${…}`-interp-uniformity
+arc (queue group-4 K) is received, not started. Do NOT touch any of it (successor discipline held).
+
+## WHAT LANDED (S366-peter) — 2 PRs
+- **#648** ⭐ **heading-drift sweep** — 20 stale `### ` gap headings realigned to their verified `@gap`
+  markers (19 open→resolved, 1 resolved→open). Zero marker changes (gap-counts byte-identical). The 5
+  suspect batch-flipped markers were first-hand re-compiled on HEAD (all genuinely resolved); no
+  false-resolved found. `headingMarkerDrift()` now 0.
+- **#649** ⭐ **`g-library-bare-fn-no-trailing-newline-brace-strip` RESOLVED** (LOW) — pair the `${…}`
+  wrapper-strip so a bare-fn library file keeps its own `}`. Repro-first + instrumented root; bug-class
+  swept; biting merge-blocker test; S239 pass sound (one test-fidelity finding applied). LOW 69→68.
+
+## ⚑ MISSES / lessons (S366)
+- **★ My own root hypothesis was wrong again** — the "#511 fixed a different facet" call on
+  `g-request-is-some` was false (re-compiled first-hand → resolved). 5th session where first-hand
+  re-derivation overturns a filed/assumed direction. [[feedback-gap-report-fix-direction-can-be-wrong]]
+- **★ A batch "bookkeeping" marker-flip with no prose resolution note is a false-resolved RISK CLASS** —
+  the 5 suspects flipped resolved in S218/S220 chores with the prose left reading open; all turned out
+  genuinely fixed, but the pattern (marker moved, prose + heading didn't) is exactly where a
+  false-resolved would hide. Verified each on HEAD before propagating "resolved" into a 2nd artifact.
+- **★ The S239 pass caught a real test-fidelity gap** — `validateEmit:false` meant the merge-blocker's
+  `expect(errors).toEqual([])` never exercised the E-CODEGEN gate the gap is about; switched to
+  `validateEmit:true`. Run `/code-review high` on every codegen dispatch, tests included.
+  [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **Verified a satellite's "all resolved" verdict first-hand** rather than trusting it (2 highest-suspicion
+  repros re-compiled by me + the other 3's emit/browser-gate) — the satellite is a claim, not the answer.
+
+## 🧷 STATE (S366 close)
+- **main** @ `c2874d6c` (#649) + #648. Coherence 0/0. Cloud `gate` GREEN on both merges (`tracking` red =
+  known non-required fs.watch baseline). #649 rebased onto main after #648 (strict:true up-to-date; clean).
+- **Gaps: HIGH 45 · MED 149 · LOW 68 · Nominal 7** (`@generated:gap-counts`). LOW 69→68 (#649 resolve).
+  20 headings realigned, 0 marker/count changes from the sweep.
+- **Review floor:** #648 (docs-only sweep) + #649 (code) owe markers → the inherent next-boot carve-out
+  tail. **Also: #647 (bryan's S365 inherent tail) still shows 1 OWED at boot** — bryan's lane, not drained
+  by me (avoid colliding with his LIVE `pr-reviews.md` footprint).
+- **Branches:** main + app-pinned only (both fix/docs branches auto-deleted on merge). **Worktrees:** main
+  + scrml-pinned only (clean). **Maps:** surgical codegen edit (emit-library wrapper-strip) — no new
+  modules/entrypoints, maps unchanged.
+- **Env:** bun 1.4.0. Integration+conformance clean; 6 baseline fails (self-host×3/self-compilation/session
+  — none codegen, pre-existing across prior sessions). `gh pr merge --squash` ran PA-side this session
+  (both #648 direct + #649 via armed auto-merge after rebase); no harness block hit.
+- **Sibling:** S365-bryan board still reads LIVE ("FINAL for this stretch", AFK). Board S366-peter → WRAPPED.
+
+<!-- ================= S354-bryan (STILL PENDING) below ================= -->
 
 # scrml — Session 354 (bryan · ASUS-Vivobook) — WRAP
 

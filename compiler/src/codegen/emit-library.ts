@@ -986,9 +986,16 @@ export function generateLibraryJs(
           errors,
           [...asyncEmit.removals, ...controlFlowEmit.removals],
         );
-        // Strip the ${ prefix and } suffix
-        if (blockText.startsWith("${")) blockText = blockText.slice(2);
-        if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);
+        // Strip the ${…} logic-wrapper as a MATCHED PAIR: the trailing `}` is the
+        // wrapper close ONLY when a `${` prefix was actually present. A bare-fn
+        // library file has no wrapper and ends in the fn's OWN `}`; stripping it
+        // there truncates the fn → E-CODEGEN-INVALID-LOGIC
+        // (g-library-bare-fn-no-trailing-newline-brace-strip). The bug hid in the
+        // common case only because a trailing newline left the fn's `}` non-final.
+        if (blockText.startsWith("${")) {
+          blockText = blockText.slice(2);
+          if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);
+        }
         blockText = blockText.trim();
         if (blockText) {
           // §21.2/§21.5 — remove scrml `type` decls (incl. any leading
