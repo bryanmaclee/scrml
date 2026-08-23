@@ -200,44 +200,14 @@ import {
 // in compiler/src/ so it ships with the compiler. Path normalization in
 // isUnitCCExempt() strips the absolute repo prefix, fall-through to a
 // best-effort suffix match (covers worktree/checkout-location variance).
-import { readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+// S368 — the loader + predicate moved to a leaf module so the TAB stage can
+// consult the SAME list. `E-CALL-NOT-IN-LOGIC-CONTEXT` (S368) fires at
+// ast-builder.js on the SAME §40.8 body-top locus as this code, and TAB runs
+// before SYM, so ast-builder.js cannot import from symbol-table.ts.
+import { isDefaultLogicBodyTopExempt } from "./default-logic-exemption.ts";
 
-const __filename_unitcc = fileURLToPath(import.meta.url);
-const __dirname_unitcc = dirname(__filename_unitcc);
-const UNIT_CC_EXEMPTION_LIST: string[] = (() => {
-  try {
-    const raw = readFileSync(join(__dirname_unitcc, "unit-cc-exemption-list.json"), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
-      return parsed as string[];
-    }
-    return [];
-  } catch {
-    return [];
-  }
-})();
-const UNIT_CC_EXEMPT_SET = new Set<string>(UNIT_CC_EXEMPTION_LIST);
-
-function isUnitCCExempt(filePath: string): boolean {
-  if (!filePath) return false;
-  // Strict: try direct membership (caller passed a repo-relative path).
-  if (UNIT_CC_EXEMPT_SET.has(filePath)) return true;
-  // Lenient: peel any known repo prefixes. The list is repo-relative; spans
-  // typically carry absolute paths. The worktree harness adds the
-  // `.claude/worktrees/agent-XXX/` segment; strip that and the repo root.
-  for (const entry of UNIT_CC_EXEMPT_SET) {
-    if (filePath.endsWith(entry)) {
-      // Guard against accidental short-suffix collisions (e.g., "a.scrml"
-      // matching "/foo/bar/a.scrml"): require a `/` boundary just before
-      // the entry, OR the entry to BE the full path.
-      const idx = filePath.length - entry.length;
-      if (idx === 0 || filePath[idx - 1] === "/") return true;
-    }
-  }
-  return false;
-}
+/** Back-compat alias for the Unit CC call sites below. */
+const isUnitCCExempt = isDefaultLogicBodyTopExempt;
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry

@@ -49,6 +49,12 @@ import {
   KEYWORDS as SCRML_KEYWORDS,
 } from "./tokenizer.ts";
 
+// S368 — shared per-file exemption for the §40.8 default-logic BODY-TOP codes
+// (`E-WRITE-NOT-IN-LOGIC-CONTEXT` at SYM, `E-CALL-NOT-IN-LOGIC-CONTEXT` here).
+// A leaf module, deliberately: TAB runs before SYM, so this stage must not
+// import from symbol-table.ts.
+import { isDefaultLogicBodyTopExempt } from "./default-logic-exemption.ts";
+
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
@@ -1973,7 +1979,11 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // dropping keeps the non-fatal collector paths honest too.)
     if (block.type === "text" && isDefaultLogicBody) {
       const callee = matchTopLevelBareCall(block.raw);
-      if (callee) {
+      // EXEMPTION: the per-file list shared with E-WRITE-NOT-IN-LOGIC-CONTEXT
+      // (same §40.8 body-top locus, same newly-rejecting migration surface). An
+      // exempt file keeps the pre-S368 status quo EXACTLY — no fire AND no drop,
+      // so its emitted artifacts stay byte-identical.
+      if (callee && !isDefaultLogicBodyTopExempt(filePath)) {
         const lead = /^\s*/.exec(block.raw)[0];
         const newlinesBefore = (lead.match(/\n/g) || []).length;
         const lastNlIdx = lead.lastIndexOf("\n");
