@@ -1229,10 +1229,51 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             }
           }
           const cfRenderFn = `_scrml_cf_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+          // g-value-form-if-fn-condition-not-reactive — the `_scrml_reactive_get`
+          // scan above only sees DIRECT cell reads in the lowered value. A call to a
+          // fn (`${ if isOn() … }` where `fn isOn(){ return @c }`) reads reactive
+          // state TRANSITIVELY, invisible to that scan, so the value was classified
+          // static → a one-shot render that never updated when the cell changed
+          // (while a `${ if @c … }` twin did). Fix: a value-form is also reactive when
+          // its control-flow node CONTAINS A CALL. Scan the AST (`controlFlowNode`),
+          // NOT the lowered string — the string carries emitMatchExpr's `(function(){
+          // … if (…) … })()` IIFE wrapper, keyword-parens, and user string-literal
+          // text, all of which a text scan would false-positive on (forcing every
+          // match-form + call-in-a-string static value reactive). The AST has none of
+          // those artifacts, so a const-scrutinee match / a const `if` whose branch
+          // TEXT merely contains `word(` stays static. Fail-safe: any call → reactive
+          // (the effect auto-tracks the callee's reads at runtime; a pure call yields
+          // an effect that never re-fires — a false positive is a needless effect, a
+          // false negative a stale display).
+          // A `visited` WeakSet guards against a cyclic/shared object reference a
+          // later pass may stamp onto the AST (resolved-type / symbol annotation) —
+          // the same defense every sibling AST walker in the codebase uses; without
+          // it the unguarded recursion could stack-overflow on a genuinely-static
+          // subtree (which is walked in full, since it only short-circuits on a call).
+          const _seenCallScan = new WeakSet<object>();
+          const _containsCall = (n: any): boolean => {
+            if (!n || typeof n !== "object") return false;
+            if (_seenCallScan.has(n)) return false;
+            _seenCallScan.add(n);
+            if (Array.isArray(n)) return n.some(_containsCall);
+            if (n.kind === "call") return true;
+            for (const k of Object.keys(n)) {
+              if (k === "span") continue;
+              const v = (n as any)[k];
+              if (v && typeof v === "object" && _containsCall(v)) return true;
+            }
+            return false;
+          };
+          // Fail-safe over-approximation (NOT a transitive-read analysis): ANY call
+          // in the value-form node → reactive, so a value that calls a PURE fn also
+          // gets a (never-firing) effect. Correct-always, at a small efficiency cost;
+          // a precise fix would reuse reactive-deps' transitive cell-read resolution
+          // to keep pure-call value-forms static — deferred as an optimization.
+          const _cfIsReactive = refSet.size > 0 || _containsCall(cfNode);
           // Rebindable (finding #1): the block is emitted inline (boot) AND into
           // the soft-nav rehydrator (scoped to the swapped region).
           const cfBody: string[] = [];
-          if (refSet.size > 0) {
+          if (_cfIsReactive) {
             // Reactive: define the value computation once, render it now, and
             // re-render under a region-tracked effect (re-runs the reads → tracks).
             cfBody.push(`const ${cfRenderFn} = function() { return ${valueExpr}; };`);
@@ -1244,7 +1285,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           }
           // Only the reactive variant needs a rehydrator rebind; the static
           // one-shot is server-rendered in a swapped region.
-          pushRebindableDisplay(placeholderId, cfBody, refSet.size > 0);
+          pushRebindableDisplay(placeholderId, cfBody, _cfIsReactive);
         }
         continue;
       }
