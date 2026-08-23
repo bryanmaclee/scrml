@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 43 |
+| HIGH | 45 |
 | MED | 149 |
 | LOW | 69 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -9213,3 +9213,35 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Consequence:** earlier browser tests register happy-dom globally and never unregister, so any later test in the same run that drives an emitted server with cookie auth sees no cookie. The double-submit CSRF check then answers **403 where a standalone run answers 200**. It cost three phantom failures in a first test draft, which vanished when run alone.
 >
 > **Same class as the known happy-dom global-state leak** ([[g-browser-tier-happydom-global-state-leak]] family) — an environmental leak, not a regression, and the F1 tests were re-pinned onto the limiter's own signal (reached-consistently vs 429) rather than the incidental CSRF status. Filed because it is a **live trap for the next author** who writes an executing server test with cookie auth and reads the failure as a product bug.
+
+### g-delta-lint-partially-blind-on-emoji-kind-entries — `delta-lint` and `state.ts` share a regex that cannot parse `[NNNN] <emoji> <kind> · body`, so FOUR live delta-log entries are invisible to the duplicate gate AND to the digest projection, today, at exit 0 — `NEW S365-bryan (found by the instrument-integrity RE-review; PA-REPRODUCED against the live file); HIGH; open`
+<!-- @gap id=g-delta-lint-partially-blind-on-emoji-kind-entries sev=HIGH status=open locus=scripts/delta-lint.ts(the ENTRY regex)+scripts/state.ts(byte-identical copy of it) prov=rationale:S365-bryan-re-review-finding-A-PA-reproduced-by-re-implementing-the-scripts-own-parser-against-the-live-file-1402-bracketed-lines-in-scope-1398-ENTRY-matched-4-unparsed-561-562-565-727-each-carrying-an-emoji-token-before-the-kind-while-the-gate-prints-1398-entries-PASS -->
+> **⚑ S365-bryan: PA-REPRODUCED against the live `handOffs/delta-log.md`, and this is the SECOND hole in the same gate in one session.**
+>
+> The regex is `/^\[(\d+)\]\s+(\S+)\s+·\s+(.*)$/` — three tokens. The writing convention drifted to `[NNNN] <emoji> <kind> · body`, which is four. Measured on the live file:
+>
+> ```
+> bracketed lines in live scope : 1402
+> ENTRY-matched                 : 1398
+> BRACKETED BUT UNPARSED        :    4
+>    [561] ⭐ find/rule · …      [562] ⭐ rule · …
+>    [565] ⭐ find · …           [727] ⚠️ rule-falsified · …
+> ```
+>
+> The gate prints `1398 entries in the live scope … — PASS`, **exit 0**. It is not reporting a smaller number as a warning; it does not know those lines are entries.
+>
+> **`scripts/state.ts` carries the BYTE-IDENTICAL regex** (verified: `/^\[(\d+)\]\s+(\S+)\s+·\s+(.*)$/` present in both), so the same four are invisible to the digest projection as well. **That is precisely the silent-drop class the gate was built for, occurring live while the gate reports clean.**
+>
+> **Distinct from [[g-delta-lint-gate-vacuous-on-zero-population]]**, which was the TOTAL-blindness case and is fixed. This is the PARTIAL case: enough entries still parse that the output looks healthy, which is why it survived both the original build and my own bite proof. **The zero-population guard already computes `bracketed` — it just only consults it inside the `total === 0` branch. Comparing `bracketed` vs `total` unconditionally catches this.**
+>
+> ⚑ **The sharpest part:** the very same fix round applied exactly this partial-vs-total insight to `corpus-zero-debt.ts` (all-or-nothing guard → per-root guard) and did not carry it one file over. The insight was in hand and did not generalise.
+
+### g-delta-lint-fix-corrupts-log-under-partial-blindness — `delta-lint --fix` computes `maxSeq` from VISIBLE entries only, so under partial blindness it renumbers a duplicate onto a number that already exists in the invisible region, creating a real new duplicate, then reports PASS — `NEW S365-bryan (found by the instrument-integrity RE-review; reproduced end-to-end by the reviewer); HIGH; open`
+<!-- @gap id=g-delta-lint-fix-corrupts-log-under-partial-blindness sev=HIGH status=open locus=scripts/delta-lint.ts(the --fix renumber path — maxSeq derived from parsed entries, not from all bracketed lines) prov=rationale:S365-bryan-re-review-finding-B-reviewer-reproduced-end-to-end-tail-region-drift-fix-renumbered-a-duplicate-to-1620-which-already-existed-at-line-2602-in-the-invisible-region-then-the-confirm-step-printed-1328-entries-max-1620-PASS-exit-0 -->
+> **⚑ S365-bryan: RELAYED from the re-review, which reproduced it end-to-end; I have reproduced its PRECONDITION ([[g-delta-lint-partially-blind-on-emoji-kind-entries]]) but not this consequence directly.**
+>
+> With a drift in the tail region, `--fix` derives `maxSeq` from the entries it can see. The reviewer's run renumbered a duplicate to `[1620]` — **a number that already existed at line 2602 inside the invisible region** — manufacturing a genuine new collision, and the "re-run without `--fix` to confirm" step then printed `1328 entries … max [1620] — PASS`, exit 0.
+>
+> **The tail is the realistic drift site** (a new writer appends there), so this is the live configuration of the hazard rather than a contrived one.
+>
+> **Compounds with a rule already recorded this session:** `--fix` was ALREADY known to renumber the wrong side on a merge (it keeps first-in-file order, which is blind to which side is already published — delta-log `[1686]`, and I warned Peter about it by inbox the same day). So the verb now has two independent ways to damage the file it maintains. **Recommend `--fix` be gated on a clean parse — refuse to renumber anything while `bracketed !== total`** — and, separately, that the merge-orientation hazard be handled by making `--fix` refuse outright on a file with unmerged-side ambiguity rather than by operator memory.
