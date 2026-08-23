@@ -1933,6 +1933,29 @@ accumulating unnoticed is the empirical proof that it does.
 
 ### g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy — the stale-worktree sweep has been owed since S268 because its natural probe answers the wrong question: we land by copying file CONTENT, so an agent branch is never an ancestor of main and `--merged` reports "nothing prunable" forever — `NEW S326-bryan; MED; open`
 <!-- @gap id=g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy sev=MED status=open locus=searched:scripts/,compiler/scripts/ — no script implements wrap 6b; the step is manual prose in ../scrml-support/pa-scrml-overlay.md {{wrap_step_fills}} 6b prov=rationale:the-sweep-owed-since-S268-is-a-probe-mismatch-not-a-backlog -->
+> **⚑ S365-bryan — A WORKING PROBE, derived by running the broken ones and watching them disagree.** This gap has been owed since S268 and diagnosed since S326; the blocker was always that nobody had a trustworthy test. Here is one, measured.
+>
+> **Both obvious probes are structurally wrong under squash-merge**, and I reproduced both rather than assuming:
+> - `git merge-base --is-ancestor <branch> origin/main` → reported **every** worktree branch unmerged, **including two I squash-merged the same hour**. A squash merge creates a new commit, so the branch tip is never an ancestor. This is the S326 diagnosis, confirmed.
+> - `git cherry origin/main <branch>` → same failure by a different route: it reported **25 unmatched commits** on a fully-landed branch, because squash collapses N commits into 1 and no individual patch-id survives.
+>
+> **The probe that works — a per-file content compare, restricted to the files the branch itself changed:**
+> ```sh
+> mb=$(git merge-base origin/main "$b")
+> git diff --name-only "$mb" "$b" | while read -r f; do
+>   git diff --quiet origin/main "$b" -- "$f" || echo "$f"      # differs from main
+> done
+> ```
+> Empty output ⇒ every change the branch made is present in main ⇒ **sweepable**.
+>
+> **It has one residual false positive, and the correction is one line.** If MAIN edited the same file *after* the merge, the file differs for the wrong reason. Discriminate:
+> ```sh
+> git diff --quiet "$mb" origin/main -- "$f" >   && echo "branch work genuinely absent" >   || echo "main changed it after the merge — FALSE POSITIVE"
+> ```
+>
+> **Measured today:** `handle-onion-top-level-dispatch` — 51 files touched, **all content in main → genuinely landed.** `fix/s365-instrument-partial-blindness` — flagged 1 of 11, and that 1 is `docs/FACTS.md`, which **main changed after the merge**; also landed. So the naive form over-reports by exactly the generated-file churn this repo produces constantly.
+>
+> ⚑ **NOTHING WAS SWEPT.** The method is recorded, not executed — a wrong sweep is irreversible work loss, and the probe deserves a bite proof (plant a branch with genuinely unlanded work, confirm it is NOT flagged sweepable) before it is trusted with `worktree remove`. That bite proof is the remaining work on this entry, and it is small.
 
 **The mismatch.** Wrap step 6b says to land-then-remove worktrees whose work integrated this session.
 The obvious probe is `git branch --merged origin/main`. That is correct under a merge-based landing
