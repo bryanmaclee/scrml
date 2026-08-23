@@ -79,7 +79,7 @@ import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
 // type error here, not a silent `asIs` at some adopter's decl site.
-import type { ExprNode, LitExpr, UnaryExpr } from "./types/ast.ts";
+import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
 import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
@@ -450,6 +450,91 @@ function inferenceGap(nodeKind: ExprNode["kind"], detail: string): InferenceResu
 }
 
 /**
+ * §7.5.2 (S365 fix round) — the adopter-facing name of an `escape-hatch` node.
+ *
+ * `escape-hatch` is NOT one construct. It is the expression parser's catch-all for
+ * every form it did not structure — a `_={ … }=` foreign slice, yes, but also a
+ * regular-expression literal, a dynamic `import()`, a template literal whose
+ * interpolation degraded, and outright parse failures. The first cut of this
+ * diagnostic reported all of them as "foreign-code escape hatch", so an adopter
+ * who wrote `const re = /ab+c/g` was told they had written an escape hatch they
+ * had not written. Every sampled `escape-hatch` gap in the corpus was that case.
+ *
+ * Naming the construct the adopter actually typed is the whole contract of this
+ * warning (§7.5.2: "it names a construct, never an internal identifier").
+ */
+function describeEscapeHatch(node: EscapeHatchExpr): string {
+  const raw = typeof node.raw === "string" ? node.raw.trim() : "";
+  // The `_={ … }=` inline foreign initializer (§23.2.2). Checked on the raw text
+  // rather than on `nativeKind`, because the foreign opener never reaches Acorn.
+  if (raw.startsWith("_={") || raw.startsWith("_{")) {
+    return "foreign-code escape hatch (`_={ … }=`)";
+  }
+  // A regex literal survives as raw source: `/pattern/flags`.
+  if (/^\/(?:[^/\\\n]|\\.)+\/[a-z]*$/.test(raw)) {
+    return "regular-expression literal";
+  }
+  switch (node.nativeKind) {
+    case "ParseError":
+      return "an expression the parser could not structure";
+    case "SqlPlaceholderError":
+      return "an unresolved `?{ … }` SQL placeholder";
+    case "ConversionError":
+      return "an expression that could not be converted to a scrml expression node";
+    case "TemplateInterpFallback":
+      return "a template literal with interpolation";
+    case "ImportExpression":
+      return "a dynamic `import()` expression";
+    case "RegExpLiteral":
+      return "regular-expression literal";
+    default:
+      return typeof node.nativeKind === "string" && node.nativeKind
+        ? `an expression form inference does not cover (\`${node.nativeKind}\`)`
+        : "an expression form inference does not cover";
+  }
+}
+
+/**
+ * §7.5.2 (S365 fix round) — the adopter-facing name of the DECLARATION a gap is about.
+ *
+ * `LetDeclNode.name` / `ConstDeclNode.name` is `string | DestructurePattern`. The
+ * first cut read it as a string, so every destructuring declaration was reported as
+ * `[object Object]` — 122 of the 9,954 warnings at introduction (1.2%). A warning
+ * whose two stated resolutions are both "annotate THAT declaration" is worth nothing
+ * if it cannot say which declaration.
+ *
+ * Renders the pattern back in source shape (`{ a, b }`, `[ first, ...rest ]`) rather
+ * than listing bound names, so the adopter can find the line by eye.
+ */
+function renderDeclGapName(name: unknown): string {
+  if (typeof name === "string" && name.length > 0) return name;
+  if (isDestructurePattern(name)) return renderDestructurePattern(name);
+  return "<anonymous>";
+}
+
+function renderDestructurePattern(p: DestructurePatternShape): string {
+  if (p.kind === "destructure-array") {
+    const parts = p.elements.map((el) => {
+      if (el.kind === "hole") return "";
+      if (el.kind === "nested" && el.pattern) return renderDestructurePattern(el.pattern);
+      return el.name ?? "";
+    });
+    if (p.rest) parts.push(`...${p.rest}`);
+    return `[${parts.join(", ")}]`;
+  }
+  const parts = p.properties.map((prop) => {
+    if (prop.kind === "nested" && prop.pattern) {
+      return `${prop.fieldName ?? "?"}: ${renderDestructurePattern(prop.pattern)}`;
+    }
+    const field = prop.fieldName ?? "";
+    const bind = prop.bindName ?? "";
+    return field && bind && field !== bind ? `${field}: ${bind}` : (bind || field);
+  });
+  if (p.rest) parts.push(`...${p.rest}`);
+  return `{ ${parts.join(", ")} }`;
+}
+
+/**
  * §7.5 (S365, dpa-036 call 1) — SYNTACTIC expression-type inference.
  *
  * Types an expression from its own shape alone: no scope, no registry, no
@@ -579,11 +664,15 @@ function inferExprType(node: ExprNode): InferenceResult {
       return inferenceGap("input-state-ref", "input-state reference");
 
     case "escape-hatch":
-      // A `_{ … }` foreign slice. §23.2.3 opacity means the type CANNOT be read
-      // from the slice — but the developer who wrote `_{ }` did sign for that,
-      // so the decl-site cascade classifies this as an authored `asIs` BEFORE
-      // reaching inference. If it reaches here, nobody signed.
-      return inferenceGap("escape-hatch", "foreign-code escape hatch");
+      // The parser's catch-all, and NOT synonymous with `_{ … }`. A `_={ … }=`
+      // foreign slice lands here, but so does a regex literal, a dynamic
+      // `import()`, and a parse failure — see `describeEscapeHatch`, which names
+      // which one the adopter actually wrote. For the foreign-slice case,
+      // §23.2.3 opacity means the type CANNOT be read from the slice, and the
+      // developer who wrote `_{ }` signed for that: the decl-site cascade carves
+      // it out on the attached foreign node BEFORE reaching inference. If a
+      // foreign slice reaches here, it was not attached (§7.5.2's ⚑ note).
+      return inferenceGap("escape-hatch", describeEscapeHatch(node as EscapeHatchExpr));
 
     case "markup-value":
       return inferenceGap("markup-value", "markup-as-value expression");
@@ -10486,12 +10575,27 @@ function annotateNodes(
           const gapInit = (n as any).initExpr as ExprNode | undefined;
           if (gapInit && typeof gapInit === "object" && typeof gapInit.kind === "string") {
             const inferredResult = inferExprType(gapInit);
-            if (!inferredResult.ok) {
+            if (inferredResult.ok) {
+              // §7.5.2 (S365 fix round) — BIND WHAT INFERENCE PROVED.
+              //
+              // Rung 0's `ok` set is EXACTLY today's inference power (number and
+              // string literals, and a negated numeric literal), and every member
+              // of it is already recovered by the contextual cascade above, so
+              // this branch is measured at ZERO firings across the 2,362-file
+              // corpus. It is written anyway, because the rungs above are
+              // specified as "moving one arm from `inferenceGap` to
+              // `inferenceOk`" — and with no `else`, the first such move would
+              // silence the warning WITHOUT binding the type it just proved,
+              // leaving the declaration `asIs` again. That is the `asIs`/`unknown`
+              // collapse re-created inside the fix for it. The arm is here so the
+              // rung-1 author cannot fall into it.
+              resolvedType = inferredResult.type;
+            } else {
               const gap = inferredResult.gap;
               resolvedType = tUnknown({ source: "inference-gap", gap });
               const gapSpan = (n.span as Span | undefined)
                 ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-              const gapName = ((n as ASTNodeLike).name as string | undefined) ?? "<anonymous>";
+              const gapName = renderDeclGapName((n as ASTNodeLike).name);
               errors.push(new TSError(
                 "W-TYPE-031-UNPROVEN",
                 `W-TYPE-031-UNPROVEN: the type of \`${gapName}\` is UNPROVEN — inference stopped at ` +
