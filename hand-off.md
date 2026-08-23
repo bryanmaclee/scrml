@@ -1,14 +1,92 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S367-peter.        -->
-<!--   S367-peter (below) — the peter lane: item 2 (cross-file       -->
-<!--     imported markup-fn mount) LANDED #658; main @ 82fb7e68 0/0.  -->
+<!-- hand-off.md — live session state. WRAPPED at S369-peter.        -->
+<!--   S369-peter (below) — item-3 (library-mode fn match object-arm) -->
+<!--     LANDED #664; review-floor drain LANDED #661; main @ 8ce1b19b.-->
 <!--   S365-bryan (2nd block) — the bryan lane, STILL has FOUR        -->
 <!--     operator decisions + ONE dispatch in flight (read it).      -->
-<!--   S366-peter (3rd block) — prior peter wrap (history).          -->
-<!-- Note: an S368-bryan session is also LIVE (booted after S367;    -->
-<!--   drained the review floor, landed #656/#657/#659). Mechanical  -->
-<!--   stream: delta-log [1709] (this session); [1686]-[1708] prior. -->
+<!--   S367/S366-peter — prior peter wraps (history, below).         -->
+<!-- Mechanical stream: delta-log [1712] (this session); the S369     -->
+<!--   detail is [1710]-[1712]; [1686]-[1709] prior.                 -->
 <!-- ============================================================= -->
+
+# scrml — Session 369 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+S369 drained the inherent review-floor tail (#661) then took the S364 buildable **item 3** —
+`g-library-fn-match-object-or-block-arm-body-returns-undefined` — and landed it (#664). **The
+durable finding recurred (5th+ session): the filed fix locus/direction was a HYPOTHESIS** — the
+real locus was the shared `emitIifeBlockArmBody`, not the filed `emit-library-shared.ts`. Re-derived
+first-hand. [[feedback-gap-report-fix-direction-can-be-wrong]]
+
+### B. peter's lane — next buildables (pick in order, or dog-food)
+1. **`g-each-nested-in-fn-body-markup-fn-stringifies` (MED, NEW this session)** — a markup fn nested
+   INSIDE another fn's body, consumed by a nested `<each>` in that same body, stringifies to
+   `[object HTMLSpanElement]`. **PA-VERIFIED PRE-EXISTING (NOT a #658 regression — identical on the
+   pre-#658 base `772c0fb2`).** Two-part root, and **part 2 is the real blocker**: (1) the collector
+   doesn't descend into fn bodies (a two-mode `includeNested` collector fixes this without breaking
+   module-resolver export classification / the line-197 fail-safe — PA-tried); (2) **`_eachMarkupFnNames`
+   is NULL when a fn-body-nested each is emitted** (that pass runs outside the emit-each :3555/:3690
+   set/clear window — PA-instrumented at emit-each.ts:1406). The mounting set must be wired into the
+   fn-body emission pass. Fail-safe + edge-case. **Repro-first + weigh scope before building** (the set
+   is null there — this is real wiring, not a quick descend).
+2. **`g-library-mode-multi-scrutinee-match-misparsed-as-single` (MED, NEW)** — `match a, b` in a
+   library-mode `fn` mis-parses to the single-scrutinee path (`const _m = a , b` · trailing `_`) →
+   `E-CODEGEN-INVALID-LOGIC`. PA-reproduced, pre-existing. Fix: populate the multi-scrutinee node
+   fields in library-mode fn parse (or route a comma-header match to `emitMultiScrutineeMatch`).
+3. **`g-match-structuredbody-empty-object-arm-voids` (LOW, NEW) — REPRO OWED FIRST.** Structural claim
+   from the S239 pass (component/inline `=>` block-form empty object voids); I could NOT reach it in
+   library mode. Do NOT act before reproducing — the filed premise is a hypothesis.
+4. **Or DOG-FOOD a fresh shape** — the durable S358→S367 finding holds: cheap ledger veins are worked
+   out; fresh clean bugs come from running a new adopter program.
+
+### A. bryan's lane — S365-bryan block below is STILL LIVE
+FOUR operator decisions + ONE dispatch in flight (read the S365 block §1-2). Do NOT touch bryan's lane.
+
+## WHAT LANDED (S369-peter) — 2 PRs
+- **#661** review-floor drain (3 → 0): #658 re-verified clean by EXECUTION (fresh distinct repro,
+  both directions), #660/#659 docs-only carve-outs. docs-only.
+- **#664** ⭐ **`g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED) RESOLVED.**
+  Object-literal match arm in a library fn now returns its value (incl. empty `{}`), not silent
+  `undefined`. Fix in the SHARED value-IIFE emitter (`emitIifeBlockArmBody`, RETURN position). THREE
+  correctly-targeted S239 rounds also fixed the empty-`{}` void, the object-arm auto-await parity, and
+  a multi-scrutinee await-header strand. 7-case bite-proven test; full suite 22668/0.
+
+## ⚑ MISSES / lessons (S369)
+- **★ Filed locus/direction was a hypothesis again** (5th+ session). Re-derived first-hand. The
+  real locus (shared `emitIifeBlockArmBody`) was not the filed `emit-library-shared.ts`.
+  [[feedback-gap-report-fix-direction-can-be-wrong]]
+- **★ /code-review MIS-FIRES on a branch with no committed diff** — it fell back to the latest
+  history commit (#658) TWICE, silently reviewing the wrong code. FIX: commit the diff first, then
+  review (or pass an explicit base like `HEAD~1`). Verify the review actually targeted your change.
+- **★ VERIFY THE PREMISE of a claimed regression before fixing.** The mis-fired review called a
+  nested-markup-fn bug "a #658 regression"; I reproduced it on the pre-#658 base and it was IDENTICAL
+  → pre-existing. Peter had approved a fix premised on "regression"; the premise was false, so I
+  re-decided (file + defer). [[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ Filed 3 new gaps not absorbed into the fix** — two pre-existing bugs the S239 pass surfaced +
+  the fn-body-each one. Kept item-3 scoped; documented the residuals honestly (one repro-owed).
+  [[feedback-maximize-bryan-turnkey-on-routed-items]]
+
+## 🧷 STATE (S369 close)
+- **main** @ `8ce1b19b` (#664) + this wrap. #661 + #664 merged, gate green. Coherence target 0/0.
+- **Gaps: HIGH 45 · MED 154 · LOW 71 · Nominal 7** (`@generated:gap-counts`; net this session: −1 MED
+  resolved [#664], +2 MED filed [multi-scrutinee, fn-body-each], +1 LOW filed [structuredbody] — and
+  origin/main moved HIGH 46→45 / LOW +1 during the day). Regenerated + verified via the generator's
+  own `gapCountsFromTokens` (state.ts --write is blocked locally — see below).
+- **Review floor: 0 OWED** at #664 land; the #661/#664 wrap PRs are the inherent next-boot tail.
+- **⚑ LOCAL TOOLING SNAG (pre-existing, bryan's lane):** `bun scripts/state.ts` REFUSES on this
+  Windows checkout — "PARTIAL PARSE, 0 of 1420 delta-log entries matched" (the ` · `-separator
+  encoding blindness bryan filed HIGH; identical on the clean base, NOT mine). So gap-counts were
+  synced by hand via `parseGapMarkers`+`gapCountsFromTokens` (which only read known-gaps.md). CI
+  (Linux) parses fine — main's gate is green. FACTS.md regenerated normally (`facts.ts --check` PASS).
+- **Branches:** main + app-pinned only (both fix branches auto-deleted on merge; the nested-markup
+  fix branch DELETED — work reverted per the file-and-defer decision). **Worktrees:** main + scrml-pinned.
+- **Maps:** surgical codegen edit (`emit-control-flow.ts` object-arm lowering) — no new modules/
+  entrypoints; maps unchanged.
+- **Env:** bun 1.4.0. `gh pr merge --squash --auto` (both #661 and #664 auto-merged on green gate).
+- **Sibling:** S365-bryan board reads LIVE (4 decisions + 1 dispatch pending). Board S369-peter → WRAPPED.
+
+<!-- ================= S367-peter (history) below ================= -->
 
 # scrml — Session 367 (peter · P-Tech1 Windows) — WRAP
 
