@@ -1,56 +1,69 @@
 <!-- ============================================================= -->
 <!-- hand-off.md — live session state. WRAPPED at S369-peter.        -->
-<!--   S369-peter (below) — item-3 (library-mode fn match object-arm) -->
-<!--     LANDED #664; review-floor drain LANDED #661; main @ 8ce1b19b.-->
+<!--   S369-peter (below) — a LONG session: item-3 (#664) + drain     -->
+<!--     (#661), THEN a DOG-FOOD ARC that fixed 3 silent-wrong bugs    -->
+<!--     (#670 value-if-in-each · #672 empty-string-value-if · #673    -->
+<!--     fn-condition-reactivity) + filed several. main @ ff12b709.    -->
 <!--   S365-bryan (2nd block) — the bryan lane, STILL has FOUR        -->
 <!--     operator decisions + ONE dispatch in flight (read it).      -->
 <!--   S367/S366-peter — prior peter wraps (history, below).         -->
-<!-- Mechanical stream: delta-log [1712] (this session); the S369     -->
-<!--   detail is [1710]-[1712]; [1686]-[1709] prior.                 -->
+<!-- Mechanical stream: delta-log [1715] (this session); the S369     -->
+<!--   detail is [1710]-[1715]; [1686]-[1709] prior.                 -->
 <!-- ============================================================= -->
 
 # scrml — Session 369 (peter · P-Tech1 Windows) — WRAP
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-S369 drained the inherent review-floor tail (#661) then took the S364 buildable **item 3** —
-`g-library-fn-match-object-or-block-arm-body-returns-undefined` — and landed it (#664). **The
-durable finding recurred (5th+ session): the filed fix locus/direction was a HYPOTHESIS** — the
-real locus was the shared `emitIifeBlockArmBody`, not the filed `emit-library-shared.ts`. Re-derived
-first-hand. [[feedback-gap-report-fix-direction-can-be-wrong]]
+S369 was a LONG session: drained the review-floor tail (#661), landed item-3 (#664), then ran a
+**DOG-FOOD ARC** — wrote fresh adopter apps, ran them in happy-dom, and **fixed 3 silent-wrong bugs**
+(#670 · #672 · #673), each a pattern adopters write constantly, **none of which were in the ledger**.
+**The durable takeaway (reconfirmed hard): dog-fooding beats mining the ledger** — every find came
+from RUNNING a new app, not the gap list. Two durable finds also recurred: *the filed fix
+locus/direction is a hypothesis* (item-3, 5th+ session) and *`/code-review` mis-fires on an
+uncommitted branch — commit first + verify it targeted your diff* (memory
+[[feedback-code-review-mis-fires-on-uncommitted-branch]]).
 
-### B. peter's lane — next buildables (pick in order, or dog-food)
-1. **`g-each-nested-in-fn-body-markup-fn-stringifies` (MED, NEW this session)** — a markup fn nested
-   INSIDE another fn's body, consumed by a nested `<each>` in that same body, stringifies to
-   `[object HTMLSpanElement]`. **PA-VERIFIED PRE-EXISTING (NOT a #658 regression — identical on the
-   pre-#658 base `772c0fb2`).** Two-part root, and **part 2 is the real blocker**: (1) the collector
-   doesn't descend into fn bodies (a two-mode `includeNested` collector fixes this without breaking
-   module-resolver export classification / the line-197 fail-safe — PA-tried); (2) **`_eachMarkupFnNames`
-   is NULL when a fn-body-nested each is emitted** (that pass runs outside the emit-each :3555/:3690
-   set/clear window — PA-instrumented at emit-each.ts:1406). The mounting set must be wired into the
-   fn-body emission pass. Fail-safe + edge-case. **Repro-first + weigh scope before building** (the set
-   is null there — this is real wiring, not a quick descend).
-2. **`g-library-mode-multi-scrutinee-match-misparsed-as-single` (MED, NEW)** — `match a, b` in a
-   library-mode `fn` mis-parses to the single-scrutinee path (`const _m = a , b` · trailing `_`) →
-   `E-CODEGEN-INVALID-LOGIC`. PA-reproduced, pre-existing. Fix: populate the multi-scrutinee node
-   fields in library-mode fn parse (or route a comma-header match to `emitMultiScrutineeMatch`).
-3. **`g-match-structuredbody-empty-object-arm-voids` (LOW, NEW) — REPRO OWED FIRST.** Structural claim
-   from the S239 pass (component/inline `=>` block-form empty object voids); I could NOT reach it in
-   library mode. Do NOT act before reproducing — the filed premise is a hypothesis.
-4. **Or DOG-FOOD a fresh shape** — the durable S358→S367 finding holds: cheap ledger veins are worked
-   out; fresh clean bugs come from running a new adopter program.
+### B. peter's lane — next buildables (the dog-food residuals; or dog-food MORE)
+1. **`g-each-nested-in-fn-body-markup-fn-stringifies` (MED)** — a markup fn nested inside another fn's
+   body, consumed by a nested `<each>` in that body, stringifies. PA-verified PRE-EXISTING (not a #658
+   regression). **Part 2 is the real blocker: `_eachMarkupFnNames` is NULL when a fn-body-nested each
+   is emitted** (that pass runs outside the emit-each :3555/:3690 window — PA-instrumented at :1406);
+   the mounting set must be wired into the fn-body emission pass. Weigh scope — real wiring.
+2. **`g-value-form-if-fn-condition-not-reactive` follow-on / `g-each-inline-value-form-match-or-markup-branch-interp-dropped` (MED)** — the value-form `match` in an each (+ markup-branch value-if) still
+   silently drops; and match-value INTERP is non-reactive on a separate path. Fix direction (both): the
+   value-form-`match`-interp path is the shared next step — lower it + make the recognized-but-unlowered
+   case LOUD (a `W-EACH-…` warning + its §34 catalog row).
+3. **`g-library-mode-multi-scrutinee-match-misparsed-as-single` (MED)** — `match a, b` in a library-mode
+   `fn` → `E-CODEGEN-INVALID-LOGIC`. PA-reproduced. Populate the multi-scrutinee node fields in the
+   library-mode fn parse (or route a comma-header match to `emitMultiScrutineeMatch`).
+4. **`g-usage-analyzer-blind-to-each-in-collection-fn-ref` (LOW, cry-wolf)** — a fn used ONLY in
+   `<each in=fn(...)>` is falsely `W-DEAD-FUNCTION`'d. Sibling of the fixed closure-callee case
+   (usage-analyzer.ts:691). Confirm lane (W-DEAD family noted bryan "g-263 arc") before building.
+5. **`g-match-structuredbody-empty-object-arm-voids` (LOW) — REPRO OWED FIRST** (structural claim only).
+6. **Or DOG-FOOD MORE** — it keeps paying out. Ideas not yet stressed: components/slots, channels/
+   realtime, server fns + `?{}` SQL (auto-await), forms with server round-trips, `<if>` block element.
 
 ### A. bryan's lane — S365-bryan block below is STILL LIVE
 FOUR operator decisions + ONE dispatch in flight (read the S365 block §1-2). Do NOT touch bryan's lane.
 
-## WHAT LANDED (S369-peter) — 2 PRs
-- **#661** review-floor drain (3 → 0): #658 re-verified clean by EXECUTION (fresh distinct repro,
-  both directions), #660/#659 docs-only carve-outs. docs-only.
-- **#664** ⭐ **`g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED) RESOLVED.**
-  Object-literal match arm in a library fn now returns its value (incl. empty `{}`), not silent
-  `undefined`. Fix in the SHARED value-IIFE emitter (`emitIifeBlockArmBody`, RETURN position). THREE
-  correctly-targeted S239 rounds also fixed the empty-`{}` void, the object-arm auto-await parity, and
-  a multi-scrutinee await-header strand. 7-case bite-proven test; full suite 22668/0.
+## WHAT LANDED (S369-peter) — 6 PRs
+- **#661** review-floor drain (3 → 0): #658 re-verified clean by EXECUTION. docs-only.
+- **#664** ⭐ **`g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED) RESOLVED** —
+  library-mode fn object-literal match arm returns its value (incl. empty `{}`), not silent undefined.
+  Shared value-IIFE emitter, RETURN position. 3 S239 rounds also fixed empty-`{}`, object-arm
+  auto-await, and a multi-scrutinee await-header strand.
+- **#666** the first S369 wrap (item-3 + drain).
+- **#670** ⭐ **DOG-FOOD: a value-form `${ if … }` interp inside `<each>` rendered EMPTY (silent-wrong)**
+  — lowered to a raw ternary through the shared `lowerEachExpr`. (Residuals: value-form `match`/markup-
+  branch in each — filed, held for a LOUD-warning + lowering follow-on.)
+- **#671** the 2 filed dog-food gaps (docs).
+- **#672** ⭐ **DOG-FOOD: `${ if valid { "" } else { "err" } }` (empty-string branch) rendered NOTHING
+  (silent-wrong, VERY common)** — the parser blank-token skip swallowed the `""` literal; excluded
+  STRING from the skip (both loops). S239 caught the second unpatched loop.
+- **#673** ⭐ **DOG-FOOD: a fn-condition value-if `${ if isOn() … }` was not reactive (silent-wrong)** —
+  the effect-vs-static decision string-scanned for `_scrml_reactive_get`, blind to a cell read inside a
+  called fn; now reactive when the AST contains a `call` node. 2 S239 rounds (regex→AST scan + cycle guard).
 
 ## ⚑ MISSES / lessons (S369)
 - **★ Filed locus/direction was a hypothesis again** (5th+ session). Re-derived first-hand. The
@@ -63,28 +76,45 @@ FOUR operator decisions + ONE dispatch in flight (read the S365 block §1-2). Do
   nested-markup-fn bug "a #658 regression"; I reproduced it on the pre-#658 base and it was IDENTICAL
   → pre-existing. Peter had approved a fix premised on "regression"; the premise was false, so I
   re-decided (file + defer). [[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-verify-the-bug-class-not-just-reported-instance]]
-- **★ Filed 3 new gaps not absorbed into the fix** — two pre-existing bugs the S239 pass surfaced +
-  the fn-body-each one. Kept item-3 scoped; documented the residuals honestly (one repro-owed).
+- **★ Filed several gaps not absorbed into fixes** — kept each fix scoped; documented residuals honestly.
   [[feedback-maximize-bryan-turnkey-on-routed-items]]
+- **★ DOG-FOODING BEATS THE LEDGER (reconfirmed hard).** All 3 silent-wrong fixes + the filed finds came
+  from RUNNING fresh apps in happy-dom, none from the gap list. Each hit a super-common pattern
+  (conditional text in a loop, error message with an empty branch, a computed-fn condition) invisible
+  until an app exercised it. Keep dog-fooding.
+- **★ When the local suite is FLAKY, the Linux cloud gate is the authority.** #673's local full-suite
+  count varied 6/8/15 run-to-run — a Windows temp-dir-lock flake (server-fn/session/csrf tests, IDENTICAL
+  on the clean base). Do NOT chase a flaky count; isolate to the change's actual test area (was 27/27
+  green) and trust the Linux gate (passed clean). [[feedback-verify-on-committed-state-not-staged-overlay]]
+- **★ The adversarial S239 pass earned its keep repeatedly.** #672: caught a SECOND unpatched blank-skip
+  loop (fix-the-class). #673: round 1 redirected a coarse regex → the correct AST-`call`-node scan; round
+  2 hardened the walker (cycle guard). Run it on EVERY codegen change, and commit-first so it targets the diff.
 
 ## 🧷 STATE (S369 close)
-- **main** @ `8ce1b19b` (#664) + this wrap. #661 + #664 merged, gate green. Coherence target 0/0.
-- **Gaps: HIGH 45 · MED 154 · LOW 71 · Nominal 7** (`@generated:gap-counts`; net this session: −1 MED
-  resolved [#664], +2 MED filed [multi-scrutinee, fn-body-each], +1 LOW filed [structuredbody] — and
-  origin/main moved HIGH 46→45 / LOW +1 during the day). Regenerated + verified via the generator's
-  own `gapCountsFromTokens` (state.ts --write is blocked locally — see below).
-- **Review floor: 0 OWED** at #664 land; the #661/#664 wrap PRs are the inherent next-boot tail.
+- **main** @ `ff12b709` (#673) + this wrap. 6 PRs merged (#661/#664/#666/#670/#671/#672/#673), all
+  Linux-gate green. Coherence target 0/0; both repos clean.
+- **Gaps: HIGH 48 · MED 158 · LOW 72 · Nominal 7** (`@generated:gap-counts`). Net peter this session:
+  RESOLVED #664 object-arm · #670 value-if-in-each · #672 empty-string-value-if · #673 fn-cond-reactive;
+  FILED (open) fn-body-each · multi-scrutinee · structuredbody · each-value-form-match/markup-branch ·
+  usage-analyzer-each-in · fn-condition-follow-on. (bryan's concurrent PRs also moved counts.) Synced
+  by hand via `gapCountsFromTokens` (state.ts --write blocked locally — see below).
+- **Review floor: 0 OWED** at each land; the wrap PRs are the inherent next-boot tail.
 - **⚑ LOCAL TOOLING SNAG (pre-existing, bryan's lane):** `bun scripts/state.ts` REFUSES on this
   Windows checkout — "PARTIAL PARSE, 0 of 1420 delta-log entries matched" (the ` · `-separator
   encoding blindness bryan filed HIGH; identical on the clean base, NOT mine). So gap-counts were
   synced by hand via `parseGapMarkers`+`gapCountsFromTokens` (which only read known-gaps.md). CI
   (Linux) parses fine — main's gate is green. FACTS.md regenerated normally (`facts.ts --check` PASS).
-- **Branches:** main + app-pinned only (both fix branches auto-deleted on merge; the nested-markup
-  fix branch DELETED — work reverted per the file-and-defer decision). **Worktrees:** main + scrml-pinned.
-- **Maps:** surgical codegen edit (`emit-control-flow.ts` object-arm lowering) — no new modules/
-  entrypoints; maps unchanged.
-- **Env:** bun 1.4.0. `gh pr merge --squash --auto` (both #661 and #664 auto-merged on green gate).
+- **Branches:** main + app-pinned only (all fix branches auto-deleted on merge). **Worktrees:** main +
+  scrml-pinned (clean; the failed pre-#658 comparison worktree was pruned).
+- **Maps:** all surgical codegen edits (`emit-control-flow.ts` · `emit-each.ts` · `ast-builder.js` ·
+  `emit-event-wiring.ts`) — no new modules/entrypoints; maps unchanged.
+- **Env:** bun 1.4.0. `gh pr merge --squash --auto` throughout (each auto-merged on green gate; several
+  needed a rebase past bryan's fast-moving concurrent PRs — gap-count block re-synced to the merged
+  truth each time). ⚑ **Windows temp-dir-lock flake** in the local suite (server-fn/session/csrf) — NOT
+  a code issue; trust the Linux gate.
 - **Sibling:** S365-bryan board reads LIVE (4 decisions + 1 dispatch pending). Board S369-peter → WRAPPED.
+- **Inbox:** 5 peter→bryan pings still held in `handOffs/incoming/` (awaiting bryan's stamp — his lane,
+  correctly not filed). No new inbound for peter.
 
 <!-- ================= S367-peter (history) below ================= -->
 
