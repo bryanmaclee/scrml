@@ -12,7 +12,7 @@
       "users": [{ "id": 1, "name": "Alice" }]
     },
     "firstPaint": {
-      "contains": ["id=\"panel\"", "window.__scrml_ssr_state="],
+      "contains": ["id=\"panel\"", "<script type=\"application/json\" id=\"__scrml_ssr_state\">"],
       "notContains": ["display:none", "display: none"]
     }
   }

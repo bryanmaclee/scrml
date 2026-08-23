@@ -9,7 +9,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
-import { escapeRegex } from "./utils.ts";
+import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
@@ -809,7 +809,6 @@ function hasRuntimeMetaBlocks(fileAST: any): boolean {
 //                 upload-call, reactive-explicit-set, bare navigate call,
 //                 state-decl with reactivity (debounced= / throttled= per §6.13).
 //   meta          meta node
-//   transitions   logic binding or event binding with transitionEnter/transitionExit
 //   input         markup tag "keyboard", "mouse", or "gamepad"
 //   deep_reactive state-decl (uses _scrml_deep_reactive), when-effect, bind: directives,
 //                 CSS variable bridge with reactive refs, bind-props wiring,
@@ -1807,13 +1806,6 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
 
   if (logicBindings.length > 0) {
     chunks.add("deep_reactive"); // _scrml_effect for reactive display
-    // Check for transition directives
-    for (const binding of logicBindings) {
-      if (binding.transitionEnter || binding.transitionExit) {
-        chunks.add("transitions");
-        break;
-      }
-    }
   }
 
   if (eventBindings.length > 0) {
@@ -2069,7 +2061,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // that doesn't otherwise need them). All three options deferred to a
   // follow-up dispatch.
   //
-  // 'core', 'scope', 'errors', 'transitions' are always pre-populated (see
+  // 'core', 'scope', 'errors' are always pre-populated (see
   // makeCompileContext in context.ts).
   const runtimeInsertIndex = lines.length;
   lines.push("// --- runtime assembly placeholder (P3.B) ---");
@@ -2937,8 +2929,14 @@ export function generateClientJs(ctx: CompileContext): string {
       if (moduleNames.size === 0) return;
 
       // Client body view: every emitted line EXCEPT the lowered read decls, so a
-      // bound name is never counted as used by its own declaration.
-      const body = strLines.filter((_, i) => !readLineIdx.has(i)).join("\n");
+      // bound name is never counted as used by its own declaration. String
+      // literals are masked (maskStringLiteralSpans) so a stdlib name appearing
+      // only inside a display label — `"call hashPassword on the server"` — is
+      // not misread as a genuine client use that keeps a server-only chunk
+      // (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence).
+      const body = maskStringLiteralSpans(
+        strLines.filter((_, i) => !readLineIdx.has(i)).join("\n"),
+      );
 
       for (const [mod, locals] of moduleNames) {
         // Defensive: a direct `_scrml_stdlib.<mod>` registry access keeps the chunk.
@@ -3739,6 +3737,13 @@ export function generateClientJs(ctx: CompileContext): string {
         body = body.slice(0, rtStart) + "\n;\n" + body.slice(rtEnd);
       }
     }
+
+    // Mask string-literal bodies AFTER the runtime-span excision (the RT markers
+    // are line comments the indexOf above must still find). A stdlib name that
+    // appears only inside a display label must not read as a client use and keep
+    // this read-line alive — the read-line twin of the chunk-prune leak
+    // (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence).
+    body = maskStringLiteralSpans(body);
 
     // A region drops only when NONE of its bound names appear in the remaining
     // body (whole-region grain — matches GITI-003 and the brief: strip when

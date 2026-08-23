@@ -1,42 +1,43 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# ⚑ **CURRENCY RE-VERIFIED AT `c93a692c` (S346), NOT RE-WALKED.** `git diff --name-only
-# 4f034e13..c93a692c -- compiler/src/types` is **EMPTY** (TEN windows now), and the window's 15
-# source-bearing files added no exported type or interface — the two API-surface moves are FUNCTION
-# exports, not shapes (`emit-server.ts` exports `localServerImportNameUsed`; `lint-ghost-patterns.js`
-# exports `skipPastRanges` + new `makeSkipCursor`, and `commands/dev.js` exports
-# `noteCompileResult`/`getCompileFailure` — all documented in structure/error maps). `emit-each.ts`'s
-# #515 additions are module-level `const` Set/Record literals, not types.
-# ⚑ **WATERMARK CORRECTED at the S341 pass and ADVANCED again this pass to `c93a692c`** — line 3 carries the ancestor-of-`origin/main` watermark,
-# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
-# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
-# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
-# communicating nothing this header does not already say.
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **CURRENCY RE-VERIFIED AT `c96e7012`, NOT RE-WALKED.** Ancestry CHECKED (invariant 48); outbound
+# MAP-STAMP check run (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012`
+# is an ancestor of `origin/main`.
 #
-# ⚑ **CONTENT AS OF `fe14c9b2` — CURRENCY RE-VERIFIED AT `4f034e13` (S341), and again at `c93a692c` (S346, header above), NOT RE-WALKED. NINE windows.**
-# `git diff --name-only 8863d457..4f034e13 -- compiler/src/types` is **EMPTY**.
+# **`compiler/src/types` IS ZERO-DIFF FOR THE ELEVENTH WINDOW** — `git diff --name-only
+# c93a692c..c96e7012 -- compiler/src/types` is EMPTY. And the stronger check, run because this
+# window touched 32 `compiler/src/` files: **`git diff c93a692c..c96e7012 -- compiler/src/ | grep
+# '^+' | grep -E 'export (interface|type) '` returns NOTHING.** Not one exported type or interface
+# was added anywhere in the compiler this window. Every shape below carries.
 #
-# ⚠ **AND THE OLD STAMP WAS ITSELF OFF-MAIN — THIS MAP IS THE WORST INSTANCE IN THE SET.** `fe14c9b2`
-# is the tip of `wrap/s302`; `git merge-base --is-ancestor fe14c9b2 origin/main` returns FALSE. It sat
-# on line 3 for roughly TEN sessions. The S331 pass looked straight at it and concluded *"the stamp
-# stays honestly older"* — **right about AGE, and it never asked about ANCESTRY.** An honest older
-# stamp is still worthless if it bounds nothing: every "zero diff since `fe14c9b2`" command written
-# into this header was, strictly, unbounded. (The CONCLUSION survives — re-checked this pass from
-# `8863d457`, which IS on main — but it survived by luck, not by the check.)
+# **What the window DID add is FUNCTION and CONST exports, which belong in structure/dependencies,
+# not here:** `selectRequestOnion` + `formatOnionConflict` (`commands/select-request-onion.js`),
+# `collectUsedTransitions` + `renderTransitionCss` (`codegen/emit-transition-css.ts`),
+# `stripRedundantCode` (`commands/diagnostic-format.js`), `maskStringLiteralSpans` +
+# `indentBodyLines` (`codegen/utils.ts`), `rewriteResetCalls` (`codegen/rewrite.ts`),
+# `isStandardHtmlRenderElement` (`html-elements.js`), `injectHandleRequestAwaits` /
+# `effectiveRequestIds` / `setCurrentFileRequestIds` / `compareInputPathsCanonical`, and the
+# `commands/dev.js` test surface (`devDispatch`, `loadServerRoutes`, `getRegisteredOnions`,
+# `getRegisteredRoutes`, `runThroughOnions`, `compileThrowDiagnostic`,
+# `createHotReloadScriptResponse`, `launchingProcessGone`, `HOT_RELOAD_SRC`).
 #
-# This window's 28 changed source files added **no declared type**. Specifically: §6.6.19's structural
-# walk is module-local functions returning `Array<Record<string, unknown>>` plus a `boolean` key
-# predicate (`route-inference.ts:3677`/`:3730`); the §52.8 SSR lint changed `buildOneRenderer`'s return
-# from `SsrEachRenderer | null` to `SsrEachRenderer | { fallback: string }` — **an INLINE union at the
-# function signature, not a named exported shape** (`emit-ssr-render.ts`); the §6.7 lifecycle work added
-# `DEFERRED_LIFECYCLE_BODY_TAGS: ReadonlySet<string>` (a module const in `collect.ts`) and a fifth
-# `immediate` PARAMETER on `_scrml_timer_start` (`runtime-template.js`, untyped JS). None is a `FileAST`
-# or `ast.ts` type. See domain.map.md / dependencies.map.md, not this file.
+# ⚠ **`type-system.ts` MOVED (+186) AND ADDED NO SHAPE.** The changes are #582/#596 (mask string
+# literals + a structural reset member-guard, closing the §14.12/§14.3 lifecycle raw-text launder
+# class) and #634 (don't false-fire `E-FN-003` on a `=` inside a fn-body string literal). All three
+# are local helpers.
 #
-# Superseded header notes (S326/S328 stamp-correction prose for `97576f35`) are DELETED, not carried:
-# the rule they were groping toward is now stated once, normatively, at the top of primary.map.md.
+# ⚑ **NOT ON MAIN, NOT MAPPED — the `asIs`/`unknown` split.** `InferenceResult` (a `Result`-shaped
+# return from `inferExprType`), `InferenceGap` (whose construction requires naming an AST node kind),
+# the exhaustive switch with a `never` fallthrough, and a REQUIRED `UnknownType.reason` all live on
+# the unlanded branch `feat/s365-asis-split-rung0` — `git merge-base --is-ancestor
+# feat/s365-asis-split-rung0 origin/main` exits NON-ZERO. **At this watermark `UnknownType` is
+# `{ kind: "unknown" }` and NOTHING ELSE** (`type-system.ts:364-366`) — there is no `reason` field at
+# all, optional or otherwise, and no `UnknownReason` union. On the branch it is
+# `{ kind: "unknown"; reason: UnknownReason }` (REQUIRED). The `asIs` KIND itself has existed
+# for many windows (`type-system.ts:341`) and is documented below — do not confuse it with the split.
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
@@ -332,7 +333,7 @@ No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN ide
 FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main
 
 ## Links
 - [primary.map.md](./primary.map.md)

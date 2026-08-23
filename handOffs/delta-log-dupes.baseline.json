@@ -1,0 +1,15 @@
+{
+ "_why": "Pre-existing duplicate delta-log sequence numbers, baselined at S354 so the new gate is not instantly red for reasons no change caused (pa-base 8). EVERY one is a multi-writer collision from before the single-writer rule was known to be broken: dPA-vs-PA, Peter-vs-dPA, or two concurrent PA sessions. A duplicate means the SECOND entry to merge reads as already-absorbed by the flogence checkpoint cursor and drops out of the digest \u2014 so each of these is a possibly-lost entry, recoverable by renumbering it above the current max. That repair is deliberately NOT taken here: it rewrites historical numbering on a shared doc while a sibling session is live, and is the operator call. This list may SHRINK; it must never grow silently.",
+ "baselined_at": "S354",
+ "duplicates": [
+  721,
+  722,
+  1079,
+  1080,
+  1081,
+  1173,
+  1174,
+  1524,
+  1525
+ ]
+}

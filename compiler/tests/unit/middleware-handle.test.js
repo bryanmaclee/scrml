@@ -830,7 +830,7 @@ describe("MW-HANDLE-002: handle() body emitted in _scrml_mw_wrap", () => {
     expect(serverJs).toContain("async () => {");
   });
 
-  test("route handler is wrapped with _scrml_mw_wrap in route export", () => {
+  test("the TOP-LEVEL dispatcher is wrapped, not the route export (§40.3)", () => {
     const { fnNode, routeMap } = makePostHandler("getData", [
       makeReturnStmt('"ok"', span(110)),
     ], [], { explicitMethod: "GET" });
@@ -841,7 +841,10 @@ describe("MW-HANDLE-002: handle() body emitted in _scrml_mw_wrap", () => {
       { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
-    expect(serverJs).toContain("_scrml_mw_wrap(");
+    // The onion wraps the dispatcher…
+    expect(serverJs).toContain("_scrml_mw_wrap(_scrml_route_dispatch)");
+    // …and NOT the individual route handler (that would run PRE twice).
+    expect(serverJs).not.toMatch(/_scrml_mw_wrap\(_scrml_handler_/);
   });
 });
 
@@ -964,14 +967,17 @@ describe("MW-HANDLE-004: handle() with no middlewareConfig generates _scrml_mw_w
 });
 
 // ---------------------------------------------------------------------------
-// MW-HANDLE-005: handle() with no middlewareConfig wraps route handlers
+// MW-HANDLE-005: handle() with no middlewareConfig wraps TOP-LEVEL dispatch
 //
-// BUG-R13-004 fix: route exports must use _scrml_mw_wrap(handler) when
-// handle() is present, even when middlewareConfig is null.
+// change-id `handle-onion-top-level-dispatch-2026-08-22` — supersedes BUG-R13-004
+// ("route exports must use _scrml_mw_wrap(handler)"). SPEC §40.3.4 says handle()
+// "applies to all HTTP requests handled by the compiled server", and §40.3.5 says
+// an early return "prevents the route handler from running" — neither is
+// satisfiable from inside a route handler. The onion now wraps the dispatcher.
 // ---------------------------------------------------------------------------
 
-describe("MW-HANDLE-005: handle() with no middlewareConfig wraps route exports", () => {
-  test("route export uses _scrml_mw_wrap when handle() present and no middlewareConfig", () => {
+describe("MW-HANDLE-005: handle() with no middlewareConfig wraps top-level dispatch", () => {
+  test("the dispatcher — not the route export — carries the onion (§40.3)", () => {
     const handleBody = [
       { kind: "return-stmt", expr: "resolve(request)", span: span(60) },
     ];
@@ -991,8 +997,38 @@ describe("MW-HANDLE-005: handle() with no middlewareConfig wraps route exports",
       null, // no compiler-auto middleware
     );
 
-    // The route handler export must reference _scrml_mw_wrap(...)
-    expect(serverJs).toMatch(/_scrml_mw_wrap\(_scrml_handler_/);
+    // The route dispatch loop is the onion's DOWNSTREAM…
+    expect(serverJs).toContain("async function _scrml_route_dispatch(request) {");
+    expect(serverJs).toContain("_scrml_mw_wrap(_scrml_route_dispatch)");
+    // …the `fetch` entry point runs the pipeline, not the bare loop…
+    expect(serverJs).toContain("const response = await _scrml_fetch_pipeline(request);");
+    // …and the route export registers the handler BARE (no double PRE).
+    expect(serverJs).not.toMatch(/_scrml_mw_wrap\(_scrml_handler_/);
+    expect(serverJs).toMatch(/handler: _scrml_handler_getData_\d+,/);
+  });
+
+  test("a handle()-only program (ZERO routes) still emits a real dispatcher", () => {
+    // Pre-fix this emitted `_scrml_mw_wrap` and called it zero times: no `fetch`,
+    // no `routes`, 100% dead middleware — so a custom-path PRE short-circuit was
+    // unreachable and every such path 404'd.
+    const handleBody = [
+      { kind: "return-stmt", expr: "resolve(request)", span: span(60) },
+    ];
+    const handleNode = makeFunctionDecl("handle", handleBody, ["request", "resolve"], {
+      span: span(50),
+      isServer: true,
+      isHandleEscapeHatch: true,
+    });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([handleNode], span(40))],
+      { functions: new Map(), components: new Map() },
+      null,
+    );
+
+    expect(serverJs).toContain("export const routes = [];");
+    expect(serverJs).toContain("export async function fetch(request) {");
+    expect(serverJs).toContain("_scrml_mw_wrap(_scrml_route_dispatch)");
   });
 
   test("route export does NOT use _scrml_mw_wrap when neither handle() nor middlewareConfig present", () => {
@@ -1143,11 +1179,11 @@ describe("MW-WRAP-001: _scrml_mw_wrap generated with any middlewareConfig", () =
 });
 
 // ---------------------------------------------------------------------------
-// MW-WRAP-002: route handler export uses _scrml_mw_wrap
+// MW-WRAP-002: the top-level dispatcher — not the route export — is wrapped
 // ---------------------------------------------------------------------------
 
-describe("MW-WRAP-002: route export uses _scrml_mw_wrap when middleware present", () => {
-  test("route handler line references _scrml_mw_wrap", () => {
+describe("MW-WRAP-002: dispatcher carries _scrml_mw_wrap when middleware present", () => {
+  test("the dispatch loop is wrapped and the route export stays bare", () => {
     const { fnNode, routeMap } = makePostHandler("getData", [
       makeReturnStmt('"ok"', span(110)),
     ], [], { explicitMethod: "GET" });
@@ -1158,8 +1194,10 @@ describe("MW-WRAP-002: route export uses _scrml_mw_wrap when middleware present"
       { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
-    // The handler in the route export should be wrapped
-    expect(serverJs).toMatch(/_scrml_mw_wrap\(_scrml_handler_/);
+    // §40.3 — the onion wraps top-level dispatch so CORS / rate-limit / secure
+    // headers / logging apply to EVERY request, not only a route match.
+    expect(serverJs).toMatch(/_scrml_mw_wrap\(_scrml_route_dispatch\)/);
+    expect(serverJs).not.toMatch(/_scrml_mw_wrap\(_scrml_handler_/);
   });
 
   test("without middleware, route handler is NOT wrapped", () => {
@@ -1175,6 +1213,79 @@ describe("MW-WRAP-002: route export uses _scrml_mw_wrap when middleware present"
 
     // Without middleware, handler is direct reference (not wrapped)
     expect(serverJs).not.toContain("_scrml_mw_wrap");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MW-WRAP-003: `middlewareConfig != null` is NOT the request-pipeline predicate
+//
+// `middlewareConfig` is the raw `<program>` attribute bag and it is WIDER than
+// the request pipeline: `batch-in-list-cap=` (§8.10.6 SQL batching),
+// `idempotency-store=` / `idempotency-ttl=` (§19.9.6), `cors-max-age=` (inert
+// without `cors=`) and `channel-reconnect=` (§38.3.1 WebSocket) all land in the
+// same object and NONE of them emits an onion stage.
+//
+// Gating the onion on `middlewareConfig != null` made a file whose only
+// `<program>` attribute is `batch-in-list-cap="999"` export `_scrml_mw_pipeline`
+// — an onion with no stages and no `handle()`. Two such files in one build were
+// then rejected as E-MW-007 "declares the request pipeline in 2 different
+// sources", listing attributes neither file has.
+// ---------------------------------------------------------------------------
+
+describe("MW-WRAP-003: a non-pipeline <program> attribute emits NO onion", () => {
+  const nonPipelineConfigs = [
+    ["batch-in-list-cap= only (§8.10.6)", { cors: null, log: null, ratelimit: null, headers: null, batchInListCap: "999" }],
+    ["cors-max-age= without cors= (inert)", { cors: null, log: null, ratelimit: null, headers: null, corsMaxAge: "3600" }],
+    ["idempotency-store= only (§19.9.6)", { cors: null, log: null, ratelimit: null, headers: null, idempotencyStore: "sqlite" }],
+    ["channel-reconnect= only (§38.3.1 WS)", { cors: null, log: null, ratelimit: null, headers: null, channelReconnect: "5s" }],
+    ['log="off" declares no stage', { cors: null, log: "off", ratelimit: null, headers: null }],
+    ['a non-strict headers= declares no stage', { cors: null, log: null, ratelimit: null, headers: "off" }],
+  ];
+
+  for (const [label, middlewareConfig] of nonPipelineConfigs) {
+    test(`${label} — no _scrml_mw_wrap, no _scrml_mw_pipeline`, () => {
+      const { fnNode, routeMap } = makePostHandler("getData", [
+        makeReturnStmt('"ok"', span(110)),
+      ], [], { explicitMethod: "GET" });
+
+      const serverJs = getServerJs([makeLogicBlock([fnNode], span(90))], routeMap, middlewareConfig);
+
+      expect(serverJs).not.toContain("_scrml_mw_wrap");
+      expect(serverJs).not.toContain("_scrml_mw_pipeline");
+      expect(serverJs).not.toContain("_scrml_mw_declared_in");
+    });
+  }
+
+  test("end-to-end: a real `<program batch-in-list-cap>` file exports no onion", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mw-nonpipeline-"));
+    try {
+      const f = join(dir, "alpha.scrml");
+      writeFileSync(f, ['<program batch-in-list-cap="999">', "  <h1>Alpha</h1>", "</program>", ""].join("\n"));
+      const result = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "dist"), log: () => {} });
+      expect((result.errors ?? []).filter((e) => (e.severity ?? "error") === "error")).toEqual([]);
+      const serverJs = result.outputs.get(f)?.serverJs ?? "";
+      // No pipeline export means `selectRequestOnion` never sees this module as a
+      // candidate, so a SECOND such file cannot manufacture an E-MW-007.
+      expect(serverJs).not.toContain("_scrml_mw_pipeline");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the pipeline attributes DO still emit the onion", () => {
+    for (const middlewareConfig of [
+      { cors: "*", log: null, ratelimit: null, headers: null },
+      { cors: null, log: "structured", ratelimit: null, headers: null },
+      { cors: null, log: null, ratelimit: "100/min", headers: null },
+      { cors: null, log: null, ratelimit: null, headers: "strict" },
+    ]) {
+      const { fnNode, routeMap } = makePostHandler("getData", [
+        makeReturnStmt('"ok"', span(110)),
+      ], [], { explicitMethod: "GET" });
+      const serverJs = getServerJs([makeLogicBlock([fnNode], span(90))], routeMap, middlewareConfig);
+      expect(serverJs).toContain("function _scrml_mw_wrap(");
+      expect(serverJs).toContain("export const _scrml_mw_pipeline");
+    }
   });
 });
 

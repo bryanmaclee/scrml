@@ -14,7 +14,7 @@
  */
 
 import { emitFnShortcutBody } from "./emit-logic.js";
-import { paramSignature } from "./utils.ts";
+import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
@@ -689,7 +689,7 @@ export function emitLibraryFnMember(
   const lines: string[] = [
     `${opts.isExported ? "export " : ""}${signatureAsync ? "async " : ""}function${star} ${name}(${paramList}) {`,
   ];
-  for (const code of bodyCodes) for (const line of code.split("\n")) lines.push(`  ${line}`);
+  for (const code of bodyCodes) for (const line of indentBodyLines(code, "  ")) lines.push(line);
   lines.push("}");
   return lines.join("\n");
 }

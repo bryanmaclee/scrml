@@ -1143,6 +1143,33 @@ function _scrml_wire_decode(value) {
 //      declaration-order requirement.
 //   4. Otherwise no-op (defensive: unknown name, e.g. a future engine cell
 //      whose B22 didn't reject — silent rather than throwing).
+// §13.2 auto-await parity for reset (g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn).
+// A server-fn-backed init/default thunk returns a Promise. The DECLARATION path already settles it
+// asynchronously (fire-and-forget async IIFE + await + error boundary) so the RESOLVED value lands in
+// the cell. The reset path re-invoked the same thunk but wrote the raw Promise, so the cell held the
+// string [object Promise]. Mirror the declaration path: detect a thenable and settle it fire-and-forget,
+// otherwise write directly. _scrml_reset stays SYNCHRONOUS (no call-site change), and the async settle
+// matches the declaration path's own async settle -- §6.8.1 mandates writing "the result", which under
+// §13.2 IS the resolved value. _scrml_error_boundary_log is guarded (typeof) like the other optional
+// deps in _scrml_reset, so a bundle without it degrades to a bare resolve rather than throwing.
+function _scrml_reset_apply(name, r) {
+  if (r !== null && typeof r === "object" && typeof r.then === "function") {
+    // Promise.resolve() FIRST. A bare r.then(...).catch(...) assumes .then returns
+    // a promise -- true for a real Promise, NOT true for an arbitrary thenable. A
+    // thenable of the form { then: (res) => res(99) } returns undefined from .then,
+    // so .catch is a TypeError thrown SYNCHRONOUSLY out of _scrml_reset and out of
+    // the adopter's event handler, aborting the rest of it. Adopting the thenable
+    // first is also what makes the comment above TRUE rather than merely plausible:
+    // await on that same value resolves to 99 without throwing, so this is the shape
+    // that genuinely mirrors the declaration path. S368.
+    // NB this file is itself a template literal -- no backticks, no dollar-brace.
+    Promise.resolve(r).then(function (v) { _scrml_reactive_set(name, v); }).catch(function (e) {
+      if (typeof _scrml_error_boundary_log === "function") _scrml_error_boundary_log(name, e);
+    });
+  } else {
+    _scrml_reactive_set(name, r);
+  }
+}
 function _scrml_reset(name) {
   // S79 / §6.13 — cancel any pending debounced/throttled timer for this cell
   // BEFORE applying the reset value. The cancel-then-apply ordering ensures
@@ -1160,12 +1187,12 @@ function _scrml_reset(name) {
   }
   // Default thunk wins per §6.8.2 line 4857.
   if (typeof _scrml_default_fns[name] === "function") {
-    _scrml_reactive_set(name, _scrml_default_fns[name]());
+    _scrml_reset_apply(name, _scrml_default_fns[name]());
     return;
   }
   // Otherwise re-evaluate init thunk per §6.8.1 line 4831.
   if (typeof _scrml_init_fns[name] === "function") {
-    _scrml_reactive_set(name, _scrml_init_fns[name]());
+    _scrml_reset_apply(name, _scrml_init_fns[name]());
     return;
   }
   // Otherwise: treat as a compound parent — walk every registered child
@@ -2763,20 +2790,29 @@ function _scrml_nav_fetch_and_swap(path, restore) {
     });
 }
 
-// Extract the target document's SSR state seed (the SSR doc injects
-// <script>window.__scrml_ssr_state={…}</script>; DOMParser does NOT execute it,
-// so parse the JSON out of the script text). Replaces the live seed wholesale so
-// a stale prior-route seed does not leak into the new region.
+// Extract the target document's SSR state seed. The SSR doc carries it as
+// <script type="application/json" id="__scrml_ssr_state">{…}</script> — a data
+// block, so there is nothing to execute either here or in the live document
+// (that is what keeps it legal under headers="strict", §39.2.5). Replaces the
+// live seed wholesale so a stale prior-route seed does not leak into the new
+// region. Parsed locally rather than through the 'ssr' chunk's reader: soft nav
+// ships in a different runtime chunk and must not depend on one that a page
+// with no server-authority cell tree-shakes away.
 function _scrml_nav_extract_seed(doc) {
   if (typeof window === "undefined") return;
-  var scripts = doc.querySelectorAll("script");
-  var prefix = "window.__scrml_ssr_state=";
-  for (var i = 0; i < scripts.length; i++) {
-    var text = scripts[i].textContent || "";
-    var at = text.indexOf(prefix);
-    if (at === -1) continue;
-    var json = text.slice(at + prefix.length).replace(/;\\s*$/, "");
-    try { window.__scrml_ssr_state = JSON.parse(json); }
+  var el = doc && typeof doc.getElementById === "function"
+    ? doc.getElementById("__scrml_ssr_state")
+    : null;
+  // Match on the emitted WIRE FORM, not the id alone — an ordinary
+  // <div id="__scrml_ssr_state"> in the FETCHED document must not be parsed as
+  // the seed. The 'ssr' chunk applies the identical test in
+  // _scrml_ssr_is_seed_element; it is repeated rather than shared because soft
+  // nav must not depend on a chunk a seedless page tree-shakes away (see above).
+  if (el
+    && String(el.tagName || "").toUpperCase() === "SCRIPT"
+    && typeof el.getAttribute === "function"
+    && String(el.getAttribute("type") || "").toLowerCase() === "application/json") {
+    try { window.__scrml_ssr_state = JSON.parse(el.textContent || "null"); }
     catch (e) { /* malformed seed — keep the prior seed rather than crash */ }
     return;
   }
@@ -3685,27 +3721,14 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
 }
 
 
-// --- Transition CSS injection (§38 transition directives) ---
-// Inject transition keyframes and classes into the document head once.
-(function() {
-  if (typeof document === "undefined") return;
-  const style = document.createElement("style");
-  style.textContent = [
-    "@keyframes scrml-fade-in { from { opacity: 0 } to { opacity: 1 } }",
-    "@keyframes scrml-fade-out { from { opacity: 1 } to { opacity: 0 } }",
-    ".scrml-enter-fade { animation: scrml-fade-in 300ms ease }",
-    ".scrml-exit-fade { animation: scrml-fade-out 300ms ease }",
-    "@keyframes scrml-slide-in { from { transform: translateY(-20px); opacity: 0 } to { transform: none; opacity: 1 } }",
-    "@keyframes scrml-slide-out { from { transform: none; opacity: 1 } to { transform: translateY(-20px); opacity: 0 } }",
-    ".scrml-enter-slide { animation: scrml-slide-in 300ms ease }",
-    ".scrml-exit-slide { animation: scrml-slide-out 300ms ease }",
-    "@keyframes scrml-fly-in { from { transform: translateX(-100%); opacity: 0 } to { transform: none; opacity: 1 } }",
-    "@keyframes scrml-fly-out { from { transform: none; opacity: 1 } to { transform: translateX(100%); opacity: 0 } }",
-    ".scrml-enter-fly { animation: scrml-fly-in 300ms ease }",
-    ".scrml-exit-fly { animation: scrml-fly-out 300ms ease }",
-  ].join("\\n");
-  document.head.appendChild(style);
-})();
+// --- Transition CSS (§38 transition directives) ---
+// RETIRED from the runtime. The scrml-enter-* / scrml-exit-* keyframes used
+// to be injected here as an inline <style>; <program headers="strict"> pins
+// default-src 'self' (§39.2.5) and a browser REFUSES to apply an inline style
+// under it, so a strict-headers app silently lost every §38 transition. They now
+// ship in the file's own stylesheet (codegen/emit-transition-css.ts), which is a
+// same-origin <link rel="stylesheet"> and needs no CSP widening. Emitted only
+// for the transitions a file actually uses.
 
 // --- §19 Built-in error types ---
 // Each error type is a class extending Error with .type and .cause fields.
@@ -6079,7 +6102,7 @@ function _scrml_map_decode(x) {
 // §52.8 SSR pre-render seed (chunk: 'ssr')
 //
 // B-substrate (ssr-b-substrate). The compiler-emitted SSR HTML-composition route
-// (emit-server.ts) injects <script>window.__scrml_ssr_state={…}</script> before
+// (emit-server.ts) injects the seed data block (WIRE FORMAT below) before
 // </head>, carrying the server-authoritative cell values redacted at the §14.8.9
 // egress sink. _scrml_ssr_seed_apply() runs BEFORE the mount fetch decisions and
 // the engine hydration (emit-reactive-wiring Step 4c) so each seeded cell is
@@ -6089,6 +6112,44 @@ function _scrml_map_decode(x) {
 // host, no server in the request path), window.__scrml_ssr_state is absent and
 // both helpers are no-ops — the ordinary fetch path runs unchanged (graceful
 // degradation, never a crash).
+//
+// WIRE FORMAT — the seed is a NON-EXECUTABLE data block:
+//   <script type="application/json" id="__scrml_ssr_state">{…}</script>
+// A type the browser does not recognise as a script language is DATA, never
+// executed, so <program headers="strict">'s pinned default-src 'self' CSP
+// (§39.2.5) has nothing to refuse. The executable form this replaced
+// (<script>window.__scrml_ssr_state=…</script>) was refused outright under
+// that CSP and the page silently lost its whole seed.
+function _scrml_ssr_seed_from_document(doc) {
+  var el = (doc && typeof doc.getElementById === "function")
+    ? doc.getElementById("__scrml_ssr_state")
+    : null;
+  if (!_scrml_ssr_is_seed_element(el)) return undefined; // no seed in this document
+  try { return JSON.parse(el.textContent || "null"); }
+  catch (e) { return undefined; }                 // malformed — behave as unseeded
+}
+// The seed is identified by its WIRE FORM, not by its id alone: an id is a
+// document-wide namespace an author shares, so a page carrying its own
+// <div id="__scrml_ssr_state"> would otherwise have its text content parsed as
+// the server-authoritative seed and applied over the cell store. Requiring the
+// exact emitted shape — a <script type="application/json"> — means only what
+// emit-server actually wrote can seed the page.
+function _scrml_ssr_is_seed_element(el) {
+  return !!el
+    && String(el.tagName || "").toUpperCase() === "SCRIPT"
+    && typeof el.getAttribute === "function"
+    && String(el.getAttribute("type") || "").toLowerCase() === "application/json";
+}
+// Hoist the seed onto window the moment this chunk loads. EAGER, not lazy:
+// the runtime script sits at the end of <body>, so <head>'s data block is
+// already parsed — and a later soft nav replaces window.__scrml_ssr_state with
+// the TARGET document's seed (_scrml_nav_extract_seed), which a lazy hoist
+// reading the ORIGINAL document would clobber.
+(function () {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  var _seed = _scrml_ssr_seed_from_document(document);
+  if (_seed !== undefined) window.__scrml_ssr_state = _seed;
+})();
 function _scrml_ssr_seeded(name) {
   return typeof window !== "undefined"
     && window.__scrml_ssr_state != null

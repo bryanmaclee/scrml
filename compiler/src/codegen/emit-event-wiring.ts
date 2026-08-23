@@ -851,7 +851,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // `.advance(.X)` (and any other structured-only detection in
           // emit-expr.ts) routes correctly. Map-var assigns also take this path
           // (s169-map-inline-insert) so emitAssign's map-method RHS lowering fires.
-          const body = emitExprField(binding.handlerExprNode, binding.handlerExpr, {
+          // g-request-ref-in-lift-event-handler-attr-misroute (top-level seam) — a
+          // `<#id>`-leading handler (`onclick=${<#profile>.reload()}`) arrives as an
+          // escape-hatch node; the bare `emitExprField` takes the string fallback →
+          // mis-routes to the §36 `_scrml_input_state_registry` (never populated for a
+          // request → ReferenceError at click, silent at exit 0). Recover the
+          // structured node the same way the top-level bool-/value-attr siblings do
+          // (L1630 / L1689), gated to registered requests so a non-request handler
+          // stays byte-identical. `requestIds` is already carried in engineExprCtxExtras.
+          const body = emitExprField(
+            reparseRequestRefEscapeHatch(binding.handlerExprNode, binding.handlerExpr, "<event-handler-request-ref>", requestIds, /* gateToRegisteredRequests */ true),
+            binding.handlerExpr, {
             mode: "client",
             ...engineExprCtxExtras,
           });

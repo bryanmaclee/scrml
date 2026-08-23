@@ -1681,7 +1681,16 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
             /^\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(raw));
         const rewritten = isSynthCallableSource
           ? rewriteExprArrowBody(raw)
-          : emitExprField(val.exprNode, raw, liftExprCtx());
+          // g-request-ref-in-lift-event-handler-attr-misroute — a `<#id>`-leading
+          // handler (`onclick=${<#profile>.reload()}`) arrives as an escape-hatch
+          // node (ast-builder skips the `<`-leading expr); handing it straight to
+          // `emitExprField` takes the string fallback → mis-routes to the §36
+          // `_scrml_input_state_registry` (never populated for a request → a
+          // ReferenceError at click, silent at exit 0). Recover the structured node
+          // the same way the non-event value/if/class attr siblings do (L1713 /
+          // L1448 / L1530), gated to registered requests so a non-request handler
+          // stays byte-identical. `liftExprCtx()` already threads the request-id set.
+          : emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
         // S96 Bug 11+12 fix — if the expression IS a callable (arrow
         // function or function expression), use it directly per SPEC §5.2.2:
         //   `onclick=${(e) => fn(e, arg)}` — `${}` expression used as-is.

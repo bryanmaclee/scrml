@@ -43,6 +43,8 @@ describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
       expect(r.forbidden).toEqual([]); // ABSENCE: no forbidden code fired.
       expect(r.prefixViolations).toEqual([]); // ABSENCE: no forbidden family-prefix fired.
       expect(r.severityMismatches).toEqual([]); // §34: each asserted code's severity matches.
+      expect(r.countMismatches).toEqual([]); // CARDINALITY: each asserted code fired exactly N times.
+      expect(r.shapeErrors).toEqual([]); // WELL-FORMEDNESS: the case's own `expect` block is shaped legally.
       // (b) runtime half (only when the case declares one).
       if (runtime) {
         const failures = await runCaseRuntime(c);

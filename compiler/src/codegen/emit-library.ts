@@ -297,6 +297,118 @@ function pruneServerFnsAndLowerGuarded(
     ops.push({ start: sp.start, end: sp.end, text: lowered });
   }
 
+  // g-library-mode-toplevel-decl-match-leaks — a TOP-LEVEL `const/let X = match …`
+  // (`node.matchExpr` on a const-/let-decl) is NOT a function-decl, so
+  // `emitControlFlowLibraryFns` (which prunes + APPENDS the lowered fn — safe
+  // because function declarations hoist) never routes it, and the raw `match`
+  // leaks its scrml syntax into the library `.js` → §2.2.1 E-CODEGEN-INVALID-LOGIC.
+  // A `const`/`let` does NOT hoist, so it must be lowered IN PLACE — hence a splice
+  // here (not an append). Reuse the SAME browser decl lowering the emit-logic
+  // const-/let-decl `matchExpr` arm uses (`emitLogicNode` → `emitMatchExprDecl`,
+  // the tilde form `let _scrml_tilde = null; …; ${kw} X = _scrml_tilde;`), span-
+  // spliced over the raw decl. The tilde form places each arm body in EXPRESSION
+  // position, so a brace-delimited arm result (an object literal / block-body arm)
+  // is a value, not a statement block that silently returns undefined. Nested
+  // `const = match` inside a fn body is already handled (its fn routes structurally
+  // via emitControlFlowLibraryFns), so only the top-level `logicBody` children are
+  // scanned here. `match` lowers correctly cross-mode — library↔browser parity, no
+  // language surface. Two parser shapes: a NON-export decl arrives as a const-/
+  // let-decl carrying `matchExpr`; an EXPORT decl arrives SPLIT (export-decl + a
+  // sibling match-stmt) and is re-associated below.
+  if (Array.isArray(logicBody)) {
+    const declBody = logicBody as ASTNode[];
+    const spanOf = (n: ASTNode | undefined): Span | null => {
+      const sp = n?.span as Span | undefined;
+      return sp && typeof sp.start === "number" && typeof sp.end === "number" ? sp : null;
+    };
+    const insideRemoval = (sp: Span): boolean =>
+      removals.some((r) => sp.start >= r.start && sp.end <= r.end);
+    // A `match`/decl node span can OVERSHOOT its closing `}` into the start of the
+    // NEXT statement (a parser span-accuracy quirk — filed g-match-decl-span-
+    // overshoots-next-statement). Splicing on the raw end would clobber the next
+    // decl's leading keyword. Trim back to the match's own closing `}`: it is the
+    // last `}` at or before the span end, and the overshoot region is a
+    // next-statement opener (`const`/`let`/`export`/identifier) that never holds a
+    // `}`, so this is deterministic.
+    const matchCloseEnd = (end: number): number => {
+      const b = sourceText.lastIndexOf("}", end - 1);
+      return b >= 0 ? b + 1 : end;
+    };
+    // The tilde lowering (emitMatchExprDecl) can be MULTI-LINE — module-local temps
+    // (`let _scrml_tilde_N = null; …`) followed by the final `${kw} ${name} = …;`
+    // binding. To EXPORT such a decl, only the FINAL binding gets the `export `
+    // keyword (the temps must stay module-local). Prefix the last `${kw} ${name} =`
+    // statement; a single-line lowering (`const X = <IIFE>`) is prefixed at its head.
+    const exportify = (lowered: string, kw: string, name: string): string => {
+      const marker = `${kw} ${name} = `;
+      const idx = lowered.lastIndexOf(marker);
+      return idx >= 0 ? lowered.slice(0, idx) + "export " + lowered.slice(idx) : `export ${lowered}`;
+    };
+    for (let di = 0; di < declBody.length; di++) {
+      const node = declBody[di];
+      if (!node) continue;
+      const o = node as Record<string, unknown>;
+      // Shape 1 — NON-export `const/let X = match …`: a const-/let-decl carrying a
+      // `matchExpr` init (the same node the browser emit-logic decl arm consumes).
+      if ((node.kind === "const-decl" || node.kind === "let-decl") && o.matchExpr) {
+        const sp = spanOf(node);
+        if (!sp || insideRemoval(sp)) continue;
+        const name = typeof o.name === "string" ? o.name : null;
+        if (!name) continue; // destructure LHS — leave to the raw path (out of scope)
+        // Lower via the SAME browser decl path (emitLogicNode → emitMatchExprDecl,
+        // the tilde form): it places each arm body in EXPRESSION position
+        // (`_scrml_tilde = <arm>`), so a brace-delimited arm result — an object
+        // literal `{ x: 1 }` or a block-body arm — is a value, not a statement
+        // block that returns undefined (which a bare `return <arm>` IIFE would
+        // silently produce). This is the cross-mode parity the gap requires.
+        const lowered = emitLogicNode(
+          node as Parameters<typeof emitLogicNode>[0],
+          {} as Parameters<typeof emitLogicNode>[1],
+        );
+        if (lowered == null) continue;
+        ops.push({ start: sp.start, end: matchCloseEnd(sp.end), text: lowered });
+        continue;
+      }
+      // Shape 2 — EXPORT `export const/let X = match …`: the parser splits this into
+      // an `export-decl` whose `raw` ends at the `=` (init NOT captured) IMMEDIATELY
+      // followed by a sibling `match-stmt` node — the binding is disassociated from
+      // its match init (browser drops the binding for the same reason). Re-associate
+      // + lower to the value-IIFE, splicing over BOTH spans as one `export const X = …`.
+      if (
+        node.kind === "export-decl" &&
+        (o.exportKind === "const" || o.exportKind === "let") &&
+        typeof o.exportedName === "string" &&
+        typeof o.raw === "string" && /=\s*$/.test(o.raw as string)
+      ) {
+        const next = declBody[di + 1];
+        if (next && next.kind === "match-stmt") {
+          const sp = spanOf(node);
+          const nsp = spanOf(next);
+          if (sp && nsp && !insideRemoval(sp) && !insideRemoval(nsp)) {
+            const kw = o.exportKind as string;
+            const name = o.exportedName as string;
+            // Re-associate: synthesize the const-/let-decl the parser did NOT build
+            // and lower it through the SAME tilde path as Shape 1 (correct for
+            // brace-delimited arm bodies). Then export-prefix the final binding and
+            // splice over `export … = match …` from the `export` keyword itself
+            // (found by scanning back from the decl span) so no double-`export`.
+            const synthetic = { kind: kw === "let" ? "let-decl" : "const-decl", name, matchExpr: next, span: { start: sp.start, end: matchCloseEnd(nsp.end) } };
+            const lowered = emitLogicNode(
+              synthetic as unknown as Parameters<typeof emitLogicNode>[0],
+              {} as Parameters<typeof emitLogicNode>[1],
+            );
+            if (lowered != null) {
+              const exportKw = sourceText.lastIndexOf("export", sp.start);
+              const spliceStart = exportKw >= 0 ? exportKw : sp.start;
+              ops.push({ start: spliceStart, end: matchCloseEnd(nsp.end), text: exportify(lowered, kw, name) });
+              di++; // consume the match-stmt too
+            }
+          }
+        }
+      }
+    }
+  }
+
   // §23.6 (S238) — lower each inline value-returning `_={ … }=` foreign block to
   // its §23.2.4a async-IIFE (emit-logic `case "foreign"`) and splice it over the
   // raw `_={ … }=` span. Skip any foreign node inside a pruned server-fn span
@@ -409,8 +521,8 @@ function emitAsyncLibraryFns(
   crossImportSeed: Set<string> | undefined,
   filePath: string,
   errors: CGError[],
-): { removals: Array<{ start: number; end: number }>; lines: string[] } {
-  const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[] };
+): { removals: Array<{ start: number; end: number }>; lines: string[]; routedNames: Set<string> } {
+  const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[], routedNames: new Set<string>() };
   if (!Array.isArray(logicBody) || !calleeMap || !exportRegistry || exportRegistry.size === 0) {
     return none;
   }
@@ -510,7 +622,104 @@ function emitAsyncLibraryFns(
   for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
   // E-SQL-006 .prepare() diagnostics from lowering an async fn body.
   for (const e of preparedStmtErrors) if (e) errors.push(e as CGError);
+  return { removals, lines: outLines, routedNames: new Set(toEmit.map((f) => f.name as string)) };
+}
+
+/**
+ * §18 cross-mode parity (g-library-mode-match-expr-fails-codegen) — route every
+ * library function-decl whose body contains a `match` expression that browser
+ * mode LOWERS but the whole-block text path passes through RAW through the SAME
+ * structured `emitLibraryFnMember` the async / server / tool paths use. The
+ * whole-block slicer below emits fn bodies verbatim, so a `match` expression leaks
+ * its raw scrml syntax into the importable `.js` — invalid JS that trips the
+ * §2.2.1 E-CODEGEN-INVALID-LOGIC emit gate — exactly as a raw `!{}` / `?{}` would.
+ * Mirrors `emitAsyncLibraryFns`: returns the source SPANS to prune (the caller
+ * merges them into the prune pass so the verbatim copy is removed) plus the
+ * structured JS to append.
+ *
+ * Selection is disjoint from the async / SQL routers by construction:
+ *   - `alreadyRouted` names are the async / nested-async-holder fns emitted
+ *     structurally above (their body already lowers the match) — skip them.
+ *   - a `?{}` / transaction fn is pruned to `.server.js` by
+ *     `collectSqlFnRemovalRanges` (its whole body, match included) — skip it.
+ * What remains is a pure SYNC fn whose ONLY blocker to valid output is the
+ * unlowered `match`, so `emitLibraryFnMember` with an empty async set (client
+ * boundary) reproduces browser mode's client lowering byte-for-byte.
+ *
+ * Detection is by AST node kind (`match-expr`/`match-stmt`, or a `matchExpr`
+ * attachment on an enclosing return/let/const), NOT by span-splicing the inner
+ * node: the match-expr node's own span bleeds across the enclosing `return ` and
+ * the fn's trailing brace, so re-emitting the WHOLE fn from the AST (which the
+ * shared member emitter already does correctly) is the sound unit. `if`-expression
+ * forms are deliberately NOT routed — see `fnBodyContainsMatch`.
+ */
+function emitControlFlowLibraryFns(
+  logicBody: unknown,
+  sourceText: string,
+  alreadyRouted: Set<string>,
+): { removals: Array<{ start: number; end: number }>; lines: string[] } {
+  const removals: Array<{ start: number; end: number }> = [];
+  const outLines: string[] = [];
+  if (!Array.isArray(logicBody)) return { removals, lines: outLines };
+  const emptyAsync = new Set<string>();
+  for (const node of logicBody as ASTNode[]) {
+    if (!node || node.kind !== "function-decl" || typeof node.name !== "string") continue;
+    if (alreadyRouted.has(node.name)) continue;
+    if (containsSqlOrTransaction(node)) continue;
+    if (!fnBodyContainsMatch(node)) continue;
+    const sp = node.span as Span | undefined;
+    if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
+    // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the decl
+    // span starts at `function`/`fn` (mirrors emitAsyncLibraryFns / collectSqlFnRemovalRanges).
+    const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
+    const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
+    const prefixLen = m ? m[1].length : 0;
+    removals.push({ start: sp.start - prefixLen, end: sp.end });
+    outLines.push(
+      emitLibraryFnMember(node, { isExported: node.fromExport === true, asyncFnNames: emptyAsync }),
+    );
+  }
   return { removals, lines: outLines };
+}
+
+/**
+ * True when a library fn body holds a `match` expression the whole-block text
+ * path cannot lower — a bare `match`/`match-expr` node (statement position) or a
+ * `matchExpr` attachment on an enclosing `return`/`let`/`const`. Walks the whole
+ * body so a `match` nested inside a block-arm / inner helper is caught too;
+ * routing the enclosing fn structurally lowers the nested one in the same pass.
+ *
+ * SCOPE (deliberate — match ONLY, not `if`): browser mode's `if`-expression-value
+ * lowering is itself broken (an `if`-bound `let` compiles but the arm values
+ * assign to fresh block-scoped temps, so the binding stays `null` at runtime — a
+ * silent-wrong in BOTH modes, filed as g-if-expression-value-binding-lowers-null).
+ * Routing an `if`-bearing fn here would trade library's loud
+ * E-CODEGEN-INVALID-LOGIC for that silent-wrong — the dangerous direction — so
+ * `if` stays raw-failing (loud, unchanged) until the shared lowering is fixed.
+ * `match` lowers correctly in browser mode (verified byte- and run-identical), so
+ * routing it is pure cross-mode parity.
+ */
+function fnBodyContainsMatch(fnNode: ASTNode): boolean {
+  let found = false;
+  const walk = (n: unknown): void => {
+    if (found || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      for (const c of n) walk(c);
+      return;
+    }
+    const o = n as Record<string, unknown>;
+    const k = o.kind;
+    if (k === "match-expr" || k === "match-stmt" || o.matchExpr) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(o)) {
+      const v = o[key];
+      if (v && typeof v === "object") walk(v);
+    }
+  };
+  walk(fnNode.body);
+  return found;
 }
 
 /**
@@ -759,17 +968,34 @@ export function generateLibraryJs(
           filePath,
           errors,
         );
+        // g-library-mode-match-expr-fails-codegen — route the remaining SYNC fns
+        // whose body holds an unlowered `match`/`if` expression through the same
+        // structured member emitter (disjoint from the async / SQL routers). Its
+        // removals join the async removals in the single prune-splice below so the
+        // verbatim `match` text is excised; its lines are appended alongside.
+        const controlFlowEmit = emitControlFlowLibraryFns(
+          logic.body,
+          sourceText,
+          asyncEmit.routedNames,
+        );
         blockText = pruneServerFnsAndLowerGuarded(
           blockText,
           logicSpan.start,
           logic.body,
           sourceText,
           errors,
-          asyncEmit.removals,
+          [...asyncEmit.removals, ...controlFlowEmit.removals],
         );
-        // Strip the ${ prefix and } suffix
-        if (blockText.startsWith("${")) blockText = blockText.slice(2);
-        if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);
+        // Strip the ${…} logic-wrapper as a MATCHED PAIR: the trailing `}` is the
+        // wrapper close ONLY when a `${` prefix was actually present. A bare-fn
+        // library file has no wrapper and ends in the fn's OWN `}`; stripping it
+        // there truncates the fn → E-CODEGEN-INVALID-LOGIC
+        // (g-library-bare-fn-no-trailing-newline-brace-strip). The bug hid in the
+        // common case only because a trailing newline left the fn's `}` non-final.
+        if (blockText.startsWith("${")) {
+          blockText = blockText.slice(2);
+          if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);
+        }
         blockText = blockText.trim();
         if (blockText) {
           // §21.2/§21.5 — remove scrml `type` decls (incl. any leading
@@ -823,6 +1049,15 @@ export function generateLibraryJs(
         // trailing placement after the imports/sync content is resolution-safe.
         if (asyncEmit.lines.length > 0) {
           for (const fnBlock of asyncEmit.lines) {
+            lines.push(fnBlock);
+            lines.push("");
+          }
+        }
+        // g-library-mode-match-expr-fails-codegen — append the structured
+        // match/if sync fns (pruned from the verbatim block above), same as the
+        // async fns. Function declarations hoist, so trailing placement is safe.
+        if (controlFlowEmit.lines.length > 0) {
+          for (const fnBlock of controlFlowEmit.lines) {
             lines.push(fnBlock);
             lines.push("");
           }

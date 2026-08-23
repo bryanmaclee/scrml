@@ -41,6 +41,20 @@ export interface CompileResult {
    * vs warning — the cross-stream rule: a W-/I- code never lands in errors).
    */
   byCode: Record<string, Severity>;
+  /**
+   * Per-code OCCURRENCE COUNT across both streams — how many diagnostics the
+   * compiler actually pushed carrying that code. `codes`/`byCode` are both
+   * de-duplicating maps, so cardinality is destroyed by the time a case sees
+   * them: a code firing ONCE and a code firing TWICE are the identical
+   * observation. That blindness is what `expect.codeCounts` reads, and the
+   * invariant it exists to pin is "one diagnostic per mistake, never two,
+   * never none" (§4.12.3's `or` between the two nested-program NOMINAL codes).
+   *
+   * Counts EVERY diagnostic entry, including two entries sharing a code across
+   * the errors and warnings streams — the honest answer to "how many
+   * diagnostics did the user see", which is the thing a double fire is bad for.
+   */
+  counts: Record<string, number>;
 }
 
 /** The diagnostic's own severity wins; the stream is authoritative fallback. */
@@ -89,16 +103,20 @@ export function compile(source: string, auxFiles: Record<string, string> = {}): 
     // Build the per-code severity map. The errors stream wins (the §34 fatal
     // partition): a code present as an error is never downgraded to a warning.
     const byCode: Record<string, Severity> = {};
+    const counts: Record<string, number> = {};
     const record = (d: Diagnostic, streamSev: "error" | "warning") => {
       const c = d?.code;
       if (typeof c !== "string" || c.length === 0) return;
+      // Cardinality is recorded BEFORE the severity de-dup returns early —
+      // otherwise a code fired twice as an error would count once.
+      counts[c] = (counts[c] ?? 0) + 1;
       if (byCode[c] === "error") return;
       byCode[c] = normalizeSeverity(d.severity, streamSev);
     };
     for (const d of result.errors ?? []) record(d, "error");
     for (const d of result.warnings ?? []) record(d, "warning");
     const codes = Object.keys(byCode).sort();
-    return { codes, byCode };
+    return { codes, byCode, counts };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -811,11 +829,14 @@ function installCsrfRetryFallback(): () => void {
   return () => { if (had) g._scrml_fetch_with_csrf_retry = prev; else delete g._scrml_fetch_with_csrf_retry; };
 }
 
-/** Pull the inline B-substrate seed value out of composed first-paint HTML.
- *  `innerHTML=` does NOT execute the seed `<script>`, so the caller applies it by
- *  hand (exactly what that script would set on `window.__scrml_ssr_state`). */
+/** Pull the B-substrate seed value out of composed first-paint HTML.
+ *  The seed ships as a NON-EXECUTABLE data block —
+ *  `<script type="application/json" id="__scrml_ssr_state">{…}</script>` — so it
+ *  stays legal under `headers="strict"`'s `default-src 'self'` (§39.2.5). Nothing
+ *  executes it here either; the caller applies the parsed value by hand, exactly
+ *  as the client runtime's 'ssr' chunk does on a real page load. */
 function extractSsrSeed(firstPaint: string): unknown {
-  const m = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(firstPaint);
+  const m = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(firstPaint);
   return m ? JSON.parse(m[1]) : null;
 }
 

@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# handOffs/delta-log.md — union merge (S354)
+#
+# The log is APPEND-ONLY and its entries are one-line records. Every collision
+# observed has been a tail-append conflict: two concurrent sessions each append
+# after the same last entry. `union` keeps BOTH sides automatically instead of
+# raising a conflict that has to be hand-resolved — which is where the real
+# damage came from, since a hand-resolve once renumbered the OTHER session's
+# already-merged entries.
+#
+# ⚑ This trades a merge conflict for a possible DUPLICATE sequence number, and
+# that trade is only safe because `bun scripts/delta-lint.ts` is loud about
+# duplicates in CI. A duplicate is not cosmetic: the flogence bridge uses the
+# sequence as a checkpoint cursor, so the second entry to merge reads as
+# already-absorbed and drops out of the digest. The two changes land together;
+# neither is sufficient alone.
+handOffs/delta-log.md merge=union

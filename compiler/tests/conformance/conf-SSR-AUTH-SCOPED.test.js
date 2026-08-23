@@ -148,7 +148,7 @@ describe("CONF-SSR-AUTH-SCOPED (runtime-half): the compiled bundle omits the see
 
     const resp = await compose({});          // anonymous request — no cookies, no session
     const html = await resp.text();
-    const seedMatch = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(html);
+    const seedMatch = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(html);
     const seed = seedMatch ? JSON.parse(seedMatch[1]) : {};
 
     // (a) the auth-scoped rows + seed key are ABSENT from the anon first paint.

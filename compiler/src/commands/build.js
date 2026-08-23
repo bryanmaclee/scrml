@@ -19,6 +19,7 @@ import { resolve, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
+import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -166,8 +167,12 @@ export function parseArgs(args) {
  * must NOT be added to the routes array (they have shape {open, message, close}, not
  * {path, method, handler}, and are passed to Bun.serve() websocket: option instead).
  *
+ * The §40.3 `handle()` onion export (_scrml_mw_pipeline) is separated into
+ * middlewareNames for the same reason — it is `wrap(downstream) -> handler`, and
+ * generateServerEntry mounts it AROUND the whole fetch body.
+ *
  * @param {string} outputDir
- * @returns {Array<{ filename: string, routeNames: string[], wsHandlerNames: string[] }>}
+ * @returns {Array<{ filename: string, routeNames: string[], wsHandlerNames: string[], middlewareNames: string[] }>}
  */
 export function discoverServerRoutes(outputDir) {
   // F-COMPILE-001 Option A: outputDir may be a tree (e.g. dist/pages/customer/home.server.js)
@@ -194,6 +199,15 @@ export function discoverServerRoutes(outputDir) {
     //   export const _scrml_ws_handlers = { open, message, close } (WS handlers — not a route)
     const routeNames = [];
     const wsHandlerNames = [];
+    const middlewareNames = [];
+    // §40.3/§40.8 — the `.scrml` source that DECLARES this module's onion.
+    // emit-server.ts stamps it next to the mount point so the entry generator can
+    // NAME the competing sources when a build presents more than one application.
+    let middlewareDeclaredIn = null;
+    const declaredInMatch = /export\s+const\s+_scrml_mw_declared_in\s*=\s*("(?:[^"\\]|\\.)*")/.exec(source);
+    if (declaredInMatch) {
+      try { middlewareDeclaredIn = JSON.parse(declaredInMatch[1]); } catch { middlewareDeclaredIn = null; }
+    }
     // `_scrml_*` covers routes/session/endpoint/sse/cors/ws; `__ri_route_*` are
     // the inferred server-function RPC routes (a `?{}`/host-touching function
     // escalated to a route) — they do NOT carry the `_scrml_` prefix, so without
@@ -205,15 +219,22 @@ export function discoverServerRoutes(outputDir) {
       const name = m[1];
       if (name === "_scrml_ws_handlers") {
         wsHandlerNames.push(name);
+      } else if (name === "_scrml_mw_pipeline") {
+        // §40.3 — the handle() onion mount point. It is a WRAPPER FUNCTION, not a
+        // `{ path, method, handler }` route: pushing it into `routes` would put a
+        // bare function in the match loop and lose the onion entirely.
+        middlewareNames.push(name);
+      } else if (name === "_scrml_mw_declared_in") {
+        // Provenance for the onion above, not a route. Captured separately.
       } else {
         routeNames.push(name);
       }
     }
 
-    if (routeNames.length > 0 || wsHandlerNames.length > 0) {
+    if (routeNames.length > 0 || wsHandlerNames.length > 0 || middlewareNames.length > 0) {
       // `filename` carries the relative path under outputDir so the generated
       // `_server.js` can import via `./${filename}` regardless of nesting.
-      result.push({ filename: relPath, routeNames, wsHandlerNames });
+      result.push({ filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn });
     }
   }
 
@@ -260,6 +281,26 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   const wsModules = serverModules.filter(m => (m.wsHandlerNames ?? []).length > 0);
   const hasWs = wsModules.length > 0;
 
+  // §40.3/§40.8 — the ONE `handle()` onion this server mounts. The onion is
+  // application-scope (§40.3.4: it applies to every HTTP request the compiled
+  // server handles; §40.8: the <program> middleware attributes are app-scope and
+  // the top-level <program> is declared exactly once, in the entry file), so
+  // exactly one onion runs per request. `selectRequestOnion` reports E-MW-007
+  // rather than composing several by module order — which is filename-sorted, so
+  // a RENAME would silently decide which handle() wins a contested path.
+  const { onion: onionModule, error: onionError } = selectRequestOnion(serverModules);
+  if (onionError) {
+    const err = new Error(formatOnionConflict(onionError));
+    err.scrmlCode = onionError.code;
+    err.scrmlSources = onionError.sources;
+    throw err;
+  }
+  const onionAliasFor = new Map();
+  // The alias keeps the emitted import readable and unambiguous even though the
+  // export name is the same in every module.
+  if (onionModule) onionAliasFor.set(onionModule, "_scrml_mw_pipeline_0");
+  const hasOnion = onionModule != null;
+
   lines.push("// scrml production server — compiler-generated");
   lines.push("// DO NOT EDIT. Regenerate with: scrml build");
   lines.push("");
@@ -289,17 +330,23 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     // source module). Per-file unique route names (`_scrml_route_<name>`) are
     // unaffected since each appears in exactly one module.
     const seenNames = new Set();
-    for (const { filename, routeNames, wsHandlerNames } of serverModules) {
+    for (const mod of serverModules) {
+      const { filename, routeNames, wsHandlerNames } = mod;
       // Import both route names and ws handler names from each server file
       const allNames = [
         ...(routeNames ?? []),
         ...(wsHandlerNames ?? []),
       ].filter(Boolean);
       // Drop names already imported by an earlier module
-      const uniqueNames = allNames.filter(n => !seenNames.has(n));
-      if (uniqueNames.length > 0) {
-        for (const n of uniqueNames) seenNames.add(n);
-        lines.push(`import { ${uniqueNames.join(", ")} } from "./${filename}";`);
+      const specifiers = allNames.filter(n => !seenNames.has(n));
+      for (const n of specifiers) seenNames.add(n);
+      // §40.3/§40.8 — the ONE application onion. It is imported under an ALIAS
+      // rather than its bare export name so the mount site reads unambiguously
+      // (every onion-hosting module exports the same `_scrml_mw_pipeline`).
+      const alias = onionAliasFor.get(mod);
+      if (alias) specifiers.push(`_scrml_mw_pipeline as ${alias}`);
+      if (specifiers.length > 0) {
+        lines.push(`import { ${specifiers.join(", ")} } from "./${filename}";`);
       }
     }
     lines.push("");
@@ -403,6 +450,81 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("}");
   lines.push("");
 
+  // §40.3 — the dispatch body is emitted ONCE and mounted two ways: inline in
+  // `async fetch()` when the program has no handle() onion (byte-identical to the
+  // pre-onion output), or as a standalone `_scrml_dispatch(req, server)` that the
+  // onion's `resolve(request)` runs when it does. It is the FULL remainder of the
+  // pipeline — route match → static file → 404 — per SPEC §40.3.4 ("handle()
+  // applies to all HTTP requests handled by the compiled server, including
+  // statically-served assets").
+  const dispatchBody = [];
+  dispatchBody.push("  const url = new URL(req.url);");
+  dispatchBody.push("");
+  dispatchBody.push("  // Match server routes");
+  dispatchBody.push("  for (const route of routes) {");
+  dispatchBody.push("    if (url.pathname === route.path && req.method === route.method) {");
+  if (hasWs) {
+    dispatchBody.push("      // WebSocket upgrade routes call server.upgrade() — they need the server ref");
+    dispatchBody.push("      if (route.isWebSocket) return route.handler(req, server);");
+    dispatchBody.push("      return route.handler(req);");
+  } else {
+    dispatchBody.push("      return route.handler(req);");
+  }
+  dispatchBody.push("    }");
+  dispatchBody.push("  }");
+  dispatchBody.push("");
+  dispatchBody.push("  // Static file serving");
+  dispatchBody.push('  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;');
+  dispatchBody.push("  const candidates = [");
+  dispatchBody.push("    join(SERVE_DIR, pathname),");
+  dispatchBody.push("    join(SERVE_DIR, `${pathname}.html`),");
+  dispatchBody.push("  ];");
+  dispatchBody.push("");
+  dispatchBody.push("  for (const candidate of candidates) {");
+  dispatchBody.push("    try {");
+  dispatchBody.push("      const st = statSync(candidate);");
+  dispatchBody.push("      if (st.isFile()) {");
+  dispatchBody.push("        // adopter-#82 — cache policy: content-hashed artifacts (by exact");
+  dispatchBody.push("        // set membership) are immutable; the HTML entry is no-cache; other");
+  dispatchBody.push("        // static assets revalidate via ETag / Last-Modified → 304.");
+  dispatchBody.push('        const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
+  dispatchBody.push("        const headers = _scrml_cache_headers(rel, st);");
+  dispatchBody.push('        const inm = req.headers.get("if-none-match");');
+  dispatchBody.push("        if (headers.ETag && inm) {");
+  dispatchBody.push("          // INM present ⇒ authoritative; a mismatch means CHANGED — do NOT");
+  dispatchBody.push("          // consult If-Modified-Since (RFC 7232 §6 precedence).");
+  dispatchBody.push("          if (inm === headers.ETag) return new Response(null, { status: 304, headers });");
+  dispatchBody.push("        } else if (headers.ETag) {");
+  dispatchBody.push('          const ims = req.headers.get("if-modified-since");');
+  dispatchBody.push("          const since = ims ? Date.parse(ims) : NaN;");
+  dispatchBody.push("          if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {");
+  dispatchBody.push("            return new Response(null, { status: 304, headers });");
+  dispatchBody.push("          }");
+  dispatchBody.push("        }");
+  dispatchBody.push("        return new Response(Bun.file(candidate), { headers });");
+  dispatchBody.push("      }");
+  dispatchBody.push("    } catch {}");
+  dispatchBody.push("  }");
+  dispatchBody.push("");
+  dispatchBody.push('  return new Response("Not found", { status: 404 });');
+
+  if (hasOnion) {
+    lines.push("// §40.3 — the remainder of the pipeline, downstream of the handle() onion.");
+    lines.push("// resolve(request) inside handle() runs exactly this.");
+    lines.push("async function _scrml_dispatch(req, server) {");
+    for (const l of dispatchBody) lines.push(l);
+    lines.push("}");
+    lines.push("");
+    lines.push("// §40.3/§40.8 — handle() PRE wraps ALL top-level dispatch. The onion is");
+    lines.push("// APPLICATION-scope, so there is exactly ONE and it runs once per request.");
+    lines.push(`// Declared in ${onionModule.middlewareDeclaredIn || onionModule.filename}.`);
+    lines.push("function _scrml_onion_dispatch(req, server) {");
+    lines.push("  const downstream = (request) => _scrml_dispatch(request, server);");
+    lines.push("  return _scrml_mw_pipeline_0(downstream)(req);");
+    lines.push("}");
+    lines.push("");
+  }
+
   // Server
   lines.push("// Production server");
   lines.push('const PORT = parseInt(process.env.PORT ?? "3000", 10);');
@@ -423,55 +545,33 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   // `--idle-timeout` (default 120, so this line is byte-unchanged when the flag is unset).
   lines.push(`  idleTimeout: ${idleTimeout},`);
   lines.push("  async fetch(req, server) {");
-  lines.push("    const url = new URL(req.url);");
-  lines.push("");
-  lines.push("    // Match server routes");
-  lines.push("    for (const route of routes) {");
-  lines.push("      if (url.pathname === route.path && req.method === route.method) {");
-  if (hasWs) {
-    lines.push("        // WebSocket upgrade routes call server.upgrade() — they need the server ref");
-    lines.push("        if (route.isWebSocket) return route.handler(req, server);");
-    lines.push("        return route.handler(req);");
+  if (hasOnion) {
+    if (hasWs) {
+      // SPEC §40.3.4: "handle() does NOT apply to WebSocket upgrade requests.
+      // WebSocket lifecycle handlers use <channel> (§38)." A successful
+      // server.upgrade() signals "do not return a response" by returning
+      // undefined; §40.3.2 types resolve() as returning a Response, so routing
+      // an upgrade through the onion would manufacture one AFTER the protocol
+      // switch. Dispatch upgrades directly — same as the pre-§40.3 behaviour
+      // (the `_scrml_route_ws_*` export was never middleware-wrapped either).
+      lines.push("    // §40.3.4 — WebSocket upgrades bypass the handle() onion: a successful");
+      lines.push("    // server.upgrade() must return undefined, and resolve() returns a Response.");
+      lines.push("    const _scrml_ws_url = new URL(req.url);");
+      lines.push("    for (const route of routes) {");
+      lines.push("      if (route.isWebSocket && _scrml_ws_url.pathname === route.path && req.method === route.method) {");
+      lines.push("        return route.handler(req, server);");
+      lines.push("      }");
+      lines.push("    }");
+      lines.push("");
+    }
+    lines.push("    // §40.3 — every request enters handle() first; only resolve(request)");
+    lines.push("    // continues to route match → static file → 404.");
+    lines.push("    return _scrml_onion_dispatch(req, server);");
   } else {
-    lines.push("        return route.handler(req);");
+    // Non-onion builds keep the pre-§40.3 shape byte-for-byte: the dispatch body
+    // inlined at its original 4-space indent.
+    for (const l of dispatchBody) lines.push(l === "" ? "" : "  " + l);
   }
-  lines.push("      }");
-  lines.push("    }");
-  lines.push("");
-  lines.push("    // Static file serving");
-  lines.push('    const pathname = url.pathname === "/" ? "/index.html" : url.pathname;');
-  lines.push("    const candidates = [");
-  lines.push("      join(SERVE_DIR, pathname),");
-  lines.push("      join(SERVE_DIR, `${pathname}.html`),");
-  lines.push("    ];");
-  lines.push("");
-  lines.push("    for (const candidate of candidates) {");
-  lines.push("      try {");
-  lines.push("        const st = statSync(candidate);");
-  lines.push("        if (st.isFile()) {");
-  lines.push("          // adopter-#82 — cache policy: content-hashed artifacts (by exact");
-  lines.push("          // set membership) are immutable; the HTML entry is no-cache; other");
-  lines.push("          // static assets revalidate via ETag / Last-Modified → 304.");
-  lines.push('          const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
-  lines.push("          const headers = _scrml_cache_headers(rel, st);");
-  lines.push('          const inm = req.headers.get("if-none-match");');
-  lines.push("          if (headers.ETag && inm) {");
-  lines.push("            // INM present ⇒ authoritative; a mismatch means CHANGED — do NOT");
-  lines.push("            // consult If-Modified-Since (RFC 7232 §6 precedence).");
-  lines.push("            if (inm === headers.ETag) return new Response(null, { status: 304, headers });");
-  lines.push("          } else if (headers.ETag) {");
-  lines.push('            const ims = req.headers.get("if-modified-since");');
-  lines.push("            const since = ims ? Date.parse(ims) : NaN;");
-  lines.push("            if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {");
-  lines.push("              return new Response(null, { status: 304, headers });");
-  lines.push("            }");
-  lines.push("          }");
-  lines.push("          return new Response(Bun.file(candidate), { headers });");
-  lines.push("        }");
-  lines.push("      } catch {}");
-  lines.push("    }");
-  lines.push("");
-  lines.push('    return new Response("Not found", { status: 404 });');
   lines.push("  },");
 
   if (hasWs) {
@@ -799,7 +899,22 @@ export async function runBuild(args) {
     : null;
   // adopter-#82 FIX 1 — thread the exact content-addressed artifact set so the
   // emitted server serves `immutable` by membership, not by filename shape.
-  const serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
+  let serverEntry;
+  try {
+    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
+  } catch (err) {
+    // §40.3/§40.8 E-MW-007 — more than one application declared a request
+    // pipeline in this build. Report it as a build failure naming every
+    // competing source, NOT a stack trace: the server cannot pick one, and
+    // picking by filename order is the defect this diagnostic exists to stop.
+    if (err && err.scrmlCode) {
+      console.error(`\nBuild failed with 1 error(s):`);
+      console.error(`  ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
   const serverEntryPath = join(resolvedOutputDir, "_server.js");
   writeFileSync(serverEntryPath, serverEntry);
   if (mcpOpts) {

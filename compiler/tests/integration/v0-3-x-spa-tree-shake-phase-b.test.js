@@ -182,7 +182,7 @@ describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
     expect(runtime).not.toContain("_scrml_wire_decode");
   });
 
-  test("SPA shape includes core + scope + errors + transitions (always-present set)", () => {
+  test("SPA shape includes core + scope + errors (always-present set)", () => {
     const { result, outDir } = compileSingle(SPA_COUNTER);
     const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
     // 'core' chunk
@@ -193,8 +193,12 @@ describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
     // 'errors' chunk
     expect(runtime).toContain("class _ScrmlError");
     expect(runtime).toContain("class NetworkError");
-    // 'transitions' chunk (always shipped — small CSS IIFE)
-    expect(runtime).toContain("Transition CSS injection");
+    // The 'transitions' chunk was in this always-present set until the §38
+    // keyframes moved to the emitted stylesheet (codegen/emit-transition-css.ts).
+    // An inline <style> is refused under `headers="strict"`'s pinned
+    // `default-src 'self'` (§39.2.5); no runtime chunk may inject one again.
+    expect(runtime).not.toContain("scrml-fade-in");
+    expect(runtime).not.toContain('createElement("style")');
   });
 
   test("assembled shared runtime is syntactically valid JS", () => {

@@ -6,6 +6,11 @@
  *   (a) CODES   — emitted ⊇ expect.codes  AND  emitted ∩ expect.notCodes = ∅
  *       (SUPERSET, not exact: real compiles emit incidental codes the source
  *       conf tests ignore; presence, not line/col — SCOPE OQ3).
+ *       Both halves are SET-valued and therefore blind to CARDINALITY. The
+ *       optional `expect.codeCounts` is the exact-count escape: it asserts a
+ *       named code fired exactly N times, which is the only assertion here that
+ *       can see a DOUBLE FIRE. Opt-in and additive — a case without the key is
+ *       checked exactly as before.
  *
  *   (b) RUNTIME — when expect carries any of { input, dom, domAnchored, state }:
  *       compile + execute the artifact in a DOM (adapter `run()`), drive the
@@ -58,6 +63,22 @@ export interface ExpectedCase {
      *  assert a code fires AS error vs warning; the adapter's byCode honors the
      *  partition (a W-/I- code never lands in the errors stream). */
     severity?: Record<string, "error" | "warning" | "info">;
+    /** Per-code EXACT OCCURRENCE COUNT — the cardinality assertion.
+     *
+     *  `codes` is a SUPERSET presence check and `notCodes` an absence check, so
+     *  both are set-valued: a code that fires TWICE is indistinguishable from one
+     *  that fires once. That is a real blind spot, not a theoretical one — the
+     *  §4.12.3 nested-program contract is "ONE diagnostic per unbuilt
+     *  declaration, never two, never none", and nothing in a set-based harness
+     *  can read the "never two" half.
+     *
+     *  `codeCounts` is checked EXACTLY: the listed code must fire exactly N
+     *  times. `N: 0` is a legal and meaningful assertion (a strictly stronger
+     *  `notCodes`). Codes NOT listed are unconstrained — the key is per-code, not
+     *  a whole-emission exact-match, so it composes with the superset contract.
+     *
+     *  OPTIONAL and ADDITIVE: a case without the key behaves exactly as before. */
+    codeCounts?: Record<string, number>;
     // (b) runtime-effect half:
     input?: InputStep[];
     /** Whole-tree canonical normalized <body> (OQ1 default mode). */
@@ -104,6 +125,189 @@ export interface ExpectedCase {
   };
 }
 
+/**
+ * THE `expect` CONTAINER POLICY (S365) — decided ONCE for the whole vocabulary, not per key.
+ *
+ * A malformed CONTAINER silently disables the assertion it holds. Measured across 883-case runs:
+ *
+ *   severity: {} / null / []          -> all PASS   (falsy or zero-key: the loop never runs)
+ *   notCodePrefixes: [] / null / ""   -> all PASS   (`?? []` swallows null; "" iterates to nothing)
+ *   notCodePrefixes: {}               -> the ENTIRE 883-case run dies, `TypeError: {} is not iterable`
+ *   codes: null                       -> PASS       (`ex.codes ?? []` coerced it to a no-op)
+ *
+ * So the harness had BOTH failure directions at once: a malformed container could turn a case green,
+ * or it could take down every other case in the corpus. `codeCounts` was hardened against this in
+ * isolation at the same review; the policy below is that treatment generalised rather than a second
+ * pattern minted beside it — the per-key container check that used to live inline in the codeCounts
+ * block is GONE, replaced by this table.
+ *
+ * THE RULES:
+ *   1. An ABSENT key is free. Every key here is optional-and-additive; omitting it is the documented
+ *      way to assert nothing.
+ *   2. An empty ARRAY is a legal NO-OP, identical in meaning to omitting the key. `notCodePrefixes:
+ *      []` honestly reads "no families forbidden", and 466 `codes: []` / 404 `notCodes: []` /
+ *      31 `input: []` cases in the live corpus depend on it.
+ *   3. A container that does not CONFORM to the declared kind is a HARD ERROR — `{}` where an array
+ *      belongs, `null`, `""`, a number, a boolean. It is malformed under every reading, so there is
+ *      nothing to interpret.
+ *   4. An empty RECORD is a hard error wherever the record IS the assertion (`severity`,
+ *      `codeCounts`, `state`, `firstPaint`). There is no reading of an empty severity map as an
+ *      assertion. "I wrote the key and it asserted nothing" is never a pass.
+ *   5. `serverStub` / `serverDb` are the deliberate exception to rule 4, and the ONLY one: they are a
+ *      MOCK TABLE and a SEED, not assertions, and their mere presence selects a run MODE (real-server
+ *      / SSR). An empty seed is therefore a coherent thing to write, so emptiness is allowed here
+ *      while the shape is still enforced. Whether an empty seed SHOULD be legal is a semantics
+ *      question this policy deliberately does not answer.
+ *
+ * A violation FAILS ONE CASE with a diagnostic. It never throws: a harness that dies on one
+ * malformed case file cannot report on the other 882, which is a robustness bug independent of the
+ * policy above.
+ *
+ * ⚑ KEEP IN LOCKSTEP WITH `ExpectedCase["expect"]` ABOVE. A key in the interface and not in this
+ * table is rejected as unknown; a key here and not in the interface is untyped. Adding an assertion
+ * key means editing both — which is the point: an unrecognised key (say `notCodePrefix`, singular)
+ * is a silently-disabled assertion, the exact defect this policy exists to close.
+ */
+type ExpectShape =
+  | { kind: "stringArray" }
+  | { kind: "objectArray" }
+  | { kind: "record"; empty: "reject" | "allow"; values?: readonly string[] }
+  | { kind: "string" }
+  | { kind: "boolean" }
+  | { kind: "enum"; values: readonly string[] };
+
+const EXPECT_SHAPES: Record<string, ExpectShape> = {
+  // (a) codes half
+  codes: { kind: "stringArray" },
+  notCodes: { kind: "stringArray" },
+  notCodePrefixes: { kind: "stringArray" },
+  severity: { kind: "record", empty: "reject", values: ["error", "warning", "info"] },
+  codeCounts: { kind: "record", empty: "reject" },
+  // (b) runtime half
+  input: { kind: "objectArray" },
+  dom: { kind: "string" },
+  domAnchored: { kind: "objectArray" },
+  state: { kind: "record", empty: "reject" },
+  serverStub: { kind: "record", empty: "allow" },   // a MOCK TABLE, not an assertion — see rule 5
+  serverDb: { kind: "record", empty: "allow" },     // a SEED, not an assertion — see rule 5
+  sqlEngine: { kind: "enum", values: ["stub", "real"] },
+  ssr: { kind: "boolean" },
+  firstPaint: { kind: "record", empty: "reject" },
+  stdout: { kind: "string" },
+};
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Human-readable container description, for a diagnostic that names what was actually written. */
+function describeContainer(v: unknown): string {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return v.length === 0 ? "an empty array" : "an array";
+  if (typeof v === "object") return Object.keys(v).length === 0 ? "an empty object {}" : "an object";
+  return `a ${typeof v} (${JSON.stringify(v)})`;
+}
+
+/**
+ * Validate every container in a case's `expect` block against EXPECT_SHAPES.
+ *
+ * EXPORTED so the policy is drivable from a test — a validator that can only be reached by running
+ * the whole corpus is indistinguishable from one that never fires.
+ *
+ * Returns a list of diagnostics; empty means the contract is well-formed. Pure: reads only `ex`.
+ */
+export function validateExpectContainers(ex: unknown): string[] {
+  const errors: string[] = [];
+
+  if (!isPlainObject(ex)) {
+    return [`expect is ${describeContainer(ex)} — it must be an object holding the assertion keys`];
+  }
+
+  for (const key of Object.keys(ex)) {
+    const shape = EXPECT_SHAPES[key];
+    if (!shape) {
+      errors.push(
+        `expect.${key} is not a recognised assertion key — it asserts NOTHING. ` +
+          `Known keys: ${Object.keys(EXPECT_SHAPES).sort().join(", ")}`,
+      );
+      continue;
+    }
+    const v = (ex as Record<string, unknown>)[key];
+
+    switch (shape.kind) {
+      case "stringArray":
+      case "objectArray": {
+        if (!Array.isArray(v)) {
+          errors.push(
+            `expect.${key} is ${describeContainer(v)}, not an array — a present-but-malformed ` +
+              `container silently disables the whole assertion. Omit the key, or write [].`,
+          );
+          break;
+        }
+        // An empty array is a legal no-op (rule 2). Element types are still checked.
+        const wantString = shape.kind === "stringArray";
+        v.forEach((el, i) => {
+          const ok = wantString ? typeof el === "string" : isPlainObject(el);
+          if (!ok) {
+            errors.push(
+              `expect.${key}[${i}] is ${describeContainer(el)} — expected ` +
+                `${wantString ? "a string" : "an object"}`,
+            );
+          }
+        });
+        break;
+      }
+      case "record": {
+        if (!isPlainObject(v)) {
+          errors.push(
+            `expect.${key} is ${describeContainer(v)}, not an object — a present-but-malformed ` +
+              `container silently disables the whole assertion. Omit the key rather than writing one ` +
+              `that cannot fail.`,
+          );
+          break;
+        }
+        if (shape.empty === "reject" && Object.keys(v).length === 0) {
+          errors.push(
+            `expect.${key} is present but EMPTY — it asserts nothing. Omit the key (it is optional) ` +
+              `rather than writing an assertion that cannot fail.`,
+          );
+          break;
+        }
+        if (shape.values) {
+          for (const [k, val] of Object.entries(v)) {
+            if (typeof val !== "string" || !shape.values.includes(val)) {
+              errors.push(
+                `expect.${key}['${k}'] is ${JSON.stringify(val)} — expected one of ` +
+                  shape.values.map((s) => JSON.stringify(s)).join(" | "),
+              );
+            }
+          }
+        }
+        break;
+      }
+      case "string":
+        if (typeof v !== "string") {
+          errors.push(`expect.${key} is ${describeContainer(v)} — expected a string`);
+        }
+        break;
+      case "boolean":
+        if (typeof v !== "boolean") {
+          errors.push(`expect.${key} is ${describeContainer(v)} — expected a boolean`);
+        }
+        break;
+      case "enum":
+        if (typeof v !== "string" || !shape.values.includes(v)) {
+          errors.push(
+            `expect.${key} is ${describeContainer(v)} — expected one of ` +
+              shape.values.map((s) => JSON.stringify(s)).join(" | "),
+          );
+        }
+        break;
+    }
+  }
+
+  return errors;
+}
+
 export interface LoadedCase {
   dir: string;
   relDir: string;
@@ -123,6 +327,11 @@ export interface CaseResult {
   forbidden: string[]; // notCodes that DID fire
   prefixViolations: string[]; // emitted codes matching a forbidden family prefix
   severityMismatches: string[]; // codes whose §34 severity != the asserted one
+  countMismatches: string[]; // codes whose OCCURRENCE COUNT != the asserted one
+  /** Malformed `expect` containers (S365) — a contract too broken to evaluate. When non-empty the
+   *  case fails on THIS alone and no assertion is attempted: a container that silently disables an
+   *  assertion must never be reported as the assertion passing. */
+  shapeErrors: string[];
   runtimeHalfPending: boolean;
   /** Runtime (b) half failures (empty when the case has no runtime half or it passed). */
   runtimeFailures: string[];
@@ -140,8 +349,11 @@ export function loadCases(casesDir: string = CASES_DIR): LoadedCase[] {
     if (existsSync(scrml) && existsSync(exp)) {
       const expected = JSON.parse(readFileSync(exp, "utf8")) as ExpectedCase;
       const ex = expected.expect ?? { codes: [], notCodes: [] };
-      ex.codes = ex.codes ?? [];
-      ex.notCodes = ex.notCodes ?? [];
+      // PRESENCE, not truthiness (S365). `ex.codes ?? []` coerced an explicit `"codes": null` into a
+      // silent no-op, so a malformed container reached runCase already laundered into a passing one.
+      // An ABSENT key still defaults to []; a PRESENT-but-malformed one now survives to be reported.
+      if (!("codes" in ex)) ex.codes = [];
+      if (!("notCodes" in ex)) ex.notCodes = [];
       expected.expect = ex;
       // `files` convention: every *.scrml besides case.scrml is an aux import
       // fixture written alongside the entry at compile/run time (§21.3).
@@ -196,9 +408,36 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 /** Run one case's CODES (a) half through impl#1 and diff against the contract. */
 export function runCase(c: LoadedCase): CaseResult {
-  const { codes: emitted, byCode } = compile(c.source, c.auxFiles);
-  const emittedSet = new Set(emitted);
   const ex = c.expected.expect;
+
+  // CONTAINER POLICY FIRST (S365) — before the compile and before any assertion touches `ex`.
+  // Order is load-bearing twice over: `ex.codes.filter(...)` throws outright on `"codes": {}`, and
+  // `for (const p of ex.notCodePrefixes ?? [])` throws `{} is not iterable` — either one aborted the
+  // whole 883-case run from inside a single bad case file. Validating first converts both into ONE
+  // failed case carrying a diagnostic, which is what a harness owes its operator.
+  const shapeErrors = validateExpectContainers(ex);
+  if (shapeErrors.length > 0) {
+    return {
+      id: c.expected.id,
+      relDir: c.relDir,
+      pass: false,
+      emitted: [],
+      missing: [],
+      forbidden: [],
+      prefixViolations: [],
+      severityMismatches: [],
+      countMismatches: [],
+      shapeErrors,
+      runtimeHalfPending: c.expected["runtime-half-pending"] === true,
+      runtimeFailures: [],
+      // A contract this broken cannot be trusted to say whether it HAS a runtime half, and running
+      // one against a malformed expect block is how the harness died in the first place.
+      hasRuntimeHalf: false,
+    };
+  }
+
+  const { codes: emitted, byCode, counts } = compile(c.source, c.auxFiles);
+  const emittedSet = new Set(emitted);
   const missing = ex.codes.filter((code) => !emittedSet.has(code));
   const forbidden = ex.notCodes.filter((code) => emittedSet.has(code));
 
@@ -225,6 +464,44 @@ export function runCase(c: LoadedCase): CaseResult {
     }
   }
 
+  // codeCounts — EXACT per-code cardinality. The one assertion in this harness
+  // that is not set-valued: it reads how many times the compiler pushed the code,
+  // so a double fire is visible. A malformed value is a HARD failure rather than
+  // a skip — a cardinality assertion that silently does nothing is the exact
+  // hollow-gate shape this key was added to close.
+  //
+  // THE CONTAINER IS CHECKED, NOT JUST THE VALUE (S365 review). The paragraph above promised a
+  // malformed VALUE is a hard failure — and the first cut delivered exactly that and no more, so
+  // the CONTAINER could still turn the whole assertion off in silence:
+  //   "codeCounts": null   -> falsy, block skipped, case green
+  //   "codeCounts": ""     -> falsy, block skipped, case green
+  //   "codeCounts": {}     -> truthy, zero keys, loop never runs, case green
+  //   "codeCounts": []     -> truthy, zero keys, loop never runs, case green
+  // A hollow assertion inside the anti-hollow-assertion feature.
+  //
+  // That container check no longer lives here: it was the FIRST instance of a defect the whole
+  // `expect` vocabulary had, so it was generalised into EXPECT_SHAPES / validateExpectContainers
+  // above rather than copied per key. runCase() returns before this point on any container
+  // violation, so what remains here is what is genuinely codeCounts-specific — the VALUE contract
+  // (a non-negative integer) and the cardinality comparison itself.
+  const countMismatches: string[] = [];
+  if ("codeCounts" in ex) {
+    const cc = ex.codeCounts as Record<string, unknown>;
+    for (const code of Object.keys(cc)) {
+      const want = cc[code];
+      if (typeof want !== "number" || !Number.isInteger(want) || want < 0) {
+        countMismatches.push(
+          "codeCounts['" + code + "'] is not a non-negative integer (got " + JSON.stringify(want) + ")",
+        );
+        continue;
+      }
+      const got = counts[code] ?? 0;
+      if (got !== want) {
+        countMismatches.push("code '" + code + "' fired " + got + " time(s), expected exactly " + want);
+      }
+    }
+  }
+
   return {
     id: c.expected.id,
     relDir: c.relDir,
@@ -232,12 +509,15 @@ export function runCase(c: LoadedCase): CaseResult {
       missing.length === 0 &&
       forbidden.length === 0 &&
       prefixViolations.length === 0 &&
-      severityMismatches.length === 0,
+      severityMismatches.length === 0 &&
+      countMismatches.length === 0,
     emitted,
     missing,
     forbidden,
     prefixViolations,
     severityMismatches,
+    countMismatches,
+    shapeErrors: [],   // unreachable non-empty: runCase returns early on any container violation
     runtimeHalfPending: c.expected["runtime-half-pending"] === true,
     runtimeFailures: [],
     hasRuntimeHalf: hasRuntimeHalf(c),
@@ -364,6 +644,11 @@ async function main(): Promise<void> {
     const rt = r.runtimeHalfPending ? "  [runtime-half-pending]" : r.hasRuntimeHalf ? "  [runtime]" : "";
     console.log(`${tag}  ${r.relDir}${rt}`);
     if (!r.pass) {
+      // First and alone when present: the contract itself is malformed, so every other list is
+      // empty by construction and printing them would read as "nothing else wrong".
+      for (const f of r.shapeErrors) {
+        console.log(`        MALFORMED expect: ${f}`);
+      }
       if (r.missing.length > 0) {
         console.log(`        missing required codes: ${JSON.stringify(r.missing)}`);
       }
@@ -378,6 +663,9 @@ async function main(): Promise<void> {
       }
       for (const f of r.severityMismatches) {
         console.log(`        severity: ${f}`);
+      }
+      for (const f of r.countMismatches) {
+        console.log(`        codeCounts: ${f}`);
       }
       for (const f of r.runtimeFailures) {
         console.log(`        runtime: ${f}`);

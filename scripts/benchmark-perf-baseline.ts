@@ -231,6 +231,24 @@ async function main() {
     console.log(`    median total: ${totalMs}ms (${totals.length} samples)`);
   }
 
+  // REFUSE TO RECORD AN EMPTY BASELINE (S364). Every corpus that cannot resolve is `[SKIP]`ped and
+  // the loop carries on, so a renamed `examples/` directory produced `corpora: {}` written to disk
+  // at exit 0. That file is worse than no file: `perf-regression-check.ts` iterates the recorded
+  // corpora, finds none, and reports "no regressions detected (all stages within N% of baseline)"
+  // at exit 0 — forever. The pair was measured end-to-end in that state; a baseline of nothing and
+  // a check that passes on it.
+  //
+  // A baseline over zero corpora is never a legitimate recording. Mirrors
+  // scripts/browser-baseline.ts: "Refusing to record or compare an empty set."
+  const measured = Object.keys(results).length;
+  if (measured === 0) {
+    console.error("\n  MEASURED ZERO CORPORA — refusing to write a baseline.");
+    console.error("  Every corpus was skipped, so this baseline would assert nothing, and");
+    console.error("  perf-regression-check.ts would then pass against it forever (the hollow-gate shape).");
+    console.error("  Most likely cause: the corpus directories were renamed, moved, or are absent.");
+    process.exit(2);
+  }
+
   const baseline = {
     schemaVersion: 1,
     timestamp: new Date().toISOString(),
