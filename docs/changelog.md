@@ -6237,6 +6237,57 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-22/23 — S365: five inherited branches landed, and the session's sharpest findings were against its own work
+
+Booted onto a four-day backlog: five branches complete and pushed, none landed, five operator
+decisions pending. All five branches are now resolved — four landed, one held on a ruling. Eight
+operator rulings taken, `dpa-036` (type-system assignability) ratified after its own arc, and
+**seven gaps filed, every one PA-reproduced before filing.** Six PRs merged (#581 #643 #644 #645
+#646 #647) plus #649-#654.
+
+**The recurring shape, and it is uncomfortable: the most valuable findings were against work this
+session produced.** `scripts/delta-lint.ts` landed in #581, was recorded as "bite proven both
+directions", and was then found **hollow** — it returned exit 0 PASS over a delta-log still
+containing a duplicate once the ` · ` separator drifted, and over an empty file. The proof had run
+entirely in the canonical format. *Proving a gate BITES is not proving it cannot be SILENCED.*
+Fixed in #652 — and the fix exposed a **second** hole in the same gate: it was **partially** blind
+on the live file, silently dropping four real entries (`[561] [562] [565] [727]`, one of them a
+`rule-falsified` record) because the writing convention had grown an emoji token. `scripts/state.ts`
+carried the byte-identical regex, so the digest projection dropped them too. Now 1408 of 1408.
+
+- **#581** — the S354 wrap, four days late. Merged rather than rebased; the union merge produced
+  four real delta-log sequence collisions, and `delta-lint --fix` would have renumbered the
+  **already-published** side. Twice more that day the same hazard appeared with a sibling's entries.
+- **#646 / #652** — instrument integrity. Five gates that reported green while measuring nothing now
+  bite, each corrupted and confirmed RED-then-GREEN. `corpus-zero-debt` had been printing
+  `✅ no debt` over a scan that reached **zero artifacts** — from any worktree, and it is a boot probe.
+- **#654** — `handle()` wraps top-level dispatch (ruling `[1677]`). **Three adversarial passes, two
+  DO-NOT-LANDs, four HIGHs, every one past a green suite.** The sharpest: `ratelimit=` hoisted from
+  per-route to per-request, so a `<program ratelimit="3/min">` app **429'd its own client bundle on
+  the first page load**. Then §38 transitions silently lost on every soft navigation, and
+  `headers="strict"` refusing the dev hot-reload script — the exact defect class the branch existed
+  to eliminate, recreated one layer over. The transitions regression landed in a **measurement blind
+  spot**: all 14 transition browser tests are already baselined-failing.
+- **`dpa-036` RATIFIED** — `asIs` means the developer signed for it, never "the compiler did not
+  look". Established as a **conformance defect against S174**, not a new one-way door: `SPEC.md:19236`
+  already said *"a deliberate, named untyped escape hatch"*, and the compiler already declared both
+  `AsIsType` and `UnknownType` and discarded the distinction in two lines. Authors wrote `asIs` 29
+  times; the compiler synthesized it at **97 sites**.
+- **The build found the ratified mechanism could not work as specified.** The `never`-fallthrough
+  enforcement depends on a TypeScript build — and there was none: no `tsconfig.json`, `typescript`
+  not a dependency, `tsc` referenced nowhere, while `ci.yml:4` advertises a layer *"types
+  (always-on local)"* that never existed. The idiom was already deployed and already **red**: nine
+  live fallthrough failures, `MarkupValueExpr` in the `ExprNode` union and handled by no switch.
+- **Four SPEC citations corrected**, three of which resolved to the *wrong* section rather than
+  dangling. The heading-drift behind them measured **36 → 27**, after a report of 141 was found
+  wrong by ~4× — the fifth relayed figure to fail this session.
+- **A working worktree-sweep probe**, owed since S268. Both obvious tests are structurally wrong
+  under squash-merge; the correct one is a per-file content compare over branch-touched files.
+  **Nothing was swept** — it owes a bite proof first.
+
+Review floor drained to 0 twice; code-bearing carve-out rate **2 of 110**, both historical.
+corpus-zero debt 5 → 0, with **2 of the 5 found to be vocabulary false positives**.
+
 ### 2026-08-19 → 08-22 — S354: five branches in hand, five decisions pending, and the instruments audited
 
 A four-day recovery session (successor to a crashed S353). **Output was diagnosis, not landing** —

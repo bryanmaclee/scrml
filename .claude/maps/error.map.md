@@ -1,65 +1,69 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor)
-# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators — peter S340/S341/S344,
-# bryan S343/S345/S346).** Ancestry CHECKED (invariant 48); the watermark IS `origin/main`'s tip at
-# generation (MAP-STAMP RULE, primary.map.md).
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
+# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
+# `origin/main`.
 #
-# **THE CATALOG IS FLAT AT 809 — first flat window after two consecutive moves, and it is flat by
-# construction: `compiler/SPEC.md` and `compiler/SPEC-INDEX.md` are BYTE-IDENTICAL over this window**
-# (`git diff 4f034e13..c93a692c -- compiler/SPEC.md compiler/SPEC-INDEX.md` is empty). Zero codes in,
-# zero out, zero conformance-case movement (883 flat). Every catalog figure below carries.
+# **THE CATALOG MOVED FOR THE FIRST TIME IN TWO WINDOWS: 809 -> 810 rows, and the BUCKETS moved much
+# further than the total.** `bun scripts/s34-census.ts` re-executed at this HEAD:
 #
-# **WHAT DID MOVE IS THE FIRE SURFACE OF ONE EXISTING CODE, AND IT REFUTED A RECORDED BELIEF:**
-# **`E-EACH-BODY-DECL-UNSUPPORTED` WIDENED at #515/#516 (S340-peter, bryan #508-review F2+F3).**
-#   · **Position: ANY body statement, not `body[0]`.** The old guard inspected only the FIRST
-#     statement, so `${ @.id  let nm = @.name }` slipped through and re-produced the exact silent
-#     miscompile one statement over.
-#   · **Kind: the full name-binding decl set** — `let-decl`, `const-decl`, `function-decl`,
-#     **`lin-decl` (added)**, and **`tilde-decl` (added — covers BOTH `~name` and the `var` keyword,
-#     which parse to the same kind)**. Only `type-decl` stays excluded (compile-time-only, no runtime
-#     local to dangle).
-#   · **The refuted belief:** the prior generation of this map carried "`~`/`var` already fails loud
-#     via `E-CODEGEN-INVALID-LOGIC`". **That held ONLY for the first-position case the old `body[0]`
-#     guard happened to inspect** — at a non-first position `var nm = 1` was SILENT (bryan delta-log
-#     [1437], PA-verified on main post-#515). A coverage claim proven on one position is not a
-#     coverage claim.
-#   · **The fire site MOVED: `emit-each.ts:1416`** (was `:1387`). Pinned by
-#     `unit/each-body-decl-unsupported-positions.test.js` (95L) on top of the existing conformance
-#     case.
+#     810 rows (§34 19113..19994) · 883 conformance cases
+#     STRUCK 34 · PINNED 343 · IMPL-SITES 300 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112
 #
-# **NEW ERROR-SURFACE BEHAVIOUR WITH NO NEW CODE — `scrml dev` serves the REAL compile error at the
-# request (#518, adopter #517).** While the last compile is FAILING, the fetch handler short-circuits
-# every non-infra request: `Accept: text/html` gets a self-contained HTML overlay listing the
-# diagnostics (carrying the hot-reload script, so it auto-refreshes into the working app on the next
-# green compile); everything else gets JSON. Before: the last-good IN-MEMORY routes stayed registered
-# while a PARTIAL bundle hit disk, so the adopter saw a misleading runtime `X is not defined` instead
-# of the compile error. `formatDiagnostic` (dev.js) reads BOTH diagnostic shapes api.js emits — flat
-# `{filePath,line,column}` and BS-stage `{span:{file,line,col}}`. See build/structure maps.
+# vs the S346 run (`809 · STRUCK 34 · PINNED 343 · IMPL-SITES 320 · DECLARED-AHEAD 14 ·
+# RUNTIME-SURFACED 3 · FALSE-CLAIM 95`). **Read the bucket deltas, not the +1:** IMPL-SITES
+# **320 -> 300 (-20)** and FALSE-CLAIM **95 -> 112 (+17)**, DECLARED-AHEAD **14 -> 18 (+4)**, with
+# STRUCK / PINNED / RUNTIME-SURFACED all flat. **A -20 / +17 swing on a +1 total is a
+# RECLASSIFICATION, not twenty regressions** — the census's own classifier changed this window
+# (`scripts/s34-census.ts`, +143 lines) and now emits a FALSE-CLAIM DISPOSITION table it did not
+# have before:
 #
-# **NEW NEGATIVES THIS WINDOW — FIVE fixes landed with NO diagnostic, deliberately. Do not go looking
-# for an `E-` code to catch a regression in any of them:**
-#   - **#526 `{ once: true }` on the three emitted `DOMContentLoaded` boot registrations** —
-#     production-identical (DCL fires once per document); the defect it kills is a stale boot
-#     re-firing against a longer-lived document (the S345 cross-file gate red). Behavioural absence;
-#     browser tier is the gate.
-#   - **#528 api.js directory-walk sorts** — determinism, not diagnosis. ⚠ And the REAL
-#     order-dependence is STILL OPEN: `compileScrml`'s `inputFiles` order mints route/logic/stub ids
-#     (`g-compilescrml-input-order-dependent-emission`, HIGH — same file SET, two orders, 79 of 115
-#     emitted files differ, including server route URLs).
-#   - **#537 `lint-ghost-patterns.js` `makeSkipCursor`** — a pure performance re-plumb of the lint's
-#     range-skip; byte-identical lint OUTPUT, pinned by equivalence test against the retained oracle
-#     `skipPastRanges` (now an EXPORTED dead-in-src function, on purpose).
-#   - **#524 census `toRel()`** — cross-OS separator normalization in a PROBE, not the compiler.
-#   - **#515 tool import prune predicate unification** — the drop-a-live-import defect produced a
-#     runtime `ReferenceError`, not a diagnostic; the fix removes the defect, not the silence.
+#     BUILD-ARC 71 · HOME-NO-SHALL 27 · ORPHAN-INDEX 4 · NOMINAL-HOME 10
 #
-# **CARRIED, re-verified: `E-SQL-006` fires on every server-fn emit path; #460's §12.5 `SHALL`
-# carries NO code; the `E-PARSEVARIANT-*` trio is RUNTIME-SURFACED. The census bucket figures below
-# are the S341 run's — re-derive with `bun scripts/s34-census.ts` rather than citing, per standing
-# rule; nothing this window could have moved a bucket (SPEC + conformance byte-identical, and no
-# emitter added or removed a code push).**
+# ⚠ **DO NOT read "FALSE-CLAIM 112" as 112 broken diagnostics, and do NOT diff it against 95 as if
+# the same instrument produced both.** The pre-#646 census had no disposition axis at all; rows that
+# used to land in IMPL-SITES on a weaker emitter test now land in FALSE-CLAIM with a disposition
+# naming WHY. Scope any "the catalog got worse" claim by re-running the census on BOTH sides, or do
+# not make it.
+#
+# **EXACTLY ONE NEW CODE IN SPEC THIS WINDOW: `E-MW-007`. ZERO removed.**
+# ⚠ **AND THE METHOD MATTERS, because the obvious method gets this wrong.** Grepping the SPEC DIFF
+# for added `E-*` tokens returns THREE (`E-MW-007`, `E-PROGRAM-002`, `E-IMPORT-005`) — and two of
+# them are FALSE. `E-PROGRAM-002` and `E-IMPORT-005` were both ALREADY in SPEC at `c93a692c`
+# (mention counts moved 1 -> 2 and 6 -> 7); what the diff caught was a new PROSE MENTION of an
+# existing code, not a new catalog row. **Count a code as new only when
+# `git show <base>:compiler/SPEC.md | grep -c '<CODE>'` is 0.** The census total agrees: 809 -> 810,
+# a +1. `compiler/SPEC.md` **37,152 -> 37,298 lines**; `SPEC-INDEX.md` moved 33/33 (a
+# heading-drift alignment sweep, #648, not new content).
+#
+# **`E-MW-007` IS THE ONE TO KNOW, AND IT IS FULLY GROUNDED — spec row, fire site, and LSP hover all
+# verified present at this HEAD, which is NOT the usual state of a new code here.**
+#   · SPEC rows: `compiler/SPEC.md:19693` (§34 catalog) and `:22715` (§40 family table), normative
+#     prose at `:22652`.
+#   · Fire site: `compiler/src/commands/select-request-onion.js:72` — the ONLY emit site, shared.
+#   · Surfaced by: `commands/build.js` (throws with `err.scrmlCode` / `err.scrmlSources`) and
+#     `commands/dev.js:381` (through the compile-failure channel).
+#   · LSP hover: `lsp/handlers.js:1127` `ERROR_DESCRIPTIONS["E-MW-007"]` — added the same window.
+# **THE TWO NEIGHBOURS, AND THEY ARE NOT THE SAME KIND OF THING:**
+#   · **`E-PROGRAM-002` — pre-existing and DECLARED-AHEAD. It does NOT fire.** No emit site anywhere
+#     in `compiler/src/` (the only hit is a COMMENT at `select-request-onion.js:41`). SPEC
+#     `:22811` marks it "(TBD — separate diagnostic…)" and §40.8 states `E-MW-007` "is the
+#     emitted-server consequence, and fires today". **Do not write a test asserting it fires.**
+#   · **`E-IMPORT-005` — pre-existing and FULLY LIVE.** Emits from `compiler/src/module-resolver.js`
+#     (`:206`), rows at SPEC `:16375` + `:19662`, §21.3. It gained only a prose mention this window.
+#     **Do not record it as new.**
+#
+# **CARRIED FINDING C4 RE-DERIVED AT THIS HEAD AND IT IS STILL NINE.** Live `W-LINT-*` codes with no
+# §34 TABLE ROW: `W-LINT-016 017 018 019 020 021 022 023 024` — nine, all firing from
+# `compiler/src/lint-ghost-patterns.js`. ⚠ **A naive `comm` of "codes in source" vs "codes anywhere
+# in SPEC.md" returns TEN and it is WRONG in both directions:** it adds `W-LINT-009`, which is NOT a
+# fire site (`lint-ghost-patterns.js:929` is the comment "No separate entry for W-LINT-009 —
+# W-LINT-004 subsumes it"), and it drops `W-LINT-018`, which appears in SPEC PROSE but has no row.
+# **Grep the fire site before counting; a code's presence in a comment is not a fire.**
 
 ## HOW TO LOOK UP A DIAGNOSTIC CODE (read this first)
 
@@ -125,28 +129,50 @@ row now exists AND it fires; the prior "NOT implemented — do not add" note her
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
 
-**809 distinct diagnostic codes** cataloged in §34 at `c93a692c` (SPEC byte-identical over `4f034e13..c93a692c`, so every §34 figure from the S341 walk carries exactly) — **`bun scripts/s34-census.ts` is
+**810 distinct diagnostic codes** cataloged in §34 at `c96e7012` — **`bun scripts/s34-census.ts` is
 the ORACLE and it was RE-EXECUTED this pass**, returning
-`809 rows (§34 19113..19993, derived) · 1858 source files · 883 conformance cases`. **+2
-(`E-EACH-BODY-DECL-UNSUPPORTED` §17.7.3, `I-SSR-EACH-CLIENT-RENDERED` §52.8 — both S339-peter), zero
-removed.** §34's range shifts release-to-release — derive it from the `## 34. Error Codes` / `## 35.`
-headings, never a baked line number (the range moved only +2 this window, because the two new rows
-were inserted INSIDE §34 rather than above it).
+`810 rows (§34 19113..19994, derived) · 1940 source files · 883 conformance cases`. **+1 net
+(`E-MW-007` §40 — S365-bryan, the one-onion rule), zero removed.** ⚠ A grep of the SPEC diff for
+added `E-*` tokens returns three; **two are false positives** — `E-PROGRAM-002` and `E-IMPORT-005`
+were both already in SPEC at the base and only gained a prose mention. `E-PROGRAM-002` is
+DECLARED-AHEAD (no emit site; SPEC `:22811` says "TBD"); `E-IMPORT-005` is fully LIVE and always was
+(`module-resolver.js:206`, §21.3). §34's range shifts
+release-to-release — derive it from the `## 34. Error Codes` / `## 35.` headings, never a baked line
+number (the range moved only +1 this window, because the new row was inserted INSIDE §34).
+
+**BUCKETS MOVED MUCH FURTHER THAN THE TOTAL, AND THE CAUSE IS THE INSTRUMENT, NOT THE CATALOG.**
+
+| bucket | S346 (`c93a692c`) | THIS pass (`c96e7012`) | delta |
+|---|---|---|---|
+| STRUCK | 34 | 34 | flat |
+| PINNED | 343 | 343 | flat |
+| IMPL-SITES | 320 | **300** | **-20** |
+| DECLARED-AHEAD | 14 | **18** | **+4** |
+| RUNTIME-SURFACED | 3 | 3 | flat |
+| FALSE-CLAIM | 95 | **112** | **+17** |
+
+`scripts/s34-census.ts` gained +143 lines this window (#646, the instrument-integrity sweep) and now
+emits a FALSE-CLAIM **disposition** table it did not previously have — `BUILD-ARC 71 · HOME-NO-SHALL
+27 · ORPHAN-INDEX 4 · NOMINAL-HOME 10`. **A -20 / +17 swing against a +1 total is a
+RECLASSIFICATION.** Rows that landed in IMPL-SITES under the weaker pre-#646 emitter test now land in
+FALSE-CLAIM with a disposition naming why. ⚠ **Do NOT diff 112 against 95 as though one instrument
+produced both, and do NOT report "112 broken diagnostics".** If you need a real trend, re-run the
+census on BOTH sides of your window; otherwise do not make the claim.
 
 **Independent cross-check, run because a single oracle is a single point of failure.** The manual
-`awk -F'|'` field-split methodology (below) agrees exactly: **810 EWIH unique codes (809 `[EWI]` + 1
-`H-LIFECYCLE-001`)** at this HEAD, matching the +2 delta. Raw prefix greps over the whole SPEC —
-**912** `^| E-…`, **178** `^| W-…`, **10** `^| I-…`, **2** `^| H-…` — are **NOT** the catalog figure
-and must not be quoted as one: they sweep the §34.x sub-tables AND later tables outside the §34..§35
-bounds, and they count rows rather than unique codes. **Bound the extraction; do not prefix-grep the
-file.** ⚠ **And watch the two series diverge: `^| E-` moved 911 -> 912 (+1) while the catalog moved
-807 -> 809 (+2).** The catalog gained one `E-` and one `I-`; the prefix greps saw `E-` +1 and `I-` +1.
-**Neither series is derivable from the other, and a reader who checks only the `E-` grep will conclude
-one code landed when two did.**
+`awk -F'|'` field-split methodology (below) remains the cross-check, not a fallback. Raw prefix greps
+over the whole SPEC are **NOT** the catalog figure and must not be quoted as one: they sweep the
+§34.x sub-tables AND later tables outside the §34..§35 bounds, and they count rows rather than unique
+codes. **Bound the extraction; do not prefix-grep the file.** ⚠ **The two series diverge** — the
+catalog and the `^| E-` row-grep move by different amounts for the same landing, and neither is
+derivable from the other.
 
-⚠ **THE CENSUS'S `1858 source files` IS NOT A REPO FACT.** `filesScanned` (`s34-census.ts:184`)
-increments over a FILESYSTEM walk of ten roots, so it counts whatever gitignored build output the
-checkout holds — the prior generation of this section published `1887` and it does not reproduce at
+⚠ **THE CENSUS'S `source files` FIGURE IS NOT A REPO FACT — AND THIS PASS IS THE CLEANEST PROOF YET.**
+`filesScanned` (`s34-census.ts`) increments over a FILESYSTEM walk of ten roots, so it counts whatever
+gitignored build output the checkout holds. It printed **1858** at S341, **1864** at S346 (in a fresh
+worktree), and **1940** here — in the MAIN checkout, which carries build output the worktree did not.
+**The `810` and `883` figures ARE index-derivable and were independently reproduced; the file count is
+not. Do not use it as a delta signal, and do not publish it.**
 any commit. **The `809` and `883` figures ARE index-derivable and were independently reproduced; the
 file count is not. Do not use it as a delta signal.**
 
@@ -181,10 +207,11 @@ part of the catalog and are included.
 | `c700c435..115e8b1b` | 795 -> 799 | +4: `E-SCHEMA-011`, `W-SCHEMA-CONSTRAINT-TIGHTENED`, `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED`, `W-NAV-CHUNK-LOAD-FAILED` |
 | `115e8b1b..d0763cff` | 799 -> 800 | +1 `W-AUTH-MIDDLEWARE-AUTO-INJECTED` (a SPLIT out of `W-AUTH-001`; the fire already existed) |
 | `d0763cff..fe14c9b2` | 800 -> 801 | +1 `E-IF-IN-DISPATCHED-ARM` (S301) |
-| **`fe14c9b2..e80b692e` (THIS pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — `ast-builder.js:8535` / `:12927`, rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:2860`); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
-| **`e80b692e..b929b9c9` (THIS pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3755` `rejectFnEqualsBody`, four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
-| **`97576f35..6f176c0d` (THIS pass, S328)** | **806 -> 806** | **ZERO in, ZERO out — and the zero is load-bearing twice over.** (1) #460 added a normative §12.5 `SHALL` with **no code** (enforced by construction). (2) #464 REVERTED #450's `show=`-false SSR-hide, which also had no code — so ~122 lines of `emit-html.ts` left the tree without moving a single census number. #463 (`_blockTailIsValueExpr` keyword fence) and #466 (RCDATA per-item body) are both silent-wrong-output fixes with no diagnostic. **#466 explicitly DEFERS one: "a markup-returning call has no valid rendering in an RCDATA content model" needs a NEW §34 row and its own ruling — it was surfaced, not smuggled in.** |
-| **`4f034e13..c93a692c` (THIS pass, S340-S346)** | **809 -> 809** | **ZERO in, ZERO out — SPEC byte-identical, so the zero is by construction, not by census.** The window's one catalog-adjacent move is a FIRE-SURFACE widening of an existing code (`E-EACH-BODY-DECL-UNSUPPORTED`, #515/#516 — any body position, full name-binding decl set incl. `lin`/`~`/`var`; fire site now `emit-each.ts:1416`), which no catalog count can see. |
+| **`fe14c9b2..e80b692e` (prior pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — `ast-builder.js:8535` / `:12927`, rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:2860`); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
+| **`e80b692e..b929b9c9` (prior pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3755` `rejectFnEqualsBody`, four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
+| **`97576f35..6f176c0d` (S328)** | **806 -> 806** | **ZERO in, ZERO out — and the zero is load-bearing twice over.** (1) #460 added a normative §12.5 `SHALL` with **no code** (enforced by construction). (2) #464 REVERTED #450's `show=`-false SSR-hide, which also had no code — so ~122 lines of `emit-html.ts` left the tree without moving a single census number. #463 (`_blockTailIsValueExpr` keyword fence) and #466 (RCDATA per-item body) are both silent-wrong-output fixes with no diagnostic. **#466 explicitly DEFERS one: "a markup-returning call has no valid rendering in an RCDATA content model" needs a NEW §34 row and its own ruling — it was surfaced, not smuggled in.** |
+| **`4f034e13..c93a692c` (S340-S346)** | **809 -> 809** | **ZERO in, ZERO out — SPEC byte-identical, so the zero is by construction, not by census.** The window's one catalog-adjacent move is a FIRE-SURFACE widening of an existing code (`E-EACH-BODY-DECL-UNSUPPORTED`, #515/#516 — any body position, full name-binding decl set incl. `lin`/`~`/`var`; fire site now `emit-each.ts:1416`), which no catalog count can see. |
+| **`c93a692c..c96e7012` (THIS pass, S347-S366)** | **809 -> 810** | **+1 LIVE, +2 DECLARED-AHEAD, zero removed — and the BUCKETS moved 20x further than the total.** The live one is **`E-MW-007`** (§40, S365-bryan): more than one module in a build declares a request pipeline, so two applications were emitted into one compiled server. Fires from the shared `commands/select-request-onion.js:72`; surfaced by BOTH `scrml build` and `scrml dev`; SPEC rows at `:19693` + `:22715`; LSP hover at `lsp/handlers.js:1127`. **`E-PROGRAM-002`** and **`E-IMPORT-005`** entered SPEC the same window and DO NOT FIRE — §40.8 explicitly reserves `E-PROGRAM-002` for the second-`<program>` shape and states that `E-MW-007` "is the emitted-server consequence, and fires today". Bucket deltas (IMPL-SITES -20, FALSE-CLAIM +17, DECLARED-AHEAD +4) are a census RECLASSIFICATION from #646's +143-line instrument-integrity rewrite, not twenty regressions — see the catalog section above before quoting any of them. |
 | **`8863d457..4f034e13` (S334-S340)** | **807 -> 809** | **+2, zero removed, and the two are opposite in kind.** `E-EACH-BODY-DECL-UNSUPPORTED` (Error; §17.7.3/§17.7.2; catalog row `SPEC.md:19577`; emitted `codegen/emit-each.ts:1387`) **REJECTS** a form that previously produced a silent-broken bundle — the decl was dropped, a later `${nm}` still emitted `String(nm)`, and the whole list rendered empty at exit 0. `I-SSR-EACH-CLIENT-RENDERED` (Info; §52.8; catalog row `SPEC.md:19429`; emitted `codegen/emit-ssr-render.ts:432`, wired `emit-server.ts:5162`) **REJECTS NOTHING** — it names a pre-existing conservative SSR fallback that used to be a bare `null` return. **Both PINNED in the same PR that emitted them** (`each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`; each `expected.json` READ to confirm a real `expect.codes` assertion, not a rationale-prose mention), so PINNED moved 341 -> 343 in lockstep and every other bucket is FLAT. **FOUR other fixes landed this window with NO code and each declined one for a different reason** — see the header's NEW NEGATIVES block; in particular #510's `<timeout>` fix is a **false-FIRE** repair, which moves no catalog number in either direction. |
 | **`35d4d32e..616688ea` (S330-S334)** | **806 -> 807** | **+1, zero removed: `E-DERIVED-SERVER-ONLY-REACH`** (Error; §6.6.19 `SPEC.md:3694`; catalog row `:3304`; long row `:19483`; emitted `route-inference.ts:4429`, Step 3b). Landed WITH three conformance cases and a 379L unit test, so it enters **PINNED**, not IMPL-SITES — Rule 4 satisfied at landing. **Read the row's own scope sentence before asserting against it:** it fires ONLY for a `const <name>` DERIVED-cell RHS. A plain cell initialiser and a markup interpolation reach the same module from the same client position and are **NOT diagnosed** — the error text says so out loud, because deleting the `const` is the shortest edit that silences it and it restores the leak. Carve-out: NOT emitted in a `kind="tool"` program (§64). Migration measured at ZERO. **Second, timing-only movement in the same window: `E-SQL-006` (§44.3) now fires at COMPILE time on every server-fn emit path (#476) — no new code, a narrow sink (`preparedStmtErrors`) threaded and drained; +5 NEG conformance cases.** Third: #479's §18.5 fixes and #484's request-ref routing fix are silent-wrong-output classes with **no diagnostic added**, deliberately. |
 | **`b929b9c9..15e5e070` (prior pass)** | **805 -> 806** | **+1, zero removed:** `W-IF-IN-EACH` (§17.1 — `emit-each.ts`'s `renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch; warns when a NESTED, non-item-root, per-row `if=` inside `<each>` references the iteration item — the condition is a create-time-only append gate, not reactive on a same-key reconcile). GH adopter #409. |
@@ -513,7 +540,7 @@ compiling stdlib source emitting a browser-DOA bundle, invisible to every prior 
 once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for how to run it.
 
 ## Tags
-#scrml #map #error #diagnostics #routing #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact
+#scrml #map #error #diagnostics #routing #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule
 
 ## Links
 - [primary.map.md](./primary.map.md)

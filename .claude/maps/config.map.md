@@ -1,28 +1,34 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-16T10:53:19-06:00  commit: c93a692c
-# generated-at: c93a692c (informational — not the currency anchor; identical to the watermark this pass)
-# **INCREMENTAL over `4f034e13` -> `c93a692c` (22 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48); the watermark IS `origin/main`'s tip at generation (MAP-STAMP RULE, primary.map.md).
+# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
+# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
+# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
+# **CURRENCY RE-VERIFIED AT `c96e7012`, NOT RE-WALKED — and verified by DIFFING, not by assuming.**
+# Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md): the source diff
+# `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of `origin/main`.
 #
-# **Zero env-surface diff, verified by DIFFING rather than by assuming:**
-# `git diff 4f034e13..c93a692c -- compiler/src/ scripts/ lsp/` contains **no added and no removed**
-# `process.env` / `Bun.env` line (grep count over the window diff is **0**), and `package.json` is
-# zero-diff, so the key tables below all still hold. The ONE new `scripts/` file (`issue-debt.ts`,
-# #536) was checked INDIVIDUALLY, not covered by the aggregate: it reads no environment variable —
-# repo paths via `fileURLToPath`, sub-process via `spawnSync` `gh` (which reads its own auth from its
-# own config, not from an env key this map would list). Same for the `commands/dev.js` additions
-# (#518): zero env reads.
+# **ZERO ENV-SURFACE DIFF ACROSS A 111-COMMIT, 127-FILE WINDOW.** The evidence, re-run at this HEAD:
+# `git diff c93a692c..c96e7012 -- compiler/src/ scripts/ lsp/ | grep -cE 'process\.env|Bun\.env'`
+# returns **0** — no added AND no removed env-var line anywhere in the window diff. `package.json`
+# is zero-diff (eleven windows), so the script/config surface is unchanged too. Every key table
+# below carries.
 #
-# **TWO CONFIG FILES DID MOVE THIS WINDOW, and one of them is the headline of the whole map set:**
-#   · **`bunfig.toml` (#537, S346) — the `[test] timeout = 10000` key is DELETED, and the deletion is
-#     a CORRECTION, not a change of budget: bun NEVER READ IT.** `[test].timeout` is not a bunfig key
-#     (bun 1.3.14, verified empirically — a 6 s synchronous test under the old file reported `timed
-#     out after 5000ms`; the `root` key in the same file IS honoured, so the file loads). The
-#     effective per-test budget was always bun's DEFAULT **5000 ms**, locally and in CI. See the
-#     bunfig section below for the standing rule.
-#   · **`.github/workflows/ci.yml` (#532, S345) — the `push` trigger is now scoped `branches: [main]`.**
-#     No secret, no step, no required-check change — see build.map.md / infra.map.md.
+# **The window's five NEW files were checked INDIVIDUALLY, not covered by the aggregate** (an
+# aggregate grep over a diff can only see lines that MOVED; a new file whose every line is an
+# addition is covered, but the check is worth stating): `compiler/src/commands/select-request-onion.js`,
+# `compiler/src/codegen/emit-transition-css.ts`, `compiler/src/commands/diagnostic-format.js`,
+# `scripts/delta-lint.ts`, `scripts/corpus-zero-debt.ts`. **None reads an environment variable.**
+# `delta-lint.ts` reads two REPO PATHS (`handOffs/delta-log.md`, `handOffs/delta-log-dupes.baseline.json`)
+# and one ARGV flag (`--fix`); `select-request-onion.js` is pure.
+#
+# ⚠ **INVARIANT 56 / THE `bunfig.toml` CORRECTION CARRIES AND IS STILL LOAD-BEARING.** `[test]
+# timeout` is NOT a knob bun reads and the key is DELETED. **The real per-test budget is bun's
+# default 5000 ms, everywhere, and it always was** — locally and in CI. Any doc, comment or map that
+# says "the bunfig default 10s" is describing a number that was never in force
+# (non-compliance.report.md N11; three live test files still say it).
+#
+# **NO VALUES APPEAR IN THIS MAP.** Key names, requiredness and purpose only. No file whose path
+# contains `.env` was read.
 
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 
@@ -101,7 +107,7 @@ A map stamp is now exactly as old as the last PA wrap.**
 No secret VALUE appears anywhere in this map set.
 
 ## Tags
-#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged
+#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56
 
 ## Links
 - [primary.map.md](./primary.map.md)
