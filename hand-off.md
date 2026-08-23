@@ -1,11 +1,75 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S365-bryan.        -->
-<!--   S365-bryan (below) — the bryan lane. The four-day five-branch -->
-<!--     backlog is CLEARED. Four operator decisions remain, and     -->
-<!--     ONE dispatch is in flight (see PICKUP §1).                  -->
-<!--   S366-peter (next block) — the peter lane (history).           -->
-<!-- Mechanical stream: delta-log [1686]-[1704].                     -->
+<!-- hand-off.md — live session state. WRAPPED at S367-peter.        -->
+<!--   S367-peter (below) — the peter lane: item 2 (cross-file       -->
+<!--     imported markup-fn mount) LANDED #658; main @ 82fb7e68 0/0.  -->
+<!--   S365-bryan (2nd block) — the bryan lane, STILL has FOUR        -->
+<!--     operator decisions + ONE dispatch in flight (read it).      -->
+<!--   S366-peter (3rd block) — prior peter wrap (history).          -->
+<!-- Note: an S368-bryan session is also LIVE (booted after S367;    -->
+<!--   drained the review floor, landed #656/#657/#659). Mechanical  -->
+<!--   stream: delta-log [1709] (this session); [1686]-[1708] prior. -->
 <!-- ============================================================= -->
+
+# scrml — Session 367 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+S367 took S364 buildable list **item 2** — the each-interp IMPORTED-fn residual — and landed it
+(#658). **The durable finding recurred: the filed fix-direction is a hypothesis.** "Thread the
+exportRegistry" was INCOMPLETE (the registry carries no fn body; no imported AST reaches codegen's
+ctx) — re-derived first-hand into the real fix. [[feedback-gap-report-fix-direction-can-be-wrong]]
+
+### B. peter's lane — the S364 buildable list, item 3 remains (or dog-food)
+1. ~~item 1 (bare-fn-no-trailing-newline)~~ — DONE S366 (#649).
+2. ~~item 2 (each-interp IMPORTED-fn residual)~~ — **DONE this session (#658).**
+3. **`g-library-fn-match-object-or-block-arm-body-returns-undefined` (MED)** — the #636 FN path
+   still lowers a brace-delimited arm body (`1 :> {x:1}`) as a statement block → silent `undefined`;
+   the #641 decl fix sidesteps it via the tilde lowering, the FN path wants the same. bryan
+   re-confirmed at S365 it reproduces live. Clean peter-lane cross-mode parity. **Repro-first.**
+4. **Or DOG-FOOD a fresh shape** — the durable S358→S364 finding: cheap ledger veins are worked out;
+   fresh clean bugs come from running a new adopter program.
+
+### A. bryan's lane — S365-bryan block below is STILL LIVE
+S365-bryan CLEARED the five-branch backlog but left **FOUR operator decisions + ONE dispatch in
+flight** (read the S365 block §1). Plus an **S368-bryan session is currently LIVE** (landed #656 wrap,
+#657 dpa-036 ratify, #659 review-floor drain). Do NOT touch bryan's lane (successor discipline held).
+
+## WHAT LANDED (S367-peter) — 1 PR
+- **#658** ⭐ **`g-each-nested-markup-interp-stringifies` residual 2 (cross-file IMPORTED markup fns)
+  RESOLVED** (MED gap stays open on narrower residuals). A shared `markup-return-scan.js` (single
+  source for emit-each + module-resolver) + a `returnsMarkup` export flag (isAsync rail) + ONE
+  graph-level fixpoint over re-export AND call edges → an imported/re-exported/wrapped markup fn
+  mounts at any depth. Fail-safe + nesting-aware. 9-case merge-blocker + executed-DOM test.
+
+## ⚑ MISSES / lessons (S367)
+- **★ Scope-creep not flagged early enough.** Item 2 was triaged "small compute" and became a
+  cross-module inference pass through FOUR S239 review rounds (each finding a real issue: one-hop
+  miss → fixpoint; re-export edge; nested-fn name collision; cleanup). The convergence was the right
+  call once committed, but I should have surfaced the scope blow-up to Peter around round 2 rather
+  than sinking four cycles in. Recognize "this outgrew the buildable" as a checkpoint signal.
+- **★ The filed direction was wrong again** — re-derive first-hand before building. 5th+ session
+  running. [[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ Repeated review, same class → converge.** r1+r2 kept finding propagation-incompleteness → I
+  stopped patching hops and built ONE complete graph fixpoint. [[feedback-repeated-review-same-class-means-converge-not-enumerate]]
+- **★ CRLF hazard:** my edits flipped module-resolver.js to mixed CRLF/LF, inflating the diff to the
+  whole file (1883 lines) under `autocrlf=true`; normalizing to pure LF collapsed it to the real 114.
+  Watch line endings on Windows edits to keep PR diffs minimal.
+
+## 🧷 STATE (S367 close)
+- **main** @ `82fb7e68` (#658) + this wrap. Coherence 0/0. Cloud `gate` GREEN on #658 (rebased twice
+  past the fast-moving main — S368-bryan live). `tracking` red = known non-required fs.watch baseline.
+- **Gaps:** g-each residual 2 closed (gap stays `open` on narrower residuals → no count change). Other
+  counts per `@generated:gap-counts` (bryan's S365/S368 filings moved HIGH/MED; regen matched base).
+- **Review floor:** #658 (code) owes a marker → inherent next-boot tail. S368-bryan drained the floor
+  at its boot, so nothing else owed by me.
+- **Branches:** main + app-pinned only (fix branch auto-deleted on merge). **Worktrees:** main +
+  scrml-pinned (clean). **Maps:** new file `markup-return-scan.js` + surgical edits — a shared codegen
+  util, no new entrypoint/module; maps effectively unchanged (note the new file at next map refresh).
+- **Env:** bun 1.4.0. `gh pr merge --squash --auto` (armed; landed after 2 rebases). Full unit
+  17756/0, conformance 1597/0, integration name-set == base (pre-existing baseline fails only).
+- **Sibling:** S368-bryan LIVE. Board S367-peter → WRAPPED.
+
+<!-- ================= S365-bryan (STILL LIVE: 4 decisions + 1 dispatch) below ================= -->
 
 # scrml — Session 365 (bryan · ASUS-Vivobook) — WRAP
 
