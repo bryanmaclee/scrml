@@ -42,6 +42,16 @@ import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { CGError } from "./errors.ts";
+// The markup-return detection (same-file + the transitive fixpoint) lives in one
+// shared module so codegen and module-resolver.js classify identically — an
+// IMPORTED markup fn is flagged on its export-registry entry and mounts across
+// files exactly like a same-file one (g-each-nested-markup-interp-stringifies
+// residual 2). `interpMayYieldNode` is the interp-site discriminant reused below.
+import {
+  collectMarkupReturningFnNames,
+  interpMayYieldNode,
+  resolveImportedMarkupLocalNames,
+} from "../markup-return-scan.js";
 import { nsId } from "./chunk-namespace.ts";
 
 // ---------------------------------------------------------------------------
@@ -217,19 +227,23 @@ function exprNodeHasMarkupValue(node: any): boolean {
 // codegen is synchronous + single-threaded, so this is safe) and cleared in
 // the `emitEachBodyRenderForFile` finally.
 //
-// RESIDUALS (documented, out of scope for #161):
-//   - Cross-file IMPORTED markup fns are not in this same-file set (would need
-//     exportRegistry threading) — the interp still stringifies for them.
+// CLOSED (S361): a same-file fn that returns markup only TRANSITIVELY (`fn
+// wrap(n){ return badge(n) }`) IS detected — `collectMarkupReturningFnNames`
+// runs a fixpoint over `fnBodyReturnsCallToMarkupFn` so a chain wrap→badge→…
+// closes fully.
+//
+// CLOSED (S367): cross-file IMPORTED markup fns are now detected too. The scan
+// moved to the shared `../markup-return-scan.js`; module-resolver.js runs it per
+// module and flags each markup-returning export `returnsMarkup:true` on its
+// export-registry entry. `collectImportedMarkupFnSeed` resolves this file's
+// import specifiers to those flags and seeds the set BEFORE the fixpoint, so a
+// cross-file `${badge(it)}` — and a local wrapper of an imported markup fn —
+// mounts. Fail-safe throughout: a string-returning fn is never flagged.
+//
+// RESIDUAL (documented):
 //   - Markup-typed struct FIELDS used bare (`${it.badge}`) are not detected —
 //     mounting a bare member-access interp is a newly-accepting language-surface
 //     decision (bryan's lane), not a codegen hole.
-//
-// CLOSED (S361): a same-file fn that returns markup only TRANSITIVELY (`fn
-// wrap(n){ return badge(n) }`) IS now detected — `collectMarkupReturningFnNames`
-// runs a fixpoint over `fnBodyReturnsCallToMarkupFn` so a chain wrap→badge→…
-// closes fully. Still same-file only (cross-file IMPORTED markup fns remain a
-// residual — would need exportRegistry threading; the interp still stringifies
-// for them).
 // ---------------------------------------------------------------------------
 
 // Module-level, set once per file at emitEachBodyRenderForFile entry, cleared
@@ -238,208 +252,39 @@ function exprNodeHasMarkupValue(node: any): boolean {
 // (byte-identical to pre-fix, no regression).
 let _eachMarkupFnNames: Set<string> | null = null;
 
-/**
- * POSITIONAL markup-value detection: does this expression YIELD a markup value
- * (a DOM node) in VALUE position — a bare `markup-value` leaf, or a ternary /
- * match whose VALUE branches do? Unlike `exprNodeHasMarkupValue` (which descends
- * every child key indiscriminately), this does NOT descend into call ARGUMENTS,
- * member objects, ternary CONDITIONS, binary operands, or closures — markup
- * appearing there is NOT the expression's yielded value. This mirrors the
- * site-side `interpMayYieldNode` discipline so the collector matches its own
- * documented "returns markup in value position" contract. Using the
- * recurse-everywhere helper here would flag a STRING-returning fn whose return
- * expression merely CONTAINS a markup literal in a sub-position (e.g.
- * `return classify(row, <b>!</b>)` — markup as an argument), which would then
- * over-wrap the interp in a `<span data-scrml-mv>` and regress restricted
- * parents (`<option>`/`<textarea>`). (Currently LATENT — such sub-position
- * markup shapes fail codegen with E-CODEGEN-INVALID-LOGIC before reaching here —
- * but closing the class keeps a future grammar relaxation from exposing it;
- * flagged by the S239 adversarial review.)
- */
-function exprYieldsMarkupValue(node: any): boolean {
-  if (!node || typeof node !== "object") return false;
-  const k = node.kind;
-  if (k === "markup-value") return true;
-  if (k === "ternary") {
-    return exprYieldsMarkupValue(node.consequent) || exprYieldsMarkupValue(node.alternate);
-  }
-  if (k === "match-expr") {
-    const arms = Array.isArray(node.body) ? node.body : Array.isArray(node.arms) ? node.arms : [];
-    for (const arm of arms) {
-      if (!arm || typeof arm !== "object") continue;
-      for (const vk of ["value", "result", "consequent", "body", "exprNode", "expr"]) {
-        const v = (arm as Record<string, unknown>)[vk];
-        if (Array.isArray(v)) {
-          for (const it of v) if (exprYieldsMarkupValue(it)) return true;
-        } else if (v && typeof v === "object" && exprYieldsMarkupValue(v)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  if (k === "paren" || k === "group" || k === "sequence") {
-    return exprYieldsMarkupValue(node.expr ?? node.inner ?? node.body);
-  }
-  return false;
-}
+// exprYieldsMarkupValue / fnBodyReturnsMarkup / fnBodyReturnsCallToMarkupFn /
+// interpMayYieldNode / collectMarkupReturningFnNames now live in the shared
+// ../markup-return-scan.js (imported above) so codegen and module-resolver.js
+// classify markup-returning fns identically. collectMarkupReturningFnNames now
+// takes an optional seed set (the IMPORTED markup fns) folded in before the
+// transitive fixpoint — see the emitEachBodyRenderForFile entry.
 
 /**
- * Does this fn body carry a markup value in ANY of its `return`s? A return
- * "carries markup" when it returns a markup literal directly
- * (`return-stmt.markupNode`, kind "markup"/"component") OR its returned
- * expression YIELDS a markup value in VALUE position (a ternary / match arm
- * that yields markup — via the POSITIONAL `exprYieldsMarkupValue`, NOT the
- * recurse-everywhere `exprNodeHasMarkupValue`, so markup in an argument /
- * closure / condition of the returned expression does NOT falsely flag a
- * string-returning fn). Scans returns at any depth in the body (guards / if /
- * match arms), but does NOT descend into a NESTED `function-decl` (its returns
- * are its own).
+ * The IMPORTED markup-returning fns in scope for this file, by LOCAL name
+ * (g-each-nested-markup-interp-stringifies residual 2). MOD flags each export
+ * whose body returns markup with `returnsMarkup:true` on its export-registry
+ * entry; here we walk this file's import specifiers and collect the local names
+ * bound to such exports. Seeded into `collectMarkupReturningFnNames` BEFORE its
+ * fixpoint so a local `fn wrap(n){ return badge(n) }` wrapping an imported
+ * `badge` also closes. Empty (fail-safe: no seed) when MOD's graph/registry are
+ * absent — e.g. unit-test compiles with no importGraph.
  */
-function fnBodyReturnsMarkup(body: any): boolean {
-  const seen = new WeakSet<object>();
-  const scan = (n: any): boolean => {
-    if (!n || typeof n !== "object") return false;
-    if (Array.isArray(n)) {
-      for (const x of n) if (scan(x)) return true;
-      return false;
-    }
-    if (seen.has(n)) return false;
-    seen.add(n);
-    // Do NOT analyze a nested fn's returns as THIS fn's returns.
-    if (n.kind === "function-decl") return false;
-    if (n.kind === "return-stmt") {
-      const mk = n.markupNode;
-      if (mk && typeof mk === "object" && (mk.kind === "markup" || mk.kind === "markup-value" || mk.kind === "component")) {
-        return true;
-      }
-      if (exprYieldsMarkupValue(n.exprNode)) return true;
-    }
-    for (const key of Object.keys(n)) {
-      const v = (n as Record<string, unknown>)[key];
-      if (v && typeof v === "object" && scan(v)) return true;
-    }
-    return false;
-  };
-  return scan(body);
-}
-
-/**
- * Collect the names of same-file `function-decl`s whose body returns markup.
- * Walks the whole file AST (mirrors how `collectMapVarNames` /
- * `buildEachEngineCtx` derive their sets once per file); kept LOCAL to codegen
- * (no type-system import).
- */
-function collectMarkupReturningFnNames(fileAST: any): Set<string> {
-  const out = new Set<string>();
-  const named: Array<{ name: string; body: any }> = [];
-  const visited = new WeakSet<object>();
-  const walk = (node: any): void => {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const n of node) walk(n);
-      return;
-    }
-    if (visited.has(node)) return;
-    visited.add(node);
-    if (node.kind === "function-decl" && typeof node.name === "string" && node.name) {
-      named.push({ name: node.name, body: node.body });
-      if (fnBodyReturnsMarkup(node.body)) out.add(node.name);
-    }
-    for (const key of Object.keys(node)) {
-      const v = (node as Record<string, unknown>)[key];
-      if (v && typeof v === "object") walk(v);
-    }
-  };
-  walk(fileAST);
-  // Transitive fixpoint (documented residual: `fn wrap(n){ return badge(n) }`).
-  // A fn whose return YIELDS a call to an already-known markup fn is itself
-  // markup-returning, so `${wrap(it.name)}` in a nested each interp mounts
-  // instead of `String()`-ing the returned DOM node. Fail-safe: the same
-  // positional `interpMayYieldNode` used at the interp site never returns true
-  // for a string-yielding shape, so the set only ever WIDENS onto genuinely
-  // markup-returning fns — and the emitted mount is `instanceof Node`-guarded
-  // regardless. Iterate to a fixpoint so a chain (wrap→badge→…) is fully closed.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const { name, body } of named) {
-      if (out.has(name)) continue;
-      if (fnBodyReturnsCallToMarkupFn(body, out)) { out.add(name); changed = true; }
-    }
-  }
-  return out;
-}
-
-/**
- * Body-scan sibling of `fnBodyReturnsMarkup` for the transitive step: does this
- * fn body have a `return` whose VALUE is a call to a fn already in `markupFns`
- * (or a ternary/match whose value branches are)? Reuses the interp-site
- * `interpMayYieldNode` so the "yields a node" judgment is identical at the
- * return position and the interp position. Does NOT descend a nested
- * `function-decl` (its returns are its own).
- */
-function fnBodyReturnsCallToMarkupFn(body: any, markupFns: Set<string>): boolean {
-  const seen = new WeakSet<object>();
-  const scan = (n: any): boolean => {
-    if (!n || typeof n !== "object") return false;
-    if (Array.isArray(n)) {
-      for (const x of n) if (scan(x)) return true;
-      return false;
-    }
-    if (seen.has(n)) return false;
-    seen.add(n);
-    if (n.kind === "function-decl") return false;
-    if (n.kind === "return-stmt" && interpMayYieldNode(n.exprNode, markupFns)) return true;
-    for (const key of Object.keys(n)) {
-      const v = (n as Record<string, unknown>)[key];
-      if (v && typeof v === "object" && scan(v)) return true;
-    }
-    return false;
-  };
-  return scan(body);
-}
-
-/**
- * Detection at the interp SITE: could this exprNode evaluate to a DOM node
- * because it calls a markup-returning fn? True when the node IS such a call, or
- * a ternary/match whose VALUE branches (never the test/subject) are such calls.
- * A call under `binary`/`arithmetic` (`+`) coerces to string → intentionally
- * false (member/ident/literal/etc. likewise). Never returns true for a
- * string-yielding shape → never over-wraps.
- */
-function interpMayYieldNode(node: any, markupFns: Set<string> | null): boolean {
-  if (!node || typeof node !== "object" || !markupFns || markupFns.size === 0) return false;
-  const k = node.kind;
-  if (k === "call") {
-    const callee = node.callee;
-    const name = callee && callee.kind === "ident" ? callee.name : undefined;
-    return typeof name === "string" && markupFns.has(name);
-  }
-  if (k === "ternary") {
-    // Value branches only — the `condition` is tested, never yielded.
-    return interpMayYieldNode(node.consequent, markupFns) || interpMayYieldNode(node.alternate, markupFns);
-  }
-  if (k === "match-expr") {
-    // Recurse arm VALUE positions only (never the subject/header — that is the
-    // discriminant, not the yielded value). Arm shape varies by parser route;
-    // probe the common value-carrying fields defensively. A string arm carries
-    // no markup call → stays false, so this never over-wraps.
-    const arms = Array.isArray(node.body) ? node.body : Array.isArray(node.arms) ? node.arms : [];
-    for (const arm of arms) {
-      if (!arm || typeof arm !== "object") continue;
-      for (const vk of ["value", "result", "consequent", "body", "exprNode", "expr"]) {
-        const v = (arm as Record<string, unknown>)[vk];
-        if (Array.isArray(v)) {
-          for (const it of v) if (interpMayYieldNode(it, markupFns)) return true;
-        } else if (v && typeof v === "object" && interpMayYieldNode(v, markupFns)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  return false;
+function collectImportedMarkupFnSeed(ctx: CompileContext): Set<string> {
+  const ig = ctx.importGraph;
+  const er = ctx.exportRegistry as
+    | Map<string, Map<string, { returnsMarkup?: boolean }>>
+    | null
+    | undefined;
+  const fp = ctx.filePath;
+  if (!ig || !er || !fp) return new Set<string>();
+  const entry = ig.get(fp);
+  if (!entry || !Array.isArray(entry.imports)) return new Set<string>();
+  // Same import→markup-local-name resolution module-resolver's cross-module
+  // fixpoint uses, sharing the one helper so the two classifications can't drift.
+  return resolveImportedMarkupLocalNames(
+    entry.imports,
+    (absSource, importedName) => er.get(absSource)?.get(importedName)?.returnsMarkup === true,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -3695,11 +3540,16 @@ export function emitEachBodyRenderForFile(
       encodingCtx: ctx.encodingCtx,
       errors: ctx.errors ?? null,
     };
-    // #161 follow-on — same-file markup-returning fn NAMES, so a nested each
-    // interp `${badge(it.name)}` whose callee returns markup mounts (rather
-    // than String()-ing the returned DOM node). Built ONCE from the SAME
-    // fileAST; cleared in the finally below.
-    _eachMarkupFnNames = collectMarkupReturningFnNames(_astForBinds);
+    // #161 follow-on — markup-returning fn NAMES, so a nested each interp
+    // `${badge(it.name)}` whose callee returns markup mounts (rather than
+    // String()-ing the returned DOM node). Built ONCE from the SAME fileAST;
+    // cleared in the finally below. Seeded with the IMPORTED markup fns (residual
+    // 2) so cross-file `${importedBadge(it.name)}` mounts too, and the fixpoint
+    // closes a local wrapper of an imported markup fn.
+    _eachMarkupFnNames = collectMarkupReturningFnNames(
+      _astForBinds,
+      collectImportedMarkupFnSeed(ctx),
+    );
     // g-request-is-some-in-each-loop-attr-misroute — registered `<request>` ids
     // for the per-item each-attr request-ref routing (see `_eachRequestIds`).
     // Built ONCE from the SAME fileAST the top-level request-ref paths use

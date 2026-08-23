@@ -82,7 +82,7 @@ export interface CompileContext {
    *
    * SPEC §21.8 + §51.0.D — cross-file engine import via `<EngineName/>`.
    */
-  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
+  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; returnsMarkup?: boolean }>> | null;
   /**
    * known-gaps-#6 (S152) — MOD's `importGraph` plumbed into codegen so the
    * cross-file client module-loading lowering (Approach B, §21.3) can:
