@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 46 |
-| MED | 152 |
+| MED | 153 |
 | LOW | 68 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9336,3 +9336,25 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Why it matters beyond tidiness:** a §-citation is the project's primary durable pointer into the normative source (this session already found a `known-gaps.md:6429` line-number citation rotted for the same reason — line numbers shift, so §-refs are supposed to be the stable alternative). If a §-ref cannot be resolved by heading lookup, the stable alternative is not stable either.
 >
 > **Fix direction, two parts, separable:** (a) mechanical sweep of the 32 dangling comment citations `§39.3.x → §40.3.x` — zero behavioural risk, verify the mapping is uniform first; (b) a decision on the remaining 141, which is a bigger call: renumber the headings to match their parents, or accept the drift and stop treating h4 numbers as addressable. **Do not do (b) piecemeal per-branch** — that is how 9 got fixed and 32 got broken in one commit.
+
+### g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard — `const r = match x { … }` and `const q = if (…) { lift … }` carry their initializer in a `matchExpr` / `ifExpr` SIDECAR, never in `initExpr`, so §7.5.2's `W-TYPE-031-UNPROVEN` guard — whose precondition IS `initExpr` — skips them entirely and a defeated inference still silently produces `asIs`; `inferExprType`'s `case "match-expr"` arm is consequently UNREACHABLE from its only production call site — `NEW S365 (adversarial pass on the rung-0 branch; PA-relayed, then independently reproduced and re-measured in the fix round); MED; open (deliberately NOT fixed in the fix round — scoped out; it is the ruling's stated invariant not holding at a position rung 0 claims to own)`
+<!-- @gap id=g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard sev=MED status=open locus=compiler/src/type-system.ts:10575(the guard reads `initExpr` and returns when it is absent)+compiler/src/ast-builder.js:7994,8108(let/const-decl attach `matchExpr` and set `init: ""`, leaving `initExpr` undefined) prov=rationale:S365-fix-round-the-rung-0-normative-claim-is-that-an-un-annotated-let-const-declaration-shall-not-bind-asIs-from-a-defeated-inference-and-at-this-position-it-still-does-silently -->
+> **⚑ Reproduced and MEASURED in the fix round, not relayed.**
+>
+> ```scrml
+> ${
+>     let x = 1
+>     const r = match x {
+>         1 => 10
+>         else => 20
+>     }
+>     print(r)
+> }
+> ```
+> → compiles clean, **no `W-TYPE-031-UNPROVEN`**, and `r` stays `asIs`. The AST shows why: the decl carries `matchExpr` and `init: ""`, and `initExpr` is `undefined`, so the guard's `if (gapInit && …)` precondition is never met.
+>
+> **Corpus scope, measured by a structural AST walk (2,362 tracked `.scrml` files, 0 parse failures):** **55 un-annotated declarations across 41 files** — 50 `matchExpr`, 5 `ifExpr`, 0 `forExpr`. The brief that surfaced this said "~60"; the exact figure and its method are recorded here so the next reader re-runs rather than inherits it.
+>
+> **Why it is filed rather than fixed.** It is not a cosmetic miss: §7.5.2's normative statement is that an un-annotated `let`/`const` declaration SHALL NOT bind `asIs` as the result of a defeated inference, and at this position it still does. But wiring the sidecar means deciding how a `match`- / `if`-as-expression's ARM types unify before the declaration binds — that is rung-1 scoping work, not a guard tweak, and doing it inside a text-fix round would ship an unreviewed typing rule.
+>
+> **Pinned in the test suite** at `compiler/tests/unit/s365-asis-unknown-split.test.js` ("a `match`-as-expression initializer is NOT reached by the guard"), asserting `gaps.length === 0` with an explicit ⚑ FLIP marker — so the fix turns a green test red and the rung's author cannot land it without noticing.

@@ -305,3 +305,99 @@ text-only, all in `compiler/SPEC.md`. Five ride-along items (S6-S10), small.
 
 (appended as work proceeds)
 
+### Per-item disposition
+
+| item | disposition | evidence |
+|---|---|---|
+| B1 headline SHALL is false | FIXED (text) | six-line refutation reproduced before AND after; both sentences narrowed |
+| B2 §14.7 self-contradiction | FIXED (text) | bare-prop bullet reconciled via the resolution-obligation distinction |
+| B3 `_{ }` carve-out unconditional | FIXED (text, NOT guard) | A/B reproduced; reasoning recorded in SPEC; test added both sides |
+| B4 §34 row false citation + fire domain | FIXED (text) | all five claims re-measured here, one of them PARTLY WRONG (below) |
+| B5 `Result<ResolvedType, InferenceGap>` | FIXED | renamed to `InferenceResult`; same false claim also fixed in the test docstring |
+| S6 rung-1 trap | FIXED (code) | `else resolvedType = inferredResult.type;`; `ok` branch measured at 0 firings BY EXECUTION |
+| S7 `[object Object]` | FIXED (code) | `renderDeclGapName` / `renderDestructurePattern`; object + array forms tested |
+| S8 escape-hatch mis-describes regex | FIXED (code) | `describeEscapeHatch`; regex, foreign, import, parse-failure sub-kinds named |
+| S9 match/if sidecar leak | DEFERRED + FILED | gap `g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard`; pinned in tests with a ⚑ FLIP marker |
+| S10 types-gate unwired | FIXED (both halves) | wired into non-blocking `tracking` AND ci.yml:4 header corrected |
+
+### DEFERRED POSITIONS — the ledger, now complete
+
+Positions where a value binds `asIs` with **no author behind it**, after rung 0:
+
+1. **Un-annotated function PARAMETER.** `function eat(powerUp) { match powerUp { … } }` →
+   `E-TYPE-025` naming a hatch the author never wrote. This is the six-line program that
+   REFUTED the branch's original headline SHALL. Rung 1. Now normative in §7.5.2's ⚑ note and
+   pinned as an open test.
+2. **`match`- / `if`-as-expression initializers (S9, NEW to this ledger).** The initializer lands
+   in a `matchExpr` / `ifExpr` sidecar, not `initExpr`, so the guard's precondition is never met
+   and a defeated inference is SILENT. `inferExprType`'s `case "match-expr"` arm is therefore
+   unreachable from its only production call site. **Measured: 55 un-annotated sites across 41
+   files** (50 `matchExpr`, 5 `ifExpr`, 0 `forExpr`; structural AST walk over 2,362 files, 0 parse
+   failures). Filed as a gap entry. NOT built — wiring it means deciding how arm types unify,
+   which is rung-1 typing work, not a guard tweak.
+3. **`_={ … }=` at bare logic-statement scope.** Not a carve-out failure — the construct is not
+   admitted there at all (`E-CODEGEN-INVALID-LOGIC` governs). §23.2.2's question, not §7.5.2's.
+4. **The other 100 `tAsIs()` call sites** in `type-system.ts`. Rung 0 converts one.
+
+---
+
+## WHAT WENT WRONG IN THE FIX ROUND — disclosed, not just what worked
+
+1. **I nearly propagated a false correction.** The brief said §53.4 was a bad citation. I grepped
+   `^#{2,4} 53\.4` , got nothing, and was one keystroke from writing "§53.4 does not exist" into the
+   SPEC. **It does exist** — `## §53.4 Three-Zone Enforcement (SPARK Model)` at line 32934; my
+   pattern missed it because the heading carries the `§` sigil. The real defect is narrower than
+   the brief implied: §53.4 is a real section, just not the validator path. Had I not re-grepped,
+   this round would have shipped a *new* false claim while fixing an old one — inside a commit whose
+   entire subject is false claims.
+
+2. **A relayed figure was wrong and I only caught it by measuring.** The brief said "17 validator
+   (`symbol-table.ts`)". All 17 are on the validator PATH, but 12 are in `checkValidator` and 5 are
+   in `checkArgShape` (called only from `checkValidator`). The row now names both, because "in
+   `checkValidator`" alone would not resolve for someone grepping for the other five.
+
+3. **The row's own "NINE normative sites" was never measured.** Actual: 18 mentions across 12
+   sections. The previous pass corrected a mis-booking by mis-booking it differently. That is
+   recorded in the row itself so the next reader does not have to rediscover it.
+
+4. **I wrote a Python string-concat artifact into SPEC.md** — a literal `` ` + "`asIs`" + ` `` —
+   and caught it only by reading back the rendered section. Every generated SPEC edit in this round
+   was read back afterwards; that is why.
+
+5. **The first version of the B3 boundary TEST asserted the wrong thing and failed.**
+   `E-CODEGEN-INVALID-LOGIC` is raised by the EMIT pass, so a `write: false` compile of that source
+   reports **zero** errors. The CLI showed the error; the test harness did not. Measured both ways
+   and the test now compiles with `write: true`, with the reason in the test. ⚑ **Generalisable:**
+   `compileSrc`-style `write: false` helpers are BLIND to every emit-pass diagnostic. Any test
+   asserting one must pay for the write.
+
+6. **The `ok` branch (S6) is currently unreachable, and I only know that because I instrumented
+   and ran it.** A temporary counter measured 0 hits across 2,362 files AND 0 on a targeted
+   number/string/negative-literal probe — the contextual cascade above it already recovers every
+   member of rung 0's `ok` set. Reading the code would have suggested `let n = -42` reaches it.
+   It does not. Instrumentation removed before commit.
+
+7. **`s34-census` cannot catch the class of defect that produced B4.** Its provenance resolver
+   strips `:N` from a backticked path (`(?::\d+)?`), so `type-system.ts:10112` — pointing at an
+   `E-ERROR-010` fragment — resolved and PASSED the gate. Paths and symbols are checked; line
+   numbers are not. Recorded in the row itself ("Trust the symbol") rather than silently relied on.
+   **Not filed as a gap** — surfaced to PA, since widening the resolver is a tooling call outside
+   this round.
+
+8. **A commit hit the 6m40s foreground timeout** (pre-commit runs the full ~29k-test suite). The
+   commit HAD landed; only the post-commit hook was killed. Verified by `git log` rather than
+   assumed from the non-zero exit — the failure mode where an agent re-commits and duplicates work.
+
+---
+
+## MEASUREMENT LEDGER — fix round
+
+| claim | measured how | result |
+|---|---|---|
+| corpus code delta from S6/S7/S8 | full census before + after: every diagnostic code counted across 2,362 tracked `.scrml` files, plus a per-gap `file\|nodeKind` name-set | **byte-identical both ways** — 399 distinct codes, 9,954 gaps, 490 files |
+| `+9954 W-TYPE-031-UNPROVEN` vs `origin/main` | census at `origin/main`'s `compiler/src` vs branch | recorded in the final report |
+| `ok` branch firings | temporary in-source counter, corpus-wide | **0** / 2,362 files |
+| E-TYPE-031 push sites | `grep -rn '"E-TYPE-031"' compiler/src` | 18 — 12 `checkValidator`, 5 `checkArgShape`, 1 `type-system.ts:10364` |
+| E-TYPE-031 SPEC mentions | `grep -n 'E-TYPE-031' compiler/SPEC.md` minus the two §34 rows | 18 mentions, 12 distinct sections |
+| S9 corpus scope | structural AST walk, un-annotated decls with a `matchExpr`/`ifExpr`/`forExpr` sidecar and no `initExpr` | **55 sites / 41 files** (50 / 5 / 0) |
+| `tAsIs()` call sites | `grep -c 'tAsIs()' compiler/src/type-system.ts` | 101 |
