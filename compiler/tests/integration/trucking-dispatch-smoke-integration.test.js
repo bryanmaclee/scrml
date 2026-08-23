@@ -462,6 +462,39 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // so every by-name import resolves and the warning no longer fires.
     // W-SERVER-IMPORT-UNEMITTED is therefore REMOVED from the baseline.
     // Aggregate 80 -> 74.
+    //
+    // S365 (dpa-036 call 1, the asIs/unknown split, SPEC §7.5): W-TYPE-031-UNPROVEN
+    // is a NEW warning and it is the single largest entry in this baseline by an
+    // order of magnitude. That is the point of it, and the number is not a
+    // regression — nothing here changed. It is the FIRST measurement of a debt
+    // that was always present and previously unobservable.
+    //
+    // Before S365, when expression inference could not type an un-annotated
+    // `let`/`const` initializer, it gave up by returning `asIs` — the SAME value
+    // §14.7 reserves for a deliberate, developer-signed escape hatch. So "the
+    // developer opted out" and "the compiler could not tell" were one value, and
+    // *absence of a diagnostic* and *success* were the same observation. The split
+    // makes the give-up produce `unknown` carrying the AST node kind that defeated
+    // inference, and say so. The program is unchanged: same emit, same acceptance,
+    // exit 0.
+    //
+    // WHERE THE 338 COME FROM — measured, not estimated:
+    //     232  call            a call result with no annotation and no known
+    //                          `fn` signature (rung 2/3: return-type inference)
+    //      28  ternary         branch types not unified
+    //      27  member          member access (rung 3: the builtin-method catalog)
+    //      17  lit             `bool` / template literals — inference types only
+    //                          `number` and `string` today (rung 1)
+    //      14  binary          operand typing does not exist at all (rung 3)
+    //      10  index
+    //       5  ident
+    //       5  array           element type not unified
+    //
+    // 68% of it is ONE node kind (`call`), and rungs 1-3 retire most of the rest.
+    // When those land this number SHALL fall, and a fall is the success signal —
+    // update it downward here and say which rung bought the reduction.
+    // Aggregate 74 -> 80 (#409 W-IF-IN-EACH) -> 418.
+    "W-TYPE-031-UNPROVEN": 338,
   };
 
   test("aggregate diagnostic count matches baseline", () => {

@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 48 |
-| MED | 157 |
+| MED | 158 |
 | LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9686,3 +9686,32 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > actionable by the person compiling. Fix direction is the same either way — a stdlib-internal resolution failure
 > is a compiler-team signal and belongs behind a debug flag or a build-time self-check, not in an adopter's
 > terminal.
+### g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard — `const r = match x { … }` and `const q = if (…) { lift … }` carry their initializer in a `matchExpr` / `ifExpr` SIDECAR, never in `initExpr`, so §7.5.2's `W-TYPE-031-UNPROVEN` guard — whose precondition IS `initExpr` — skips them entirely and a defeated inference still silently produces `asIs`; `inferExprType`'s `case "match-expr"` arm is consequently UNREACHABLE from its only production call site — `NEW S365 (adversarial pass on the rung-0 branch; PA-relayed, then independently reproduced and re-measured in the fix round); MED; open (deliberately NOT fixed in the fix round — scoped out; it is the ruling's stated invariant not holding at a position rung 0 claims to own)`
+<!-- @gap id=g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard sev=MED status=open locus=compiler/src/type-system.ts:10575(the guard reads `initExpr` and returns when it is absent)+compiler/src/ast-builder.js:7994,8108(let/const-decl attach `matchExpr` and set `init: ""`, leaving `initExpr` undefined) prov=rationale:S365-fix-round-the-rung-0-normative-claim-is-that-an-un-annotated-let-const-declaration-shall-not-bind-asIs-from-a-defeated-inference-and-at-this-position-it-still-does-silently -->
+> **⚑ Reproduced and MEASURED in the fix round, not relayed.**
+>
+> ```scrml
+> ${
+>     let x = 1
+>     const r = match x {
+>         1 => 10
+>         else => 20
+>     }
+>     print(r)
+> }
+> ```
+> → compiles clean, **no `W-TYPE-031-UNPROVEN`**, and `r` stays `asIs`. The AST shows why: the decl carries `matchExpr` and `init: ""`, and `initExpr` is `undefined`, so the guard's `if (gapInit && …)` precondition is never met.
+>
+> **Corpus scope, measured by a structural AST walk (2,362 tracked `.scrml` files, 0 parse failures):** **55 un-annotated declarations across 41 files** — 50 `matchExpr`, 5 `ifExpr`, 0 `forExpr`. The brief that surfaced this said "~60"; the exact figure and its method are recorded here so the next reader re-runs rather than inherits it.
+>
+> **Why it is filed rather than fixed.** It is not a cosmetic miss: §7.5.2's normative statement is that an un-annotated `let`/`const` declaration SHALL NOT bind `asIs` as the result of a defeated inference, and at this position it still does. But wiring the sidecar means deciding how a `match`- / `if`-as-expression's ARM types unify before the declaration binds — that is rung-1 scoping work, not a guard tweak, and doing it inside a text-fix round would ship an unreviewed typing rule.
+>
+> **Pinned in the test suite** at `compiler/tests/unit/s365-asis-unknown-split.test.js` ("a `match`-as-expression initializer is NOT reached by the guard"), asserting `gaps.length === 0` with an explicit ⚑ FLIP marker — so the fix turns a green test red and the rung's author cannot land it without noticing.
+>
+> **Carved out of the SPEC's SHALL in the S365 fix round (rung 1).** §7.5.2 and §14.7 both stated,
+> unqualified, that an un-annotated `let` / `const` declaration SHALL NOT bind `asIs` from a
+> defeated inference — a SHALL this gap makes unsatisfiable at 55 sites, and therefore a false
+> claim inside the §62.2 contract. Both statements now carry an EXCEPT clause naming this position
+> and pointing here, and §7.5.2 carries the reproduction above. **The gap is unchanged and still
+> open** — the SPEC was corrected to describe the implementation, not the other way round. When the
+> sidecar position is wired, BOTH carve-outs must be removed alongside the ⚑ FLIP test.

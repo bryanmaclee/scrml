@@ -1,8 +1,11 @@
 # CI — the authoritative async gate (clean env). Never blocks a local push.
 #
 # Gate-layering (flogence gate-layering-methodology-2026-07-06 + scrml S242/S243; TUNED S253 cloud-PA arc):
-#   types (always-on local) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
+#   types (`bun run types:check`; NON-BLOCKING in `tracking` below — NOT always-on local, nothing local
+#   invokes it) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
+#   (S365 fix round: this line previously advertised a layer that did not exist — `scripts/types-gate.ts`
+#   was runnable and nothing ran it. That is the script's own thesis, one level up. Corrected AND wired.)
 #
 # THREE jobs:
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
@@ -172,6 +175,22 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
+      # S365 — the compiler's own TypeScript diagnostics do not grow silently.
+      #
+      # NON-BLOCKING BY TWO MECHANISMS, ON PURPOSE. The job is `continue-on-error`, and so is
+      # this STEP. The step-level flag is not redundant: a failed step HALTS the job even in a
+      # continue-on-error job (verified on run 30742472551, where the within-node parity step
+      # reported `skipped` and had never run at all). Without it, a types regression would
+      # silently suppress every tracking signal below it — the exact failure this job exists
+      # to avoid.
+      #
+      # PLACED FIRST because it needs neither `pretest` nor a populated dist, so it cannot be
+      # skipped by an earlier step's failure. Promotion into the BLOCKING `gate` job remains an
+      # operator call and is NOT taken here; it wants a decision on the nine live `never`
+      # failures first (fix, or record and drain).
+      - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
+        continue-on-error: true
+        run: bun scripts/types-gate.ts --check
       - name: Populate browser-test fixtures
         run: bun run pretest
       - name: integration + lsp + commands (promotion candidates — integration needs self-host-smoke dist-guarded)

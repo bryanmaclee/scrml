@@ -75,6 +75,11 @@
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+// §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
+// union. Imported as a TYPE so the `never` fallthrough has a closed set to close
+// over: adding a member to `ExprNode` without teaching inference about it is a
+// type error here, not a silent `asIs` at some adopter's decl site.
+import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
 import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
@@ -361,8 +366,335 @@ interface AsIsType {
   isFunctionField?: boolean;
 }
 
+/**
+ * §7.5 / §14.7 (S365, dpa-036 call 1) — THE SPLIT.
+ *
+ * `asIs` (above) means **a developer signed for it** — §14.7's named escape
+ * hatch, the thing §34's `E-TYPE-ANY-FORBIDDEN` row steers to when it says
+ * *"Use a concrete type, or `asIs` for a deliberate, named untyped escape
+ * hatch."* It is silent by design, because a human took responsibility.
+ *
+ * `unknown` means **the compiler did not look, or looked and could not tell**.
+ * It is NOT an escape hatch and nobody signed for it.
+ *
+ * Before S365 those two were one value: inference gave up by returning
+ * `tAsIs()`, so a gap in the type checker was spelled exactly like a
+ * developer's deliberate opt-out, and *absence of a diagnostic* and *success*
+ * were the same observation. `reason` is what makes them different values.
+ * It is REQUIRED — an `unknown` that cannot say why it is unknown has decayed
+ * back into an `asIs`.
+ */
 interface UnknownType {
   kind: "unknown";
+  reason: UnknownReason;
+}
+
+/**
+ * Why a type resolved to `unknown`. Three sources, each one an honest claim:
+ *
+ *  - `inference-gap`  — expression inference ran and could not type the node.
+ *                       Carries the `InferenceGap`, which names the AST node
+ *                       kind that defeated it. This is the loud, counted case
+ *                       (`W-TYPE-031-UNPROVEN`).
+ *  - `forward-ref`    — a type NAME is registered before its declaration is
+ *                       resolved (`buildTypeRegistry` pass 1). Transient by
+ *                       construction; a later pass overwrites it.
+ *  - `not-a-node`     — the caller handed the resolver something that is not an
+ *                       AST node at all. A defensive sentinel, not a judgement
+ *                       about any program.
+ */
+type UnknownReason =
+  | { readonly source: "inference-gap"; readonly gap: InferenceGap }
+  | { readonly source: "forward-ref"; readonly typeName: string }
+  | { readonly source: "not-a-node" };
+
+/**
+ * §7.5 (S365) — a NAMED inference failure.
+ *
+ * `nodeKind` is typed `ExprNode["kind"]`, not `string`, and there is no default.
+ * You cannot construct an `InferenceGap` without naming a REAL expression node
+ * kind — which is the property that keeps the gap honest as the language grows.
+ * The companion property lives in `inferExprType`: its `never` fallthrough makes
+ * "a new `ExprNode` member that nobody taught inference about" a TYPE ERROR
+ * rather than a silent `asIs`.
+ */
+interface InferenceGap {
+  /** The AST expression node kind inference could not type. */
+  readonly nodeKind: ExprNode["kind"];
+  /**
+   * A short, adopter-facing refinement of WHICH form of that node kind lost —
+   * e.g. `lit` is not one thing, so a boolean literal reports `bool literal`.
+   * Free text, but it names a construct, never an internal identifier.
+   */
+  readonly detail: string;
+}
+
+/**
+ * §7.5 (S365) — inference's return type.
+ *
+ * The ratified decay-stopper: inference no longer returns a bare `ResolvedType`,
+ * because a bare `ResolvedType` gave callers no way to distinguish "I typed this"
+ * from "I gave up and here is the hatch". Callers must destructure `ok`, so the
+ * failure branch cannot be reached by accident.
+ */
+type InferenceResult =
+  | { readonly ok: true; readonly type: ResolvedType }
+  | { readonly ok: false; readonly gap: InferenceGap };
+
+function inferenceOk(type: ResolvedType): InferenceResult {
+  return { ok: true, type };
+}
+
+function inferenceGap(nodeKind: ExprNode["kind"], detail: string): InferenceResult {
+  return { ok: false, gap: { nodeKind, detail } };
+}
+
+/**
+ * §7.5.2 (S365 fix round) — the adopter-facing name of an `escape-hatch` node.
+ *
+ * `escape-hatch` is NOT one construct. It is the expression parser's catch-all for
+ * every form it did not structure — a `_={ … }=` foreign slice, yes, but also a
+ * regular-expression literal, a dynamic `import()`, a template literal whose
+ * interpolation degraded, and outright parse failures. The first cut of this
+ * diagnostic reported all of them as "foreign-code escape hatch", so an adopter
+ * who wrote `const re = /ab+c/g` was told they had written an escape hatch they
+ * had not written. Every sampled `escape-hatch` gap in the corpus was that case.
+ *
+ * Naming the construct the adopter actually typed is the whole contract of this
+ * warning (§7.5.2: "it names a construct, never an internal identifier").
+ */
+function describeEscapeHatch(node: EscapeHatchExpr): string {
+  const raw = typeof node.raw === "string" ? node.raw.trim() : "";
+  // The `_={ … }=` inline foreign initializer (§23.2.2). Checked on the raw text
+  // rather than on `nativeKind`, because the foreign opener never reaches Acorn.
+  if (raw.startsWith("_={") || raw.startsWith("_{")) {
+    return "foreign-code escape hatch (`_={ … }=`)";
+  }
+  // A regex literal survives as raw source: `/pattern/flags`.
+  if (/^\/(?:[^/\\\n]|\\.)+\/[a-z]*$/.test(raw)) {
+    return "regular-expression literal";
+  }
+  switch (node.nativeKind) {
+    case "ParseError":
+      return "an expression the parser could not structure";
+    case "SqlPlaceholderError":
+      return "an unresolved `?{ … }` SQL placeholder";
+    case "ConversionError":
+      return "an expression that could not be converted to a scrml expression node";
+    case "TemplateInterpFallback":
+      return "a template literal with interpolation";
+    case "ImportExpression":
+      return "a dynamic `import()` expression";
+    case "RegExpLiteral":
+      return "regular-expression literal";
+    default:
+      return typeof node.nativeKind === "string" && node.nativeKind
+        ? `an expression form inference does not cover (\`${node.nativeKind}\`)`
+        : "an expression form inference does not cover";
+  }
+}
+
+/**
+ * §7.5.2 (S365 fix round) — the adopter-facing name of the DECLARATION a gap is about.
+ *
+ * `LetDeclNode.name` / `ConstDeclNode.name` is `string | DestructurePattern`. The
+ * first cut read it as a string, so every destructuring declaration was reported as
+ * `[object Object]` — 122 of the 9,954 warnings at introduction (1.2%). A warning
+ * whose two stated resolutions are both "annotate THAT declaration" is worth nothing
+ * if it cannot say which declaration.
+ *
+ * Renders the pattern back in source shape (`{ a, b }`, `[ first, ...rest ]`) rather
+ * than listing bound names, so the adopter can find the line by eye.
+ */
+function renderDeclGapName(name: unknown): string {
+  if (typeof name === "string" && name.length > 0) return name;
+  if (isDestructurePattern(name)) return renderDestructurePattern(name);
+  return "<anonymous>";
+}
+
+function renderDestructurePattern(p: DestructurePatternShape): string {
+  if (p.kind === "destructure-array") {
+    const parts = p.elements.map((el) => {
+      if (el.kind === "hole") return "";
+      if (el.kind === "nested" && el.pattern) return renderDestructurePattern(el.pattern);
+      return el.name ?? "";
+    });
+    if (p.rest) parts.push(`...${p.rest}`);
+    return `[${parts.join(", ")}]`;
+  }
+  const parts = p.properties.map((prop) => {
+    if (prop.kind === "nested" && prop.pattern) {
+      return `${prop.fieldName ?? "?"}: ${renderDestructurePattern(prop.pattern)}`;
+    }
+    const field = prop.fieldName ?? "";
+    const bind = prop.bindName ?? "";
+    return field && bind && field !== bind ? `${field}: ${bind}` : (bind || field);
+  });
+  if (p.rest) parts.push(`...${p.rest}`);
+  return `{ ${parts.join(", ")} }`;
+}
+
+/**
+ * §7.5 (S365, dpa-036 call 1) — SYNTACTIC expression-type inference.
+ *
+ * Types an expression from its own shape alone: no scope, no registry, no
+ * data-flow. Those richer sources (a SQL projection row, a `fn` signature's
+ * return type, the host-method table) are CONTEXTUAL and are applied by the
+ * decl-site cascade around this call — they can only ever ADD type information,
+ * so a gap reported here is a lower bound on what the compiler knows, never an
+ * overstatement.
+ *
+ * ⚑ THE INVARIANT THIS FUNCTION EXISTS TO HOLD ⚑
+ *
+ * Every arm below returns either `inferenceOk(t)` — "I typed it, here it is" —
+ * or `inferenceGap(kind, detail)` — "I could not, and here is the node kind that
+ * beat me". **No arm returns `tAsIs()`.** Inference is structurally incapable of
+ * manufacturing the developer's escape hatch, because it never had the standing
+ * to sign for one.
+ *
+ * The `default:` arm assigns `node` to a `never`. Once every member of the
+ * `ExprNode` union is handled, the narrowed type at `default:` IS `never` and
+ * the assignment checks. Add a member to `ExprNode` without adding an arm here
+ * and that assignment stops checking — the coverage invariant is enforced by a
+ * type checker instead of by a reviewer's attention.
+ *
+ * SCOPE (rung 0). The `ok` arms are deliberately EXACTLY today's inference
+ * power — number and string literals, and a negated numeric literal — so that
+ * introducing the split changes no program's acceptance. Widening the `ok` set
+ * (bool/template literals, array/object/map shapes, `is`-comparison results,
+ * a builtin-method catalog) is rungs 1-3; each such widening is now a matter of
+ * moving one arm from `inferenceGap` to `inferenceOk`, with the gap counter
+ * showing what it bought.
+ */
+function inferExprType(node: ExprNode): InferenceResult {
+  switch (node.kind) {
+
+    // --- TYPED -------------------------------------------------------------
+
+    case "lit": {
+      const lit = node as LitExpr;
+      // Only `number` and `string` are typed today. The others are named gaps
+      // rather than quiet `asIs`, which is what makes the rung-1 widening a
+      // measurable decision instead of a guess.
+      if (lit.litType === "number" && typeof lit.value === "number") {
+        return inferenceOk(tPrimitive("number"));
+      }
+      if (lit.litType === "string" && typeof lit.value === "string") {
+        return inferenceOk(tPrimitive("string"));
+      }
+      return inferenceGap("lit", `\`${lit.litType}\` literal`);
+    }
+
+    case "unary": {
+      const un = node as UnaryExpr;
+      // `-42` is a numeric literal wearing a prefix operator.
+      if (un.op === "-" && un.prefix && un.argument && un.argument.kind === "lit") {
+        const inner = un.argument as LitExpr;
+        if (inner.litType === "number" && typeof inner.value === "number") {
+          return inferenceOk(tPrimitive("number"));
+        }
+      }
+      return inferenceGap("unary", `prefix \`${un.op}\` expression`);
+    }
+
+    // --- NOT TYPED — every one of these is a named, countable gap -----------
+    //
+    // Ordered as the `ExprNode` union declares them (types/ast.ts:2082) so a
+    // reader can check coverage against the union by eye, and so the rungs
+    // above have an obvious reading order.
+
+    case "ident":
+      // Needs the scope chain, which this function deliberately does not have.
+      // The decl-site cascade resolves what it can; what it cannot lands here.
+      return inferenceGap("ident", "identifier reference");
+
+    case "array":
+      return inferenceGap("array", "array literal (element type not unified)");
+
+    case "object":
+      return inferenceGap("object", "object literal (no structural type synthesised)");
+
+    case "spread":
+      return inferenceGap("spread", "spread element");
+
+    case "binary":
+      // Rung 3. Operand typing does not exist at all today — `\"x\" * 2` is
+      // accepted in silence.
+      return inferenceGap("binary", `binary \`${(node as { op?: string }).op ?? "?"}\` expression`);
+
+    case "assign":
+      return inferenceGap("assign", "assignment expression");
+
+    case "ternary":
+      return inferenceGap("ternary", "ternary expression (branches not unified)");
+
+    case "member":
+      return inferenceGap("member", "member access");
+
+    case "index":
+      return inferenceGap("index", "index access");
+
+    case "call":
+      // Rung 2/3. The decl-site cascade already recovers SOME calls (a known
+      // `fn` signature's return type, the host-method table); this arm is what
+      // is left after those.
+      return inferenceGap("call", "call result");
+
+    case "new":
+      return inferenceGap("new", "constructor call");
+
+    case "lambda":
+      return inferenceGap("lambda", "lambda expression");
+
+    case "cast":
+      return inferenceGap("cast", "cast expression");
+
+    case "match-expr":
+      return inferenceGap("match-expr", "match expression (arm types not unified)");
+
+    case "map-lit":
+      return inferenceGap("map-lit", "map literal (key/value types not unified)");
+
+    case "sql-ref":
+      // A `?{ … }` reference. The projection-row typing that DOES exist runs
+      // off the decl's `sqlNode` sidecar, not off this expression node.
+      return inferenceGap("sql-ref", "SQL reference");
+
+    case "input-state-ref":
+      return inferenceGap("input-state-ref", "input-state reference");
+
+    case "escape-hatch":
+      // The parser's catch-all, and NOT synonymous with `_{ … }`. A `_={ … }=`
+      // foreign slice lands here, but so does a regex literal, a dynamic
+      // `import()`, and a parse failure — see `describeEscapeHatch`, which names
+      // which one the adopter actually wrote. For the foreign-slice case,
+      // §23.2.3 opacity means the type CANNOT be read from the slice, and the
+      // developer who wrote `_{ }` signed for that: the decl-site cascade carves
+      // it out on the attached foreign node BEFORE reaching inference. If a
+      // foreign slice reaches here, it was not attached (§7.5.2's ⚑ note).
+      return inferenceGap("escape-hatch", describeEscapeHatch(node as EscapeHatchExpr));
+
+    case "markup-value":
+      return inferenceGap("markup-value", "markup-as-value expression");
+
+    case "reset-expr":
+      return inferenceGap("reset-expr", "`reset()` expression");
+
+    // --- THE DECAY-STOPPER --------------------------------------------------
+
+    default: {
+      // If this line stops compiling, a member was added to `ExprNode` and
+      // inference was not taught about it. Add a `case` above. Do NOT widen
+      // this arm, do NOT cast, and do NOT return `tAsIs()` — an untaught node
+      // kind is the compiler not looking, which is precisely what `unknown`
+      // is for and precisely what `asIs` must never be used for.
+      const unhandled: never = node;
+      return inferenceGap(
+        (unhandled as ExprNode).kind,
+        "expression form not covered by inference",
+      );
+    }
+  }
 }
 
 // §42 — absence value type (replaces null/undefined in scrml source)
@@ -963,8 +1295,17 @@ function tFunction(): FunctionType {
   return { kind: "function", name: "", params: [], returnType: tAsIs() };
 }
 
-function tUnknown(): UnknownType {
-  return { kind: "unknown" };
+/**
+ * §7.5 / §14.7 (S365, dpa-036 call 1) — mint an `unknown`.
+ *
+ * `reason` is REQUIRED. There is no zero-argument overload and no default,
+ * because the whole point of the asIs/unknown split is that an `unknown` which
+ * cannot say what defeated it is indistinguishable from an `asIs` the developer
+ * signed for — and that indistinguishability IS the defect this constructor
+ * exists to close. See `UnknownReason`.
+ */
+function tUnknown(reason: UnknownReason): UnknownType {
+  return { kind: "unknown", reason };
 }
 
 // §42 — absence value constructor
@@ -3649,7 +3990,7 @@ function buildTypeRegistry(
   // Pass 1: register all names as placeholders.
   for (const decl of typeDecls) {
     if (!decl.name) continue;
-    registry.set(decl.name as string, tUnknown());
+    registry.set(decl.name as string, tUnknown({ source: "forward-ref", typeName: decl.name as string }));
   }
 
   // Pass 2: parse bodies and replace placeholders.
@@ -8950,7 +9291,7 @@ function annotateNodes(
   const errorBoundaryFallbackStack: boolean[] = [];
 
   function visitNode(node: unknown): ResolvedType {
-    if (!node || typeof node !== "object") return tUnknown();
+    if (!node || typeof node !== "object") return tUnknown({ source: "not-a-node" });
 
     const n = node as ASTNodeLike;
     const key = nodeKey(n);
@@ -10180,6 +10521,97 @@ function annotateNodes(
             ?? resolveHostMemberPropType(_memberInit, scopeChain);
           if (_hostType) {
             resolvedType = _hostType;
+          }
+        }
+        // §7.5 (S365, dpa-036 call 1) — THE asIs/unknown SPLIT, at the one site
+        // in the compiler where inference is definitionally what is happening:
+        // a `let`/`const` with no annotation, whose type can come from nothing
+        // but its initializer.
+        //
+        // Everything above this line is the CONTEXTUAL cascade — the SQL
+        // projection row, a known `fn` signature's return type, the host-method
+        // table. Each can only ADD information. If `resolvedType` is STILL
+        // `asIs` here, the whole compiler looked and could not tell, and until
+        // S365 it said so by handing back the developer's escape hatch — the
+        // one value §14.7 reserves for "a human signed for this". That made
+        // *absence of a diagnostic* and *success* the same observation.
+        //
+        // Now the give-up produces `unknown` carrying the AST node kind that
+        // defeated inference, and says so out loud. It is a WARNING: the program
+        // still compiles and the adopter is billed nothing.
+        //
+        // ⚑ THE SWAP IS NOT FREE, AND TWO SITES PROVED IT. `asIs` and `unknown`
+        // are interchangeable at MOST consumers (`fieldTypeAssignable`,
+        // `classifyMapKey`, the §57 serializability classifier all list the two
+        // kinds together) — but not all, and both exceptions were found by
+        // execution, not by reading:
+        //   • `codegen/index.ts` fired E-CG-001 on ANY `unknown` in `nodeTypes`,
+        //     treating it as a leaked internal sentinel. That gate is the reason
+        //     inference used to give up via `tAsIs()` in the first place. It is
+        //     now reason-aware (an `inference-gap` unknown is expected).
+        //   • the §18.8.2 match-subject gate fired E-TYPE-025 on `asIs` only, so
+        //     the swap would have silently retired it for un-annotated subjects.
+        //     It now covers `unknown` too.
+        // Anything else that special-cases `asIs` in VALUE position needs the
+        // same treatment; annotation-resolution sites do not, because
+        // `resolveTypeExpr` still yields `asIs` and is untouched here.
+        //
+        // THREE CARVE-OUTS, each because somebody DID sign:
+        //   • an annotation is present — the author stated the type. (An
+        //     annotation that FAILS to resolve, `let x: strng = …`, is a
+        //     type-NAME gap owned by E-TYPE-UNKNOWN-NAME / rung 1, not an
+        //     expression-inference gap. Not this diagnostic's business.)
+        //   • a `?{ … }` SQL initializer — the projection typer owns the
+        //     graceful-degrade path and already names it (W-SQL-ROW-UNTYPED).
+        //   • a `_{ … }` foreign initializer — §23.2.3 opacity is deliberate,
+        //     and writing `_{ }` IS the signature. §14.7's named hatch, used as
+        //     designed.
+        if (
+          !letAnnot &&
+          resolvedType.kind === "asIs" &&
+          !((n as Record<string, unknown>).sqlNode) &&
+          !((n as Record<string, unknown>).foreignNode)
+        ) {
+          const gapInit = (n as any).initExpr as ExprNode | undefined;
+          if (gapInit && typeof gapInit === "object" && typeof gapInit.kind === "string") {
+            const inferredResult = inferExprType(gapInit);
+            if (inferredResult.ok) {
+              // §7.5.2 (S365 fix round) — BIND WHAT INFERENCE PROVED.
+              //
+              // Rung 0's `ok` set is EXACTLY today's inference power (number and
+              // string literals, and a negated numeric literal), and every member
+              // of it is already recovered by the contextual cascade above, so
+              // this branch is measured at ZERO firings across the 2,362-file
+              // corpus. It is written anyway, because the rungs above are
+              // specified as "moving one arm from `inferenceGap` to
+              // `inferenceOk`" — and with no `else`, the first such move would
+              // silence the warning WITHOUT binding the type it just proved,
+              // leaving the declaration `asIs` again. That is the `asIs`/`unknown`
+              // collapse re-created inside the fix for it. The arm is here so the
+              // rung-1 author cannot fall into it.
+              resolvedType = inferredResult.type;
+            } else {
+              const gap = inferredResult.gap;
+              resolvedType = tUnknown({ source: "inference-gap", gap });
+              const gapSpan = (n.span as Span | undefined)
+                ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+              const gapName = renderDeclGapName((n as ASTNodeLike).name);
+              errors.push(new TSError(
+                "W-TYPE-031-UNPROVEN",
+                `W-TYPE-031-UNPROVEN: the type of \`${gapName}\` is UNPROVEN — inference stopped at ` +
+                `${gap.detail} (AST node kind \`${gap.nodeKind}\`), line ${gapSpan.line}. ` +
+                `This is the compiler reporting a gap in ITSELF, not a defect in your program: ` +
+                `\`${gapName}\` compiles and runs exactly as before, and no assignability check ` +
+                `has been skipped that was previously performed. ` +
+                `It is reported because an unproven type and a deliberate one used to look ` +
+                `identical (§7.5, §14.7). ` +
+                `To prove it, annotate the declaration — \`${gapName}: <type> = …\`. ` +
+                `To state that it is deliberately untyped, annotate it \`asIs\`, which is silent by ` +
+                `design (§14.7 — the named escape hatch).`,
+                gapSpan,
+                "warning",
+              ));
+            }
           }
         }
         // §2a — E-SCOPE-001 on undeclared identifiers inside the initializer
@@ -16854,11 +17286,28 @@ function checkMatchDiagnostics(
     return;
   }
 
-  if (subjectType.kind === "asIs") {
+  // §18.8.2 — `match` requires a RESOLVED subject.
+  //
+  // §7.5 (S365, dpa-036 call 1) — `unknown` is included here, and deliberately.
+  // The asIs/unknown split changed WHY a subject is unresolved, never WHETHER it
+  // is: an inference-gap `unknown` is exactly as un-narrowed as a developer's
+  // `asIs`, so the same guidance applies and the code must keep firing. Omitting
+  // it would silently retire E-TYPE-025 for every un-annotated `let p = powerUp`
+  // — the split buying a REGRESSION, which it must never do. (Caught by
+  // `gauntlet-s24/match-type-narrowing.test.js`; the second phrasing below is the
+  // gap case, which can say something more useful than the hatch case can.)
+  if (subjectType.kind === "asIs" || subjectType.kind === "unknown") {
+    const unresolvedIsGap = subjectType.kind === "unknown" &&
+      (subjectType as UnknownType).reason.source === "inference-gap";
     errors.push(new TSError(
       "E-TYPE-025",
-      "E-TYPE-025: Cannot match on `asIs`-typed subject. `match` requires a typed subject (enum, union, or primitive). " +
-      "Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching.",
+      unresolvedIsGap
+        ? "E-TYPE-025: Cannot match on an UNPROVEN subject — inference stopped at " +
+          `${((subjectType as UnknownType).reason as { gap: InferenceGap }).gap.detail}, so the subject has no ` +
+          "resolved type. `match` requires a typed subject (enum, union, or primitive). " +
+          "Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching."
+        : "E-TYPE-025: Cannot match on `asIs`-typed subject. `match` requires a typed subject (enum, union, or primitive). " +
+          "Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching.",
       span,
     ));
     return;
@@ -27810,6 +28259,10 @@ export {
   tAsIs,
   tUnknown,
   tNot,
+  // §7.5 (S365, dpa-036 call 1) — the asIs/unknown split. Exported for the
+  // typer-unit tests that assert (a) inference never yields `asIs` and (b) the
+  // gap names the AST node kind that defeated it.
+  inferExprType,
   tSnippet,
   tPredicated,
   tState,

@@ -56,6 +56,9 @@
     "bench": "bun run compiler/src/cli.js compile samples/compilation-tests/ --timing",
     "security": "bun run compiler/src/cli.js compile samples/compilation-tests/ && node --check samples/compilation-tests/*/dist/*.client.js 2>&1",
     "lsp": "bun run lsp/server.js --stdio",
+    "//types": "S365 — bun runs .ts TRANSPILE-ONLY, so nothing type-checked compiler/src until this landed. See scripts/types-gate.ts; it found nine live exhaustive-switch `never` failures that had been invisible.",
+    "types": "bun scripts/types-gate.ts",
+    "types:check": "bun scripts/types-gate.ts --check",
     "docs:build": "bun run docs/build.ts",
     "e2e": "playwright test --config=e2e/playwright.config.ts",
     "e2e:ui": "playwright test --config=e2e/playwright.config.ts --ui",
@@ -75,6 +78,7 @@
     "@playwright/test": "^1.49.0",
     "happy-dom": "^20.8.9",
     "marked": "^14.1.3",
-    "puppeteer": "^24.40.0"
+    "puppeteer": "^24.40.0",
+    "typescript": "^5.9.2"
   }
 }
