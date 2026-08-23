@@ -829,11 +829,14 @@ function installCsrfRetryFallback(): () => void {
   return () => { if (had) g._scrml_fetch_with_csrf_retry = prev; else delete g._scrml_fetch_with_csrf_retry; };
 }
 
-/** Pull the inline B-substrate seed value out of composed first-paint HTML.
- *  `innerHTML=` does NOT execute the seed `<script>`, so the caller applies it by
- *  hand (exactly what that script would set on `window.__scrml_ssr_state`). */
+/** Pull the B-substrate seed value out of composed first-paint HTML.
+ *  The seed ships as a NON-EXECUTABLE data block —
+ *  `<script type="application/json" id="__scrml_ssr_state">{…}</script>` — so it
+ *  stays legal under `headers="strict"`'s `default-src 'self'` (§39.2.5). Nothing
+ *  executes it here either; the caller applies the parsed value by hand, exactly
+ *  as the client runtime's 'ssr' chunk does on a real page load. */
 function extractSsrSeed(firstPaint: string): unknown {
-  const m = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(firstPaint);
+  const m = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(firstPaint);
   return m ? JSON.parse(m[1]) : null;
 }
 

@@ -100,7 +100,8 @@ async function flush(cycles = 6) {
 // exercised (a DIFFERENT client chunk = cross-route → hard-nav, finding #4).
 function ssrDoc(outletInner, seed, clientScript) {
   const seedTag = seed
-    ? "<script>window.__scrml_ssr_state=" + JSON.stringify(seed).replace(/</g, "\\u003c") + ";</script>"
+    ? '<script type="application/json" id="__scrml_ssr_state">' +
+      JSON.stringify(seed).replace(/</g, "\\u003c") + "</script>"
     : "";
   const scriptTag = clientScript ? '<script src="' + clientScript + '"></script>' : "";
   return (

@@ -809,7 +809,6 @@ function hasRuntimeMetaBlocks(fileAST: any): boolean {
 //                 upload-call, reactive-explicit-set, bare navigate call,
 //                 state-decl with reactivity (debounced= / throttled= per §6.13).
 //   meta          meta node
-//   transitions   logic binding or event binding with transitionEnter/transitionExit
 //   input         markup tag "keyboard", "mouse", or "gamepad"
 //   deep_reactive state-decl (uses _scrml_deep_reactive), when-effect, bind: directives,
 //                 CSS variable bridge with reactive refs, bind-props wiring,
@@ -1807,13 +1806,6 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
 
   if (logicBindings.length > 0) {
     chunks.add("deep_reactive"); // _scrml_effect for reactive display
-    // Check for transition directives
-    for (const binding of logicBindings) {
-      if (binding.transitionEnter || binding.transitionExit) {
-        chunks.add("transitions");
-        break;
-      }
-    }
   }
 
   if (eventBindings.length > 0) {
@@ -2069,7 +2061,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // that doesn't otherwise need them). All three options deferred to a
   // follow-up dispatch.
   //
-  // 'core', 'scope', 'errors', 'transitions' are always pre-populated (see
+  // 'core', 'scope', 'errors' are always pre-populated (see
   // makeCompileContext in context.ts).
   const runtimeInsertIndex = lines.length;
   lines.push("// --- runtime assembly placeholder (P3.B) ---");

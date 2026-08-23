@@ -7297,7 +7297,7 @@ The compiler SHALL escalate a function to a server route if ANY of the following
 5. **Caller-context propagation.** A function with no direct triggers (1-4) and no capture-taint, called only from server-classified callers and never from a client-classified function, SHALL escalate to server by inheritance. A function with at least one client-classified caller SHALL remain ambient (client-classified). A function with no callers at all SHALL NOT escalate via this trigger; see Trigger 6. (Added 2026-05-08 — Insight 26 Batch 1 precondition; whole-program analysis applied at the call-graph fixed-point. Implementation: `compiler/src/route-inference.ts` Step 5c.)
 6. **Dead-code unreached-warn.** A function declared but called from neither a server-classified context nor a client-classified context, not exported, not server-annotated, not referenced from markup, and **not referenced as a first-class value from reachable logic** (passed as a call argument, assigned, stored in an array/object, or otherwise named without being called — a bare function reference keeps it reachable and un-tree-shakeable), SHALL fire `W-DEAD-FUNCTION` at its declaration site (§34). A call or reference located **inside a nested closure body (an arrow `=>` or `function` expression) within a reachable function counts as a use** — reachability descends into nested closure scopes. The function will be tree-shaken from the output. This trigger is diagnostic, not escalation: it surfaces the in-vacuum case where neither Trigger 1-3 nor Trigger 5 carries information about intended placement. (Added 2026-05-08 — Insight 26 Batch 1 precondition; complements Trigger 5 by catching empty-call-graph cases the call-graph fixed-point cannot resolve. Closure-body + first-class-value reachability clarified 2026-07-26 — change-id `w-dead-function-fp-closure-and-value-ref`, adopter #195; the tree-shaker already retains these — the fix closes a false-positive gap in the dead-warn walk only, no placement change.)
 7. **Channel `broadcast()` / `disconnect()` escalation.** A standalone `function` declaration whose declaration appears within the lexical scope of a `<channel>` body (§38) SHALL escalate to the server boundary when its body calls the channel built-in `broadcast(...)` or `disconnect()` (§38.6). These are the channel's server-side hub operations (they publish to / drop subscribers on the topic), so their presence is itself the server-placement signal — the structural successor to the deprecated `server` keyword on channel publisher functions that genuinely broadcast. **A channel-CELL WRITE does NOT escalate.** Under the v0.3 client-held channel model (§38.4 — there is NO server-authoritative channel-cell store), a write to a channel-declared cell is a CLIENT-side, sync-emitting operation: the client mutates its locally-held cell and the auto-sync reactive effect distributes the new value to every other subscriber via the `__sync` wire frame (§38.4, §38.7). This is exactly what an `onclient:*` lifecycle handler that writes a channel cell already does (§38.10) — a regular publisher that only writes a channel cell stays on the client and behaves identically. **Scope (over-fire discipline):** the trigger applies ONLY to standalone `function` declarations lexically inside a `<channel>` body — NOT to `onclient:`/`onserver:` attribute handlers (which are channel attributes, not function declarations), NOT to `fn`, and NOT to functions declared outside any `<channel>` scope. Neither a READ nor a WRITE of a channel cell escalates; only a `broadcast()`/`disconnect()` call does. (Added 2026-06-10 — change-id `server-keyword-eliminate-2026-06-10` D2. **AMENDED 2026-06-12 — change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A (S189):** the former sub-clause (a) "channel-cell write → server" is REMOVED; this revises the S180 D2 Trigger-7a addition. A channel-cell write is now a client-side sync-emitting operation per the client-held model (§38.4, §38.10), not a server-placement signal — only `broadcast()`/`disconnect()` (§38.6 server hub ops) remain placement signals. A server-context channel function (escalated via `broadcast()`/`disconnect()`, an `onserver:*` handler per §38.6.1, or another §12.2 trigger such as `?{}` SQL) that READS a channel cell is rejected — see `E-CHANNEL-SERVER-CELL-READ` (§34, §38.4, §38.6.1). Implementation: `compiler/src/route-inference.ts` `detectChannelBroadcastReason`, gated on `collectChannelFunctionMap`.)
-8. **Reserved-name `handle()` escalation.** The function the compiler recognizes as the middleware `handle(request, resolve)` escape hatch (§39.3 / §40.3) SHALL escalate to the server boundary by virtue of that recognition, independent of the deprecated `server` keyword. Recognition is by the reserved name `handle` joined with the §39.3.2 signature shape (exactly two parameters named `request` and `resolve`; not a generator), so a keyword-less `function handle(request, resolve)` is both server-escalated AND woven into the request pipeline (§40.3) exactly as the keyword-bearing form was. The function's boundary is `middleware` (a server-executing onion-model interceptor, not a route). (Added 2026-06-10 — change-id `server-keyword-eliminate-2026-06-10` D2. Implementation: `compiler/src/ast-builder.js` `isHandleEscapeHatch` recognition + `compiler/src/route-inference.ts` `middleware-handle` reason.)
+8. **Reserved-name `handle()` escalation.** The function the compiler recognizes as the middleware `handle(request, resolve)` escape hatch (§40.3) SHALL escalate to the server boundary by virtue of that recognition, independent of the deprecated `server` keyword. Recognition is by the reserved name `handle` joined with the §40.3.2 signature shape (exactly two parameters named `request` and `resolve`; not a generator), so a keyword-less `function handle(request, resolve)` is both server-escalated AND woven into the request pipeline (§40.3) exactly as the keyword-bearing form was. The function's boundary is `middleware` (a server-executing onion-model interceptor, not a route). (Added 2026-06-10 — change-id `server-keyword-eliminate-2026-06-10` D2. Implementation: `compiler/src/ast-builder.js` `isHandleEscapeHatch` recognition + `compiler/src/route-inference.ts` `middleware-handle` reason.)
 
 > **Trigger 3 — S299 amendment (`trigger-3-server-only-import-escalation`).** Until S299 this trigger did **not fire**: it named `SERVER_ONLY_SCRML_MODULES`, a set whose only consumers were the STDLIB-EXPORT-SEED async fail-closed backstop and the CPS-eligibility predicates — never the placement decision. A `<program>` calling `hashPassword` from `scrml:auth` therefore emitted no `.server.js` at all and shipped both the caller's secret and a real `Bun.password.hash` argon2id implementation into the browser bundle, with zero diagnostics (verified by execution, S280 and again S299).
 >
@@ -7323,7 +7323,7 @@ For each server-escalated function, the compiler SHALL generate:
 
 **Compiler-internal route names.** A *compiler-internal* route is one the compiler generates together with a scrml client-side fetch caller (the §12.3 bundle above) — the Pillar-3 zero-boilerplate case where the only consumer of the route is the compiler-generated client. The name of a compiler-internal route is an implementation detail: the developer SHALL NOT reference, configure, or even observe it in scrml source. There is no need to — the compiler hands the name to its own generated fetch caller, and no other party ever sees it.
 
-**Carve-out — author-declared foreign-facing endpoints (the serve-side BYOB rule).** This axiom is SCOPED to compiler-internal routes. It does NOT forbid an author from declaring a stable, observable contract URL on a route whose consumer is NOT a compiler-generated scrml client. An explicit `route="/path"` on a `server function*` SSE generator (§37.3) — and on the `handle()` raw escape hatch (§39.3) — declares an **author-controlled foreign-facing endpoint**: a stable URL that a NON-scrml client (a foreign agent, a webhook source, an `EventSource` subscriber in another codebase) connects to directly. Such a client has no compiler-generated scrml fetch caller to receive a compiler-internal route hash, so the author-declared path IS the contract — the developer MUST be able to declare and observe it. The compiler SHALL honor the author-declared `route=` path as the mounted handler path. (The compiler still exports each such route under a compiler-internal JS binding identifier; the author path is the `path:` of the route record, never the binding name — the two are distinct.) This is the SERVE-side mirror of the consume-side `<api>` Bring-Your-Own-Boundary rule (§60, S210): when scrml does not own BOTH ends of a wire, the boundary URL is an author-owned, type-system-honest contract, not a compiler-hidden detail. (Added 2026-06-23 — change-id `escalation-2-sse-author-route-app-mode-2026-06-23`; ratified S216, design-insight [S216/escalation-2]; dpa-002 serve-side-raw-route deep dive, Approach B + the OQ-1 carve-out. NARROW: this carves out only the author-declared `route=` on a `server function*` SSE / `handle()`; it does NOT introduce a `raw` route primitive — see §37.3 / §39.3.)
+**Carve-out — author-declared foreign-facing endpoints (the serve-side BYOB rule).** This axiom is SCOPED to compiler-internal routes. It does NOT forbid an author from declaring a stable, observable contract URL on a route whose consumer is NOT a compiler-generated scrml client. An explicit `route="/path"` on a `server function*` SSE generator (§37.3) — and on the `handle()` raw escape hatch (§40.3) — declares an **author-controlled foreign-facing endpoint**: a stable URL that a NON-scrml client (a foreign agent, a webhook source, an `EventSource` subscriber in another codebase) connects to directly. Such a client has no compiler-generated scrml fetch caller to receive a compiler-internal route hash, so the author-declared path IS the contract — the developer MUST be able to declare and observe it. The compiler SHALL honor the author-declared `route=` path as the mounted handler path. (The compiler still exports each such route under a compiler-internal JS binding identifier; the author path is the `path:` of the route record, never the binding name — the two are distinct.) This is the SERVE-side mirror of the consume-side `<api>` Bring-Your-Own-Boundary rule (§60, S210): when scrml does not own BOTH ends of a wire, the boundary URL is an author-owned, type-system-honest contract, not a compiler-hidden detail. (Added 2026-06-23 — change-id `escalation-2-sse-author-route-app-mode-2026-06-23`; ratified S216, design-insight [S216/escalation-2]; dpa-002 serve-side-raw-route deep dive, Approach B + the OQ-1 carve-out. NARROW: this carves out only the author-declared `route=` on a `server function*` SSE / `handle()`; it does NOT introduce a `raw` route primitive — see §37.3 / §39.3.)
 
 ### 12.4 Normative Statements
 
@@ -19690,6 +19690,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-MW-002 | §40 | `ratelimit=` attribute value does not match the canonical `N/unit` pattern (e.g., `100/minute`, `10/second`). Emitted at `compiler/src/ast-builder.js` (the §40 middleware-validation block — the `E-MW-*` `ratelimit=` / `handle()` checks). | Error |
 | E-MW-005 | §40 | More than one `handle()` function definition in the same file. A file has at most one middleware handler. Emitted at `compiler/src/ast-builder.js` (the §40 middleware-validation block — the `E-MW-*` `ratelimit=` / `handle()` checks). | Error |
 | E-MW-006 | §40 | `handle()` defined outside file top-level `${ }` logic context (e.g., inside a function body or nested scope). The middleware handler must be a file-top-level binding. Emitted at `compiler/src/ast-builder.js` (the §40 middleware-validation block — the `E-MW-*` `ratelimit=` / `handle()` checks). | Error |
+| E-MW-007 | §40 | More than one module in a build declares a request pipeline (a `handle()`, or a `<program>` attribute that emits a pipeline stage — `cors=` / `log=` other than `"off"` / `ratelimit=` / `headers="strict"`) — two applications emitted into one compiled server. The §40.3 onion is application-scope and a compiled server mounts exactly ONE (§40.3.4); composing them would run every module's `handle()` PRE on every other module's document, in an order the module list decides — and that list is filename-sorted, so a rename would silently change which `handle()` won. The diagnostic names every competing source. Emitted at `compiler/src/commands/select-request-onion.js`, surfaced by `scrml build` (`compiler/src/commands/build.js`) and by `scrml dev` through its compile-failure channel (`compiler/src/commands/dev.js`). (Emitted at `compiler/src/commands/select-request-onion.js:72` — the shared one-onion selector consumed by both `commands/build.js` and `commands/dev.js`.) | Error |
 | E-USE-001 | §41 | `use` declaration appears inside a `${ }` context, component body, or other nested scope. `use` is only valid at file top level. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
 | E-USE-002 | §41 | `use` declaration appears after the first markup element or logic context in the file. All `use` declarations must precede file body content. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
 | E-USE-005 | §41 | `use` specifier uses an unrecognized protocol prefix (must begin with `scrml:`, `vendor:`, `./`, or `../`). Bare npm-style specifiers are not valid in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
@@ -22596,7 +22597,7 @@ INTEGER timestamps for cross-driver portability. TTL eviction is lazy on read; c
 
 `server function handle(request, resolve)` is a reserved function name. When defined in a file, the compiler weaves it into the request pipeline as an onion-model interceptor.
 
-#### 39.3.1 Syntax
+#### 40.3.1 Syntax
 
 ```scrml
 <program db="./app.db" log="structured" cors="*">
@@ -22617,7 +22618,7 @@ ${ function handle(request, resolve) {
 
 `resolve(request)` calls the remainder of the pipeline: all compiler-auto middleware that comes after the pre-middleware position, then the matched route handler, then all compiler-auto middleware in the post-middleware position.
 
-#### 39.3.2 Signature
+#### 40.3.2 Signature
 
 ```
 function handle(request: Request, resolve: (req: Request) => Response) -> Response
@@ -22626,9 +22627,9 @@ function handle(request: Request, resolve: (req: Request) => Response) -> Respon
 - `request` is the raw Bun `Request` object.
 - `resolve(request)` invokes the rest of the pipeline and returns a Bun `Response`. It MUST be called exactly once. Calling `resolve` zero times or more than once is a compile error (E-MW-003).
 - The return type of `handle` is `Response`. Returning a non-`Response` value is a compile error (E-MW-004).
-- `handle` is always server-escalated, inferred by its reserved name joined with the §39.3.2 signature shape (§12.2 Trigger 8). The deprecated `server` keyword is no longer required (and SHALL surface `W-DEPRECATED-SERVER-MODIFIER` (§34) like any other escalating function once the body/name supplies the escalation reason — for `handle()`, the reserved name itself supplies it). A keyword-less `function handle(request, resolve)` is recognized, server-escalated, AND woven into the request pipeline (§40.3) exactly as the keyword-bearing form was. (Amended 2026-06-10 — change-id `server-keyword-eliminate-2026-06-10` D2; supersedes the prior "the `server` keyword before `function` is required and is not implied".)
+- `handle` is always server-escalated, inferred by its reserved name joined with the §40.3.2 signature shape (§12.2 Trigger 8). The deprecated `server` keyword is no longer required (and SHALL surface `W-DEPRECATED-SERVER-MODIFIER` (§34) like any other escalating function once the body/name supplies the escalation reason — for `handle()`, the reserved name itself supplies it). A keyword-less `function handle(request, resolve)` is recognized, server-escalated, AND woven into the request pipeline (§40.3) exactly as the keyword-bearing form was. (Amended 2026-06-10 — change-id `server-keyword-eliminate-2026-06-10` D2; supersedes the prior "the `server` keyword before `function` is required and is not implied".)
 
-#### 39.3.3 Position in the Pipeline
+#### 40.3.3 Position in the Pipeline
 
 The compiler inserts `handle()` at this position in the full pipeline:
 
@@ -22638,7 +22639,7 @@ The compiler inserts `handle()` at this position in the full pipeline:
 
 The compiler-auto middleware order relative to `handle()` is fixed. If the developer needs a different order (e.g., logging before CORS), they MUST implement that concern in `handle()` directly and omit the `<program>` attribute for it.
 
-#### 39.3.4 `handle()` Rules
+#### 40.3.4 `handle()` Rules
 
 **Normative statements:**
 
@@ -22646,8 +22647,11 @@ The compiler-auto middleware order relative to `handle()` is fixed. If the devel
 - `handle()` SHALL be defined at file top level, inside a `${ }` logic context. A `handle()` definition inside a function body, component body, or any nested scope SHALL be a compile error (E-MW-006).
 - `handle()` does NOT apply to WebSocket upgrade requests. WebSocket lifecycle handlers use `<channel>` (§38). An attempt to intercept WebSocket upgrades via `handle()` is not blocked by the compiler but the behavior is undefined and SHALL NOT be relied upon.
 - `handle()` applies to all HTTP requests handled by the compiled server — including statically-served assets and the `/_scrml_ws/` upgrade routes. If the developer's `handle()` modifies a `/_scrml_ws/` request, behavior is undefined.
+- **The request onion is APPLICATION-scope, and a compiled server SHALL mount exactly ONE.** It SHALL run exactly once per request. This follows from the two statements already made: the onion applies to *all* HTTP requests the compiled server handles (above), and the `<program>` middleware attributes are app-scope with the top-level `<program>` declared exactly once per application, in the entry file (§40.8). In the canonical shape the question does not arise — the entry file declares `<program>` (carrying the middleware attributes and/or `handle()`) and the `pages/*.scrml` route files declare `<page>`, which hosts no onion.
+- **Declaring a request pipeline** means declaring a `handle()`, or a `<program>` attribute that emits a pipeline STAGE: `cors=`, `log=` with any value other than `"off"`, `ratelimit=`, or `headers="strict"`. The other `<program>` attributes that share the same configuration surface emit no stage and therefore declare no pipeline: `batch-in-list-cap=` (§8.10.6), `idempotency-store=` / `idempotency-ttl=` (§19.9.6), `cors-max-age=` (inert on its own — the preflight it tunes exists only when `cors=` is present), and `channel-reconnect=` (§38.3.1, a WebSocket cadence). A file carrying only those SHALL NOT be treated as hosting an onion.
+- When a build presents MORE than one module declaring a request pipeline in that sense, that is more than one application emitted into one server. The compiler SHALL emit `E-MW-007` naming every competing source and SHALL NOT compose them. Composition would run every module's `handle()` PRE on every other module's document, and its order would be the module-discovery order — which is filename-sorted, so a **rename** would silently change which `handle()` won a contested path. Precedence is read off `<program>` in the source, never off a filename. (§40.8 reserves `E-PROGRAM-002` for the underlying shape: a second top-level `<program>` in another file of the same application. `E-MW-007` is the emitted-server consequence, and fires today.)
 
-#### 39.3.5 Early Return from `handle()`
+#### 40.3.5 Early Return from `handle()`
 
 `handle()` MAY return a response directly without calling `resolve()`. This short-circuits the pipeline and prevents the route handler from running.
 
@@ -22708,6 +22712,7 @@ A scrml application with one custom concern adds one `handle()`. The common 80% 
 | E-MW-004 | `handle()` returns a non-`Response` value | Error |
 | E-MW-005 | More than one `handle()` definition in the same file | Error |
 | E-MW-006 | `handle()` defined outside file top-level `${ }` | Error |
+| E-MW-007 | More than one module in a build declares a request pipeline (a `handle()`, or a `<program>` attribute that emits a pipeline stage — `cors=` / `log=` other than `"off"` / `ratelimit=` / `headers="strict"`) — two applications in one compiled server; the onion is app-scope and there SHALL be exactly one (§40.3.4) (Emitted at `compiler/src/commands/select-request-onion.js:72` — the shared one-onion selector consumed by both `commands/build.js` and `commands/dev.js`.) | Error |
 
 > **E-MW-001 retired (S80, 2026-05-11).** The prior pairing requirement (`csrf="on"` ⟹ `auth=`) was retired alongside the `csrf="on"` value. The canonical value set is `csrf="auto" | "off"` per §52.13. Invalid literals emit `W-ATTR-002`.
 
@@ -23247,7 +23252,7 @@ This section extends and supersedes §21 (Module and Import System). The `import
 
 ### 41.2 `use` — Capability Imports
 
-#### 40.2.1 Syntax
+#### 41.2.1 Syntax
 
 ```
 use-declaration ::= 'use' module-specifier named-imports?
@@ -23281,7 +23286,7 @@ ${ import { formatCurrency } from './utils.scrml' }
 </program>
 ```
 
-#### 40.2.2 What `use` Brings into Scope
+#### 41.2.2 What `use` Brings into Scope
 
 `use scrml:ui` without named imports brings ALL exports of that module into markup scope. Named imports (`use scrml:chart { LineChart }`) bring only the named items.
 
@@ -23293,7 +23298,7 @@ ${ import { formatCurrency } from './utils.scrml' }
 - A named import in `use` that does not exist in the target module SHALL be a compile error (E-USE-003).
 - When two `use` declarations bring the same name into scope, the later declaration wins. The compiler SHALL emit W-USE-001 for each shadowed name.
 
-#### 40.2.3 `use` and the Living Compiler
+#### 41.2.3 `use` and the Living Compiler
 
 Living compiler extensions (transformation alternatives) are imported via `use vendor:<extension-name>`. The extension is a vendored `.scrml` or `.js` file in the project's `vendor/` directory that registers transformation alternatives.
 
@@ -23303,7 +23308,7 @@ Living compiler extensions (transformation alternatives) are imported via `use v
 
 ### 41.3 `import` — Value Imports
 
-#### 40.3.1 Syntax (extended from §21)
+#### 41.3.1 Syntax (extended from §21)
 
 The `import` syntax from §21 is retained exactly. This section adds the `scrml:` protocol prefix for stdlib value imports.
 
@@ -35045,7 +35050,7 @@ The lint fires on a `function`-keyword declaration when ALL of:
    - NOT failable (`function name!(...)`) — the `!` suffix is the failable
      surface (§55 / §19.4); failable functions are not promotable to `fn`
      because `fn` is implicitly infallible.
-   - NOT the `handle()` escape hatch (§39.3.1).
+   - NOT the `handle()` escape hatch (§40.3.1).
 
 3. **The body satisfies the §48.3 fn-body prohibitions.** Operationally, this
    is verified by invoking the existing `checkFnBodyProhibitions` walker
@@ -36074,7 +36079,7 @@ This is the inbound mirror of §60.6 (where `<api>` emits a *client* callable an
 
 - **§60 `<api>` (typed OUTBOUND)** — the direct mirror. `<api>` types the boundary where scrml **calls** a foreign backend; `<endpoint>` types the boundary where scrml **is called by** a foreign client (§61.1). Together they type both directions of a foreign HTTP wire scrml does not own end-to-end.
 - **§37 `server function* route=` (the SSE leg — ALREADY LANDED, escalation-2)** — an author-declared `route=` on a `server function*` SSE generator serves a **streaming** foreign-facing endpoint (an `EventSource` subscriber connects directly). Landed S216 (`escalation-2-sse-author-route-app-mode-2026-06-23`, `f5f15009`). `<endpoint>` is the **request/response** (non-streaming, typed-dispatch) counterpart to that streaming leg; an app with both serves a foreign client a typed request/response surface (`<endpoint>`) AND a typed SSE stream (`server function* route=`).
-- **§40 `handle()` (the global-middleware raw escape — stays)** — the onion-model request interceptor (§40.3 / §39.3). `handle()` is the **global, untyped** raw escape (it sees every request as a raw `request`); `<endpoint>` is a **per-path, typed** inbound surface. `handle()` stays as the interim raw escape for an untypeable per-path need until the deferred `raw` server-fn (below) is witnessed.
+- **§40 `handle()` (the global-middleware raw escape — stays)** — the onion-model request interceptor (§40.3). `handle()` is the **global, untyped** raw escape (it sees every request as a raw `request`); `<endpoint>` is a **per-path, typed** inbound surface. `handle()` stays as the interim raw escape for an untypeable per-path need until the deferred `raw` server-fn (below) is witnessed.
 - **§12 routes (the owned data-layer)** — a §12.3 data-layer route is the boundary where scrml owns **both** ends (it emits both a server handler AND the paired client fetch-stub). `<endpoint>` is precisely the case where scrml does **not** own the client end, so it emits the server half only (§61.6) and applies inbound-edge honesty (§61.4) rather than the owned-boundary disappearing-server promise.
 - **The DEFERRED `raw` server-fn (the path-bound raw escape)** — a path-bound *raw* (untyped-wire) inbound escape was the (a) half of the dpa-002 a+b pair. It is **DEFERRED** — gated on a witnessed *untypeable* inbound case (a foreign contract that cannot be modelled as an `accepts=` enum). Until then, `handle()` (§40) is the interim raw escape. `raw` SHALL NOT ship without its own ratification (mirroring the §60.8 A1 deferral).
 
@@ -36103,7 +36108,7 @@ The `<endpoint>` implementation waves will fire these. Each is **named and reser
 
 ### 61.11 Cross-references
 
-§60 `<api>` (the typed-OUTBOUND mirror — `<endpoint>` is the typed-INBOUND dual; §61.1, §61.8) · §41.13 `parseVariant` (the request decode, §61.3 — the same total/failable tagged-variant decoder §60.5 uses for the response half) · §18.0.1 `<match>` block-form arms + exhaustiveness (the arm grammar + the exhaustiveness surface `<endpoint>` reuses, §61.2 / §61.4) · §51.0.B.1 payload binding (the per-arm payload destructure, §61.2) · §4.14 `:`-shorthand body (the canonical terse arm form, §61.2) · §4.18 code-default body (the arm-body mode, §61.2) · §53.15 enum-subset refinement (the §61.4 subset-narrows exhaustiveness rule) · §37.3 `server function* route=` (the foreign-facing SSE leg — the streaming counterpart, ALREADY LANDED escalation-2; §61.8) · §40 / §39.3 `handle()` (the global raw escape — interim raw, §61.8) · §12.2 / §12.3 (server placement + the owned data-layer route `<endpoint>` is distinguished from; §61.6) · §14 / §53 (the `accepts=` enum type surface) · §4.15 / §24.4 (the structural-element registry — `<endpoint>` is registered there). Build arc: `docs/changes/endpoint-primitive-2026-06-25/`. Design: the dpa-002 reopen deep-dive + the S219 ratification.
+§60 `<api>` (the typed-OUTBOUND mirror — `<endpoint>` is the typed-INBOUND dual; §61.1, §61.8) · §41.13 `parseVariant` (the request decode, §61.3 — the same total/failable tagged-variant decoder §60.5 uses for the response half) · §18.0.1 `<match>` block-form arms + exhaustiveness (the arm grammar + the exhaustiveness surface `<endpoint>` reuses, §61.2 / §61.4) · §51.0.B.1 payload binding (the per-arm payload destructure, §61.2) · §4.14 `:`-shorthand body (the canonical terse arm form, §61.2) · §4.18 code-default body (the arm-body mode, §61.2) · §53.15 enum-subset refinement (the §61.4 subset-narrows exhaustiveness rule) · §37.3 `server function* route=` (the foreign-facing SSE leg — the streaming counterpart, ALREADY LANDED escalation-2; §61.8) · §40.3 `handle()` (the global raw escape — interim raw, §61.8) · §12.2 / §12.3 (server placement + the owned data-layer route `<endpoint>` is distinguished from; §61.6) · §14 / §53 (the `accepts=` enum type surface) · §4.15 / §24.4 (the structural-element registry — `<endpoint>` is registered there). Build arc: `docs/changes/endpoint-primitive-2026-06-25/`. Design: the dpa-002 reopen deep-dive + the S219 ratification.
 
 ---
 

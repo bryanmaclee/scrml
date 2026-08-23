@@ -66,11 +66,21 @@ function stdlibModules(): string[] {
     .sort();
 }
 
-/** CLI verbs = compiler/src/commands/*.js, minus non-verb helper modules. */
+/**
+ * CLI verbs = compiler/src/commands/*.js, minus non-verb helper modules.
+ *
+ * The allowlist is the weak point: a helper module dropped into `commands/`
+ * silently becomes a published "CLI verb" until someone notices. The verbs the
+ * CLI actually dispatches are the `subcommand === "..."` chain in
+ * `compiler/src/cli.js`; every name below is absent from it.
+ *   - `module-format-notice` — a notice-string helper.
+ *   - `diagnostic-format`    — `stripRedundantCode`, imported by build/compile/dev.
+ *   - `select-request-onion` — §40.3/§40.8 onion selection, imported by build/dev.
+ */
 function cliVerbs(): string[] {
   const d = join(ROOT, "compiler/src/commands");
   if (!existsSync(d)) return [];
-  const NOT_A_VERB = new Set(["module-format-notice"]);
+  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion"]);
   return readdirSync(d)
     .filter((e) => extname(e) === ".js")
     .map((e) => e.replace(/\.js$/, ""))

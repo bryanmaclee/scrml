@@ -28,6 +28,8 @@ import {
   buildServeConfig,
   compileThrowDiagnostic,
   sseClients,
+  createHotReloadScriptResponse,
+  HOT_RELOAD_SRC,
 } from "../../src/commands/dev.js";
 
 // A representative fatal-error set: the exact shape api.js emits (flat
@@ -99,8 +101,14 @@ describe("§2 buildCompileErrorResponse() HTML overlay", () => {
 
   test("overlay carries the hot-reload script so it auto-refreshes on fix", async () => {
     const body = await buildCompileErrorResponse(htmlReq("/"), FAILURE).text();
-    expect(body).toContain("/_scrml/live-reload");
-    expect(body).toContain("location.reload()");
+    // The client is served from a same-origin URL rather than inlined, so that a
+    // `<program headers="strict">` app's `default-src 'self'` accepts it (§39.2.5);
+    // the overlay carries the TAG, and the endpoint (registered ahead of this
+    // short-circuit in buildServeConfig) carries the reconnect + reload logic.
+    expect(body).toContain(`<script src="${HOT_RELOAD_SRC}"></script>`);
+    const js = await createHotReloadScriptResponse().text();
+    expect(js).toContain("/_scrml/live-reload");
+    expect(js).toContain("location.reload()");
   });
 
   test("diagnostic messages are HTML-escaped (no raw injection)", async () => {

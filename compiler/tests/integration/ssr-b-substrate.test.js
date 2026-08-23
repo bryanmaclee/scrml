@@ -6,7 +6,7 @@
  * SAME server-authority queries the /__serverLoad + /__mountHydrate routes run
  * (reusing the §14.8.9 _scrml_protect_tag → _scrml_protect_redact egress sink),
  * reads the sibling compiled <base>.html, and injects
- * `<script>window.__scrml_ssr_state={…}</script>` before </head>. The client
+ * `<script type="application/json" id="__scrml_ssr_state">{…}</script>` before </head>. The client
  * seeds its cells BEFORE mount (_scrml_ssr_seed_apply) so a seeded cell is
  * construction-resolved; the /__serverLoad fetch IIFEs skip the RTT
  * (_scrml_ssr_seeded), and the engine `server=@cell` ride reads a real value at
@@ -17,7 +17,7 @@
  * the seed/skip/redact machinery, NOT the markup-render or the warning retirement.
  *
  * Coverage:
- *   (a) inline <script>window.__scrml_ssr_state=…</script> injected before </head>
+ *   (a) <script type="application/json" id="__scrml_ssr_state">…</script> injected before </head>
  *   (b) a protect='d column is REDACTED in the inline state
  *   (c) the /__serverLoad fetch IIFE is SKIPPED for a seeded cell
  *   (d) the engine server=@cell ride hydrates at construction from the seed
@@ -161,16 +161,20 @@ const NON_SERVER = `<program>
 </program>`;
 
 // ---------------------------------------------------------------------------
-// (a) inline <script>window.__scrml_ssr_state=…</script> before </head>
+// (a) <script type="application/json" id="__scrml_ssr_state">…</script> before </head>
 // ---------------------------------------------------------------------------
 
-describe("ssr-b-substrate (a): the SSR HTML-composition route injects the inline seed", () => {
-  test("emits a GET route returning text/html that injects window.__scrml_ssr_state before </head>", () => {
+describe("ssr-b-substrate (a): the SSR HTML-composition route injects the seed data block", () => {
+  test("emits a GET route returning text/html that injects the JSON seed before </head>", () => {
     const { serverJs } = compileBundles(TIER1);
     expect(serverJs).toContain("_scrml_route___ssr");
     expect(serverJs).toContain('method: "GET"');
     expect(serverJs).toContain('Content-Type": "text/html');
-    expect(serverJs).toContain("window.__scrml_ssr_state=");
+    // NON-EXECUTABLE data block: an executable inline <script> is refused under
+    // `headers="strict"`'s pinned `default-src 'self'` (§39.2.5), which silently
+    // cost a strict-headers app its whole SSR seed.
+    expect(serverJs).toContain('<script type="application/json" id="__scrml_ssr_state">');
+    expect(serverJs).not.toContain("<script>window.__scrml_ssr_state=");
     // injected before </head> via a FUNCTION replacer (FIX E — so $-patterns in the
     // seed JSON are spliced literally, not interpreted by String.replace).
     expect(serverJs).toContain('_scrml_html.replace("</head>", () => _scrml_seed_tag + "</head>")');

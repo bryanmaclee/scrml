@@ -21,7 +21,7 @@
     "firstPaint": {
       "contains": [
         "<li data-scrml-key=\"10\" class=\"pub\">PublicRow</li>",
-        "window.__scrml_ssr_state=",
+        "<script type=\"application/json\" id=\"__scrml_ssr_state\">",
         "\"publicCell\""
       ],
       "notContains": ["SECRETROW", "\"secretCell\""]
