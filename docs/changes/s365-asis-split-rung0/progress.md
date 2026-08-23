@@ -388,6 +388,13 @@ Positions where a value binds `asIs` with **no author behind it**, after rung 0:
    commit HAD landed; only the post-commit hook was killed. Verified by `git log` rather than
    assumed from the non-zero exit — the failure mode where an agent re-commits and duplicates work.
 
+9. **`docs/FACTS.md` went stale twice and I caught it only on the final gate sweep.** Its
+   `@generated:facts-table` carries `compiler/src` LOC, so **any** source edit stales it — the SPEC
+   commit staled the SPEC-lines row, and the `type-system.ts` commit staled the LOC row. Both were
+   regenerated, but the second was found by the closing gate run rather than at the commit that
+   caused it. ⚑ **Rule for the next round: `bun scripts/facts.ts --write` belongs in the SAME commit
+   as any `compiler/src` or `compiler/SPEC.md` edit, not at the end.**
+
 ---
 
 ## MEASUREMENT LEDGER — fix round
