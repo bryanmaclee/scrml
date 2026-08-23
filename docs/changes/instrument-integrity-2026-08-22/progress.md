@@ -869,3 +869,55 @@ regenerators rather than by reading the anchors:
 $ bun scripts/state.ts --check; echo $?   ->  0
 $ bun scripts/facts.ts --check; echo $?   ->  0
 ```
+
+### (4) MEDIUM — `compiler/SPEC.md:19618` was a live CI landmine — **DONE**
+
+The `I-MATCH-PROMOTABLE` row cited `compiler/src/lint-promotable.ts`. That file does not exist;
+the emitter is `compiler/src/lint-i-match-promotable.js`. This branch's own
+`s34-census.ts --check-new` provenance resolver is a BLOCKING gate, and it uses that very row as
+its motivating example in a source comment — **so the branch shipped a gate armed against a
+defect it left in place.** The next PR to so much as reflow that line fails for something it did
+not cause: the pa-base §8 cry-wolf shape that gets a gate bypassed and then deleted.
+
+**Emitter identified by grepping fire sites, not by inferring from the filename.** Three
+`code: "I-MATCH-PROMOTABLE"` construction sites at `lint-i-match-promotable.js:577, 604, 626`,
+dispatched from `api.js:2231` (Stage 6.4). The row's *other* citation,
+`compiler/src/commands/promote.js`, was checked too and is correct — so only the one path moved.
+
+**Bite proof.** The first attempt at a RED proof was wrong and is recorded because the failure
+mode is instructive: reverting the path made the line **identical to `origin/main`**, so the
+gate correctly reported `no new/changed §34 rows — PASS`. A diff-scoped gate cannot fire on a
+row nobody touched — that is its design, not a defect. The real landmine only arms when the row
+is CHANGED, so the proof has to simulate the innocent edit:
+
+| `compiler/SPEC.md` state | `bun scripts/s34-census.ts --check-new --base origin/main` | exit |
+|---|---|---|
+| stale path, line otherwise untouched | `no new/changed §34 rows vs origin/main — PASS` | 0 (gate not armed — correct) |
+| **stale path + an innocent reflow** (`The lint` → `This lint`) | **`§34.0 gate FAILED — I-MATCH-PROMOTABLE — STALE PROVENANCE: names `compiler/src/lint-promotable.ts`, which does not exist`** | **1** |
+| **fixed path + the same innocent reflow** | `1 new/changed §34 row(s), all well-formed (provenance resolves) — PASS` | **0** |
+| fixed path (landed state) | `1 new/changed §34 row(s), all well-formed (provenance resolves) — PASS` | **0** |
+
+Rows 2 and 3 are the whole finding: the identical innocent edit fails before the fix and passes
+after it.
+
+**Swept for siblings rather than assuming it was the only one.** The same `PATH_REF` regex run
+over EVERY code-shaped table row in `SPEC.md` — a deliberate SUPERSET of the census's §34-range
+selection (1227 rows swept vs the census's 809 catalogued codes), because the question was "are
+there other armed landmines" and a superset can only over-report:
+
+```
+swept 1227 catalogued §34 rows — 0 unresolvable backticked repo path(s), 0 distinct
+```
+
+**Zero remain.** `I-MATCH-PROMOTABLE` was the only one, and it is disarmed.
+
+**The census's own comments were de-staled in the same commit.** Two sites in
+`scripts/s34-census.ts` asserted in the PRESENT tense that the row "cites `lint-promotable.ts`,
+which does not exist". After the fix those sentences are false about this tree — a comment
+asserting a falsehood about the current tree is the exact rot the resolver exists to stop.
+Both are now past-tense with the S365 correction named, and the example is kept because it is
+the reason the resolver exists.
+
+**No bucket moved.** Verified by executing the census against `HEAD`'s SPEC and against the
+fixed SPEC and diffing the two outputs — byte-identical (`diff` exit 0). Correct: the bucket
+depends on whether the CODE appears in executable source, not on whether the cited path resolves.

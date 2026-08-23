@@ -39,9 +39,15 @@
  *            only remove claims, never real emitters, since a comment cannot fire a diagnostic.
  *  T8 (S364) A PROVENANCE NOTE THAT POINTS AT NOTHING. The §34.0 gate regex tested the SHAPE of a
  *            provenance note and never whether it RESOLVED, so a row naming a deleted file or a
- *            renamed function passed. Found by execution: `I-MATCH-PROMOTABLE` cites
- *            `compiler/src/lint-promotable.ts`, which does not exist (the emitter is
+ *            renamed function passed. Found by execution: `I-MATCH-PROMOTABLE` CITED
+ *            `compiler/src/lint-promotable.ts`, which did not exist (the emitter is
  *            `compiler/src/lint-i-match-promotable.js`). Paths and symbols are now resolved.
+ *            The SPEC row itself was corrected at S365 — leaving it stale would have red-lined
+ *            the next PR that so much as reflowed the line, for a defect it did not cause, which
+ *            is the pa-base §8 cry-wolf shape that gets a gate bypassed and then deleted. Swept
+ *            afterwards: ZERO unresolvable backticked repo paths remain across every code-shaped
+ *            §34 row in SPEC.md. The example is kept in past tense because it is the reason this
+ *            resolver exists, but it no longer describes this tree.
  *
  * NO HARDCODED LINE NUMBERS. §34's range is derived from the headings every run. A baked line number
  * in a maintained artifact rots silently and nothing fails — the defect class behind the 3,140-line
@@ -308,9 +314,11 @@ if (CHECK_NEW) {
   // -- provenance RESOLUTION (this round) --------------------------------------------------------
   // The check above is a regex for the SHAPE of a provenance note. It never asked whether the note
   // points at anything: a row naming a deleted file or a renamed function passed, because a
-  // backticked path is a backticked path. Measured on this tree — `I-MATCH-PROMOTABLE` claims
-  // "Emitted at `compiler/src/lint-promotable.ts`"; that file does not exist (the emitter is
-  // `compiler/src/lint-i-match-promotable.js`). A rename staled the note and nothing checked.
+  // backticked path is a backticked path. Measured on this tree at S364 — `I-MATCH-PROMOTABLE`
+  // claimed "Emitted at `compiler/src/lint-promotable.ts`"; that file did not exist (the emitter
+  // is `compiler/src/lint-i-match-promotable.js`). A rename staled the note and nothing checked.
+  // The row was corrected at S365, so this reads as history, not as a live defect — a comment
+  // asserting a falsehood about the current tree is the exact rot this resolver was built to stop.
   //
   // So a note that HAS the shape must also RESOLVE:
   //   - every backticked repo path in the row must exist on disk
