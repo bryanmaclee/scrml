@@ -326,7 +326,7 @@ describe("ssr-a-terminus (R26): the composed first-paint HTML contains the rende
     expect(firstPaint.match(/<\/html>/g)?.length ?? 0).toBe(1);
     expect(firstPaint.match(/<\/body>/g)?.length ?? 0).toBe(1);
     // The seed round-trips literally: the inline state carries the verbatim value.
-    const seedTag = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(firstPaint);
+    const seedTag = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(firstPaint);
     expect(seedTag).not.toBeNull();
     const seed = JSON.parse(seedTag[1]);
     expect(seed.accounts.map((r) => r.name)).toEqual(["a$'b", "c$&d"]);

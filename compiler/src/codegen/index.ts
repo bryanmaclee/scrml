@@ -56,6 +56,7 @@ import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-proven
 import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
+import { generateTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
@@ -2014,7 +2015,7 @@ export function runCG(input: CgInput): CgOutput {
         structuralDeclNames: collectStructuralDeclNames(fileAST),
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
-        usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
+        usedRuntimeChunks: new Set(['core', 'scope', 'errors']),
         // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
         // discriminate cross-file engine mount sites from local components / HTML.
         exportRegistry: exportRegistryInput,
@@ -2092,6 +2093,13 @@ export function runCG(input: CgInput): CgOutput {
       const cssParts: string[] = [];
       if (userCss) cssParts.push(userCss);
       if (tailwindCss) cssParts.push(tailwindCss);
+      // §38 transition keyframes. These ship in the file's own stylesheet — a
+      // same-origin <link rel="stylesheet"> — rather than the runtime's former
+      // inline <style> injection, which `<program headers="strict">`'s pinned
+      // `default-src 'self'` CSP (§39.2.5) refuses to apply. Null for a file
+      // with no transition directive, so most stylesheets are unchanged.
+      const transitionCss: string | null = generateTransitionCss(nodes);
+      if (transitionCss) cssParts.push(transitionCss);
       const css: string | null = cssParts.length > 0 ? cssParts.join("\n") : null;
 
       // Create per-file EncodingContext (§47) and set it on the compile context

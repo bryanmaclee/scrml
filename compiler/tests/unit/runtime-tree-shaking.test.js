@@ -18,10 +18,15 @@ import { RUNTIME_CHUNKS, RUNTIME_CHUNK_ORDER, assembleRuntime } from "../../src/
 // ---------------------------------------------------------------------------
 
 describe("RUNTIME_CHUNKS", () => {
-  test("exports the expected 14 chunks", () => {
+  test("exports the expected 13 chunks", () => {
+    // 13 post-CSP-seed round: the 'transitions' chunk RETIRED. Its only content
+    // was an inline-<style> injection IIFE for the §38 keyframes, which a browser
+    // refuses to apply under `headers="strict"`'s pinned `default-src 'self'`
+    // (§39.2.5). The keyframes now ship in the emitted stylesheet
+    // (codegen/emit-transition-css.ts), per the transitions a file actually uses.
     const expectedChunks = [
       'core', 'derived', 'lift', 'scope', 'timers', 'animation',
-      'reconciliation', 'utilities', 'meta', 'transitions', 'errors',
+      'reconciliation', 'utilities', 'meta', 'errors',
       'input', 'equality', 'deep_reactive',
     ];
     for (const name of expectedChunks) {
@@ -120,9 +125,14 @@ describe("RUNTIME_CHUNKS", () => {
     expect(RUNTIME_CHUNKS.meta).toContain("_scrml_meta_effect");
   });
 
-  test("transitions chunk contains CSS animation keyframes", () => {
-    expect(RUNTIME_CHUNKS.transitions).toContain("scrml-fade-in");
-    expect(RUNTIME_CHUNKS.transitions).toContain("scrml-slide-in");
+  test("the retired 'transitions' chunk is gone — no keyframes ship in the runtime", () => {
+    // The §38 keyframes moved OUT of the runtime and into the emitted stylesheet
+    // so `headers="strict"` (`default-src 'self'`, §39.2.5) cannot refuse them.
+    // Nothing in the runtime may create a <style> for them again.
+    expect(RUNTIME_CHUNKS).not.toHaveProperty("transitions");
+    expect(SCRML_RUNTIME).not.toContain("scrml-fade-in");
+    expect(SCRML_RUNTIME).not.toContain("scrml-slide-in");
+    expect(SCRML_RUNTIME).not.toContain("scrml-fly-in");
   });
 
   test("errors chunk contains built-in error classes", () => {
@@ -257,7 +267,14 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 31 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 30 chunks", () => {
+    // 30 chunks post-CSP-seed round: the 'transitions' chunk RETIRED. Its only
+    // content was the inline-<style> injection IIFE for the §38 keyframes, which
+    // a browser refuses to apply under `headers="strict"`'s pinned
+    // `default-src 'self'` (§39.2.5) — a strict-headers app silently lost every
+    // transition. They ship in the emitted stylesheet now
+    // (codegen/emit-transition-css.ts), scoped to the transitions a file uses.
+    //
     // 31 chunks post-§17.1 if= Phase 2 (S301): 'ifmount' SPLIT OUT of the
     // always-included 'scope' chunk. It holds _scrml_create_scope /
     // _scrml_find_if_marker / _scrml_mount_template / _scrml_unmount_scope /
@@ -317,6 +334,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(31);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(30);
   });
 });

@@ -5324,12 +5324,25 @@ export function generateServerJs(
       }
       if (_hasSsrSeed) {
         // Inline the server-authoritative state seed before </head> so the client
-        // hydrates BEFORE mount (kills the fetch RTT). String.fromCharCode(92) is a
-        // backslash: a `<` in the JSON becomes the JS escape so the embedded value
-        // can never break out of the <script> (a `</script>` in revealed string
-        // data stays inert).
+        // hydrates BEFORE mount (kills the fetch RTT).
+        //
+        // The seed ships as a NON-EXECUTABLE data block:
+        //   <script type="application/json" id="__scrml_ssr_state">{…}</script>
+        // A `type` the browser does not recognise as a script language is a DATA
+        // block per HTML: the UA never executes it, so `<program headers="strict">`'s
+        // pinned `default-src 'self'` CSP (§39.2.5) has nothing to refuse. The client
+        // runtime reads it with `document.getElementById(...)` + `JSON.parse` (the
+        // 'ssr' runtime chunk). An executable `<script>window.__scrml_ssr_state=…`
+        // would be refused outright under that CSP, which silently cost the page its
+        // whole SSR seed — and §39.2.5's "override via handle()" escape does not
+        // cover compiler-emitted content, so the author could not fix it.
+        //
+        // String.fromCharCode(92) is a backslash: every `<` in the JSON becomes the
+        // `\u003c` JSON escape, which parses back to `<` and guarantees the payload
+        // can never contain the `</script` that would end the data block early (a
+        // `</script>` inside revealed string data stays inert).
         lines.push(`  const _scrml_seed_json = JSON.stringify(_scrml_ssr_state).replace(/</g, String.fromCharCode(92) + "u003c");`);
-        lines.push(`  const _scrml_seed_tag = "<script>window.__scrml_ssr_state=" + _scrml_seed_json + ";</script>";`);
+        lines.push(`  const _scrml_seed_tag = '<script type="application/json" id="__scrml_ssr_state">' + _scrml_seed_json + "</script>";`);
         // FUNCTION replacer: the seed JSON embeds server-authority cell/row values; a
         // string 2nd-arg would honor $&/$'/$`/$$ in that data and duplicate/corrupt the
         // page tail. (The </head> boundary is a literal string, not a regex, so a $ in

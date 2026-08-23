@@ -138,7 +138,7 @@ async function composeFirstPaint(serverJs, html, dbRows) {
 // `innerHTML=` does NOT execute the `<script>`, so we apply the seed by hand —
 // exactly what the seed script would set on `window.__scrml_ssr_state`.
 function extractSeed(firstPaint) {
-  const m = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(firstPaint);
+  const m = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(firstPaint);
   return m ? JSON.parse(m[1]) : null;
 }
 

@@ -24,7 +24,7 @@
     "firstPaint": {
       "contains": [
         "<li data-scrml-key=\"10\" class=\"wid\">PublicWidget</li>",
-        "window.__scrml_ssr_state=",
+        "<script type=\"application/json\" id=\"__scrml_ssr_state\">",
         "\"widgets\""
       ],
       "notContains": ["SECRETORDER", "99999", "\"orders\"", "\"invoices\""]
