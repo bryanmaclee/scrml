@@ -6239,8 +6239,40 @@ merely told it exists, which they previously could not be.
 
 - `inferExprType` — the compiler's syntactic expression-type inference (`compiler/src/type-system.ts`)
   — SHALL NOT return `asIs`, and an un-annotated `let` / `const` declaration SHALL NOT bind `asIs`
-  as the result of a defeated inference. Those two positions are what rung 0 converts, and they are
-  the whole of what this section makes provable.
+  as the result of a defeated inference — EXCEPT where that declaration's initializer is a
+  `match`-as-expression or an `if`-as-expression, which the guard does not reach (carve-out below).
+  Those two positions are what rung 0 converts, and they are the whole of what this section makes
+  provable.
+- ⛑ **The `match`- / `if`-as-expression initializer is carved out because the guard does not reach
+  it — a disclosed gap, not a design choice.** `const r = match x { … }` and
+  `const q = if (…) { lift … }` carry their initializer in a `matchExpr` / `ifExpr` SIDECAR and set
+  `init: ""`, so `initExpr` is never populated — and `initExpr` IS the guard's precondition. The
+  guard is therefore skipped entirely at those declarations and a defeated inference still silently
+  produces `asIs`. Reproduced:
+
+  ```scrml
+  ${
+      let x = 1
+      const r = match x {
+          1 :> 10
+          else :> 20
+      }
+      print(r)
+  }
+  ```
+
+  → compiles clean, **no `W-TYPE-031-UNPROVEN`**, and a later `match r { … }` reports
+  ``error [E-TYPE-025]: Cannot match on `asIs`-typed subject.`` — naming `asIs`, not `unknown`,
+  which is precisely the collapse this section exists to remove. **MEASURED** by a structural AST
+  walk over 2,362 tracked `.scrml` files: **55 un-annotated declarations across 41 files** — 50
+  `matchExpr`, 5 `ifExpr`, 0 `forExpr`. Filed as
+  `g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard` in `docs/known-gaps.md`,
+  and pinned in `compiler/tests/unit/s365-asis-unknown-split.test.js` with an explicit ⛑ FLIP
+  marker so closing it turns a green test red. It is stated as an EXCEPTION rather than left inside
+  the SHALL because a normative SHALL the implementation does not hold is a false claim inside the
+  §62.2 contract — the same defect §7.5.1 was amended to remove one section earlier. Closing it
+  requires ruling how a `match`- / `if`-as-expression's ARM types unify before the declaration
+  binds; that is rung-1 scoping work, not a guard tweak.
 - ⚑ **That is NOT a global invariant over the compiler, and SHALL NOT be read as one.** Other paths
   still bind `asIs` with no author behind it. `tAsIs()` has 101 call sites in
   `compiler/src/type-system.ts`; rung 0 converts exactly one of them. The visible case is an
@@ -8271,7 +8303,16 @@ mechanism.
 
 Rung 0 makes that split real at ONE position, and this SPEC claims that position and no more:
 **`inferExprType` SHALL NOT return `asIs`, and an un-annotated `let` / `const` declaration SHALL
-NOT bind `asIs` as the result of a defeated inference.**
+NOT bind `asIs` as the result of a defeated inference — EXCEPT where that declaration's initializer
+is a `match`-as-expression or an `if`-as-expression, which the guard does not reach.**
+
+That exception is a disclosed gap, not a design choice: the initializer is carried in a `matchExpr`
+/ `ifExpr` SIDECAR with `init: ""`, so `initExpr` — which IS the guard's precondition — is never
+populated, and a defeated inference at those declarations still binds `asIs` silently. **MEASURED:
+55 un-annotated declarations across 41 files** (50 `matchExpr`, 5 `ifExpr`, 0 `forExpr`) over 2,362
+tracked `.scrml` files. Filed as
+`g-365-match-and-if-as-expression-initializers-bypass-the-unproven-guard` in `docs/known-gaps.md`;
+§7.5.2 carries the reproduction and the rung-1 scoping reason it is filed rather than fixed.
 
 > ⚑ **Other positions still bind `asIs` without an author. They are rungs 1-3, and two of them are
 > normative in this SPEC today — they are not defects and this note is not a deprecation.**
