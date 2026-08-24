@@ -1420,8 +1420,18 @@ function renderTemplateChildToJs(
         // `stmt.raw`, so it fell to `inner = ""` and was SILENTLY DROPPED.
         // `_eachValueFormIfRaw` returns null for a non-value-form `if` (no else /
         // multi-statement branch) OR a MARKUP-valued branch — the latter is a
-        // still-open RESIDUAL here (NOT routed anywhere): it is captured in
-        // `_droppedCFStmt` so the skip below WARNS instead of dropping silently.
+        // still-open RESIDUAL here (NOT routed anywhere).
+        // ⚠ CORRECTED S371-bryan (review floor, PA-verified by execution): this
+        // comment previously claimed the case "is captured in `_droppedCFStmt` so
+        // the skip below WARNS instead of dropping silently." BOTH HALVES WERE
+        // FALSE — `_droppedCFStmt` exists nowhere in the tree (the comment was its
+        // only occurrence), and the skip below emits a JS COMMENT into the artifact
+        // (`// each: empty logic interpolation skipped`), which is NOT a compiler
+        // diagnostic: compile is exit 0 with nothing in `result.warnings`. The drop
+        // is still SILENT to the adopter. Tracked at
+        // g-each-inline-value-form-match-or-markup-branch-interp-dropped, whose
+        // fix direction (b) is the real `W-EACH-VALUE-FORM-CONTROL-FLOW-DROPPED`
+        // warning + its §34 catalog row. Do not read this path as loud.
         inner = _eachValueFormIfRaw(stmt) ?? "";
       } else if (typeof stmt.raw === "string") {
         inner = stmt.raw;
