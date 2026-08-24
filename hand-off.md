@@ -26,21 +26,24 @@ verified quality, per Peter's goal ("numbers down, not for numbers' sake").
 
 ### 1. ⭐ FOLD IN THE g-when SIBLING — turnkey, same pattern (the fix-the-class tail of #693)
 
-`#693` landed `g-when-message-parent-handler-drops-all-but-the-first-statement` (HIGH → resolved: a
-parent-side `when message`/`when error` worker handler dropped every statement after the first; the
-flagship `examples/13-worker.scrml` was live-broken). **Three S239 rounds** hardened it (two caught
-real bugs: line-granular reconstruction regressions; string-bracket accounting). Round 3 surfaced
-**the fix is not class-complete** — three follow-ons filed, all turnkey:
-- **`g-when-effect-multi-statement-body-drops-all-but-first` (HIGH)** — the sibling `when @var changes`
-  (when-effect) node has the IDENTICAL bug. **Apply the exact #693 pattern to the when-effect capture
-  (`ast-builder.js:~13736`, still `bodyParts.join(" ")`) + emit (route through `rewriteBlockBody`);
-  best via a shared token-reconstruction helper** (also closes the S239 finding-4 dup). PETER-LANE.
+The g-when arc closed the mainline multi-statement drop across **both** when-handler node kinds:
+`#693` (worker `when message`/`when error`) + `#695` (the sibling `when @var changes` — fix-the-class,
+shared `_captureWhenHandlerBody` helper). **FOUR S239 rounds total** — every round caught something real
+(line-granular regressions · string-bracket accounting · unfixed sibling · **round-4 a regression the
+approach itself introduced**). Remaining follow-ons, all filed, NONE mainline:
+- **`g-when-handler-multistatement-body-loses-ast-path-lowerings` (MED, NEW round-4, execution-confirmed)** —
+  routing when-handler bodies through `rewriteBlockBody` lost the AST-path lowerings the old single-`bodyExpr`
+  path had: a map `.insert`/`.set`, `<#request>` ref, or `?{}` SQL param in a when-handler statement now
+  mis-lowers (rewriteBlockBody's per-statement RHS uses the STRING fallback, not `emitExpr`/`emitMember`).
+  ⚑ **Threading ctx via `exprCtxExtras` is INSUFFICIENT (PA-tried + reverted).** Real fix = AST-path
+  per-statement lowering (`emit-control-flow.ts:1831`) — its own arc. Narrow (map/set/request/SQL in a
+  when-body) vs the mainline case the fix repaired (net-positive). Server-fn auto-await UNAFFECTED.
 - **`g-component-prop-substitution-skips-when-worker-handler-bodies` (MED)** — `substitutePropsInLogicStmt`
-  (`component-expander.ts:2152`) has no when-worker case; #693 WIDENED the leak to the whole body. Add
-  the when-worker cases. PETER-LANE.
-- **`g-when-handler-usage-analysis-walks-only-first-statement` (MED)** — usage-analysis walks only
-  `bodyExpr` (stmt 1) → feature in stmt 2+ under-detects → chunk pruned → runtime throw. **Routed to
-  bryan** (his live `usage-analyzer.ts` W-DEAD surface — do not edit while live).
+  (`component-expander.ts:2152`) has no when-worker case; #693 WIDENED the leak to the whole body. Add the
+  when-worker cases. PETER-LANE.
+- **`g-when-handler-usage-analysis-walks-only-first-statement` (MED)** — usage-analysis walks only `bodyExpr`
+  (stmt 1) → feature in stmt 2+ under-detects → chunk pruned → runtime throw. **Routed to bryan** (his live
+  `usage-analyzer.ts` W-DEAD surface — do not edit while live).
 
 ### 2. ITEM 2 IS REPRO'D + TRIGGER-ISOLATED — `g-library-fn-match-else-arm...` (HIGH), ready to fix
 
