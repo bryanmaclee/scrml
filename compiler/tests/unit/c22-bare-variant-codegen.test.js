@@ -245,13 +245,22 @@ describe("C22 §C22.8 — qualified `Phase.Idle` regression (MemberExpr)", () =>
     // The exact emit form (whether "Phase.Idle" or "Idle") is an orthogonal
     // codegen concern — what matters is (a) no error, and (b) the variant
     // identity is preserved.
+    // S368 — `render(m)` is wrapped in `${ ... }`. It was BARE here, and a bare
+    // call at a default-logic body-top does not run: MEASURED at S368, this
+    // fixture's emitted client JS contained NO lowered render call at all (only
+    // `_scrml_render_value`, the `${@phase}` interpolation lowering) while the
+    // literal string `render(m)` shipped into the emitted HTML as page text.
+    // The fixture was a latent instance of the very defect S368 rules on, and
+    // this test never noticed because it asserts on the `_scrml_reactive_set`
+    // line, not on render. SPEC §20.3a: the built-in is a `render(...)` call
+    // *in logic position* — which is what the wrapper now makes it.
     const { clientJs, result } = compile("p8.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 
 const m = <main>${"$"}{@phase}</>
 
-render(m)
+${"$"}{ render(m) }
 `);
     expect((result.errors ?? [])).toEqual([]);
     // The reactive_set call should reference Idle (either as "Idle" string OR

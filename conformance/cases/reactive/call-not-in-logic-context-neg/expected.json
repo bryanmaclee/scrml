@@ -1,0 +1,12 @@
+{
+  "id": "call-not-in-logic-context-neg",
+  "description": "The byte-identical call from `call-not-in-logic-context-pos`, wrapped in an explicit `${ ... }` logic block — does NOT fire E-CALL-NOT-IN-LOGIC-CONTEXT. The `${}` wrapper is the ONLY delta between the two cases, so the pair brackets the call/logic-context boundary exactly.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§40.8 S368 amendment names this as THE fix verbatim: \"A call is logic; wrap it in `${...}`: `${ loadData() }`.\" Inside a logic block a call is in its proper context, so the code SHALL stay silent. This NEG also pins the amendment's scope discrimination: the diagnostic fires at the IMMEDIATE default-logic body-top ONLY — a call inside an explicit user-written `${...}` block is outside the fire region, exactly as the `write-not-in-logic-context-neg` sibling pins for writes.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CALL-NOT-IN-LOGIC-CONTEXT"]
+  }
+}

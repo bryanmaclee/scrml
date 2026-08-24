@@ -1,0 +1,12 @@
+{
+  "id": "call-not-in-logic-context-pos",
+  "description": "A bare `loadData()` CALL at the immediate body-top of the §40.8 default-logic body fires E-CALL-NOT-IN-LOGIC-CONTEXT. The function IS declared (in the `${ ... }` block above it) — the wrong is the call's SHAPE at that locus, not name resolution. Left bare, the call is emitted as page TEXT and never runs.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§40.8 S368 amendment (operator ruling `c`, user-voice S368): default-logic mode auto-lifts DECLARATIONS only, and the complement falls through to \"emit as text\" — right for prose, wrong for logic. A call is a scrml logic form by the identical reasoning that already rejects a bare write (the S123 amendment: \"writes ARE logic; logic goes in `${...}`\"), so a bare call at the IMMEDIATE body-top of a default-logic body SHALL fire this code. Measured pre-fix: the shape compiled at exit 0 and shipped the literal string into the emitted HTML. The discriminator is scrml's grammar ONLY — operator-ruled in the same breath that \"'valid js' is not a consideration one way or another\" — so a call is diagnosed because `ident(...)` is a scrml call form, never because a run parses as JS. This case uses the IMPLICIT default-logic body (a file with no `<program>` wrapper), the same locus shape as the `write-not-in-logic-context-pos` sibling.",
+  "expect": {
+    "codes": ["E-CALL-NOT-IN-LOGIC-CONTEXT"],
+    "notCodes": []
+  }
+}

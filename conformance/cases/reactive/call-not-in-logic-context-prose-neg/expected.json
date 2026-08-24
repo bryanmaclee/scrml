@@ -1,0 +1,12 @@
+{
+  "id": "call-not-in-logic-context-prose-neg",
+  "description": "PROSE at a §40.8 default-logic body-top — a sentence, a bare word, and a parenthetical with a space before the `(` — does NOT fire E-CALL-NOT-IN-LOGIC-CONTEXT. This is a COUNTER-gate: it fails an implementation for OVER-reaching, not for under-reaching.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "The S368 ruling is CALL-SHAPE-SPECIFIC and the two alternatives were rejected precisely on this ground: option (a) \"lift every text run\" contradicts the S122 Option-2 ratification AND breaks prose, and option (b) \"diagnose every non-declaration run\" over-reaches into prose. Prose renders at this position and is a WORKING SHAPE — a fix that rejects it is wrong. Stated in scrml's own grammar: a bare word or a sentence is not any scrml logic form, so it is text. `Loading (please wait)` is included deliberately: the space before `(` is what keeps natural prose out of the call form, so an implementation that stops requiring the `(` to be attached to the callee re-breaks this case.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CALL-NOT-IN-LOGIC-CONTEXT"]
+  }
+}

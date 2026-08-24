@@ -1,0 +1,5 @@
+${ function loadData() { } }
+
+${ loadData() }
+
+<p>Dashboard</>

@@ -101,6 +101,19 @@ describe("S368 — E-CALL-NOT-IN-LOGIC-CONTEXT at a §40.8 default-logic body-to
     expect(fires(errors).length).toBe(1);
   });
 
+  test("Case 1e — the IMPLICIT default-logic body (a file with no <program>) is the surface too", () => {
+    // MEASURED at S368: `E-WRITE-NOT-IN-LOGIC-CONTEXT` already fires at a
+    // no-`<program>` file top level, the decl-lift gates already fire there, and
+    // a bare call there ships as page text exactly as it does inside
+    // `<program>`. Dropping this case would diagnose a call inside `<program>`
+    // while silently dropping the same call in a module file.
+    const { errors } = compileSource(
+      `\${ function loadData() { } }\n\nloadData()\n\n<p>hi</>\n`,
+      "case-1e-implicit-body.scrml",
+    );
+    expect(fires(errors).length).toBe(1);
+  });
+
   // ── 2. COUNTER-GATE — prose still renders ─────────────────────────────────
   // A fix that rejects either of the next two is WRONG. Both are working shapes
   // at this position and option (a) "lift every text run" was rejected for

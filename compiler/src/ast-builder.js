@@ -1960,8 +1960,25 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // `E-CALL-NOT-IN-LOGIC-CONTEXT` (§34, §40.8). See TOPLEVEL_BARE_CALL_RE for
     // the rule, the ruling, and the scrml-grammar discriminator.
     //
-    // Gated `isDefaultLogicBody === true` — the PRECISE §40.8 surface, matching
-    // E-WRITE-NOT-IN-LOGIC-CONTEXT's discrimination exactly. This gate sits
+    // Gated to the §40.8 default-logic surface, matching
+    // E-WRITE-NOT-IN-LOGIC-CONTEXT's discrimination exactly. That surface has TWO
+    // members, and the second is easy to miss:
+    //
+    //   (1) `isDefaultLogicBody === true` — a direct child of `<program>` /
+    //       `<page>` / `<channel>` markup.
+    //   (2) `parentType === null`         — the IMPLICIT default-logic body: the
+    //       top level of a file that declares no `<program>` wrapper (a module).
+    //       `buildAST` is the only caller that passes `parentType === null`, so
+    //       this identifies the file top level uniquely.
+    //
+    // Member (2) is not decoration. MEASURED at S368: the decl-lift gates above
+    // already fire there (they gate on `parentType !== "markup"`, which admits
+    // null), `E-WRITE-NOT-IN-LOGIC-CONTEXT` already fires there, and a bare call
+    // there ships as page text exactly as it does inside `<program>`. Omitting it
+    // would diagnose a call inside `<program>` while silently dropping the same
+    // call in a module file — one language, two answers.
+    //
+    // This gate sits
     // BELOW the decl-lift gates on purpose, so the shapes those gates already
     // claim never reach it:
     //   - `function f() { helper() }`  — BARE_DECL_RE lifts the whole run, so a
@@ -1977,7 +1994,8 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // below: a rejected construct ships NEITHER its source text nor any inner
     // `${...}` into the DOM. (The error is fatal, so nothing is emitted anyway;
     // dropping keeps the non-fatal collector paths honest too.)
-    if (block.type === "text" && isDefaultLogicBody) {
+    const isDefaultLogicSurface = isDefaultLogicBody || parentType === null;
+    if (block.type === "text" && isDefaultLogicSurface) {
       const callee = matchTopLevelBareCall(block.raw);
       // EXEMPTION: the per-file list shared with E-WRITE-NOT-IN-LOGIC-CONTEXT
       // (same §40.8 body-top locus, same newly-rejecting migration surface). An
