@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 56 |
-| MED | 164 |
+| MED | 165 |
 | LOW | 72 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2433,6 +2433,19 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > So the trigger is the **three-level compound-nav path to a PER-FIELD synthesized cell** — not synth cells generally (compound-level works), not compound-nav generally (2-level works). Consistent with PRIMER §13.7 B12: per-field synth records live in a distinct `kind:"field"` scope reached only via `lookupQualifiedStateCell`'s extended descent, so 3-level is a separate resolution path the `if=` lowering never learned.
 > **`${@signup.name.touched}` in an INTERPOLATION works correctly** (renders `false` → `true` on interaction), so the per-field synth cells themselves are sound and reactive — this is `if=` lowering specifically.
 > **Severity HIGH:** silent at compile (exit 0; the only diagnostics were an unrelated `W-PROGRAM-SPA-INFERRED` info lint), catastrophic in scope (kills the entire page's reactivity), on the documented §55 auto-synth validity flagship — **and the shape is exactly what SPEC's own stated adopter mental model prescribes.** `SPEC.md:5898`: *"Adopter mental model: 'I'm still typing, don't show field errors yet; I stopped, now show them.'"* The idiomatic way to honour that is to gate on `touched`, and `<errors>` has no `touched` attribute (§55.8 defines only `of=` and `all`), and `if=` on `<errors>` is rejected with `W-ATTR-001` — so **wrapping in `<span if=@field.touched>` is the remaining idiom, and it is precisely the shape that crashes.** Found dog-fooding, not in the ledger. Repro-first re-derive before building.
+
+### g-else-if-dotted-cell-ref-emits-unregistered-flat-key — ⭐ an `else-if=@cell.field` chain branch lowers to a FLAT-key lookup for a key that is never registered, so the branch can NEVER be selected — while the identical predicate as a standalone `if=` lowers correctly — `NEW S372-bryan (surfaced by the S239 pass on the if-attr-synth fix; PA-REPRODUCED on BOTH sides of that branch, so PRE-EXISTING); MED; open`
+<!-- @gap id=g-else-if-dotted-cell-ref-emits-unregistered-flat-key sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts:647(`computeChainBranchCondition`'s `condition.name` branch emits `_scrml_reactive_get(<full dotted path>)` for ANY dotted `variable-ref`, with NO `synthCellKeys` membership test — the guard its three sibling call sites all apply) prov=rationale:S372-adversarial-review-of-the-if-attr-synth-fix-PA-reproduced-identically-on-base-and-head-so-pre-existing-not-introduced -->
+> **⚑ S372-bryan: PA-REPRODUCED, and reproduced on BOTH SIDES of the fix branch — this is PRE-EXISTING, not introduced.**
+> ```scrml
+> <cfg> = { errors: [] }
+> <div if=@flag>A</div>
+> <div else-if=@cfg.errors>B</div>
+> ```
+> Both base and the fix branch emit `_scrml_cs_reactive_get("cfg.errors")`. `_scrml_reactive_get` is a **flat-key lookup with no path navigation**; `cfg` is a plain cell holding an object and `cfg.errors` is never a registered key, so the branch reads `undefined` and **can never be selected**. The identical predicate written as a standalone `if=@cfg.errors` correctly emits `_scrml_cs_reactive_get("cfg").errors`.
+> **This is the fourth copy of one rule, and it is wrong in the OPPOSITE direction from the other three.** `computeDisplayToggleCondition` (`:508`) collapses to a flat key ONLY on a `synthCellKeys` membership test; `computeChainBranchCondition` (`:647`) collapses **unconditionally**. So the display path under-collapses without the guard and the chain path over-collapses with no guard at all.
+> ⚑ **Recorded because it falsifies a claim made in good faith:** the `if-attr-per-field-synth-crash` work states *"three call sites now share this rule."* There is a fourth, one screen below the code that PR edits. **Not folded into that landing** — it is pre-existing, it would expand a diff whose direction-of-change classification depends on staying narrow, and it deserves its own measured migration.
+> **Fix direction:** apply the same `resolveSynthCellPrefix` membership test the sibling call sites use — **extending the shared helper, not adding a fifth predicate.** Direction of change: a branch that could never be selected becomes selectable, so it is **semantics-changed** and owes a corpus differential plus a measured migration. **Repro-first re-derive before building.**
 
 ### g-match-fncall-scrutinee-prunes-effect-chunk-dead-page — ⭐⭐ a `<match>` whose scrutinee is a FUNCTION CALL emits an unguarded `_scrml_effect(...)` that the SHIPPED runtime chunk does not define → `ReferenceError` at load, dead page, exit 0 — and ANY unrelated `${@cell}` in the file MASKS it — `NEW S372-bryan (review-floor S239 pass on #688; PA-EXECUTED, three-way discriminator); HIGH; open`
 <!-- @gap id=g-match-fncall-scrutinee-prunes-effect-chunk-dead-page sev=HIGH status=open locus=compiler/src/route-inference.ts(`markupReferencedNames`, built at :4852 — the same walker #688 extended for `<each>` openers at :4926; a `<match for=T on=fn()>` OPENER is still invisible to it, so the fn is not a client root [:6242 `clientRootIds`] and the `effect` runtime chunk is pruned while the emitted client calls `_scrml_effect` unguarded) prov=rationale:S372-review-floor-adversarial-pass-on-688-PA-EXECUTED-shipped-runtime-chunk-three-way-discriminator-fn-call-scrutinee-dead-page-cell-scrutinee-ok-fn-call-plus-any-other-reactive-use-masked -->
