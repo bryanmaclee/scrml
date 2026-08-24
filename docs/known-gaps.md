@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 48 |
-| MED | 158 |
+| HIGH | 49 |
+| MED | 159 |
 | LOW | 72 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9729,3 +9729,25 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > and pointing here, and §7.5.2 carries the reproduction above. **The gap is unchanged and still
 > open** — the SPEC was corrected to describe the implementation, not the other way round. When the
 > sidecar position is wired, BOTH carve-outs must be removed alongside the ⚑ FLIP test.
+
+<!-- ⚑ S370-peter filing batch — 2 finds from a DOG-FOOD arc (running fresh server-fn + ?{} SQL apps end-to-end: real bun:sqlite via Bun.serve for the server half, happy-dom for the client half). Both PA-reproduced by EXECUTION, not emit-inspection. Peter chose "route to bryan (converge)"; inbox flag in scrml-support/handOffs/incoming/2026-08-23-from-peter-to-bryan-s370-autoawait-nested-call-converge.md -->
+
+### g-server-call-nested-in-expression-not-awaited-outside-fn-body — a server-fn call NESTED in a larger expression (receiver-tail `call().length`, nested arg `f(call())`, comparison `call() > 0`) is NOT awaited at the inner call site in MARKUP INTERP (`${loadRows().length}` → renders "") or an INLINE EVENT HANDLER (`onclick=@n = load().length` / `oninput=…` → `undefined`); §13.2 position-invariant await holds only where the call is the ENTIRE value or is inside a `function` body (U1/dpa-020 emitCall client-await) — `NEW S370-peter (dog-food); HIGH; open (ROUTED to bryan — the retrofit→by-construction converge decision is the STAGE re-examination axis; Peter's call, S370)`
+<!-- @gap id=g-server-call-nested-in-expression-not-awaited-outside-fn-body sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts:1952,2023(markup-interp wraps `await (${expr})` — awaits the OUTER expr, so `await (call().length)`=`await undefined`)+compiler/src/codegen/emit-event-wiring.ts:849,870(inline-handler assign takes the rewriteBlockBody STRING path, bypassing emit-expr's emitCall client-await)+compiler/src/codegen/emit-client.ts:3295-3328(the post-hoc reactive-set await pass matches ONLY the exact shape set(name,mangled(args)) and BAILS on any tail/nesting)+CORRECT-REF:compiler/src/codegen/emit-expr.ts(emitCall isClientServerFnCall lands `await` at the INNER call site → `(await call()).length`, fires for fn-body positions) prov=adopter-dogfood:peter-S370-ran-fresh-server-fn-SQL-apps-in-happy-dom-and-bun-serve-executed-not-emit-inspected -->
+> **⚑ PA-REPRODUCED BY EXECUTION on `main` @ `3a7203ff`** (harness: real bun:sqlite via Bun.serve server half + happy-dom client half; U1 known-good control verified count 0→3 first, so the harness is sound). Emitted-code side-by-side (all three call `loadRows()`, a `?{SELECT}.all()` server fn):
+>
+> | position | emitted | result |
+> |---|---|---|
+> | markup interp `${loadRows().length}` | `el.textContent = await (loadRows_3().length)` | `await (Promise.length)` = `await undefined` → **""** |
+> | inline handler `onclick=@n = loadRows().length` (also `oninput`) | `set("n", loadRows_4().length)` — no await | `Promise.length` → **undefined** |
+> | inline handler nested-arg `@n = pick(loadRows())` | `set("n", pick(loadRows_4()))` | Promise into pick → **undefined** |
+>
+> **CORRECT (asymmetry proof — these await at the INNER call site):** fn-body `refresh(){ @n = loadRows().length }` → `set("n", (await loadRows_4()).length)` ✓ · direct cell-assign `onclick=@rows = loadRows()` → `(async()=>set("rows", await loadRows_4()))()` ✓ · canonical `on mount { @rows = loadRows() }` + `${@rows.length}` → "3" ✓ (reads a RESOLVED cell — this bounds the find to DIRECT nested calls).
+>
+> **Root (re-derived first-hand):** the by-construction await is emit-expr's `emitCall` client branch (U1). Markup-interp + inline-handler-assign positions do NOT route through it — they rely on RETROFIT injectors that only reach the OUTER expression: markup interp awaits `(${expr})` whole (so a `.length` tail is taken off the Promise before the await), and the inline-handler assign takes the `rewriteBlockBody` string path whose only await is the exact-shape post-hoc pass that bails on nesting.
+>
+> **Why routed, not fixed (Peter's call, S370):** this is the profile STAGE re-examination test verbatim — *"a normative SHALL delivered by RETROFIT rather than BY CONSTRUCTION"* (§13.2 is the SHALL; the injectors are the smell). U1 fixed 3 fn-body positions; the SAME class keeps reappearing in every non-emitCall position → converge, don't enumerate ([[feedback-repeated-review-same-class-means-converge-not-enumerate]]). **Fix directions:** (A) CONVERGE — route markup-interp + inline-handler server calls through emitCall client-await (deletes the retrofit for the server-call case; regression surface = the engine-assign guard on the handler path + reactive-effect wrapping on the interp path). (B) PATCH — teach each retrofit to await the INNER call (interp: emit `(await call()).length` not `await (call().length)`; handler pass: await nested calls in arbitrary RHS) — bounded but deepens the smell.
+
+### g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select — a `<schema>` `boolean` column (and a struct field typed `boolean`) read via a raw `?{SELECT paid …}` reaches the client as `1`/`0` (integer), not `true`/`false`; conditionals still work (0/1 truthy) but display (`${e.paid}` → "1") and any bool-shaped consumer see the wrong type — `NEW S370-peter (dog-food); MED; open (needs a SPEC SCOPE ruling — bryan)`
+<!-- @gap id=g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select sev=MED status=open locus=SPEC.md:22293(NORMATIVE SHALL: boolean columns "SHALL emit read-path coercion (`!!value`) … in any generated migration or QUERY HELPER" — a raw ?{} SELECT does not coerce; whether a raw ?{} SELECT counts as a "query helper" is the OPEN scope question)+searched:compiler/src/codegen/emit-server.ts,compiler/src/schema-differ.js(the ?{} result mapping does not thread declared-column types into read-path coercion) prov=adopter-dogfood:peter-S370-schema-paid-boolean-plus-struct-field-boolean-raw-select-returns-1-0-to-client -->
+> **⚑ PA-REPRODUCED BY EXECUTION on `main` @ `3a7203ff`.** `<schema> expenses { … paid: boolean … }` + `type Expense:struct = { … paid: boolean }`; server fn `?{SELECT id, description, amount, paid, settled_at FROM expenses}.all()`. Over the wire: `[{…,"paid":1,…},{…,"paid":0,…}]`. SPEC:22293 mandates read-path `!!value` coercion "in any generated migration or **query helper**." **The open question is scope:** is a raw `?{}` SELECT a "query helper" (→ coerce declared-boolean result columns, a codegen fix) or is coercion only for `schemaFor`/typed-accessor paths (→ raw SELECT is "you get sqlite's 0/1", and the SPEC text should say so)? §12.5 (return serialization) does not independently re-coerce by declared struct-field type. **This is a SPEC-scope ruling, not a clean codegen bug** — filed for bryan. (Everything else in the ?{} SQL core probed clean: multi-param + reuse/dedup §8.2, expression params, LIKE binding, .run() INSERT persistence, UPDATE RETURNING, .get() no-row→null, NULL/real round-trip.)
