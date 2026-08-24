@@ -50,7 +50,7 @@ the wrong form and feels it. Consequences: bryan's friction reports are the only
 exists; every adopter bug report to date is a correctness signal, never an ergonomic one; and the
 tier-1 conformance campaign is structurally blind to the class.
 
-Suite: **conformance 883/883** on this tree; cloud `gate` **GREEN** at main HEAD (last 3 pushes all `completed/success`). The 29,196 / 886-case figures reported by the bare-call build are on ITS branch, not on main. Gaps: HIGH 48 · MED 158 · LOW 71.
+Suite at close, measured on this tree: **30,465 pass / 53 fail / 216 skip** across 1,401 files; **conformance 883/883**; cloud `gate` GREEN at main HEAD. The 53 are the known pre-existing baseline (self-host ×3 · self-compilation · session · browser-tier). Gaps: HIGH 48 · MED 158 · LOW 71.
 Four operator rulings carried to next session by request. Detail: `hand-off.md` S368 +
 delta-log `[1718]`-`[1725]`.
 

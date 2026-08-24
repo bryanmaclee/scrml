@@ -171,7 +171,7 @@ friction events; five were noise or wrong-default and one was a silent wrong-out
 ## 🧷 STATE
 
 - **main** `674f890b` at wrap-cut; coherence 0/0; both repos clean.
-- **Suite at close: conformance 883/883 on this tree; cloud `gate` GREEN at main HEAD** (last 3 pushes `completed/success`). ⚑ The 29,196-pass / 886-case figures in the bare-call build's report are on ITS branch — do not cite them as main's.
+- **Suite at close, MEASURED on this tree:** full `bun run test` **30,465 pass / 53 fail / 216 skip / 1 todo** across 1,401 files (259s); **conformance 883/883**; cloud `gate` **GREEN** at main HEAD (last 3 pushes `completed/success`). The 53 are the known pre-existing baseline (self-host ×3 · self-compilation · session · browser-tier) — the dispatches independently measured base 55 → tip 53 with a zero-new failure set-diff. ⚑ The 29,196-pass / 886-case figures in the bare-call build's report are on ITS branch; do not cite them as main's.
 - **Gaps: HIGH 48 · MED 158 · LOW 71 · Nominal 7.** Up on the day and more truthful for it.
 - **Debts:** dPA **0 UNRUN / 0 ADVISORY** · issue-debt **0** · corpus-zero **0** · review floor
   **6 OWED (all peter-lane)**.
