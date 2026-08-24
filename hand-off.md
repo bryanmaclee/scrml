@@ -1,15 +1,190 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S370-peter (S369 block below).        -->
-<!--   S369-peter (below) — a LONG session: item-3 (#664) + drain     -->
-<!--     (#661), THEN a DOG-FOOD ARC that fixed 3 silent-wrong bugs    -->
-<!--     (#670 value-if-in-each · #672 empty-string-value-if · #673    -->
-<!--     fn-condition-reactivity) + filed several. main @ ff12b709.    -->
-<!--   S365-bryan (2nd block) — the bryan lane, STILL has FOUR        -->
-<!--     operator decisions + ONE dispatch in flight (read it).      -->
-<!--   S367/S366-peter — prior peter wraps (history, below).         -->
-<!-- Mechanical stream: delta-log [1715] (this session); the S369     -->
-<!--   detail is [1710]-[1715]; [1686]-[1709] prior.                 -->
+<!-- hand-off.md — live session state. WRAPPED at S368-bryan.        -->
+<!--   S368-bryan (below) — 7 PRs landed. FOUR operator rulings are   -->
+<!--     owed and were DELIBERATELY carried (bryan: "we will take     -->
+<!--     these Qs next session"). Read PICKUP §1 first.               -->
+<!--   S370/S369-peter (next blocks) — the peter lane, concurrent.    -->
+<!--   S365-bryan — older bryan block; its 4 decisions are now 2      -->
+<!--     (dpa-036 ratified S365; raw-egress is in flight at r9).      -->
+<!-- Mechanical stream: delta-log [1718]-[1725].                      -->
 <!-- ============================================================= -->
+
+# scrml — Session 368 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-23. Booted `/boot` Profile A as SUCCESSOR to a LIVE S367-peter. Ran concurrent
+with S367/S369/S370-peter throughout; `main` moved under me eleven times.
+
+**The framing that matters, because it reorders everything else: bryan hand-wrote scrml for the
+first time this session, and it went badly.** Every compiler defect below came out of that.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ FOUR OPERATOR RULINGS OWED — deliberately carried
+
+bryan, verbatim at wrap: *"we will take these Qs next session."* None is blocked on work; all four
+are surfaced with measurements and, where I had one, a recommendation.
+
+1. **The `<db>` state-block locus.** `on mount { loadDashboard() }` inside a `<db>` body ships to
+   the page as text and never runs (PA-reproduced; `samples/htmx-debate-dashboard.scrml`, clean
+   compile exit 0, `loadDashboard` only ever bound to a click). SPEC says `<db>`/`<state>` bodies
+   are **NOT default-logic-mode loci** — a state-block body is markup context. The sibling
+   `W-STATE-BLOCK-BARE-WRITE-DECL` covers a bare *write* at the same locus at **Info**, and its own
+   catalog text says it deliberately excludes state blocks from the hard error *"because a hard
+   error there is a bigger call."* Options: **(a)** extend the Info lint to `on mount` and other
+   statement forms · **(b)** promote the locus to the already-reserved
+   `E-STATE-BLOCK-BARE-WRITE-DECL` · **(c)** make the `<db>` body a lift surface (a widening).
+   **I did NOT recommend between (a) and (b)** — the earlier ruling *chose* Info here, so
+   recommending (b) means arguing that choice was wrong, not merely incomplete.
+2. **The bare-call migration — 2 files.** The build stopped rather than migrating, per its brief.
+   Population derived from the compiler (`compileScrml({write:false})` over 2,193 files), not by
+   text-scanning. Both hits are the comment-branch's **reproducer artifacts** (one is bryan's own
+   hand-written file) and both fire on `log(...)` after a comment flush — i.e. they reproduce the
+   defect being closed. **Newly rejecting them is arguably the point.** Migrate, exempt, or accept?
+3. **Bare `if (){}` at a default-logic body-top ships as page text.** PA-CONFIRMED on `main` and on
+   the build branch: `<program>` + `if (1) { }` → exit 0, `if (1) { }` in the body. ⚑ **This
+   contradicts a §34 row**: `E-CONTROL-FLOW-IN-MARKUP`'s own text claims the §40.8 auto-lift *"fires
+   only at `<program>`/`<page>`/`<channel>` direct-child roots"* and that without it such a
+   construct *"would ship as raw `for(){}` text into the DOM."* It ships. In-§40.8, so not covered
+   by the bare-call ruling, which deliberately rejected "diagnose every non-declaration run."
+4. **`TILDE_TOKEN_RE` disagrees with the new bare-call rule.** A call-led run *containing* `~` is
+   LIFTED and runs; the identical run without `~` is now an error. Pre-existing deliberate §32
+   carve-out; reversing it is its own ruling.
+
+### 2. ⚠️ THREE BRANCHES IN FLIGHT — complete, none landed
+
+| branch | state | needs |
+|---|---|---|
+| `raw-egress-r9-work` @ `e755c431` | Finding 1 FIXED + executed (leak → `200 {}`); Finding 2 message-fixed | **the `corpus-emit-differential` it skipped** (a standing gate it self-reported not running) + a re-review at the new SHA |
+| the bare-call build @ `7d5fe573` | complete: 19 merge-blocker tests, 3 conformance cases, differential 0 artifact diffs, bite proven both ways | **its S239 adversarial pass**, then ruling 2 above |
+| the comment-flush fix @ `4f241cd1` | complete; differential clean (35 artifacts, all mechanically classified) | **its S239 pass** |
+
+⚑ **`ast-builder.js` LANDING HAZARD.** The bare-call build and the comment-flush fix both touch
+`liftBareDeclarations` — additively, in different places. **Cherry-pick, never file-delta**, or one
+clobbers the other. The bare-call gate is a REJECT gate and must NOT be folded into
+`matchesAnyLiftGate`.
+
+### 3a. ⚠️ NEW INBOUND, arrived DURING this wrap — unread, routed to bryan
+
+**`2026-08-23-from-peter-to-bryan-s370-autoawait-nested-call-converge.md`** (scrml-support inbox).
+A **HIGH silent-wrong** from S370-peter's dog-food arc: a server-fn call **nested inside a larger
+expression** (`call().length`, `f(call())`, `call() > 0`) is **not awaited at the inner call site**
+in markup interps and inline event handlers — renders `""`/`undefined`, exit 0, no diagnostic. He
+executed the asymmetry (fn bodies and direct cell-assign are correct; the class is position-scoped)
+and **deliberately routed the converge decision rather than patching in-lane**, because it is the
+§13.2-SHALL-by-RETROFIT axis — the S322 re-examination test verbatim. Turnkey entry:
+`g-server-call-nested-in-expression-not-awaited-outside-fn-body`. Everything short of the authority
+call is done.
+
+**Also still unread:** the two S361 security HIGHs and the S364 `${…}`-interp-uniformity arc.
+**Answered and filed to `read/` this session:** reset-init-await (merged), todomvc (merged),
+promote-engine (REFUSED — return leg sent with the reproducer).
+
+### 3. ⚠️ REVIEW FLOOR — 6 OWED, all peter-lane, deliberately not drained by me
+
+#670 #671 #672 #673 #674 #675 — S369/S370-peter's dog-food arc, landed while I was working. **Three
+are code-bearing** and want real adversarial passes, not carve-outs. I drained my own four
+(#665/#667/#668/#669) and left his; reviewing a sibling's live work at my wrap would be worse than
+leaving it visible.
+
+---
+
+## 🧷 WHAT LANDED (7 PRs)
+
+`#659` review floor 3→0 · `#662` reset() unawaited-Promise + the thenable correction · `#663`
+TodoMVC hollow gate · `#665` the asIs/unknown split · `#667` §40.8 gaps + my own correction ·
+`#668` floor 5→0 (returned a HIGH) · `#669` **the stdlib client registry**.
+
+**The headline fix:** client-side stdlib imports were **DOA for 17 of 21 modules**. A client bundle
+is a classic script, so `import { slug } from 'scrml:format'` lowers to `_scrml_stdlib.format`, and
+`RUNTIME_CHUNK_ORDER` declared **four** chunks against `const _scrml_stdlib = {}`. Compile exit 0,
+`TypeError` at bundle load, dead page, **zero diagnostics**. Verified matrix: base 4 execute → tip
+13 execute / 8 refused loudly / **0 silent**. The original DOA case now runs on `main`.
+
+⚑ **The gate that should have caught it watched the wrong property** — `existsSync` of the shim
+FILE (all 21 exist) while the deciding property is chunk registration (only 4 were). pa-base §10,
+obligation and probe resolving to different artifacts, again.
+
+---
+
+## ⚑ MISSES (mine — recorded because they will recur)
+
+1. **★ I committed conflict markers — the S354 miss verbatim, which I read at boot this morning.**
+   My resolver asserted, exited non-zero, **never wrote the file**, and I chained `git add &&
+   git commit` without checking. Four marker lines reached a commit; caught by grepping HEAD, not
+   by the clean exit. **Fix: the resolver now REFUSES rather than asserts**, with a marker-count
+   gate before staging — and it earned that on the very next merge by correctly refusing.
+2. **★ I filed a gap wrong in TWO places and a dispatch overturned it.** I reported the `//` comment
+   as the root and `/* */` as CLEAN. Re-measured: a bare call with **no declaration in the run leaks
+   with no comment at all**, and **`/* */` above a `fn` leaks the DECLARATION ITSELF** — strictly
+   more severe than what I filed. I had tested `/* */` before a *statement* and generalised from one
+   shape. Corrected in place.
+3. **★ bryan struck a load-bearing premise of mine: "valid JS" is not a scrml consideration.** I
+   framed a bare word as *ambiguous* because it is a valid JS expression statement. **There was no
+   ambiguity** — a call is a scrml logic form, a bare word is not; the JS premise did no work except
+   make the argument wrong. Rule 7 one level up. → `[[feedback-valid-js-is-not-a-scrml-design-consideration]]`
+4. **★ Two text-scanning measurements of mine over-counted badly** (a "prose at body-top" scan, and
+   a db-top classification that misread the FLAGSHIP as failing when its top level is `<program>`).
+   Both were caught before reaching an artifact. **Derive populations from the compiler/AST, not by
+   regex** — the build round did exactly that and got a trustworthy 2.
+5. **★ A merge commit shipped a stale `@generated` count.** `state.ts --check` exits 1 against it
+   and 0 against a regen. Counts derive from the whole ledger, so regenerating *before* resolving
+   computes a number the resolution invalidates. **The regen is the LAST step after a ledger merge.**
+6. **★ zsh did not word-split my file list** and a corpus sweep silently processed one giant string
+   — the recorded `[[feedback_enumerate_boot_populations_untruncated]]` lesson, walked into anyway.
+7. **★ CWD drifted into a sibling directory** from an earlier `cd` and three probes answered about
+   the wrong tree while looking well-formed.
+
+**Score for the day: four dispatches corrected me, two of them on measurements I had made myself.**
+
+---
+
+## 🔭 THE DURABLE FINDING — the corpus has ZERO ergonomic feedback
+
+bryan, verbatim: *"No human being has EVER written a single line of scrml before me, today. Every
+single scrml line, file, example, etc. was written by llm. there are no 'people' that know the
+workarounds."* He noted the PA **has never gotten this right**.
+
+**Consequence, and it is structural:** an LLM author never reaches for the wrong form and *feels*
+it. The corpus is a fixed point of *what the compiler accepted* ∩ *what LLM priors produced*, and
+**neither term contains human ergonomics.** So:
+
+- bryan's friction reports are not *better* evidence than the corpus — they are the **only**
+  evidence. n=1 IS the whole n. Do not discount an item for being small or corpus-unsupported;
+  corpus support cannot exist for an ergonomic claim.
+- **Every adopter bug report to date is a correctness signal, never an ergonomic one** — those
+  codebases are LLM-written too.
+- The tier-1 conformance campaign is **structurally blind** to this class. That is the S322 pause
+  argument arriving from a second, independent direction.
+- `examples/25-triage-board.scrml:28` reverts a `scrml:data` import *"per Bug 18"* and uses vanilla
+  `.sort()`. **That is not a human routing around friction** — it is an LLM+PA session logging a
+  defect and moving on, which is why the underlying bug survived unre-derived until today.
+
+⚑ **Owed to bryan next session:** his unfiltered friction list from hand-authoring. He was asked for
+it and the session ran out before he sent it. **Do not pre-triage it** — small and subjective is
+exactly where this class lives. In ~20 minutes and ~30 lines of my own hand-written scrml I hit six
+friction events; five were noise or wrong-default and one was a silent wrong-output.
+
+---
+
+## 🧷 STATE
+
+- **main** `674f890b` at wrap-cut; coherence 0/0; both repos clean.
+- **Suite at close: conformance 883/883 on this tree; cloud `gate` GREEN at main HEAD** (last 3 pushes `completed/success`). ⚑ The 29,196-pass / 886-case figures in the bare-call build's report are on ITS branch — do not cite them as main's.
+- **Gaps: HIGH 48 · MED 158 · LOW 71 · Nominal 7.** Up on the day and more truthful for it.
+- **Debts:** dPA **0 UNRUN / 0 ADVISORY** · issue-debt **0** · corpus-zero **0** · review floor
+  **6 OWED (all peter-lane)**.
+- **Worktrees: 89 — NOT swept.** Three carry unlanded complete work (raw-egress-r9, bare-call,
+  comment-flush). The S365 note stands: a working sweep probe exists but is deliberately unproven,
+  and both obvious tests are structurally wrong under squash-merge.
+- **Concurrent:** S367 → S369 → S370-peter ran throughout on the peter lane (dog-food arc). No
+  collision — I stayed off `emit-each.ts`/`exportRegistry`/name-resolver all session.
+- ⚠️ `scripts/ruling-debt.ts` **still not on `origin/main`** — the S353 finding reproduces for the
+  Nth session: the instrument for undelivered rulings is itself undelivered.
+- ⚠️ **`master-list.md` §0's newest PROGRESS entry is S352** — sixteen sessions of dashboard drift
+  on the doc the contract names as the live "what's done / what's left" authority.
+
 
 # scrml — Session 370 (peter · P-Tech1 Windows) — WRAP
 
