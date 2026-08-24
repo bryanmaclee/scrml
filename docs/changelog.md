@@ -2,6 +2,58 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S368 — 2026-08-23 (bryan · ASUS-Vivobook) — the first human-written scrml, and the seven landings it produced
+
+bryan hand-wrote scrml for the first time in the project's history and reported the experience as
+"kinda dreadful". Every compiler defect below came out of that file. Seven PRs landed; **four
+dispatches corrected the PA, two of them on measurements the PA had made itself.**
+
+- **#669 — client-side stdlib imports were DOA for 17 of 21 modules.** A client bundle is a classic
+  script, so `import { slug } from 'scrml:format'` lowers to a registry read `_scrml_stdlib.format`
+  — and `RUNTIME_CHUNK_ORDER` declared **four** chunks against `const _scrml_stdlib = {}`. Compile
+  exit 0, `TypeError` at bundle load, dead page, **zero diagnostics**. Independently verified
+  execution matrix: base 4 execute → **13 execute / 8 refused loudly / 0 silent**. Two further
+  defects found by execution: `scrml:auth/jwt` lowered to a *division*; submodule reads escaped the
+  unused-import prune entirely. The gate that should have caught it keys on `existsSync` of the shim
+  FILE (all 21 exist) while the deciding property is chunk registration — the obligation and its
+  probe resolving to different artifacts.
+- **#665 — the `asIs`/`unknown` split.** Implements the S365 ruling that `asIs` means *the developer
+  signed for it*, never *the compiler did not look*. Code verified clean (7,388 artifacts
+  byte-identical, one diagnostic moving, merge integrity set-diffed both ways, the `never`-fallthrough
+  by-construction guarantee bite-proven both directions). Landed after **two** review rounds that
+  together found **nine false normative sentences** — five, then four more in the round that fixed
+  them.
+- **#662 / #663 — two stamps, adjudicated by execution.** `reset()`'s three-session blocker
+  (*"changes every call site"*) **refuted two ways**: `reset()` returns `undefined` on both
+  revisions and the emitted client JS is byte-identical base-to-tip. Landed with a one-token
+  correction (`Promise.resolve(r).then(…)`) after a non-Promise thenable was shown to throw
+  synchronously out of the adopter's event handler. TodoMVC's hollow gate landed with two residuals
+  recorded, one undisclosed by its author. A third stamp — `promote --engine` — was **refused**: it
+  silently deletes a `const` from adopter source, passes its own gate, writes the file, and exits 0
+  reporting success.
+- **#667 / #668 — the §40.8 default-logic surface, and a correction to the PA's own filing.** The
+  `//`-comment defect was filed wrong in two places and overturned by first-hand re-derivation: a
+  bare call with **no declaration in the run leaks with no comment at all**, and a `/* */` comment
+  above a `fn` **leaks the declaration itself** — strictly more severe than filed. Corrected in
+  place rather than shipped as an erratum. #668's review-floor drain then **returned a HIGH on
+  already-merged code**: #664 is a *partial* fix whose `else` arm still lowers an object literal to
+  a bare identifier — silently, when the key name is in scope.
+
+**Operator rulings:** the bare-call fork ruled **(c)** — diagnose the call shape at a default-logic
+body-top. And a load-bearing framing struck: **"valid JS" is not a consideration in a scrml design
+argument, in either direction.** scrml is not a JS superset, and asking a foreign grammar what
+scrml's own grammar answers is Rule 7 one level up.
+
+**The durable finding:** *no human had written a single line of scrml before this day.* The entire
+corpus is LLM-authored, so it contains **zero ergonomic feedback** — an LLM author never reaches for
+the wrong form and feels it. Consequences: bryan's friction reports are the only such evidence that
+exists; every adopter bug report to date is a correctness signal, never an ergonomic one; and the
+tier-1 conformance campaign is structurally blind to the class.
+
+Suite at close, measured on this tree: **30,465 pass / 53 fail / 216 skip** across 1,401 files; **conformance 883/883**; cloud `gate` GREEN at main HEAD. The 53 are the known pre-existing baseline (self-host ×3 · self-compilation · session · browser-tier). Gaps: HIGH 48 · MED 158 · LOW 71.
+Four operator rulings carried to next session by request. Detail: `hand-off.md` S368 +
+delta-log `[1718]`-`[1725]`.
+
 ## S370 — 2026-08-23 (peter · P-Tech1 Windows) — dog-food arc: server fns + `?{}` SQL, one HIGH auto-await silent-wrong found and routed
 
 Successor to the likely-live S368/bare-call bryan session; worked strictly the peter dog-food lane. Built an end-to-end harness (real `bun:sqlite` via `Bun.serve` for the server half + happy-dom for the client half) and ran fresh server-fn + `?{}` SQL apps — "emitted ≠ runs". Docs-only session (no code landed); two gaps filed turnkey and routed to bryan per Peter's call.
