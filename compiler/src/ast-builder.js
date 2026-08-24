@@ -13597,38 +13597,60 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           if (peek().text === ")") consume(); // consume `)`
         }
         // Parse body: `{ ... }`
-        const bodyParts = [];
+        // g-when-message-parent-handler-drops-all-but-the-first-statement (S372):
+        // reconstruct the handler body preserving STATEMENT boundaries. The tokens
+        // carry no inter-token whitespace, so the old flat space-join collapsed a
+        // multi-statement body onto one logical line — `safeParseExprToNode` then
+        // recovered only the FIRST statement and the rest were silently dropped
+        // (exit 0). We re-insert a newline at a source line-break ONLY when we are at
+        // the body's TOP LEVEL (`_nest === 0`, i.e. not inside a nested `{}`/`()`/`[]`),
+        // so the depth-aware block-body reconstructor (rewriteBlockBody) splits real
+        // statements while a multi-line object/array literal or a parenthesised
+        // continuation stays intact on one logical line. COMMENT tokens are dropped
+        // here (their text would otherwise leak into the body as bare non-code text).
+        // Known limitation: a leading-`.` method-chain continuation across lines
+        // (`x\n.foo()`) sits at _nest 0 and is treated as a new statement — the same
+        // boundary the scrml logic parser itself draws for that shape.
+        let _whenWorkerBody = "";
         if (peek().text === "{") {
           consume(); // consume `{`
           let depth = 1;
           let lastTok = peek();
+          let _prevLine = null;
+          let _nest = 0; // nesting of {}/()/[] INSIDE the body (excludes the body braces)
           while (depth > 0 && peek().kind !== "EOF") {
             const t = peek();
-            if (t.text === "{") depth++;
-            if (t.text === "}") {
+            // Bracket accounting must count only REAL bracket punctuation, never a
+            // `{`/`}` that is the entire text of a STRING/COMMENT token (e.g.
+            // `label("}")`). Guarding on kind===PUNCT stops a string containing a
+            // brace from terminating the body loop early (parse desync).
+            if (t.kind === "PUNCT" && t.text === "{") depth++;
+            if (t.kind === "PUNCT" && t.text === "}") {
               depth--;
               if (depth === 0) { lastTok = consume(); break; }
             }
             lastTok = consume();
-            if (lastTok.kind === "STRING") {
-              // A4: preserve backtick templates so `${...}` interpolations
-
-              // remain template-literal interpolations after re-parsing.
-
-              if (lastTok.isTemplate) {
-
-                bodyParts.push('`' + lastTok.text + '`');
-
-              } else {
-
-                bodyParts.push(reemitJsStringLiteral(lastTok.text));
-
-              }
-            } else {
-              bodyParts.push(lastTok.text);
+            if (lastTok.kind === "COMMENT") continue; // drop leaked comment text
+            const _tx = lastTok.text;
+            // Same rule for the top-level `_nest` accounting: only PUNCT bracket
+            // tokens change nesting — a `(`/`[` INSIDE a string literal must not.
+            const _isPunct = lastTok.kind === "PUNCT";
+            // A closer belongs to the OUTER level — decrement before the top-level test.
+            if (_isPunct && (_tx === "}" || _tx === ")" || _tx === "]")) _nest = Math.max(0, _nest - 1);
+            const _atTop = _nest === 0;
+            const _line = lastTok.span?.line ?? _prevLine;
+            const _piece = lastTok.kind === "STRING"
+              ? (lastTok.isTemplate ? ('`' + lastTok.text + '`') : reemitJsStringLiteral(lastTok.text))
+              : _tx;
+            if (_whenWorkerBody === "") _whenWorkerBody = _piece;
+            else {
+              const _nl = _atTop && _prevLine !== null && _line !== null && _line > _prevLine;
+              _whenWorkerBody += (_nl ? "\n" : " ") + _piece;
             }
+            // An opener raises the nest AFTER its own placement decision.
+            if (_isPunct && (_tx === "{" || _tx === "(" || _tx === "[")) _nest++;
+            if (_line !== null) _prevLine = _line;
           }
-          const _whenWorkerBody = bodyParts.join(" ");
           nodes.push({
             id: ++counter.next,
             kind: workerName ? "when-worker-" + eventType : "when-message",

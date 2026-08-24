@@ -820,6 +820,29 @@ export function rewriteReflectForRuntime(code: string): string {
 /**
  * Build an EmitExprContext from the current EmitLogicOpts.
  */
+/**
+ * Strip leaked comment lines from a `when …` handler body. The tokenizer strips
+ * `//` markers but leaves the comment TEXT as bare tokens; joined back into the
+ * body they are not valid statements. The single-expr emit path used to ignore
+ * them by parsing only the first statement, but the multi-statement block path
+ * (rewriteBlockBody) would try to lower each line — so a trailing `// comment`
+ * becomes `E-CODEGEN-INVALID-LOGIC`. Keep only lines that look like code.
+ * (Extracted from the `when-effect` case so `when message`/`when error` share it.)
+ */
+function _filterLeakedCommentLines(bodyRaw: string): string {
+  return (bodyRaw ?? "")
+    .split("\n")
+    .filter((line: string) => {
+      const t = line.trim();
+      if (!t) return false;
+      if (/^(?:let|const|var|if|for|while|return|@|function|switch|try|catch|throw)\b/.test(t)) return true;
+      if (/^[a-zA-Z_$@][a-zA-Z0-9_$]*\s*[=\(\[.]/.test(t)) return true;
+      if (/^[{}\[\]();]/.test(t)) return true;
+      return false;
+    })
+    .join("\n");
+}
+
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
   return {
     // R25-Bug-42 (S138): honor opts.boundary so server-mode contexts (e.g.
@@ -3803,16 +3826,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
     case "when-effect": {
       // Filter out leaked comment lines (// stripped by tokenizer, leaving bare text)
-      const rawLines = (node.bodyRaw ?? "").split("\n");
-      const codeLines = rawLines.filter((line: string) => {
-        const t = line.trim();
-        if (!t) return false;
-        if (/^(?:let|const|var|if|for|while|return|@|function|switch|try|catch|throw)\b/.test(t)) return true;
-        if (/^[a-zA-Z_$@][a-zA-Z0-9_$]*\s*[=\(\[.]/.test(t)) return true;
-        if (/^[{}\[\]();]/.test(t)) return true;
-        return false;
-      });
-      const body = emitExprField(node.bodyExpr, codeLines.join("\n"), _makeExprCtx(opts));
+      const body = emitExprField(node.bodyExpr, _filterLeakedCommentLines(node.bodyRaw ?? ""), _makeExprCtx(opts));
       return `_scrml_effect(function() { ${body}; });`;
     }
 
@@ -3820,15 +3834,28 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // §4.12.4: `when message from <#name> (binding) { body }` — parent-side worker message listener
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "data";
-      const body = emitExprField(node.bodyExpr, node.bodyRaw ?? "", _makeExprCtx(opts));
+      // g-when-message-parent-handler-drops-all-but-the-first-statement (S372):
+      // the handler body is a statement BLOCK, not a single expression. Emitting it
+      // through the single-expr `emitExprField(node.bodyExpr, …)` path recovered only
+      // the first statement and silently dropped the rest. Route it through
+      // `rewriteBlockBody`'s multi-statement lowering (`@x = v` → reactive set, no
+      // spurious re-declaration). `bodyRaw` carries faithful, parser-derived statement
+      // boundaries and is already comment-free (ast-builder drops COMMENT tokens), so
+      // no line-filter is needed here. NB: like the other emit-logic rewriteBlockBody
+      // call sites, this passes a null engine/machine ctx — an engine/machine-bound
+      // `@cell` write inside a worker handler is not routed through the transition
+      // guard (a narrow shared limitation, not specific to this path).
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client");
       return `${workerVar}.onmessage = function(event) { const ${binding} = event.data; ${body}; };`;
     }
 
     case "when-worker-error": {
       // §4.12.4: `when error from <#name> (binding) { body }` — parent-side worker error listener
+      // Sibling of when-worker-message — same multi-statement block body; route it
+      // through rewriteBlockBody so a >1-statement error handler is not truncated.
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
-      const body = emitExprField(node.bodyExpr, node.bodyRaw ?? "", _makeExprCtx(opts));
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client");
       return `${workerVar}.onerror = function(${binding}) { ${body}; };`;
     }
 
