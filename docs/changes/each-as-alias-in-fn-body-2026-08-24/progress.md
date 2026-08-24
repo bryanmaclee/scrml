@@ -4,7 +4,14 @@ Worktree: /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ae080f493
 Base: cb5db9c9   Branch: worktree-agent-ae080f493c841f360
 2026-08-24
 
-## Status — COMPLETE
+> ⚑ **READ THE ROUND-2 SECTION AT THE BOTTOM BEFORE THIS ONE.** An S239
+> adversarial pass returned four findings including a HIGH DO-NOT-LAND: the
+> round-1 limb-2 fix closed ONE of four off-spine carriers while its comment
+> claimed it closed the class. Round 2 replaces it with a general sweep and
+> corrects two relayed premises that were wrong. Statements in the round-1
+> section below are superseded where they conflict.
+
+## Status — round 1 (superseded in part by round 2)
 
 - [x] startup verification (pwd / toplevel / clean / merge-base == origin/main / bun install / pretest)
 - [x] reproduced A/B/C/D by compiling + reading emitted output
@@ -190,3 +197,195 @@ leak (an earlier test file evals the full `SCRML_RUNTIME` into the shared
 process global, so `_scrml_reconcile_list` is already defined). The (A) tests
 bite in BOTH modes, so the merge-blocker is sound either way; do not read a
 green (B) in a whole-suite run as evidence the runtime chunk shipped.
+
+---
+
+# REVIEW ROUND 2 — S239 adversarial pass (4 findings, one HIGH DO-NOT-LAND)
+
+Base for this round: `68cfad44` (the round-1 head). All four findings
+REPRODUCED BY ME before acting; two relayed premises turned out wrong.
+
+## BLOCKER (HIGH) — limb 2 did not close the class. FIXED, and generically.
+
+Reproduced on `68cfad44`: `${ if @show { lift <ul><each in=@rows as it …>…</ul> } }`
+→ client calls `_scrml_reconcile_list` 1x, shipped runtime defines it 0x.
+
+Round 1 added a single `return-stmt.markupNode` descent and a comment claiming
+it closed "the one remaining carrier". That was the fifth instance of a
+one-carrier-at-a-time pattern (each-block `bodyChildren`, engine-decl arms,
+match-block `armsRaw`, if-chain `branches`), and three more carriers were live.
+
+**Carriers ENUMERATED EMPIRICALLY** — parse each reproducer, walk the AST,
+report every markup node reachable off the walk spine:
+
+| carrier | source shape |
+|---|---|
+| `return-stmt.markupNode` | `fn listing(){ return <ul><each …></ul> }` |
+| `lift-expr.expr.node`    | `${ if @show { lift <ul><each …></ul> } }` |
+| `markup-value.node`      | `${ @show ? <ul><each …></ul> : "" }` |
+| `render-spec.element`    | `const <listing> = <ul><each …></ul>` |
+
+**FIX: `sweepOffSpineMarkup`** (emit-client.ts) — the rule is stated ONCE over
+field POSITION, not field NAME: any markup node reachable from a visited node
+through non-structural intermediates is routed back into `walkNodes`. Bounded:
+markup only (structural kinds stay owned by the outer walk), stops at a markup
+node (walkNodes recurses), separate `sweptNodes` set (linearity / S226 guard).
+The over-claiming comment is corrected and now points at the sweep.
+
+Bite proof: the 3 new carrier tests fail on `68cfad44`, all 22 pass at head.
+
+## FINDING 2 — invalid alias. PARTIALLY DONE, and the relayed premise was WRONG.
+
+Reproduced: `<each in=@rows as data-id>` in a fn body → `E-CODEGEN-INVALID-LOGIC`
+on my branch, clean compile on base. Refusing is correct.
+
+⚠ **"Your BS-structural sibling already validates" is FALSE — measured.** The
+top-level path with the SAME invalid alias compiles at **exit 0** and emits
+
+    (data, _scrml_each_idx) => data-id
+
+i.e. it truncates the alias at the `-` and emits `data - id`, a subtraction of
+two undefined identifiers. That is a SILENT-WRONG on the canonical path, and it
+is worse than the lift path's loud refusal. **Mirroring it would have been a
+regression.** Filed below as a new finding.
+
+**What I did NOT do, deliberately: add the identifier guard.** The guard alone
+converts a loud failure into a possible SILENT one — an alias that is declared
+but never referenced in the body would then compile clean with the synthetic
+`_scrml_each_item` binding, silently ignoring what the author wrote. The guard
+is only safe together with a refusal, and the refusal needs a real code
+(`E-EACH-AS-ALIAS-INVALID`).
+
+**Why the code is blocked:** `.github/workflows/ci.yml:168` runs
+`bun scripts/s34-census.ts --check-new --base <sha>` on every PR — a new E-code
+without a §34 SPEC row red-lines CI. `compiler/SPEC.md` is in the live sibling
+dispatch's write-set this round, so I cannot write that row. STOP-and-surface
+per the brief rather than ship a half-mechanism.
+
+Current behaviour is preserved and still fails CLOSED — correct direction, poor
+message. The message itself is governed by the ratified Bug 70 precedent at
+`api.js:2846`: raise the real diagnostic at an EARLIER stage and the emitted-JS
+gate self-suppresses. That is the shape the follow-on should take.
+
+## FINDING 3 — nested each in a fn-body each. REPRODUCED (relayed) and FIXED.
+
+Confirmed on base AND on `68cfad44`: the inner each shipped as a literal element
+— `document.createElement("each")` (not an HTML element), the alias emitted as a
+DOM attribute `setAttribute("cell","")`, and `String(cell)` referencing a
+binding never declared → `ReferenceError: cell is not defined`.
+
+Root: the nested-each branch keys on the structural `each-block` kind; a
+lift-parsed inner each is generic `{kind:"markup", tag:"each"}`.
+
+⚠ **Position was load-bearing and my first attempt failed.** Placing the
+promotion next to the each-block branch did nothing — `case markup` sits ~500
+lines earlier in the SAME function and claims the node first. It has to run
+before any kind dispatch. Caught by re-measuring, not by reading.
+
+Covered both shapes (inner each as direct child and as grandchild), plus a
+§17.7.3 test that the OUTER alias stays addressable inside the inner body.
+
+## FINDING 4 — W-ATTR-001 false-fire. REPRODUCED and FIXED.
+
+`W-ATTR-001: Attribute \`it=\` is not recognized on \`<each>\`` fired on CORRECT
+canonical §17.7.2 source, and told the author it "is forwarded to the rendered
+HTML as-is" — false; `it` is the iteration binding. It fired INCONSISTENTLY
+(lift-expr carrier warned, fn-body carrier did not), so the warning was a
+property of WHERE the each sat. Fixed in `validators/attribute-allowlist.ts`;
+the exemption is keyed to the `as` pairing and only to a WELL-FORMED alias, with
+fail-safe tests for a non-`as` bareword and for `in=`/`key=`.
+
+## Verification
+
+* **Browser tier: `bun scripts/browser-baseline.ts --check` → PASS**, name set
+  matches the documented baseline exactly (48 asserted). ⚑ My round-1 full-suite
+  set-diff flagged one "new" browser failure; it is a documented, order-flaky
+  member of that baseline. The baseline script is the correct instrument for
+  this tier and the set-diff is the weaker measure.
+* **Full `bun run test`**: 30494 pass / 53 fail / 216 skip / 1 todo.
+* **`bun run types`**: 145 diagnostics both sides; the lines touching my three
+  files are byte-identical to base.
+* **corpus-emit-differential** base `cb5db9c9` vs head `b1b0f1e8`:
+  **20 artifact content diffs**, 0 compile-outcome / 0 diagnostic / 0 syntax /
+  0 artifact-set / 0 load-context / 0 bare-server-fn delta.
+
+### Every one of the 20 diffs accounted for
+
+7 sources x (client.js, html, runtime). **Every `case.client.js` and `case.html`
+is byte-identical after normalising the runtime content-hash reference** — the
+emitted APPLICATION code did not change anywhere in the corpus. Only runtimes
+changed, and **0 helpers were removed corpus-wide** (measured across all 1889
+runtime artifacts, not asserted from the code comment).
+
+**Corpus-wide dead-page census** — a client that calls a real runtime-template
+helper its pruned runtime never defines:
+
+| | base `cb5db9c9` | head `b1b0f1e8` |
+|---|---|---|
+| genuinely dead clients (of 1889) | **4** | **2** |
+
+FIXED: `conformance/cases/each/ternary-markup-giti033` (the coordinator's filed
+gap — was missing `_scrml_reconcile_list`, `_scrml_resolve_item`,
+`_scrml_each_clear`) and
+`conformance/cases/derived/e-derived-server-only-reach-nested-loop` (missing
+`_scrml_derived_declare`, `_scrml_derived_subscribe`). Both are shipped
+conformance cases that were dead pages on `main` while their suites passed.
+
+⚠ **My first census said 394/392 and was WRONG by ~200x.** It counted
+`if (typeof _scrml_X === "function") _scrml_X(...)` — `typeof` on an undeclared
+identifier does not throw, so a guarded call is not a dead page. Caught by
+spot-checking a flagged sample instead of trusting the number. The same error
+had me briefly reading giti033 as "still dead at head" on
+`_scrml_register_rehydrator`; that call is guarded, and giti033 is fully fixed.
+
+### The cost, measured and not hidden
+
+Runtime bytes corpus-wide: +94,765 over 1889 artifacts (+0.086%), and it
+reconciles exactly:
+
+* +27,038 giti033 — USED (the fix)
+* +4,382 derived nested-loop — USED (the fix)
+* +63,345 = 5 x 12,669 — **UNUSED**. Five cases (`if-in-dispatched-arm-neg`,
+  `for-lift-per-item-if-reactive` x4) were already complete at base; the sweep
+  now reaches `if=`-bearing markup off-spine and pulls the whole
+  `ifmount`/`scope` chunk they do not call (their per-row `if=` lowers to
+  `_scrml_ifrow_apply`, which base already shipped).
+
+That is a real cost against the minimal-runtime remit and it is a deliberate
+choice: a MISSING chunk is a dead page at exit 0, an EXTRA chunk is bytes. The
+asymmetry is the same fail-safe direction the value-form-`if` work took. **The
+narrowing option, if the operator prefers bytes: route only `each`-tagged markup
+in the sweep — that keeps all four alias carriers and giti033, and drops the
+63KB — at the cost of re-hiding any genuine off-spine `if=`/`<timer>` dead page.
+Named here so it is a choice and not a default.**
+
+## NEW findings from this round — surfaced, not closed
+
+**NEW-1 (HIGH, unfiled) — the BS-structural `as` alias SILENTLY MIS-BINDS an
+invalid identifier.** `<each in=@rows as data-id key=data-id>` at TOP LEVEL
+compiles at exit 0 and emits `(data, _scrml_each_idx) => data-id`. The regex at
+`ast-builder.js:16676` matches the identifier PREFIX and stops at the `-`,
+leaving the rest as a subtraction of two undefined names. Worse than the lift
+path (which refuses). Contradicts the review's "your BS sibling already
+validates" premise. `ast-builder.js` is off-limits this dispatch.
+
+**NEW-2 (MED, unfiled) — two dead pages remain in the corpus, different roots.**
+`conformance/cases/style/flat-inline-token-unknown` calls `_scrml_effect`
+unguarded against a runtime that does not define it;
+`stdlib/data/form-for` calls `_scrml_labels_register` likewise. Neither is a
+markup-carrier problem, so this fix does not touch them. A stdlib module
+shipping a dead bundle is worth its own dispatch.
+
+**NEW-3 (process) — I destroyed my own uncommitted work once this round** with
+`git checkout <sha> -- <file>` for a bite proof before committing, exactly the
+hazard the brief flagged. Recovered from context, then committed before every
+subsequent step-back. The brief's rule is right and should stay loud.
+
+## Round-2 DEFERRED (carried from round 1, still open)
+
+* `g-each-nested-in-fn-body-markup-fn-stringifies` (MED) — untouched. Root
+  re-confirmed: `_eachMarkupFnNames` is set at `emit-each.ts:3684` / cleared at
+  `:3818`; the lift path runs outside that window.
+* `<each … as (k, v)>` tuple destructure in a fn body — `parseLiftTag` bails on
+  the `(`; fails closed with two misleading `E-SCOPE-001`s. Identical at base.
+* `E-DG-002` false positive on a fn-body each source.
