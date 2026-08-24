@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 50 |
+| HIGH | 51 |
 | MED | 163 |
 | LOW | 71 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -2381,6 +2381,29 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > **⚑ RETRACTED S371-bryan, ON OPERATOR CHALLENGE. This was a mis-file: #670 FIXED this behaviour and the entry framed the fix as the defect.** bryan, verbatim: *"are you asking if we reject `|>`, which as you said, is not a scrml operator? are we really supposed to inclusively handle every posible combonation of characters that could ever be accidentally entered … I dont see an end to that, ever."* **He is right, and the arithmetic is the argument.** The repro was `<li>${ if r.id > 0 { r.name |> uppercase } else { "z" } }</li>`. On `659a5b0f` it **compiled green, silently dropping the content**; on `main` it **fails `E-CODEGEN-INVALID-LOGIC`**. `|>` is not a scrml operator (0 occurrences in `compiler/SPEC.md`; its single corpus hit is a deliberate ghost-pattern gauntlet sample). So the PRE-#670 behaviour was the violation of bryan's own stated bar — *"we cant have invalid syntax producing garbage in the end result"* — and #670 replaced it with a loud refusal. **There is no gap here; there is a fix.**
 > **The principle, recorded because the mis-file came from losing it:** you do NOT enumerate invalid inputs. The bounded rule that covers an unbounded space is *recognise the valid forms and refuse the complement* — ONE rule, already implemented, of which `E-CODEGEN-INVALID-LOGIC` is the catch-all arm. A gap entry per bad operator is the enumerate-forever shape this contract rejects elsewhere (`[[feedback_limit_primitives_not_godify]]`, and the S337 governing-sentence/`locus=`/`prov=` converge-not-enumerate precedent).
 > **What survives, and it is NOT this entry:** the catch-all fires at CODEGEN and names no cause. That is the pre-existing generic-diagnostic quality class, not a new gap, and not a per-operator obligation. **Method note kept:** my first reproducer used a scalar receiver, failed on BOTH revisions, and read as reviewer over-claim; only the faithful struct/member-access shape reproduced the split — reproduce the REPORTED instance before generalising.
+
+### g-if-attr-per-field-synth-cell-crashes-boot — ⭐ `if=@compound.field.<synthProp>` lowers to a root-get + JS member access, the compound parent is `null`, and the `TypeError` inside `_scrml_boot` KILLS EVERY `${…}` INTERPOLATION ON THE PAGE — exit 0, zero diagnostics — `NEW S371-bryan (found dog-fooding the §55 validity surface; EXECUTED, four-way discriminator + captured stack); HIGH; open`
+<!-- @gap id=g-if-attr-per-field-synth-cell-crashes-boot sev=HIGH status=open locus=compiler/src/codegen(the if= condition lowering emits `_scrml_cs_reactive_get("signup").name.touched` — a root-segment reactive read plus JS member access — for a THREE-level compound-nav path, while the per-field synth cells are registered as FLAT dotted keys in the same artifact: `_scrml_cs_reactive_set("signup.name.touched", false)` + `_scrml_cs_derived_declare("signup.name.isValid", …)`; thrown at runtime from `_scrml_nav_rewire` called by `_scrml_boot`) prov=rationale:S371-dogfood-of-the-55-auto-synth-validity-surface-PA-EXECUTED-captured-TypeError-null-is-not-an-object-evaluating-scrml-cs-reactive-get-signup-dot-name-dot-touched -->
+> **⚑ S371-bryan: PA-EXECUTED. The captured stack IS the finding.**
+> ```
+> TypeError: null is not an object (evaluating '_scrml_cs_reactive_get("signup").name.touched')
+>     at _scrml_nav_rewire (…:9278)
+>     at _scrml_boot (…:9306)
+> ```
+> `if=` lowers a compound-nav condition to a **root-segment reactive read + JS member access**. The compound PARENT holds `null` (it is a namespace, not a value — §6.3 Variant C), so `.name` on it throws. The throw happens inside `_scrml_boot` on `DOMContentLoaded`, so **boot dies and every subsequent wiring never runs** — the whole page's reactivity, not just the gated element. In happy-dom the listener exception is swallowed (which is why it first read as "silent"); in a real browser it is an uncaught console error with the same dead-page result.
+> **⚑ The flat keys ALREADY EXIST in the same artifact** — `_scrml_cs_reactive_set("signup.name.touched", false)` and `_scrml_cs_derived_declare("signup.name.isValid", …)`. So the fix direction is to resolve the full dotted path to the registered key rather than root-get-then-navigate. **VERIFY that before building** — it is a hypothesis from reading the emitted output, not a trace.
+> **Four-way discriminator, each differing from the last by ONE line:**
+>
+> | `if=` bound to | result |
+> |---|---|
+> | `@flag` (plain Shape-1 cell) | ✅ works |
+> | `@signup.name` (compound field, 2-level) | ✅ works |
+> | `@signup.isValid` (**compound-level** synth, 2-level) | ✅ works |
+> | `@signup.name.isValid` / `.errors` / `.touched` (**per-field** synth, 3-level) | ✗ **ALL THREE kill every interp on the page** |
+>
+> So the trigger is the **three-level compound-nav path to a PER-FIELD synthesized cell** — not synth cells generally (compound-level works), not compound-nav generally (2-level works). Consistent with PRIMER §13.7 B12: per-field synth records live in a distinct `kind:"field"` scope reached only via `lookupQualifiedStateCell`'s extended descent, so 3-level is a separate resolution path the `if=` lowering never learned.
+> **`${@signup.name.touched}` in an INTERPOLATION works correctly** (renders `false` → `true` on interaction), so the per-field synth cells themselves are sound and reactive — this is `if=` lowering specifically.
+> **Severity HIGH:** silent at compile (exit 0; the only diagnostics were an unrelated `W-PROGRAM-SPA-INFERRED` info lint), catastrophic in scope (kills the entire page's reactivity), on the documented §55 auto-synth validity flagship — **and the shape is exactly what SPEC's own stated adopter mental model prescribes.** `SPEC.md:5898`: *"Adopter mental model: 'I'm still typing, don't show field errors yet; I stopped, now show them.'"* The idiomatic way to honour that is to gate on `touched`, and `<errors>` has no `touched` attribute (§55.8 defines only `of=` and `all`), and `if=` on `<errors>` is rejected with `W-ATTR-001` — so **wrapping in `<span if=@field.touched>` is the remaining idiom, and it is precisely the shape that crashes.** Found dog-fooding, not in the ledger. Repro-first re-derive before building.
 
 ### g-each-as-alias-unbound-in-fn-body — ⭐ an `<each ... as NAME>` inside a `fn` body NEVER BINDS `NAME` → `ReferenceError` at bundle eval that kills the ENTIRE client script, exit 0, zero diagnostics — `NEW S371-bryan (found re-deriving the peter-lane residual; EXECUTED in happy-dom, four-way discriminator); HIGH; open`
 <!-- @gap id=g-each-as-alias-unbound-in-fn-body sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(the fn-body each emission emits the GENERIC iter-var as the factory params — `(_scrml_each_item, _scrml_each_idx) =>` + `let _scrml_each_item = _scrml_resolve_item(...)` — while the body text still references the author's `as` alias, which is then never declared anywhere in the artifact; the top-level path instead makes the ALIAS the parameter name) prov=rationale:S371-PA-EXECUTED-happy-dom-fn-body-plus-as-alias-throws-ReferenceError-it-is-not-defined-while-fn-body-plus-@.-sigil-renders-and-top-level-plus-as-alias-renders -->
