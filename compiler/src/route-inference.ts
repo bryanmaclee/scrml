@@ -4923,6 +4923,59 @@ export function runRI(input: RIInput): RIOutput {
         }
       }
     }
+
+    // `<each>` OPENER expressions (§17.1 `in=` / `of=` / `key=`, §17.1.2 `if=`).
+    //
+    // An `<each>` looks like markup but does NOT parse to a `markup` node: the
+    // AST builder lowers it to `kind === "each-block"`, which carries **no
+    // `attrs` array at all** (ast-builder.js:16870). So the attribute branch
+    // above — the one that already covers `<span if=fn()>` (a `call-ref`
+    // AttrValue) and `<span class=${fn()}>` (an `expr` AttrValue) — never sees
+    // it. The opener expressions live instead in bespoke raw-STRING fields:
+    // `inExprRaw` / `ofExprRaw` / `keyExprRaw`, plus `ifRaw` for the §17.1.2
+    // render gate. None of those names appears in the EXPR_STRING_FIELDS
+    // fallback below either, and that union must NOT simply be widened to
+    // absorb them: it is deliberately kept as the same union as the DG's
+    // `sweepNodeForAtRefs` exprFields list (see its comment), and these four
+    // names are each-block-specific rather than shared expression-field names.
+    //
+    // Before this block, a function referenced ONLY from an each opener was
+    // invisible to `markupReferencedNames` and W-DEAD-FUNCTION false-fired —
+    // a CRY-WOLF, since the warning's own prediction ("It will be tree-shaken
+    // from the output") is false: codegen emits the function AND calls it
+    // (`_scrml_each_items_N = _scrml_rowsFor_1()`), and the app renders.
+    // Measured on this walker's blind spot, all four positions fired.
+    //
+    // The `<each>` BODY was already covered — `bodyChildren` /
+    // `templateChildren` are arrays of ordinary markup nodes that the generic
+    // recursion at the bottom descends into. Only the OPENER was blind.
+    //
+    // Identifier-scan (not a callee extraction) for the same reason the rest
+    // of this walker is one; it also means an argument-position callee
+    // (`in=filterRows(pickDefault())`) lands too.
+    //
+    // ⚑ S371 CORRECTION — do NOT justify a future widening of this walker with
+    // "over-inclusion only suppresses an advisory warning." That is FALSE.
+    // `markupReferencedNames` is ALSO read at `:5201` (the Step-5c indirect
+    // server-escalation gate, per the #284 FIX B header at `:4836`) and at
+    // `:6233` (`clientRootIds` → `endpointClientSkipIds`), so widening this set
+    // moves CODE-PLACEMENT decisions, not just diagnostics. For THIS change both
+    // directions are fail-safe and the corpus differential measured 0 of 7388
+    // artifacts changed — but the next widening must be argued against the
+    // placement consumers too, not against the warning alone.
+    if (node.kind === "each-block") {
+      const EACH_OPENER_RAW_FIELDS = [
+        "inExprRaw",   // `<each in=EXPR>`   — the collection (§17.1)
+        "ofExprRaw",   // `<each of=EXPR>`   — the count form (§17.1)
+        "keyExprRaw",  // `<each key=EXPR>`  — the per-item key (§17.1)
+        "ifRaw",       // `<each if=EXPR>`   — the render gate (§17.1.2)
+      ] as const;
+      for (const field of EACH_OPENER_RAW_FIELDS) {
+        const v = (node as Record<string, unknown>)[field];
+        if (typeof v === "string") collectIdentsFromText(v);
+      }
+    }
+
     // Bare-expr text inside markup interpolations (`${fn()}` in markup).
     // Note: we walk ALL bare-expr at logic-block top level too, but
     // function-decl returns above, so these are limited to non-function
