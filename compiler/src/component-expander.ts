@@ -100,6 +100,7 @@ import type {
   BareExprNode,
   PropagateExprNode,
   GuardedExprNode,
+  WhenMessageNode,
   CleanupRegistrationNode,
   UploadCallNode,
   TransactionBlockNode,
@@ -1833,6 +1834,20 @@ function rewriteTemplateInterpolations(
  * preceded by `.`) with the emit-string form of the substituted ExprNode.
  * This is a token-level pass suitable for template-interpolation contents
  * where re-parse-and-re-emit would risk altering whitespace and semantics.
+ *
+ * KNOWN HEURISTIC LIMITS (leading-identifier scan, not a full parser — shared
+ * with the long-standing template-interpolation caller, so PRE-EXISTING, not new
+ * to the when-handler callers; filed as
+ * g-component-prop-rawexpr-heuristic-substitution-edges):
+ *   - an object-literal KEY equal to a prop name is rewritten (`{label: v}` →
+ *     `{<value>: v}`; shorthand `{label}` becomes invalid). It is not
+ *     distinguished from a value read.
+ *   - a `` ` `` / `"` / `'` inside a REGEX literal (`/["`]/`) is mis-scanned as a
+ *     string/template opener.
+ *   - an unterminated `${` in the backtick branch appends one spurious `}`.
+ * The common cases (`prop`, `x.prop`, `mylabel`, plain-string contents, and a
+ * `${prop}` interpolation) are handled correctly. Full parse-hardening is out of
+ * scope for the substitution fix.
  */
 function rewriteIdentsInRawExpr(
   text: string,
@@ -1952,44 +1967,79 @@ function substitutePropsInLogicStmts(
 }
 
 /**
- * The set of `when …` handler kinds whose CODEGEN emits the handler body from
- * the RAW `bodyRaw` string (not `bodyExpr`):
- *   - "when-effect"          → emit-logic `when-effect`   (rewriteBlockBody bodyRaw)
- *   - "when-message"         → emit-worker generateWorkerJs (worker SELF-handler; bodyRaw)
- *   - "when-worker-message"  → emit-logic `when-worker-message` (bodyRaw)
- *   - "when-worker-error"    → emit-logic `when-worker-error`   (bodyRaw)
- * For ALL of these, substituting only `bodyExpr` (which codegen ignores here)
- * left a component prop referenced in the body leaking as a bare, unbound
- * identifier (g-component-prop-substitution-skips-when-worker-handler-bodies +
- * its when-effect / worker-self-handler siblings). The two "when-worker-*" kinds
- * are additionally absent from the LogicStatement discriminated union, so they
- * never matched a typed `case`. Handling all four in one place before the switch
- * gives a single, uniform treatment.
+ * `when …` handler kinds whose CODEGEN emits the handler body from the RAW
+ * `bodyRaw` string (not `bodyExpr`) AND whose body runs in the SAME component /
+ * parent scope as the props (so a prop ref there is a real, substitutable use):
+ *   - "when-effect"          → emit-logic `when-effect`          (rewriteBlockBody bodyRaw)
+ *   - "when-worker-message"  → emit-logic `when-worker-message`  (bodyRaw)
+ *   - "when-worker-error"    → emit-logic `when-worker-error`    (bodyRaw)
+ * For these, substituting only `bodyExpr` (which codegen ignores here) left a
+ * component prop referenced in the body leaking as a bare, unbound identifier
+ * (g-component-prop-substitution-skips-when-worker-handler-bodies + its
+ * when-effect sibling). The two "when-worker-*" kinds are additionally absent
+ * from the LogicStatement discriminated union, so they never matched a typed
+ * `case`. Handling all three uniformly before the switch keeps one code path.
+ *
+ * DELIBERATELY EXCLUDED: "when-message" — the worker SELF-handler (`when
+ * message(d) { … }` inside a `<program name=w>`). Its body is emitted into a
+ * SEPARATE worker bundle / thread scope (emit-worker generateWorkerJs), NOT the
+ * component scope. Substituting a component prop there is unsafe in the general
+ * case: a non-literal prop (`<Box label=@parentState/>`) would emit
+ * `send(@parentState)` into the worker — parent reactive state the worker cannot
+ * resolve → runtime throw — and a worker-LOCAL declaration colliding with a prop
+ * name would be clobbered (it is not in `shadowed`). Pre-fix this merely leaked
+ * the bare name, so excluding it is NOT a regression. Correct worker-scope
+ * substitution (literal-only guard + worker-local-decl shadowing) is its own
+ * arc — filed as g-component-prop-worker-self-handler-substitution-needs-worker-
+ * scope-awareness.
  */
 const BODY_RAW_WHEN_HANDLER_KINDS = new Set([
   "when-effect",
-  "when-message",
   "when-worker-message",
   "when-worker-error",
 ]);
+
+/**
+ * The DEFAULT binding name codegen falls back to when a bodyRaw when-handler
+ * omits its explicit binding, kept in lock-step with emit-logic.ts:
+ *   - "when-worker-message" → `node.binding ?? "data"` (emit-logic.ts, case "when-worker-message")
+ *   - "when-worker-error"   → `node.binding ?? "e"`    (emit-logic.ts, case "when-worker-error")
+ *   - "when-effect"         → no binding.
+ * VERIFIED (rd5): the ast-builder ALREADY defaults an omitted worker-handler
+ * binding to "data" (never null on the node), so `n.binding` alone already
+ * shadows the implicit parameter and no clobber of a prop named `data` occurs
+ * today — this map is DEFENSIVE symmetry with codegen's identical `?? default`
+ * fallback (guarding a future builder that could leave `binding` unset), not a
+ * fix for an observed leak.
+ */
+const WHEN_HANDLER_DEFAULT_BINDING: Record<string, string | undefined> = {
+  "when-worker-message": "data",
+  "when-worker-error": "e",
+  "when-effect": undefined,
+};
 
 /**
  * Substitute component prop refs into a bodyRaw-emitting `when …` handler node.
  * Rewrites `bodyRaw` (the string codegen actually emits) via
  * `rewriteIdentsInRawExpr` — leading-identifier discipline (`label`→caller
  * value; `x.label` / `mylabel` / plain-string contents untouched; `${…}`
- * template interpolations recursed into). The handler binding (`m` / `e` / a
- * `when message(d)` param) shadows a same-named prop. `bodyExpr` is kept
- * substituted too for shape parity, in case any path still reads it.
+ * template interpolations recursed into). The handler binding shadows a
+ * same-named prop — the EXPLICIT binding when present, else the default name
+ * codegen will synthesize (WHEN_HANDLER_DEFAULT_BINDING), so a prop named
+ * `data` / `e` under an omitted binding does not clobber the handler parameter.
+ * `bodyExpr` is kept substituted too for shape parity, in case any path still
+ * reads it.
  */
 function substitutePropsInWhenHandler(
   stmt: LogicStatement,
   propExprMap: Map<string, ExprNode>,
   shadowed: Set<string>,
 ): LogicStatement {
-  const n = stmt as unknown as { bodyRaw?: string; bodyExpr?: ExprNode; binding?: string };
+  const n = stmt as unknown as { kind: string; bodyRaw?: string; bodyExpr?: ExprNode; binding?: string };
   const inner = new Set(shadowed);
-  if (n.binding) inner.add(n.binding);
+  // Shadow the ACTUAL parameter name codegen will bind (explicit or defaulted).
+  const boundName = n.binding ?? WHEN_HANDLER_DEFAULT_BINDING[n.kind];
+  if (boundName) inner.add(boundName);
   const nextRaw = typeof n.bodyRaw === "string"
     ? rewriteIdentsInRawExpr(n.bodyRaw, propExprMap, inner)
     : n.bodyRaw;
@@ -2012,12 +2062,13 @@ function substitutePropsInLogicStmt(
     e ? substitutePropsInExprNode(e, propExprMap, shadowed) : e;
   const subInStmts = (ss: LogicStatement[] | undefined | null) =>
     ss ? substitutePropsInLogicStmts(ss, propExprMap, shadowed) : ss;
-  // Converged treatment for EVERY `when …` handler kind whose codegen emits from
-  // the raw `bodyRaw` string (when-effect / when-message / when-worker-message /
+  // Converged treatment for the same-scope `when …` handler kinds whose codegen
+  // emits from the raw `bodyRaw` string (when-effect / when-worker-message /
   // when-worker-error). Handled uniformly BEFORE the typed switch — the two
   // "when-worker-*" kinds are absent from the LogicStatement discriminant union
-  // (hence the `as string` cast), and routing all four here keeps one code path.
-  // See BODY_RAW_WHEN_HANDLER_KINDS / substitutePropsInWhenHandler.
+  // (hence the `as string` cast). The worker SELF-handler "when-message" is
+  // DELIBERATELY not here (separate worker scope) — see BODY_RAW_WHEN_HANDLER_KINDS
+  // / substitutePropsInWhenHandler.
   if (BODY_RAW_WHEN_HANDLER_KINDS.has(stmt.kind as string)) {
     return substitutePropsInWhenHandler(stmt, propExprMap, shadowed);
   }
@@ -2197,9 +2248,23 @@ function substitutePropsInLogicStmt(
         guardedNode: substitutePropsInLogicStmt(n.guardedNode, propExprMap, shadowed),
       } satisfies GuardedExprNode;
     }
-    // "when-effect" and "when-message" (worker self-handler), like the
-    // "when-worker-*" kinds, emit from `bodyRaw` and are handled uniformly by the
-    // BODY_RAW_WHEN_HANDLER_KINDS pre-switch block above — no case needed here.
+    // "when-effect" and the "when-worker-*" kinds emit from `bodyRaw` and are
+    // handled uniformly by the BODY_RAW_WHEN_HANDLER_KINDS pre-switch block above.
+    case "when-message": {
+      // The worker SELF-handler (`when message(d)` inside a `<program name=w>`).
+      // Its bodyRaw is emitted into a SEPARATE worker bundle/thread scope, so it
+      // is INTENTIONALLY NOT prop-substituted here (see BODY_RAW_WHEN_HANDLER_KINDS
+      // exclusion note). We still substitute `bodyExpr` — unused by worker codegen
+      // but kept for shape parity, matching the long-standing behavior — with the
+      // binding shadowing a same-named prop.
+      const n = stmt as WhenMessageNode;
+      if (n.bodyExpr) {
+        const inner = new Set(shadowed);
+        if (n.binding) inner.add(n.binding);
+        return { ...n, bodyExpr: substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) } satisfies WhenMessageNode;
+      }
+      return n;
+    }
     case "cleanup-registration": {
       const n = stmt as CleanupRegistrationNode;
       return { ...n, callbackExpr: subInExpr(n.callbackExpr) } satisfies CleanupRegistrationNode;

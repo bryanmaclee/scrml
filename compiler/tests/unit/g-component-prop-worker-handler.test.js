@@ -285,9 +285,13 @@ describe("g-component-prop-substitution-skips-when-worker-handler-bodies (siblin
   });
 
   // §C2 worker SELF-handler: `when message(d) { send(label) }` inside the
-  // component's `<program name="w">` emits from bodyRaw (generateWorkerJs). A
-  // string-literal prop is baked into the worker source — REACHABLE, so covered.
-  test("§C2 worker self-handler body substitutes the prop", () => {
+  // component's `<program name="w">` emits its bodyRaw into a SEPARATE worker
+  // bundle/thread scope (generateWorkerJs) — NOT the component scope. This pass
+  // DELIBERATELY does not substitute props there: a non-literal prop would emit
+  // parent state the worker cannot resolve, and a worker-local decl could be
+  // clobbered. Correct worker-scope substitution is its own arc, filed as
+  // g-component-prop-worker-self-handler-substitution-needs-worker-scope-awareness.
+  test("§C2 worker self-handler body is NOT prop-substituted (deferred, worker scope)", () => {
     const src =
       `<program>\n` +
       `  \${ const Box = <div props={ label: string }>\n` +
@@ -305,9 +309,9 @@ describe("g-component-prop-substitution-skips-when-worker-handler-bodies (siblin
     // (`@out = m`) is "when-worker-message".
     const self = collectByKind(ce.ast?.nodes ?? [], "when-message");
     expect(self).toHaveLength(1);
-    // BITING: pre-fix `send ( label )` (bare, unbound).
-    expect(self[0].bodyRaw).toContain(`"hello"`);
-    expect(self[0].bodyRaw).not.toMatch(/\blabel\b/);
+    // The prop stays a bare ref in worker scope (deferred); it is NOT baked in.
+    expect(self[0].bodyRaw).toMatch(/\blabel\b/);
+    expect(self[0].bodyRaw).not.toContain(`"hello"`);
   });
 
   // §C3 template blind spot: a prop referenced ONLY inside a `${…}` template
@@ -335,5 +339,33 @@ describe("g-component-prop-substitution-skips-when-worker-handler-bodies (siblin
     // the whole template). Post-fix the interpolation carries the caller value.
     expect(msg[0].bodyRaw).toContain(`\${"hello"}`);
     expect(msg[0].bodyRaw).not.toContain(`\${label}`);
+  });
+
+  // §C4 default-binding shadow (regression guard). A prop named `data` with an
+  // OMITTED handler binding must NOT be substituted into the handler body — the
+  // implicit parameter is named `data` (ast-builder default, matching codegen's
+  // `node.binding ?? "data"`). NOTE: this passes on the pre-fix source too — the
+  // ast-builder already defaults `binding` to "data", so the existing shadow
+  // covers it; this guards the behavior + the WHEN_HANDLER_DEFAULT_BINDING
+  // symmetry against future drift.
+  test("§C4 a prop named `data` with an omitted binding is NOT clobbered", () => {
+    const src =
+      `<program>\n` +
+      `  \${ const Box = <div props={ data: string }>\n` +
+      `    ${WORKER}\n` +
+      `    \${ <out> = ""\n` +
+      `      <t> = \`hi \${@out}\`\n` +
+      `      when message from <#w> { @out = data } }\n` +
+      `    <p>\${@out}</p>\n` +
+      `  </> }\n` +
+      `  <Box data="hello"/>\n` +
+      `</program>\n`;
+    const { ce, ceErrors } = expandCE(src);
+    expect(ceErrors).toHaveLength(0);
+    const msg = collectByKind(ce.ast?.nodes ?? [], "when-worker-message");
+    expect(msg).toHaveLength(1);
+    // `data` stays the handler parameter read, NOT the caller value.
+    expect(msg[0].bodyRaw).toMatch(/@out\s*=\s*data\b/);
+    expect(msg[0].bodyRaw).not.toContain(`"hello"`);
   });
 });
