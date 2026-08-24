@@ -1,45 +1,64 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
-# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
-# `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
+# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
+# ancestor of `origin/main` (it IS `origin/main`).
 #
-# **EXTERNAL DEPS RE-VERIFIED UNCHANGED: `git diff --name-only c93a692c..c96e7012 -- package.json`
-# is EMPTY.** No add, no bump, no removal; version stays **v0.7.1** — ELEVEN windows now. Same for
-# `stdlib/`, `compiler/runtime/`, `compiler/native-parser/`, `editors/` — all zero-diff. `lsp/`
-# moved by exactly ONE line (`lsp/handlers.js:1127`, the `E-MW-007` hover string).
+# ⚑ **THE ELEVEN-WINDOW `package.json` ZERO-DIFF STREAK IS OVER (#665).** `git diff --name-only
+# c96e7012..728bdc92 -- package.json` is NON-empty for the first time since S332. One dev dependency
+# ADDED — **`typescript@^5.9.2`** — and three `scripts` entries: `types`, `types:check`, and a
+# `"//types"` comment-key carrying the reason. **`typescript` is a DEV dependency and is NOT in the
+# `files` allowlist**, so nothing about the published surface or the runtime graph moved. Version
+# stays **v0.7.1**. `stdlib/`, `compiler/runtime/`, `compiler/native-parser/`, `editors/`, `lsp/` are
+# ALL zero-diff this window.
 #
-# **EVERY EDGE THAT MOVED THIS WINDOW IS INTERNAL — for the fourth window running. But unlike the
-# last three, this window ADDED NODES: three new `compiler/src/` modules, the first since S332.**
+# **WHY A TYPE-CHECKER WAS NOT ALREADY A DEPENDENCY, because it reads like an oversight and is worse
+# than one:** bun executes `.ts` TRANSPILE-ONLY. With no `typescript` dep, no `tsconfig.json` and no
+# `tsc` invocation anywhere in `package.json` / `scripts/` / `.github/` / either git hook, **every
+# type annotation in `compiler/src` was in effect a comment** — and `ci.yml`'s gate-layering header
+# advertised a "types (always-on local)" layer that did not exist. Adding the dep armed
+# `scripts/types-gate.ts`, which immediately found NINE live exhaustive-switch `never` failures.
 #
 # **NEW INTERNAL EDGES A DEV AGENT WILL NOT FIND FROM THE PRIOR MAP:**
 #
-#     commands/build.js          → commands/select-request-onion.js   (:22)
-#     commands/dev.js            → commands/select-request-onion.js   (:23)
-#     commands/dev.js            → commands/diagnostic-format.js      (via #555 warning loop)
-#     codegen/index.ts           → codegen/emit-transition-css.ts     (:59)
-#     codegen/emit-tool.ts       → codegen/emit-server.ts             (localServerImportNameUsed, carried)
-#     scripts/facts.ts           → (knows select-request-onion + diagnostic-format are NOT verbs)
+#     codegen/emit-each.ts       → markup-return-scan.js               (NEW node, #658; TS-imports-JS)
+#     module-resolver.js         → markup-return-scan.js               (NEW node, #658)
+#     codegen/emit-client.ts     → codegen/runtime-chunks.ts           (hasStdlibClientChunk, #669)
+#     codegen/emit-client.ts     → codegen/utils.ts                    (maskStringLiteralSpans, #669)
+#     runtime-chunks.ts          → route-inference.ts                  (DOCUMENTED criterion edge, #669 —
+#                                                                       the chunk list is DERIVED from
+#                                                                       ESCALATION_SERVER_ONLY_MODULES;
+#                                                                       prose, not an import)
+#     scripts/types-gate.ts      → typescript                          (the ONLY consumer of the new dep)
 #
-# **`select-request-onion.js` IS A SHARED-RULE NODE AND THAT IS ITS WHOLE POINT — read this before
-# adding a second onion decision anywhere.** `scrml build` and `scrml dev` previously each decided
-# which `handle()` onion to mount, independently. A dev/prod split there is precisely the class of
-# defect the module exists to remove, so **both hosts import the SAME `selectRequestOnion` and there
-# is exactly ONE emit site for `E-MW-007` (`select-request-onion.js:72`).** This is the same
-# one-provider discipline as the ASYNC-NAME PROVIDER row below (invariant 39) and the
-# `localServerImportNameUsed` unification (#515): **when two consumers must agree, give them one
-# provider, not two copies of a predicate.**
+# **`markup-return-scan.js` IS A SHARED-RULE NODE, EXACTLY LIKE `select-request-onion.js` — and the
+# one-provider discipline is now the third instance of the same lesson.** "does this fn return
+# markup?" had to be answered identically by `emit-each.ts` (same-file fns) and `module-resolver.js`
+# (per-module export classification), or an IMPORTED markup fn stringifies to
+# `[object HTMLSpanElement]` while an identical same-file one mounts. **It is authored in plain JS
+# because MOD runs BEFORE codegen and is plain JS** — that is the constraint that decided the file
+# extension, not preference. Same rule as invariant 39 (ONE async-name provider) and #515
+# (`localServerImportNameUsed`): **when two consumers must agree, give them one provider, not two
+# copies of a predicate.**
 #
-# ⚠ **`scripts/facts.ts` CARRIES A HAND-MAINTAINED EXCLUSION LIST AND NOTHING CHECKS IT.**
+# ⚑ **`RUNTIME_CHUNK_ORDER` IS NOW A DEPENDENCY EDGE, NOT JUST AN ARRAY (#669).** A client-side
+# `import … from 'scrml:NAME'` lowers to `const { … } = _scrml_stdlib.NAME;`, which the `stdlib-NAME`
+# entry in that array defines **and nothing else does**. So the array IS the client-side stdlib
+# dependency graph. It went **4 -> 13 stdlib chunks** this window; before that, client stdlib imports
+# were DOA for **17 of 21 modules** at exit 0. See the "Runtime-chunk gating" section below and
+# `stdlib module pairing`.
+#
+# ⚠ **`scripts/facts.ts` STILL CARRIES A HAND-MAINTAINED EXCLUSION LIST AND NOTHING CHECKS IT.**
 # `NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion"])`
 # (`scripts/facts.ts:83`) is how the published "CLI verbs" figure stays **11** while
-# `compiler/src/commands/` holds **14** files. A new shared-rule module dropped into `commands/`
-# will be counted as a verb until someone adds it here by hand — the same hand-maintained-beside-a-
-# derived-list hazard this map flags for `SCRML_NON_ELEMENT_TAGS_EXTRA`.
+# `compiler/src/commands/` holds **14** files. Carried verbatim from the prior window — a new
+# shared-rule module dropped into `commands/` inflates the published figure until someone edits that
+# set by hand.
+#
 
 ## MANIFEST SHAPE — one manifest, allowlisted
 
@@ -62,6 +81,7 @@ happy-dom@^20.8.9 — fast in-process DOM used by compiler/tests/browser
 @playwright/test@^1.49.0 — Playwright e2e framework (e2e/)
 marked@^14.1.3 — Markdown parser used by docs/build.ts
 puppeteer@^24.40.0 — headless browser support for e2e/docs tooling
+typescript@^5.9.2 — **NEW THIS WINDOW (#665), and the FIRST external-dependency change in eleven windows.** The ONLY consumer is `scripts/types-gate.ts` (`bun run types` / `types:check`). It is a DEV dep and is NOT in the `files` allowlist. It is NOT used to build or run anything — bun still transpiles `.ts` directly; `tsc` is invoked `--noEmit` purely to produce the diagnostic set the gate compares.
 
 ## Published surface (`files` allowlist — new this window)
 `compiler/bin/`, `compiler/src/`, `compiler/native-parser/`, `compiler/runtime/`, `stdlib/`,
@@ -254,6 +274,19 @@ Three files, one decision, and **none of them is `codegen/index.ts`**:
    (`_scrml_cs_message_for` does not contain `_scrml_message_for` as a substring).
 3. **`codegen/runtime-chunks.ts` `CHUNK_DEPENDENCIES` (:384)** — declarative cross-chunk edges,
    transitively closed at the END of `detectRuntimeChunks` before the chunk set is frozen.
+4. **`codegen/runtime-chunks.ts` `RUNTIME_CHUNK_ORDER`'s `stdlib-*` MEMBERS (NEW LOAD-BEARING ROLE, #669)** —
+   the stdlib half of this array is not a tree-shake hint, it is the **CLIENT CONTRACT**. A client-side
+   `import { x } from 'scrml:NAME'` lowers UNCONDITIONALLY to `const { x } = _scrml_stdlib.NAME;` and
+   that property is defined by the `stdlib-NAME` entry **and by nothing else** — absent, the
+   destructure reads `undefined` and THROWS AT BUNDLE LOAD, killing the whole page. **4 -> 13 chunks
+   this window; 17 of 21 modules were DOA before it.** `STDLIB_CLIENT_CHUNK_MODULES` (:349) and
+   `hasStdlibClientChunk` (:381) are DERIVED from this same array so the gate
+   (`E-STDLIB-CLIENT-CHUNK-MISSING`, `emit-client.ts:3817`) and the outcome cannot drift — the S368
+   defect was a gate reading `existsSync` of a shim FILE (all 21 exist) while the deciding property
+   was chunk registration. ⚠ **Matching is EXACT: a SUBMODULE does not inherit its root's chunk**,
+   because `scrml:auth/jwt` lowers to `_scrml_stdlib.auth/jwt`, which JS parses as the DIVISION
+   `_scrml_stdlib.auth / jwt`. **If you are fixing a bundle `TypeError` on a `scrml:` import, this is
+   the list — not the shim directory.**
 
 **GH #234, the shape to recognize:** `<errors of=…/>` wiring (emit-event-wiring.ts) captures
 `_scrml_message_for` as a VALUE behind `typeof` rather than calling it, so the call-form gate could
@@ -459,6 +492,29 @@ corpus's 116 server-only-module import sites and it ships a real client implemen
 `scrml:http` (fetch wrappers; `fetch` is browser-native and the module takes no credential of its
 own). **A hand-maintained derived list rots silently** — that is the `docs/FACTS.md` lesson, and it
 is why the two membership limbs are recorded next to the list in the source.
+
+**⚑ THE SAME CRITERION NOW ALSO DECIDES THE CLIENT RUNTIME CHUNK LIST (#669), AND THAT IS THE
+LOAD-BEARING NEW FACT IN THIS SECTION.** A module is client-registered in
+`codegen/runtime-chunks.ts:RUNTIME_CHUNK_ORDER` **iff it is NOT an escalation-server-only module
+under this same two-limb criterion** (`route-inference.ts:ESCALATION_SERVER_ONLY_MODULES`).
+Membership is DERIVED, not curated:
+
+| | modules |
+|---|---|
+| **Client-registered (13)** | `auth` · `compiler` · `crypto` · `data` · `format` · `host` · `http` · `math` · `random` · `regex` · `router` · `test` · `time` |
+| **Deliberately absent (8)** | `cron` · `fs` · `mcp` · `oauth` · `path` · `process` · `redis` · `store` — each carries a one-line reason AT the absent block in `runtime-chunks.ts` |
+
+**`auth` and `crypto` fail the criterion yet carry a chunk. That is PRE-EXISTING (S95 Bug 18) and
+was left alone DELIBERATELY** — removing a chunk is a behaviour removal, out of scope for the
+dispatch that added the rest of the list. Do not "correct" it as an inconsistency without treating
+it as its own change.
+
+**Before #669 only FOUR of these had chunks**, so a client-side `import` from any of the other
+seventeen compiled clean, emitted a shim nothing loaded, and threw `TypeError` at bundle load with
+**zero diagnostics**. Measured matrix at the fix: base 4 execute → tip **13 execute / 8 refused
+loudly with `E-STDLIB-CLIENT-CHUNK-MISSING` / 0 silent**. `path` deserves its own note: the shim
+loader **strips DEFAULT imports**, and `path`'s shim is `import nodePath from "node:path"`, so even
+if it passed the host-reach limb every export would `ReferenceError`.
 
 ## Tags
 #scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover

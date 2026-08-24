@@ -1,80 +1,147 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
-# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
-# `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
+# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
+# ancestor of `origin/main` (it IS `origin/main`).
 #
-# **THE BIGGEST LANGUAGE-SURFACE WINDOW IN MANY PASSES: SPEC.md +146 net lines (37,152 -> 37,298),
-# ONE new code (`E-MW-007`), and a normative RULE about `handle()` that did not exist before.**
-# ⚠ A grep of the SPEC diff for added `E-*` tokens returns three; `E-PROGRAM-002` and `E-IMPORT-005`
-# are FALSE POSITIVES — both were already in SPEC at the base and gained only a prose mention. See
-# error.map.md. Contrast the
-# last two windows, which were byte-identical SPEC. Six items moved and each is amended in place
-# below; the four that will bite a dev agent are:
+# **SPEC.md +241 lines (37,298 -> 37,539), TWO new codes (`E-STDLIB-CLIENT-CHUNK-MISSING`,
+# `W-TYPE-031-UNPROVEN`). THE FRAMING THAT REORDERS EVERYTHING ELSE: bryan hand-wrote scrml for the
+# first time this session, and it went badly. Every compiler defect in the bryan lane came out of
+# that; peter's came out of dog-fooding an order dashboard and a signup form.** ⚠ A token-diff of
+# SPEC for added codes returns THREE; `W-031-UNPROVEN` is FALSE — prose shorthand inside the
+# `E-TYPE-031` row. See error.map.md.
 #
-# **1. §40.3/§40.8 — THE REQUEST ONION IS APPLICATION-SCOPE, AND THERE IS EXACTLY ONE (#654).**
-# `handle()` now wraps **TOP-LEVEL DISPATCH**, not per-route dispatch — §40.3.4's "applies to all
-# HTTP requests handled by the compiled server — including statically-served assets" is now what the
-# emitter does. A build declaring a request pipeline in two modules is two applications in one
-# server and is REFUSED (`E-MW-007`). **The normative reasoning is worth carrying because it is a
-# general language principle, not a middleware detail: precedence must be readable off the SOURCE,
-# never off a FILENAME.** Composing per-module onions would order them by module-discovery order,
-# which is filename-sorted — so renaming `api.scrml` to `zapi.scrml` would silently change which
-# `handle()` won a contested path. SPEC `:22652` (prose), `:19693` + `:22715` (catalog rows). Full
-# mechanism in auth.map.md's new "§40.3 THE REQUEST ONION" section.
+# **THE FOUR THINGS THAT WILL BITE A DEV AGENT:**
 #
-# **2. §40.3.3 — THE PIPELINE ORDER IS NOW ENFORCED WHERE IT WAS ONLY DECLARED.** The CORS preflight
-# is stage 1, ahead of rate-limit and ahead of `handle()` PRE. It was previously only the
-# `_scrml_cors_options_route` registry entry, so **an author `handle()` ran on every browser
-# preflight (measured).** The domain reason: a preflight carries no credentials, so an auth-enforcing
-# `handle()` rejects it and the browser's real request never happens. And **`ratelimit=` is a
-# PER-ROUTE concern (§4.15), not app-wide** — applied to every request it counted the HTML + CSS +
-# runtime + bundle sub-requests of one page load, so `ratelimit="3/min"` 429'd a first-time visitor
-# on their own first page view.
+# **1. §7.5/§14.7 — `asIs` AND `unknown` ARE NOW DIFFERENT VALUES, AND THE DISTINCTION IS NORMATIVE
+# (#665, dpa-036 call 1).** `asIs` means **a developer signed for it** — §14.7's named escape hatch,
+# what `E-TYPE-ANY-FORBIDDEN` steers to. `unknown` means **the compiler did not look, or looked and
+# could not tell**; it is NOT an escape hatch and nobody signed for it. **Before S365 they were ONE
+# value:** inference gave up by returning `tAsIs()`, so a gap in the type checker was spelled exactly
+# like a deliberate opt-out, and *absence of a diagnostic* and *success* were the same observation.
+# `UnknownType.reason` is REQUIRED and `tUnknown()` has no zero-arg overload — **an `unknown` that
+# cannot say what defeated it has decayed back into an `asIs`.** New warning `W-TYPE-031-UNPROVEN`
+# (SPEC §7.5.2) reports it, and it and `E-TYPE-031` are **COMPLEMENTS, not alternatives**: 031 is "I
+# proved it does not fit", UNPROVEN is "I could not prove anything". ⚑ **This retires the prior map's
+# "NOT ON MAIN, NOT MAPPED" note verbatim — the split LANDED.** schema.map.md · error.map.md.
 #
-# **3. §38 TRANSITIONS MOVED FROM THE RUNTIME TO THE STYLESHEET, AND §39.2.5 IS WHY (`codegen/
-# emit-transition-css.ts`, NEW).** `<program headers="strict">` pins `default-src 'self'`; the old
-# keyframes were injected by a `document.createElement("style")` IIFE, and an inline `<style>` is
-# refused — **so a strict-headers app lost EVERY §38 transition and the author had no way to fix
-# it.** §39.2.5's "override via `handle()`" escape covers author-loaded external origins, NOT
-# compiler-emitted content. **The generalisable rule: `headers="strict"` binds the COMPILER's own
-# emissions, not just the author's.** The SSR seed moved for the same reason — it is now
-# `<script type="application/json" id="__scrml_ssr_state">` + `JSON.parse` (both readers changed:
-# `runtime-template.js:2767-2788` and `:6090-6114`).
+# **2. §41 — A CLIENT-SIDE `scrml:NAME` IMPORT IS ONLY REAL IF THE MODULE HAS A RUNTIME CHUNK, AND
+# 17 OF 21 DID NOT (#669).** A client bundle is a CLASSIC SCRIPT: it cannot resolve a bare
+# specifier, so `import { slug } from 'scrml:format'` lowers UNCONDITIONALLY to
+# `const { slug } = _scrml_stdlib.format;`, and `_scrml_stdlib.NAME` is defined by the `stdlib-NAME`
+# entry in `RUNTIME_CHUNK_ORDER` **and by nothing else**. Four were registered. **Compile exit 0,
+# `TypeError` at bundle load, dead page, zero diagnostics.** Registry 4 -> 13; the other 8 now refuse
+# LOUDLY with `E-STDLIB-CLIENT-CHUNK-MISSING`. **Membership is DERIVED from the §12.2 Trigger 3
+# two-limb criterion, not curated** — (a) host reach into `Bun.*`/`process.*`/`bun`/`bun:*`/`node:*`,
+# or (b) credential handling. ⚑ **Two normative consequences worth carrying:** (i) **a submodule
+# specifier is NOT a thing the registry can express** — `scrml:auth/jwt` lowers to
+# `_scrml_stdlib.auth/jwt`, which JS parses as the DIVISION `_scrml_stdlib.auth / jwt`; refusing it
+# is correct and teaching the registry about submodules is its own arc; (ii) **the gate that should
+# have caught this watched the WRONG PROPERTY** — `W-STDLIB-SHIM-MISSING` probes whether a shim FILE
+# exists (all 21 do), while the deciding property is chunk registration. **Obligation and probe
+# resolving to different artifacts is the recurring shape here, not a one-off.**
 #
-# **4. §20.8.2 SOFT NAV IS THE REASON THE TRANSITION CSS HAS AN APP-WIDE UNION — and this is a
-# standing constraint on ANY per-page emitted asset.** A soft navigation swaps the target route's
-# markup into the SHELL's live document and never loads the target page's stylesheet
-# (`_scrml_nav_sync_head` syncs `<title>`/description/canonical ONLY). Soft nav is the DEFAULT path —
-# `_scrml_link_click_handler` intercepts every same-origin `<a href>`. **So a page-scoped stylesheet
-# cannot reach a soft-navigated element, and any new per-page asset has the same hole.** The fix
-# pattern used here: put the app-wide union in the `<program>` shell entry, which every composed
-# per-page document already links.
+# **3. §17.6 — THE VALUE-FORM `if` HAD THREE SEPARATE SILENT-WRONG HOLES, ALL FOUND BY DOG-FOODING,
+# ALL FIXED THIS WINDOW (#670/#672/#673).** They are worth reading TOGETHER because the class is one
+# thing: **a construct that is correct at TOP LEVEL and silently degrades in a NESTED or INDIRECT
+# position.**
+#   · **#670 — inside an `<each>` body.** `${ if c { a } else { b } }` as the SOLE content of an
+#     interp inside an `<each>` was neither a `bare-expr` nor carried `stmt.raw`, so emit-each fell
+#     to `inner = ""` and emitted an empty text node. The IDENTICAL form at top level lowered to a
+#     reactive ternary correctly. **Filed residual: a value-form `match` in an each interp is STILL
+#     dropped** (`g-each-inline-value-form-match-interp-dropped`).
+#   · **#672 — an empty-string branch.** `{ "" }` collapsed to an empty BLOCK, because the parser's
+#     blank-token skip tested `tok.text.trim() === ""` and an empty-string STRING literal has blank
+#     `.text` while being a MEANINGFUL expression statement. The branch then failed value-form
+#     recognition and rendered nothing.
+#   · **#673 — a fn-call CONDITION.** `${ if isOn() { … } else { … } }` never re-rendered when a cell
+#     `isOn()` reads changed, while `${ if @c … }` did. Root: the effect-vs-static decision
+#     string-scanned the LOWERED value for `_scrml_reactive_get(...)`, which sees a DIRECT cell read
+#     but **not a read hidden inside a called fn**. Now ANY call in the lowered value counts as
+#     potentially-reactive. ⚑ **The fail-safe DIRECTION is the reusable part: a false positive is a
+#     needless effect that never re-fires; a false negative is a stale display. Bias toward the
+#     effect.** The static optimisation survives only for a genuinely-const value-form `if`.
 #
-# Also this window, amended in place below: **§21.5 library-mode bare-fn files keep their own closing
-# brace (#649), and the SHAPE of that bug is the reusable part** — the `${…}` logic-wrapper strip
-# took its prefix and suffix INDEPENDENTLY (`startsWith("${")` → slice 2; `endsWith("}")` → slice -1),
-# so a bare-fn library file with no wrapper lost the fn's OWN closing brace and died at
-# `E-CODEGEN-INVALID-LOGIC`. **It hid in the common case only because a trailing newline left the
-# fn's `}` non-final.** Strip a delimiter pair as a MATCHED PAIR, and be suspicious of any bug whose
-# reproducer needs a missing trailing newline. §18 library-mode `const/let X = match` lowers
-# in place (#641) and a `match` EXPRESSION inside a library-mode pure fn lowers at all (#636); §19
-# failable-arm bodies admit a template literal (#637); §5.5 reactive attrs work on standard render
-# elements the curated registry omits (#632, `isStandardHtmlRenderElement`); §6.7.7 a
-# `<#request>`-leading event handler routes correctly (#630); §61.3 an `<endpoint>` with a
-# malformed/empty body returns the mandated 400 instead of throwing (#619); §39.3 a no-argument
-# server function tolerates an empty request body (#604).
+# **4. §18 — A `match` OBJECT-LITERAL ARM IS A RETURNED VALUE, NOT A STATEMENT BLOCK (#664).** In
+# library-mode `fn`, `1 :> { x: 1 }` emitted BARE; JS reads `{ x: 1 }` as a labeled-statement block,
+# the IIFE falls off its end, and the fn silently returns `undefined`. It now emits in RETURN
+# position, through `emitExprField` + `_awaitMatchArmServerCalls` so a server call inside the object
+# (`{ rows: queryUsers() }`) is auto-awaited (§13.2/§19.9.3) exactly as the decl path does.
+# ⚠ **RESIDUAL, OPEN, HIGH: the `else`/wildcard arm was NOT covered** —
+# `g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier`.
 #
-# ⚑ **NOT ON MAIN, NOT MAPPED:** the `asIs`/`unknown` split (`InferenceResult`, `InferenceGap`,
-# required `UnknownType.reason`) is on the unlanded branch `feat/s365-asis-split-rung0`. At this
-# watermark `UnknownType` is `{ kind: "unknown" }` and nothing else. See schema.map.md.
+# ⚑ **THE OPEN ITEM THAT NOW HAS ITS OWN ROUTING ROW IN primary.map.md — §40.8 DEFAULT-LOGIC MODE
+# SILENTLY EMITS NON-DECLARATION CODE AS PAGE TEXT.** THREE defects of ONE class landed on this
+# surface this session and none of them is fixed on `main`. **All three PA-REPRODUCED at this
+# watermark by compiling and reading the emitted `<body>`, not by reading the ledger:**
+#   · `<program>` + `log("M1");` → exit 0, literal `log("M1");` in `<body>`.
+#   · `<program>` + `if (1) { }` → exit 0, literal `if (1) { }` in `<body>`.
+#   · `<program>` + `// c` + `log("M1");` → exit 0, literal `log("M1");` in `<body>` (the comment
+#     FLUSHES the surrounding contiguous run, before AND after).
+#   · Control: `<program>` + `<count> = 0` lifts correctly and emits NO page text.
+# **The masking limb is why these are HIGH: a swallowed statement's diagnostics are swallowed too.**
+# The original reproducer read an UNDECLARED cell and `E-STATE-UNDECLARED` did not fire, because the
+# statement was never compiled. **A defect that turns code into text also deletes every diagnostic
+# that code would have raised.** And `W-PROGRAM-REDUNDANT-LOGIC` actively routes authors INTO the
+# broken mode — it tells you to remove the `${…}` wrapper, and the wrapped form is the one that works.
+# ⚠ **THE BARE-CALL LIMB IS A RULING, NOT A FIX.** §40.8 (`SPEC.md:22813-22814`) enumerates what
+# auto-lifts (DECLARATIONS), carves out writes with a diagnostic, and is **SILENT on a bare call** —
+# so *"searched §40.8, no governing sentence found"* is a FINDING that converts it into an operator
+# decision. The fork: **(a) lift every text run** (closes it, but prose written directly in a
+# `<program>` body then parses as logic) vs **(b) diagnose non-declaration runs** (closes it, but
+# must then reject `const bias = 1.2` followed by `log(x)`, which compiles today). **Either needs
+# SPEC text. Nobody should guess.** ⚑ **The bare-`if` limb is NOT covered by that ruling** and it
+# contradicts a §34 row outright — `E-CONTROL-FLOW-IN-MARKUP`'s own text claims the auto-lift *"fires
+# only at `<program>`/`<page>`/`<channel>` direct-child roots"* and that without it such a construct
+# *"would ship as raw `for(){}` text into the DOM."* **It ships.** The emit site
+# (`ast-builder.js:1857-1860`) is gated `parentType === "markup"`, the COMPLEMENT of the §40.8 locus.
+# ⚑ **AND THE CLASS IS WIDER THAN §40.8.** A corpus sweep read from source found at least four live
+# members OUTSIDE it — most sharply **`on mount { loadDashboard() }` inside a `<db>` state-block body
+# ships as page text and the mount hook NEVER RUNS** (`samples/htmx-debate-dashboard.scrml:143`,
+# clean compile). SPEC says `<db>`/`<state>` bodies are NOT default-logic loci — a state-block body
+# is markup context — and the sibling `W-STATE-BLOCK-BARE-WRITE-DECL` covers a bare *write* there at
+# **Info**, deliberately, *"because a hard error there is a bigger call."* **That locus is an OPEN
+# OPERATOR RULING, not a bug with a known fix.** Plus ~25 bare `@name = expr` writes emitted as text
+# in `gauntlet-r10-bun-admin` / `samples/dashboard`, and `stdlib/http/index.scrml` leaking 8 lines of
+# its own body. primary.map.md Task-Shape Routing · structure.map.md `ast-builder.js`.
+#
+# **§13.2 — A NEW HIGH, ROUTED NOT FIXED (S370-peter, filed at `674f890b`).** A server-fn call
+# **nested inside a larger expression** (`call().length`, `f(call())`, `call() > 0`) is **not awaited
+# at the inner call site** in markup interps and inline event handlers — renders `""`/`undefined`,
+# exit 0, no diagnostic. **The asymmetry was executed, not inferred: fn bodies and direct
+# cell-assign are correct, so the class is POSITION-SCOPED.** Deliberately routed rather than patched
+# in-lane because it is the §13.2-SHALL-by-RETROFIT axis. Entry:
+# `g-server-call-nested-in-expression-not-awaited-outside-fn-body`.
+#
+# **§6.8 — `reset(@cell)` NO LONGER HANDS BACK A PROMISE (#662).** `_scrml_reset` re-invoked the init
+# thunk with no `await`, so a cell whose init calls a server fn was correct at mount and became a raw
+# Promise on reset. Both re-invocation paths now route through `_scrml_reset_apply`
+# (`runtime-template.js:1179`). ⚠ **The thenable correction is the durable part:** a bare
+# `r.then(...).catch(...)` assumes `.then` returns a promise — true of a real Promise, NOT of an
+# arbitrary thenable (`{ then: (res) => res(99) }` returns `undefined`, so `.catch` throws a
+# `TypeError` SYNCHRONOUSLY out of the adopter's event handler and aborts the rest of it).
+# `Promise.resolve(r)` FIRST is what makes the declaration-path parity claim true rather than
+# plausible.
+#
+# **§1.4/§7.4 — a cross-file IMPORTED markup fn now MOUNTS in an `<each>` interp (#658)**, matching
+# the same-file case. The predicate moved into `compiler/src/markup-return-scan.js`, a shared leaf
+# both `emit-each.ts` and `module-resolver.js` import, with an import-graph FIXPOINT so a re-exported
+# wrapper at any depth is classified. **Residual OPEN:** `g-each-nested-markup-interp-stringifies`.
+#
+# **CARRIED FROM THE PRIOR WINDOW, all still true and amended in place below:** §40.3/§40.8 the
+# ONE-ONION rule and precedence-off-SOURCE-not-FILENAME · §40.3.3 the enforced pipeline order
+# (CORS preflight is stage 1; a preflight carries no credentials) · `ratelimit=` is PER-ROUTE (§4.15)
+# · §38 transitions moved runtime -> stylesheet because `headers="strict"` binds the COMPILER's own
+# emissions (§39.2.5), and the §20.8.2 soft-nav stylesheet hole that forces the app-wide union in the
+# `<program>` shell · §21.5 strip a delimiter pair as a MATCHED PAIR.
 #
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
+#
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
@@ -1852,7 +1919,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main
+#scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main
 
 ## Links
 - [primary.map.md](./primary.map.md)

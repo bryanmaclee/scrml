@@ -1,62 +1,31 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **RE-WALKED over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
-# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
-# `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.
+# The prior pass RE-WALKED this map after a ten-window streak and found the request pipeline had
+# moved hard; that content is one window old and carries in full.** Ancestry CHECKED (invariant 48);
+# outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is
+# EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
 #
-# ⚑ **THE TEN-WINDOW "AUTH SURFACE IS ZERO-DIFF" STREAK IS OVER. `emit-server.ts` moved +413/-…
-# lines and THE REQUEST PIPELINE ITSELF WAS RE-ORDERED AND RE-SCOPED. Read the new section
-# "§40.3 THE REQUEST ONION" below BEFORE touching anything request-scoped — three separate
-# things moved and two of them were fail-OPEN.**
+# **THE AUTH SURFACE IS ZERO-DIFF THIS WINDOW.**
+# `git diff --name-only c96e7012..728bdc92 -- compiler/src/codegen/emit-server.ts
+# compiler/src/commands/select-request-onion.js compiler/src/protect-analyzer.ts
+# compiler/src/auth-graph.ts stdlib/auth stdlib/oauth stdlib/crypto lsp/` is **EMPTY**. §40.3's
+# one-onion rule, the stage-1 CORS preflight, per-route `ratelimit=`, the §20.5 session surface and
+# the protect-floor all carry unchanged.
 #
-#   1. **`handle()` NOW WRAPS TOP-LEVEL DISPATCH, NOT PER-ROUTE DISPATCH (#654, adopter #471).**
-#      §40.3.4 says the onion "applies to all HTTP requests handled by the compiled server —
-#      including statically-served assets". It was applied PER-ROUTE, so a `handle()` that
-#      intercepted a custom path 404'd before it ran. Emitted shape: `emit-server.ts` splits the
-#      pipeline remainder into a standalone `_scrml_dispatch(req, server)` and wraps it in
-#      `_scrml_onion_dispatch(req, server)` (`:521`); with NO onion the emitter still produces the
-#      byte-identical pre-onion `async fetch()`.
-#
-#   2. **THE CORS PREFLIGHT MOVED TO PIPELINE STAGE 1 — AHEAD OF RATE-LIMIT AND AHEAD OF
-#      `handle()` PRE (`emit-server.ts:3097-3115`).** §40.3.3 pins the order
-#      `[CORS preflight] → [rate limit] → handle() PRE`, but the preflight was ONLY the
-#      `_scrml_cors_options_route` registry entry — so **an author `handle()` ran on every browser
-#      preflight (MEASURED: an OPTIONS request came back stamped by `handle()`).** A `handle()`
-#      that enforces auth would reject the preflight, and **a preflight carries no credentials to
-#      satisfy an auth check with**, so the browser's real request never happens. The preflight now
-#      short-circuits at stage 1 and reaches neither `[logging]` nor `[rate limit]`.
-#
-#   3. **`ratelimit=` IS ROUTE-SCOPED AGAIN (F1, S355 — `emit-server.ts:2997-3020`).** §4.15
-#      classifies `ratelimit=` among the PER-ROUTE concerns, not the app-wide ones. Applied to
-#      EVERY request it counted the HTML + CSS + runtime + client-bundle sub-requests of a single
-#      page load, so `ratelimit="3/min"` 429'd a first-time visitor on their own first page view.
-#      It now counts only requests a ROUTE serves.
-#
-# ⚑ **NEW FAIL-CLOSED GATE ON THE PIPELINE: `E-MW-007` (§40, `commands/select-request-onion.js:72`).**
-# A compiled server mounts EXACTLY ONE onion. Two modules declaring a request pipeline is two
-# applications in one server, and the compiler now refuses instead of guessing. **Read the
-# "one-onion rule" section below for what COUNTS as declaring one** — `cors=`, `log=` other than
-# `"off"`, `ratelimit=`, `headers="strict"` or a `handle()` do; `batch-in-list-cap=`,
-# `idempotency-store=`/`-ttl=`, `cors-max-age=` and `channel-reconnect=` do NOT (same config bag,
-# no pipeline stage).
-#
-# ⚑ **CSP: `<program headers="strict">` PINS `default-src 'self'` (§39.2.5) AND THAT NOW BINDS TWO
-# COMPILER-EMITTED THINGS IT PREVIOUSLY BROKE.** (a) The **SSR seed** is now a
-# `<script type="application/json" id="__scrml_ssr_state">` read via `JSON.parse` — not an inline
-# executable `<script>` (`runtime-template.js:2767-2788` and `:6090-6114`, BOTH seed readers
-# changed). (b) The **§38 transition keyframes** moved out of a runtime-injected inline `<style>`
-# into the emitted stylesheet (`codegen/emit-transition-css.ts`, NEW). Both were silently dead
-# under strict headers and the author had no escape — §39.2.5's "override via `handle()`" covers
-# author-loaded external origins, not compiler-emitted content.
-#
-# **CARRIED AND STILL TRUE:** `stdlib/` is zero-diff over this window (`git diff --name-only
-# c93a692c..c96e7012 -- stdlib/` is EMPTY — eleven windows). `compute-program-config.ts` zero-diff.
-# `protect-analyzer.ts` moved by 6 lines (#582's string-literal masking, not an auth-policy change).
-# Every session / JWT / OAuth / CSRF / protect-floor claim below is carried and re-verified.
+# ⚑ **ONE ADJACENCY YOU MUST NOT MISREAD AS AN AUTH CHANGE (#669, §41).** `scrml:auth`,
+# `scrml:crypto` and `scrml:oauth` appear in this window's diff, but ONLY inside
+# `codegen/runtime-chunks.ts`'s client-registry classification — **no auth CODE moved.** What
+# changed is what the compiler will now REFUSE: a CLIENT-reachable `import … from 'scrml:oauth'` is
+# a hard `E-STDLIB-CLIENT-CHUNK-MISSING`, because `oauth` puts `client_secret` in the token-exchange
+# body and its own module header reads SERVER-SIDE ONLY. ⚠ **`auth` and `crypto` are
+# escalation-server-only by the §12.2 Trigger 3 criterion YET STILL CARRY A CLIENT CHUNK** —
+# PRE-EXISTING since S95 Bug 18, left in place deliberately because removing a chunk is a behaviour
+# removal and was out of scope for that dispatch. **That is a live inconsistency in the client
+# safety story, not a mapped-and-closed decision.** dependencies.map.md · error.map.md.
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
 

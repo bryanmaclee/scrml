@@ -1,26 +1,22 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **CURRENCY RE-VERIFIED AT `c96e7012`, NOT RE-WALKED. ELEVEN windows with no DB/migration surface
-# movement.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md): the
-# source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED. TWELVE windows with no DB/migration surface
+# movement.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at
+# WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of
+# `origin/main`.
 #
-# Zero-diff re-run at this HEAD over the full 111-commit window:
-# `git diff --name-only c93a692c..c96e7012 -- compiler/src/schema-differ.js
+# Zero-diff re-run at this HEAD over the `c96e7012` -> `728bdc92` window (21 commits, PRs #657-#676):
+# `git diff --name-only c96e7012..728bdc92 -- compiler/src/schema-differ.js
 # compiler/src/commands/db-migrate.js compiler/src/codegen/db-authoritative.ts
 # compiler/src/sql-table-refs.js` is **EMPTY**. No SQL-adjacent change this window.
 #
-# ⚠ **ONE ADJACENT THING MOVED AND IT IS NOT A MIGRATION CHANGE — do not let it read as one.**
-# `<program batch-in-list-cap=>` (§8.10.6 SQL batching) is now explicitly named in the §40.3/§40.8
-# ONE-ONION rule as an attribute that does **NOT** declare a request pipeline
-# (`commands/select-request-onion.js`). That is a statement about the request onion, not about SQL
-# batching, and the batching behaviour is unchanged. See auth.map.md's §40.3 section.
-#
-# The stamp on line 3 is the CURRENCY ANCHOR `scripts/state.ts:mapsStaleness()` parses;
-# **"content as of X" below carries the provenance.** Only ONE line in this file may carry
-# `commit: <SHA>` — a second match would be read as the watermark.
+# ⚠ **ONE ADJACENT ITEM WORTH KNOWING, filed NOT fixed (S370-peter, `674f890b`): a boolean-column
+# ROUND-TRIP defect** — `g-...boolean-column-round-trip` (MED, open, `docs/known-gaps.md`). It is a
+# dog-food find against the DB tier, so it will surface in this map's territory when it is worked,
+# but **no code in the migration surface has moved for it**.
 
 The conditional check (a real DB-migration-apply tool exists) fires because `scrml db-migrate`
 (§14.8.11.1) exists — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB

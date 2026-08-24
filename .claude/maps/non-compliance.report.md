@@ -1,15 +1,110 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`).
-# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
-# S347-S366, bryan S347-S365).** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check
-# passes (source diff `merge-base..HEAD` EMPTY, `c96e7012` an ancestor of `origin/main`).
+# generated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY).
+# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
+# S368, peter S367/S369/S370).** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check
+# passes (source diff `merge-base..HEAD` EMPTY, `728bdc92` IS `origin/main`).
 # scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, PLUS
 # re-verification of the carried findings at this HEAD — **spot-EXECUTED, not carried on faith.**
-
 ## Summary — this pass
+
+**FIVE new findings (N14-N18). FOUR OF THE FIVE ARE THE MAP SET DESCRIBING BEHAVIOUR THE CODE NO
+LONGER HAS — i.e. this pass's largest non-compliance population was the PRIOR GENERATION OF THESE
+MAPS, not the repo's docs.** That is the honest headline and it is not comfortable: a 21-commit
+window falsified four separate published claims, three of which a reader had no way to detect from
+inside the map. All are corrected in this generation. Carried findings were re-verified at this HEAD
+and the previous pass's N12/N13 are folded into the carried set below.
+
+**N14 — FOUR MAPS PUBLISHED A "NOT ON MAIN, NOT MAPPED" EXCLUSION FOR CONTENT THAT HAD SINCE
+LANDED.** primary, schema, structure and build all carried an explicit block saying the
+`asIs`/`unknown` split (`InferenceResult`, `InferenceGap`, required `UnknownType.reason`),
+`scripts/types-gate.ts` and `compiler/tests/TYPES-BASELINE.json` lived only on the unlanded branch
+`feat/s365-asis-split-rung0`, and that *"at this watermark `UnknownType` is `{ kind: \"unknown\" }`
+and NOTHING ELSE."* **All of it landed at `43eea9aa` (#665).** `git merge-base --is-ancestor
+43eea9aa origin/main` exits 0; `type-system.ts:387-389` carries the required `reason`; both files
+are in `git ls-tree HEAD` and on disk. ⚑ **The shape is the finding, not the instance: a
+DELIBERATE, well-reasoned exclusion is exactly the kind of claim that rots silently, because it
+reads as verified rather than as time-bound.** An exclusion for unlanded work should name the
+condition that retires it, not just the state it observed. **Disposition: corrected in all four maps
+this pass; schema.map.md was RE-WALKED specifically because a currency-verify would have
+re-published the false claim.**
+
+**N15 — test.map.md PUBLISHED AN ARITHMETIC VERIFICATION THAT WAS FALSE.** Its header read *"The
+category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level = **1378**."* **That sum is
+1,344.** A 34-file shortfall was stated as a check that had been performed. Recounted RECURSIVELY at
+this watermark, the real breakdown sums by execution: 901+213+133+94+14+14+11+4+2 = **1,386**
+(`docs/FACTS.md` agrees). **The likely mechanism is method, not typo — several categories hold
+`*.test.js` in SUBDIRECTORIES, and a non-recursive count undercounts.** ⚑ **A stated "the sum
+re-checks" is a claim like any other; this one was never executed.** Disposition: corrected, and the
+prior per-category figures are marked SUPERSEDED so nobody diffs against them.
+
+**N16 — primary.map.md's Task-Shape Routing sent agents to a fix that had landed, labelled OPEN.**
+The row for **`reset(@cell)` giving you a Promise instead of a value** read *"OPEN, HIGH, not
+built."* #662 (`5639cd0a`) landed `_scrml_reset_apply` (`runtime-template.js:1179`) and both
+re-invocation paths route through it. Disposition: corrected. **Class note: a routing row that
+carries a STATUS is a currency liability in a way that a row carrying only a LOCATION is not.**
+
+**⚑ N17 — A §34 CATALOG ROW ASSERTS A COUNTERFACTUAL THAT IS ACTUALLY THE CURRENT BEHAVIOUR, AND
+THE DIAGNOSTIC IT DESCRIBES IS GATED ON THE COMPLEMENT OF THE LOCUS IT CLAIMS. VERIFIED BY
+EXECUTION, NOT BY READING.** `E-CONTROL-FLOW-IN-MARKUP`'s row (and the §17.4 prose at
+`SPEC.md:11765`) states that the §40.8 default-logic auto-lift *"fires only at
+`<program>`/`<page>`/`<channel>` direct-child roots"* and that without it such a construct *"would
+ship as raw `for(){}` text into the DOM."* **It ships.** Compiled at this watermark:
+
+    <program>            ->  <body>if (1) { }<p>ok</p>…      exit 0, zero diagnostics
+    if (1) { }
+    <p>ok</>
+    </program>
+
+Two siblings of the same class reproduce identically (`log("M1");`, and a `//` comment flushing the
+run around it). The mechanism is structural: the emit site (`ast-builder.js:1857-1860`) is gated
+`parentType === "markup"`, the **COMPLEMENT** of the §40.8 default-logic locus, so the diagnostic
+**cannot** fire there. **This is a doc describing behaviour the code does not have — pa.md Rule 4,
+and it is in the NORMATIVE document.** ⚠ **Compounding it, `W-PROGRAM-REDUNDANT-LOGIC` actively
+routes authors INTO the broken mode: it tells you to remove the `${…}` wrapper, and the wrapped form
+is the one that works.** **Suggested disposition: this is NOT a map fix.** The bare-call limb is an
+OPEN OPERATOR RULING (§40.8 is silent on a bare call — `g-default-logic-bare-call-is-unspecified-and-ships-as-page-text`),
+the comment limb has a complete-but-unlanded fix
+(`g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration`), and the bare-`if`
+limb is covered by NEITHER and is the one that contradicts the SPEC row. **Either the row's claim is
+corrected, or the gate is widened to the §40.8 locus — but the row cannot stay as written.**
+
+**⚑ N18 — A NAVIGATION GAP IN THIS MAP SET, REPORTED INDEPENDENTLY BY TWO DISPATCHES BEFORE ANYONE
+FILED IT: THE §40.8 / auto-lift SURFACE HAD NO ROUTING ROW AT ALL.** Three HIGH defects of one class
+landed on `liftBareDeclarations` (`ast-builder.js:1161`) in a single session, and `§40.8` appeared in
+primary.map.md only under `keep-alive` (invariant 29) and the one-onion rule — **neither of which
+mentions lifting.** `liftBareDeclarations` appeared nowhere in any map. **The absence was not a
+judgement that the surface did not matter; it was that nothing had ever routed through it, so no
+generation had a reason to add a row.** ⚑ **The general shape: a routing table built by walking what
+CHANGED will never grow a row for a surface whose defects are all SILENT — nothing changed there,
+because nothing was fixed there.** **Disposition: CLOSED this pass** — the lift surface is now
+Task-Shape Routing **row 1** (with all nine gates, their line numbers, the three reproductions, the
+ruling-vs-fix split, the wider-than-§40.8 members and the cherry-pick-not-file-delta landing hazard),
+invariant **64**, a Key Fact, and rows in structure/domain/error.
+
+**N19 (minor, recorded not actioned) — NEITHER NEW DIAGNOSTIC CODE HAS AN LSP HOVER, AND ONE HAS NO
+SPEC-INDEX ENTRY.** `lsp/handlers.js:ERROR_DESCRIPTIONS` carries 42 `W-*` entries and **zero
+`W-TYPE-*`**, and has no entry for `E-STDLIB-CLIENT-CHUNK-MISSING` either — while `E-MW-007` got one
+in the window it landed. `W-TYPE-031-UNPROVEN` has no `SPEC-INDEX.md` entry (`E-TYPE-031` has none
+either, so that half is a family-level omission rather than a regression).
+`E-STDLIB-CLIENT-CHUNK-MISSING` DOES have one (`SPEC-INDEX.md:214`). **Verified, not assumed:** the
+#669 sweep that corrected two stale `(api.js)` attributions for the new code is clean — zero
+remaining hits across `compiler/`, `docs/`.
+
+**CARRIED FINDINGS — SPOT RE-VERIFIED BY EXECUTION AT `728bdc92`, all still live:** **C6**
+`docs/tutorial.md` hardcodes `v0.7.0` at **4** sites while `package.json` is `0.7.1` · **C3** SPEC's
+`data-scrml-each-mount` description (1 hit) still lacks the top-level/nested split the code makes ·
+**N9** `docs/known-gaps.md` still calls `planBlockArmLift` "the single §18.5 classifier" (1 hit) and
+`primary.map.md`'s routing row still says the opposite — **still needs a human to adjudicate BY
+EXECUTION, not by reading** · **N6** `route-inference.ts:3643` still carries the two back-to-back
+`/** Keys the derived-cell walk … */` blocks · **C4** the nine `W-LINT-*` codes with no §34 row are
+unchanged · **C8** the four `*.generated.md` files are confirmed UNTRACKED (`git ls-files .claude/`
+returns 16 paths, none of them a `.generated.md`), so the disposition remains a per-clone `rm` and
+never a commit — their staleness has now reached ~2 months and 344 test files.
+
+
 
 **TWO new findings (N12, N13), and BOTH were produced by re-deriving a number rather than carrying
 it. Every carried finding was re-verified by EXECUTION at this HEAD; all still hold, and one
@@ -416,6 +511,11 @@ Recorded here rather than fixed silently, because the corrections ARE findings.
 | **THIS PASS (S346) —** structure.map.md's Directory Ownership carried **ELEVEN verbatim-duplicated lines** across six row groups (`name-resolver.ts`, `emit-tool.ts`, `collect.ts`, `emit-ssr-render.ts`, `emit-lift.js`, the `_eachRequestIds`/`E-EACH-BODY` sub-rows, the `immediateArg`/`_scrml_timer_start` sub-rows, `collectDerivedCellDecls`) | all deduplicated (exact-line dedupe, one survivor each, verified). A duplicated row is a fork waiting to disagree — the next edit lands in one copy. The duplication pattern suggests a prior incremental pass APPENDED updated rows without removing the originals |
 | **THIS PASS (S346) —** structure.map.md's emit-tool row named `identReferencedInSrc` as the prune predicate | **that function is DELETED on main (#515)**; the predicate is the shared `localServerImportNameUsed`, exported from emit-server.ts. Stale-at-write is not the charge here — it was current at S341 — but the row now names the replacement AND the reason the duplicate died |
 | **THIS PASS (S346) —** domain/error maps carried "`~`/`var` in an `<each>` body already fails loud via `E-CODEGEN-INVALID-LOGIC`" | **held only at FIRST position** — at any other body position `var nm = 1` was the silent list-killing miscompile (#516 closed it; bryan delta-log [1437]). A coverage claim proven on one position is not a coverage claim |
+| **THIS PASS (S368-wrap) —** primary · schema · structure · build all carried *"NOT ON MAIN, NOT MAPPED — the `asIs`/`unknown` split … lives on the unlanded branch `feat/s365-asis-split-rung0`"*, plus the same exclusion for `scripts/types-gate.ts` and `compiler/tests/TYPES-BASELINE.json` | **ALL OF IT LANDED at `43eea9aa` (#665).** `merge-base --is-ancestor 43eea9aa origin/main` exits 0; `UnknownType` carries the REQUIRED `reason` at `type-system.ts:387-389`; both files are in `git ls-tree HEAD`. **Rule produced: an exclusion for unlanded work must name the CONDITION that retires it, not just the state it observed — otherwise it reads as verified rather than time-bound.** (N14) |
+| **THIS PASS (S368-wrap) —** test.map.md published *"The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level = **1378**"* | **That sum is 1,344.** A 34-file shortfall stated as a completed check. Recursive recount: 901+213+133+94+14+14+11+4+2 = **1,386**. **Rule produced: "the sum re-checks" is a claim like any other — execute it.** (N15) |
+| **THIS PASS (S368-wrap) —** primary.map.md's routing row for `reset(@cell)` returning a Promise read *"OPEN, HIGH, not built"* | **FIXED at #662 (`5639cd0a`)** — `_scrml_reset_apply` (`runtime-template.js:1179`), both re-invocation paths. **Rule produced: a routing row carrying a STATUS is a currency liability in a way a row carrying only a LOCATION is not.** (N16) |
+| **THIS PASS (S368-wrap) —** the map set had NO routing row, and no mention anywhere, for `liftBareDeclarations` / the §40.8 auto-lift surface | **THREE HIGH defects of one class landed there in one session** and `§40.8` appeared in primary.map.md only under `keep-alive` and the one-onion rule. **Rule produced: a routing table built by walking what CHANGED will never grow a row for a surface whose defects are all SILENT — nothing changed there, because nothing was fixed there.** Now Task-Shape Routing row 1 + invariant 64. (N18) |
+| **THIS PASS (S368-wrap) —** counts across the map set: 242,954 lines / 190 files / 1,378 tests / 37,298 SPEC / 810 §34 codes | **244,112 / 191 / 1,386 / 37,539 / 812**, each re-derived (FACTS.md + a recursive `find` + a re-executed `s34-census.ts`). Conformance FLAT at **883** for the fourth window. |
 
 ---
 
@@ -478,52 +578,50 @@ every gate this repo runs. The question is no longer "does the marketing oversta
 
 ## Map currency at this stamp
 
-**EVERY stamp is `c96e7012`, the tip of `origin/main` at generation — trivially an ancestor.** The
-working tip `c813d6bf` is a DOCS-ONLY wrap commit on `wrap/s365` (`docs/changelog.md`, `hand-off.md`,
-`handOffs/delta-log.md`), recorded on the `generated-at:` line. The two-column convention carries:
-line 3 is the currency anchor; "content as of X" is walk provenance. **Only ONE line per file carries
-`commit: <SHA>`** — `scripts/state.ts:mapsStaleness()` parses line 3 by regex and a second match
-would be read as the watermark.
+**EVERY stamp is `728bdc92`, which IS `origin/main` — trivially an ancestor.** There is no separate
+working tip this pass: the `generated-at:` line records the same SHA, with the reason. **Only ONE
+line per file carries `commit: <SHA>`** — `scripts/state.ts:mapsStaleness()` parses line 3 by regex
+and a second match would be read as the watermark.
 
-| Map | Stamp | Content as of | Re-walked? | Evidence |
-|---|---|---|---|---|
-| primary · structure · dependencies · domain · test · error · build · infra · auth · non-compliance | `c96e7012` | `c96e7012` | **yes** | 127 files moved in the mapped roots; `emit-server.ts` +413, `dev.js` +953, three NEW `compiler/src/` modules |
-| schema | `c96e7012` | `c96e7012` | no — **currency verified** | `compiler/src/types` zero-diff; AND `git diff c93a692c..c96e7012 -- compiler/src/ \| grep '^+' \| grep -E 'export (interface\|type) '` returns NOTHING |
-| config | `c96e7012` | `c96e7012` | no — **currency verified** | `grep -cE 'process\.env\|Bun\.env'` over the window diff returns **0**; five new files checked individually, none reads an env var |
-| migrations | `c96e7012` | `c96e7012` | no — **currency verified** | `schema-differ.js` / `db-migrate.js` / `db-authoritative.ts` / `sql-table-refs.js` all zero-diff over the full 111 commits |
+| Map | Stamp | Re-walked? | Evidence |
+|---|---|---|---|
+| primary · structure · dependencies · **schema** · domain · test · error · build · infra · non-compliance | `728bdc92` | **yes** | 28 source/test files moved across the window; every one traced to a landing and read at HEAD |
+| config | `728bdc92` | no — **currency verified** | `grep -cE '^[+-].*(process\.env\|Bun\.env)'` over the whole 2,328-line source diff returns **0**; `.env*` / `bunfig.toml` / `tsconfig*` are `--name-only` EMPTY |
+| auth | `728bdc92` | no — **currency verified** | `emit-server.ts`, `select-request-onion.js`, `protect-analyzer.ts`, `auth-graph.ts`, `stdlib/auth\|oauth\|crypto`, `lsp/` all `--name-only` EMPTY; re-walked LAST window, content is one window old |
+| migrations | `728bdc92` | no — **currency verified** | `schema-differ.js` / `db-migrate.js` / `db-authoritative.ts` / `sql-table-refs.js` all zero-diff — twelfth window |
 
-⚠ **auth.map.md WAS RE-WALKED THIS PASS AFTER TEN CURRENCY-ONLY WINDOWS.** Its ten-window "zero-diff
-auth surface" streak ended: `emit-server.ts` moved +413 lines and the REQUEST PIPELINE was re-ordered
-(CORS preflight to stage 1) and re-scoped (`ratelimit=` back to per-route), with `handle()` moved
-from per-route to top-level dispatch. **Two of those three were fail-OPEN.** A currency-verify would
-have missed all of it — the streak was the reason to re-walk, not a reason to skip.
+⚠ **schema.map.md WAS RE-WALKED THIS PASS AFTER A STREAK OF CURRENCY-ONLY PASSES, AND THE STREAK WAS
+THE REASON.** Its header carried an explicit "NOT ON MAIN, NOT MAPPED" exclusion for the
+`asIs`/`unknown` split — content that landed at #665. **A currency-verify would have re-published a
+false claim**, because the surface it checks (`compiler/src/types`, and "no exported type added")
+is genuinely zero-diff: the three new types are module-private to `type-system.ts`. **A zero-diff
+proof of the surface you habitually check does not cover a claim you made about a DIFFERENT surface.**
 
-**The watermark advanced `c93a692c` → `c96e7012`** — **111 commits**, the largest interval in this
-map set's history, and the arithmetic is clean at both ends: the prior stamp WAS an ancestor
-(`merge-base --is-ancestor c93a692c c96e7012` passes) and the new one is
-(`merge-base --is-ancestor c96e7012 origin/main` passes). The outbound check per the MAP-STAMP RULE
-returned an EMPTY source diff.
+**The watermark advanced `c96e7012` → `728bdc92`** — **21 commits, PRs #657-#676** — and the
+arithmetic is clean at both ends: the prior stamp WAS an ancestor
+(`merge-base --is-ancestor c96e7012 728bdc92` passes) and the new one IS `origin/main`. The outbound
+check per the MAP-STAMP RULE returned an EMPTY source diff.
 
-⚠ **THE WATERMARK MOVED UNDER THIS PASS, MID-RUN, AND THE CHECK CAUGHT IT.** At the start of this
-run `HEAD` was `c96e7012`; partway through, the operator committed `c813d6bf` on `wrap/s365`.
-Re-running `git merge-base HEAD origin/main` produced `c96e7012` and the outbound source diff was
-EMPTY (the new commit is docs-only), so the watermark is correct. **A pass that had read HEAD once at
-the start and stamped it would have written a NON-ANCESTOR branch tip — exactly the defect the
-MAP-STAMP RULE exists to prevent, arriving by a route the rule's own three-command procedure does
-cover but only if the procedure is run at WRITE time, not at read time.** Run the outbound check
-immediately before writing line 3, not at orientation.
+⚑ **THE BRANCH VANISHED UNDER THIS PASS — A STRONGER FORM OF THE DEFECT THE PRIOR PASS MEASURED, AND
+THE CHECK CAUGHT IT AGAIN.** This generation began on `wrap/s368` at `6bb57c66`, under a dispatching
+brief that said in as many words *"stay on it, do not switch branches."* Partway through, the
+operator squash-merged that branch as **#676** and the checkout moved to `main` at `728bdc92`. **So
+the SHA the pass started with is not merely a non-ancestor — it is on no branch at all**, and the
+branch the brief named no longer exists. Re-running the three-command procedure at WRITE time
+returned `BASE = 728bdc92` with an EMPTY source diff (#676 is docs-only), so the stamp is correct.
+**Corollary now recorded in the MAP-STAMP RULE block: "which branch am I on" is ALSO a write-time
+question. A pass that recorded its branch once at orientation would have committed to a merged
+branch.**
 
 **The carried residual stands:** `state.ts` checks ancestry against `HEAD`, not `origin/main`; the
-written rule is stricter. A compliant stamp satisfies both; a branch-tip stamp can satisfy the
-instrument and violate the rule. ⚠ Also carried and now MEASURED: `bun scripts/state.ts --check`
-reports maps staleness as **WARN-only, not gated** — at the start of this run it printed
-`maps: 112 commits behind HEAD`, and nothing failed. **The maps-currency check that
-`pa-scrml-overlay.md {{maps_fills}}` requires before every dev dispatch is advisory, and a
-112-commit drift produced no failure anywhere in the toolchain.**
+written rule is stricter. ⚠ Also carried and MEASURED AGAIN: `bun scripts/state.ts --check` reports
+maps staleness as **WARN-only, not gated** — mid-pass it printed
+`maps: 22 commits behind HEAD (watermark c96e7012, HEAD 7b945a99)` and **exited 0**. **Nine
+consecutive passes have recommended a deterministic map-currency gate; nothing has moved on it.**
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
+#non-compliance #project-mapper #cleanup #scrml #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness
