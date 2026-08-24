@@ -4702,6 +4702,60 @@ export function _matchArmResultIsBlockBody(result: string): boolean {
 }
 
 /**
+ * §18 object-literal arm parity (g-library-fn-match-else-arm-object-literal-...).
+ *
+ * A BLOCK-FORM match arm — `else :> { x: 0 }`, `.V :> { x: 0 }`, `not :> { x: 0 }` —
+ * is parsed by the AST builder into a `structuredBody` (statement nodes), whereas
+ * the INLINE-form sibling `1 :> { x: 0 }` keeps a `result` STRING that #664 already
+ * lowers correctly as a value (emitIifeBlockArmBody's object branch). So an
+ * OBJECT-LITERAL body reaching the structuredBody path mis-lowers: `{ x: 0 }` is
+ * read as a labeled-statement block whose "tail" is the bare ident `x`, emitting
+ * `return x` (silent-wrong when `x` is in scope) — or, in decl position, the
+ * malformed `_scrml_tilde = x : 0` (E-CODEGEN-INVALID-LOGIC).
+ *
+ * This recovers the brace-body source from the structuredBody and runs the SAME
+ * object-vs-block classifier the inline path uses (`_matchArmResultIsBlockBody`) —
+ * there is NO second predicate, so the two arm forms stay in lockstep by
+ * construction. Returns the object-literal source string when (and only when) the
+ * body resolves to an `object` node; otherwise null, so the caller keeps the
+ * genuine-block structuredBody path (which threads tildeContext / engineCtx /
+ * declaredNames that a string re-lowering would drop). The single-`bare-expr`
+ * reconstruction relies on the node's retained raw `expr` text (`"x : 0"`), the
+ * same field the §18.5 tail derivation already reads.
+ */
+export function _objectLiteralArmFromStructuredBody(structuredBody: any): string | null {
+  if (!Array.isArray(structuredBody)) return null;
+  let candidate: string | null = null;
+  if (structuredBody.length === 0) {
+    // `else :> {}` — an empty OBJECT (parity with the inline `1 :> {}` → `return {}`),
+    // not a void block: the classifier below resolves `{}` to an object node.
+    candidate = "{}";
+  } else if (
+    structuredBody.length === 1 &&
+    structuredBody[0] &&
+    structuredBody[0].kind === "bare-expr" &&
+    typeof structuredBody[0].expr === "string"
+  ) {
+    // Reconstruct from the node's retained raw `expr` text ONLY. The node's
+    // `exprNode` is NOT a usable fallback here: for a `{ a: 1, b: {...} }` body the
+    // parser captured only the FIRST key as `exprNode` (an `ident`), so
+    // emitStringFromTree(exprNode) would yield `{ a }` and silently drop the rest.
+    // `expr` is the sole faithful source; when it is absent the arm is left on the
+    // structuredBody path below (it cannot be an object we can reconstruct).
+    candidate = `{ ${structuredBody[0].expr} }`;
+  }
+  if (candidate === null) return null;
+  // Divert ONLY when the classifier resolves the candidate to an object node. This
+  // is the SAME `_matchArmResultIsBlockBody` the inline path (#664) runs, so the two
+  // arm forms stay in lockstep by construction — including the object-SHORTHAND case
+  // `{ x }`, which the parser resolves to an object, exactly as the inline arm
+  // `1 :> { x }` does (both emit `return { x }`). A candidate the classifier calls a
+  // genuine BLOCK returns null and keeps the §18.5 structuredBody tail lowering
+  // (tildeContext / engineCtx / declaredNames a string re-lowering would drop).
+  return _matchArmResultIsBlockBody(candidate) ? null : candidate;
+}
+
+/**
  * §18.5 — is a block's trailing segment a value EXPRESSION (its result) rather
  * than a statement (a decl/assignment/`lift`/`return`, or empty → §18.5 void)?
  * Value-tail blocks assign the tail to the result var; statement-only blocks
