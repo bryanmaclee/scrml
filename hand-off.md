@@ -9,6 +9,137 @@
 <!-- Mechanical stream: delta-log [1718]-[1725].                      -->
 <!-- ============================================================= -->
 
+# scrml — Session 371 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-23 evening → 08-24. Booted `/boot` Profile A, **SOLO** (no live sibling).
+Eleven PRs, one code landing, **two branches deliberately HELD**.
+
+**The framing, because it reorders everything else: six claims of mine were overturned by
+measurement this session, and every one was caught before it reached a build.** Two of the six were
+overturned by bryan, two by dispatches, two by my own re-checks. The session's durable output is
+verification discipline, not the defect count.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ ONE OPERATOR DECISION, NEW THIS SESSION — the each-alias byte cost
+
+The each-alias fix (`0e836a70`, HELD) closes the dead-page class generically by sweeping **four**
+off-spine markup carriers. Cost: **+94,765 runtime bytes corpus-wide (+0.086%)**, of which
+**+63,345 is UNUSED** — the sweep now reaches off-spine `if=` markup and pulls the whole `ifmount`
+chunk those cases never call. The agent chose correctness (a missing chunk is a dead page at exit 0;
+an extra chunk is bytes) and surfaced the trade rather than defaulting it.
+**Narrowing option if you prefer bytes:** route only `each`-tagged markup — keeps all four carriers
+and both fixed dead pages, drops the 63KB, re-hides any genuine off-spine `if=`/`<timer>` dead page.
+**Not my call. Nothing else blocks on it.**
+
+### 2. ⚠️ THE FOUR S368 RULINGS ARE STILL OWED — untouched this session
+
+`<db>` state-block locus · the 2-file bare-call migration · bare `if (){}` at a default-logic
+body-top (contradicts the §34 `E-CONTROL-FLOW-IN-MARKUP` row's own claim) · the `TILDE_TOKEN_RE`
+disagreement. All four still carry their S368 measurements. **Plus bryan's unfiltered
+hand-authoring friction list, still owed and still not to be pre-triaged.**
+
+### 3. ⚠️ TWO BRANCHES HELD — complete, reviewed, NOT landed
+
+| branch | state | owes |
+|---|---|---|
+| **match-arity** `2514a84c` (`worktree-agent-a24e739ba7d1e2612`) | round 2 complete; core VERIFIED by me (`(1,x)` still rejects · fire-once 3→1 · conformance 886/886) | **A THIRD false normative sentence.** Round 2 fixed round 1's and introduced its own: *"both are still REJECTED, neither is silent-wrong"* holds only at `write:true` — measured `errors: []` with malformed `libraryJs` at `write:false`, **the exact consumer the same §34 row names as the harm three sentences earlier.** Plus a third uncovered shape (inline event-handler body) the enumeration misses, and a write-path effect worse than reported: on incremental rebuild a failed build now **overwrites a previously-valid artifact**. ⚑ Its two owed gap entries are drafted at `scratchpad/gaps-match-arity.md` — **the SPEC text references them by id and will dangle without them.** |
+| **each-alias** `0e836a70` (`worktree-agent-ae080f493c841f360`) | round 2 complete; blocker fixed generically | a **re-review** (a fix round invalidates the review that produced it) + decision §1 above |
+
+⚑ **`SPEC.md` is in the match-arity write-set.** The RULED §17.6 amendment (below) cannot fire until
+that branch lands or is abandoned.
+
+### 4. ⚠️ THE §17.6 AMENDMENT IS RULED AND SCOPED — brief written, not dispatched
+
+bryan ruled **limb (b)**: amend §17.6 to admit a lift-less single-expression branch as sugar for
+`lift`, AND give `value-form` a normative name. Brief at
+`docs/changes/spec-17-6-value-form-amendment-2026-08-24/BRIEF.md` with all **three** measured
+divergences. ⚑ **It owes a reconciliation of `SPEC.md:11884`** — the §17.6.2 sentence saying a
+lift-less arm contributes `not` is exactly what the compiler contradicts; amending the grammar
+without striking that leaves the contradiction in writing.
+
+### 5. ⚠️ THREE NEW HIGHs, none dispatched
+
+- **`g-render-snippet-slot-renders-empty`** — `${render name(...)}` renders NOTHING; the flagship
+  `examples/12-snippets-slots.scrml` ships every card empty; **15 corpus files** use the surface.
+  NO LOCUS TRACED (searched, recorded).
+- **`g-if-attr-per-field-synth-cell-crashes-boot`** — kills every interpolation on the page.
+  ⚑ **My first mechanism diagnosis was WRONG** (I blamed the `@`-path regex; the AST path emits the
+  same shape for working cases). Corrected in the entry — the rewriter is the wrong layer.
+- **`g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime`** — partially closed
+  by the HELD each-alias branch (corpus dead pages 4 → 2). **Two remain**, different roots:
+  `conformance/cases/style/flat-inline-token-unknown` and **`stdlib/data/form-for`** — a stdlib
+  module shipping a dead bundle, which deserves its own dispatch.
+
+---
+
+## 🔭 THE DURABLE FINDINGS — method, not defects
+
+### A. A browser-tier check that evals the full runtime template is not testing what ships
+
+Every probe I ran for most of this session loaded `SCRML_RUNTIME` from `runtime-template.js` (the
+`browser-conditionals.test.js` pattern). That template **defines everything the pruned
+`scrml-runtime.<hash>.js` chunk omits**, so it masks every chunk-pruning defect. Executing against
+the shipped chunk found a **conformance case that is a dead page while its own 886/886 suite passes
+it** — and invalidated one of my own filed rows (a "control B works" that dies under the shipped
+runtime). **Related trap:** a control can FAIL isolated and PASS whole-suite, because an earlier
+file leaks the full runtime into the shared happy-dom global.
+
+### B. "Recognise the valid forms and refuse the complement" — bryan, and it caught a second case in an hour
+
+I filed a finding that amounted to *"make an ungrammatical form work."* bryan retracted it:
+*"are we really supposed to inclusively handle every posible combonation of characters that could
+ever be accidentally entered … I dont see an end to that, ever."* The pre-fix behaviour was the
+violation of his own bar (invalid syntax compiled green, silently dropping content). **The very next
+residual I picked up was the same mis-framing** — its filed direction would have widened
+`match a, b` into legality against §18.19's grammar. Re-scoped before building.
+
+### C. An unnamed shape is how a hole survives 30 ledger entries
+
+`value-form` appears **zero times in SPEC.md** against ~30 in the gap ledger, ~10 compiler source
+files, and three merged PRs. bryan asking *"what is a value-form if?"* is what surfaced it. A term
+with no normative definition cannot be checked against an implementation.
+
+---
+
+## ⚑ MISSES (mine — six claims overturned by measurement)
+
+1. **★ The `if=` crash mechanism.** I diagnosed the `@`-path regex truncating a dotted path — a
+   textbook Rule 7 find, half-written into a brief. Executing both rewrite paths showed the AST path
+   succeeds and emits the SAME shape for cases that WORK. **The rewriter is the wrong layer.**
+2. **★ "A preceding `if=` breaks following interps."** Falsified outright by a minimal pair.
+3. **★ "control B works"** (fn body + `@.` sigil) — a harness artifact; dies under the shipped runtime.
+4. **★ The W-DEAD locus.** I relayed `usage-analyzer.ts` from the ledger into a dispatch **without
+   tracing it**. That file cannot emit the warning. S295 verbatim: a locus produced by searching a
+   symbol NAME is a hypothesis, because a symbol appears wherever it is MENTIONED.
+5. **★ "The BS-structural sibling already validates."** Relayed from a reviewer into a fix round.
+   It does not — the same invalid alias compiles at exit 0 at top level and emits a subtraction of
+   two undefined names. **Mirroring it would have shipped a regression.** The agent caught it.
+6. **★ A truncated probe.** I sliced a rendered body to 180 chars and nearly reasoned from the count
+   — the §8 truncated-probe shape, in my own harness.
+
+**Also:** three CWD slips into `scrml-support`, one of which answered a path-discipline question
+about the wrong repository while looking perfectly well-formed.
+
+---
+
+## 🧷 STATE
+
+- **main** `b9e97f1b` at wrap-cut; coherence 0/0; both repos clean.
+- **Gaps: HIGH 53 · MED 163 · LOW 72 · Nominal 7.** Up on the day and more truthful for it.
+- **Debts:** review floor **0 OWED at drain** (the wrap PRs are the inherent next-boot tail) ·
+  dPA 0 unrun / 0 advisory · issue-debt 0 · corpus-zero 0.
+- **Eleven PRs:** #678 #679 #680 #681 #682 #683 #684 #685 #686 #687 #688. One code landing (#688).
+- **Worktrees: 3 probe worktrees REMOVED at wrap; 3 agent worktrees RETAINED** (two hold unlanded
+  reviewed work; one is the landed W-DEAD agent, retained same-session for forensics).
+- **Mechanical stream:** delta-log `[1729]`–`[1751]`. Changelog S371 block. Do not re-derive from
+  this hand-off what those carry.
+- ⚠️ `scripts/ruling-debt.ts` **still not on `origin/main`** — third session running. The instrument
+  for undelivered rulings is itself undelivered, and this session found a ruled-but-unrecorded fix
+  direction (S354 Q3) that it would have caught.
+
 # scrml — Session 368 (bryan · ASUS-Vivobook) — WRAP
 
 **Date:** 2026-08-23. Booted `/boot` Profile A as SUCCESSOR to a LIVE S367-peter. Ran concurrent

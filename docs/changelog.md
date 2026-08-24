@@ -2,6 +2,56 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S371 — 2026-08-24 (bryan · ASUS-Vivobook) — the review floor drained to zero, and dog-fooding found three HIGHs the gates cannot see
+
+A session whose durable output was **verification discipline**: eleven PRs, one code landing, two
+branches deliberately HELD, and **six claims of mine overturned by measurement — every one caught
+before it reached a build.** The operator retracted one of my findings on principle, and that
+principle then caught a second mis-framing within the hour.
+
+- **#678 — the review floor drained 8 OWED → 0** (#670–#677). Five docs-only carve-outs classified
+  by FILE SET rather than title (#677's title reads code-bearing; its diff is 13 maps). Two CLEAN by
+  corpus differential (#672/#673 — NO DIFFERENCES over 1906 sources / 7388 artifacts; neither PR had
+  run one). One FINDING (#670), all three sub-findings reproduced by execution on both revisions:
+  a value-form `if` branch calling a markup-returning fn renders `[object HTMLSpanElement]` where the
+  adjacent identical ternary mounts correctly — a **worsening**, since pre-#670 the same line rendered
+  nothing. Code-bearing carve-out rate held at 2/119.
+
+- **#688 — `W-DEAD-FUNCTION` no longer cries wolf on `<each>` opener expressions.** `route-inference.ts`
+  `walkMarkupContext` gains one per-kind `each-block` block, **extending** the existing walker rather
+  than adding a near-duplicate predicate. False positives **2 → 0**; a genuinely-dead fn **still fires**
+  (the bite requirement — silencing the gate everywhere would be worse than the bug). Corpus
+  129 files/146 warnings → 128/145; differential 0/7388. ⚑ The filed **locus had been wrong since
+  S369** — `usage-analyzer.ts` cannot emit that warning (one prose mention, exports a boolean bitmap);
+  the machinery is `route-inference.ts`. S295 exactly: a locus found by searching a symbol NAME is a
+  hypothesis.
+
+- **Three HIGHs found by dog-fooding, none in the ledger, all silent at exit 0.**
+  `${render name(...)}` renders NOTHING — the flagship `examples/12-snippets-slots.scrml` ships every
+  card with an empty header and body, and 15 corpus files use the surface. An `<each ... as NAME>`
+  inside a `fn` body never binds NAME → `ReferenceError` that kills the whole client script. And
+  `if=@compound.field.<synthProp>` throws inside `_scrml_boot`, killing **every** interpolation on the
+  page — a shape `SPEC.md:5898` effectively prescribes.
+
+- **⚑ A shipped CONFORMANCE CASE is a dead page, and the 886/886 suite passes it.**
+  `conformance/cases/each/ternary-markup-giti033` calls `_scrml_reconcile_list` 3× against a runtime
+  defining it 0×. Found only by executing the **shipped** runtime chunk — the method correction of the
+  session: a browser-tier check that evals the full `SCRML_RUNTIME` template masks every pruning
+  defect, and it had masked one of my own filed rows.
+
+- **Two operator rulings.** Invalid syntax must not produce garbage, but the answer is
+  **recognise the valid forms and refuse the complement** — not a rule per bad input; one filed
+  finding was retracted on that basis and the same principle immediately re-scoped a second. And
+  **`value-form` control flow ruled (b)**: amend §17.6 to admit a lift-less single-expression branch
+  as sugar for `lift` and give the shape a normative name — the term appears **zero times** in
+  SPEC.md against ~30 in the gap ledger.
+
+- **HELD, not landed:** match-arity @ `2514a84c` (two review rounds, two false normative sentences)
+  and each-alias @ `0e836a70` (owes a re-review and a byte-cost decision). Both carry full detail in
+  `hand-off.md`.
+
+Gap counts 49/159/72/7 → **53/163/72/7** — larger and more truthful.
+
 ## S368 — 2026-08-23 (bryan · ASUS-Vivobook) — the first human-written scrml, and the seven landings it produced
 
 bryan hand-wrote scrml for the first time in the project's history and reported the experience as

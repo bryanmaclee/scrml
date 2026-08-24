@@ -1,8 +1,15 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED —
+# with ONE in-place correction applied.** `compiler/SPEC.md` is `--name-only` EMPTY (zero SPEC delta
+# this window), so every §-anchored claim below holds. The correction: the still-open each-interp
+# residual is `g-each-inline-value-form-match-or-markup-branch-interp-dropped` — this map carried
+# the S369 ID (`g-each-inline-value-form-match-interp-dropped`), which the ledger has since
+# widened to cover the MARKUP-valued `if` branch as well.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
+# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
 # S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
@@ -53,7 +60,7 @@
 #     interp inside an `<each>` was neither a `bare-expr` nor carried `stmt.raw`, so emit-each fell
 #     to `inner = ""` and emitted an empty text node. The IDENTICAL form at top level lowered to a
 #     reactive ternary correctly. **Filed residual: a value-form `match` in an each interp is STILL
-#     dropped** (`g-each-inline-value-form-match-interp-dropped`).
+#     dropped** (`g-each-inline-value-form-match-or-markup-branch-interp-dropped`).
 #   · **#672 — an empty-string branch.** `{ "" }` collapsed to an empty BLOCK, because the parser's
 #     blank-token skip tested `tok.text.trim() === ""` and an empty-string STRING literal has blank
 #     `.text` while being a MEANINGFUL expression statement. The branch then failed value-form

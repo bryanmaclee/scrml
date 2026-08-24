@@ -1,8 +1,12 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
+# `.github/` is `--name-only` **EMPTY** over the window: no workflow, job, secret, runner or
+# required check moved.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
+# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **CURRENCY RE-VERIFIED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676).** Ancestry
 # CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source
 # diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
