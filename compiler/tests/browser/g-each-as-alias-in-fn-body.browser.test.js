@@ -127,6 +127,44 @@ fn badge(v) {
 </program>
 `;
 
+// ---------------------------------------------------------------------------
+// OFF-SPINE MARKUP CARRIERS — the four AST fields that park lift-parsed markup
+// outside the chunk-walker's children/body spine. Enumerated empirically (parse
+// each source, walk the AST, report every markup node reachable off the spine),
+// NOT guessed. See `sweepOffSpineMarkup` in emit-client.ts.
+//
+// Every one of these shipped a client that CALLS `_scrml_reconcile_list`
+// against a runtime that never DEFINES it. Three were still live after the
+// first cut of this fix, which closed only the first and carried a comment
+// claiming it closed the class.
+// ---------------------------------------------------------------------------
+
+// carrier: lift-expr.expr.node
+const SRC_CARRIER_LIFT = `<program>
+<rows> = ["a", "b"]
+<show> = true
+<div>${DOLLAR}{ if @show { lift <ul><each in=@rows as it key=it><li>${DOLLAR}{it}</li></each></ul> } }</div>
+</program>
+`;
+
+// carrier: markup-value.node  (the shape of conformance/cases/each/ternary-markup-giti033)
+const SRC_CARRIER_TERNARY = `<program>
+<rows> = ["a", "b"]
+<show> = true
+<main>
+    ${DOLLAR}{ @show ? <ul><each in=@rows as it key=it><li>${DOLLAR}{it}</li></each></ul> : "" }
+</main>
+</program>
+`;
+
+// carrier: render-spec.element  (§6.6.17 markup-typed derived cell)
+const SRC_CARRIER_DERIVED = `<program>
+<rows> = ["a", "b"]
+const <listing> = <ul><each in=@rows as it key=it><li>${DOLLAR}{it}</li></each></ul>
+<div>${DOLLAR}{@listing}</div>
+</program>
+`;
+
 const tmpRoot = resolve("/tmp", "scrml-each-as-alias-fn-body");
 
 function compileToOutputs(source, baseName) {
@@ -259,4 +297,46 @@ describe("g-each-as-alias-unbound-in-fn-body — `<each … as NAME>` binds NAME
       .toEqual(["a", "b"]);
     expect(app.bodyText()).not.toContain("[object");
   });
+
+  // -----------------------------------------------------------------------
+  // OFF-SPINE CARRIER MATRIX — the tree-shaking half of the defect.
+  // -----------------------------------------------------------------------
+
+  test("HARNESS GUARD: these tests load the SHIPPED runtime, not the SCRML_RUNTIME template", () => {
+    // ⚑ Load-bearing. The unpruned `SCRML_RUNTIME` template defines EVERY
+    // helper, so it masks every tree-shaking defect in this file — a suite
+    // written against it reports green on a bundle that is dead in a browser.
+    // `compileToOutputs` reads `result.runtimeFilename` off disk, i.e. exactly
+    // the `scrml-runtime.<hash>.js` the emitted HTML references. Assert a
+    // helper that IS pruned is genuinely absent from a program that does not
+    // use it, which the template could never satisfy.
+    const noEach = `<program>\n<n> = 1\n<p>${DOLLAR}{@n}</p>\n</program>\n`;
+    const { runtimeJs } = compileToOutputs(noEach, "harnessguard");
+    expect(runtimeJs.length).toBeGreaterThan(0);
+    expect(runtimeJs).not.toContain("function _scrml_reconcile_list");
+  });
+
+  const CARRIERS = [
+    ["return-stmt.markupNode  (fn body)", SRC_FN_ALIAS, "carrier1"],
+    ["lift-expr.expr.node     (${ if … { lift … } })", SRC_CARRIER_LIFT, "carrier2"],
+    ["markup-value.node       (ternary-markup consequent)", SRC_CARRIER_TERNARY, "carrier3"],
+    ["render-spec.element     (markup-typed derived cell)", SRC_CARRIER_DERIVED, "carrier4"],
+  ];
+
+  for (const [label, src, base] of CARRIERS) {
+    test(`carrier ${label}: a client that CALLS _scrml_reconcile_list ships a runtime that DEFINES it`, () => {
+      const { clientJs, runtimeJs } = compileToOutputs(src, base);
+      // Premise: this shape really does emit the call. If a future change stops
+      // emitting it, this test must fail loudly rather than pass vacuously.
+      expect(clientJs).toContain("_scrml_reconcile_list(");
+      expect(runtimeJs).toContain("function _scrml_reconcile_list");
+      expect(runtimeJs).toContain("function _scrml_effect_static");
+    });
+
+    test(`carrier ${label}: executes with ZERO errors and renders both rows`, () => {
+      const app = mount(src, `${base}exec`);
+      expect(app.thrown === null ? "no error" : String(app.thrown)).toBe("no error");
+      expect(app.items()).toEqual(["a", "b"]);
+    });
+  }
 });

@@ -1282,6 +1282,90 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   // unchanged: `chunks` is a Set and detectFromNode's `.add` calls are
   // idempotent, so visiting each node exactly once yields the identical set.
   const visitedChunkNodes = new Set<any>();
+
+  // -------------------------------------------------------------------------
+  // g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime
+  // (2026-08-24) — THE OFF-SPINE MARKUP SWEEP.
+  //
+  // walkNodes/walkBody descend a SPINE: `children` / `body` / `consequent` /
+  // `alternate`. Markup parked on ANY OTHER FIELD is invisible to chunk
+  // detection, so every chunk-requiring shape inside it is tree-shaken out of
+  // the runtime while the emitted client bundle still CALLS into it — compile
+  // exit 0, `ReferenceError` at bundle eval, whole page dead, zero diagnostics.
+  //
+  // ⚠ WHY THIS IS A SWEEP AND NOT A FIFTH SPECIAL CASE. The four pre-existing
+  // per-kind descents (each-block `bodyChildren`, engine-decl arm
+  // `bodyChildren`, match-block `armsRaw`, if-chain `branches`) were each added
+  // the same way: one carrier at a time, each after one more shipped dead page.
+  // The first cut of THIS fix continued that pattern — a single
+  // `return-stmt.markupNode` line, with a comment claiming it closed "the one
+  // remaining carrier". An adversarial pass measured THREE more, all live, in
+  // minutes. Carriers ENUMERATED EMPIRICALLY (parse the reproducer, walk the
+  // AST, report every markup node reachable off the spine):
+  //
+  //     return-stmt.markupNode   fn listing(){ return <ul><each …></ul> }
+  //     lift-expr.expr.node      ${ if @show { lift <ul><each …></ul> } }
+  //     markup-value.node        ${ @show ? <ul><each …></ul> : "" }
+  //     render-spec.element      const <listing> = <ul><each …></ul>
+  //
+  // So the rule is stated ONCE, over field POSITION rather than field NAME: any
+  // markup node reachable from a visited node through any chain of
+  // NON-structural intermediates is routed back into `walkNodes`. A fifth
+  // carrier introduced upstream tomorrow is covered without a fifth edit here.
+  //
+  // BOUNDS, deliberately tight:
+  //   * Only MARKUP nodes are routed. Structural AST kinds are NOT — the outer
+  //     walk owns those, and routing them would widen detection well past the
+  //     defect.
+  //   * The sweep STOPS at a markup node. `walkNodes` takes it from there
+  //     (detectFromNode + the children spine + its own sweep), so nesting of
+  //     any depth closes by recursion rather than by another rule.
+  //   * `sweptNodes` is separate from `visitedChunkNodes` so an intermediate
+  //     traversed here is never marked "already chunk-visited" — that would
+  //     suppress a later legitimate visit. Both sets keep the walk linear (the
+  //     S226 exponential-hang guard).
+  //   * Detection-only: `chunks` is a Set and every `.add` is idempotent, so
+  //     this can only ADD a chunk that emitted code already references. It can
+  //     never remove one.
+  // -------------------------------------------------------------------------
+  const MARKUP_NODE_KINDS = new Set<string>(["markup", "component"]);
+  const sweptNodes = new Set<any>();
+  function sweepOffSpineMarkup(root: any): void {
+    if (!root || typeof root !== "object") return;
+    const stack: any[] = [];
+    for (const k in root) {
+      if (k === "parent" || k === "span") continue;
+      const v = (root as any)[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== "object") continue;
+      if (sweptNodes.has(n)) continue;
+      sweptNodes.add(n);
+      if (Array.isArray(n)) {
+        for (const el of n) if (el && typeof el === "object") stack.push(el);
+        continue;
+      }
+      const kind = typeof n.kind === "string" ? n.kind : "";
+      // A markup node: hand it to the outer walker; stop descending here.
+      if (MARKUP_NODE_KINDS.has(kind)) {
+        walkNodes([n]);
+        continue;
+      }
+      // A structural AST kind: the outer walk owns it. Do not route, do not
+      // descend — widening past markup is not this sweep's job.
+      if (kind && STRUCTURAL_AST_KINDS.has(kind)) continue;
+      // A non-structural intermediate (expression node, render-spec, markup
+      // wrapper): keep looking through it.
+      for (const k in n) {
+        if (k === "parent" || k === "span") continue;
+        const v = (n as any)[k];
+        if (v && typeof v === "object") stack.push(v);
+      }
+    }
+  }
+
   function walkNodes(nodes: any[]): void {
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
@@ -1290,6 +1374,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       detectFromNode(node);
       if (Array.isArray(node.children)) walkNodes(node.children);
       if (Array.isArray(node.body)) walkBody(node.body);
+      sweepOffSpineMarkup(node);
     }
   }
 
@@ -1304,17 +1389,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       if (Array.isArray(stmt.consequent)) walkBody(stmt.consequent);
       if (Array.isArray(stmt.alternate)) walkBody(stmt.alternate);
       if (Array.isArray(stmt.children)) walkNodes(stmt.children);
-      // g-each-as-alias-unbound-in-fn-body limb 2 (2026-08-24) — a
-      // markup-returning `fn` parks its structured markup on
-      // `return-stmt.markupNode` (ast-builder.js:8896-8902), which none of the
-      // four descents above reach. Without this the whole subtree of a
-      // `fn listing(){ return <ul>…</ul> }` body is INVISIBLE to chunk
-      // detection, so every chunk-requiring shape inside it (`<each>` first
-      // and foremost) is tree-shaken out of the runtime while the client
-      // bundle still calls into it. Detection-only descent — `chunks` is a Set
-      // and every `.add` is idempotent, so this can only ever ADD a chunk that
-      // emitted code already references, never remove one.
-      if (stmt.markupNode && typeof stmt.markupNode === "object") walkNodes([stmt.markupNode]);
+      sweepOffSpineMarkup(stmt);
     }
   }
 
@@ -1569,29 +1644,36 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
             // but uses _scrml_register_cleanup — already in 'scope' (always included)
           }
         }
-        // g-each-as-alias-unbound-in-fn-body limb 2 (2026-08-24) — a generic
-        // `{kind:"markup", tag:"each"}` node. `parseLiftTag` produces GENERIC
-        // markup recursively and never promotes `<each>` to a structural
-        // `each-block` (the promotion lives only in the BS-structural
-        // `buildBlock` path), so an `<each>` inside a `fn` body — or inside any
-        // other lift-parsed markup — reaches this walker as a plain markup
-        // node and NEVER hit the `case "each-block"` discriminator below.
-        // Measured on base cb5db9c9: the shipped runtime for
+        // g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime
+        // (2026-08-24) — a generic `{kind:"markup", tag:"each"}` node.
+        // `parseLiftTag` produces GENERIC markup recursively and never promotes
+        // `<each>` to a structural `each-block` (that promotion lives only in
+        // the BS-structural `buildBlock` path), so an `<each>` in ANY
+        // lift-parsed markup reaches this walker as a plain markup node and
+        // never hits the `case "each-block"` discriminator below. Measured on
+        // base cb5db9c9: the shipped runtime for
         // `fn listing(){ return <ul><each in=@rows …></each></ul> }` contains
         // ZERO `function _scrml_reconcile_list` while the client bundle CALLS
         // it → `ReferenceError: _scrml_reconcile_list is not defined` at bundle
-        // eval, whole page dead, compile exit 0 with zero diagnostics.
+        // eval, whole page dead, compile exit 0 with zero diagnostics. Bug 57
+        // exactly — the same tree-shaking gap the each-block / engine-decl /
+        // match-block cases below were each added to close.
         //
-        // This is Bug 57 exactly — the same tree-shaking gap the each-block /
-        // engine-decl / match-block cases below were each added to close, for
-        // the one remaining `<each>` carrier none of them reach. Both chunks
-        // are unconditional for the same reason the each-block case gives:
-        // every non-empty each emits the `_scrml_reconcile_list` call, and the
-        // `_scrml_effect_static` dispatcher lives in `deep_reactive`.
+        // ⚠ THIS TAG TEST IS ONLY HALF THE FIX AND DOES NOT CLOSE THE CLASS ON
+        // ITS OWN. It fires only for a node the walker actually REACHES, and
+        // four separate AST fields park lift-parsed markup off the walk spine.
+        // The reaching half is `sweepOffSpineMarkup` — read the block at its
+        // definition before trusting either half alone. An earlier revision of
+        // this comment claimed the tag test closed "the one remaining carrier";
+        // three more were live at the time.
         //
-        // Deliberately OUTSIDE the `__chunkedMarkupTagDefinitivelyAbsent`
-        // guard above: that flag only proves the absence of the
-        // timer/poll/timeout/keyboard/mouse/gamepad tag set, and says nothing
+        // Both chunks are unconditional for the same reason the each-block case
+        // gives: every non-empty each emits the `_scrml_reconcile_list` call,
+        // and the `_scrml_effect_static` dispatcher lives in `deep_reactive`.
+        //
+        // Deliberately OUTSIDE the `__chunkedMarkupTagDefinitivelyAbsent` guard
+        // above: that flag only proves the absence of the
+        // timer/poll/timeout/keyboard/mouse/gamepad tag set and says nothing
         // about `<each>` (same reason the `if=` ifmount block below sits
         // outside it).
         if ((node.tag ?? "") === "each") {
