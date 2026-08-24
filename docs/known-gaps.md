@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 53 |
+| HIGH | 54 |
 | MED | 163 |
 | LOW | 72 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -2433,6 +2433,57 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > So the trigger is the **three-level compound-nav path to a PER-FIELD synthesized cell** — not synth cells generally (compound-level works), not compound-nav generally (2-level works). Consistent with PRIMER §13.7 B12: per-field synth records live in a distinct `kind:"field"` scope reached only via `lookupQualifiedStateCell`'s extended descent, so 3-level is a separate resolution path the `if=` lowering never learned.
 > **`${@signup.name.touched}` in an INTERPOLATION works correctly** (renders `false` → `true` on interaction), so the per-field synth cells themselves are sound and reactive — this is `if=` lowering specifically.
 > **Severity HIGH:** silent at compile (exit 0; the only diagnostics were an unrelated `W-PROGRAM-SPA-INFERRED` info lint), catastrophic in scope (kills the entire page's reactivity), on the documented §55 auto-synth validity flagship — **and the shape is exactly what SPEC's own stated adopter mental model prescribes.** `SPEC.md:5898`: *"Adopter mental model: 'I'm still typing, don't show field errors yet; I stopped, now show them.'"* The idiomatic way to honour that is to gate on `touched`, and `<errors>` has no `touched` attribute (§55.8 defines only `of=` and `all`), and `if=` on `<errors>` is rejected with `W-ATTR-001` — so **wrapping in `<span if=@field.touched>` is the remaining idiom, and it is precisely the shape that crashes.** Found dog-fooding, not in the ledger. Repro-first re-derive before building.
+
+### g-match-fncall-scrutinee-prunes-effect-chunk-dead-page — ⭐⭐ a `<match>` whose scrutinee is a FUNCTION CALL emits an unguarded `_scrml_effect(...)` that the SHIPPED runtime chunk does not define → `ReferenceError` at load, dead page, exit 0 — and ANY unrelated `${@cell}` in the file MASKS it — `NEW S372-bryan (review-floor S239 pass on #688; PA-EXECUTED, three-way discriminator); HIGH; open`
+<!-- @gap id=g-match-fncall-scrutinee-prunes-effect-chunk-dead-page sev=HIGH status=open locus=compiler/src/route-inference.ts(`markupReferencedNames`, built at :4852 — the same walker #688 extended for `<each>` openers at :4926; a `<match for=T on=fn()>` OPENER is still invisible to it, so the fn is not a client root [:6242 `clientRootIds`] and the `effect` runtime chunk is pruned while the emitted client calls `_scrml_effect` unguarded) prov=rationale:S372-review-floor-adversarial-pass-on-688-PA-EXECUTED-shipped-runtime-chunk-three-way-discriminator-fn-call-scrutinee-dead-page-cell-scrutinee-ok-fn-call-plus-any-other-reactive-use-masked -->
+> **⚑ S372-bryan: PA-EXECUTED against the SHIPPED runtime chunk. Found by the review floor, on already-merged code.**
+> This is the residual that [[g-usage-analyzer-blind-to-each-in-collection-fn-ref]] (RESOLVED by #688) deliberately left open — delta-log `[1750]` recorded it as *"the identical blind spot on `<match for=T on=fn()>`"* and filed it as a **LOW cry-wolf**. **It is not a cry-wolf. It is a dead page.**
+>
+> Minimal reproducer — no `<each>`, no `<endpoint>`, no adopter exotica:
+> ```scrml
+> <program>
+> type Phase:enum = { Idle, Busy }
+> ${
+>     fn phaseFor() -> Phase {
+>         return .Idle
+>     }
+> }
+> <match for=Phase on=phaseFor()>
+>     <Idle : "idle">
+>     <Busy : "busy">
+> </>
+> </program>
+> ```
+> Compiles **exit 0** (one false `W-DEAD-FUNCTION` on `phaseFor`, no errors). The emitted client calls `_scrml_effect(` **unguarded** at top level; the shipped `scrml-runtime.<hash>.js` mentions `_scrml_effect` in **4 comments and defines it 0 times** (the runtime TEMPLATE has 24 occurrences — the symbol exists, chunk pruning dropped it). Loading the pair the way the emitted HTML does:
+> ```
+> ReferenceError: _scrml_effect is not defined
+> body rendered: ""
+> ```
+>
+> **Three-way discriminator, PA-EXECUTED — this is the precise trigger:**
+>
+> | shape | `_scrml_effect` calls in client | chunk defines it | verdict |
+> |---|---|---|---|
+> | `<match for=P on=phaseFor()>` — **fn-call scrutinee**, no other reactive use in the file | 1 | **0** | ✗ **DEAD PAGE** |
+> | `<match for=P on=@phase>` — reactive-cell scrutinee | 0 | 1 | ✅ |
+> | fn-call scrutinee **+** any unrelated `<p>${@phase}</p>` | 2 | 1 | ✅ |
+>
+> **Row 3 is the important one: ANY other reactive content in the file pulls the `effect` chunk in and MASKS the defect.** That is why the corpus emit differential measured 0 of 7388 artifacts and why nobody has hit it — a realistic page almost always has another `${@cell}`. It fails only on the small, clean file, which is exactly what an adopter writes first.
+>
+> **Root — same walker, same blind spot, one carrier short.** `markupReferencedNames` (`route-inference.ts:4852`) is read at THREE sites: the `W-DEAD-FUNCTION` warning (advisory), `:5210` (the Step-5c indirect server-escalation gate) and `:6242` (`clientRootIds` → `endpointClientSkipIds`). **#688 extended this walker to cover `<each>` OPENER expressions** (`inExprRaw`/`ofExprRaw`/`keyExprRaw`/`ifRaw`) precisely because an each-block carries no `attrs` array. A `<match>` opener has the same shape and was NOT covered. So `phaseFor` is not a client root → its closure is not client-reachable → the `effect` chunk is pruned → the client calls a symbol nobody emitted.
+>
+> ⚑ **This also means #688 is BETTER than its own PR describes, and the "diagnostic-only" characterisation is corpus-scoped rather than general.** Its delta-log entry reads *"differential 0 of 7388 artifacts — diagnostic-only, tree-shaking never moved."* True for the corpus; **false as a general claim.** PA-measured across the #688 merge boundary (`b2403285` → `b9e97f1b`) on an endpoint + each-opener shape: the artifacts **DIFFER**, and the difference is a FIX —
+> ```
+> PRE-#688 client:  function _scrml_rowsFor_1() { return [shared(1), shared(2)]; }   // `shared` DEFINED NOWHERE
+> POST-#688 client: function _scrml_shared_1(n) { … }  … [_scrml_shared_1(1), _scrml_shared_1(2)]
+> ```
+> Executed: pre-#688 → `ReferenceError: shared is not defined`, **0 rows rendered**; post-#688 → renders `["v1","v2"]`. **#688 closed a real client-side `ReferenceError` dead page, not just a cry-wolf warning.**
+>
+> **Fix direction (extend, do not duplicate):** cover the `<match>` opener in the SAME `markupReferencedNames` walker block #688 added for `<each>`, beside its sibling bespoke-field blocks — a second near-duplicate predicate is this repo's standing hazard and #688's own comment says so. ⚑ **But that comment also carries the S371 correction and it binds here:** widening this set moves CODE-PLACEMENT decisions (`:5210`, `:6242`), not just diagnostics, so the fix owes the placement argument and a corpus differential, not just a warning-count delta. Per pa-base §8, also **count what any narrowing stops inspecting.**
+>
+> ⚑ **Same CLASS as** [[g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime]] (a client calling a runtime symbol the pruned chunk omits) and the S368 stdlib-client-registry DOA — *the compiler emits a call to something it did not emit, at exit 0, with zero diagnostics.* Third carrier found for the same class in two sessions; that recurrence is itself the signal (converge, do not enumerate).
+>
+> **Repro-first re-derive before building.** Reproducer archived at `docs/changes/if-attr-per-field-synth-crash-2026-08-24/` alongside the sibling probes.
 
 ### g-render-snippet-slot-renders-empty — ⭐⭐ `${render name(...)}` renders NOTHING — every named snippet slot is empty, including in the FLAGSHIP `examples/12-snippets-slots.scrml`, exit 0, zero diagnostics — `NEW S371-bryan (dog-food probe of §16 slots; confirmed on a CORPUS file against the SHIPPED runtime); HIGH; open`
 <!-- @gap id=g-render-snippet-slot-renders-empty sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/codegen/emit-client.ts,compiler/src/component-expander.ts — NO LOCUS TRACED; SPEC §16.8.1 says CE SHALL emit a render-expansion node per valid invocation and codegen SHALL see only inlinedChildren, so the break is somewhere between CE expansion and emit; PA did not trace it prov=spec:SPEC.md:11117-§16.8.1-CE-SHALL-emit-a-transient-render-expansion-node-for-every-valid-invocation-TS-consumes-it-codegen-sees-only-inlinedChildren -->
