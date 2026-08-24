@@ -1304,6 +1304,17 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       if (Array.isArray(stmt.consequent)) walkBody(stmt.consequent);
       if (Array.isArray(stmt.alternate)) walkBody(stmt.alternate);
       if (Array.isArray(stmt.children)) walkNodes(stmt.children);
+      // g-each-as-alias-unbound-in-fn-body limb 2 (2026-08-24) — a
+      // markup-returning `fn` parks its structured markup on
+      // `return-stmt.markupNode` (ast-builder.js:8896-8902), which none of the
+      // four descents above reach. Without this the whole subtree of a
+      // `fn listing(){ return <ul>…</ul> }` body is INVISIBLE to chunk
+      // detection, so every chunk-requiring shape inside it (`<each>` first
+      // and foremost) is tree-shaken out of the runtime while the client
+      // bundle still calls into it. Detection-only descent — `chunks` is a Set
+      // and every `.add` is idempotent, so this can only ever ADD a chunk that
+      // emitted code already references, never remove one.
+      if (stmt.markupNode && typeof stmt.markupNode === "object") walkNodes([stmt.markupNode]);
     }
   }
 
@@ -1558,6 +1569,36 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
             // but uses _scrml_register_cleanup — already in 'scope' (always included)
           }
         }
+        // g-each-as-alias-unbound-in-fn-body limb 2 (2026-08-24) — a generic
+        // `{kind:"markup", tag:"each"}` node. `parseLiftTag` produces GENERIC
+        // markup recursively and never promotes `<each>` to a structural
+        // `each-block` (the promotion lives only in the BS-structural
+        // `buildBlock` path), so an `<each>` inside a `fn` body — or inside any
+        // other lift-parsed markup — reaches this walker as a plain markup
+        // node and NEVER hit the `case "each-block"` discriminator below.
+        // Measured on base cb5db9c9: the shipped runtime for
+        // `fn listing(){ return <ul><each in=@rows …></each></ul> }` contains
+        // ZERO `function _scrml_reconcile_list` while the client bundle CALLS
+        // it → `ReferenceError: _scrml_reconcile_list is not defined` at bundle
+        // eval, whole page dead, compile exit 0 with zero diagnostics.
+        //
+        // This is Bug 57 exactly — the same tree-shaking gap the each-block /
+        // engine-decl / match-block cases below were each added to close, for
+        // the one remaining `<each>` carrier none of them reach. Both chunks
+        // are unconditional for the same reason the each-block case gives:
+        // every non-empty each emits the `_scrml_reconcile_list` call, and the
+        // `_scrml_effect_static` dispatcher lives in `deep_reactive`.
+        //
+        // Deliberately OUTSIDE the `__chunkedMarkupTagDefinitivelyAbsent`
+        // guard above: that flag only proves the absence of the
+        // timer/poll/timeout/keyboard/mouse/gamepad tag set, and says nothing
+        // about `<each>` (same reason the `if=` ifmount block below sits
+        // outside it).
+        if ((node.tag ?? "") === "each") {
+          chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_lis
+          chunks.add("deep_reactive");  // _scrml_effect_static dispatcher
+        }
+
         // §17.1 ifmount — an `if=` (or a chain-construction `else-if=`/`else`)
         // attribute means emit-event-wiring will emit a conditional controller
         // that calls _scrml_find_if_marker / _scrml_mount_template. Runs
