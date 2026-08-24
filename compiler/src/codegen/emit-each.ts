@@ -3251,15 +3251,74 @@ function eachAttrRawText(attrVal: any): string | null {
 }
 
 /**
+ * True when a lift-parsed markup attribute is a BAREWORD — present in the
+ * opener with no `=value`. `parseLiftTag` (ast-builder.js) records those as
+ * `{ name, value: { kind: "absent" } }`.
+ */
+function isBarewordAttr(attr: any): boolean {
+  if (!attr || typeof attr.name !== "string" || !attr.name.trim()) return false;
+  const v = attr.value;
+  return v == null || v.kind === "absent";
+}
+
+/**
+ * Read the `<each … as NAME>` alias out of a lift-parsed attribute list.
+ *
+ * ⚑ THE DEFECT THIS EXISTS FOR (`g-each-as-alias-unbound-in-fn-body`, fixed
+ * 2026-08-24). `as name` is a BAREWORD PAIR in the §17.7.2 source grammar — all
+ * four canonical shapes spell it `as conflict` / `as day` / `as row`, never
+ * `as=conflict`. `parseLiftTag` tokenises an opener into `name[=value]`
+ * attributes, so the pair arrives here as TWO ADJACENT VALUE-LESS attributes:
+ * `as` followed by the alias. The original code read `attr.value` of the `as`
+ * attribute alone, which is `{kind:"absent"}`, so the alias silently resolved to
+ * null and the caller fell back to the synthetic `_scrml_each_item` iter var —
+ * while the BODY still lowered `${name}` as a bare identifier. Emitted result:
+ *
+ *     (_scrml_each_item, _scrml_each_idx) => it        // `it` never declared
+ *
+ * i.e. a `ReferenceError: it is not defined` thrown at bundle eval, killing the
+ * whole client script, from a compile that exited 0 with zero diagnostics.
+ *
+ * Only the LIFT path was affected: the BS-structural `buildBlock` each-block
+ * dispatch re-splits the raw header text and has always handled the bareword
+ * form, which is why a top-level `<each … as it>` was fine and the identical
+ * `<each>` inside a `fn` body (or any other `parseLiftTag`-parsed markup) was
+ * not.
+ *
+ * @param attrs — the lift-parsed attribute list.
+ * @param asIndex — index of the `as` attribute itself.
+ * @returns the alias name (or null when the opener has a dangling `as`), plus
+ *   the index the caller's loop should resume from — the alias bareword is
+ *   CONSUMED so it is not mistaken for an attribute in its own right.
+ */
+function readEachAsAlias(attrs: any[], asIndex: number): { name: string | null; nextIndex: number } {
+  // Lenient first: an explicit `as=name` (not the canonical spelling, but the
+  // shape the pre-fix code was written against) still resolves.
+  const explicit = eachAttrRawText(attrs[asIndex]?.value);
+  if (explicit) return { name: explicit, nextIndex: asIndex };
+
+  // Canonical: the next bareword is the alias. A FOLLOWING attribute that
+  // carries a value (`as key=it` — a dangling `as`) is NOT an alias, so the
+  // malformed opener keeps its null alias rather than stealing `key`.
+  const next = attrs[asIndex + 1];
+  if (isBarewordAttr(next)) {
+    return { name: next.name.trim(), nextIndex: asIndex + 1 };
+  }
+  return { name: null, nextIndex: asIndex };
+}
+
+/**
  * Bug 72 (S158) — convert a generic markup `<each>` node (from `parseLiftTag`,
  * carrying structured `attrs` + `children`) into the structural `each-block`
  * shape the shared each-render machinery consumes. Mirrors the field set the
  * ast-builder `buildBlock` each-block dispatch produces (§17.7), but reads from
  * the already-structured attrs/children rather than re-splitting raw text.
  *
- * The `as name` form lives either as an `as` attribute OR (when `parseLiftTag`
- * keeps it inline) as a bareword in the header; markup attrs from lift already
- * split `in=`/`of=`/`as`/`key=`, so we read them by name.
+ * `in=` / `of=` / `key=` are ordinary `name=value` attributes and are read by
+ * name. `as name` is NOT — see `readEachAsAlias` below and the defect note
+ * there; the pre-2026-08-24 comment in this slot claimed "markup attrs from
+ * lift already split `as`", which was never true and cost a whole class of
+ * runtime `ReferenceError`s.
  *
  * Returns null when the node is not a usable `<each>` (no `in=`/`of=` source).
  */
@@ -3273,13 +3332,18 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
   let ofExprRaw: string | null = null;
   let asName: string | null = null;
   let keyExprRaw: string | null = null;
-  for (const attr of attrs) {
+  for (let i = 0; i < attrs.length; i++) {
+    const attr = attrs[i];
     if (!attr || typeof attr.name !== "string") continue;
     const n = attr.name;
     if (n === "in") inExprRaw = eachAttrRawText(attr.value);
     else if (n === "of") ofExprRaw = eachAttrRawText(attr.value);
     else if (n === "key") keyExprRaw = eachAttrRawText(attr.value);
-    else if (n === "as") asName = eachAttrRawText(attr.value);
+    else if (n === "as") {
+      const alias = readEachAsAlias(attrs, i);
+      asName = alias.name;
+      i = alias.nextIndex;
+    }
   }
 
   let iterShape: "in" | "of" | null = null;
