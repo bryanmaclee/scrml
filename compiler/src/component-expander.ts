@@ -100,8 +100,6 @@ import type {
   BareExprNode,
   PropagateExprNode,
   GuardedExprNode,
-  WhenEffectNode,
-  WhenMessageNode,
   CleanupRegistrationNode,
   UploadCallNode,
   TransactionBlockNode,
@@ -1841,18 +1839,19 @@ function rewriteIdentsInRawExpr(
   propExprMap: Map<string, ExprNode>,
   shadowed: Set<string>,
 ): string {
-  if (!text) return text;
-  // \b(name)\b but ensure not preceded by `.` (member access) and not inside a string.
-  // For safety we use a simple regex pass; templates inside `${...}` rarely
-  // contain string literals containing prop names, but we attempt to skip
-  // string contents.
+  // Empty-map early-out (mirrors rewriteTemplateInterpolations): no prop can
+  // match, so the text is returned verbatim.
+  if (!text || propExprMap.size === 0) return text;
+  // \b(name)\b but ensure not preceded by `.` (member access) and not inside a
+  // plain string literal. A backtick TEMPLATE is NOT skipped wholesale — its
+  // `${…}` interpolations carry live expressions we must recurse into.
   let out = "";
   let i = 0;
   const n = text.length;
   while (i < n) {
     const ch = text[i];
-    // Skip string literals
-    if (ch === '"' || ch === "'" || ch === "`") {
+    // Skip plain (single/double-quoted) string-literal contents verbatim.
+    if (ch === '"' || ch === "'") {
       const q = ch;
       out += ch;
       i++;
@@ -1862,6 +1861,49 @@ function rewriteIdentsInRawExpr(
         out += c;
         i++;
         if (c === q) break;
+      }
+      continue;
+    }
+    // Backtick TEMPLATE: literal spans stay verbatim, but each `${…}`
+    // interpolation is an expression — recurse prop substitution into it.
+    // Without this, a prop referenced ONLY inside a template interpolation in a
+    // handler body (e.g. `send(\`done: ${label}\`)`) leaked as a bare identifier.
+    if (ch === "`") {
+      out += ch;
+      i++;
+      while (i < n) {
+        const c = text[i];
+        if (c === "\\") { out += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
+        if (c === "`") { out += c; i++; break; }
+        if (c === "$" && text[i + 1] === "{") {
+          // Collect the interpolation expression, respecting nested braces,
+          // string literals and nested templates, then recurse into it.
+          out += "${";
+          i += 2;
+          let depth = 1;
+          let seg = "";
+          while (i < n && depth > 0) {
+            const d = text[i];
+            if (d === "\\") { seg += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
+            if (d === "{") { depth++; seg += d; i++; continue; }
+            if (d === "}") { depth--; if (depth === 0) { i++; break; } seg += d; i++; continue; }
+            if (d === '"' || d === "'" || d === "`") {
+              const q = d; seg += d; i++;
+              while (i < n) {
+                const s = text[i];
+                if (s === "\\") { seg += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
+                seg += s; i++;
+                if (s === q) break;
+              }
+              continue;
+            }
+            seg += d; i++;
+          }
+          out += rewriteIdentsInRawExpr(seg, propExprMap, shadowed) + "}";
+          continue;
+        }
+        out += c;
+        i++;
       }
       continue;
     }
@@ -1910,6 +1952,52 @@ function substitutePropsInLogicStmts(
 }
 
 /**
+ * The set of `when …` handler kinds whose CODEGEN emits the handler body from
+ * the RAW `bodyRaw` string (not `bodyExpr`):
+ *   - "when-effect"          → emit-logic `when-effect`   (rewriteBlockBody bodyRaw)
+ *   - "when-message"         → emit-worker generateWorkerJs (worker SELF-handler; bodyRaw)
+ *   - "when-worker-message"  → emit-logic `when-worker-message` (bodyRaw)
+ *   - "when-worker-error"    → emit-logic `when-worker-error`   (bodyRaw)
+ * For ALL of these, substituting only `bodyExpr` (which codegen ignores here)
+ * left a component prop referenced in the body leaking as a bare, unbound
+ * identifier (g-component-prop-substitution-skips-when-worker-handler-bodies +
+ * its when-effect / worker-self-handler siblings). The two "when-worker-*" kinds
+ * are additionally absent from the LogicStatement discriminated union, so they
+ * never matched a typed `case`. Handling all four in one place before the switch
+ * gives a single, uniform treatment.
+ */
+const BODY_RAW_WHEN_HANDLER_KINDS = new Set([
+  "when-effect",
+  "when-message",
+  "when-worker-message",
+  "when-worker-error",
+]);
+
+/**
+ * Substitute component prop refs into a bodyRaw-emitting `when …` handler node.
+ * Rewrites `bodyRaw` (the string codegen actually emits) via
+ * `rewriteIdentsInRawExpr` — leading-identifier discipline (`label`→caller
+ * value; `x.label` / `mylabel` / plain-string contents untouched; `${…}`
+ * template interpolations recursed into). The handler binding (`m` / `e` / a
+ * `when message(d)` param) shadows a same-named prop. `bodyExpr` is kept
+ * substituted too for shape parity, in case any path still reads it.
+ */
+function substitutePropsInWhenHandler(
+  stmt: LogicStatement,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): LogicStatement {
+  const n = stmt as unknown as { bodyRaw?: string; bodyExpr?: ExprNode; binding?: string };
+  const inner = new Set(shadowed);
+  if (n.binding) inner.add(n.binding);
+  const nextRaw = typeof n.bodyRaw === "string"
+    ? rewriteIdentsInRawExpr(n.bodyRaw, propExprMap, inner)
+    : n.bodyRaw;
+  const nextExpr = n.bodyExpr ? substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) : n.bodyExpr;
+  return { ...(stmt as object), bodyRaw: nextRaw, bodyExpr: nextExpr } as unknown as LogicStatement;
+}
+
+/**
  * F-COMPONENT-004: Substitute prop refs inside a single LogicStatement. Mutates
  * `shadowed` to add any names declared by this statement (so subsequent stmts
  * in the same scope see the shadowing).
@@ -1924,30 +2012,14 @@ function substitutePropsInLogicStmt(
     e ? substitutePropsInExprNode(e, propExprMap, shadowed) : e;
   const subInStmts = (ss: LogicStatement[] | undefined | null) =>
     ss ? substitutePropsInLogicStmts(ss, propExprMap, shadowed) : ss;
-  // g-component-prop-substitution-skips-when-worker-handler-bodies:
-  // Parent-side worker handlers (`when message from <#w>` / `when error from
-  // <#w>`) carry kinds "when-worker-message" / "when-worker-error" — NOT members
-  // of the LogicStatement union, so they never matched a typed `case` and fell
-  // through to `default` UNCHANGED. Codegen emits their body from `bodyRaw`
-  // (emit-logic when-worker-*), so a prop referenced inside a COMPONENT's worker
-  // handler leaked as a bare, unbound identifier (ReferenceError at runtime).
-  // Substitute prop refs in the raw body string via `rewriteIdentsInRawExpr`
-  // (leading-identifier discipline: `label`→value, `x.label` / `mylabel`
-  // untouched, string-literal contents skipped) — the same token-level pass the
-  // template-interpolation path uses. The handler binding (`m` / `e`) shadows a
-  // same-named prop. `bodyExpr` (a first-statement parse; codegen ignores it for
-  // these nodes) is kept shape-consistent. The `as string` cast is needed
-  // because the kinds are absent from the typed discriminant union.
-  const _workerHandlerKind = stmt.kind as string;
-  if (_workerHandlerKind === "when-worker-message" || _workerHandlerKind === "when-worker-error") {
-    const n = stmt as unknown as { bodyRaw?: string; bodyExpr?: ExprNode; binding?: string };
-    const inner = new Set(shadowed);
-    if (n.binding) inner.add(n.binding);
-    const nextRaw = typeof n.bodyRaw === "string"
-      ? rewriteIdentsInRawExpr(n.bodyRaw, propExprMap, inner)
-      : n.bodyRaw;
-    const nextExpr = n.bodyExpr ? substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) : n.bodyExpr;
-    return { ...(stmt as object), bodyRaw: nextRaw, bodyExpr: nextExpr } as unknown as LogicStatement;
+  // Converged treatment for EVERY `when …` handler kind whose codegen emits from
+  // the raw `bodyRaw` string (when-effect / when-message / when-worker-message /
+  // when-worker-error). Handled uniformly BEFORE the typed switch — the two
+  // "when-worker-*" kinds are absent from the LogicStatement discriminant union
+  // (hence the `as string` cast), and routing all four here keeps one code path.
+  // See BODY_RAW_WHEN_HANDLER_KINDS / substitutePropsInWhenHandler.
+  if (BODY_RAW_WHEN_HANDLER_KINDS.has(stmt.kind as string)) {
+    return substitutePropsInWhenHandler(stmt, propExprMap, shadowed);
   }
   switch (stmt.kind) {
     case "let-decl":
@@ -2125,20 +2197,9 @@ function substitutePropsInLogicStmt(
         guardedNode: substitutePropsInLogicStmt(n.guardedNode, propExprMap, shadowed),
       } satisfies GuardedExprNode;
     }
-    case "when-effect": {
-      const n = stmt as WhenEffectNode;
-      return { ...n, bodyExpr: subInExpr(n.bodyExpr) } satisfies WhenEffectNode;
-    }
-    case "when-message": {
-      const n = stmt as WhenMessageNode;
-      // The binding name shadows props inside the body
-      if (n.bodyExpr) {
-        const inner = new Set(shadowed);
-        if (n.binding) inner.add(n.binding);
-        return { ...n, bodyExpr: substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) } satisfies WhenMessageNode;
-      }
-      return n;
-    }
+    // "when-effect" and "when-message" (worker self-handler), like the
+    // "when-worker-*" kinds, emit from `bodyRaw` and are handled uniformly by the
+    // BODY_RAW_WHEN_HANDLER_KINDS pre-switch block above — no case needed here.
     case "cleanup-registration": {
       const n = stmt as CleanupRegistrationNode;
       return { ...n, callbackExpr: subInExpr(n.callbackExpr) } satisfies CleanupRegistrationNode;

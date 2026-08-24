@@ -250,3 +250,90 @@ describe("g-component-prop-substitution-skips-when-worker-handler-bodies (emit)"
     expect(() => new Function("e", onerrorBody(clientJs))).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// §C converge: the SAME leak in every OTHER `when …` handler kind that codegen
+// emits from `bodyRaw` — `when-effect` (emit-logic), the worker SELF-handler
+// `when message(d)` (emit-worker), and a prop referenced only inside a `${…}`
+// template interpolation. One shared substitution path now covers them all.
+// ---------------------------------------------------------------------------
+
+describe("g-component-prop-substitution-skips-when-worker-handler-bodies (sibling handler kinds)", () => {
+  // §C1 when-effect: `when @dep changes { @out = label }` emits from bodyRaw.
+  test("§C1 when-effect body substitutes the prop", () => {
+    const src =
+      `<program>\n` +
+      `  \${ const Box = <div props={ label: string }>\n` +
+      `    \${ <dep> = 0\n` +
+      `      <out> = ""\n` +
+      `      <t> = \`hi \${@out}\`\n` +
+      `      when @dep changes {\n` +
+      `        @out = label\n` +
+      `      } }\n` +
+      `    <button onclick={ @dep = @dep + 1 }>go</button>\n` +
+      `    <p>\${@out}</p>\n` +
+      `  </> }\n` +
+      `  <Box label="hello"/>\n` +
+      `</program>\n`;
+    const { ce, ceErrors } = expandCE(src);
+    expect(ceErrors).toHaveLength(0);
+    const eff = collectByKind(ce.ast?.nodes ?? [], "when-effect");
+    expect(eff).toHaveLength(1);
+    // BITING: pre-fix `@out = label` (bare, unbound).
+    expect(eff[0].bodyRaw).toContain(`@out = "hello"`);
+    expect(eff[0].bodyRaw).not.toMatch(/@out\s*=\s*label\b/);
+  });
+
+  // §C2 worker SELF-handler: `when message(d) { send(label) }` inside the
+  // component's `<program name="w">` emits from bodyRaw (generateWorkerJs). A
+  // string-literal prop is baked into the worker source — REACHABLE, so covered.
+  test("§C2 worker self-handler body substitutes the prop", () => {
+    const src =
+      `<program>\n` +
+      `  \${ const Box = <div props={ label: string }>\n` +
+      `    <program name="w">\${ when message(d) { send(label) } }</program>\n` +
+      `    \${ <out> = ""\n` +
+      `      <t> = \`hi \${@out}\`\n` +
+      `      when message from <#w> (m) { @out = m } }\n` +
+      `    <p>\${@out}</p>\n` +
+      `  </> }\n` +
+      `  <Box label="hello"/>\n` +
+      `</program>\n`;
+    const { ce, ceErrors } = expandCE(src);
+    expect(ceErrors).toHaveLength(0);
+    // The SELF-handler is kind "when-message" (no workerName); the parent handler
+    // (`@out = m`) is "when-worker-message".
+    const self = collectByKind(ce.ast?.nodes ?? [], "when-message");
+    expect(self).toHaveLength(1);
+    // BITING: pre-fix `send ( label )` (bare, unbound).
+    expect(self[0].bodyRaw).toContain(`"hello"`);
+    expect(self[0].bodyRaw).not.toMatch(/\blabel\b/);
+  });
+
+  // §C3 template blind spot: a prop referenced ONLY inside a `${…}` template
+  // interpolation in the handler body.
+  test("§C3 a prop inside a ${...} template interpolation is substituted", () => {
+    const src =
+      `<program>\n` +
+      `  \${ const Box = <div props={ label: string }>\n` +
+      `    ${WORKER}\n` +
+      `    \${ <out> = ""\n` +
+      `      <t> = \`hi \${@out}\`\n` +
+      `      when message from <#w> (m) {\n` +
+      `        @out = m\n` +
+      `        send(\`done: \${label}\`)\n` +
+      `      } }\n` +
+      `    <p>\${@out}</p>\n` +
+      `  </> }\n` +
+      `  <Box label="hello"/>\n` +
+      `</program>\n`;
+    const { ce, ceErrors } = expandCE(src);
+    expect(ceErrors).toHaveLength(0);
+    const msg = collectByKind(ce.ast?.nodes ?? [], "when-worker-message");
+    expect(msg).toHaveLength(1);
+    // BITING: pre-fix `${label}` shipped verbatim (rewriteIdentsInRawExpr skipped
+    // the whole template). Post-fix the interpolation carries the caller value.
+    expect(msg[0].bodyRaw).toContain(`\${"hello"}`);
+    expect(msg[0].bodyRaw).not.toContain(`\${label}`);
+  });
+});
