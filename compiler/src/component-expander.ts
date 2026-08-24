@@ -1924,6 +1924,31 @@ function substitutePropsInLogicStmt(
     e ? substitutePropsInExprNode(e, propExprMap, shadowed) : e;
   const subInStmts = (ss: LogicStatement[] | undefined | null) =>
     ss ? substitutePropsInLogicStmts(ss, propExprMap, shadowed) : ss;
+  // g-component-prop-substitution-skips-when-worker-handler-bodies:
+  // Parent-side worker handlers (`when message from <#w>` / `when error from
+  // <#w>`) carry kinds "when-worker-message" / "when-worker-error" — NOT members
+  // of the LogicStatement union, so they never matched a typed `case` and fell
+  // through to `default` UNCHANGED. Codegen emits their body from `bodyRaw`
+  // (emit-logic when-worker-*), so a prop referenced inside a COMPONENT's worker
+  // handler leaked as a bare, unbound identifier (ReferenceError at runtime).
+  // Substitute prop refs in the raw body string via `rewriteIdentsInRawExpr`
+  // (leading-identifier discipline: `label`→value, `x.label` / `mylabel`
+  // untouched, string-literal contents skipped) — the same token-level pass the
+  // template-interpolation path uses. The handler binding (`m` / `e`) shadows a
+  // same-named prop. `bodyExpr` (a first-statement parse; codegen ignores it for
+  // these nodes) is kept shape-consistent. The `as string` cast is needed
+  // because the kinds are absent from the typed discriminant union.
+  const _workerHandlerKind = stmt.kind as string;
+  if (_workerHandlerKind === "when-worker-message" || _workerHandlerKind === "when-worker-error") {
+    const n = stmt as unknown as { bodyRaw?: string; bodyExpr?: ExprNode; binding?: string };
+    const inner = new Set(shadowed);
+    if (n.binding) inner.add(n.binding);
+    const nextRaw = typeof n.bodyRaw === "string"
+      ? rewriteIdentsInRawExpr(n.bodyRaw, propExprMap, inner)
+      : n.bodyRaw;
+    const nextExpr = n.bodyExpr ? substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) : n.bodyExpr;
+    return { ...(stmt as object), bodyRaw: nextRaw, bodyExpr: nextExpr } as unknown as LogicStatement;
+  }
   switch (stmt.kind) {
     case "let-decl":
     case "const-decl":
