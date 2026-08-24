@@ -1,42 +1,84 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **INCREMENTAL over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
-# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
-# `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
+# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
+# ancestor of `origin/main` (it IS `origin/main`).
 #
-# **+39 test files, ZERO deleted — 1,339 -> 1,378** (`*.test.js` under `compiler/tests`, FACTS.md
-# mechanically derived). Conformance corpus **FLAT at 883** for the third window running. The §34
-# catalog moved **809 -> 810** (`E-MW-007`), so error.map.md is NOT flat this window even though the
-# corpus is.
+# **+8 test files, ZERO deleted — 1,378 -> 1,386** (`*.test.js` under `compiler/tests`, agrees with
+# `docs/FACTS.md`). Conformance corpus **FLAT at 883 for the FOURTH window running**. §34 moved
+# **810 -> 812**, so error.map.md is not flat even though the corpus is.
 #
-# **THE HEADLINE IS NOT THE COUNT — IT IS THAT THE CONFORMANCE `expect` VOCABULARY IS NOW GOVERNED,
-# AND THAT FIVE GATES WERE MEASURING NOTHING.**
+# ⚑ **A CORRECTION TO THE PRIOR GENERATION OF THIS MAP, AND IT IS THE KIND THIS MAP SET EXISTS TO
+# CATCH: ITS CATEGORY BREAKDOWN DID NOT SUM TO ITS OWN TOTAL, WHILE CLAIMING IT DID.** The prior
+# header wrote *"The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level = 1378."*
+# **That arithmetic gives 1,344, not 1,378** — a 34-file shortfall stated as a verification. Every
+# category below was RE-COUNTED RECURSIVELY at this watermark and the sum is now checked by
+# execution: **901+213+133+94+14+14+11+4+2 = 1,386.** ⚠ **The likely cause is the counting method,
+# not a typo: several categories hold `*.test.js` files in SUBDIRECTORIES, so a non-recursive count
+# undercounts.** Count recursively, then add.
 #
-#   · **`conformance/run.ts` gained `EXPECT_SHAPES` + `validateExpectContainers` (#652, +298 lines).**
-#     Every container in a case's `expect` block is validated against a declared shape BEFORE the
-#     case runs. The full vocabulary is now enumerable in one place — see the new section below.
-#     `validateExpectContainers` is **EXPORTED on purpose**, with the reason written at the site: *"a
-#     validator that can only be reached by running the whole corpus is indistinguishable from one
-#     that never fires."* Driven by `compiler/tests/conformance/expect-container-policy.test.js`
-#     (NEW, 316 lines).
+# ─── WHAT THIS WINDOW ADDED, AND WHY EACH ONE IS A MERGE-BLOCKER RATHER THAN A REGRESSION TEST ───
 #
-#   · **#646 — "five gates that reported green while measuring nothing."** This is the window's
-#     governing lesson and it generalises past conformance: a gate that parses a population, silently
-#     drops the part it cannot parse, and reports PASS on the remainder is worse than no gate.
-#     `scripts/state.ts` and `scripts/delta-lint.ts` both gained an **unconditional
-#     `bracketed !== parsed` refusal** — if the number of `[NNNN]`-bracketed lines in scope does not
-#     equal the number the regex matched, the instrument REFUSES (exit 2) instead of reporting on a
-#     subset. **Exit 2 is deliberately distinct from exit 1 and is NOT reachable as a PASS:** 1 means
-#     "the log is wrong", 2 means "the instrument is broken".
+# ⚑ **`integration/stdlib-client-registry.test.js` (37 cases, #669) — AND ITS TIER IS THE LESSON.**
+# It was authored in `compiler/tests/browser/` and **DELIBERATELY MOVED TO `integration/`**, because
+# `.git/hooks/pre-commit:39` runs unit + integration + conformance + root `*.test.js` and
+# **`compiler/tests/browser/` IS NOT IN THAT SET** — so the merge-blocker proving the feature is not
+# DOA was itself outside the merge gate. The browser tier is not load-bearing for any of it: 14
+# integration tests already register happy-dom the same way, including this feature's own predecessor
+# `integration/bug-18-scrml-stdlib-client-import.test.js`. **The WHOLE file moved, not just the new
+# regression.** ⚠ **Before you call a test a merge-blocker, check which TIER it is in.**
+#   Its four sections are worth knowing because they are a template for "the emitted artifact is
+#   DEAD" testing, a class a grep-level assertion structurally cannot see (before the fix, every
+#   text-level check anyone would write PASSED while the page was dead):
+#     §1  every client-registered module EXECUTES, and its registry entry carries REAL exports
+#         (an empty object would also "load" — asserting load is not asserting function).
+#     §1b **THE PARTITION** — every shim on disk is client-registered XOR escalation-server-only,
+#         with **no unclassified third state**. This is the assertion that stops the next module
+#         hiding the way 17 did, and the module lists are DERIVED from `RUNTIME_CHUNK_ORDER` and
+#         `ESCALATION_SERVER_ONLY_MODULES`, never hand-copied, so a chunk added tomorrow is executed
+#         automatically.
+#     §2  the gate FIRES for all 8 chunkless server-only modules + a submodule specifier.
+#     §3  the gate does NOT over-fire — a server-only stdlib reached only from a `server function`
+#         compiles clean (this pins the post-prune placement fix).
+#     §4  **INSTRUMENT INTEGRITY** — the harness is fed a deliberately-DOA bundle and MUST report it.
+#         **A harness that swallowed the throw would make §1 vacuous.** Invariant 59, applied to a
+#         test harness rather than a CI step.
 #
-# ⚠ **THE COUNTING CAVEAT CARRIES, UNCHANGED.** `docs/FACTS.md`'s `test files` figure counts
-# **`*.test.js` under `compiler/tests` only** — it EXCLUDES the **15** `*.test.ts` files in the same
-# tree, and it excludes `conformance/`. A "how many tests" question has three different right answers
-# depending on which population you mean; name the population.
+#   · `unit/s365-asis-unknown-split.test.js` (#665) — the §7.5/§14.7 split + `W-TYPE-031-UNPROVEN`.
+#   · `integration/each-inline-value-form-if-interp.test.js` (#670, 5 cases, **bite-proven: 3 fail
+#     pre-fix**).
+#   · `integration/value-form-if-empty-string-branch.test.js` (#672).
+#   · `integration/value-form-if-fn-condition-reactive.test.js` (#673, 4 cases, **bite-proven: 2 fail
+#     pre-fix** — fn-condition + else-if cascade; plus direct-read and static non-regressions).
+#   · `integration/each-cross-file-imported-markup-fn-mount.test.js` +
+#     `browser/each-cross-file-imported-markup-fn-mount.browser.test.js` (#658).
+#   · `integration/library-mode-fn-match-object-arm-lowering.test.js` (#664).
+#   · `integration/trucking-dispatch-smoke-integration.test.js`.
+#
+# **`compiler/tests/TYPES-BASELINE.json` IS NEW AND IS NOT A TEST FILE.** It is
+# `scripts/types-gate.ts`'s baseline — a **name->COUNT map**, keyed
+# `<relative file> :: <TS code> :: <message head>` with line and column deliberately stripped.
+# ⚠ **The COUNT half was a mid-build correction and it is the reusable part:** because the key strips
+# line numbers, the NINE live `MarkupValueExpr` exhaustive-switch `never` failures in
+# `expression-parser.ts` collapsed into ONE entry under a bare set — so a TENTH would have joined an
+# existing entry and the gate would have stayed GREEN, on a defect class whose entire signal is *how
+# many switches did this member fall through*. Regenerate with `bun scripts/types-gate.ts --write`;
+# `--check` is red when a name JOINS **or LEAVES** the set, or when a count GROWS. build.map.md.
+#
+# **CARRIED, UNCHANGED — the conformance `expect` vocabulary is a DECLARED TABLE** (`EXPECT_SHAPES`
+# at `conformance/run.ts:179`, enforced by `validateExpectContainers` at `:218`, EXPORTED on purpose:
+# *"a validator that can only be reached by running the whole corpus is indistinguishable from one
+# that never fires."*), and **#646's "five gates reporting green while measuring nothing"** with the
+# unconditional `bracketed !== parsed` refusal in `state.ts` + `delta-lint.ts` (exit 1 = the log is
+# wrong, exit 2 = the instrument is broken; 2 is NOT reachable as a PASS).
+#
+# ⚠ **THE COUNTING CAVEAT CARRIES.** `docs/FACTS.md`'s `test files` figure counts **`*.test.js` under
+# `compiler/tests` only** — it EXCLUDES the **15** `*.test.ts` files in the same tree and excludes
+# `conformance/`. Three populations, three right answers; name the one you mean.
 #
 # ⚠ **INVARIANT 56 CARRIES AND IS STILL THE FIRST THING TO CHECK ON ANY `(fail)`.** bun does not read
 # `bunfig.toml [test] timeout`; the real per-test budget is bun's default **5000 ms** everywhere. A
@@ -44,6 +86,7 @@
 # reports `(fail) <name>`, **the same marker an assertion failure produces**. Declare `{ timeout }` at
 # the site for anything multi-second. Several old test comments still cite "the bunfig default 10s",
 # a number that was NEVER in force (non-compliance.report.md N11).
+#
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -59,32 +102,56 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1378** `*.test.js` total, +39 this window)
+## Test Categories (compiler/tests/, **1,386** `*.test.js` total, +8 this window)
 
-Fresh recursive recount at `c93a692c`, all 9 categories individually re-verified; agrees with
-`docs/FACTS.md` (`test files | 1,378`), **which is the citable authority — do not hardcode a
-competing number.** Net **+5** this pass, decomposing as **unit +4**, **integration +1** (conformance
-/ browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged). **ZERO deletions,
-third window running.** The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level =
-**1378**.
+Fresh RECURSIVE recount at `728bdc92`, all 9 categories individually re-verified; agrees with
+`docs/FACTS.md` (`test files | 1,386`), **which is the citable authority — do not hardcode a
+competing number.** Net **+8** this pass, decomposing as **unit +16 · integration +17 · conformance
++1 · browser +2 · commands +6** against the prior map's figures.
 
-Carried: the conformance-TIER row (132) counts `compiler/tests/conformance/*.test.js` — the
-artifact-level harnesses — and is a DIFFERENT number from the 883 conformance CASES under
-`conformance/cases/`; **do not reconcile them.** Neither moved this window.
+⚑ **THOSE PER-CATEGORY DELTAS ARE MOSTLY A RECOUNT, NOT NEW TESTS — and that is the finding.** Only
+EIGHT files were added by this window's PRs. The rest of the apparent movement is the prior map's
+breakdown having been non-recursive: **its own stated sum (885+196+132+92+11+8+4+2 = 1330, +14 =
+"1378") is arithmetically 1,344**, a 34-file shortfall published as a verification. **This one sums
+by execution: 901+213+133+94+14+14+11+4+2 = 1,386.** Treat the prior per-category numbers as
+superseded, not as a baseline to diff against.
+
+**ZERO deletions, fourth window running.**
+
+Carried: the conformance-TIER row counts `compiler/tests/conformance/*.test.js` — the artifact-level
+harnesses — and is a DIFFERENT number from the 883 conformance CASES under `conformance/cases/`;
+**do not reconcile them.**
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **885** (+4) | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **196** (+1) | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | 132 (unchanged) | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | 92 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
+| Unit | `compiler/tests/unit/**/*.test.js` | **901** | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **213** | `tracking` (non-blocking) + **pre-commit** + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | **133** | `gate` (blocking) + pre-commit + pre-push |
+| Browser | `compiler/tests/browser/**/*.test.js` | **94** | `gate` (BLOCKING) + `tracking` — via the NAME-SET check. ⚠ **NOT in the pre-commit set** (`.git/hooks/pre-commit:39`) |
+| Commands | `compiler/tests/commands/**/*.test.js` | **14** | `tracking` only (non-blocking) |
+| Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
-| Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
-| Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
+| *(not a test file)* | `compiler/tests/TYPES-BASELINE.json` | — | read by `bun scripts/types-gate.ts --check` (`tracking`, non-blocking) |
 
-**Changed this pass — 5 added + 2 reworked substantially in place, ZERO deleted:**
+**ADDED THIS WINDOW — 8 files, ZERO deleted. Every one is a merge-blocker for a SILENT-WRONG defect
+(clean compile, exit 0, wrong or missing output), which is why they are integration/unit and not
+browser:**
+
+| File | Tier | What it pins |
+|---|---|---|
+| `integration/stdlib-client-registry.test.js` | integration | **#669, 37 cases.** §41 client stdlib registry. Loads the emitted runtime + client as TWO CLASSIC SCRIPTS IN ONE SHARED SCOPE and asserts the page is not DOA — **a grep-level assertion structurally cannot see this class**; before the fix every text-level check anyone would write PASSED while the page was dead. Four sections: §1 every registered module EXECUTES with real exports · **§1b the PARTITION (client-registered XOR escalation-server-only, no third state — this is what stops the next module hiding the way 17 did; lists DERIVED from `RUNTIME_CHUNK_ORDER` + `ESCALATION_SERVER_ONLY_MODULES`, never hand-copied)** · §2 the gate FIRES for all 8 chunkless modules + a submodule · §3 the gate does NOT over-fire on a server-fn-only use (pins the post-prune placement) · **§4 INSTRUMENT INTEGRITY — feed the harness a deliberately-DOA bundle; it MUST report it, or §1 is vacuous.** ⚑ **Authored in `browser/`, MOVED to `integration/`** because `browser/` is not in the pre-commit set. Merge-blocker proof: baseline exit 0 / sabotage exit 1 (partition test + both chunk-set pins) / restore exit 0. |
+| `unit/s365-asis-unknown-split.test.js` | unit | **#665.** §7.5/§14.7 `asIs`/`unknown` split + `W-TYPE-031-UNPROVEN` + the required `UnknownType.reason`. |
+| `integration/each-inline-value-form-if-interp.test.js` | integration | **#670 §17.6, 5 cases, BITE-PROVEN: 3 fail pre-fix.** A value-form `${ if c { a } else { b } }` as the SOLE content of an interp inside an `<each>` body rendered an EMPTY text node at exit 0. |
+| `integration/value-form-if-empty-string-branch.test.js` | integration | **#672 §17.6.** A value-form `if` branch that is the empty-string literal `""` rendered nothing — the parser's blank-token skip ate a MEANINGFUL expression statement. |
+| `integration/value-form-if-fn-condition-reactive.test.js` | integration | **#673, 4 cases, BITE-PROVEN: 2 fail pre-fix** (fn-condition + else-if cascade; plus direct-read and static non-regressions). A value-form `if` whose CONDITION is a fn call was a stale one-shot. |
+| `integration/each-cross-file-imported-markup-fn-mount.test.js` | integration | **#658 §1.4/§7.4.** A cross-file IMPORTED markup fn mounts in an `<each>` interp instead of stringifying. |
+| `browser/each-cross-file-imported-markup-fn-mount.browser.test.js` | browser | **#658**, the executed-DOM twin. ⚠ **Browser tier — NOT in the pre-commit set.** |
+| `integration/library-mode-fn-match-object-arm-lowering.test.js` | integration | **#664 §18.** A library-mode `fn` `match` object-literal arm is a returned VALUE, not silent `undefined`. |
+| `integration/trucking-dispatch-smoke-integration.test.js` | integration | Corpus smoke over `examples/23-trucking-dispatch`. |
+
+**PRIOR WINDOW (`c93a692c` -> `c96e7012`) — 5 added + 2 reworked substantially in place, ZERO deleted:**
 
 | File | Tier | Lines | What it pins |
 |---|---|---|---|
@@ -497,7 +564,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout
+#scrml #map #test #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout
 
 ## Links
 - [primary.map.md](./primary.map.md)

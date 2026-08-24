@@ -1,43 +1,35 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **CURRENCY RE-VERIFIED AT `c96e7012`, NOT RE-WALKED.** Ancestry CHECKED (invariant 48); outbound
-# MAP-STAMP check run (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012`
-# is an ancestor of `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676) — the streak of
+# currency-only passes is BROKEN, because a shape landed.** Ancestry CHECKED (invariant 48);
+# outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source diff `merge-base..HEAD`
+# is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
 #
-# **`compiler/src/types` IS ZERO-DIFF FOR THE ELEVENTH WINDOW** — `git diff --name-only
-# c93a692c..c96e7012 -- compiler/src/types` is EMPTY. And the stronger check, run because this
-# window touched 32 `compiler/src/` files: **`git diff c93a692c..c96e7012 -- compiler/src/ | grep
-# '^+' | grep -E 'export (interface|type) '` returns NOTHING.** Not one exported type or interface
-# was added anywhere in the compiler this window. Every shape below carries.
+# **`compiler/src/types` IS ZERO-DIFF FOR THE TWELFTH WINDOW** — `git diff --name-only
+# c96e7012..728bdc92 -- compiler/src/types` is EMPTY, and
+# `git diff c96e7012..728bdc92 -- compiler/src/ | grep '^+' | grep -E 'export (interface|type) '`
+# returns NOTHING. **No EXPORTED type or interface was added anywhere in the compiler.**
 #
-# **What the window DID add is FUNCTION and CONST exports, which belong in structure/dependencies,
-# not here:** `selectRequestOnion` + `formatOnionConflict` (`commands/select-request-onion.js`),
-# `collectUsedTransitions` + `renderTransitionCss` (`codegen/emit-transition-css.ts`),
-# `stripRedundantCode` (`commands/diagnostic-format.js`), `maskStringLiteralSpans` +
-# `indentBodyLines` (`codegen/utils.ts`), `rewriteResetCalls` (`codegen/rewrite.ts`),
-# `isStandardHtmlRenderElement` (`html-elements.js`), `injectHandleRequestAwaits` /
-# `effectiveRequestIds` / `setCurrentFileRequestIds` / `compareInputPathsCanonical`, and the
-# `commands/dev.js` test surface (`devDispatch`, `loadServerRoutes`, `getRegisteredOnions`,
-# `getRegisteredRoutes`, `runThroughOnions`, `compileThrowDiagnostic`,
-# `createHotReloadScriptResponse`, `launchingProcessGone`, `HOT_RELOAD_SRC`).
+# ⚑ **BUT THREE MODULE-PRIVATE TYPES DID LAND IN `type-system.ts`, AND THE PRIOR MAP'S EXCLUSION
+# BLOCK FOR THEM IS NOW FALSE — DELETE IT FROM YOUR MENTAL MODEL.** The prior generation said
+# *"NOT ON MAIN, NOT MAPPED — the `asIs`/`unknown` split ... lives on the unlanded branch
+# `feat/s365-asis-split-rung0`"*. **It landed at `43eea9aa` (#665).** `git merge-base --is-ancestor
+# 43eea9aa origin/main` exits 0. `UnknownType` is no longer `{ kind: "unknown" }`. Same landing:
+# `scripts/types-gate.ts` and `compiler/tests/TYPES-BASELINE.json` are on main (structure.map.md).
+# **This is the ONLY shape change this window; everything else below carries unchanged.**
 #
-# ⚠ **`type-system.ts` MOVED (+186) AND ADDED NO SHAPE.** The changes are #582/#596 (mask string
-# literals + a structural reset member-guard, closing the §14.12/§14.3 lifecycle raw-text launder
-# class) and #634 (don't false-fire `E-FN-003` on a `=` inside a fn-body string literal). All three
-# are local helpers.
+# **What else the window added is FUNCTION exports, which belong in structure/dependencies, not
+# here:** the six predicates of `markup-return-scan.js` (NEW file, #658), and
+# `STDLIB_CLIENT_CHUNK_MODULES` + `hasStdlibClientChunk` (`codegen/runtime-chunks.ts`, #669 — a
+# `ReadonlySet<string>` and a `(string) => boolean`, not a shape).
 #
-# ⚑ **NOT ON MAIN, NOT MAPPED — the `asIs`/`unknown` split.** `InferenceResult` (a `Result`-shaped
-# return from `inferExprType`), `InferenceGap` (whose construction requires naming an AST node kind),
-# the exhaustive switch with a `never` fallthrough, and a REQUIRED `UnknownType.reason` all live on
-# the unlanded branch `feat/s365-asis-split-rung0` — `git merge-base --is-ancestor
-# feat/s365-asis-split-rung0 origin/main` exits NON-ZERO. **At this watermark `UnknownType` is
-# `{ kind: "unknown" }` and NOTHING ELSE** (`type-system.ts:364-366`) — there is no `reason` field at
-# all, optional or otherwise, and no `UnknownReason` union. On the branch it is
-# `{ kind: "unknown"; reason: UnknownReason }` (REQUIRED). The `asIs` KIND itself has existed
-# for many windows (`type-system.ts:341`) and is documented below — do not confuse it with the split.
+# Prior windows' function/const-export list (`selectRequestOnion`, `collectUsedTransitions`,
+# `stripRedundantCode`, `maskStringLiteralSpans`, `rewriteResetCalls`, the `commands/dev.js` test
+# surface, …) carries unchanged.
+#
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
@@ -330,10 +322,93 @@ decidable, since a name bound by a NEARER ctx must suppress re-resolving a same-
 No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier. See auth.map.md for the three separate non-FileAST "auth config" shapes. **S288: `tenant-egress.ts`'s `buildTenantContext` now takes a second, optional arg (the `<schema>`-declared tables, from `extractDesiredSchema(fileAST).tables`) and unions them into `TenantContext.tenantScopedTables`** — previously it read ONLY the `<db>`-derived `ProtectContext.schemaByTable` registry, which left a `<schema>`-only app (no `<db>` block) with an EMPTY tenant set even though §14.8.10 says a `<schema>` table's `tenant_id` column presence IS the tenant declaration. See domain.map.md's §14.8.11 section for the full defect narrative (`g-dbauth-session-principal-not-wired`, RESOLVED S288).
 
 ## Type-system ResolvedType layer (type-system.ts, not ast.ts)
-FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
+FunctionType [type-system.ts:~470], MapType [:328] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom). **`:line` figures in this row shifted ~+10 when #665 inserted the split; the shapes are unchanged.**
+
+### §7.5 / §14.7 — the `asIs` / `unknown` SPLIT (NEW #665, S365, dpa-036 call 1)
+
+**The one-sentence rule, and it is the whole point of the split:** `asIs` means **a developer signed
+for it** (§14.7's named escape hatch — silent by design, because a human took responsibility);
+`unknown` means **the compiler did not look, or looked and could not tell** — an inference gap that
+**nobody signed for**. Before S365 those were ONE value: inference gave up by returning `tAsIs()`,
+so a hole in the type checker was spelled exactly like a deliberate opt-out, and *absence of a
+diagnostic* and *success* were the same observation.
+
+All three new types are **module-private to `type-system.ts` (no `export`)**, which is why the
+"no exported type added" check above still passes.
+
+### AsIsType  [type-system.ts:345]
+```
+kind: "asIs"
+constraint: ResolvedType | null
+bareVariantBase?: ResolvedType   // R28-8 / §14.10 sidecar — the field's TRUE base type when a
+                                 // trailing validator (`category: Category req`) defeated the
+                                 // registry lookup. ADDITIVE: does not change the `asIs` kind
+                                 // any other `structType.fields` consumer reads.
+isFunctionField?: boolean        // §59.4 / §45.2 — annotation was unambiguously FUNCTION-SHAPED
+                                 // but lowered to `asIs`. Routes a map KEY to `E-EQ-003` rather
+                                 // than the general `E-MAP-KEY-NOT-COMPARABLE`.
+```
+Pre-existing for many windows. **Do not confuse the `asIs` KIND with the S365 split** — the split
+is what got carved OUT of it.
+
+### UnknownType  [type-system.ts:387]
+```
+kind: "unknown"
+reason: UnknownReason            // REQUIRED. No optional, no default.
+```
+⚠ **`tUnknown(reason)` [:1307] has NO zero-argument overload and NO default parameter, deliberately.
+An `unknown` that cannot say what defeated it has decayed back into an `asIs`.** If you find
+yourself wanting `tUnknown()`, the call site does not yet know enough to be honest.
+
+### UnknownReason  [type-system.ts:409] — a discriminated union, three honest sources
+```
+| { readonly source: "inference-gap"; readonly gap: InferenceGap }
+| { readonly source: "forward-ref";   readonly typeName: string }
+| { readonly source: "not-a-node" }
+```
+- `inference-gap` — expression inference RAN and could not type the node. **This is the loud,
+  counted case: it is what `W-TYPE-031-UNPROVEN` reports** (error.map.md).
+- `forward-ref` — a type NAME registered before its declaration resolves (`buildTypeRegistry`
+  pass 1). Transient BY CONSTRUCTION; a later pass overwrites it. **Not a defect, do not gate on it.**
+- `not-a-node` — the caller handed the resolver something that is not an AST node. A defensive
+  sentinel, **not a judgement about any program**.
+
+### InferenceGap  [type-system.ts:421]
+```
+readonly nodeKind: ExprNode["kind"]   // NOT `string`, and there is no default
+readonly detail:  string              // adopter-facing refinement — names a CONSTRUCT, never an
+                                      // internal identifier (`lit` is not one thing, so a boolean
+                                      // literal reports `bool literal`)
+```
+**You cannot construct an `InferenceGap` without naming a REAL `ExprNode` kind. That type — not a
+convention — is what keeps the gap honest as the language grows.**
+
+### InferenceResult  [type-system.ts:440] — the return type of `inferExprType` [:569]
+```
+| { readonly ok: true;  readonly type: ResolvedType }
+| { readonly ok: false; readonly gap:  InferenceGap }
+```
+Constructors: `inferenceOk(type)` [:444], `inferenceGap(nodeKind, detail)` [:448].
+
+⚑ **THE RATIFIED DECAY-STOPPER, and it is why every `inferExprType` caller had to change:**
+inference no longer returns a bare `ResolvedType`, because a bare `ResolvedType` gave callers **no
+way to distinguish "I typed this" from "I gave up and here is the hatch."** Callers must destructure
+`ok`, so the failure branch cannot be reached by accident.
+
+⚑ **THE COMPANION PROPERTY IS A COMPILE-TIME ONE, AND IT ONLY WORKS BECAUSE `scripts/types-gate.ts`
+LANDED IN THE SAME PR.** `inferExprType` ends in a `never` fallthrough, which makes "a new `ExprNode`
+member that nobody taught inference about" a **TYPE ERROR** rather than a silent `asIs`. bun runs
+`.ts` transpile-only, so before #665 that guarantee was decorative: nine sibling exhaustive switches
+in `expression-parser.ts` were ALREADY failing on `MarkupValueExpr` and nothing had ever noticed.
+**Building a tenth `never` fallthrough without arming a checker would have reproduced the defect
+rather than closed it.** build.map.md · test.map.md.
+
+**Assignability is UNCHANGED and still permissive on both members** [`:1183-1186`]: `asIs` OR
+`unknown` on EITHER side is assignable (graceful-degrade column, or an inference gap). The split
+changed what the compiler can SAY, not what it accepts.
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main
+#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,56 +1,74 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **RE-WALKED over `c93a692c` -> `c96e7012` (111 commits, PRs #539-#654, TWO operators — peter
-# S347-S366, bryan S347-S365).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md): the source diff `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of
-# `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan S368,
+# peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
+# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
+# ancestor of `origin/main` (it IS `origin/main`).
 #
-# **`gate` GAINED A STEP — 12 -> 13 — and separately one existing step's NAME was corrected because
-# it was lying. Both changes are in `.github/workflows/ci.yml` and nothing else in `.github/` moved.**
+# ⚑ **THE ELEVEN-WINDOW `package.json` ZERO-DIFF STREAK IS OVER (#665): THREE NEW SCRIPT ENTRIES AND
+# THE FIRST NEW DEV DEPENDENCY IN ELEVEN WINDOWS.** `types` · `types:check` · a `"//types"`
+# comment-key carrying the reason · `typescript@^5.9.2`. Version stays `0.7.1`.
 #
-#   · **NEW BLOCKING STEP: `delta-log sequence gate (a duplicate silently drops an entry from the
-#     digest)` → `bun scripts/delta-lint.ts`.** WHY it is a gate and not a probe: `handOffs/
-#     delta-log.md` numbers entries from a single shared counter under a single-writer rule that
-#     stopped being true when the project went to two concurrent operators. The flogence bridge uses
-#     the number as a CHECKPOINT CURSOR (`last_seq`), so given two entries sharing a number, the
-#     first to merge advances the cursor past BOTH and **the second is silently dropped from the
-#     digest.** BASELINED (`handOffs/delta-log-dupes.baseline.json`, nine pre-existing collisions) so
-#     it is not instantly red for reasons no change caused — **only a NEW duplicate fails.**
+# ⚑ **AND THE PRIOR MAP'S "`scripts/types-gate.ts` IS NOT ON MAIN" NOTE IS RETIRED — IT LANDED, AND
+# IT IS WIRED INTO CI.** But read the wiring carefully, because it is deliberately weak:
 #
-#   · **A STEP NAME WAS CORRECTED FOR TRUTHFULNESS, and this is the more generalisable of the two
-#     (`g-ci-does-not-run-root-level-test-files`).** The step formerly named *"Within-node
-#     parser-parity + canary"* runs ONLY `parser-conformance-within-node.test.js`. **The canary was
-#     never in that command** — it is gated in the BLOCKING `gate` job by the `*.test.js` root glob.
-#     The step is now named *"Within-node parser-parity (M6.x native-parser migration backlog —
-#     tracking; canary gated in the blocking `gate` job)"*, kept truthful to its command, **so an
-#     auditor asking "is the canary covered?" is not misled into thinking THIS step covers it.**
-#     Rule: **a CI step name is read as a coverage claim. Name it after what it RUNS.**
+#   · **`bun run types` / `types:check` / `bun scripts/types-gate.ts --write`.** Three modes,
+#     mirroring `browser-baseline.ts` / `state.ts` / `facts.ts` exactly.
+#   · **IT IS IN `ci.yml`, IN THE `tracking` JOB, AND `continue-on-error` AT *BOTH* THE JOB AND THE
+#     STEP LEVEL.** The step-level flag is NOT redundant, and the reason is worth carrying: **a failed
+#     step HALTS the job even inside a `continue-on-error` job** — verified on run 30742472551, where
+#     the within-node parity step reported `skipped` and had never run at all. Without the step flag,
+#     a types regression would silently suppress every tracking signal below it: the exact failure
+#     that job exists to avoid.
+#   · **PLACED FIRST in the job** because it needs neither `pretest` nor a populated dist, so it
+#     cannot be skipped by an earlier step's failure.
+#   · **PROMOTION INTO THE BLOCKING `gate` JOB IS AN EXPLICIT OPERATOR CALL AND WAS NOT TAKEN.** It
+#     wants a decision on the **nine live `never` failures** first (fix, or record and drain).
+#   · ⚠ **IT GATES ON A NAME->COUNT MAP, NOT ON `tsc`'s EXIT CODE.** `tsc --noEmit` still exits
+#     non-zero over this tree and will until the pre-existing population drains; an always-red gate is
+#     the cry-wolf shape that gets bypassed and then deleted (S301). `--check` goes red the moment a
+#     diagnostic JOINS **or LEAVES** the set — the identical mechanism S313 ratified for the browser
+#     tier. **Counts matter, not just names:** a bare set was a mid-build CORRECTION, because the key
+#     strips line/column and the nine `MarkupValueExpr` fallthroughs collapsed into ONE entry, so a
+#     TENTH would have joined an existing entry and the gate would have stayed GREEN.
+#   · **`.github/workflows/ci.yml`'s gate-layering header was CORRECTED in the same landing, and the
+#     correction is the script's own thesis one level up.** It had advertised a layer
+#     *"types (always-on local)"*. **That layer did not exist** — no `tsconfig.json`, `typescript` not
+#     a dependency, no `tsc` invocation in `package.json` / `scripts/` / `.github/` / either git hook,
+#     and bun runs `.ts` TRANSPILE-ONLY. **A documented gate that nothing invokes is the same defect
+#     as a gate that reports PASS while measuring nothing (invariant 59), and it had been true for
+#     the entire life of the project.**
+#
+# **`gate` IS STILL 13 STEPS — ZERO change this window.** The new types step is in `tracking`, which
+# is NOT a branch-protection required check. `.github/` moved by exactly 22 lines, all in `ci.yml`,
+# all of them the header correction plus the one tracking step.
 #
 # **CARRIED, RE-VERIFIED, STILL TRUE:** `ci.yml`'s `push` trigger stays scoped `branches: [main]`
-# (#532) — a branch with NO open PR gets no CI until a PR exists. `workflow_dispatch: {}` is
-# PROSPECTIVE, not retroactive (HTTP 422 on a ref cut before #454; rebase, or `--ref main`). Three
-# workflows on `main` (`ci.yml`, `advisory-review.yml`, `cloud-maps.yml`) — count unchanged. Branch
-# protection + `enforce_admins=true` untouched. The `windows` job's `PUPPETEER_SKIP_DOWNLOAD`
-# carries. **`package.json` is ZERO-DIFF (eleven windows) — no script added, removed or renamed, and
-# the version stays `0.7.1`.**
+# (#532). `workflow_dispatch: {}` is PROSPECTIVE, not retroactive (HTTP 422 on a ref cut before
+# #454; rebase, or `--ref main`). Three workflows on `main` (`ci.yml`, `advisory-review.yml`,
+# `cloud-maps.yml`) — count unchanged. Branch protection + `enforce_admins=true` untouched. The
+# `windows` job's `PUPPETEER_SKIP_DOWNLOAD` carries.
 #
-# **TWO NEW `scripts/` FILES, AND ONLY ONE IS A GATE — check before you assume:**
-#   · `scripts/delta-lint.ts` (#652) — **IS in `ci.yml`, blocking.** Exit 1 = a NEW duplicate;
-#     **exit 2 = the instrument could not account for the population** (saw none of it, or only part
-#     of it). Exit 2 is deliberately distinct from 1 and is NOT reachable as a PASS. `--fix`
-#     renumbers duplicates but **REFUSES unless every bracketed line parsed** (S365).
-#   · `scripts/corpus-zero-debt.ts` (#552) — the sliding-doors audit's enforcement surface (R1).
-#     **NOT a gate.** ⚠ And read the standing correction before using it to justify anything:
-#     **corpus-zero is blast-radius evidence ONLY, never demand evidence.** "Nothing uses it" does
-#     not mean "do not build it" — it may be unused because the thing that would let anyone use it
-#     was never built (the reverse ouroboros, ratified S346).
+# **CARRIED, PRIOR WINDOW: the `delta-log sequence gate` (`bun scripts/delta-lint.ts`, #652) is the
+# 13th BLOCKING `gate` step**, exit 1 = a NEW duplicate, **exit 2 = the instrument could not account
+# for the population** and is NOT reachable as a PASS. And the step-NAME correction rule stands:
+# **a CI step name is read as a coverage claim — name it after what it RUNS**
+# (`g-ci-does-not-run-root-level-test-files`).
 #
-# ⚠ **`scripts/types-gate.ts` IS NOT ON MAIN AND IS NOT A GATE HERE.** It exists only on the unlanded
-# branch `feat/s365-asis-split-rung0`, together with `compiler/tests/TYPES-BASELINE.json`. Neither
-# path is in `git ls-tree HEAD`; neither is on disk. Do not add a row for it until it lands.
+# **CARRIED: `scripts/corpus-zero-debt.ts` (#552) is NOT a gate**, and the standing correction on it
+# still governs: **corpus-zero is blast-radius evidence ONLY, never demand evidence.**
+#
+# ⚑ **A MERGE-BLOCKER THAT WAS NOT IN THE MERGE GATE — the #669 test-tier move, and it generalises.**
+# `.git/hooks/pre-commit:39` runs unit + integration + conformance + root `*.test.js`.
+# **`compiler/tests/browser/` is NOT in that set.** So the browser test proving the stdlib client
+# registry is not DOA was itself outside the gate it existed to be. The whole file was moved
+# `browser/ -> integration/` (14 integration tests already register happy-dom the same way,
+# including this feature's own predecessor `integration/bug-18-scrml-stdlib-client-import.test.js`).
+# **Before you call a test a merge-blocker, check which TIER it is in.** test.map.md.
+#
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -60,6 +78,8 @@ test:coverage — `bun test compiler/tests/ --coverage`
 watch — `bun --watch compiler/src/cli.js compile`
 bench — compiles samples/compilation-tests/ with `--timing`
 security — compiles samples then `node --check`s every emitted .client.js
+types — `bun scripts/types-gate.ts` (**NEW #665**) — PRINT the current TypeScript diagnostic set over `compiler/src`.
+types:check — `bun scripts/types-gate.ts --check` (**NEW #665**) — diff the diagnostic NAME->COUNT map against `compiler/tests/TYPES-BASELINE.json`; **exit 1 on ANY difference, in EITHER direction**. This is the CI-wired mode (`tracking` job, `continue-on-error` at both job and step level). Record a new baseline with `bun scripts/types-gate.ts --write`.
 lsp — `bun run lsp/server.js --stdio`
 docs:build — `bun run docs/build.ts`
 e2e / e2e:ui / e2e:docs — Playwright suites (playwright.config.ts / playwright.docs.config.ts)
@@ -520,9 +540,9 @@ extension: `<base>.client.js` → `<base>.client.<hash>.js`, `<base>.css` → `<
 Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/src/commands/build.js`
 (`generateServerEntry`), `compiler/src/commands/dev.js` (`devCacheHeaders`).
 
-## CI/CD Pipeline  [.github/workflows/ci.yml] — the `push` trigger SCOPED to `main` this window (#532), ZERO step changes
+## CI/CD Pipeline  [.github/workflows/ci.yml] — ONE NEW STEP THIS WINDOW, in `tracking` (NOT `gate`), plus a header correction (#665)
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
-
+Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment). ⚑ **The `types` layer in that model DID NOT EXIST until #665** — the header advertised it and nothing invoked it; corrected in the same landing, and the types step is `tracking`/non-blocking, NOT `gate`.
 **gate** — BLOCKING (the merge-gate), **13 steps** (**+1 this window: the delta-log sequence gate**). checkout (`fetch-depth: 0`) → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step — **this is where the parser-conformance CANARY is actually gated**) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → `bun scripts/browser-baseline.ts --check` → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/delta-lint.ts` (NEW #652 — the delta-log sequence gate)** → `bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (the SPEC §34.0 row-provenance gate).
 Triggers: push `branches: [main]` (#532, S345 — an unscoped `push` ran the gate TWICE per PR under the one required check name, doubling intermittent exposure; paths-ignore: `**.md`, `handOffs/**`, `docs/**` unchanged), pull_request, and `workflow_dispatch: {}` (#454). **A branch with no open PR gets NO CI until a PR exists — the standard trade; `workflow_dispatch` re-fires any post-#454 ref on demand.** `concurrency: group ci-${{ref}}, cancel-in-progress: true`. ⚠ **Both diff-scoped/baselined gates are that way DELIBERATELY** — `s34-census --check-new` is silent on the legacy corpus by construction, and `delta-lint` carries nine pre-existing duplicates in `handOffs/delta-log-dupes.baseline.json`. The repo states the reason in its own CI comments (pa-base §8): **a gate that is instantly red for reasons no change caused gets bypassed, and then deleted.**
 
@@ -566,6 +586,7 @@ Two placement facts that are deliberate, not incidental:
 - **The browser gate sits AFTER the gauntlet step**, which compiles the TodoMVC benchmark and therefore materialises `benchmarks/todomvc/dist`. That makes `browser-baseline.ts`'s two env-exclusions moot IN THIS JOB (the pair passes here) — they still matter in `tracking`, which never builds it. Both sides of the comparison are filtered, so the check is correct either way.
 
 **tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (incl. `commands/db-migrate.test.js`) → **`bun scripts/browser-baseline.ts --check` (REPLACES the raw `bun test compiler/tests/browser`)** → the parser-conformance-within-node M6.x backlog. **The replacement fixed a second-order bug worth knowing: a FAILED step HALTS the job, and the browser step was permanently red, so `Within-node parser-parity + canary` — the step after it — reports `skipped` on run 30742472551 and had therefore NEVER RUN.** That is the S302 class (13 of 14 root-level files run by no workflow) recurring one job over: the tier was useless in both directions at once *and* it was silently eating the steps behind it.
+  ⚑ **NEW FIRST STEP (#665): `Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)` → `bun scripts/types-gate.ts --check`.** `continue-on-error: true` at the STEP level as well as the job level — **not redundant: a failed step HALTS the job even in a `continue-on-error` job** (verified on run 30742472551, where the within-node parity step reported `skipped` and had never run). Without it a types regression would silently suppress every tracking signal below it. **Placed FIRST** because it needs neither `pretest` nor a populated dist, so it cannot be skipped by an earlier step's failure. **Promotion into the BLOCKING `gate` job is an explicit operator call and was NOT taken** — it wants a decision on the nine live exhaustive-switch `never` failures first.
 
 **windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only. **Carried from the prior window (unchanged this pass):** the `Install deps` step now sets `PUPPETEER_SKIP_DOWNLOAD: "true"` before `bun install --frozen-lockfile` — this job never touches the browser tier, so the puppeteer postinstall download was pure cost AND a flake source (PR #382 witnessed an `ECONNRESET` failing `Install deps` before a single test ran, on IDENTICAL content that passed on a sibling run). **`gate` still downloads it — the browser NAME-SET assertion needs a real browser.**
 
@@ -769,7 +790,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows
+#scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows
 
 ## Links
 - [primary.map.md](./primary.map.md)

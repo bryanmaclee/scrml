@@ -1,34 +1,27 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-23T08:54:48-06:00  commit: c96e7012
-# generated-at: 565696e5 (informational — not the currency anchor; the working tip is a DOCS-ONLY
-# wrap commit on `wrap/s365`, so every source claim below holds at the watermark).
-# **CURRENCY RE-VERIFIED AT `c96e7012`, NOT RE-WALKED — and verified by DIFFING, not by assuming.**
-# Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md): the source diff
-# `merge-base..HEAD` is EMPTY and `c96e7012` is an ancestor of `origin/main`.
+# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
+# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
+# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.**
+# Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the
+# source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
 #
-# **ZERO ENV-SURFACE DIFF ACROSS A 111-COMMIT, 127-FILE WINDOW.** The evidence, re-run at this HEAD:
-# `git diff c93a692c..c96e7012 -- compiler/src/ scripts/ lsp/ | grep -cE 'process\.env|Bun\.env'`
-# returns **0** — no added AND no removed env-var line anywhere in the window diff. `package.json`
-# is zero-diff (eleven windows), so the script/config surface is unchanged too. Every key table
-# below carries.
+# **ZERO ENV-SURFACE DIFF ACROSS THE `c96e7012` -> `728bdc92` WINDOW (21 commits, PRs #657-#676).**
+# The evidence, re-run at this HEAD over a 2,328-line source diff:
+# `git diff c96e7012..728bdc92 -- compiler/src/ scripts/ lsp/ | grep -cE '^[+-].*(process\.env|Bun\.env)'`
+# returns **0** — no added AND no removed env-var line anywhere in the window diff. `.env*`,
+# `bunfig.toml` and `tsconfig*` are `--name-only` EMPTY. **Every key table below carries.**
 #
-# **The window's five NEW files were checked INDIVIDUALLY, not covered by the aggregate** (an
-# aggregate grep over a diff can only see lines that MOVED; a new file whose every line is an
-# addition is covered, but the check is worth stating): `compiler/src/commands/select-request-onion.js`,
-# `compiler/src/codegen/emit-transition-css.ts`, `compiler/src/commands/diagnostic-format.js`,
-# `scripts/delta-lint.ts`, `scripts/corpus-zero-debt.ts`. **None reads an environment variable.**
-# `delta-lint.ts` reads two REPO PATHS (`handOffs/delta-log.md`, `handOffs/delta-log-dupes.baseline.json`)
-# and one ARGV flag (`--fix`); `select-request-onion.js` is pure.
+# ⚑ **ONE CARRIED CLAIM IS NOW FALSE: `package.json` is NOT zero-diff.** The eleven-window streak
+# ended at #665 — `typescript@^5.9.2` (dev) plus `types` / `types:check` / a `"//types"` comment-key
+# in `scripts`. **It introduces NO environment variable and NO configuration key**, so nothing in
+# this map's tables moves; it is recorded here only so a reader who diffs `package.json` does not
+# conclude the config surface changed. build.map.md · dependencies.map.md.
 #
-# ⚠ **INVARIANT 56 / THE `bunfig.toml` CORRECTION CARRIES AND IS STILL LOAD-BEARING.** `[test]
-# timeout` is NOT a knob bun reads and the key is DELETED. **The real per-test budget is bun's
-# default 5000 ms, everywhere, and it always was** — locally and in CI. Any doc, comment or map that
-# says "the bunfig default 10s" is describing a number that was never in force
-# (non-compliance.report.md N11; three live test files still say it).
-#
-# **NO VALUES APPEAR IN THIS MAP.** Key names, requiredness and purpose only. No file whose path
-# contains `.env` was read.
+# ⚠ **STILL NO `tsconfig.json` IN THE REPO, even after `typescript` became a dependency.**
+# `scripts/types-gate.ts` supplies its compiler options programmatically. **Do not add one casually**
+# — it would change what `tsc` sees and therefore what the `TYPES-BASELINE.json` name-set means.
 
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 
