@@ -71,6 +71,71 @@ function valueIsRecognized(
 }
 
 // ---------------------------------------------------------------------------
+// `<each … as NAME>` — the alias bareword is NOT an attribute
+// ---------------------------------------------------------------------------
+
+/**
+ * True when a lift-parsed markup attribute is a BAREWORD — present in the
+ * opener with no `=value`. `parseLiftTag` (ast-builder.js) records those as
+ * `{ name, value: { kind: "absent" } }`.
+ */
+function isBarewordAttr(attr: unknown): boolean {
+  if (!attr || typeof attr !== "object") return false;
+  const a = attr as { name?: unknown; value?: { kind?: string } | null };
+  if (typeof a.name !== "string" || !a.name.trim()) return false;
+  return a.value == null || a.value.kind === "absent";
+}
+
+/**
+ * Indices of attribute records that are the ALIAS half of an `<each … as NAME>`
+ * clause, and must therefore be exempt from the unknown-attribute check.
+ *
+ * ⚑ WHY THIS EXISTS. `as name` is a BAREWORD PAIR in the §17.7.2 grammar — all
+ * four canonical shapes spell it `as conflict` / `as day` / `as row`, never
+ * `as=conflict`. `parseLiftTag` tokenises an opener into `name[=value]`
+ * attributes, so the pair arrives here as TWO ADJACENT VALUE-LESS attributes
+ * and the alias half looks exactly like an unknown boolean attribute. VP-1 then
+ * fired `W-ATTR-001: Attribute \`it=\` is not recognized on \`<each>\`` on
+ * CORRECT, canonical scrml — and told the author it "is currently forwarded to
+ * the rendered HTML as-is", which is false; it is the iteration binding.
+ *
+ * ⚠ It fired INCONSISTENTLY, which is the worse half: the same `<each … as it>`
+ * warns when it reaches VP-1 through `lift-expr.expr.node`
+ * (`${ if @show { lift <ul><each … as it> … } }`) and stays silent inside a
+ * markup-returning `fn` body, because `walkFileAst` reaches one carrier and not
+ * the other. So the warning was a property of WHERE the each sat, not of what
+ * the author wrote.
+ *
+ * Only the lift-parsed `<each>` reaches here at all — the BS-structural path
+ * promotes its each to a structural `each-block` (not `kind: "markup"`), so
+ * `validateMarkup` never sees it and never warned on it.
+ *
+ * NOTE the deliberate omission: an alias that is NOT a valid identifier
+ * (`as data-id` — `_parseLiftAttrName` merges the `-`) is NOT exempted here, so
+ * it still surfaces. Refusing such source outright, with a diagnostic that
+ * names `as` and the offending alias, needs a new `E-EACH-AS-ALIAS-INVALID`
+ * code and the §34 row that CI's `s34-census --check-new` gate requires — see
+ * the dispatch report. Today it still fails CLOSED downstream, which is the
+ * correct direction.
+ */
+function eachAliasAttrIndices(node: MarkupNode): Set<number> {
+  const exempt = new Set<number>();
+  if ((node.tag ?? "") !== "each") return exempt;
+  const attrs = (node.attrs ?? []) as Array<{ name?: string; value?: { kind?: string } | null }>;
+  for (let i = 0; i < attrs.length; i++) {
+    if (attrs[i]?.name !== "as") continue;
+    // `as=NAME` (not canonical, but tolerated upstream) has no bareword half.
+    if (!isBarewordAttr(attrs[i])) continue;
+    const next = attrs[i + 1];
+    if (!isBarewordAttr(next)) continue;
+    // Exempt only a WELL-FORMED alias. A malformed one keeps its diagnostic.
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(String(next!.name))) continue;
+    exempt.add(i + 1);
+  }
+  return exempt;
+}
+
+// ---------------------------------------------------------------------------
 // Per-markup-node validation
 // ---------------------------------------------------------------------------
 
@@ -84,8 +149,14 @@ function validateMarkup(
   const schema = getElementAttrSchema(tag);
   if (!schema) return;
 
-  for (const attr of node.attrs ?? []) {
+  // `<each … as NAME>`: NAME is the iteration binding, not an attribute.
+  const aliasIndices = eachAliasAttrIndices(node);
+
+  const attrList = node.attrs ?? [];
+  for (let attrIdx = 0; attrIdx < attrList.length; attrIdx++) {
+    const attr = attrList[attrIdx];
     if (!attr || !attr.name) continue;
+    if (aliasIndices.has(attrIdx)) continue;
     const name = attr.name;
 
     // Open-prefix attributes (bind:, on:, data-, aria-, etc.) are always
