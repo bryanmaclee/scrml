@@ -1,8 +1,13 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED —
+# SECOND consecutive window.** `codegen/emit-server.ts`, `commands/select-request-onion.js`,
+# `protect-analyzer.ts`, `auth-graph.ts`, `compiler/runtime/stdlib/{auth,oauth,crypto}` and `lsp/`
+# are all `--name-only` **EMPTY**. Two source files moved in the whole window and neither is auth.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
+# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.
 # The prior pass RE-WALKED this map after a ten-window streak and found the request pipeline had
 # moved hard; that content is one window old and carries in full.** Ancestry CHECKED (invariant 48);

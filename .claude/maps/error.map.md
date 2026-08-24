@@ -1,15 +1,19 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
-# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
-# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
-# ancestor of `origin/main` (it IS `origin/main`).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# generated-at: b9e97f1b (the watermark IS `origin/main` and IS the working tip).
+# **INCREMENTAL over `728bdc92` -> `b9e97f1b` (S371-bryan). SOURCE WINDOW = TWO FILES,
+# ONE COMMENT-ONLY.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run at WRITE time.
 #
-# **CATALOG 810 -> 812 (+2). BUCKETS ESSENTIALLY FLAT — the opposite of last window.**
-# `bun scripts/s34-census.ts` re-executed at this HEAD:
+# **CATALOG FLAT AT 812 — `compiler/SPEC.md` is `--name-only` EMPTY this window, so the §34 count,
+# the buckets and every code-vs-spec row below carry UNCHANGED and were not re-censused.**
+# ⚑ **WHAT DID CHANGE IS A LOCUS, NOT A COUNT: `W-DEAD-FUNCTION` now has a row of its own below
+# (search `W-DEAD-FUNCTION — THE LOCUS`), because the gap ledger carried a WRONG one (it named
+# `codegen/usage-analyzer.ts`) from S369 to S371 and this map had nothing that contradicted it.**
+#
+# **Carried from S368 — CATALOG 810 -> 812 (+2). BUCKETS ESSENTIALLY FLAT.**
+# `bun scripts/s34-census.ts` as executed at `728bdc92` (NOT re-executed this pass — SPEC.md is
+# `--name-only` EMPTY over `728bdc92..b9e97f1b`, so the figures below are unchanged by construction):
 #
 #     812 rows (§34 19352..20235) · 1950 source files · 883 conformance cases
 #     STRUCK 34 · PINNED 343 · IMPL-SITES 302 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112
@@ -441,6 +445,57 @@ fix a DOWNSTREAM symptom nobody had connected to it: the within-node parser-pari
 dead on Windows because its span-comparison assertions never matched (enumerator backslash relpaths
 compounding the un-rebased span mismatch). SPAN-COORD parity improved by −1470 mismatches corpus-wide.
 
+## W-DEAD-FUNCTION — THE LOCUS, THE GATE, AND THE FILE THAT IS **NOT** THE LOCUS
+
+⚑ **NEW SECTION S371-bryan. It exists because this map set had NO row for reachability at all, and a
+WRONG locus for this code lived in `docs/known-gaps.md` from S369 until S371** — the `locus=` field
+named `compiler/src/codegen/usage-analyzer.ts`, a dispatch brief repeated it, and nothing here said
+otherwise. **The omission is what let the false claim stand.**
+
+**`compiler/src/codegen/usage-analyzer.ts` CANNOT EMIT THIS WARNING — verified at this watermark:**
+
+| probe | result |
+|---|---|
+| `grep -c W-DEAD compiler/src/codegen/usage-analyzer.ts` | **1**, and it is a PROSE mention inside a comment at `:692` |
+| what the file exports | `FeatureUsage` (a boolean bitmap) + `emptyUsage` / `fullUsage` / `mergeUsage` / `analyzeUsage` — no diagnostic type, no `errors` array |
+| its own header, `:16-17` | *"**What C0 does NOT do:** zero new diagnostics, zero AST mutation, zero emission. Pure analysis pass producing a structured data record."* |
+
+**THE REAL MACHINERY — `compiler/src/route-inference.ts`:**
+
+| element | site | note |
+|---|---|---|
+| SOLE emit site | **`:5615-5616`** | `new RIError(` at `:5615`, the code string `"W-DEAD-FUNCTION"` at `:5616`;, `warn.severity = "warning"`, pushed to `errors` |
+| the D4 block | **`:5575`** | inside `for (const [fnNodeId, record] of analysisMap)` at `:5564`; D5 (`W-DEPRECATED-SERVER-MODIFIER`) follows in the same loop |
+| the gate | **`:5614`** | a **TEN-TERM conjunction**: `!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator && !isToolMainEntry && !isReturnedInline && !isLogicReferenced` |
+| markup-reference set | **`:4852`** built · **`:4876`** `walkMarkupContext` | the false-positive suppressor that most fixes belong in |
+| logic-reference set | **`:5505`** `logicReferencedFnNames` (declared; populated `:5556`) | adopter #195 — callee inside a nested closure, or a bare first-class value |
+| `<each>` OPENER block | **`:4966`** (NEW #688) | collects idents from `inExprRaw` / `ofExprRaw` / `keyExprRaw` / `ifRaw` |
+
+**WHY THE `<each>` OPENER NEEDED ITS OWN BLOCK:** an `<each>` does **not** parse to a `markup` node —
+it lowers to `kind === "each-block"` with **no `attrs` array at all**, so the attribute branch that
+already covered `<span if=fn()>` never saw it. The `<each>` BODY was always covered
+(`bodyChildren` / `templateChildren` are ordinary markup arrays the generic recursion descends).
+**Only the OPENER was blind, and all four positions fired.**
+
+⚠ **THE SUPPRESSION SET IS NOT DIAGNOSTIC-ONLY (primary.map.md invariant 68).**
+`markupReferencedNames` is also read at **`:5210`** (Step-5c indirect server-escalation, #284 FIX B)
+and **`:6242`** (`clientRootIds` -> `endpointClientSkipIds`). **Widening it moves CODE PLACEMENT.**
+(The in-source comment at `:4959-4962` cites `:5201`/`:6233` for these — both **9 lines short** at
+this watermark. Grep; do not cite the comment.)
+
+⚠ **THE MESSAGE TEXT MAKES A FALSE PREDICTION, AND IT IS FALSE IN THE SIMPLE CASE.** The warning says
+*"It will be tree-shaken from the output."* **PA-EXECUTED at this watermark:**
+`<program>${ fn reallyDead() { return 41 } }<p>hello</p></program>` warns, and
+`dist/page.client.js` still contains `reallyDead`. Gap `g-wdead-function-tree-shaken-claim-is-false`.
+**Do not repeat the message's own claim back to an adopter as a fact.**
+
+**KNOWN FALSE-POSITIVE SHAPES.** PA-REPRODUCED at this watermark: **`<match for=T on=fn()>` opener**
+— a fn used only as the match scrutinee fires `W-DEAD-FUNCTION`
+(`g-match-block-opener-expr-not-a-wdead-reachability-root`, OPEN; same walker, same one-block shape
+as the `<each>` fix). **LEDGER-SOURCED, not re-executed this pass:** arrow-callback bodies
+(`G-DEAD-FUNCTION-MISSES-ARROW-CALLBACK-BODIES`) and match-ARM call edges
+(`g-ri-dead-function-match-arm-edges`).
+
 ## Diagnostic families by feature area — THE ROUTING TABLE
 
 Keyed by PREFIX. A code not named individually below is still routed by its family row.
@@ -474,7 +529,7 @@ Keyed by PREFIX. A code not named individually below is still routed by its fami
 | Session (§20.5) | E-SCOPE-012 / E-SESSION-* | 4 | type-system.ts, codegen/emit-expr.ts, emit-server.ts. **THIS WINDOW (#435, GH #357): `E-SESSION-CONTEXT`'s scan was widened to match the new bare-`session` text form, the widening REGRESSED §20.5 conformance, and it was TRIMMED before landing** — the over-broad scan string-matched the compiler's OWN emitted comments and generated guards. The PA adversarial fix-vs-prefix pass caught it; the agent had reported clean. **The sound-scan reimplementation is open and ROUTED-TO-BRYAN** (`g-session-context-scan-bare-form-sound`, MED — dpa-021 §6.1's non-route residual needs a LOWERING-SITE RECORD, not a text scan; it is a newly-REJECTING language surface, so it is bryan's call, not a fix-forward). Companion HIGH, also routed to bryan: `g-session-get-reserved-key-read-disclosure` — the §20.5 reserved-key guard covers the WRITE side; a request-controlled `session[k]` READ still reaches compiler-owned internals (`csrfToken`) through `.get()` at HTTP 200. |
 | Error handling (`!{}`/fail) | E-ERROR-* | 9 | emit-logic.ts, type-system.ts (E-ERROR-010 at type-system.ts:9853) |
 | Functions | E-FN-* | 10 (+1 `E-FN-EQUALS-BODY`, NEW #396; E-FN-009 Nominal/deferred — zero fire site) | type-system.ts (§48.5); **`E-FN-EQUALS-BODY` / `E-FN-ARROW-BODY` fire from `ast-builder.js`, not type-system.ts** — a parse-time reject, not a type-check |
-| Route inference (client/server boundary) | E-ROUTE-* / E-RI-* / **E-DERIVED-SERVER-ONLY-REACH** / **W-DEAD-FUNCTION** / W-DEPRECATED-SERVER-MODIFIER | — | route-inference.ts (§12.4 E-ROUTE-002/005; §12.2 Trigger 6 `W-DEAD-FUNCTION`; §38.4 E-RI-002). **§12.2 Trigger 3 (S299) produces NO diagnostic when it FIRES** — it silently RELOCATES a function to the server. "Why did my function move / why is there no `.server.js`" is a PLACEMENT question, not a diagnostic one. **But as of #486 there IS a code for the position Trigger 3 cannot reach:** `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, Step 3b `:4429`) REFUSES a `const <name>` derived-cell RHS that reaches an `ESCALATION_SERVER_ONLY_MODULES` binding, because a synchronous lazy-pull recompute (§6.6.3) has no escalation to be given. **Scope discipline: this code covers ONE position.** A plain cell initialiser and a markup interpolation are still undiagnosed — see the §12.2 scope table in domain.map.md before you assert coverage. |
+| Route inference (client/server boundary) | E-ROUTE-* / E-RI-* / **E-DERIVED-SERVER-ONLY-REACH** / **W-DEAD-FUNCTION** / W-DEPRECATED-SERVER-MODIFIER | — | route-inference.ts (§12.4 E-ROUTE-002/005; §12.2 Trigger 6 `W-DEAD-FUNCTION`; §38.4 E-RI-002). **§12.2 Trigger 3 (S299) produces NO diagnostic when it FIRES** — it silently RELOCATES a function to the server. "Why did my function move / why is there no `.server.js`" is a PLACEMENT question, not a diagnostic one. **But as of #486 there IS a code for the position Trigger 3 cannot reach:** `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, Step 3b `:4429`) REFUSES a `const <name>` derived-cell RHS that reaches an `ESCALATION_SERVER_ONLY_MODULES` binding, because a synchronous lazy-pull recompute (§6.6.3) has no escalation to be given. **Scope discipline: this code covers ONE position.** A plain cell initialiser and a markup interpolation are still undiagnosed — see the §12.2 scope table in domain.map.md before you assert coverage. **⚑ `W-DEAD-FUNCTION` HAS ITS OWN SECTION ABOVE ("THE LOCUS, THE GATE, AND THE FILE THAT IS NOT THE LOCUS") — read it before touching reachability; `codegen/usage-analyzer.ts` is NOT the locus.** |
 | **Server-import cross-file invariant** | **W-SERVER-IMPORT-UNEMITTED** + W-SERVER-* | 2 | **`compiler/src/api.js` `checkServerImportInvariant`** — runs on the COMPILE, before the write gate. **Reverses the emitted specifier in DIST space via `serverImportTargetSource` since D-4 (S296); a source-space reversal made this guard blind to the exact class it exists to catch.** See dependencies.map.md's "Coordinate space" section. |
 | Markup / element name | E-MARKUP-001 | 1 live | name-resolver.ts (§4.1 gate) + html-elements.js |
 | Middleware (§40) | E-MW-002/005/006 | 3 live | ast-builder.js §40-block (:18190, :18231) |
@@ -619,7 +674,7 @@ compiling stdlib source emitting a browser-DOA bundle, invisible to every prior 
 once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for how to run it.
 
 ## Tags
-#scrml #map #error #diagnostics #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule
+#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule
 
 ## Links
 - [primary.map.md](./primary.map.md)

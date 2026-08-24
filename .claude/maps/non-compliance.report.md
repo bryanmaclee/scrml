@@ -1,14 +1,93 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY).
-# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
-# S368, peter S367/S369/S370).** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check
-# passes (source diff `merge-base..HEAD` EMPTY, `728bdc92` IS `origin/main`).
+# generated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# generated-at: b9e97f1b (the watermark IS `origin/main` and IS the working tip).
+# **INCREMENTAL over `728bdc92` -> `b9e97f1b` (S371-bryan). SOURCE WINDOW = TWO FILES, one of them
+# COMMENT-ONLY.** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check passes.
 # scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, PLUS
-# re-verification of the carried findings at this HEAD — **spot-EXECUTED, not carried on faith.**
-## Summary — this pass
+# the two carried route-inference findings re-verified BY READING THE FILE AT THIS HEAD.
+## Summary — S371 pass (this pass)
+
+**SIX findings (N19-N24). FIVE ARE LIVE. The headline is not a doc: it is that a
+DIAGNOSTIC'S LOCUS WAS WRONG IN THE LEDGER FOR THREE SESSIONS AND THE MAP SET HAD NOTHING TO
+CONTRADICT IT.** The map set's own omission is the enabling condition, so it is filed as a finding
+against these maps, not as a ledger typo.
+
+**N19 — THE MAP SET CARRIED NO ROW FOR `W-DEAD-FUNCTION`, REACHABILITY, OR `usage-analyzer.ts`, AND
+A WRONG LOCUS SURVIVED S369 -> S371 BECAUSE OF IT.** `docs/known-gaps.md` named
+`locus=compiler/src/codegen/usage-analyzer.ts` for
+`g-usage-analyzer-blind-to-each-in-collection-fn-ref`; a dispatch brief repeated it; the dev agent
+working that surface had to re-derive the locus from source and said so explicitly. **Verified at
+this watermark:** `usage-analyzer.ts` contains ONE occurrence of `W-DEAD` — a prose mention in a
+comment at `:692` — exports only a boolean `FeatureUsage` bitmap, and its own header (`:16-17`)
+states *"zero new diagnostics, zero AST mutation, zero emission."* The sole emit site is
+`route-inference.ts:5615-5616`. **Disposition: CORRECTED THIS PASS in the maps** — a Task-Shape
+Routing row (primary row 2), a dedicated `W-DEAD-FUNCTION` section in error.map.md, a positive row on
+`route-inference.ts` and a NEGATIVE row on `usage-analyzer.ts` in structure.map.md, plus invariant 68.
+The ledger's `locus=` was corrected by the operator this session. ⚑ **The transferable shape: a map
+that omits a surface is not neutral — it is the absence of the thing that would have contradicted the
+false claim.**
+
+**N20 — LIVE, IN SOURCE, LANDED THIS WINDOW: `route-inference.ts:4959-4962` CITES `:5201` AND
+`:6233`; THE ACTUAL CONSUMERS ARE `:5210` AND `:6242`.** Both citations are **9 lines short**. The
+comment is the S371 correction block added by #688 itself, and its point is important and correct —
+that `markupReferencedNames` feeds PLACEMENT decisions, not just the advisory warning — but the two
+line numbers a reader would jump to are wrong. Mechanism: the numbers were computed before the
+53-line insertion settled. **Disposition: correct the two numbers on the next touch of the file. Do
+not delete the comment — its claim is right and load-bearing (invariant 68).**
+
+**N21 — LIVE (CODE + TEST-INSTRUMENT): A SHIPPED CONFORMANCE CASE PASSES ITS OWN SUITE WHILE ITS PAGE
+IS DEAD UNDER THE RUNTIME THAT ACTUALLY SHIPS.** PA-REPRODUCED at this watermark by compiling
+`conformance/cases/each/ternary-markup-giti033` standalone: exit 0, and the emitted `page.client.js`
+makes BARE calls to `_scrml_each_clear` (`:31`, `:101`, `:159`) and `_scrml_resolve_item` (`:46`,
+`:54`, `:66`, …) — both defined in the **`reconciliation`** chunk, which is **absent from the emitted
+`scrml-runtime.<hash>.js`**. First each render -> `ReferenceError` -> dead page. **The case passes
+because the conformance (b) half executes the FULL `SCRML_RUNTIME` monolith**
+(`conformance/adapters/impl1-ts.ts:467` and `:924`), not the pruned artifact. **Root cause
+localized:** `detectRuntimeChunks` (`codegen/emit-client.ts:828`) walks AST *nodes* and has no
+`markup-value` case, so an `<each>` inside a ternary-markup consequent — a `MarkupValueExpr`
+(`types/ast.ts:2070`) nested in an EXPRESSION tree — is never visited. **Third instance of one class;
+the other two are already fixed in that same file** (`case "engine-decl"` `:1707`, `case
+"match-block"` `:1750`), each with the identical failure sentence in its own comment. ⚑ **Precision:
+two further symbols are also unresolved (`_scrml_register_rehydrator` `:213`, `_scrml_chunk_loading`
+`:220`, both `utilities`) and BOTH are `typeof`-guarded, so they are harmless — a symbol diff without
+reading the call site reports 4 defects where there is 1.** **Disposition: NOT a doc fix — this is an
+open defect plus a test-tier gap. Route to the PA for a gap-ledger entry and a fix decision. Recorded
+in the maps as invariant 67 + Task-Shape Routing row 3 + a new test.map.md section.**
+
+**N22 — LIVE, USER-FACING TEXT CONTRADICTS BEHAVIOUR: THE `W-DEAD-FUNCTION` MESSAGE PROMISES A
+TREE-SHAKE THAT NEVER HAPPENS.** PA-EXECUTED at this watermark:
+`<program>${ fn reallyDead() { return 41 } }<p>hello</p></program>` emits the warning *"It will be
+tree-shaken from the output"* and `dist/page.client.js` **still contains `reallyDead`.** Already
+ledgered this session as `g-wdead-function-tree-shaken-claim-is-false`. **Disposition: PA-owned;
+recorded here so no map or brief repeats the message's own claim as a fact.**
+
+**N23 — CORRECTED THIS PASS (MAP -> SOURCE DRIFT, INHERITED): structure.map.md cited
+`detectRuntimeChunks` at `:273` and `POST_EMIT_HELPER_CHUNK_GATES` at `:2167`.** Actual at this
+watermark: **`:828`** and **`:2869`**. Both were ALSO wrong at `728bdc92` (verified by reading
+`git show 728bdc92:compiler/src/codegen/emit-client.ts`), so this is inherited rot, not a
+this-window regression — which is worse, not better: it means a currency-verify pass re-published
+them. **Disposition: corrected in structure.map.md this pass.**
+
+**N24 — CORRECTED THIS PASS (MAP PROSE): a gap ID renamed in the ledger was stale in THREE maps.**
+primary, domain and structure all cited `g-each-inline-value-form-match-interp-dropped`; the ledger
+entry is now `g-each-inline-value-form-match-or-markup-branch-interp-dropped` (widened to cover the
+markup-valued `if` branch). Related: #678's comment-only change to `codegen/emit-each.ts:1420`
+retracted TWO false claims in that file's own comment — that the dropped case is *"captured in
+`_droppedCFStmt`"* (**that identifier exists nowhere in the tree**, grep-verified at this watermark)
+and that the skip *"WARNS instead of dropping silently"* (**it emits a JS comment into the artifact;
+compile is exit 0 with nothing in `result.warnings`**). **Disposition: map prose corrected; the
+source comment is already fixed on `main`.**
+
+⚑ **WHAT THIS PASS DID NOT SCAN.** With a two-file source window, a full docs re-scan would have
+re-derived the S368 population unchanged. The doc-population sections below (aspirational content,
+uncertain docs, C-series) are **CARRIED VERBATIM from `728bdc92` and were NOT re-scanned**, except
+the two `route-inference.ts` findings (N6, S331-N5) which WERE re-read at this HEAD because that file
+changed. Treat every carried entry as `verify-before-acting`.
+
+---
+
+## Carried Summary — S368 pass (verbatim below this line)
 
 **FIVE new findings (N14-N18). FOUR OF THE FIVE ARE THE MAP SET DESCRIBING BEHAVIOUR THE CODE NO
 LONGER HAS — i.e. this pass's largest non-compliance population was the PRIOR GENERATION OF THESE
@@ -236,7 +315,7 @@ the phantom 10 s.
 
 ## S341-pass findings (N6-N9) — RE-VERIFIED at this HEAD, all still live
 
-### N6. A STALE, ORPHANED DOC COMMENT IS LIVE ON `main` — `route-inference.ts:3643-3657` contradicts the block directly below it, on the same function
+### N6. **RE-VERIFIED AT `b9e97f1b` (S371) — STILL LIVE, UNCHANGED BY #688.** Two consecutive `/** … */` blocks remain at `:3643-3657` and `:3658-3676` immediately above the same function. A STALE, ORPHANED DOC COMMENT IS LIVE ON `main` — `route-inference.ts:3643-3657` contradicts the block directly below it, on the same function
 
 **This is a source-code finding, not a docs one, and it sits inside a confidentiality check.**
 
@@ -391,7 +470,7 @@ who reaches §12.6 first gets the wrong module set from a SHALL.**
 
 **Still open. SPEC edit — scope-barred from this dispatch.** Routed to the PA.
 
-### S331-N5 (carried, UNCHANGED). `route-inference.ts:3438` cites SPEC **§6.6.20**; the section is **§6.6.19**
+### S331-N5 **RE-VERIFIED AT `b9e97f1b` (S371) — STILL LIVE.** `:3438` still reads `§6.6.20`; `grep -n '§6.6.20' compiler/SPEC.md` returns ZERO hits while `#### 6.6.19` sits at `SPEC.md:3694`. (carried, UNCHANGED). `route-inference.ts:3438` cites SPEC **§6.6.20**; the section is **§6.6.19**
 
 Re-verified verbatim at this HEAD: `* the derived-cell-RHS one (\`collectDerivedRhsServerOnlyRefs\`, §6.6.20).`
 
@@ -578,7 +657,33 @@ every gate this repo runs. The question is no longer "does the marketing oversta
 
 ## Map currency at this stamp
 
-**EVERY stamp is `728bdc92`, which IS `origin/main` — trivially an ancestor.** There is no separate
+**EVERY stamp is `b9e97f1b`, which IS `origin/main` — trivially an ancestor.** Verified at WRITE
+time: `git merge-base HEAD origin/main` -> `b9e97f1b`; the source diff against it is EMPTY;
+`git merge-base --is-ancestor b9e97f1b origin/main` exits 0; and `bun scripts/state.ts --check`
+prints **`maps: current`** (it printed `maps: 112 commits behind` at the start of the S368 pass).
+
+| Map | Stamp | Re-walked this pass? | Evidence |
+|---|---|---|---|
+| primary · structure · error · test · non-compliance | `b9e97f1b` | **yes — targeted** | the routing gap (N19) + the chunk-pruning finding (N21); source claims re-verified BY EXECUTION, not by reading |
+| dependencies | `b9e97f1b` | no — **zero-diff measured** | `package.json` / `bun.lock` `--name-only` EMPTY; `grep -cE '^[+-]import '` over the `route-inference.ts` diff returns 0 |
+| schema | `b9e97f1b` | no — **zero-diff measured** | `compiler/src/types/`, `*.d.ts`, `schema*`, `*.proto`, `*.graphql`, `compiler/SPEC.md` all `--name-only` EMPTY |
+| domain | `b9e97f1b` | no — **zero-diff measured** + one in-place gap-ID correction (N24) | `compiler/SPEC.md` `--name-only` EMPTY |
+| build · infra | `b9e97f1b` | no — **zero-diff measured** | `.github/`, `package.json`, `Makefile`, `Dockerfile`, `scripts/` all `--name-only` EMPTY |
+| config | `b9e97f1b` | no — **zero-diff measured** | `process.env`/`Bun.env` grep over the whole window's diff returns 0 |
+| auth | `b9e97f1b` | no — **zero-diff measured**, second consecutive window | whole auth surface `--name-only` EMPTY |
+| migrations | `b9e97f1b` | no — **zero-diff measured**, thirteenth consecutive window | no migration/schema/DB path in the window |
+
+⚠ **THE S368 WARNING STILL APPLIES AND IS WHY THE TABLE ABOVE NAMES A SURFACE PER ROW:** a zero-diff
+proof of the surface you habitually check does not cover a claim you made about a DIFFERENT surface.
+S368 caught schema.map.md re-publishing a false "NOT ON MAIN" exclusion that way. **This pass's N23
+is the same species one level down** — structure.map.md's `:273` / `:2167` citations were stale at
+`728bdc92` too, and every currency-verify pass since re-published them.
+
+---
+
+### Carried currency table (S368 pass)
+
+**EVERY stamp was `728bdc92`, which IS `origin/main` — trivially an ancestor.** There is no separate
 working tip this pass: the `generated-at:` line records the same SHA, with the reason. **Only ONE
 line per file carries `commit: <SHA>`** — `scripts/state.ts:mapsStaleness()` parses line 3 by regex
 and a second match would be read as the watermark.
@@ -621,7 +726,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
+#non-compliance #project-mapper #cleanup #scrml #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness

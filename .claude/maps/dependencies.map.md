@@ -1,8 +1,15 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
+# `git diff --name-only 728bdc92..b9e97f1b -- package.json bun.lock` is **EMPTY** (the manifest
+# streak resumes: one change in twelve windows). The whole source window is `route-inference.ts`
+# (+53) and a comment block in `codegen/emit-each.ts`, and
+# `git diff 728bdc92..b9e97f1b -- compiler/src/route-inference.ts | grep -cE '^[+-]import '`
+# returns **0** — **no new internal edge, no removed one.** Every dependency claim below holds.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
+# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
 # S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an

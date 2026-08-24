@@ -1,8 +1,14 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
+# `.github/`, `package.json`, `Makefile`, `Dockerfile`, `scripts/` are ALL `--name-only` **EMPTY**
+# over the window. `gate` stays at 13 steps, every command below is unchanged, and no CI stage
+# moved. ⚠ **The pre-land codegen gate still is not in CI** — see the `corpus-emit-differential`
+# section; #688 records having run it by hand (0 of 7,388 artifacts changed) exactly as that section requires — **that figure is #688's in-source claim, not a this-pass measurement**.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
+# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan S368,
 # peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an

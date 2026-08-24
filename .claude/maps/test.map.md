@@ -1,16 +1,21 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-23T20:40:00-06:00  commit: 728bdc92
-# generated-at: 728bdc92 (the watermark IS the working tip — `wrap/s368` was squash-merged as #676
-# MID-PASS and the checkout moved to `main`; #676 is DOCS-ONLY, so every source claim below holds).
-# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
-# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
-# ancestor of `origin/main` (it IS `origin/main`).
+# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
+# generated-at: b9e97f1b (the watermark IS `origin/main` and IS the working tip).
+# **INCREMENTAL over `728bdc92` -> `b9e97f1b` (S371-bryan).** Ancestry CHECKED (invariant 48);
+# outbound MAP-STAMP check run at WRITE time.
 #
-# **+8 test files, ZERO deleted — 1,378 -> 1,386** (`*.test.js` under `compiler/tests`, agrees with
-# `docs/FACTS.md`). Conformance corpus **FLAT at 883 for the FOURTH window running**. §34 moved
-# **810 -> 812**, so error.map.md is not flat even though the corpus is.
+# **+1 test file, ZERO deleted — 1,386 -> 1,387** (`docs/FACTS.md` at this watermark). The new file
+# is `compiler/tests/unit/wdead-each-opener-expr-reachability.test.js` (#688). Conformance corpus
+# **FLAT at 883 for the FIFTH window running**. §34 **FLAT at 812** (`compiler/SPEC.md` untouched).
+#
+# ⚑ **THE ONE THING TO READ IN THIS MAP THIS PASS IS THE NEW SECTION "WHICH RUNTIME EACH TIER
+# ACTUALLY EXECUTES".** The conformance (b) half runs the FULL `SCRML_RUNTIME` monolith, not the
+# pruned artifact the browser loads — so **all 883 cases are blind to chunk pruning BY
+# CONSTRUCTION**, and a shipped case (`each/ternary-markup-giti033`) passes while its page is dead.
+# Measured, PA-reproduced, and it changes what "the suite is green" is evidence of.
+#
+# **Carried from S368 — the +8 / 1,378 -> 1,386 recount narrative below is LAST window's.**
 #
 # ⚑ **A CORRECTION TO THE PRIOR GENERATION OF THIS MAP, AND IT IS THE KIND THIS MAP SET EXISTS TO
 # CATCH: ITS CATEGORY BREAKDOWN DID NOT SUM TO ITS OWN TOTAL, WHILE CLAIMING IT DID.** The prior
@@ -102,11 +107,11 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1,386** `*.test.js` total, +8 this window)
+## Test Categories (compiler/tests/, **1,387** `*.test.js` total, +1 this window)
 
-Fresh RECURSIVE recount at `728bdc92`, all 9 categories individually re-verified; agrees with
-`docs/FACTS.md` (`test files | 1,386`), **which is the citable authority — do not hardcode a
-competing number.** Net **+8** this pass, decomposing as **unit +16 · integration +17 · conformance
+⚑ **S371: the per-category table below is LAST window's recount at `728bdc92`, carried. This window added exactly ONE file — `unit/wdead-each-opener-expr-reachability.test.js` — so `unit` is +1 and every other category is unchanged; the categories were NOT re-counted this pass.** Fresh RECURSIVE recount at `728bdc92`, all 9 categories individually re-verified; agrees with
+`docs/FACTS.md` (which reads `test files | 1,387` at THIS watermark — **FACTS is the citable
+authority; do not hardcode a competing number**). Net **+8** this pass, decomposing as **unit +16 · integration +17 · conformance
 +1 · browser +2 · commands +6** against the prior map's figures.
 
 ⚑ **THOSE PER-CATEGORY DELTAS ARE MOSTLY A RECOUNT, NOT NEW TESTS — and that is the finding.** Only
@@ -296,6 +301,48 @@ Before this window the `expect` block's key set was implicit — a typo'd contai
 - **Pre-existing debt is BASELINED, not enforced** — `handOffs/delta-log-dupes.baseline.json` carries nine known collisions so the gate is not instantly red for reasons no change caused; only a NEW duplicate fails. The baseline may shrink and must never grow silently.
 - **The companion is `.gitattributes` `merge=union` on the delta log.** It trades a merge conflict for a duplicate, which is only the right trade because this gate is loud about duplicates. **The two land together; neither is sufficient alone.**
 - **Deliberately NOT a monotonicity check** — under union-merge two sessions' entries interleave by content, not by number. Enforcing order would fail every honest concurrent merge.
+
+## WHICH RUNTIME EACH TIER ACTUALLY EXECUTES — read this before believing a green runtime half
+
+⚑ **NEW S371-bryan, PA-MEASURED AT THIS WATERMARK. EXECUTING `SCRML_RUNTIME` IS NOT TESTING WHAT
+SHIPS.**
+
+There are TWO different runtime artifacts and they are not interchangeable:
+
+| artifact | what it is | who loads it |
+|---|---|---|
+| `SCRML_RUNTIME` (`compiler/src/runtime-template.js:547`) | the MONOLITHIC template string — every chunk, always | **nothing in production** |
+| `scrml-runtime.<hash>.js` | the PRUNED per-app assembly — `assembleRuntime(chunkNames)` (`codegen/runtime-chunks.ts:541`) over `RUNTIME_CHUNKS` (`:467`), chunk set chosen by `detectRuntimeChunks` (`codegen/emit-client.ts:828`) | **the browser, always** |
+
+**Tier-by-tier, measured (not inferred):**
+
+| tier | what it executes | can it catch a chunk-pruning defect? |
+|---|---|---|
+| **conformance (b) half** — `conformance/adapters/impl1-ts.ts:467` and `:924` | `"(function () {\n" + SCRML_RUNTIME + "\n" + clientJs + …` — the FULL monolith | **NO. All 883 cases, by construction.** |
+| **browser tier** — 94 files in `compiler/tests/browser/` | **SPLIT: 25 import `SCRML_RUNTIME`; 66 read `result.runtimeFilename` (the emitted pruned artifact); 2 do both; 5 neither** | **only the 66** |
+
+**THE PROOF IS A SHIPPED CONFORMANCE CASE, NOT A HYPOTHETICAL.**
+`conformance/cases/each/ternary-markup-giti033` compiles exit 0 and PASSES its own suite. Its
+`page.client.js` contains BARE calls to `_scrml_each_clear` (`:31`, `:101`, `:159`) and
+`_scrml_resolve_item` (`:46`, `:54`, `:66`, …) — both defined in the **`reconciliation`** chunk,
+which is **not in the emitted runtime** for that file. First each render → `ReferenceError` → dead
+page. Reproduced by compiling the case standalone and diffing the client's `_scrml_*` reference set
+against the emitted runtime.
+
+⚑ **A SYMBOL DIFF ALONE OVER-REPORTS — READ THE CALL SITE.** Two further symbols are also absent from
+the pruned runtime, `_scrml_register_rehydrator` (`:213`) and `_scrml_chunk_loading` (`:220`, both
+`utilities`), **and both are `typeof`-guarded at their call sites, so they are HARMLESS.** Only the
+two BARE-CALL `reconciliation` symbols kill the page. A probe that counts unresolved names without
+reading the call site reports 4 defects where there is 1.
+
+**HOW TO ACTUALLY VERIFY A CLIENT-RUNTIME FEATURE** (the S265 theme-switch lesson, extended):
+1. Compile the target to a real `dist/`.
+2. Execute **the emitted `scrml-runtime.<hash>.js`**, not the template.
+3. Assert on observed DOM/behaviour, not on the presence of a marker in emitted text.
+
+**And when you write the claim down, name which runtime you ran.** "The runtime executed it" is not
+a result — it is ambiguous between the two artifacts above, and the ambiguity has already shipped a
+dead page past a green suite. primary.map.md invariant 67.
 
 ## THE BROWSER TIER IS NOW GATED — and the mechanism generalizes
 
@@ -564,7 +611,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout
+#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout
 
 ## Links
 - [primary.map.md](./primary.map.md)
