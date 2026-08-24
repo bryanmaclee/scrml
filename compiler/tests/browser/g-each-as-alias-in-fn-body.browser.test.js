@@ -165,6 +165,58 @@ const <listing> = <ul><each in=@rows as it key=it><li>${DOLLAR}{it}</li></each><
 </program>
 `;
 
+// ---------------------------------------------------------------------------
+// NESTED each inside a fn-body each — g-each-nested-lift-each-inner-alias-unbound
+//
+// The nested-each branch in `renderTemplateChildToJs` keys on the STRUCTURAL
+// `each-block` kind, and a lift-parsed inner each is generic
+// `{kind:"markup", tag:"each"}`. Pre-fix the inner each shipped as a LITERAL
+// element — `document.createElement("each")` (not an HTML element) with the
+// alias emitted as a DOM attribute `setAttribute("cell","")` — and the body's
+// `${cell}` referenced a binding that was never declared:
+// `ReferenceError: cell is not defined`, whole bundle dead, exit 0.
+//
+// Two shapes: inner each as a DIRECT child of the outer per-item template, and
+// as a GRANDCHILD (wrapped in elements). Both reached literal emission pre-fix
+// and both are covered — the first cut of the fix placed the normalisation next
+// to the each-block branch, where the `case markup` branch ~500 lines earlier
+// claimed the node first, so BOTH shapes still shipped broken.
+// ---------------------------------------------------------------------------
+
+const SRC_NESTED_GRANDCHILD = `<program>
+<grid> = [{ id: "r1", cells: ["a", "b"] }, { id: "r2", cells: ["c"] }]
+fn table() {
+    return <ul>
+        <each in=@grid as row key=row.id>
+            <li>
+                <ul>
+                    <each in=row.cells as cell key=cell>
+                        <li class="cell">${DOLLAR}{cell}</li>
+                    </each>
+                </ul>
+            </li>
+        </each>
+    </ul>
+}
+<div>${DOLLAR}{table()}</div>
+</program>
+`;
+
+const SRC_NESTED_DIRECT = `<program>
+<grid> = [{ id: "r1", cells: ["a", "b"] }, { id: "r2", cells: ["c"] }]
+fn table() {
+    return <ul>
+        <each in=@grid as row key=row.id>
+            <each in=row.cells as cell key=cell>
+                <li class="cell">${DOLLAR}{cell}</li>
+            </each>
+        </each>
+    </ul>
+}
+<div>${DOLLAR}{table()}</div>
+</program>
+`;
+
 const tmpRoot = resolve("/tmp", "scrml-each-as-alias-fn-body");
 
 function compileToOutputs(source, baseName) {
@@ -339,4 +391,55 @@ describe("g-each-as-alias-unbound-in-fn-body — `<each … as NAME>` binds NAME
       expect(app.items()).toEqual(["a", "b"]);
     });
   }
+
+  // -----------------------------------------------------------------------
+  // NESTED each inside a fn-body each
+  // -----------------------------------------------------------------------
+
+  const NESTED = [
+    ["grandchild (inner each wrapped in <li><ul>)", SRC_NESTED_GRANDCHILD, "nestedgc"],
+    ["direct child of the outer per-item template", SRC_NESTED_DIRECT, "nesteddc"],
+  ];
+
+  for (const [label, src, base] of NESTED) {
+    test(`nested each, ${label}: no literal <each> element is emitted`, () => {
+      const { clientJs } = compileToOutputs(src, `${base}emit`);
+      // `<each>` is not an HTML element — emitting one is definitionally wrong,
+      // and it is what carried the undeclared inner alias.
+      expect(clientJs).not.toContain('document.createElement("each")');
+      expect(clientJs).not.toContain('setAttribute("as", "")');
+    });
+
+    test(`nested each, ${label}: the INNER alias is declared and both levels render`, () => {
+      const app = mount(src, `${base}exec`);
+      expect(app.thrown === null ? "no error" : String(app.thrown)).toBe("no error");
+      // Outer iterates 2 rows (2 + 1 cells); inner must render all three.
+      expect([...document.querySelectorAll("li.cell")].map((n) => n.textContent.trim()))
+        .toEqual(["a", "b", "c"]);
+    });
+  }
+
+  test("nested each: the OUTER alias stays addressable inside the inner body (§17.7.3)", () => {
+    // §17.7.3: "Outer scopes must use the `as name` form to remain addressable
+    // inside nested bodies." Guards against the promotion rebinding the inner
+    // scope in a way that shadows the outer alias.
+    const src = `<program>
+<grid> = [{ id: "r1", label: "R1", cells: ["a"] }, { id: "r2", label: "R2", cells: ["b"] }]
+fn table() {
+    return <ul>
+        <each in=@grid as row key=row.id>
+            <each in=row.cells as cell key=cell>
+                <li class="cell">${DOLLAR}{row.label}-${DOLLAR}{cell}</li>
+            </each>
+        </each>
+    </ul>
+}
+<div>${DOLLAR}{table()}</div>
+</program>
+`;
+    const app = mount(src, "nestedouter");
+    expect(app.thrown === null ? "no error" : String(app.thrown)).toBe("no error");
+    expect([...document.querySelectorAll("li.cell")].map((n) => n.textContent.trim()))
+      .toEqual(["R1-a", "R2-b"]);
+  });
 });

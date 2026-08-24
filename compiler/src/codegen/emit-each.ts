@@ -1009,6 +1009,39 @@ function renderTemplateChildToJs(
 ): void {
   if (!child || typeof child !== "object") return;
 
+  // -------------------------------------------------------------------------
+  // g-each-nested-lift-each-inner-alias-unbound (2026-08-24) — NORMALISE a
+  // LIFT-PARSED nested `<each>` to the structural each-block shape.
+  //
+  // The nested-each branch far below keys on `child.kind === "each-block"`, but
+  // `parseLiftTag` produces GENERIC markup recursively and never promotes
+  // `<each>` (the promotion lives only in the BS-structural `buildBlock` path).
+  // So a nested each inside a markup-returning `fn` arrived here as
+  // `{kind:"markup", tag:"each"}`, matched the `case markup` branch FIRST, and
+  // shipped as a literal element — measured on base cb5db9c9 and on the first
+  // two cuts of this fix:
+  //
+  //     document.createElement("each")        // not an HTML element
+  //     _scrml_el_8.setAttribute("as", "")    // the alias, as a DOM attribute
+  //     _scrml_el_8.setAttribute("cell", "")
+  //     ... String(cell)                      // `cell` never declared
+  //
+  // → `ReferenceError: cell is not defined`, whole bundle dead, exit 0.
+  //
+  // ⚠ POSITION IS LOAD-BEARING, and this is the second attempt. Placing the
+  // normalisation next to the each-block branch did NOT work: `case markup` sits
+  // ~500 lines earlier in this same function and claims the node first. It has
+  // to run BEFORE any kind dispatch, which is why it is at the very top rather
+  // than beside the branch it feeds.
+  //
+  // BLAST RADIUS IS BOUNDED BY CONSTRUCTION: the only emission this can replace
+  // is one that produced `document.createElement("each")`, and `<each>` is not
+  // an HTML element — that output was broken in every case it occurred.
+  if (child.kind === "markup" && (child.tag ?? "") === "each") {
+    const promoted = eachBlockFromMarkupNode(child);
+    if (promoted) child = promoted;
+  }
+
   // Text children are typically whitespace-only — skip empty / WS-only runs.
   if (child.kind === "text") {
     const txt = String((child as any).value ?? (child as any).text ?? "");
@@ -1540,6 +1573,11 @@ function renderTemplateChildToJs(
   // Mirrors the R28-1b `<match>`-in-`<each>` precedent above (item-local mount +
   // inline per-item dispatch), adapted to an each whose render is non-item-
   // agnostic (the inner source depends on the outer iter var).
+  //
+  // A LIFT-parsed inner each reaches this branch as an each-block because the
+  // normalisation at the TOP of this function promoted it — see the
+  // g-each-nested-lift-each-inner-alias-unbound block there for why it cannot
+  // live here (the `case markup` branch above claims the node first).
   if (child.kind === "each-block") {
     const innerNode = child as EachBlockAstNode;
     // Tree-shake: empty inner each (no template + no empty) renders nothing.
