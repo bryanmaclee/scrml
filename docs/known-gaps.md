@@ -2390,6 +2390,20 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 >     at _scrml_nav_rewire (…:9278)
 >     at _scrml_boot (…:9306)
 > ```
+>
+> ### ⚑ MECHANISM CORRECTED S371-bryan — my first diagnosis was WRONG, and the correction moves the fix to a different layer
+>
+> **I first wrote that the `@`-path REWRITER truncates the dotted path** — `_rewriteSegment` (`compiler/src/codegen/rewrite.ts:342`) really does regex `@([A-Za-z_$][A-Za-z0-9_$]*)` with no `.`, which looks like a textbook Rule 7 violation. **It is not the cause.** Executed both rewrite paths directly:
+>
+> | source | lowering (AST path, `ok=true`) | runtime |
+> |---|---|---|
+> | `@signup.name.touched` | `get("signup").name.touched` | **CRASH** |
+> | `@signup.isValid` | `get("signup").isValid` | works |
+> | `@signup.name` | `get("signup").name` | works |
+>
+> **All three lower to the SAME root-get + member-access shape**, and `rewriteReactiveRefsAST` returns `ok=true` for each (it never falls back to the regex here). **So the lowering is not the discriminator and the rewriter is the wrong layer to fix.** A brief blaming the regex would have sent the build to the wrong file.
+> **What the shapes actually imply, read off the error text:** *"null is not an object (evaluating `…get("signup").name.touched`)"* means the object being member-accessed is null — i.e. `get("signup")` returns an object whose **`.name` is `null`**. That fits every row: `.name` → null → falsy → the `if=` is simply false (no throw); `.isValid` → resolves or is undefined (no throw); `.name.touched` → `null.touched` → **throws**. So the compound parent's runtime object does **not** carry per-field sub-objects, and a 3-level path can never resolve through it.
+> **Fix direction (HYPOTHESIS — verify by trace, not by reading):** lower `@a.b.c` to the **flat registered key** `get("a.b.c")` when one exists — and they DO exist in the same artifact (`_scrml_cs_reactive_set("signup.name.touched", false)`, `_scrml_cs_derived_declare("signup.name.isValid", …)`). ⚑ **Do NOT "fix" it by making the member chain optional (`?.`)** — that stops the crash while leaving the condition permanently false, converting a loud failure into a silent-wrong one, which is strictly worse and is the direction this project has repeatedly ruled against.
 > `if=` lowers a compound-nav condition to a **root-segment reactive read + JS member access**. The compound PARENT holds `null` (it is a namespace, not a value — §6.3 Variant C), so `.name` on it throws. The throw happens inside `_scrml_boot` on `DOMContentLoaded`, so **boot dies and every subsequent wiring never runs** — the whole page's reactivity, not just the gated element. In happy-dom the listener exception is swallowed (which is why it first read as "silent"); in a real browser it is an uncaught console error with the same dead-page result.
 > **⚑ The flat keys ALREADY EXIST in the same artifact** — `_scrml_cs_reactive_set("signup.name.touched", false)` and `_scrml_cs_derived_declare("signup.name.isValid", …)`. So the fix direction is to resolve the full dotted path to the registered key rather than root-get-then-navigate. **VERIFY that before building** — it is a hypothesis from reading the emitted output, not a trace.
 > **Four-way discriminator, each differing from the last by ONE line:**
