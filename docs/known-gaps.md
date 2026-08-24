@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 55 |
-| MED | 167 |
+| HIGH | 56 |
+| MED | 168 |
 | LOW | 72 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -7134,6 +7134,14 @@ The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = 
 ### g-when-handler-usage-analysis-walks-only-first-statement — feature-usage analysis for `when-message`/`when-effect` walks only `node.bodyExpr` (a single parsed statement), so a feature used ONLY in statement 2+ of a multi-statement handler body is invisible → its runtime/stdlib chunk may be pruned and the handler throws at runtime — `NEW S372-peter (S239 round-2 on the g-when multi-statement fix); MED; open`
 <!-- @gap id=g-when-handler-usage-analysis-walks-only-first-statement sev=MED status=open locus=compiler/src/usage-analyzer.ts:715(analyzeUsage walks node.bodyExpr = safeParseExprToNode(bodyRaw), which is statement 1 only) prov=review:S239-round2-on-g-when-message-parent-handler-fix -->
 Latent PRE-EXISTING shape (`bodyExpr` was always statement-1-only) but **newly reachable**: before the multi-statement fix, statement 2+ of a `when` handler was dropped and never ran, so usage-analysis being blind to it was harmless; now those statements EMIT and RUN, so a `?{}` SQL / `lift` / stdlib feature appearing only in statement 2+ of an inside-worker `when message(m) { …; useFeature() }` under-detects and its chunk can be omitted. **Routed to bryan — `usage-analyzer.ts` is the actively-live W-DEAD / dead-fn surface (S371), do not edit while live.** Fix direction: for these when-node kinds, feed usage-analysis the FULL body (walk each statement of `bodyRaw`, or store a multi-statement body node) rather than the single `bodyExpr`. `route-inference`'s dead-fn scan uses the raw `bodyRaw` text and is unaffected — this is the `bodyExpr`-based FeatureUsage path specifically.
+
+### g-when-effect-multi-statement-body-drops-all-but-first — a `when @var changes { … }` (when-effect) handler with a multi-statement body silently emits ONLY its first statement — the SAME bug class fixed for worker handlers in #693, left unfixed in the sibling node — `NEW S372-peter (S239 round-3 on the g-when worker-handler fix); HIGH; open`
+<!-- @gap id=g-when-effect-multi-statement-body-drops-all-but-first sev=HIGH status=open locus=compiler/src/ast-builder.js:~13736(when-effect capture still uses bodyParts.join(" "))+compiler/src/codegen/emit-logic.ts:when-effect-case(emitExprField(node.bodyExpr,…)) prov=review:S239-round3-on-g-when-message-parent-handler-fix -->
+**Sibling of the RESOLVED `g-when-message-parent-handler-drops-all-but-the-first-statement` (#693).** The worker-handler fix reconstructed `bodyRaw` with statement boundaries + routed through `rewriteBlockBody`, but the structurally-identical **when-effect** branch (`when @count changes { log(@count)` newline `@doubled = @count * 2 }`) still space-joins its body and emits via `emitExprField(node.bodyExpr, …)` (statement 1 only) → statement 2+ silently dropped, exit 0. **TURNKEY — apply the exact #693 pattern to the when-effect capture + emit** (best: extract the token-reconstruction into a shared helper used by both when branches, which also closes the S239 finding-4 duplication). Peter-lane (cross-node parity, same file, no language surface). Fold in next peter slot.
+
+### g-component-prop-substitution-skips-when-worker-handler-bodies — `substitutePropsInLogicStmt` has no case for `when-worker-message`/`when-worker-error`, so a prop reference anywhere in a parent-side worker handler inside a COMPONENT emits as a bare unsubstituted identifier → ReferenceError / wrong value — `NEW S372-peter (S239 round-3 on the g-when worker-handler fix); MED; open`
+<!-- @gap id=g-component-prop-substitution-skips-when-worker-handler-bodies sev=MED status=open locus=compiler/src/component-expander.ts:2152(substitutePropsInLogicStmt default-case for when-worker-* nodes) prov=review:S239-round3-on-g-when-message-parent-handler-fix -->
+Pre-existing (the default case returned these nodes unchanged), **WIDENED by #693**: pre-fix only statement 1 of the handler leaked; now the whole body emits verbatim from `bodyRaw` via `rewriteBlockBody`, so every prop reference throughout the handler emits unsubstituted. Repro shape: a component whose logic block has `when message from <#w> (m) { @a = m` newline `@b = props.label }` — `props.label` (or the prop name) emits literally. Fix direction: add `when-worker-message`/`when-worker-error` cases to `substitutePropsInLogicStmt` that substitute prop refs inside `bodyRaw` (mirroring how other statement kinds are handled) before it reaches `rewriteBlockBody`. Peter-lane (component-expander, not a colliding surface).
 `emit-logic.ts:3772` emits the parent-side handler via `emitExprField(node.bodyExpr, …)`, and `bodyExpr` is `safeParseExprToNode(bodyRaw)` — which parses **one** statement.
 
 ```scrml

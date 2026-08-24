@@ -7,7 +7,84 @@
 <!--   S365-bryan — older bryan block; its 4 decisions are now 2      -->
 <!--     (dpa-036 ratified S365; raw-egress is in flight at r9).      -->
 <!-- Mechanical stream: delta-log [1718]-[1725].                      -->
+<!--   S372-peter (top block) — the drain-mode pivot: 1 HIGH landed    -->
+<!--     (#693), 3 turnkey follow-ons + E-DG-002 routed. CONCURRENT    -->
+<!--     with a live S372-bryan (two S372 PICKUPs — authority = newest  -->
+<!--     wrap COMMIT, not this digest). Mechanical stream [1765]-[1769].-->
 <!-- ============================================================= -->
+
+# scrml — Session 372 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-24. Booted `/boot` Profile A as a SUCCESSOR-concurrent to a LIVE S372-bryan (his
+S371-wrap + gaps(S372) PRs landed under me all session; `main` moved ~6 times, forcing a rebase to
+land). **The session's arc: pivot from find-mode to DRAIN-mode** — get real HIGHs off the board with
+verified quality, per Peter's goal ("numbers down, not for numbers' sake").
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⭐ FOLD IN THE g-when SIBLING — turnkey, same pattern (the fix-the-class tail of #693)
+
+`#693` landed `g-when-message-parent-handler-drops-all-but-the-first-statement` (HIGH → resolved: a
+parent-side `when message`/`when error` worker handler dropped every statement after the first; the
+flagship `examples/13-worker.scrml` was live-broken). **Three S239 rounds** hardened it (two caught
+real bugs: line-granular reconstruction regressions; string-bracket accounting). Round 3 surfaced
+**the fix is not class-complete** — three follow-ons filed, all turnkey:
+- **`g-when-effect-multi-statement-body-drops-all-but-first` (HIGH)** — the sibling `when @var changes`
+  (when-effect) node has the IDENTICAL bug. **Apply the exact #693 pattern to the when-effect capture
+  (`ast-builder.js:~13736`, still `bodyParts.join(" ")`) + emit (route through `rewriteBlockBody`);
+  best via a shared token-reconstruction helper** (also closes the S239 finding-4 dup). PETER-LANE.
+- **`g-component-prop-substitution-skips-when-worker-handler-bodies` (MED)** — `substitutePropsInLogicStmt`
+  (`component-expander.ts:2152`) has no when-worker case; #693 WIDENED the leak to the whole body. Add
+  the when-worker cases. PETER-LANE.
+- **`g-when-handler-usage-analysis-walks-only-first-statement` (MED)** — usage-analysis walks only
+  `bodyExpr` (stmt 1) → feature in stmt 2+ under-detects → chunk pruned → runtime throw. **Routed to
+  bryan** (his live `usage-analyzer.ts` W-DEAD surface — do not edit while live).
+
+### 2. ITEM 2 IS REPRO'D + TRIGGER-ISOLATED — `g-library-fn-match-else-arm...` (HIGH), ready to fix
+
+The next drain pick, already de-risked: `g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier`.
+**Confirmed on HEAD, trigger isolated to the `else` KEYWORD arm** (the `_` wildcard was fixed by #664).
+`else :> { code: "other" }` emits `return code` (bare identifier → in-scope value or ReferenceError)
+instead of the object. **Discriminator (2×2 run):** `_` wildcard ✓ · `else` keyword ✗ · independent of a
+preceding const. **Root half-traced:** instrumented `emitIifeBlockArmBody` — for `_` it's called for
+BOTH arms (object returned correctly); for `else` it's called ONLY for the matching arm, so the `else`
+arm is lowered by a DIFFERENT path that treats `{…}` as a statement block. **Pick up: find where the
+`else`/trailing-else arm body is emitted (NOT `emitIifeBlockArmBody`) and route it through the same
+object-literal-as-value lowering.** Repro banked in the delta-log narrative.
+
+### 3. THE DRAIN SHORTLIST (from the S372 HIGH-triage) — items 3-4 untouched
+
+From the triage of open HIGHs (~7 cleanly peter-drainable): `g-when-message-parent-...` DONE. Remaining
+clean picks, verify-first each (the shortlist is a hypothesis): `g-route-timer-poll-not-stopped-on-soft-nav`
+(runtime lifecycle, `runtime-template.js:3026`) · `g-soft-nav-head-sync-drops-stylesheet-links`
+(runtime nav head-sync, PR #559 territory) · the 3 `g-delta-lint-*` tooling gaps. **Lead with
+silent-wrong-output over tooling.** Do NOT take the 4 bryan-S371 dog-food finds (if-attr-synth /
+render-snippet / each-lift / each-alias — his live surface) or the DG cry-wolf (routed).
+
+### 4. ROUTED TO BRYAN (scrml-support) — awaiting his rip
+
+- **E-DG-002 cry-wolf** (`g-dg-if-chain-...`, MED) — queue item ⭐L + inbox note `2026-08-24-...-s372-dg-if-chain-...`. CONVERGE candidate.
+- **#2 freshening** — queue A/B/K stamps (HEAD-verified) + the corrected B locus. A/B/K all still live, all correctly blocked (A=substrate, B=behind unlanded PR #579, K=central-lexer). No clean peter build there.
+
+## 🧷 WHAT LANDED (S372-peter) — 1 PR
+`#693` g-when parent worker-handler multi-statement fix (HIGH resolved; two-part root; 3 S239 rounds; 6-case biting test). Plus the ride-along ledger: B-locus correction, A/g-dg/usage-analyzer entries.
+
+## 🔭 THE DURABLE STRATEGIC FINDING — the count only falls if the MODE changes
+Trajectory: **+8 HIGH / +15 MED over ~6 sessions** — discovery outpaces draining, by BOTH operators.
+Dog-fooding is a structural NET-ADDER (the only source of ergonomic-bug evidence, but it grows the
+list). "Numbers down for real" = draining (fix / verify-close), a DIFFERENT activity. Peter's lever,
+sized by the HIGH-triage: ~7 cleanly-drainable HIGHs + force-multiplying bryan (turnkey routing +
+staleness pre-closing) on the ~26 authority HIGHs. The rising count is the count getting HONEST
+(corpus-zero: no human wrote scrml until last week) — don't optimize for a small number.
+
+## 🧷 STATE (S372-peter close)
+- **main** includes `#693` (`4bf73508`); rebased past S372-bryan's concurrent landings. Gaps: **HIGH 56 · MED 168 · LOW 72 · Nom 7** (authoritative `gapCountsFromTokens`; +2 HIGH +1 MED net this session = 1 resolved, 3 filed). `state.ts` refuses locally (Windows ` · ` delta-log parse) — counts hand-synced via the authoritative fn; Linux gate green.
+- **Suite:** #693 gate GREEN (required); `windows` green; `tracking` red = known non-required fs.watch/dev-watcher timeout baseline (root-caused, unrelated). When/worker/channel/nested-program 148/0; conformance clean (one heavy DB test flakes only under co-run).
+- **Concurrent:** S372-bryan LIVE all session (if-attr-synth, render-trace, W-DEAD each-attr, floor drain, s371 wrap). Stayed off his surfaces. Two S372 PICKUPs — reconcile against the newest wrap commit.
+- **scrml-support:** queue + inbox pushed (E-DG-002 route + #2 freshening + three-stamps inbound filed to read/).
+
 
 # scrml — Session 371 (bryan · ASUS-Vivobook) — WRAP
 

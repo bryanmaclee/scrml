@@ -6356,6 +6356,14 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-24 — S372 (peter): a HIGH drained the hard way — parent worker-handler multi-statement fix, and a dog-food cry-wolf routed
+
+The drain-mode pivot: get real HIGHs off the board with verified quality rather than dog-food more (which only grows the list). One HIGH landed after a three-round adversarial review that twice caught real bugs; a dog-food find and three review-surfaced follow-ons were filed/routed turnkey.
+
+- **`#693` — `g-when-message-parent-handler-drops-all-but-the-first-statement` (HIGH) resolved.** A parent-side `when message from <#w>` / `when error from <#w>` worker handler silently emitted only its first statement; the flagship `examples/13-worker.scrml` was live-broken (its button stuck on "Computing…" forever). Two-part root, deeper than the filed locus: the body was captured as space-joined tokens (statement boundaries lost) and emitted from a single parsed expression. Fixed by reconstructing the body with statement boundaries (comment-token dropping, nest-aware newlines, `PUNCT`-guarded bracket counting) and routing through the multi-statement lowering path. Two S239 rounds hardened it (line-granular regressions; string-literal-bracket accounting), pinned by a 6-case biting test.
+- **Dog-food find routed:** `E-DG-002` cry-wolf false-fires on the mainline `if=@flag` idiom — a cell used only as an `if=`/`else-if=` chain condition or inside a branch interp is flagged "never consumed" while the runtime wires it correctly (`show=` is the positive control). Filed MED, routed to bryan as a converge candidate (3rd/4th position in the DG-consumption class).
+- **Follow-ons filed:** the identical drop bug in the sibling `when @var changes` node (HIGH, turnkey); a component prop-substitution gap the fix widened (MED); and a usage-analysis completeness gap (MED, routed to bryan).
+
 ### 2026-08-23 — S369 (peter): a dog-food arc — three silent-wrong bugs found by running fresh apps, fixed end-to-end
 
 After landing item-3 (below), the session turned to dog-fooding: writing fresh adopter apps (an order dashboard, a nested project board, a signup form), running them in happy-dom, and watching for silent-wrong output. It paid out — three silent-wrong bugs, each a pattern adopters write constantly, none of which were in the gap ledger. The recurring lesson: dog-fooding beats mining the ledger, because these bugs are invisible until an app exercises them.
