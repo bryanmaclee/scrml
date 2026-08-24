@@ -1,5 +1,5 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S369-peter.        -->
+<!-- hand-off.md — live session state. WRAPPED at S370-peter (S369 block below).        -->
 <!--   S369-peter (below) — a LONG session: item-3 (#664) + drain     -->
 <!--     (#661), THEN a DOG-FOOD ARC that fixed 3 silent-wrong bugs    -->
 <!--     (#670 value-if-in-each · #672 empty-string-value-if · #673    -->
@@ -10,6 +10,70 @@
 <!-- Mechanical stream: delta-log [1715] (this session); the S369     -->
 <!--   detail is [1710]-[1715]; [1686]-[1709] prior.                 -->
 <!-- ============================================================= -->
+
+# scrml — Session 370 (peter · P-Tech1 Windows) — WRAP
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+⚑ **CROSS-MACHINE:** S370 wrapped to swap to the LAPTOP. Everything is pushed (board S370-peter,
+the peter→bryan inbox note, branch `gaps/s370-dogfood-server-fn-sql` = PR #675). **PR #675 is OPEN
+(gaps + this wrap), gate pending — it owes a MERGE (docs-only; merge authz pending Peter).** Boot the
+laptop, confirm #675's gate, merge it (or it strands per [[feedback-detect-stranded-unwrapped-session-at-boot]]).
+
+S370 was a **DOG-FOOD ARC** on Peter's pick — server fns + `?{}` SQL — run end-to-end (real bun:sqlite
+via Bun.serve + happy-dom, "emitted ≠ runs"). **2 finds, BOTH ROUTED to bryan (Peter's explicit call):**
+1. ⭐ **HIGH `g-server-call-nested-in-expression-not-awaited-outside-fn-body`** — a server-fn call NESTED
+   in a larger expr (`call().length`, `f(call())`, comparison) isn't awaited at the inner call site in
+   MARKUP INTERP (`${loadRows().length}` → "") or an INLINE EVENT HANDLER (`onclick=@n=load().length` /
+   `oninput` → undefined). Correct in a fn body (U1 emitCall), as the whole value, or via a resolved cell.
+   **The profile STAGE re-examination axis verbatim** — a §13.2 SHALL by RETROFIT not by-construction;
+   converge-don't-enumerate → bryan. Root + both fix directions in `docs/known-gaps.md` (S370 batch) +
+   inbox note. **DO NOT build in peter-lane — Peter routed the converge decision to bryan.**
+2. **MED `g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select`** — SPEC:22293 "query helper"
+   scope ruling → bryan.
+
+### B. peter's lane — next buildables (unchanged from S369 §B; or DOG-FOOD MORE)
+The S369 dog-food residuals are STILL OPEN (none built this session): `g-each-nested-in-fn-body-markup-fn-
+stringifies` (MED, real wiring) · value-form `match`-in-each / markup-branch value-if drop (MED) · `g-library-
+mode-multi-scrutinee-match-misparsed-as-single` (MED) · usage-analyzer each-in false-W-DEAD (LOW) · match-
+structuredbody empty-object-arm (LOW, repro-owed). **OR dog-food more** — server-fn SQL core is solid;
+unstressed: components/slots, channels/realtime, forms w/ server round-trips, `<if>` block element.
+Reusable dog-food harness banked at `scratchpad/dogfood/` (server + client instrument).
+
+### A. bryan's lane — LIVE (do NOT touch)
+S368/bare-call arc likely LIVE (his `brief/s368-bare-call` + S368 voice ruling landed ~10min after my S369
+wrap). S365 block STILL LIVE: 4 operator decisions + asIs-split re-review. 5 peter→bryan pings held (his to
+process). PLUS my 2 new S370 routes (above) now in his inbox.
+
+## WHAT LANDED (S370-peter) — 0 code, docs-only
+Nothing to main yet. PR #675 OPEN = 2 gap filings + hand-off/changelog/delta-log. Board + inbox note pushed.
+
+## ⚑ MISSES / lessons (S370)
+- **★ DOG-FOODING BEATS THE LEDGER, reconfirmed again** — both finds came from RUNNING fresh server-fn SQL
+  apps end-to-end, neither in the ledger. Emit-inspection would have missed the auto-await bug (it needs
+  execution — the U1 lesson "emitted ≠ runs"). [[feedback-dogfooding-beats-mining-the-ledger]]
+- **★ VERIFY THE HARNESS before trusting a negative** — ran the U1 known-good control (count 0→3) FIRST;
+  it proved the harness sound, so the `undefined`/"" negatives were real, not harness artifacts.
+  [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ Re-derived the root first-hand** (no filed direction to trust here) — traced retrofit-vs-by-construction
+  through 4 emit sites; the emitted side-by-side (fn-body `(await call()).length` vs interp `await
+  (call().length)`) IS the proof. [[feedback-gap-report-fix-direction-can-be-wrong]]
+- **★ Same-class-across-positions → converge → route** — the auto-await class keeps reappearing per position
+  (U1 fixed 3; found 2 more families) → the retrofit approach is wrong; converge is bryan's async-model call.
+  [[feedback-repeated-review-same-class-means-converge-not-enumerate]] [[feedback-stay-in-adopter-lane-not-grammar-decisions]]
+
+## 🧷 STATE (S370 close)
+- **main** @ `3a7203ff` (unchanged — docs-only session; #675 not yet merged). scrml-support @ `0afe8fc`.
+- **Gaps: HIGH 49 · MED 159 · LOW 72 · Nom 7** (hand-synced +1 HIGH +1 MED; `state.ts` refuses locally on
+  the Windows ` · `-separator parse — bryan's lane, identical on clean base; Linux CI authoritative).
+- **Review floor:** #675 (mixed docs/gap) will owe a marker on merge — inherent next-boot tail. Prior S369
+  wrap tail (#665-#674) may still show OWED; not drained this session (docs-only, avoid bryan-collision).
+- **Branches:** main + app-pinned + `gaps/s370-dogfood-server-fn-sql` (= #675, pushed, unmerged).
+  **Worktrees:** main + scrml-pinned (clean; none created). **Maps:** unchanged (docs-only).
+- **Env:** bun 1.4.0. NO full-suite run (no code landed). Dog-food harness uses real bun:sqlite + Bun.serve.
+- **Sibling:** S368/bare-call bryan likely LIVE. Board S370-peter → WRAPPED.
+- **Inbox:** no new peter inbound. Sent 1 outbound (S370 route to bryan). The 5 prior peter→bryan pings +
+  bryan's S365 block remain his to process.
 
 # scrml — Session 369 (peter · P-Tech1 Windows) — WRAP
 
