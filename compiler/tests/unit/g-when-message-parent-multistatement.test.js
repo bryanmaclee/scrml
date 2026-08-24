@@ -143,3 +143,34 @@ describe("g-when-message-parent-handler-drops-all-but-the-first-statement (§4.1
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The SIBLING node: `when @var changes { … }` (when-effect) had the identical
+// multi-statement drop bug — g-when-effect-multi-statement-body-drops-all-but-first
+// (fixed by sharing _captureWhenHandlerBody + routing emit through rewriteBlockBody).
+// ---------------------------------------------------------------------------
+
+function effectBody(clientJs) {
+  // the reactive effect that reads @count (skip render effects)
+  const re = /_scrml_effect\(function\(\)\s*\{([\s\S]*?)\}\);/g;
+  let m;
+  while ((m = re.exec(clientJs))) {
+    if (/reactive_get\("count"\)/.test(m[1]) && /reactive_set/.test(m[1])) return m[1];
+  }
+  return "";
+}
+
+describe("g-when-effect-multi-statement-body-drops-all-but-first (§4.12.4 sibling)", () => {
+  test("a 2-statement `when @var changes` effect body runs BOTH statements", () => {
+    const src =
+      `<program>\n  \${\n    <count> = 0\n    <a> = 0\n    <b> = 0\n` +
+      `    when @count changes {\n      @a = @count\n      @b = @count * 2\n    }\n  }\n` +
+      `  <button onclick={ @count = @count + 1 }>inc</button>\n  <p>\${@a}-\${@b}</p>\n</program>\n`;
+    const { clientJs, errors } = compileToClient(src);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
+    const body = effectBody(clientJs);
+    // BITING: pre-fix only the first set was present.
+    expect(body).toContain(`_scrml_reactive_set("a", _scrml_reactive_get("count"))`);
+    expect(body).toContain(`_scrml_reactive_set("b",`);
+  });
+});

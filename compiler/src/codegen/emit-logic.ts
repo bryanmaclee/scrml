@@ -820,29 +820,6 @@ export function rewriteReflectForRuntime(code: string): string {
 /**
  * Build an EmitExprContext from the current EmitLogicOpts.
  */
-/**
- * Strip leaked comment lines from a `when …` handler body. The tokenizer strips
- * `//` markers but leaves the comment TEXT as bare tokens; joined back into the
- * body they are not valid statements. The single-expr emit path used to ignore
- * them by parsing only the first statement, but the multi-statement block path
- * (rewriteBlockBody) would try to lower each line — so a trailing `// comment`
- * becomes `E-CODEGEN-INVALID-LOGIC`. Keep only lines that look like code.
- * (Extracted from the `when-effect` case so `when message`/`when error` share it.)
- */
-function _filterLeakedCommentLines(bodyRaw: string): string {
-  return (bodyRaw ?? "")
-    .split("\n")
-    .filter((line: string) => {
-      const t = line.trim();
-      if (!t) return false;
-      if (/^(?:let|const|var|if|for|while|return|@|function|switch|try|catch|throw)\b/.test(t)) return true;
-      if (/^[a-zA-Z_$@][a-zA-Z0-9_$]*\s*[=\(\[.]/.test(t)) return true;
-      if (/^[{}\[\]();]/.test(t)) return true;
-      return false;
-    })
-    .join("\n");
-}
-
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
   return {
     // R25-Bug-42 (S138): honor opts.boundary so server-mode contexts (e.g.
@@ -3825,8 +3802,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "when-effect": {
-      // Filter out leaked comment lines (// stripped by tokenizer, leaving bare text)
-      const body = emitExprField(node.bodyExpr, _filterLeakedCommentLines(node.bodyRaw ?? ""), _makeExprCtx(opts));
+      // g-when-effect-multi-statement-body-drops-all-but-first (S372): the effect body
+      // is a statement BLOCK, not a single expression. Emitting it through the single-expr
+      // `emitExprField(node.bodyExpr, …)` path recovered only the first statement and
+      // silently dropped the rest (the same bug the worker-handler branch had). Route it
+      // through rewriteBlockBody's multi-statement lowering so every statement runs when
+      // the dependency changes. `bodyRaw` carries faithful, parser-derived statement
+      // boundaries and is comment-free (ast-builder drops COMMENT tokens).
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client");
       return `_scrml_effect(function() { ${body}; });`;
     }
 
