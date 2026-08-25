@@ -7,11 +7,72 @@
 <!--   S365-bryan — older bryan block; its 4 decisions are now 2      -->
 <!--     (dpa-036 ratified S365; raw-egress is in flight at r9).      -->
 <!-- Mechanical stream: delta-log [1718]-[1725].                      -->
-<!--   S372-peter (top block) — the drain-mode pivot: 1 HIGH landed    -->
-<!--     (#693), 3 turnkey follow-ons + E-DG-002 routed. CONCURRENT    -->
-<!--     with a live S372-bryan (two S372 PICKUPs — authority = newest  -->
-<!--     wrap COMMIT, not this digest). Mechanical stream [1765]-[1769].-->
+<!--   S372-peter — the drain-mode pivot: 1 HIGH landed (#693).         -->
+<!--   S373-peter (TOP block) — DRAIN continued: 3 more resolved (#697   -->
+<!--     else-arm HIGH · #699 component-prop MED · #700 navigate-chunk    -->
+<!--     MED) + #701 drain (floor 11→0). ARC #1 (multistatement AST-path) -->
+<!--     DEFERRED — read PICKUP §1. Mechanical stream [1770]-[1776].      -->
 <!-- ============================================================= -->
+
+# scrml — Session 373 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-24. Booted `/boot` Profile A, effectively SOLO (S372-bryan's board read LIVE but
+his session had ENDED — all his S372 PRs merged, no bryan commit after my S372 wrap). The arc, per
+Peter's directive: **"#1, then the 3 g-when arcs, then drain."** Landed 3 fixes + the drain; deferred
+the meatiest g-when arc. Two satellite dispatches (arc #2: 3 rounds; arc #3: 1 round + a root re-derivation).
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⭐ ARC #1 DEFERRED — `g-when-handler-multistatement-body-loses-ast-path-lowerings` (MED) — NOT built
+The 3rd g-when pickup item from S372, the meatiest, deliberately deferred (session was deep + it is the
+highest-blast-radius of the set; I surfaced the fork to Peter and, with no reply, took the conservative
+default of not opening a big build late). **Locus CONFIRMED:** `rewriteBlockBody` (`emit-control-flow.ts:1831`
+loop) lowers each statement RHS via `emitExprField(null, rawRhs, exprCtx)` — the STRING fallback
+(`rewriteExprWithDerived`), which does NOT do `emitMember` interception. So `@m.insert(k,v)` on a
+`[string:int]` map cell emits `..._get("m").insert(...)` (bare `.insert`) instead of `_scrml_map_insert(...)`.
+**Fix:** parse each statement RHS to an ExprNode and `emitExpr(node, fullCtx)` with the FULL
+`EmitExprContext` (mapVarNames/setVarNames/requestIds/dbVar/synthCellKeys). ⚑ **`exprCtxExtras` threading
+is INSUFFICIENT** (S372 PA-tried + reverted) — the string path can't member-intercept regardless of ctx;
+MUST use the AST path. Blast radius HIGH (`rewriteBlockBody` is shared by when/effect/worker emit) — careful
+S239. Repro: a map/set method + a `<#request>` ref + a `?{}` SQL param, each in a when-handler statement.
+Peter-lane (regression from #693/#695, compute). **OR** dog-food fresh (the durable: running new apps beats
+mining the ledger — [[feedback-dogfooding-beats-mining-the-ledger]]).
+
+### 2. ROUTED TO BRYAN — awaiting his rip (scrml-support inbox)
+- **`g-match-else-arm-object-literal-decl-and-typer-newly-accepting`** (from #697's S239) — the decl-position
+  codegen crash + the type-checker E-SCOPE-001-on-object-key halves of the else-arm class. Both **newly-accepting**
+  (one-way door). By-construction fix at `ast-builder.js:9939` Form 2 (make an object-literal block-arm parse
+  inline) closes all three consumers at the root. Turnkey inbox note `2026-08-24-...-s373-else-arm-object-literal-...`.
+- Prior peter→bryan routes still held (S361 security ×2 · S364 markup-interp · S370 auto-await · S372 DG cry-wolf).
+
+### 3. PETER-LANE follow-ons filed this session (buildable next, or dog-food)
+- `g-worker-handler-in-component-bodyraw-reconstruction-offset-sensitive` (MED, pre-existing LOUD E-CODEGEN-INVALID-LOGIC — blocked #699's end-to-end tests, hence its CE-layer assertions).
+- `g-component-worker-handler-in-component-native-reparse-rejected` (MED, E-COMPONENT-021, likely newly-accepting → bryan).
+- `g-when-handler-body-invisible-to-preemit-chunk-detection` (LOW) + the `usage-analyzer.ts` FeatureUsage **dead-code** cleanup (wire-up-or-delete).
+
+## 🧷 WHAT LANDED (S373-peter) — 5 PRs
+- **#697** ⭐ `g-library-fn-match-else-arm-object-literal` (HIGH) RESOLVED — else/wildcard arm's object literal lowers as a VALUE (return position), parity with #664's inline path via a shared `_matchArmResultIsBlockBody` classifier; `pick(9,77)` → `{x:0}` (was `77`). 8-case biting.
+- **#699** `g-component-prop-worker-handler` (MED) RESOLVED — prop substitution in `bodyRaw` when-handlers (parent worker + `when-effect`); converge-then-narrow (dropped the worker-**self**-handler over-reach — separate worker scope). 13-case.
+- **#700** `g-when-handler navigate chunk-prune` (MED) RESOLVED — reference-gated `POST_EMIT_HELPER_CHUNK_GATES` (navigate→utilities). **Briefed root was DEAD CODE**; re-derived to a real SINGLE-statement `navigate()`-in-when-handler → `utilities`-pruned ReferenceError. 4-case.
+- **#701** drain (docs) — #1 resolved, 4 follow-ons filed, review floor 11→0.
+
+## ⚑ MISSES / lessons (S373)
+- **★ FACTS-gate miss** — pushed #697 without `facts.ts --check`; the LOC delta (2-line src + 1 test file) failed the required cloud gate. Saved [[feedback-run-facts-check-before-push]]; ran it before every later push. (`tracking`/`windows` red = known non-required; only `gate` blocks.)
+- **★ Filed root/direction WRONG twice, caught by reproduce-first.** Arc #3's briefed `usage-analyzer.ts` locus was **dead code** (bitmap never read) — re-derived to `detectRuntimeChunks`/navigate. Arc #2's review-suggested "same-class" worker-self-handler was an **over-reach** (worker scope). [[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ A satellite MISREPORTED a ledger change** — claimed it marked #2's original gap resolved; it never touched the marker. Verify satellite claims, especially ledger/status. Caught + fixed.
+- **★ A `/code-review` FORK did `git checkout` in a shared worktree** and clobbered a satellite's branch HEAD mid-round (satellite recovered; commits safe on origin). Reviewer forks are NOT isolated. [[feedback-isolate-agents-that-do-git-ops-in-main-tree]]
+- **★ Converge-then-narrow** — arc #2 went under-fix (missed the `when-effect` twin) → converge (all `bodyRaw` kinds) → over-reach (worker-self) → narrow. The right scope was the middle. [[feedback-repeated-review-same-class-means-converge-not-enumerate]]
+
+## 🧷 STATE (S373 close)
+- **main** `07f75cd5` (#700); **#701** drain auto-merging on green (docs-only). Coherence target 0/0 post-#701. Both repos clean; all satellite worktrees + fix branches swept.
+- **Gaps:** 3 resolved (#697/#699/#700), 4 follow-ons filed. `state.ts` refuses locally (Windows ` · ` parse) → cloud-maps.yml regenerates the `@generated` counts post-merge (NOT in the required gate). Approx HIGH 54 · MED ~171 · LOW 73 — trust the post-merge regen.
+- **Suite:** every PR cloud-`gate` GREEN; unit **17828 pass / 0 fail / 17 skip** · conformance **883/883** on the landed state. FACTS regenerated per-PR.
+- **Review floor:** **0 OWED** at #701 (the drain PR is the inherent next-boot tail).
+- **Sibling:** S372-bryan ended. ⚠️ bryan appended `user-voice-scrml.md` entries during my session (`75ed3de` — UNREAD; absorb at next boot, may carry rulings on my routed items).
+- **Board:** S373-peter → WRAPPED.
+- **Maps:** surgical codegen/component-expander edits, no new modules/entrypoints → maps unchanged.
 
 # scrml — Session 372 (peter · P-Tech1 Windows) — WRAP
 
