@@ -2,6 +2,61 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S372 — 2026-08-24/25 (bryan · ASUS-Vivobook) — the flagship's "Account created." had never rendered, and six walkers share one shape
+
+Booted onto a **stranded S371 wrap** (every artifact written, steps 6/7 never run) and landed it as
+inherited. Ran solo, then entered **successor-mode mid-session** when Peter went live. Six PRs, two
+dispatches, **eleven adversarial passes between them — a real defect in every one**, none of which any
+test tier could see. The durable output is a structural finding, not the fixes.
+
+- **#689** — the stranded S371 wrap, landed as inherited, no content re-authored. Both currency gates
+  re-run BEFORE the commit (the S368 "regen is the LAST step" lesson).
+- **#690** — review floor **11 → 0**. `#678` recorded **clean, not carved**: code-bearing by file, but
+  all 14 changed lines mechanically classified as comments. `#688` returned a **finding in both
+  directions** — it is BETTER than its own PR describes (it closed a real client `ReferenceError` dead
+  page, so "diagnostic-only / 0 of 7388" is corpus-scoped, not general), AND the residual it
+  deliberately left is a **dead page, not the LOW cry-wolf it was filed as**. New HIGH:
+  `g-match-fncall-scrutinee-prunes-effect-chunk-dead-page` — a `<match>` with a function-call scrutinee
+  emits an unguarded `_scrml_effect` the shipped chunk defines zero times. **Any unrelated `${@cell}` in
+  the file MASKS it**, which is why the corpus differential read 0.
+- **#691** — the render-slot TRACE. **SPEC §16.8.1's mechanism was never implemented**:
+  `render-expansion` / `inlinedChildren` have zero source hits repo-wide (a Rule-4 item for the
+  operator). Decision site traced to `native-parser/translate-expr.js:296`, whose fix precedent sits
+  four lines below it. Three new defects: `${render X()}` outside a component body calls a function
+  defined nowhere (and `E-TYPE-071`, minted for exactly that, **can never fire** — it text-scans a
+  pattern an earlier pass already rewrote, using a character-for-character identical regex); a string
+  prop in `if=(prop is some)` splices as a **bare identifier** and kills page boot; and
+  **`renders-empty` is in `GREEN_STATES`** — our own e2e tier looked at the flagship and called it clean.
+- **#692** — the S239 pass on the synth fix: a blocker routed as a **ruling** rather than invented, plus
+  the **fourth** copy of one rule (`computeChainBranchCondition`, no membership test at all).
+- **#698** — ⭐ **the chunk-reachability ARC**, bryan-ruled. Surfacing the each-alias byte cost
+  (`+94,765` corpus-wide, `+0.086%`, PA-verified to the byte) produced a fork; **neither limb was the
+  root**. Ruled: land wide, file the over-pull as its own arc. Chunk-detect both UNDER-approximates
+  (four carriers of "the compiler emits a call to something it did not emit") and OVER-approximates,
+  and one computed reachability closure answers both.
+- **#704** — ⭐ **the §55 synth-toggle fix.** `examples/30-validated-form.scrml:136` —
+  `<p if=@signup.submitted>Account created.</p>` — **had never rendered, in any build ever shipped**, at
+  exit 0. Two spellings of one predicate lowered two different ways. **Five build rounds, six
+  adversarial passes**, corpus differential exactly **1 artifact of 7388** with the same head hash every
+  round, bite proven at five independent levels. Lands `ruling-gated`, not `resolved` — the rollup rows
+  stay byte-identical to main pending an operator ruling, and the remaining dead-page limb is **pinned
+  by a test asserting `ctl === ""`** so it flips loudly when the ruling closes it.
+
+**The finding that outlives all of it: six hand-maintained approximation walkers, one shape.**
+chunk-detect (4 carriers) · `markupReferencedNames` (2) · DG consumption-credit (3-4, found
+independently by Peter the same day) · synth-key resolution (**5 copies, two divergent**) · the `<each>`
+lift machinery (5) · VP-1 `walkFileAst` (reaches **1 of 5** carriers). Each approximates a question the
+compiler could compute; each emits a defect family one carrier at a time. *Repeated review, same class →
+converge, do not enumerate.*
+
+**And the method lesson from #704's five rounds: a gate over a value needs the value's TYPE, and the
+type is never recoverable from the syntax of the read** — not the leaf name, not the declaration form,
+not the presence of a tail, not key-registration alone. **Three of the four rule-shape errors were the
+PA's instruction, not the dispatch's work**; the dispatch measured its way to a better rule each time.
+
+**Gates at close:** cloud `gate` GREEN at main HEAD · review floor 0 OWED at drain · dPA 0 unrun /
+0 advisory · issue-debt 0 · corpus-zero 0. **Gaps HIGH 55 · MED 171 · LOW 74 · Nominal 7.**
+
 ## S374 — 2026-08-24 (peter · P-Tech1 Windows) — the deferred g-when arc: when-handler bodies lower via the AST path
 
 The meatiest g-when arc, deliberately deferred at S372/S373 as the highest-blast-radius of the set, built

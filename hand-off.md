@@ -1,14 +1,213 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S374-peter.        -->
-<!--   S374-peter (TOP block) — ARC #1 LANDED: #703 the deferred       -->
-<!--     g-when AST-path lowering (MED). S239 caught a silent-wrong     -->
-<!--     the fix introduced (guarded). Read PICKUP §1. [1780]-[1782].  -->
-<!--   S373-peter — DRAIN: 3 resolved (#697 else-arm HIGH · #699        -->
-<!--     component-prop · #700 navigate-chunk) + #701 drain (floor→0).  -->
-<!--   S372-peter — the drain-mode pivot: 1 HIGH landed (#693).         -->
-<!--   S368-bryan — 7 PRs landed; FOUR operator rulings owed (carried). -->
-<!--   S365-bryan — older; 4 decisions now 2 (raw-egress in flight r9). -->
+<!-- hand-off.md — live session state. WRAPPED at S372-bryan.        -->
+<!--   S372-bryan (TOP block) — 6 PRs. FOUR operator rulings owed:    -->
+<!--     the NEW §55 rollup-truthiness ruling (4 options) + THREE      -->
+<!--     carried S368 rulings (was four; #4 is downstream of #2).      -->
+<!--     each-alias HELD at its round-4 tip, re-review in flight.      -->
+<!--     Read PICKUP §1-§3 first. [1771]-[1773], [1783]-[1786].        -->
+<!--   S374/S373/S372-peter — the peter lane, concurrent, #693-#705.   -->
+<!--   S371-bryan — landed by S372 as inherited (#689).                -->
+<!--   S368-bryan — the FOUR rulings this block re-measures to THREE.  -->
 <!-- ============================================================= -->
+
+# scrml — Session 372 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-24 → 08-25. Booted `/boot` Profile A onto a **stranded S371 wrap**. Ran SOLO for
+the first half, then entered **successor-mode mid-session** when Peter went live (S372/373/374-peter).
+Six PRs landed. **Two dispatches, eleven adversarial passes between them, a real defect in every one.**
+
+**The framing, because it reorders the rest: the session's durable output is a structural finding,
+not the fixes.** The compiler carries at least **six hand-maintained approximation walkers** answering
+questions it could compute, and every one is producing a defect family. Two operators reached that
+conclusion independently on the same day.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ THE OPERATOR RULINGS OWED — one is NEW and it has four options
+
+**NEW — §55 rollup truthiness.** What does truthiness over a §55 rollup MAP or ARRAY mean?
+Options: **{always-true · never-true · diagnose · `?.`-on-declined-path-only}**. `diagnose` is the
+only limb that fails CLOSED. It governs **five** shapes: compound `errors`/`touched` bare · per-field
+`errors` bare · `@compound.errors.<field>` · the markup-typed dead-page residual · the enshrined
+bare-vs-parenthesised spelling divergence.
+⚑ **The fourth option carries a hit against my own framing and it is fair.** The reviewer:
+*"the gate's stated rationale weighs always-true vs never-true and never weighs **dead page**."* My
+round-1 ban on `?.` was about the COLLAPSE path (there it trades a loud crash for a permanently-false
+gate — strictly worse). On the DECLINED path the status quo is **already** a crash, so the real trade
+is dead-page vs contained-false-gate, and I never weighed it that way when I set the rule.
+
+**STILL OWED, untouched for a third session — the S368 rulings, now THREE not four.** `<db>` state-block
+locus · the 2-file bare-call migration · bare `if (){}` at a default-logic body-top. ⚑ **Ruling 4
+(`TILDE_TOKEN_RE`) is DOWNSTREAM of ruling 2, not independent** — re-measured on `main`: BOTH forms are
+exit 0 today (`log("hi")` ships as page text silently; `log("hi") ~` lifts and runs). The "one is now an
+error" asymmetry only exists once the bare-call build lands, and that build is **not on main** (it sits
+on `wip/s368-bare-call-build`; zero `E-BARE-CALL` in `compiler/src`).
+⚑ **Two carried premises were STALE and I corrected them by re-measuring rather than relaying:**
+ruling 1's "clean compile exit 0" does **not** reproduce — `samples/dashboard.db` does not exist, so the
+file fails `E-PA-002` (the `on mount`-ships-as-text half DOES reproduce, and that failed build still
+wrote 4 complete artifacts — `g-cli-emits-artifacts-on-failed-compile` again).
+
+**Peter's two newly-accepting halves** (else-arm object literal, decl-codegen + typer) — one-way doors,
+routed to bryan, in the inbox.
+
+**bryan's unfiltered hand-authoring friction list** — owed since S368. **Do NOT pre-triage it.**
+
+### 2. ⚠️ EACH-ALIAS IS HELD AT ITS ROUND-4 TIP — complete, re-review IN FLIGHT
+
+Branch `worktree-agent-aef0abebce785405f`; base published as `origin/feat/each-alias-round2` @ `0e836a70`.
+**bryan RULED the byte fork: land WIDE, over-pull becomes its own arc** (user-voice S372; `+94,765`
+bytes corpus-wide `+0.086%`, PA-verified to the byte).
+Round 4 fixed a confirmed **HIGH** (root-position lift-parsed `<each>` shipped a dead page:
+`createElement("each")`, alias a free identifier, `ReferenceError`, whole client dead) plus a silent
+dangling-`as` and a **regression the fix itself introduced** (`W-ATTR-001` began calling a now-working
+`if=` gate inert). **All three PA-verified by execution: 0 `<li>` → 2 `<li>`, named diagnostic, warning
+silent.**
+⚑ **The agent STALLED at 600s during REPORTING, not during work** — all three fixes were committed and
+the worktree clean. The incremental-commit rule paid for itself; a batch-at-the-end agent loses the round.
+⚑ **What is NOT verified: its differential and bite proof** — the stall ate the report. Do not land on
+the strength of a report that never arrived.
+⚑⚑ **THE RE-REVIEW LANDED AFTER THE WRAP AND RETURNED A HIGH IN THE ROUND-4 FIX ITSELF — READ THIS
+BEFORE TOUCHING THE BRANCH.** The new §17.1.2 opener `if=` gate lowers the predicate against
+`enclosingScopeVar`, which is **`null` for every lift-parsed `<each>` not inside a `for`**, so an
+ITEM-SCOPED predicate emits a guard that throws. **PA-REPRODUCED at emit:**
+`<each in=@rows key=@.id if=@.on>` inside a `fn` compiles **exit 0, zero diagnostics** and emits
+`if (!(null.on))`; the `as`-alias variant emits `if (!(it.on))` with `it` a free identifier.
+`_scrml_effect` has no `try/catch`, so it propagates out of the module body — whole client dead.
+⚑ **BUT the review's REGRESSION framing is UNCONFIRMED and I measured the difference.** It reported
+that base rendered both rows; on MY fixture **base is ALREADY dead** —
+`ReferenceError: _scrml_reconcile_list is not defined`, i.e. the chunk-pruning gap this very sweep
+fixes. So: **the broken emit is real and certain; whether it is a REGRESSION is fixture-dependent and
+was not established.** Do not carry "it regressed" into a brief without re-deriving it.
+**Also from that review — MED:** `EACH_FACTORY_ALWAYS_EMITTED` holds only `document`, but `_itemFrag`
+is emitted just as unconditionally, so `as _itemFrag` passes all four validator arms and produces the
+exact *"This is a compiler defect … please report it"* message the validator was written to remove.
+**One name short of its own "provable from the emitter" claim.**
+**And LOW:** `emitEachOpenerIfGuardLines` returns `[]` on an unrecognised value shape (e.g. a bareword
+`if`), silently dropping the gate — the fail-OPEN direction §17.1.2.3 names as the dangerous one.
+**Round 5 is NOT dispatched** — the branch is HELD and nothing is on `main`, so this is pickup, not
+an emergency.
+⚑ **Owed at landing (SPEC is out of the agent's write-set):** the `E-EACH-AS-ALIAS-INVALID` §34 catalog
+row. Ready-to-paste text is in `docs/changes/each-alias-round3-2026-08-24/` and the agent's report.
+Plus **six gap entries it asked me to author** — not yet written.
+
+### 3. ⚠️ SIX WALKERS, ONE SHAPE — the session's real finding
+
+Every one is a hand-maintained approximation of a question the compiler could compute, and each is
+emitting a defect family one carrier at a time:
+
+| walker | approximates | carriers missed (found so far) |
+|---|---|---|
+| chunk-detect (`emit-client.ts`) | which runtime chunks a page needs | **4** — filed as the arc, #698 |
+| `markupReferencedNames` (route-inference) | is this fn referenced from markup | 2 — `<each>` opener (#688), `<match on=fn()>` |
+| DG consumption-credit | is this cell consumed | **3-4** — Peter's route, independent |
+| synth-key resolution | which flat key a dotted read means | **5 copies**, two of them DIVERGENT |
+| `<each>` lift machinery | which carriers reach `eachBlockFromMarkupNode` | **5** |
+| VP-1 `walkFileAst` | attribute validation reach | **1 of 5** carriers reached |
+
+**pa-base: repeated review, same class → CONVERGE, do not enumerate.** `g-chunk-reachability-is-approximated-not-computed`
+(HIGH, #698) is the first arc filed against this; the others are filed individually and cross-linked.
+⚑ **Peter reached the same conclusion from a different direction the same day** and said so:
+*"the right fix is likely to converge the reader sweep … not a 4th patch — your architectural call."*
+
+---
+
+## 🧷 WHAT LANDED (6 PRs)
+
+`#689` the stranded S371 wrap, as inherited · `#690` review floor **11 → 0** + a HIGH ·
+`#691` the render-slot trace + 3 defects · `#692` the fourth-copy defect + the S239 blocker routed as
+a ruling · `#698` **the chunk-reachability ARC** (bryan-ruled) · `#704` **the §55 synth-toggle fix**.
+
+**⭐ #704's headline, MEASURED: `examples/30-validated-form.scrml:136` — `<p if=@signup.submitted>Account
+created.</p>` — had NEVER RENDERED, in any build ever shipped, at exit 0.** Corpus differential: exactly
+**1 changed artifact of 7388**, six rounds running, same head hash.
+
+---
+
+## 🔭 DURABLE FINDINGS — method, not defects
+
+### A. A gate over a value needs the value's TYPE — and the type is never recoverable from the syntax of the read
+Five build rounds on #704, and **three of the four rule-shape errors were MINE, not the dispatch's**:
+`scalar only` (talked down on a narrow fixture) → `tail === ""` (too loose) → `scalar tail` (wrong in a
+third way). Not the leaf name, not the declaration form, not the presence of a tail, not
+key-registration alone. **The dispatch measured its way to a better rule than I specified, every time.**
+The two derived discriminators are the durable output: compound-parent is `<prefix>.submitted ∈ keys`;
+field-vs-nested-compound is `<prefix>.<seg>.errors ∈ keys AND <prefix>.<seg>.submitted ∉ keys`.
+
+### B. Vary the declaration form before concluding
+A "base is a dead page anyway" premise, measured on a **markup-typed** field (`= <input/>`), did NOT
+hold for a **literal-init** one (`= ""`) — where base is CORRECT and collapsing regresses it. I
+verified the narrow reading myself and approved a deviation on it; the next adversarial pass caught it.
+Same shape as the S368 miss (one comment position, generalised).
+
+### C. A normative SHALL that was never implemented
+`render-expansion` / `renderExpansion` / `inlinedChildren` — **zero source hits** across `compiler/src`,
+`native-parser`, `scripts`, `stdlib`. SPEC §16.8.1's mechanism does not exist; CE implements a
+different, UNDOCUMENTED splice. **Rule-4 item for the operator:** amend §16.8.1/§16.8.2 to describe what
+CE does, or rebuild CE around the specified node.
+
+### D. Our own e2e tier looked at the flagship and called it green
+`renders-empty` is in `GREEN_STATES` and there is no partial-emptiness detector, so a page whose every
+card is empty records `renders-clean`. **The §8 hollow gate in its nastiest form — the gate is not
+broken, its answer is TRUE, it is just not an answer to the question being asked.** Operational teeth:
+the render-slot fix's regression test CANNOT be an e2e-render-map cell.
+
+---
+
+## ⚑ MISSES (mine)
+
+1. **★ Three of four rule-shape instructions on #704 were the imprecise part.** See finding A.
+2. **★ I approved a deviation on a fixture I had verified too narrowly.** See finding B. My own
+   verification was the thing that was insufficient — not the agent's flagging, which was honest.
+3. **★ I could not reproduce the each-alias HIGH across three fixtures and routed it
+   RELAYED-UNVERIFIED with code-level corroboration. The agent reproduced it.** Correct handling —
+   had I dismissed it on my own failure to reproduce, a real defect would have shipped inside a branch
+   bryan had just approved. **Failing to reproduce is not evidence of absence.**
+4. **★ My ad-hoc gap-count greps disagreed with `state.ts` and I nearly reported a discrepancy that
+   did not exist** — adjacent-attribute grep, blind to multi-line markers and to non-`open` statuses
+   the parser counts. **Quote the `@generated` block, never a hand grep.**
+5. **★ A missing-symbol detector of mine over-reported NINE symbols where the truth was ONE** —
+   it searched only the runtime chunk, not the client bundle, matched a double-underscore name inside a
+   single-underscore pattern, and ignored `typeof` guards. Caught before it reached a filing.
+6. **★ zsh did not word-split a file list** (again — the recorded lesson), and a `cd` into
+   `scrml-support` persisted so a later `git rev-parse HEAD` answered about the wrong repo.
+7. **★ A commit hook timed out at 8m20s** and I verified git STATE rather than the exit code — it had
+   committed cleanly. The recorded rule held.
+
+---
+
+## 🧷 STATE
+
+- **main** `8b2e4053` at wrap-cut (Peter's #705); my six PRs merged; coherence 0/0.
+- **Gaps: HIGH 55 · MED 171 · LOW 74 · Nominal 7.**
+- **Debts:** review floor **0 OWED at drain** (the wrap PR is the inherent next-boot tail) ·
+  dPA 0 unrun / 0 advisory · issue-debt 0 · corpus-zero 0.
+- **Concurrent:** Peter LIVE across S372/373/374-peter, landing continuously (#693–#705).
+  **Collision check run before every action — all six of my dispatches' compiler paths CLEAR.**
+  ⚑ The each-alias brief's ban on `ast-builder.js`, written for an unrelated reason, is what kept it
+  off a real collision with Peter's #697.
+- ⚑ **`strict:true` cost two rebases.** Peter's cadence wins the race; **arm `--auto` on a PR rather
+  than hand-racing the merge.**
+- ⚑ **`delta-lint --fix` was deliberately NOT used** on two sequence collisions with Peter — it
+  renumbers the wrong side on a merge (first-in-file order is blind to which side is published).
+  Renumbered by hand both times.
+- **Worktrees:** see 6b in the changelog block; the two agent worktrees holding unlanded work are RETAINED.
+- ⚑ **WRAP 6c — MAPS REFRESH DISPATCHED AND STILL IN FLIGHT AT WRAP-CUT; DELIBERATELY NOT COMMITTED.**
+  The mapper had bumped line 3 to `8b2e4053` while line 4 still read `generated-at: b9e97f1b` — a
+  self-contradicting watermark, which is precisely what the MAP-STAMP RULE exists to prevent. I
+  unstaged rather than ship it. The stamp SHA it chose IS a valid ancestor of `origin/main`
+  (verified). **Next session: let it finish, or take the `cloud-maps` scheduled refresh, then commit
+  `.claude/maps/` with an EXPLICIT pathspec.** The maps are ~5 code landings behind (#697 #699 #700
+  #703 #704). ⚑ **Two ROUTING HOLES were named in the dispatch and are worth confirming landed:** no
+  Task-Shape row for `if=`/`show=` lowering or `emit-event-wiring.ts`, and none for
+  `eachBlockFromMarkupNode` / the lift-vs-structural `<each>` split — **both reported independently by
+  two dispatches this session**, which is what makes them measured rather than speculative.
+- **Mechanical stream:** delta-log `[1771]`–`[1773]`, `[1783]`–`[1786]`. Do not re-derive from this
+  hand-off what the delta-log and changelog carry.
+- ⚠️ `scripts/ruling-debt.ts` **still not on `origin/main`** — fourth session running. The instrument
+  for undelivered rulings remains itself undelivered, and this session carried FOUR owed rulings.
+
 
 # scrml — Session 374 (peter · P-Tech1 Windows) — WRAP
 
