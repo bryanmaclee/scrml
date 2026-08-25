@@ -1774,6 +1774,21 @@ export function rewriteBlockBody(
   // client-only `_scrml_reactive_get("cell")`. Defaults to "client" so every
   // existing caller (event wiring, variant guards) is unaffected.
   mode: "client" | "server" = "client",
+  // g-when-handler-multistatement-body-loses-ast-path-lowerings (S374) — OPT-IN
+  // AST-path lowering. When a caller passes a full `EmitExprContext` here, each
+  // statement's expression is parsed to an ExprNode and lowered via
+  // `emitExprField(node, …, astExprCtx)` — the AST path — so `emitMember`'s
+  // interceptions (`@m.insert`→`_scrml_map_insert`, `@s.add`, `<#req>` refs,
+  // `?{}` SQL, synth-cell reads) fire. The default STRING fallback
+  // (`rewriteExprWithDerived`) does NOT do member interception, so a
+  // when-handler body routed through this fn used to mis-lower those forms
+  // (regression introduced by #693/#695, which moved when-handler bodies onto
+  // this path). Absent → byte-identical to the prior behaviour for every
+  // existing caller (event wiring, match arms, each-handlers, variant guards).
+  // Gated to CLIENT mode: the real class (when-effect / when-worker) is
+  // client-side; server-boundary bodies keep the existing rewriteServerExpr
+  // path unchanged (no new server emission).
+  astExprCtx?: EmitExprContext | null,
 ): string {
   // C5 (R27): split block-body statements on top-level `;` / newline, but the
   // scanner MUST be STRING-LITERAL-AWARE — a `;` (or `\n`) INSIDE a `"..."` /
@@ -1827,6 +1842,36 @@ export function rewriteBlockBody(
     ...(engineCtx?.exprCtxExtras ?? {}),
   };
 
+  // g-when-handler-multistatement-body-loses-ast-path-lowerings (S374) — lower a
+  // raw expression string via the best available path. When `astExprCtx` is
+  // present AND we are in client mode, parse the string to an ExprNode and route
+  // it through the AST path (`emitExpr` via `emitExprField`) so member
+  // interception fires; if the string is not a single parseable expression (a
+  // control statement, or a shape `shouldSkipExprParse` rejects), the parser
+  // returns an escape-hatch node and we fall back to the STRING path — with the
+  // full ctx, so `derivedNames` / `synthCellKeys` still apply. Absent → the
+  // original string-only behaviour.
+  const useAstPath = astExprCtx != null && astExprCtx.mode !== "server";
+  const lowerExpr = (raw: string): string => {
+    if (useAstPath) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { safeParseExprToNodeGlobal } = require("../ast-builder.js") as {
+        safeParseExprToNodeGlobal: (
+          expr: string,
+          filePath: string,
+          startOffset: number,
+          errors?: unknown,
+        ) => { kind?: string } | undefined;
+      };
+      const node = safeParseExprToNodeGlobal(raw, "<when-handler-body>", 0, undefined);
+      if (node && node.kind !== "escape-hatch") {
+        return emitExprField(node as Parameters<typeof emitExprField>[0], raw, astExprCtx as EmitExprContext);
+      }
+      return emitExprField(null, raw, astExprCtx as EmitExprContext);
+    }
+    return emitExprField(null, raw, exprCtx);
+  };
+
   const results: string[] = [];
   for (const stmt of stmts) {
     const reactiveAssignMatch = stmt.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)\s*([\s\S]+)$/);
@@ -1858,7 +1903,7 @@ export function rewriteBlockBody(
         results.push(emitEngineWriteGuard(engineBinding, valueExpr, hist.isHistoryForm).join("\n"));
         continue;
       }
-      const valueExpr = emitExprField(null, rawRhs, exprCtx);
+      const valueExpr = lowerExpr(rawRhs);
       const binding = machineBindings?.get(name) ?? null;
       if (binding) {
         // §51.5: Emit transition guard instead of plain reactive_set for machine-bound vars
@@ -1875,7 +1920,7 @@ export function rewriteBlockBody(
         results.push(`_scrml_reactive_set("${name}", ${valueExpr})`);
       }
     } else {
-      results.push(emitExprField(null, stmt, exprCtx));
+      results.push(lowerExpr(stmt));
     }
   }
   return results.join("; ");

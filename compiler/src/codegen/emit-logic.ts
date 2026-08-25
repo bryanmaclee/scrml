@@ -3809,7 +3809,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // through rewriteBlockBody's multi-statement lowering so every statement runs when
       // the dependency changes. `bodyRaw` carries faithful, parser-derived statement
       // boundaries and is comment-free (ast-builder drops COMMENT tokens).
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client");
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", _makeExprCtx(opts));
       return `_scrml_effect(function() { ${body}; });`;
     }
 
@@ -3828,7 +3828,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // call sites, this passes a null engine/machine ctx — an engine/machine-bound
       // `@cell` write inside a worker handler is not routed through the transition
       // guard (a narrow shared limitation, not specific to this path).
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client");
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", _makeExprCtx(opts));
       return `${workerVar}.onmessage = function(event) { const ${binding} = event.data; ${body}; };`;
     }
 
@@ -3838,7 +3838,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // through rewriteBlockBody so a >1-statement error handler is not truncated.
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client");
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", _makeExprCtx(opts));
       return `${workerVar}.onerror = function(${binding}) { ${body}; };`;
     }
 

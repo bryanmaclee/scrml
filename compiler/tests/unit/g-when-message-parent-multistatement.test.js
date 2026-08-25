@@ -100,8 +100,11 @@ describe("g-when-message-parent-handler-drops-all-but-the-first-statement (§4.1
     const { clientJs, errors } = compileToClient(src);
     expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     const body = onmessageBody(clientJs);
-    expect(body).toContain("x :");
-    expect(body).toContain("y :");
+    // Both object fields survive (S374: the when-body now lowers via the AST path,
+    // which emits `x: m` — standard spacing — vs the prior string path's `x : m`;
+    // the guard is field-presence, not colon spacing).
+    expect(body).toMatch(/x\s*:\s*m/);
+    expect(body).toMatch(/y\s*:\s*m/);
     expect(body).not.toMatch(/reactive_set\("cfg",\s*\{\s*\}\s*\)/); // not the empty-object regression
   });
 
