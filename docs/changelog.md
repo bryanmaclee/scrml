@@ -6504,8 +6504,10 @@ because its defects turned out to be one class rather than four bugs.
   session IDs rather than blocks — the real number was 2. Rode along: the SPEC-INDEX §17 row gained
   the §17.1.2 pointers it had never carried, and the review floor drained **2 → 0** with #707 recorded
   `verdict=clean` **reviewed by execution**.
-- **`#711` — the each-alias ledger.** 10 gap entries, 2 new §34 rows (`E-EACH-AS-ALIAS-INVALID`, owed
-  since round 3 and never written; `E-EACH-OPENER-IF-EMPTY`), and 2 fire-site amendments. Includes a
+- **`#711` — the each-alias ledger.** 10 gap entries. The 2 §34 rows were **deferred, not landed**:
+  the cloud §34.0 row-provenance gate failed correctly because they named symbols living only on the
+  parked branch — a §34 code lands WITH its impl, and a provenance note pointing at a function nobody
+  can find reads as a verified fire-site. Row text preserved on the parked branch. Includes a
   self-correction: one entry had been authored from a branch measurement and filed as truth about
   main, caught by re-verifying every entry against main before merge.
 - **The four carried operator rulings, taken in one turn.** The `<db>`/state-block locus refuses

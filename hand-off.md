@@ -87,10 +87,20 @@ into the comment fix.**
 
 | | state |
 |---|---|
-| **#711** ledger + 2 §34 rows + 2 fire-site amendments | rebased onto #710; **gate FAILED then re-run — CHECK IT.** Unit 17,859/0 and conformance 1,567/0 pass locally; `snippet-gate` and `facts --check` exit 0 locally; `types-gate` is inconclusive locally (no `tsc`). |
+| **#711** ledger — 10 gap entries. **The 2 §34 rows were DEFERRED, not landed.** | The cloud **§34.0 row-provenance gate** (`s34-census.ts --check-new`) failed correctly: my rows named `validateEachAlias` / `refuseEmptyOpenerIf` / `refuseItemScopedOpenerIf`, symbols that exist ONLY on the parked branch. I had authored §34 rows for an implementation that is not on main — the same class as the ledger entry I corrected earlier, and against the project's own "a §34 code lands WITH its impl" rule. SPEC.md reverted; every gate the cloud runs now exits 0 locally. **Row text is preserved in the parked branch's `progress.md`** and lands whenever the arc resumes. |
 | **#708** `scripts/ctx.ts` | `gate`+`windows` green, **HELD unreviewed** — deliberately, because its numbers now underwrite a ratified contract rule, which is the operator's own "still in question" carve-out |
 | ruling-1 build | held pending §1 above |
 | each-alias | parked, §2 above |
+
+
+
+### 5. ⚑ THE §34 GATE CAUGHT ME, AND IT IS WORTH KNOWING IT EXISTS
+
+`scripts/s34-census.ts --check-new` enforces that **a provenance note SHALL RESOLVE** — every
+backticked repo path must exist and every named symbol must appear in executable source. It failed
+this session's PR, correctly, because I wrote §34 rows for a parked implementation. **A note pointing
+at a function nobody can find is worse than no note: it reads as a verified fire-site.** If you park
+an arc, park its §34 rows with it.
 
 ---
 
