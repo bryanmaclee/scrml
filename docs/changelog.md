@@ -2,6 +2,32 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S374 — 2026-08-24 (peter · P-Tech1 Windows) — the deferred g-when arc: when-handler bodies lower via the AST path
+
+The meatiest g-when arc, deliberately deferred at S372/S373 as the highest-blast-radius of the set, built
+and landed on Peter's directive ("then arc g-when"). It also turned into a clean demonstration of the
+adversarial-review discipline catching a regression the fix itself introduced.
+
+- **#703 — `g-when-handler-multistatement-body-loses-ast-path-lowerings` (MED) resolved.** A value-native
+  map/set method (`@m.insert`, `@s.add`), a `<#request>` ref, or a `?{}` SQL param inside a `when @var
+  changes` / `when message|error from <#w>` handler mis-lowered: #693/#695 moved these bodies onto
+  `rewriteBlockBody`, whose per-statement RHS used the string fallback (no member interception), so
+  `@fareByLane = @fareByLane.insert(k, v)` emitted a bare `.insert(` on the raw map object — a runtime
+  TypeError — instead of `_scrml_map_insert(...)`. Fix: an **opt-in AST-path** in `rewriteBlockBody`
+  (parse each statement to a node, lower via `emitExpr`/`emitMember`); the three when-emit sites opt in,
+  and every other caller of the shared function is byte-identical.
+- **The mandatory S239 review caught a silent-wrong in the fix itself.** The AST path drops the raw text
+  when a node is present, so a partial parse (`foo(1) bar(2)` on one line) silently dropped the second
+  expression — the exact silent-statement-drop class this arc exists to close. A full-consumption guard
+  now falls back to the string path (a loud error, never a silent drop); a stranded-`await` hazard in the
+  non-async effect/worker wrappers was foreclosed with `clientAsyncBody:false`. Both invariants are locked
+  by biting merge-blocker tests.
+- Suite on the landed state: **unit 17834 / 0**; full unit+integration+conformance **22818 pass / 99 skip
+  / 6 fail** — the 6 are pre-existing integration flakies (auth / self-host / csrf family, unchanged from
+  the boot baseline; none touch the changed codegen surface). The #703 cloud `gate`
+  (unit+conformance+gauntlet) was GREEN. tsc-clean on every edited line (baseline unchanged); FACTS
+  regenerated per-PR.
+
 ## S373 — 2026-08-24 (peter · P-Tech1 Windows) — drain continued: three silent-wrong bugs off the board, and the filed root was wrong twice
 
 A DRAIN session on Peter's directive ("#1, then the 3 g-when arcs, then drain"). **Three fixes landed

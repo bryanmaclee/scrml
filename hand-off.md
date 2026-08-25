@@ -1,18 +1,76 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S368-bryan.        -->
-<!--   S368-bryan (below) — 7 PRs landed. FOUR operator rulings are   -->
-<!--     owed and were DELIBERATELY carried (bryan: "we will take     -->
-<!--     these Qs next session"). Read PICKUP §1 first.               -->
-<!--   S370/S369-peter (next blocks) — the peter lane, concurrent.    -->
-<!--   S365-bryan — older bryan block; its 4 decisions are now 2      -->
-<!--     (dpa-036 ratified S365; raw-egress is in flight at r9).      -->
-<!-- Mechanical stream: delta-log [1718]-[1725].                      -->
+<!-- hand-off.md — live session state. WRAPPED at S374-peter.        -->
+<!--   S374-peter (TOP block) — ARC #1 LANDED: #703 the deferred       -->
+<!--     g-when AST-path lowering (MED). S239 caught a silent-wrong     -->
+<!--     the fix introduced (guarded). Read PICKUP §1. [1780]-[1782].  -->
+<!--   S373-peter — DRAIN: 3 resolved (#697 else-arm HIGH · #699        -->
+<!--     component-prop · #700 navigate-chunk) + #701 drain (floor→0).  -->
 <!--   S372-peter — the drain-mode pivot: 1 HIGH landed (#693).         -->
-<!--   S373-peter (TOP block) — DRAIN continued: 3 more resolved (#697   -->
-<!--     else-arm HIGH · #699 component-prop MED · #700 navigate-chunk    -->
-<!--     MED) + #701 drain (floor 11→0). ARC #1 (multistatement AST-path) -->
-<!--     DEFERRED — read PICKUP §1. Mechanical stream [1770]-[1776].      -->
+<!--   S368-bryan — 7 PRs landed; FOUR operator rulings owed (carried). -->
+<!--   S365-bryan — older; 4 decisions now 2 (raw-egress in flight r9). -->
 <!-- ============================================================= -->
+
+# scrml — Session 374 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-24. Booted `/boot` Profile A, SOLO (predecessor S373-peter wrapped; no live sibling
+at boot). Peter's directive: **"then arc g-when."** Built + landed the one deferred g-when arc, end-to-end.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ✅ ARC #1 DONE — the g-when set is now fully drained on the Peter side
+`g-when-handler-multistatement-body-loses-ast-path-lowerings` (MED) **RESOLVED (#703, `574af206`)** —
+the last of the g-when follow-ons deferred at S372/S373. `rewriteBlockBody` gained an opt-in `astExprCtx`;
+when-handler statements lower via the AST path (map/set/request/dbVar/synth interception). Fix verified
+LIVE on merged main. Nothing g-when remains in the Peter lane.
+
+### 2. PETER-LANE follow-ons still OPEN (buildable next, or dog-food)
+- `g-worker-handler-in-component-bodyraw-reconstruction-offset-sensitive` (MED) — pre-existing LOUD
+  E-CODEGEN-INVALID-LOGIC; blocked #699's end-to-end tests (S373 §3).
+- `g-when-handler-body-invisible-to-preemit-chunk-detection` (LOW) + the `usage-analyzer.ts` FeatureUsage
+  **dead-code** cleanup (wire-up-or-delete) — S373 §3.
+- The durable alternative: **dog-food a fresh adopter app** in happy-dom (beats mining the ledger —
+  [[feedback-dogfooding-beats-mining-the-ledger]]). S372/S373 fresh finds all came from RUNNING code.
+
+### 3. ROUTED TO BRYAN — still awaiting his rip (scrml-support inbox)
+- `g-match-else-arm-object-literal-decl-and-typer-newly-accepting` (from #697, S373) — turnkey inbox note.
+- Prior peter→bryan routes: S361 security ×2 · S364 markup-interp · S370 auto-await · S372 DG cry-wolf.
+
+### 4. TOOLING follow-on (filed as a friction, candidate fix)
+`types-gate.ts` `resolveTsc()` hard-codes `.bin/tsc` (Unix-only) → the gate `exit(2)`s on this Windows
+clone even after `bun install` (bun installs `tsc.exe`/`tsc.bunx`). Non-blocking (cloud gate runs no tsc).
+Fix = try `.bin/tsc.exe`/`.bin/tsc.bunx` on win32. Delta-log [1782] carries the manual workaround command.
+
+## 🧷 WHAT LANDED (S374-peter) — 1 code PR + this wrap
+- **#703** `g-when-handler-multistatement-body-loses-ast-path-lowerings` (MED) RESOLVED. Opt-in AST-path
+  lowering in `rewriteBlockBody`; three when-emit sites pass `_makeExprCtx(opts)`; every existing caller
+  byte-identical. **S239 caught a real silent-wrong in the fix** — a partial parse (`foo(1) bar(2)`)
+  dropped the 2nd expr silently → full-consumption guard added (loud fallback, never silent). Plus a
+  `clientAsyncBody:false` sync-wrapper defense (latent stranded-`await`). Biting 6 cases. Unit 17834/0.
+
+## ⚑ MISSES / lessons (S374)
+- **★ The S239 pass caught a silent-wrong I INTRODUCED** — the AST path's `emitExprField(node, raw)`
+  ignores `raw`, so a partial parse silently drops trailing tokens. Reproduce-each-finding (not relay)
+  confirmed #2 by execution and *falsified* #1 (no `await` emitted today). [[feedback-verify-the-bug-class-not-just-reported-instance]] [[feedback-gap-report-fix-direction-can-be-wrong]]
+- **★ types-gate is Windows-broken** — a local always-on gate that can't run on this clone. Worked around
+  by hand; verified zero new tsc diagnostics on the edited lines. [[feedback-run-facts-check-before-push]]
+
+## 🧷 STATE (S374 close)
+- **main** `574af206` (#703 squash); coherence 0/0; both repos clean; feature branch deleted (local+remote).
+- **Suite:** #703 cloud-`gate` GREEN (`windows` also green, `tracking` red = known non-required). Unit
+  **17834/0**; full unit+integration+conformance **22818 pass / 99 skip / 6 fail** — the 6 are pre-existing
+  integration flakies (auth/self-host/csrf family, unchanged from boot baseline; none in the changed
+  codegen surface, and the cloud gate that binds the merge was green).
+- **Gaps:** 1 resolved (#703). `state.ts` refuses locally (Windows ` · ` parse) → cloud-maps.yml
+  regenerates the `@generated` counts post-merge (NOT in the required gate) — trust the post-merge regen.
+- **Review floor:** recorded my **#701/#702** (docs carve-outs) + **#703** (finding — self-reviewed via
+  `/code-review high`). ⚠️ **#698** (bryan chunk-reachability) + **#704** (bryan §55 synth) merged during
+  my session and are OWED — **bryan-lane**, left for his boot to state/record.
+- **Sibling:** bryan was active (merged #698 + #704 under me). Re-check `user-voice-scrml.md` for any NEW
+  rulings at next boot (I absorbed through the S372 each-alias entry).
+- **Board:** S374-peter → WRAPPED.
+- **Maps:** surgical codegen edits (rewriteBlockBody + 3 when-sites), no new modules/entrypoints → maps unchanged.
 
 # scrml — Session 373 (peter · P-Tech1 Windows) — WRAP
 
