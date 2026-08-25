@@ -1,13 +1,18 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED —
-# SECOND consecutive window.** `codegen/emit-server.ts`, `commands/select-request-onion.js`,
-# `protect-analyzer.ts`, `auth-graph.ts`, `compiler/runtime/stdlib/{auth,oauth,crypto}` and `lsp/`
-# are all `--name-only` **EMPTY**. Two source files moved in the whole window and neither is auth.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED —
+# THIRD consecutive window.** Re-measured at THIS watermark, not carried:
+# `git diff --name-only b9e97f1b..8b2e4053 -- compiler/src/codegen/emit-server.ts
+# compiler/src/protect-analyzer.ts compiler/src/auth-graph.ts
+# compiler/src/commands/select-request-onion.js compiler/runtime/stdlib/ lsp/` is **EMPTY**. Seven
+# `compiler/src` files moved in the window (`ast-builder.js`, `component-expander.ts`, and five under
+# `codegen/`) and **not one is on the auth surface**; the window is entirely §55 `if=` toggle
+# lowering, §18 match arms, and §4.12.4 when-handler bodies.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.
 # The prior pass RE-WALKED this map after a ten-window streak and found the request pipeline had
 # moved hard; that content is one window old and carries in full.** Ancestry CHECKED (invariant 48);

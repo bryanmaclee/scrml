@@ -1,12 +1,14 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
-# `.github/` is `--name-only` **EMPTY** over the window: no workflow, job, secret, runner or
-# required check moved.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED.**
+# Re-measured at THIS watermark: `.github/` is `--name-only` **EMPTY** over the window — no
+# workflow, job, secret, runner or required check moved. No `Dockerfile`, no `docker-compose.*`,
+# no `*.tf` and no `k8s/` path exists in the repo at this watermark either.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **CURRENCY RE-VERIFIED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676).** Ancestry
 # CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source
 # diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).

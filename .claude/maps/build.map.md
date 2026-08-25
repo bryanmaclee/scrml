@@ -1,14 +1,18 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
-# `.github/`, `package.json`, `Makefile`, `Dockerfile`, `scripts/` are ALL `--name-only` **EMPTY**
-# over the window. `gate` stays at 13 steps, every command below is unchanged, and no CI stage
-# moved. ⚠ **The pre-land codegen gate still is not in CI** — see the `corpus-emit-differential`
-# section; #688 records having run it by hand (0 of 7,388 artifacts changed) exactly as that section requires — **that figure is #688's in-source claim, not a this-pass measurement**.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED.**
+# Re-measured at THIS watermark: `.github/`, `package.json`, `bun.lock`, `Makefile`, `Dockerfile`
+# and `scripts/` are ALL `--name-only` **EMPTY** over the window. `gate` stays at 13 steps, every
+# command below is unchanged, and no CI stage, secret or required check moved.
+# ⚠ **The pre-land codegen gate still is not in CI** — see the `corpus-emit-differential` section.
+# #704 records running it by hand for FIVE rounds, each time exit 1 (VALID) with **exactly 1 changed
+# artifact of 7,388** and the same head hash `da8a859c` — **that is #704's own commit-message claim,
+# NOT a this-pass measurement**; the gate remains hand-run and unenforced.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan S368,
 # peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an

@@ -1,12 +1,121 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# generated-at: b9e97f1b (the watermark IS `origin/main` and IS the working tip).
-# **INCREMENTAL over `728bdc92` -> `b9e97f1b` (S371-bryan). SOURCE WINDOW = TWO FILES, one of them
-# COMMENT-ONLY.** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check passes.
-# scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, PLUS
-# the two carried route-inference findings re-verified BY READING THE FILE AT THIS HEAD.
-## Summary — S371 pass (this pass)
+# generated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# generated-at: f536d35e on `wrap/s372-bryan` (the watermark `8b2e4053` is `merge-base HEAD
+# origin/main`; the commits above it are docs-only, so the source diff is EMPTY).
+# **INCREMENTAL over `b9e97f1b` -> `8b2e4053` (S372-bryan). SOURCE WINDOW = SEVEN FILES, ALL
+# LOWERINGS.** Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check passes.
+# scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, with
+# every LIVE finding REPRODUCED BY COMPILING or by grepping source at this watermark — not relayed.
+## Summary — S372 pass (this pass)
+
+**SEVEN findings (N25-N31). ALL SEVEN ARE LIVE.** Docs scanned: the maps themselves plus the
+`docs/` surface this window's diff could have falsified. **The headline is that THREE separate
+derived artifacts each outlived the code they described, and one of them is `compiler/SPEC.md`.**
+
+⚑ **METHOD NOTE, AND IT IS THE POINT OF THE PASS: every finding below was REPRODUCED, not relayed.**
+Two of the three source-contradiction findings were caught only because a claim was COMPILED rather
+than read. See the S347 memory *"Relayed premises fail ~1 in 3"* — this pass measured 3 of 3 on the
+claims it chose to execute.
+
+---
+
+**N25 — LIVE, AND IT IS THE SPEC ITSELF: `compiler/SPEC.md:11686` ASSERTS A BEHAVIOUR THE COMPILER
+NO LONGER HAS.** §17.1.2.3's position table says a markup `if=` on a NON-ROOT element inside an
+`<each>` row template *"emits nothing — fails **CLOSED** (never renders)"*. **PA-REPRODUCED at this
+watermark by compiling** `<each in=@rows><li><span if=@.ok>YES</span><b>${@.name}</b></li></each>`:
+the emitted client JS contains `if (_scrml_each_item.ok) _scrml_frag_3.appendChild(_scrml_el_4);` —
+a real **create-time append gate** — and the compile emits `W-IF-IN-EACH`. So it RENDERS correctly at
+row build and then goes STALE on a same-key reconcile; it does not "emit nothing" and does not "never
+render". The row is marked *measured S302* and was overtaken by **#416 / GH adopter #409**, which
+landed both the gate and the warning, and was never updated.
+**Reason:** grep-mismatch / stale-measurement.
+**Why it matters more than a prose slip:** the SPEC table is the natural scoping artifact for anyone
+fixing `g-structural-if-inside-each-row-template-fails-open`, and it would send them to build a gate
+that already exists while mischaracterising the failure mode of the position next to it.
+**Suggested disposition:** update `compiler/SPEC.md:11686` to the measured behaviour (create-time
+gate + `W-IF-IN-EACH`, renders-then-stale) — **operator-owned, this is a SPEC edit.** The corrected
+table with the executed evidence is in domain.map.md §17.1.2; error.map.md's new "A PREDICATE WITH NO
+DIAGNOSTIC" section and primary.map.md Task-Shape Routing row 3 both warn against scoping from it.
+
+**N26 — LIVE, IN THE GAP LEDGER: `docs/known-gaps.md:2561` POINTS AT A LINE 142 AWAY FROM THE CODE.**
+`g-else-if-dotted-cell-ref-emits-unregistered-flat-key` (MED, open, #692) carries
+`locus=compiler/src/codegen/emit-event-wiring.ts:647(computeChainBranchCondition's condition.name
+branch …)`. **Verified at this watermark:** `computeChainBranchCondition` is at **`:750`** and its
+`condition.name` arm at **`:789-791`**; `:647` lands inside `computeDisplayToggleCondition`'s
+always-truthy-gate block, a different function. **Mechanism: #704 inserted 192 lines ABOVE it**, and
+the locus was recorded before that landed. **This is the same failure that cost three sessions at
+S369-S371** (`g-usage-analyzer-…`, N19) — a `locus=` that reads authoritative and is not.
+**Reason:** stale-locus after an unrelated insertion.
+**Suggested disposition:** correct the `locus=` to `:789`; **and consider whether a `locus=` should
+carry a SYMBOL rather than a line number**, since a line number is invalidated by any edit above it
+while `computeChainBranchCondition`'s `condition.name` arm is stable. Recorded in the maps as
+dependencies.map.md's §55 SYNTH-KEY RULE table + primary.map.md routing row 1, both of which name the
+symbol and flag the stale figure.
+
+**N27 — CORRECTED THIS PASS (MAP -> SOURCE DRIFT, INHERITED): FIVE LINE REFS IN
+dependencies.map.md's `ifRaw`/`ifCond` TABLE WERE WRONG.** Verified against source at this watermark
+and corrected in place: `captureStructuralIfAttr` `:2705` -> **`:2731`**; `structuralHeaderAnchor`
+`:2797` -> **`:2823`**; `emitGatedStructural` `:1498` -> **`:1516`**; `emitIfMountGate` `:1421` ->
+**`:1439`**; `isGateableIfValue` `:1472` -> **`:1490`**; the `E-IF-IN-DISPATCHED-ARM` guard `:1508` ->
+**`:1526`**; `stripSourceTextFromValue` `:1681` -> **`:1611`**. And `visitStructuralIfAttr` was cited
+at `:12688`, which is **neither** its definition (`type-system.ts:13190`) nor either call site
+(`:12721`, `:12811`). `creditFromAttrValue` `:2559` was the only one still correct.
+**Reason:** map-to-source drift across windows that did not re-walk this section.
+**Suggested disposition:** DONE — corrected in dependencies.map.md this pass. ⚑ **The transferable
+observation: a table of line numbers is a maintenance liability that no test covers.** Seven of eight
+refs in one table had rotted. Prefer `symbol` + `file`, and treat a bare `:NNNN` as a hint.
+
+**N28 — CORRECTED THIS PASS (MAP CONTRADICTED ITSELF, WHILE CLAIMING TO HAVE BEEN VERIFIED):
+primary.map.md PUBLISHED THREE FIGURES THAT ITS OWN OTHER SECTIONS CONTRADICTED.**
+  · The "Derived-figure authority" section said *"Re-read at this HEAD, not carried:"* and then gave
+    `244,112` lines / `1,386` test files — where `docs/FACTS.md` at `b9e97f1b` read **`244,175` /
+    `1,387`**, which is exactly what its own Fingerprint block twelve lines above said.
+  · The diagnostic-lookup routing row said the census *"re-executed at this HEAD … returns **810
+    rows** (+1: `E-MW-007`)"* — while error.map.md AND this file's own Map Index row both said **812**.
+  · A Key Fact repeated `809 -> 810, E-MW-007`.
+**Reason:** a carried S368 figure surviving a pass that had already corrected it elsewhere in the
+same file. **Suggested disposition:** DONE — all three corrected by EXECUTION at this watermark
+(`244,774` / `1,394`; census re-run: **812 rows**, STRUCK 34 · PINNED 343 · IMPL-SITES 302 ·
+DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112). ⚑ **An internal contradiction inside ONE
+map is the cheapest available tell that a "re-read" was a carry — diff a map against itself.**
+
+**N29 — CORRECTED THIS PASS: test.map.md's "338 PINNED at this HEAD" IS WRONG, AND SO IS THE
+IMPLICATION THAT `--full` DISAGREES WITH THE PLAIN CENSUS.** `bun scripts/s34-census.ts` and
+`bun scripts/s34-census.ts --full` were BOTH executed at this watermark and BOTH return **PINNED
+343**. The map's phrasing invited a reader to believe the two modes compute different pinned sets.
+**Reason:** stale figure + a misleading framing. **Suggested disposition:** DONE — corrected in
+test.map.md, with the equality between the two modes stated explicitly. Its category sum was also
+re-counted recursively (`908+213+133+95+14+14+11+4+2 = 1,394`, agreeing exactly with FACTS.md).
+
+**N30 — LIVE, AND IT IS THE MAP SET'S OWN OMISSION: TWO ROUTING HOLES WERE REPORTED INDEPENDENTLY BY
+TWO SEPARATE DISPATCHES ON THE SAME DAY.** (a) No Task-Shape Routing row for `if=`/`show=` lowering
+and none naming `codegen/emit-event-wiring.ts` for that concern — the file appeared in exactly ONE
+row, about module-init ownership — **while four defects landed on it in this one window** (#704 plus
+the three-defect §55 arc it closed). (b) No row for `eachBlockFromMarkupNode` or the lift-vs-structural
+`<each>` split, which appeared **nowhere in the map set at all** while producing multiple dead-page
+defects this session. **Two independent reports of the same absence is measurement, not opinion.**
+**Reason:** structural — a routing table built by walking what CHANGED grows no row for a DISTINCTION,
+because nothing "changes" at a fork; and it grows no row for a surface whose defects are silent.
+**Suggested disposition:** DONE — Task-Shape Routing rows 1-3 added, invariants 69 + 70 added, with
+supporting sections in dependencies.map.md (§55 SYNTH-KEY RULE), domain.map.md (§55 collapse matrix),
+structure.map.md (six file entries) and error.map.md (the no-diagnostic class). ⚑ **Carried forward as
+a standing check: after each window, ask which FORKS the window's defects turned on, not just which
+FILES changed.**
+
+**N31 — LIVE, IN SOURCE, UNCHANGED FROM LAST WINDOW AND RE-VERIFIED: `route-inference.ts:4959-4962`
+STILL CITES `:5201` AND `:6233` WHERE THE CONSUMERS ARE `:5210` AND `:6242`.** Both still **9 lines
+short** at this watermark (`markupReferencedNames.has(_fnNameForMarkup)` is at `:5210`;
+`markupReferencedNames.has(nm) || exportedFnNames.has(nm)` inside the `clientRootIds` build is at
+`:6242`, with `const clientRootIds` at `:6240`). This was filed last pass as N20 and **nothing has
+moved on it** — `route-inference.ts` is `--name-only` EMPTY this window, so no touch has come along
+to carry the fix. **Reason:** in-source comment drift.
+**Suggested disposition:** correct on the next touch of the file; the comment's CLAIM is right and
+load-bearing (invariant 68) — do not delete it. Recorded again so nothing re-publishes the figures.
+
+---
+
+## Summary — S371 pass (PRIOR pass — carried for provenance)
 
 **SIX findings (N19-N24). FIVE ARE LIVE. The headline is not a doc: it is that a
 DIAGNOSTIC'S LOCUS WAS WRONG IN THE LEDGER FOR THREE SESSIONS AND THE MAP SET HAD NOTHING TO
@@ -567,8 +676,8 @@ its output.** Routed to the PA; nothing here is a repo edit.
 
 Recorded here rather than fixed silently, because the corrections ARE findings.
 
-> **The table below is the PRIOR pass's correction ledger, retained because each rule it produced is
-> still the rule.** This pass's own corrections are the four rows appended at the bottom.
+> **The table below is the PRIOR passes' correction ledger, retained because each rule it produced is
+> still the rule.** **This pass's (S372) corrections are the rows appended at the very bottom.**
 
 | Map claim (prior generation) | Truth at `4f034e13` |
 |---|---|
@@ -595,40 +704,44 @@ Recorded here rather than fixed silently, because the corrections ARE findings.
 | **THIS PASS (S368-wrap) —** primary.map.md's routing row for `reset(@cell)` returning a Promise read *"OPEN, HIGH, not built"* | **FIXED at #662 (`5639cd0a`)** — `_scrml_reset_apply` (`runtime-template.js:1179`), both re-invocation paths. **Rule produced: a routing row carrying a STATUS is a currency liability in a way a row carrying only a LOCATION is not.** (N16) |
 | **THIS PASS (S368-wrap) —** the map set had NO routing row, and no mention anywhere, for `liftBareDeclarations` / the §40.8 auto-lift surface | **THREE HIGH defects of one class landed there in one session** and `§40.8` appeared in primary.map.md only under `keep-alive` and the one-onion rule. **Rule produced: a routing table built by walking what CHANGED will never grow a row for a surface whose defects are all SILENT — nothing changed there, because nothing was fixed there.** Now Task-Shape Routing row 1 + invariant 64. (N18) |
 | **THIS PASS (S368-wrap) —** counts across the map set: 242,954 lines / 190 files / 1,378 tests / 37,298 SPEC / 810 §34 codes | **244,112 / 191 / 1,386 / 37,539 / 812**, each re-derived (FACTS.md + a recursive `find` + a re-executed `s34-census.ts`). Conformance FLAT at **883** for the fourth window. |
+| **THIS PASS (S372) —** `compiler/SPEC.md:11686` (§17.1.2.3) states a markup `if=` on a NON-ROOT element inside an `<each>` row template *"emits nothing — fails CLOSED (never renders)"* | **FALSE at this watermark. PA-REPRODUCED by compiling:** it emits a create-time append gate (`if (_scrml_each_item.ok) frag.appendChild(el)`) and fires `W-IF-IN-EACH` — it renders, then goes STALE. Measured-S302, overtaken by #416/GH #409, never updated. **Rule produced: a SPEC table marked "measured" carries a DATE, and the code can move under it — a measurement is a snapshot, not a normative claim.** (N25) |
+| **THIS PASS (S372) —** `docs/known-gaps.md:2561` locus `emit-event-wiring.ts:647` for `g-else-if-dotted-cell-ref-emits-unregistered-flat-key` | **142 lines off** — `computeChainBranchCondition` is at `:750`, its `condition.name` arm at `:789`; `:647` is inside a DIFFERENT function. #704 inserted 192 lines above it. **Rule produced: a `locus=` should name a SYMBOL, not a line — a line number is invalidated by any edit above it.** (N26) |
+| **THIS PASS (S372) —** dependencies.map.md's `ifRaw`/`ifCond` table: `captureStructuralIfAttr :2705` · `structuralHeaderAnchor :2797` · `visitStructuralIfAttr :12688` · `emitGatedStructural :1498` · `emitIfMountGate :1421` · `isGateableIfValue :1472` · dispatched-arm guard `:1508` · `stripSourceTextFromValue :1681` | **SEVEN OF EIGHT WRONG.** Truth: `:2731` · `:2823` · def `:13190` (calls `:12721`/`:12811`) · `:1516` · `:1439` · `:1490` · `:1526` · `:1611`. Only `creditFromAttrValue :2559` survived. **Rule produced: a table of bare line numbers is a maintenance liability no test covers.** (N27) |
+| **THIS PASS (S372) —** primary.map.md's "Derived-figure authority" said *"Re-read at this HEAD, not carried"* and gave `244,112` / `1,386`; its routing row said the census returns `810 rows` | **Its OWN Fingerprint block said `244,175` / `1,387`, and its OWN Map Index row said `812`.** An internal contradiction inside one file. Corrected by execution: **`244,774` / `1,394` / `812`**. **Rule produced: diff a map against ITSELF — a self-contradiction is the cheapest tell that a "re-read" was a carry.** (N28) |
+| **THIS PASS (S372) —** test.map.md's "338 PINNED at this HEAD", phrased as what `--full` computes | **343**, and `--full` and the plain census return the SAME number — the two modes have never disagreed. Category sum also re-counted recursively to `908+213+133+95+14+14+11+4+2 = 1,394`, agreeing exactly with FACTS.md. (N29) |
+| **THIS PASS (S372) —** the map set had NO routing row for `if=`/`show=` LOWERING (and named `emit-event-wiring.ts` only for module-init), and NONE for `eachBlockFromMarkupNode` / the lift-vs-structural `<each>` split | **Both holes reported INDEPENDENTLY by two dispatches on the same day.** Four defects landed on `emit-event-wiring.ts` in this one window; the each split produced multiple dead pages. **Rule produced: a routing table built by walking what CHANGED grows no row for a DISTINCTION — nothing "changes" at a fork. After each window, ask which FORKS the defects turned on, not just which FILES moved.** (N30) |
 
 ---
 
 ## Aspirational / archival content — NO new mislocation this window
 
-**RE-DERIVED AT THIS HEAD: `git diff --name-status c93a692c..c96e7012 -- '*.md' | grep '^A'` outside `archive/`, `handOffs/` and `docs/changes/` returns NOTHING.** Across 111 commits this window added **zero** new `.md` files to `docs/` or the repo root — every added doc is a rotated hand-off, a `docs/changes/<id>/` dispatch record, or an archive entry. `docs/audits/` still holds **20** files, all dated 2026-05 to 2026-07, all carried from prior passes; **the location finding on that directory is UNCHANGED, not re-litigated** — deep-dives, debates, ADRs and gauntlet reports belong in `scrml-support`, and `docs/audits/` is the standing exception the PA has chosen not to move. No new doc crossed the line this window.
+**RE-DERIVED AT THIS WATERMARK:** `git diff --name-status b9e97f1b..8b2e4053 -- '*.md' | grep '^A'`
+returns exactly **five** new markdown files and **every one of them is under `docs/changes/`**, which
+is the archived-dispatch-artifact convention (S133/S135 — every `isolation:worktree` dispatch archives
+its prompt verbatim as `BRIEF.md`), i.e. out of scope by design:
 
-**No new mislocation finding.** The window's added `.md` files partition cleanly:
+    docs/changes/if-attr-per-field-synth-crash-2026-08-24/{BRIEF.md, progress.md}
+    docs/changes/render-snippet-slot-trace-2026-08-24/{BRIEF.md, TRACE.md, progress.md}
 
-| Added | Kind | Verdict |
-|---|---|---|
-| `docs/changes/{census-crossos-separator-fix, compilescrml-input-order-canonical, derived-transitive-r4, derived-transitive-r5, derived-transitive-r6, dev-compile-throw-fail-closed, flagship-hos-hermetic, gate-boot-listener-fix, gate-each-multiroot-image-debug, issue-debt-probe, maps-refresh-s341, pgnotify-listen-case-split, tool-import-prune-2026-08-11}/` (BRIEF/progress/FINDINGS/WORK-ORDER) | dispatch briefs + logs, archived at dispatch time per the standing convention | correctly located |
-| `handOffs/hand-off-s343-bryan.md`, `handOffs/incoming/…` (3 files, one a pure rename) | rotated hand-offs + cross-clone inbox | correctly located; OUT OF SCOPE by the standing exclusion |
+**Filtering out `archive/`, `handOffs/` and `docs/changes/` leaves ZERO added `.md` files.** No
+deep-dive, ADR, debate, gauntlet report, spec draft, proposal or planning doc was added to this repo
+this window. `docs/deep-dives/`, `docs/adrs/`, `docs/debates/`, `docs/gauntlets/` and `docs/research/`
+do not exist here — that content lives in `scrml-support`, and the separation held.
 
-⚠ **Two of those `docs/changes/` ids describe work NOT LANDED at this watermark, and that is
-CORRECT for a BRIEF but worth stating so nobody maps it as shipped:**
-`dev-compile-throw-fail-closed/` is PR #539 (in flight — dev.js throw-path fail-close, dir watches,
-debounce, `ctimeMs`), and `compilescrml-input-order-canonical/` is the OPEN
-`g-compilescrml-input-order-dependent-emission` fix (HIGH). The name/content heuristics must not
-fire inside `docs/changes/` — that directory's contract is "record of a decision process" — but a
-READER must also not cite a BRIEF as evidence of a landing. The landed/not-landed authority is git.
+⚠ **THE ONE THING WORTH SAYING ABOUT THE `docs/changes/` ARTIFACTS: they are DISPATCH-TIME snapshots
+and several of them are ALREADY superseded by the commits they produced.** `if-attr-per-field-synth-
+crash-2026-08-24/progress.md` (+484 lines) records a premise — *per-field `.errors` collapse is safe
+because the base is a dead page there* — that #704's own final commit message **retracts**, because it
+was measured on one field-declaration form. **A `docs/changes/*` artifact is EVIDENCE OF A PROCESS,
+never a statement of current behaviour.** Do not scope from one; scope from source at a watermark.
+**Suggested disposition: none — leave them in place. They are correctly located and correctly
+historical.** This note exists so a future reader does not mistake one for a spec.
 
-**No `docs/deep-dives/`, `docs/adrs/`, `docs/debates/`, `docs/gauntlets/` or `docs/research/`
-directory exists in this repo** — re-verified this pass; the location heuristic has nothing to fire
-on, which is the correct steady state.
+## Uncertain — needs human review (both carried; existence RE-VERIFIED at this watermark, content unchanged)
 
-Carried nuance, still true: `docs/changes/**` may contain live `.scrml`/`.ts` evidence files
-(this window adds `flagship-hos-hermetic/repro/compile-hos.ts` and
-`pgnotify-listen-case-split/repro/ordersFeed.scrml`). They are evidence, not samples, and stay
-outside the compile gate.
-
----
-
-## Uncertain — needs human review (both carried, both unchanged)
+⚠ **All seven filenames in the first entry and `docs/website/` were confirmed to still EXIST at
+`8b2e4053`** — an "uncertain" entry that silently outlives its subject is worse than no entry, so the
+check is cheap and is now run each pass. **Neither entry was touched by this window's diff.**
 
 ### `docs/language-inspiration-audit-2026-06-06.md`, `docs/lin.md`, `docs/external-js.md`, root `gaunt.md` / `DESIGN.md` / `NERDME.md` / `scrmlFormula.md`
 **Reason uncertain:** each mixes durable design rationale with dated status claims, and the mix is
@@ -640,8 +753,9 @@ window** — none was touched by the diff.
 
 ### `docs/website/`
 **Reason uncertain:** a published surface with its own currency contract, not re-walked here.
-**What to check:** whether the website's feature claims track the §34 catalog's movement (**now
-807 → 809**) and the two still-open server-only-leak positions. **A public page asserting that the
+**What to check:** whether the website's feature claims track the §34 catalog (**FLAT at 812 at this
+watermark, re-censused not carried; this line read `807 → 809` and was two windows stale**) and the
+two still-open server-only-leak positions. **A public page asserting that the
 compiler prevents server-only code from reaching the browser would be over-claiming** — the guarantee
 holds for functions and for derived cells (**and, only since #500 this window, for derived cells at
 any depth**), and does NOT hold for a mutable-cell initialiser or a markup interpolation.
@@ -657,21 +771,30 @@ every gate this repo runs. The question is no longer "does the marketing oversta
 
 ## Map currency at this stamp
 
-**EVERY stamp is `b9e97f1b`, which IS `origin/main` — trivially an ancestor.** Verified at WRITE
-time: `git merge-base HEAD origin/main` -> `b9e97f1b`; the source diff against it is EMPTY;
-`git merge-base --is-ancestor b9e97f1b origin/main` exits 0; and `bun scripts/state.ts --check`
-prints **`maps: current`** (it printed `maps: 112 commits behind` at the start of the S368 pass).
+**EVERY stamp is `8b2e4053` — the `merge-base HEAD origin/main` at WRITE time, NOT the tip.**
+Verified at write time: the source diff `8b2e4053..HEAD` is EMPTY (the three commits above it are
+docs-only) and `git merge-base --is-ancestor 8b2e4053 origin/main` exits 0.
+⚠ **`origin/main` ADVANCED DURING THIS PASS** — from `8b2e4053` to `c9a33bfd`, a docs-only
+squash-merge of what had been the working tip minutes earlier. **The stamp is the SHA the source was
+actually verified against, not the newest one visible**; stamping `c9a33bfd` would have claimed a
+verification that never happened. `bun scripts/state.ts --check` printed
+`maps: 3 commits behind HEAD (watermark 8b2e4053, HEAD f536d35e)  [WARN-only — not gated]` during the
+pass — **a real number, which is itself the news**: an orphaned stamp makes that check print NOTHING,
+silently. It still **exits 0**.
 
 | Map | Stamp | Re-walked this pass? | Evidence |
 |---|---|---|---|
-| primary · structure · error · test · non-compliance | `b9e97f1b` | **yes — targeted** | the routing gap (N19) + the chunk-pruning finding (N21); source claims re-verified BY EXECUTION, not by reading |
-| dependencies | `b9e97f1b` | no — **zero-diff measured** | `package.json` / `bun.lock` `--name-only` EMPTY; `grep -cE '^[+-]import '` over the `route-inference.ts` diff returns 0 |
-| schema | `b9e97f1b` | no — **zero-diff measured** | `compiler/src/types/`, `*.d.ts`, `schema*`, `*.proto`, `*.graphql`, `compiler/SPEC.md` all `--name-only` EMPTY |
-| domain | `b9e97f1b` | no — **zero-diff measured** + one in-place gap-ID correction (N24) | `compiler/SPEC.md` `--name-only` EMPTY |
-| build · infra | `b9e97f1b` | no — **zero-diff measured** | `.github/`, `package.json`, `Makefile`, `Dockerfile`, `scripts/` all `--name-only` EMPTY |
-| config | `b9e97f1b` | no — **zero-diff measured** | `process.env`/`Bun.env` grep over the whole window's diff returns 0 |
-| auth | `b9e97f1b` | no — **zero-diff measured**, second consecutive window | whole auth surface `--name-only` EMPTY |
-| migrations | `b9e97f1b` | no — **zero-diff measured**, thirteenth consecutive window | no migration/schema/DB path in the window |
+| primary · structure · dependencies · domain · test · error · non-compliance | `8b2e4053` | **yes — targeted** | the two independently-reported routing holes (N30) + the SPEC contradiction (N25) + the stale-locus finding (N26); source surface = seven lowering files |
+| schema | `8b2e4053` | **yes — header re-walked, body zero-diff measured** | `compiler/src/types/` `--name-only` EMPTY for the THIRTEENTH window; the window's only two new exported symbols are FUNCTIONS, not types (`resolveSynthCellPrefix`, `_objectLiteralArmFromStructuredBody`) — verified by `grep -E 'export (interface\|type) '` over the whole `+` side, which returns nothing |
+| build | `8b2e4053` | no — **zero-diff RE-MEASURED** | `.github/`, `package.json`, `bun.lock`, `Makefile`, `Dockerfile`, `scripts/` ALL `--name-only` EMPTY |
+| infra | `8b2e4053` | no — **zero-diff RE-MEASURED** | `.github/` `--name-only` EMPTY; no Dockerfile / compose / `*.tf` / `k8s/` exists in the repo |
+| config | `8b2e4053` | no — **zero-diff RE-MEASURED** | `grep -cE '^[+-].*(process\.env\|Bun\.env)'` over the whole window's diff returns **0**; `.env*` / `bunfig.toml` / `tsconfig*` / `package.json` / `bun.lock` EMPTY |
+| auth | `8b2e4053` | no — **zero-diff RE-MEASURED**, third consecutive window | `emit-server.ts`, `select-request-onion.js`, `protect-analyzer.ts`, `auth-graph.ts`, `compiler/runtime/stdlib/`, `lsp/` all `--name-only` EMPTY — seven source files moved, not one on the auth surface |
+| migrations | `8b2e4053` | no — **zero-diff RE-MEASURED**, fourteenth consecutive window | `git diff --name-only -- '*migrat*' '*schema*'` returns only the two `.claude/maps/` files themselves |
+
+⚠ **EVERY "zero-diff measured" ROW ABOVE WAS RE-RUN AT THIS WATERMARK, NOT COPIED FROM LAST PASS** —
+which is exactly the discipline N28 shows was missing when a "Re-read at this HEAD" line published
+carried figures.
 
 ⚠ **THE S368 WARNING STILL APPLIES AND IS WHY THE TABLE ABOVE NAMES A SURFACE PER ROW:** a zero-diff
 proof of the surface you habitually check does not cover a claim you made about a DIFFERENT surface.
@@ -726,7 +849,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
+#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness

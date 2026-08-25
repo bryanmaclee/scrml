@@ -1,14 +1,31 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
-# `compiler/src/types/`, `*.d.ts`, `schema*`, `*.proto`, `*.graphql` and `compiler/SPEC.md` are all
-# `--name-only` **EMPTY** over the window. The only source files that moved are
-# `route-inference.ts` (+53, no type declarations added — the change is one walker block over
-# `Record<string, unknown>` field reads) and a comment block in `codegen/emit-each.ts`.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED.**
+# Re-measured at THIS watermark: `compiler/src/types/`, `*.d.ts`, `schema*`, `*.proto`, `*.graphql`
+# and `compiler/SPEC.md` are all `--name-only` **EMPTY** over the window —
+# **`compiler/src/types/` is now ZERO-DIFF FOR THE THIRTEENTH CONSECUTIVE WINDOW.**
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# ⚑ **SEVEN `compiler/src` FILES MOVED AND THE EXPORTED-TYPE SURFACE STILL DID NOT.** The window
+# added exactly TWO exported symbols and **both are FUNCTIONS, not types** —
+# `git diff b9e97f1b..8b2e4053 -- compiler/src/ | grep '^+' | grep -E 'export (interface|type) '`
+# is EMPTY, while `grep -E 'export (function|const|class)'` returns:
+#   · `resolveSynthCellPrefix(segments, synthCellKeys) -> {dotted, tail} | null`
+#     (`codegen/emit-expr.ts:1032`, #704) — the §55 synth-key collapse rule, exported so the
+#     `if=`/`show=` toggle lowering in `emit-event-wiring.ts` stops carrying its own copy.
+#   · `_objectLiteralArmFromStructuredBody(structuredBody) -> string | null`
+#     (`codegen/emit-logic.ts`, #697) — the §18 object-vs-block arm classifier, exported so the
+#     inline and block arm forms share one predicate.
+# **Neither introduces a SHAPE.** `resolveSynthCellPrefix`'s return object is an inline structural
+# literal with no named interface, and the §55 synth-cell KEY SET it consults (`synthCellKeys:
+# Set<string>`) is a flat dotted-string set, not a typed record — so there is no §55 "synth surface"
+# type to map here. ⚠ **That is worth knowing before you go looking for one:** the shape facts about
+# §55 cells (which are scalars, which are object maps) are enforced by MEMBERSHIP TESTS over that
+# string set, not by the type system — see domain.map.md's §55 collapse matrix.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676) — the streak of
 # currency-only passes is BROKEN, because a shape landed.** Ancestry CHECKED (invariant 48);
 # outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source diff `merge-base..HEAD`
@@ -414,7 +431,7 @@ rather than closed it.** build.map.md · test.map.md.
 changed what the compiler can SAY, not what it accepts.
 
 ## Tags
-#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main
+#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced
 
 ## Links
 - [primary.map.md](./primary.map.md)

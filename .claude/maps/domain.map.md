@@ -1,15 +1,31 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED —
-# with ONE in-place correction applied.** `compiler/SPEC.md` is `--name-only` EMPTY (zero SPEC delta
-# this window), so every §-anchored claim below holds. The correction: the still-open each-interp
-# residual is `g-each-inline-value-form-match-or-markup-branch-interp-dropped` — this map carried
-# the S369 ID (`g-each-inline-value-form-match-interp-dropped`), which the ledger has since
-# widened to cover the MARKUP-valued `if` branch as well.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: `compiler/SPEC.md` IS `--name-only` EMPTY FOR THE SECOND CONSECUTIVE WINDOW
+# (37,539 lines, unchanged), so every §-anchored claim below still ANCHORS — but TWO in-place
+# corrections and ONE new section landed, because the CODE moved under three §-surfaces.**
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# **CORRECTION 1 (§17.1.2.3) — THIS MAP CARRIED A SPEC TABLE ROW THAT IS FALSE AT THIS WATERMARK,
+# AND SO DOES THE SPEC.** The row *"markup `if=` on a NON-ROOT element inside a row template — emits
+# nothing, fails CLOSED (never renders)"* is measured-S302 and was overtaken by #416/GH #409.
+# **PA-REPRODUCED HERE BY COMPILING:** it emits a real create-time append gate
+# (`if (_scrml_each_item.ok) _scrml_frag_3.appendChild(_scrml_el_4);`) plus a `W-IF-IN-EACH`
+# warning. Corrected in the table below with the executed evidence; **`compiler/SPEC.md:11686` still
+# carries the stale row** and is flagged in `non-compliance.report.md`.
+#
+# **CORRECTION 2 (§17.2) — `show=` ON A STRUCTURAL ELEMENT IS NOT MERELY UNWIRED, IT IS NEVER
+# CAPTURED.** `grep -rn showCond compiler/src/` returns **ZERO hits** at this watermark: only
+# `ifCond` is stamped onto an `<each>`/`<match>`/`<engine>` node (`ast-builder.js:15892`, `:16891`,
+# `:17932`, `:18082`), so there is no field for a `show=` gate to read. That is stronger than
+# "silently dropped" and it tells you where the fix starts.
+#
+# **NEW SECTION — the §55 synth-surface COLLAPSE MATRIX (#704).** Four spellings, four different
+# lowerings, two of them deliberately DECLINED pending an operator ruling. PA-MEASURED by compiling
+# at this watermark, not read off the commit message.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
 # S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
@@ -681,18 +697,27 @@ Neither carries independent state, so the distinction is vacuous for them.
 **PROHIBITION 3 — a structural `if=` INSIDE an `<each>` row template is NOT honored and fails OPEN
 (§17.1.2.3).** Four positions, and markup vs structural fail in OPPOSITE directions:
 
-| position | behaviour |
-|---|---|
-| structural element in ordinary markup | gated correctly, reactively — the §17.1.2 surface |
-| markup `if=` on the ROW-ROOT of an `<each>` row | gated correctly (`_scrml_ifrow_apply`) |
-| markup `if=` on a NON-ROOT element inside a row template | emits nothing — fails **CLOSED** (never renders) |
-| **structural `if=` inside a row template** | emits nothing — fails **OPEN** (**never gated**) |
+| position | behaviour | measured how |
+|---|---|---|
+| structural element in ordinary markup | gated correctly, reactively — the §17.1.2 surface | S302 |
+| markup `if=` on the ROW-ROOT of an `<each>` row | gated correctly + REACTIVE (`_scrml_ifrow_apply`, `emit-each.ts:1271`) — element⇄comment swap in place | S302 / source at this watermark |
+| markup `if=` on a NON-ROOT element inside a row template | ⚠ **CORRECTED S372 — the SPEC row is STALE.** It does NOT emit nothing: it emits a **create-time append gate** (`emit-each.ts:1313`, `if (cond) frag.appendChild(el)`) and warns `W-IF-IN-EACH`. So it RENDERS correctly at row-build and then goes **STALE** — never re-added/removed on a same-key reconcile | **PA-REPRODUCED at `8b2e4053` by compiling**: emitted `if (_scrml_each_item.ok) _scrml_frag_3.appendChild(_scrml_el_4);` + the `W-IF-IN-EACH` warning |
+| **structural `if=` inside a row template** | emits nothing — fails **OPEN** (**never gated**) | **PA-REPRODUCED at `8b2e4053`**: `<each in=@.tags if=@shown>` inside an `<each>` row emitted the inner list with **zero references to `shown`** in the row render path, exit 0, zero diagnostics, `@shown = false` |
 
-A fail-CLOSED miss is loud: the author sees content missing immediately. A fail-OPEN miss silently
-ships content the author wrote a predicate to withhold, and is invisible during development whenever
-that predicate is usually true. Inherited from §17.1's row-template lowering, NOT introduced by the
-widening; the durable fix is ONE diagnostic covering both positions
-(`g-structural-if-inside-each-row-template-fails-open`).
+**The two failure directions are still opposite, and that is still the point — but the loud one is
+now a WARNING, not an absence.** A fail-OPEN miss silently ships content the author wrote a predicate
+to withhold, and is invisible during development whenever that predicate is usually true; nothing
+warns on it. Inherited from §17.1's row-template lowering, NOT introduced by the widening; the
+durable fix is ONE diagnostic covering both positions
+(`g-structural-if-inside-each-row-template-fails-open`, MED, open).
+
+**AND `show=` NEVER GETS THAT FAR.** §17.1.2.2 says `else-if=` and `show=` on a structural element
+are "silently dropped". **Measured at this watermark the mechanism is upstream of emission:
+`showCond` does not exist anywhere in `compiler/src/`.** The ast-builder stamps only
+`ifRaw`/`ifCond` onto `<match>` (`ast-builder.js:15892`, `:18082`), `<each>` (`:16891`) and
+`<engine>` (`:17932`), and `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and
+nothing else. A `show=` on a structural opener is discarded at AST-build, so the fix starts at
+capture, not at emit (`g-structural-element-if-chain-and-show-composition-nominal`, MED, open).
 
 **PROHIBITION 4 — `E-IF-IN-DISPATCHED-ARM` still guards ARM BODIES, and the guard must be reverted
 as a UNIT, not eroded.** An `if=` INSIDE a dispatched arm (a `<match>` block-form arm, an `<engine>`
@@ -740,6 +765,84 @@ Widening to the shared parent instead would re-bind SIBLING wiring that was neve
 (a TreeWalker excludes its own root) — so `_scrml_remount_each` cannot see a TOP-LEVEL fence at all.
 That is why `_scrml_remount_each_fence` (:1639) exists as a separate lookup: same
 `_scrml_each_renderers` registry, same idempotence, different reach.
+
+## §55 — the synth-surface COLLAPSE MATRIX for `if=`/`show=` (NEW section, S372, #704)
+
+**The flagship's success confirmation had never rendered, in any build ever shipped, at exit 0.**
+`examples/30-validated-form.scrml:136` is `<p … if=@signup.submitted>Account created.</p>`. Two
+spellings of ONE predicate lowered two different ways, because
+`computeDisplayToggleCondition`'s `varName`+`dotPath` branch consulted nothing while its `condExpr`
+sibling three lines away already threaded `synthCellKeys`:
+
+```
+if=(@signup.isValid)   ->  _scrml_reactive_get("signup.isValid")    correct
+if=@signup.isValid     ->  _scrml_reactive_get("signup").isValid    wrong
+```
+
+**Corpus blast radius, from #704's own five-round measurement: exactly 1 changed artifact of 7,388.**
+
+**THE SHAPE FACT THAT MAKES THIS A MATRIX AND NOT A ONE-LINER: §55 does not give every synth cell a
+scalar.** The compound-level `errors` and `touched` rollups are derived OBJECT MAPS keyed by field
+name, and an object literal is **always truthy** — so collapsing them would take a gate that read
+`undefined` (never mounts) to one that is unconditionally true, rendering a pristine form's error
+block at boot. Their value spaces differ too: `errors` maps field → **array** (`[]`, truthy),
+`touched` maps field → **boolean** (scalar). ⚑ **§6.11's table says `touched` is `boolean` and
+`errors` is `string[]`; the implementation disagrees, and PRIMER §13.7 B11 records the object-map
+shape as INTENTIONAL** — a non-blocking spec-prose drift for a separate amendment, not a bug to
+"fix" at the lowering.
+
+**PA-MEASURED at `8b2e4053`** by compiling a `<signup><name req length(>=2)> = ""</signup>` form and
+reading the emitted client JS (the prefix is the chunk-scoped `_scrml_cs_*` alias):
+
+| source | emitted | verdict |
+|---|---|---|
+| `if=@signup.submitted` | `_scrml_cs_reactive_get("signup.submitted")` | **COLLAPSED** — the #704 fix; compound-level scalar |
+| `if=(@signup.isValid)` | `_scrml_cs_reactive_get("signup.isValid")` | collapsed (was already correct via the `condExpr` branch) |
+| `if=@signup.name.isValid` | `_scrml_cs_reactive_get("signup.name.isValid")` | **COLLAPSED** — per-field scalar |
+| `if=@signup.touched.name` | `_scrml_cs_reactive_get("signup.touched").name` | **COLLAPSED to the rollup + scalar tail** — a field-key tail off `touched` is a plain boolean |
+| `if=@signup.errors` | `_scrml_cs_reactive_get("signup").errors` | **DECLINED** — rollup map, always truthy |
+| `if=@signup.touched` | `_scrml_cs_reactive_get("signup").touched` | **DECLINED** — rollup map, always truthy |
+
+**THE TWO DECLINED ROWS ARE RULING-GATED, NOT UNFINISHED.** Truthiness over a §55 rollup map or a
+per-field error ARRAY is *meaningless*; which of {always-true, never-true, diagnose,
+`?.`-on-declined-path-only} is right is an **operator ruling**, and the lowering declines to invent
+one. They are byte-identical to pre-#704 main. `g-if-attr-per-field-synth-cell-crashes-boot` is
+`status=ruling-gated`, **not** `resolved`.
+
+⚠ **RESIDUAL, NAMED NOT BURIED: `if=@field.errors` on a MARKUP-TYPED field is STILL a dead page** —
+the compound value is `{name: null}`, the 3-level read dereferences null, and the `TypeError` lands
+inside `_scrml_nav_rewire` under `_scrml_boot`, so **every `${…}` interpolation on the page never
+wires**. A test pins `ctl === ""` so it flips loudly when the ruling closes it.
+
+⚑ **THE METHOD LESSON IS WORTH MORE THAN THE MATRIX, AND IT COST FOUR ROUNDS.** Two review rounds
+justified collapsing per-field `.errors` on "base is a DEAD PAGE there, so there is no working
+behaviour to preserve." That premise was measured on ONE field-declaration form. Vary it and the
+premise evaporates: `<name req length(>=2)> = <input type="text"/>` (markup-typed) gives a compound
+value of `{name: null}` → crash; `<name req length(>=2)> = ""` (literal-init) gives `{name: ""}` →
+merely `undefined`, no crash, gate correctly false. **Fatal→wrong on one declaration form does not
+license correct→wrong on another.** The through-line, in #704's own words: *a gate over a value needs
+the value's TYPE, and the type is never recoverable from the syntax of the read* — not from the leaf
+name, not from the declaration form, not from the presence of a tail, and not from key-registration
+alone. See feedback memory "Decl form in reproducers" (S96): mixing declaration forms is how a bug
+stops reproducing.
+
+**How the gate avoids a second hand-maintained list (invariant 65):** `collectSynthCellKeys`
+(**`codegen/reactive-deps.ts:1287`** — NOT in `emit-synth-surface.ts`, where a reader looks first) gives a
+compound parent FOUR keys (errors/isValid/touched/submitted) and a field child THREE (no `submitted`
+— §55.7). So `<prefix>.submitted ∈ synthCellKeys` **IS** the compound-parent test, and `seg` names a
+FIELD iff `<prefix>.<seg>.errors ∈ keys` AND `<prefix>.<seg>.submitted ∉ keys`. Both terms are
+required: a NESTED COMPOUND also gets `<compound>.<nested>.errors` registered, but the compound-level
+rollup keys only `fieldChildren` (`emit-synth-surface.ts:220-232`, which EXCLUDES compound-typed
+children), so a nested-compound tail is `undefined` — a correct false gate, exactly where collapsing
+IS right. Gate and outcome read the same artifact, so they cannot drift.
+
+⚠ **THE EMITTED KEY IS PLAIN, NOT `encode()`d, AND THE REASON IS NOT THE OBVIOUS ONE.** The
+membership test runs on the plain `varName`+`dotPath`, so it still hits under a chunk encoding
+context. What makes the plain key correct is that `encode()` is a pass-through for unregistered names
+and only TOP-LEVEL state-decl names are ever registered — **a dotted synth key never is.** If dotted
+keys are ever registered, this site and `emitMember` must start encoding **together**, or the two
+spellings diverge again. See dependencies.map.md's §55 SYNTH-KEY RULE table (five copies, two
+resolution orders) and primary.map.md Task-Shape Routing row 1.
 
 ## Runtime-chunk tree-shaking — a two-phase decision (§47.5, GH #234 / Bug 57 / GITI-036 class)
 
@@ -1926,7 +2029,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main
+#scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main #section-55 #synth-surface #collapse-matrix #ruling-gated #rollup-map-truthiness #declaration-form-premise #section-17-1-2-3 #fail-open #show-cond-absent #structural-if-row-template #spec-stale-table
 
 ## Links
 - [primary.map.md](./primary.map.md)

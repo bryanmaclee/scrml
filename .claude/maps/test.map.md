@@ -1,13 +1,48 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# generated-at: b9e97f1b (the watermark IS `origin/main` and IS the working tip).
-# **INCREMENTAL over `728bdc92` -> `b9e97f1b` (S371-bryan).** Ancestry CHECKED (invariant 48);
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# generated-at: f536d35e on `wrap/s372-bryan` (the watermark `8b2e4053` is `merge-base HEAD
+# origin/main`; the commits above it are docs-only, so the source diff is EMPTY).
+# **INCREMENTAL over `b9e97f1b` -> `8b2e4053` (S372-bryan).** Ancestry CHECKED (invariant 48);
 # outbound MAP-STAMP check run at WRITE time.
 #
-# **+1 test file, ZERO deleted — 1,386 -> 1,387** (`docs/FACTS.md` at this watermark). The new file
-# is `compiler/tests/unit/wdead-each-opener-expr-reachability.test.js` (#688). Conformance corpus
-# **FLAT at 883 for the FIFTH window running**. §34 **FLAT at 812** (`compiler/SPEC.md` untouched).
+# **+7 test files, ZERO deleted — 1,387 -> 1,394** (`docs/FACTS.md` at this watermark, and the
+# recursive filesystem count agrees exactly). Conformance corpus **FLAT at 883 for the SIXTH window
+# running**. §34 **FLAT at 812** — `compiler/SPEC.md` is `--name-only` EMPTY and **zero new
+# diagnostic codes landed**, re-verified by scanning the whole window's diff for added `"[EWI]-…"`
+# tokens (returns nothing).
+#
+# ⚠ **CORRECTION TO THIS MAP'S OWN NUMBER: the "338 PINNED at this HEAD" below is STALE.**
+# `bun scripts/s34-census.ts` RE-EXECUTED at this watermark returns **PINNED 343**, and `--full`
+# returns the same 343 — so the two modes do NOT disagree and never did. Full buckets at this
+# watermark: STRUCK 34 · PINNED 343 · IMPL-SITES 302 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 ·
+# FALSE-CLAIM 112. ⚠ And `filesScanned` reads **1958** here vs 1950 last window — that figure walks
+# ten directory roots ON DISK, so it counts gitignored build output and **is not a repo fact**.
+#
+# ─── THE SEVEN NEW FILES, AND ALL SEVEN ARE `g-`-NAMED REGRESSION PINS ON THIS WINDOW'S LOWERINGS ───
+#
+# Category split: **6 unit, 1 browser** — and the tier matters (see the merge-gate note below;
+# `.git/hooks/pre-commit` runs unit + integration + conformance + root `*.test.js`, and
+# `compiler/tests/browser/` **is not in that set**).
+#   · `unit/g-if-attr-synth-toggle-lowering.test.js` (#704) — the §55 `if=` collapse/decline matrix.
+#     **PA-EXECUTED at this watermark: 26 pass / 0 fail / 74 expect() calls in 373ms.** Its fixture is
+#     PARAMETERISED ON THE FIELD DECLARATION FORM, which is the whole point: the four-round review
+#     failure was a premise measured on ONE declaration form (markup-typed) and generalised.
+#   · `browser/g-if-attr-synth-cell-toggle.browser.test.js` (#704, +564 lines) — the executed half.
+#   · `unit/g-library-fn-match-else-arm-object-literal.test.js` (#697) — 8 cases, BOTH emitted-shape
+#     and executed-runtime halves.
+#   · `unit/g-when-handler-astpath-lowering.test.js` (#703) — map insert in a when-effect and a
+#     when-worker-message, set add, plus a plain-arithmetic regression guard.
+#   · `unit/g-when-handler-navigate-chunk-prune.test.js` (#700) — **BITE-PROVEN by stashing the fix:
+#     3 fail pre-fix.** Asserts `utilities` is PRUNED pre-fix / PRESENT post-fix, single-stmt +
+#     multi-stmt + `when message from <#w>` + a no-over-inclusion negative.
+#   · `unit/g-when-message-parent-multistatement.test.js` (#693/#695).
+#   · `unit/g-component-prop-worker-handler.test.js` (#699).
+#
+# ⚑ **ONE OF THEM CHANGED AN ASSERTION STYLE FOR A REASON WORTH KNOWING.** #703 made the existing
+# g-when-message §4 assertion **colon-spacing-agnostic**: the AST path emits `x: m` where the string
+# path emitted `x : m`. **The guard is FIELD PRESENCE, not byte layout** — an assertion that pins
+# incidental whitespace fails on a correct re-routing and teaches nothing.
 #
 # ⚑ **THE ONE THING TO READ IN THIS MAP THIS PASS IS THE NEW SECTION "WHICH RUNTIME EACH TIER
 # ACTUALLY EXECUTES".** The conformance (b) half runs the FULL `SCRML_RUNTIME` monolith, not the
@@ -22,7 +57,8 @@
 # header wrote *"The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level = 1378."*
 # **That arithmetic gives 1,344, not 1,378** — a 34-file shortfall stated as a verification. Every
 # category below was RE-COUNTED RECURSIVELY at this watermark and the sum is now checked by
-# execution: **901+213+133+94+14+14+11+4+2 = 1,386.** ⚠ **The likely cause is the counting method,
+# execution: **901+213+133+94+14+14+11+4+2 = 1,386** (S371 figures; **RE-COUNTED at `8b2e4053`:
+# 908+213+133+95+14+14+11+4+2 = 1,394**). ⚠ **The likely cause is the counting method,
 # not a typo: several categories hold `*.test.js` files in SUBDIRECTORIES, so a non-recursive count
 # undercounts.** Count recursively, then add.
 #
@@ -118,7 +154,7 @@ authority; do not hardcode a competing number**). Net **+8** this pass, decompos
 EIGHT files were added by this window's PRs. The rest of the apparent movement is the prior map's
 breakdown having been non-recursive: **its own stated sum (885+196+132+92+11+8+4+2 = 1330, +14 =
 "1378") is arithmetically 1,344**, a 34-file shortfall published as a verification. **This one sums
-by execution: 901+213+133+94+14+14+11+4+2 = 1,386.** Treat the prior per-category numbers as
+by execution — **RE-COUNTED RECURSIVELY AT `8b2e4053`: 908+213+133+95+14+14+11+4+2 = 1,394**, which agrees exactly with `docs/FACTS.md` (unit 908 · integration 213 · conformance 133 · browser 95 · commands 14 · TOP-LEVEL 14 · lsp 11 · self-host 4 · e2e-render-map 2). The S371 figure was `…= 1,386`.** Treat the prior per-category numbers as
 superseded, not as a baseline to diff against.
 
 **ZERO deletions, fourth window running.**
@@ -387,7 +423,7 @@ gets bypassed then deleted (pre-push, fixed S301). **The name-set shape is what 
 **A grep-hit is not an assertion — and this now has a machine oracle.** A conformance case may
 MENTION an E-code in `description`/`rationale` prose without asserting it; `notCodes` asserts ABSENCE
 and does not prove the code can fire. **Only `expect.codes` is a positive pin**, and
-`bun scripts/s34-census.ts --full` computes the pinned set that way (338 PINNED at this HEAD). Read
+`bun scripts/s34-census.ts --full` computes the pinned set that way (**343 PINNED at this watermark — this line read `338` and was stale; `--full` and the plain census return the SAME number, so the two modes have never disagreed**). Read
 the `expected.json` before recording a code as covered.
 
 **A §34 row is not evidence of a fire site, and now neither is an emitter string.** Two live shapes:
@@ -611,7 +647,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout
+#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout
 
 ## Links
 - [primary.map.md](./primary.map.md)
