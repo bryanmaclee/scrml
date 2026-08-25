@@ -99,4 +99,65 @@ describe("g-render-snippet-slot-renders-empty (parametric, default pipeline)", (
     expect(m.errs).toEqual([]);
     expect(m.text(".cf")).toBe("Active"); // rendered as text; no throw
   });
+
+  test("§5 a NON-parametric snippet filled with a zero-arg lambda renders (g-render-snippet-nonparametric-lambda-fill)", () => {
+    // Pre-fix: `head={ () => <markup/> }` on a non-parametric `head: snippet` was
+    // captured nowhere (the parametric loop gates on snippetParamType!==null and
+    // needs a param) → rendered empty. Now parsed into the snippet's slotted group.
+    const m = shipMount([
+      "<program>",
+      '${ const Card = <div props={ head: snippet }><div class="ch">${render head()}</div></div> }',
+      "<Card head={ () => <span class=\"hv\">HEADVAL</span> } />",
+      "</program>", "",
+    ].join("\n"));
+    expect(m.errs).toEqual([]);
+    expect(m.text(".ch")).toBe("HEADVAL");
+  });
+
+  test("§6 arity-tolerant: a zero-arg lambda on a PARAMETRIC prop renders (no page crash)", () => {
+    // Review #2: pre-fix `foo={ () => ... }` on `foo: snippet(v)` was captured
+    // nowhere → the #713 live-fallback rewrite left `__scrml_render_foo__(...)`
+    // undefined → ReferenceError killed the page. Now the zero-arg lambda fills
+    // the parametric snippet (ignoring the arg) and renders.
+    const m = shipMount([
+      "<program>",
+      '${ const Card = <div props={ foo: snippet(v: string) }><div class="cf">${render foo("Z")}</div></div> }',
+      "<Card foo={ () => <span>HI</span> } />",
+      "</program>", "",
+    ].join("\n"));
+    expect(m.errs).toEqual([]);
+    expect(m.text(".cf")).toBe("HI");
+  });
+
+  test("§7 arity-mismatch: a one-param lambda on a NON-parametric prop renders empty, never crashes", () => {
+    // Review #1/#2: pre-#713 this was silent-empty; #713's live-fallback made it a
+    // whole-page crash (`__scrml_render_head__` undefined). A `(param) =>` fill on a
+    // non-parametric snippet is an arity mismatch (the render site passes no arg, so
+    // the param is unbound) — it now renders EMPTY: the render call is consumed (no
+    // undefined-fn crash) and the mismatched body (which may read the unbound param)
+    // is not emitted (no undefined-var crash). Whether a mismatch should be a
+    // compile diagnostic is a §16.6 semantics question, deferred to bryan.
+    const m = shipMount([
+      "<program>",
+      '${ const Card = <div props={ head: snippet }><div class="ch">${render head()}</div></div> }',
+      "<Card head={ (v) => <span>${v}</span> } />", // body USES the unbound param
+      "</program>", "",
+    ].join("\n"));
+    expect(m.errs).toEqual([]);
+    expect(m.text(".ch")).toBe(""); // empty, and — critically — no throw at boot
+  });
+
+  test("§8 arity-mismatch does not corrupt SIBLING valid snippets on the same component", () => {
+    // A mismatched fill must not poison a well-formed sibling snippet.
+    const m = shipMount([
+      "<program>",
+      '${ const Card = <div props={ good: snippet, bad: snippet }>' +
+        '<div class="g">${render good()}</div><div class="b">${render bad()}</div></div> }',
+      '<Card good={ () => <span>GOOD</span> } bad={ (v) => <span>${v}</span> } />',
+      "</program>", "",
+    ].join("\n"));
+    expect(m.errs).toEqual([]);
+    expect(m.text(".g")).toBe("GOOD"); // the valid sibling still renders
+    expect(m.text(".b")).toBe("");     // the mismatch renders empty, no crash
+  });
 });
