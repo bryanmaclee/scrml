@@ -1,0 +1,11 @@
+<program>
+<rows> = ["a", "b"]
+fn listing() {
+    return <ul>
+        <each in=@rows key=@. if=@.>
+            <li>${@.}</li>
+        </each>
+    </ul>
+}
+<div>${listing()}</div>
+</program>
