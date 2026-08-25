@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 55 |
-| MED | 171 |
-| LOW | 74 |
+| HIGH | 56 |
+| MED | 177 |
+| LOW | 76 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -10212,3 +10212,107 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 ### g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select — a `<schema>` `boolean` column (and a struct field typed `boolean`) read via a raw `?{SELECT paid …}` reaches the client as `1`/`0` (integer), not `true`/`false`; conditionals still work (0/1 truthy) but display (`${e.paid}` → "1") and any bool-shaped consumer see the wrong type — `NEW S370-peter (dog-food); MED; open (needs a SPEC SCOPE ruling — bryan)`
 <!-- @gap id=g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select sev=MED status=open locus=SPEC.md:22293(NORMATIVE SHALL: boolean columns "SHALL emit read-path coercion (`!!value`) … in any generated migration or QUERY HELPER" — a raw ?{} SELECT does not coerce; whether a raw ?{} SELECT counts as a "query helper" is the OPEN scope question)+searched:compiler/src/codegen/emit-server.ts,compiler/src/schema-differ.js(the ?{} result mapping does not thread declared-column types into read-path coercion) prov=adopter-dogfood:peter-S370-schema-paid-boolean-plus-struct-field-boolean-raw-select-returns-1-0-to-client -->
 > **⚑ PA-REPRODUCED BY EXECUTION on `main` @ `3a7203ff`.** `<schema> expenses { … paid: boolean … }` + `type Expense:struct = { … paid: boolean }`; server fn `?{SELECT id, description, amount, paid, settled_at FROM expenses}.all()`. Over the wire: `[{…,"paid":1,…},{…,"paid":0,…}]`. SPEC:22293 mandates read-path `!!value` coercion "in any generated migration or **query helper**." **The open question is scope:** is a raw `?{}` SELECT a "query helper" (→ coerce declared-boolean result columns, a codegen fix) or is coercion only for `schemaFor`/typed-accessor paths (→ raw SELECT is "you get sqlite's 0/1", and the SPEC text should say so)? §12.5 (return serialization) does not independently re-coerce by declared struct-field type. **This is a SPEC-scope ruling, not a clean codegen bug** — filed for bryan. (Everything else in the ?{} SQL core probed clean: multi-param + reuse/dedup §8.2, expression params, LIKE binding, .run() INSERT persistence, UPDATE RETURNING, .get() no-row→null, NULL/real round-trip.)
+
+## §S375 — filed S375-bryan (the each-alias rounds 5+6 arc; every entry PA-verified or dispatch-measured)
+
+> **⚑ THE DIRECTION NOTE, and it reframes five of these entries.** The each-alias branch began as
+> *"make the LIFT path match the STRUCTURAL path."* After round 6 the parity control was extended to
+> ACCEPTANCE as well as refusal across 24 predicate shapes: **18 agree, 6 diverge, and in all six the
+> LIFT path is correct and the STRUCTURAL path is defective.** The migration debt has flipped sides.
+> Gaps `…if-true-false-fires…`, `…parenthesized-atdot…`, `…alias-callee…`, `…empty-value…` and
+> `…reports-compiler-defect…` below ARE that backlog, and they share one locus family
+> (`type-system.ts` / `emit-html.ts`) — a converge candidate, not five patches.
+>
+> **Context, not a new gap:** the arc's own reproducer is a dead page at `origin/main` `8731799d`
+> (`ReferenceError: _scrml_reconcile_list is not defined`, executed against the shipped runtime
+> chunk). That is the already-filed `g-chunk-reachability-is-approximated-not-computed` (HIGH), which
+> the round-4 sweep closes. It is recorded here because it falsified this PA's "base renders ungated
+> but ALIVE" claim, and with it the REGRESSION verdict built on top — a claim made from EMISSION and
+> asserted about EXECUTION.
+
+### g-lift-each-bare-atdot-attr-swallows-the-next-attribute — a bare `@.` attribute value on a lift-parsed `<each>` opener consumes the FOLLOWING attribute's name as a member access; `key=@. if=@.` emits an assignment that mutates every row
+<!-- @gap id=g-lift-each-bare-atdot-attr-swallows-the-next-attribute sev=HIGH status=open locus=compiler/src/ast-builder.js(parseLiftTag — the lift-path attribute split; a bare `@.` value is not terminated at the attribute boundary and runs on into the next attribute NAME) prov=rationale:S375-round-5-dispatch-measured-then-PA-confirmed-by-emission-identical-at-e94ce54b-and-origin-main-so-pre-existing -->
+> **⚑ PA-CONFIRMED BY EMISSION.** `<each in=@rows key=@. if=@.>` inside a `fn` compiles at **exit 0,
+> zero diagnostics**, and emits the key function
+> `(_scrml_each_item, _scrml_each_idx) => _scrml_each_item.if=_scrml_each_item` — a self-referential
+> property **assignment** run once per row per reconcile, whose value is the item, so keying is broken
+> AND every row object is mutated. `key=@. as z` emits `_scrml_each_item.as` and **silently loses the
+> alias**. `key=@. if=@show` fails loud (`E-CODEGEN-INVALID-LOGIC`).
+>
+> **Bounded precisely:** `key=@.` as the LAST attribute is correct, and `key=@.id if=@show` is
+> correct. It is specifically the BARE sigil with anything following it.
+>
+> Identical at `e94ce54b` and at `origin/main` `8731799d` — **pre-existing, not a round-4 regression.**
+> This is also the true mechanism behind what the S375 brief called "Case B — `if=@.` vanishes
+> entirely": the `if` attribute does not exist by the time codegen reads the opener, so the brief's
+> stated premise (`lowerEachExpr` yields empty) is not what happens.
+
+### g-lift-attr-split-truncates-unquoted-is-operator-runs — the lift attribute split truncates an unquoted §42 keyword-operator run at the first whitespace, leaving `is`/`some`/`not`/`given` behind as bareword attributes
+<!-- @gap id=g-lift-attr-split-truncates-unquoted-is-operator-runs sev=MED status=open locus=compiler/src/ast-builder.js(parseLiftTag — same attribute split as the bare-`@.` runaway above; the two are one locus) prov=rationale:S375-round-6-root-of-F2-measured-across-16-operator-forms-the-§42-keyword-family-is-the-entire-truncation-class -->
+> **⚑ PA-REPRODUCED.** `<each in=@rows as it if=@flag is some>` with `<flag> = 0` compiled at **exit 0**
+> and emitted `if (!(_scrml_cs_reactive_get("flag")))` — the `is some` silently dropped. Per §42.1.1
+> (S89, ABSOLUTE) `0` is a **DEFINED value**, so `@flag is some` is TRUE and the list should render; it
+> was hidden instead. Silent-wrong output, no diagnostic.
+>
+> **Round 6 refuses the shape from codegen** (fires the structural path's existing
+> `E-ATTR-UNQUOTED-OPERATOR`, no new code minted) so nothing silently-wrong ships — **but the split
+> itself is still wrong** and the durable fix is in `parseLiftTag`. Measured across 16 operator forms:
+> the §42 keyword family is the ENTIRE truncation class (every member's leftover run begins with `is`);
+> every punctuation operator survives intact. Quoted and parenthesized forms already lower correctly.
+
+### g-each-opener-if-free-bareword-ships-a-dead-page-on-the-lift-path — an opener predicate naming an identifier that resolves nowhere emits `if (!(nosuchthing))` and kills the whole client
+<!-- @gap id=g-each-opener-if-free-bareword-ships-a-dead-page-on-the-lift-path sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts(refuseItemScopedOpenerIf — deliberately NOT closed in round 6: deciding "this identifier resolves nowhere" needs the symbol table, which codegen does not hold)+compiler/src/type-system.ts(where the structural path's equivalent lives — and it false-fires, see g-structural-each-opener-if-true-false-fires-e-scope-001) prov=rationale:S375-round-5-residual-one-of-eleven-dead-pages-the-round-closed-ten -->
+> `<each in=@rows as it key=it.id if=nosuchthing>` on a lift carrier ships
+> `ReferenceError: nosuchthing is not defined`, whole page dead, exit 0, zero diagnostics. The
+> STRUCTURAL path refuses it with `E-SCOPE-001`.
+>
+> Left open deliberately rather than closed with a codegen-side heuristic: **the structural path's own
+> version of that guess already false-fires** (next entry), so guessing from codegen would import a
+> known defect rather than close one.
+
+### g-structural-each-opener-if-true-false-fires-e-scope-001 — the STRUCTURAL path refuses a literal `if=true` as an unresolvable identifier
+<!-- @gap id=g-structural-each-opener-if-true-false-fires-e-scope-001 sev=MED status=open locus=compiler/src/type-system.ts(visitAttr) prov=rationale:S375-round-6-parity-control-extended-to-acceptance-24-shapes-this-is-one-of-six-where-lift-is-correct-and-structural-is-not -->
+> `<each in=@rows as it key=it.id if=true>` exits 1 with `E-SCOPE-001` on the structural path. `true` is
+> a literal, not an identifier. The LIFT path accepts it and renders correctly — the two paths disagree
+> in the OVER-refusing direction.
+
+### g-structural-each-opener-if-parenthesized-atdot-silently-gates-the-whole-list-off — parenthesising or quoting an `@.` opener predicate escapes the refusal and renders zero rows, silently
+<!-- @gap id=g-structural-each-opener-if-parenthesized-atdot-silently-gates-the-whole-list-off sev=MED status=open locus=compiler/src/type-system.ts prov=rationale:S375-round-6-parity-control-the-refusal-is-spelling-dependent-which-is-the-Rule-7-shape-one-level-up -->
+> On the STRUCTURAL path `if=(@.on)` and `if="@.on"` compile **clean (exit 0, zero diagnostics)** and
+> render **0 rows** — a silent fail-CLOSED. The bare and member forms of the identical predicate
+> correctly fire `E-SYNTAX-064`, so **the refusal is spelling-dependent**: adding parentheses or quotes
+> escapes it. A guard whose trigger depends on how the author spaced the same expression is the Rule 7
+> shape one level up.
+
+### g-structural-each-opener-if-alias-callee-silently-gates-list-off — `if=it()` compiles clean on the structural path and renders zero rows
+<!-- @gap id=g-structural-each-opener-if-alias-callee-silently-gates-list-off sev=MED status=open locus=compiler/src/type-system.ts prov=rationale:S375-round-6-parity-control-companion-to-the-parenthesized-atdot-and-if-true-entries-one-locus-family -->
+> `<each in=@rows as it key=it.id if=it()>` on the STRUCTURAL path compiles clean and renders ZERO rows;
+> the LIFT path refuses it `E-SCOPE-001`. Companion to the two entries above — same locus, same class.
+
+### g-structural-each-opener-if-empty-value-silently-gates-list-off — `if=""` compiles clean on the structural path and renders zero rows
+<!-- @gap id=g-structural-each-opener-if-empty-value-silently-gates-list-off sev=MED status=open locus=compiler/src/type-system.ts+compiler/src/codegen/emit-html.ts prov=rationale:S375-round-6-parity-control-the-lift-path-refuses-this-as-E-EACH-OPENER-IF-EMPTY-and-structural-does-not -->
+> `if=""` on the STRUCTURAL path compiles clean and renders ZERO rows. The LIFT path refuses it with
+> `E-EACH-OPENER-IF-EMPTY` (minted S375 round 5) precisely because §17.1.2.3 names fail-OPEN as the
+> dangerous direction for this attribute — the structural path has the same hole and no code for it.
+
+### g-structural-each-opener-if-reports-compiler-defect-for-unanalyzable-predicate — the structural path blames the compiler for author errors the lift path now names precisely
+<!-- @gap id=g-structural-each-opener-if-reports-compiler-defect-for-unanalyzable-predicate sev=LOW status=open locus=compiler/src/codegen/emit-html.ts+compiler/src/type-system.ts prov=analogy:the-same-class-round-3-minted-E-EACH-AS-ALIAS-INVALID-to-close-on-the-lift-path -->
+> A bareword `if` and `if=(@.on is some)` on the STRUCTURAL path both surface as
+> `E-CODEGEN-INVALID-LOGIC` — *"This is a compiler defect (codegen produced malformed output). Please
+> report it."* — for **author errors**, which the lift path now names precisely. Same class that round 3
+> minted `E-EACH-AS-ALIAS-INVALID` to close on the other side.
+
+### g-test-suite-writes-stray-zero-file-into-repo-root — something in the test path writes a file literally named `0` into the repo root, which then defeats the pre-commit docs-only fast path
+<!-- @gap id=g-test-suite-writes-stray-zero-file-into-repo-root sev=LOW status=open locus=searched:scripts/,compiler/tests/,.github/(grepped for `grep -c … SPEC.md` and for bare `> 0` / `2> 0` redirects — no locus found) prov=rationale:S375-observed-three-times-each-time-immediately-after-a-full-suite-run-and-once-swept-into-a-commit-by-git-add--A -->
+> A file named `0` containing the single line `compiler/SPEC.md:0` — the output shape of `grep -c`
+> redirected to a file literally named `0` — appears in the repo root **after every full test-suite
+> run**. Observed three times at S375.
+>
+> **Two costs, neither obvious.** (1) It has no extension, so it defeats the pre-commit hook's
+> docs-only fast path (`grep -vE '(\.md$|\.txt$|^handOffs/)'`) and an all-documentation commit runs the
+> full unit+integration+conformance suite — roughly 20 minutes of wall clock at S375 alone. (2) It is
+> swept into commits by `git add -A`; it reached PR #709 before being caught and force-pushed out.
+>
+> **Locus NOT found** and recorded as such per the base §2 locus-or-recorded-search rule rather than
+> guessed. The `grep -c` output shape is the strongest lead: something redirects a count to `0` where
+> `2>&1` or `>&2` was meant.
