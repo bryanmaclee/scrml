@@ -1,14 +1,175 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S372-bryan.        -->
-<!--   S372-bryan (TOP block) — 6 PRs. FOUR operator rulings owed:    -->
-<!--     the NEW §55 rollup-truthiness ruling (4 options) + THREE      -->
-<!--     carried S368 rulings (was four; #4 is downstream of #2).      -->
-<!--     each-alias HELD at its round-4 tip, re-review in flight.      -->
-<!--     Read PICKUP §1-§3 first. [1771]-[1773], [1783]-[1786].        -->
-<!--   S374/S373/S372-peter — the peter lane, concurrent, #693-#705.   -->
-<!--   S371-bryan — landed by S372 as inherited (#689).                -->
-<!--   S368-bryan — the FOUR rulings this block re-measures to THREE.  -->
+<!-- hand-off.md — live session state. WRAPPED at S375-bryan.       -->
+<!--   S375-bryan (TOP block) — the context-economics session.       -->
+<!--     TWO OPERATOR DECISIONS OWED, both on ruling 1, both cheap.   -->
+<!--     The each-alias arc is PARKED at tag s375-r7-reviewed.        -->
+<!--     Rulings 2 + 3 are RATIFIED and teed up, SEQUENCED.           -->
+<!--     Read PICKUP §1-§3 first. Delta-log [1788]-[1800].            -->
+<!--   S372-bryan / S374-373-372-peter — the prior blocks, unchanged. -->
 <!-- ============================================================= -->
+
+# scrml — Session 375 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-25. Booted `/boot` Profile A. Ran SOLO, then became the PREDECESSOR when
+S375-peter registered as a successor mid-session and began landing.
+
+**The framing, because it reorders everything else: this session's subject was the PA system itself,
+not the compiler.** The operator opened it by asking for an instrument to measure context, and the
+instrument then falsified the PA's own reassurance about the trajectory. What landed on main is
+mostly doctrine and documentation; what was learned is a measured growth curve and a named defect
+class.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ TWO DECISIONS OWED — both on ruling 1, both one-line reversals
+
+Ruling 1 (`<db>`/state-block locus) is **BUILT and HELD** on `worktree-agent-a5d573c6f9c8f078c`
+(`9f899636`). It does not land until these are answered.
+
+**(A) The dispatch deviated from the ratified code name, and I think it is right.** bryan ratified
+*"promote to the already-reserved `E-STATE-BLOCK-BARE-WRITE-DECL`."* It shipped
+**`E-STATE-BLOCK-STATEMENT-FORM`** instead. PA-verified: that row's own §34 text reads *"A bare
+`@name = init` … **Deprecation cycle endpoint** — activates after the `W-…` window"*, so the reserved
+code is **shape-specific to the write form** and its window is still open. Firing it for `on mount`
+makes one row mean two shapes and be simultaneously reserved and live. **The premise the ratification
+rested on is falsified by the row itself.** `DIAGNOSTIC_CODE` is one constant if the operator
+overrules. NB the brief's DONE-PROBE greps the old name and therefore reports FAIL; the corrected
+probe is in the dispatch's `progress.md`.
+
+**(B) The migration is 1 file and my brief said STOP if non-zero.**
+`samples/htmx-debate-dashboard.scrml:143` — literally `on mount { loadDashboard() }`. Measured from
+the COMPILER over 2,194 `.scrml` (not text-scanned). It **already fails on main** with `E-PA-002`, so
+this adds a second error to an already-red file, and it uses the DEPRECATED `< db>` opener.
+**PA recommendation: migrate it** — per S368 the corpus is 100% LLM-authored, so samples are training
+input and a sample teaching a construct that silently never runs propagates the defect into every
+future generated file.
+
+### 2. ⚠️ THE EACH-ALIAS ARC IS PARKED — do NOT open round 8 without reading why
+
+Frozen at tag **`s375-r7-reviewed`** (`ae42e120`, branch `each-alias-r5`). Rounds 5/6/7 plus **four**
+adversarial passes, ~1.8M subagent tokens, three sessions, **nothing on main.**
+
+**The class, named (delta [1795]):** the refusal is decided by predicates over the **RAW attribute
+text** while the lowering it guards operates on a **NORMALIZED** form — `rewriteIterValueExpr`
+collapses `@\s*\.\s*` → `@.` before the sigil rewrite, so guard and guarded read different strings.
+Four instances, one cause. **This is Rule 7 one level in.** The convergent direction — decide the
+refusal from the SAME artifact the lowering consumes, or have the lowering itself report what it
+could not vouch for — is a **design question about where the check belongs** and is **NOT YET RULED**.
+That is why it was parked instead of re-dispatched.
+
+⚑ **A future round owes a real 3-way merge against #710**, which the concurrent session landed in
+`emit-each.ts` today. The branch's base predates it; a wholesale pull would clobber their work.
+
+⚑ **Also measured and worth keeping:** the parity control extended to ACCEPTANCE across 24 predicate
+shapes gives 18 agree / 6 diverge, and **in all six the LIFT path is correct and STRUCTURAL is
+defective.** The migration debt flipped sides. Five ledger entries are that backlog and they share one
+locus family (`type-system.ts` / `emit-html.ts`) — a CONVERGE candidate, not five patches.
+
+### 3. RULINGS 2 AND 3 — ratified, unbuilt, SEQUENCED (not parallel)
+
+Both touch `compiler/src/ast-builder.js`, as does the pre-existing comment-flush fix. **Whichever
+lands second clobbers the others, and the bare-call gate is a REJECT gate that must NOT be folded
+into the comment fix.**
+
+- **Ruling 2** — migrate the 2 bare-call files **into conformance cases asserting `E-BARE-CALL`
+  fires.** The build is at `7d5fe573` (`brief/s368-bare-call`) and **has never had its S239 pass.**
+- **Ruling 3** — BOTH halves. The §34 half is a **Rule 4 item**: `E-CONTROL-FLOW-IN-MARKUP` scopes
+  itself out of the `<program>` body-top by asserting the §40.8 auto-lift covers it. PA-verified: it
+  does not — `<program>` + `if (1) { }` compiles exit 0 and ships as page text, so the locus is
+  covered by NEITHER. Then extend the diagnostic to the control-flow statement class only (S368
+  explicitly rejected "diagnose every non-declaration run").
+- **Ruling 4 (`TILDE_TOKEN_RE`) is DEFERRED** and correctly so: both forms compile clean on main
+  today, so the asymmetry does not exist until ruling 2 lands.
+
+### 4. OPEN PRs AND HELD WORK
+
+| | state |
+|---|---|
+| **#711** ledger + 2 §34 rows + 2 fire-site amendments | rebased onto #710; **gate FAILED then re-run — CHECK IT.** Unit 17,859/0 and conformance 1,567/0 pass locally; `snippet-gate` and `facts --check` exit 0 locally; `types-gate` is inconclusive locally (no `tsc`). |
+| **#708** `scripts/ctx.ts` | `gate`+`windows` green, **HELD unreviewed** — deliberately, because its numbers now underwrite a ratified contract rule, which is the operator's own "still in question" carve-out |
+| ruling-1 build | held pending §1 above |
+| each-alias | parked, §2 above |
+
+---
+
+## 🧷 WHAT LANDED
+
+`#709` boot-trim Tier 1 · `pa-base v2.16` + overlay v2.4 (the rotation budget) · user-voice S375
+(the context ruling + the four carried rulings, verbatim) · review floor **2 → 0**.
+
+---
+
+## 🔭 DURABLE FINDINGS — method, not defects
+
+### A. Boot cost is a GROWTH PROCESS, and it is now measured
+43 boots on record: earlier-half mean **317,195** → later-half **363,266** (**+15%**); S375's
+**430,367 is the highest ever**; peaks routinely **88-96%**; working headroom 53 → **45 points**.
+Five reference docs are **65%** of a boot; the harness baseline everyone assumes is the problem is
+**13%**. Boot is **34-40% regardless of session shape** — Profile B exists and is essentially never
+taken, so the design-session price is paid on every execution arc. **The counter-proposal, unruled:
+not a third profile but an ARC-DECLARED READ-SET** — the boot naming its documents the way a dispatch
+brief already names its files, spec sections and maps.
+
+### B. The rotation budget, and why a cleanup would not have been enough
+Every maintained-tier doc is append-biased, so boot cost is a function of SESSION COUNT. A one-time
+trim buys a fixed number of weeks and then recurs. **The mechanism was already invented and used
+exactly once — the hand-off rotates and nothing else did.** `pa-base v2.16` generalizes it, and its
+first application was to pa-base itself.
+
+### C. Eight wrong-referent probes in one session — the class is the finding
+Every one was **well-formed and answered about something slightly different from what was asked**: a
+`pull --rebase` in the wrong repo · a `checkout -b` in the wrong repo · an orphan probe measuring IDs
+not blocks · `grep -c` exiting 1 on a CLEAN result · a WARN-only line matched as a gate STALE · a
+detector over-reporting 9 where the truth was 1 · a gap grep disagreeing with `state.ts` · `$?` taken
+from a PIPELINE (which `pa-base` §8 already cites as witnessed). **None shipped — every one was caught
+by something downstream failing loudly, not by the probe being right.** Operational rule: **verdict by
+EXIT CODE, never by grepping output text**, and state which artifact a probe reads before trusting it.
+
+### D. A ratified rule survived ~200 sessions unenforced because nothing computed the difference
+`master-list` §0.6 has asserted since S171 that the changelog is the one narrative home. It was false
+for 2 sessions and nobody knew, because no probe compared the two. Same shape as the review floor at
+S316 and the adopter-issue channel at S262. **A channel the probe does not read does not exist.**
+
+---
+
+## ⚑ MISSES (mine)
+
+1. **★ I told the operator "43% isn't fatal, work is cheap relative to boot" — measured against a TOOL
+   BUILD**, which is write-heavy and read-light, rather than against a bug fix, which is
+   reproduce/trace/review/verify. He supplied the falsifier in one line and it held in every limb.
+2. **★ I claimed a regression verdict from EMISSION and asserted it about EXECUTION** — "base renders
+   ungated but ALIVE." Base was dead too. That is the "emitted ≠ runs" trap, recorded three times in
+   this project, and I walked into it *in the same brief where I instructed the agent to avoid it.*
+3. **★ I authored a ledger entry from a branch measurement and filed it as truth about main.** Caught
+   by re-verifying every entry against main before merging. Corrected in the same PR.
+4. **★ `git add -A` swept a stray `./0` into a commit and a pushed PR** — the contract mandates an
+   explicit pathspec for exactly this reason.
+5. **★ My brief for ruling 1 contradicted itself** — the locus was inside my own MUST-NOT-WRITE list.
+   The dispatch routed around it rather than asking, and said so.
+6. **★ Three dispatch briefs carried a wrong rule-shape or a wrong premise and every dispatch
+   out-measured me.** That is now the standing expectation, not a surprise.
+
+---
+
+## 🧷 STATE
+
+- **main** `592dccf7` at wrap-cut (peter's #710). Coherence 0/0 on both repos.
+- **Gaps: HIGH 56 · MED 172 · LOW 75 · Nominal 7** (from the `@generated` block; +10 filed this
+  session, 1 reframed).
+- **Debts:** review floor **0** · issue-debt 0 · dpa-debt 0 unrun / 0 advisory · corpus-zero 0.
+- **Concurrent:** **S375-peter is LIVE** and landing. Footprint claimed on the board with the
+  `emit-each.ts` collision flagged. Their dog-food lane is otherwise disjoint.
+- **Worktrees:** `agent-a511a7ecac97c6ac5` (each-alias, PARKED — retain) and
+  `agent-a5d573c6f9c8f078c` (ruling 1, HELD — retain) both hold unlanded work. `agent-a43028c478d6d1232`
+  (Tier 1) landed and is swept.
+- **Maps:** no compiler source landed this session → **maps unchanged**, deliberately not refreshed.
+- ⚑ **`scripts/ctx.ts` is not on main yet**, so a future session cannot query occupancy until #708
+  merges. That is the instrument the ratified `pa-base v2.16` budget names as its probe — **a ratified
+  rule currently points at an unmerged script.**
+- **Mechanical stream:** delta-log `[1788]`–`[1800]`. Do not re-derive from this hand-off what the
+  delta-log and changelog carry.
 
 # scrml — Session 372 (bryan · ASUS-Vivobook) — WRAP
 
