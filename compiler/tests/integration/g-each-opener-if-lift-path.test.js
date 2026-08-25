@@ -58,10 +58,17 @@ import { chunkCellKey } from "../helpers/chunk-scope.js";
 const D = "$";
 
 // ---------------------------------------------------------------------------
-// The four off-spine carriers, each with `if=@show` on the <each> OPENER.
-// These are the same four the round-2 chunk sweep enumerated; the `if=` defect
-// rides on every one of them because they all route through
-// `eachBlockFromMarkupNode`.
+// CHILD-position carriers — the `<each>` has a parent element, so it reaches
+// `eachBlockFromMarkupNode` through the child branch of
+// `emitCreateElementFromMarkup`.
+//
+// ⚠ THESE FOUR ARE NOT AN ENUMERATION OF THE CLASS, and an earlier revision of
+// this comment implied they were ("the same four the round-2 chunk sweep
+// enumerated"). Round 4 found a FIFTH: the same `<each>` as the ROOT of the
+// lift-parsed markup, where NONE of this machinery ran — see §R below. Five
+// carriers have now been found one at a time, each after a fix that shipped
+// claiming closure. Treat any "the carriers are X" statement in this area as a
+// list of what has been TESTED, never as a list of what EXISTS.
 // ---------------------------------------------------------------------------
 
 // carrier: return-stmt.markupNode
@@ -191,6 +198,77 @@ fn listing() {
 </program>
 `;
 }
+
+// ---------------------------------------------------------------------------
+// §R — ROOT-position carriers. The `<each>` IS the root of the lift-parsed
+// markup value; there is no parent element.
+//
+// Pre-fix (measured at `dcc5fd0d`, exit 0, zero diagnostics) these emitted a
+// LITERAL `<each>` DOM element with the alias as an attribute and the body
+// referencing an undeclared binding -> `ReferenceError: it is not defined`,
+// whole client script dead. The `if=` was applied — as a `style.display` toggle
+// on the literal element — which is NOT the §17.1.2.1 semantics and is moot
+// anyway on a bundle that never runs.
+// ---------------------------------------------------------------------------
+
+// `${ fn … }` wrapped — an explicit logic block.
+const SRC_ROOT_FN_WRAPPED = `<program>
+<rows> = ["a", "b"]
+<show> = false
+${D}{ fn listing() { return <each in=@rows as it key=it if=@show><li>${D}{it}</li></each> } }
+<div>${D}{listing()}</div>
+</program>
+`;
+
+// bare `fn` — the §40.8 default-logic auto-lift entry path. ⚑ The declaration
+// form is varied deliberately: the two enter codegen by different routes.
+const SRC_ROOT_FN_BARE = `<program>
+<rows> = ["a", "b"]
+<show> = false
+fn listing() {
+    return <each in=@rows as it key=it if=@show><li>${D}{it}</li></each>
+}
+<div>${D}{listing()}</div>
+</program>
+`;
+
+// markup-typed derived cell with the each at ROOT.
+const SRC_ROOT_DERIVED = `<program>
+<rows> = ["a", "b"]
+<show> = false
+const <listing> = <each in=@rows as it key=it if=@show><li>${D}{it}</li></each>
+<div>${D}{@listing}</div>
+</program>
+`;
+
+// `lift` of a root each.
+const SRC_ROOT_LIFT_EXPR = `<program>
+<rows> = ["a", "b"]
+<show> = false
+<flag> = true
+<main>${D}{ if @flag { lift <each in=@rows as it key=it if=@show><li>${D}{it}</li></each> } }</main>
+</program>
+`;
+
+// ternary markup-value with the each at ROOT.
+const SRC_ROOT_TERNARY = `<program>
+<rows> = ["a", "b"]
+<show> = false
+<flag> = true
+<main>${D}{ @flag ? <each in=@rows as it key=it if=@show><li>${D}{it}</li></each> : "" }</main>
+</program>
+`;
+
+// ROOT each with NO `if=` and NO alias — the plain shape. Pre-fix its `${@.}`
+// body also leaked (rendered ONE empty <li> inside a literal <each> element).
+const SRC_ROOT_PLAIN = `<program>
+<rows> = ["a", "b"]
+fn listing() {
+    return <each in=@rows><li>${D}{@.}</li></each>
+}
+<div>${D}{listing()}</div>
+</program>
+`;
 
 const tmpRoot = resolve("/tmp", "scrml-each-opener-if-lift");
 
@@ -409,6 +487,60 @@ describe("g-each-opener-if-lift-path — `if=` on a lift-parsed `<each>` gates t
       expect(app.items()).toEqual(expected);
     });
   }
+
+  // -----------------------------------------------------------------------
+  // §R — ROOT position. The round-4 blocker: none of the machinery ran here.
+  // -----------------------------------------------------------------------
+
+  const ROOT_CARRIERS = [
+    ["fn body, `${ … }` wrapped", SRC_ROOT_FN_WRAPPED],
+    ["fn body, bare (§40.8 auto-lift)", SRC_ROOT_FN_BARE],
+    ["markup-typed derived cell", SRC_ROOT_DERIVED],
+    ["lift-expr", SRC_ROOT_LIFT_EXPR],
+    ["ternary markup-value", SRC_ROOT_TERNARY],
+  ];
+
+  for (const [label, src] of ROOT_CARRIERS) {
+    test(`(R) ROOT-position \`<each … if=@show>\` — ${label} — gates, and the bundle LIVES`, () => {
+      const app = mount(src, "ifroot");
+      expect(app.hardErrors()).toEqual([]);
+      // ⚑ THE LOAD-BEARING ASSERTION IS THIS ONE, not the row count. Pre-fix the
+      // bundle died with `ReferenceError: it is not defined`, which ALSO renders
+      // zero rows — a gate asserting only `items() === []` would have passed on
+      // the blocker. Assert liveness first.
+      expect(app.thrown === null ? "no error" : String(app.thrown)).toBe("no error");
+      expect(app.items()).toEqual([]);
+      // And the literal `<each>` DOM element must be gone: `<each>` is not an
+      // HTML element and `document.createElement("each")` was the pre-fix shape.
+      expect(document.querySelectorAll("each").length).toBe(0);
+      expect(app.clientJs).not.toContain('document.createElement("each")');
+    });
+  }
+
+  test("(R6) ROOT position with @show TRUE renders every row", () => {
+    const app = mount(SRC_ROOT_FN_BARE.replace("<show> = false", "<show> = true"), "ifroottrue");
+    expect(app.thrown === null ? "no error" : String(app.thrown)).toBe("no error");
+    expect(app.items()).toEqual(["a", "b"]);
+  });
+
+  test("(R7) ROOT position is REACTIVE — false → true → false", () => {
+    const app = mount(SRC_ROOT_FN_BARE, "ifrootreactive");
+    expect(app.items()).toEqual([]);
+    app.set("show", true);
+    expect(app.items()).toEqual(["a", "b"]);
+    app.set("show", false);
+    expect(app.items()).toEqual([]);
+  });
+
+  test("(R8) ROOT position, no `if=` and no alias: `${@.}` binds and both rows render", () => {
+    // Pre-fix this rendered ONE empty <li> inside a literal <each> element —
+    // the `@.` never lowered to an iteration binding.
+    const app = mount(SRC_ROOT_PLAIN, "ifrootplain");
+    expect(app.hardErrors()).toEqual([]);
+    expect(app.thrown === null ? "no error" : String(app.thrown)).toBe("no error");
+    expect(app.items()).toEqual(["a", "b"]);
+    expect(document.querySelectorAll("each").length).toBe(0);
+  });
 
   // -----------------------------------------------------------------------
   // §E — emit-shape assertions. Cheap, and they name the mechanism when a DOM

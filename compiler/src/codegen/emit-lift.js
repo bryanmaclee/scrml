@@ -713,6 +713,62 @@ function tryLowerLiftEngineHandler(rawHandlerText, engineCtx) {
  * @param {object|null} engineCtx — the EachEngineCtx carrier (null = no engines).
  * @returns {string[]|null}
  */
+/**
+ * ROOT-position `<each>` — the each IS the root of this lift-parsed markup value,
+ * with no parent element to append a mount into.
+ *
+ * ⚑ THE DEFECT THIS EXISTS FOR (round 4, 2026-08-24) — the FIFTH carrier of the
+ * lift-`<each>` class, and the first one where NONE of the machinery ran at all.
+ * `tryEmitNestedLiftEach` is reached from exactly ONE place: the
+ * `child.kind === "markup"` branch of `emitCreateElementFromMarkup` below. So the
+ * each-block normalisation, the `as` alias bind, `validateEachAlias`, the §17.1.2
+ * `if=` gate and the reconcile itself all required the `<each>` to have a PARENT
+ * ELEMENT. As a root it fell through to the generic element path and emitted a
+ * LITERAL `<each>` DOM element — measured at `dcc5fd0d`, exit 0, zero diagnostics:
+ *
+ *     const _scrml_lift_el_3 = document.createElement("each");
+ *     _scrml_lift_el_3.setAttribute("in", _scrml_reactive_get("rows"));
+ *     _scrml_lift_el_3.setAttribute("as", "");
+ *     _scrml_lift_el_3.setAttribute("key", it);      // `it` is a FREE identifier
+ *     … createTextNode(String((it) ?? ""))           // ditto
+ *
+ * -> `ReferenceError: it is not defined` at bundle eval, whole client script dead.
+ * Reproduced by EXECUTION on four root carriers (`fn` body wrapped and bare,
+ * `lift-expr`, ternary markup-value); the `const <c> = <each …>` derived cell
+ * renders nothing without even throwing.
+ *
+ * ⚠ WHY THE INTERCEPT IS AT THE HEAD OF `emitCreateElementFromMarkup` AND NOT AT
+ * ITS FOUR CALL SITES. That function is the single point every lift-parsed markup
+ * ROOT passes through — emit-lift.js:1910 / :2542 / :2990 and emit-logic.ts:2311.
+ * One intercept covers all four; four intercepts would be four chances to miss
+ * the fifth. That is the same argument the off-spine sweep in emit-client.ts
+ * makes, and the same one this class keeps re-teaching.
+ *
+ * ⚠ AND NO, THIS DOES NOT CLOSE THE CLASS. Five carriers have now been found ONE
+ * AT A TIME, each after a fix that shipped claiming closure. What is true and
+ * checkable is narrower: root position is covered FOR MARKUP THAT ROUTES THROUGH
+ * `emitCreateElementFromMarkup`. Nobody has enumerated the set of code paths that
+ * build lift markup without it. Converge on the shared emitter; do not assert a
+ * closed enumeration.
+ *
+ * @param {object} eachMarkupNode — the `{kind:"markup", tag:"each"}` root node.
+ * @param {string|null} scopeVar — enclosing `for`-loop var, or null at top level.
+ * @param {string[]} lines — emission sink.
+ * @param {object|null} engineCtx — the EachEngineCtx carrier (null = no engines).
+ * @returns {string|null} the mount var to use as this factory's element, or null
+ *   when the node is not a usable `<each>` (caller keeps literal-markup emission).
+ */
+function tryEmitRootLiftEach(eachMarkupNode, scopeVar, lines, engineCtx) {
+  if (scopeVar != null && typeof scopeVar !== "string") return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const each = require("./emit-each.ts");
+  if (!each || typeof each.emitRootEachFromMarkup !== "function") return null;
+  const out = each.emitRootEachFromMarkup(eachMarkupNode, scopeVar, "", engineCtx);
+  if (!out) return null;
+  for (const l of out.lines) lines.push(l);
+  return out.mountVar;
+}
+
 function tryEmitNestedLiftEach(eachMarkupNode, scopeVar, fragmentVar, engineCtx) {
   // GITI-033 — a null `scopeVar` (no enclosing `for`) is VALID: the each
   // iterates a module/const/`@cell` source and routes through the SAME shared
@@ -1387,6 +1443,24 @@ function emitSetContent(elVar, parts) {
  */
 export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scopeVar = null) {
   const tag = node.tag ?? node.tagName ?? "div";
+
+  // g-each-root-position-lift-ships-literal-each-element (round 4, 2026-08-24) —
+  // a ROOT-position `<each>`. Every caller of this function is a lift-parsed
+  // markup ROOT, so an `<each>` arriving here has no parent element and never
+  // reached the child branch below that routes into the shared emit-each
+  // machinery. Pre-fix it fell through to `document.createElement("each")` with
+  // the alias emitted as a DOM attribute and the body referencing a binding that
+  // was never declared -> `ReferenceError` at bundle eval, whole page dead,
+  // exit 0. Read `tryEmitRootLiftEach` for the measurement and for why the
+  // intercept belongs HERE rather than at the four call sites.
+  //
+  // Falls through to the generic element path when the node is not a usable
+  // `<each>` (no `in=`/`of=` source), which is byte-identical to pre-fix.
+  if (tag === "each") {
+    const rootMount = tryEmitRootLiftEach(node, scopeVar, lines, engineCtx);
+    if (rootMount !== null) return rootMount;
+  }
+
   const attrs = node.attributes ?? node.attrs ?? [];
   const children = node.children ?? [];
   const isVoid = VOID_ELEMENTS.has(tag);

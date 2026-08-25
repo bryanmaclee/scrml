@@ -3743,11 +3743,102 @@ export function emitNestedEachFromMarkup(
   indent: string = "",
   engineCtx: EachEngineCtx | null = null,
 ): string[] | null {
+  const out = emitEachFromMarkupCore(markupNode, enclosingScopeVar, fragmentVar, indent, engineCtx);
+  return out === null ? null : out.lines;
+}
+
+/**
+ * ROOT-position sibling of `emitNestedEachFromMarkup` — the `<each>` IS the root
+ * of a lift-parsed markup value, with no parent element to append a mount into.
+ *
+ * ⚑ THE DEFECT THIS EXISTS FOR (round 4, 2026-08-24) — AND IT IS THE FIFTH
+ * CARRIER OF THIS CLASS, FOUND ONE AT A TIME. `tryEmitNestedLiftEach` is reached
+ * from exactly one place: the `child.kind === "markup"` branch of
+ * `emitCreateElementFromMarkup`. So every piece of `<each>` machinery — the
+ * each-block normalisation, the `as` alias bind, `validateEachAlias`, the
+ * §17.1.2 `if=` gate, the reconcile itself — ran only when the `<each>` had a
+ * PARENT ELEMENT. When the each is the ROOT, emit-lift fell through to its
+ * generic element path and emitted a LITERAL `<each>` DOM element. Measured on
+ * this branch at `dcc5fd0d`, exit 0 with zero diagnostics:
+ *
+ *     const _scrml_lift_el_3 = document.createElement("each");   // not an HTML element
+ *     _scrml_lift_el_3.setAttribute("in", _scrml_reactive_get("rows"));
+ *     _scrml_lift_el_3.setAttribute("as", "");
+ *     _scrml_lift_el_3.setAttribute("key", it);                  // `it` is FREE
+ *     … createTextNode(String((it) ?? ""))                       // ditto
+ *
+ * -> `ReferenceError: it is not defined` at bundle eval, 0 rows where 2 were
+ * expected, WHOLE CLIENT SCRIPT DEAD. Reproduced on FOUR root carriers:
+ * `fn` body (wrapped and bare), `lift-expr`, ternary markup-value; the
+ * `const <c> = <each …>` derived cell renders nothing without even throwing.
+ * `E-EACH-AS-ALIAS-INVALID` never fired there either, so `as data-id` at root
+ * position was silent.
+ *
+ * ⚠ READ THIS BEFORE WRITING ANOTHER "THE CLASS IS NOW CLOSED" COMMENT. Five
+ * carriers of one class have now been found ONE AT A TIME, each after the
+ * previous fix shipped with a comment asserting closure. The honest statement is
+ * the one this file's F5 correction already makes about `sweepOffSpineMarkup`:
+ * coverage here is a property of WHICH CALL SITES ROUTE INTO THE SHARED EMITTER,
+ * and that is an enumerable set nobody has enumerated exhaustively. What IS true
+ * and checkable: `emitCreateElementFromMarkup` is the single function every
+ * lift-parsed markup ROOT passes through (four call sites: emit-lift.js:1910,
+ * :2542, :2990 and emit-logic.ts:2311), so intercepting at its head covers root
+ * position for all of them. A carrier that builds lift markup WITHOUT going
+ * through that function is not covered, and no inventory of such carriers exists.
+ *
+ * SHAPE. Identical to the nested case except the mount is NOT appended to a
+ * parent — it is RETURNED, and the caller uses it as the element the factory
+ * yields. That matches what the nested case already produces (`<ul>` gains a
+ * `<div data-scrml-each-mount>` wrapper), so root position introduces no new
+ * DOM shape, it just has no `<ul>` above it.
+ *
+ * @returns `{ lines, mountVar }`, or null when the node is not a usable `<each>`
+ *   (no `in=`/`of=` source) — the caller then keeps its literal-markup emission.
+ */
+export function emitRootEachFromMarkup(
+  markupNode: any,
+  enclosingScopeVar: string | null,
+  indent: string = "",
+  engineCtx: EachEngineCtx | null = null,
+): { lines: string[]; mountVar: string } | null {
+  return emitEachFromMarkupCore(markupNode, enclosingScopeVar, null, indent, engineCtx);
+}
+
+/**
+ * The ONE emitter both the nested and the root lift-each paths run through.
+ *
+ * `appendTo` is the parent fragment/element var, or null for ROOT position (no
+ * parent — the caller takes `mountVar` and returns it). Everything else is
+ * shared BY CONSTRUCTION rather than by discipline: the round-4 root-position
+ * blocker existed precisely because root had no path into this code at all, and
+ * a second copy of it would have re-created that divergence on the next fix.
+ */
+function emitEachFromMarkupCore(
+  markupNode: any,
+  enclosingScopeVar: string | null,
+  appendTo: string | null,
+  indent: string,
+  engineCtx: EachEngineCtx | null,
+): { lines: string[]; mountVar: string } | null {
   const eachBlock = eachBlockFromMarkupNode(markupNode);
   if (!eachBlock) return null;
-  // Tree-shake: empty inner each (no template + no <empty>) renders nothing.
+
+  const innerMountVar = `_scrml_each_mount_${nextLocalId()}`;
+  const mountLines = (): string[] => [
+    `${indent}const ${innerMountVar} = document.createElement("div");`,
+    `${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${nsId(eachBlock.id)}");`,
+    ...(appendTo === null ? [] : [`${indent}${appendTo}.appendChild(${innerMountVar});`]),
+  ];
+
+  // Tree-shake: an each with no template AND no <empty> renders nothing.
+  //
+  // ⚠ The two positions DIVERGE here, necessarily. Nested emits literally
+  // nothing (there is a parent, and appending no mount is the smaller output).
+  // Root MUST still produce a node, because its caller returns it as the value
+  // of a markup-valued `fn` / derived cell — returning nothing there would put
+  // `undefined` into `_scrml_render_value`. So root gets the bare, empty mount.
   if ((!Array.isArray(eachBlock.templateChildren) || eachBlock.templateChildren.length === 0) && !eachBlock.emptyChild) {
-    return [];
+    return { lines: appendTo === null ? mountLines() : [], mountVar: innerMountVar };
   }
 
   const lines: string[] = [];
@@ -3770,13 +3861,11 @@ export function emitNestedEachFromMarkup(
     ? eachBlock.asName
     : "_scrml_each_item";
   const innerIdxName = "_scrml_each_idx";
-  const innerMountVar = `_scrml_each_mount_${nextLocalId()}`;
   const innerItemsVar = `_scrml_each_items_${nextLocalId()}`;
-  // The item-local mount is created + appended ONCE (stable DOM node identity
-  // across inner re-renders); the inner reconcile writes into it in place.
-  lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
-  lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${nsId(eachBlock.id)}");`);
-  lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
+  // The mount is created ONCE (stable DOM node identity across re-renders); the
+  // reconcile writes into it in place. In NESTED position it is appended to the
+  // parent here; in ROOT position there is no parent and the caller returns it.
+  for (const l of mountLines()) lines.push(l);
   // g-nested-each-no-own-subscription (2026-06-21) — Tier-0 `${for…lift}`-nested
   // sibling of the Tier-1 nested-each branch. Same fix: wrap the source-read +
   // reconcile in a per-item `_scrml_effect` so a post-mount `@cell` update
@@ -3811,7 +3900,7 @@ export function emitNestedEachFromMarkup(
     lines.push(l);
   }
   lines.push(`${indent}}));`);
-  return lines;
+  return { lines, mountVar: innerMountVar };
 }
 
 /**
