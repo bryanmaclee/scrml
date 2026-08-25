@@ -958,6 +958,93 @@ export function emitExprField(exprNode: ExprNode | null | undefined, fallbackStr
 }
 
 /**
+ * g-if-attr-per-field-synth-cell-crashes-boot (S372) — ONE of the §55
+ * synth-collapse rules, factored out of `collapseSynthSurfaceRefsInRaw` so a
+ * second caller can apply it without hand-copying the loop.
+ *
+ * ⚑ READ THE DIVERGENCE BLOCK AT THE BOTTOM BEFORE TREATING THIS AS "the" RULE.
+ * It is not the only implementation, and it is not the one `emitMember` uses.
+ *
+ * Given the segments of a dotted path ROOTED AT THE CELL NAME (`["signup",
+ * "name", "touched"]` — no `@`), return the registered synth cell to read and
+ * whatever member tail is left over, or null when no prefix is a registered
+ * synth cell.
+ *
+ * Collapse point is the EARLIEST (innermost-from-root) synth property whose
+ * dotted key is REGISTERED, so `@f.errors.length` →
+ * `_scrml_reactive_get("f.errors").length`. `emitMember` AGREES ON THAT SHAPE
+ * but not by sharing this code, and not by the same algorithm — see below.
+ *
+ * The `synthCellKeys` membership test is the S140 OVER-FIRE GUARD and is
+ * load-bearing: a plain cell carrying a field literally named `errors`
+ * (`<config> = { errors: [] }`) is NOT in the set, so `@config.errors` stays
+ * ordinary member access on the value object. A leaf-NAME-only guard would
+ * mis-route it to an unregistered key and return undefined at runtime.
+ *
+ * Why this exists as an EXPORT rather than a second predicate beside the first:
+ * the `if=`/`show=` toggle lowering in emit-event-wiring.ts reaches this rule
+ * from a RAW DOTTED STRING (a `variable-ref` attr value), not from an ExprNode
+ * and not from `@`-prefixed source text, so neither `synthDottedKey` (AST) nor
+ * `collapseSynthSurfaceRefsInRaw` (`@`-anchored regex) is callable there.
+ *
+ * ═══ ⚑ HOW MANY IMPLEMENTATIONS THERE REALLY ARE. READ THIS BEFORE EDITING. ═══
+ *
+ * **TWO callers share THIS function** — `collapseSynthSurfaceRefsInRaw` (the
+ * raw-string statement fallback) and `computeDisplayToggleCondition`
+ * (`emit-event-wiring.ts`, the `if=`/`show=` toggle).
+ *
+ * **`emitMember` DOES NOT.** It carries its own `synthDottedKey` walk, and the
+ * two use DIFFERENT RESOLUTION ORDERS:
+ *
+ *   this function  — EARLIEST registered prefix (scan root-outward, stop at the
+ *                    first synth property whose dotted key is registered)
+ *   synthDottedKey — LONGEST key first (build the whole chain, test THAT)
+ *
+ * They agree on every shape where only one prefix is registered, which is why
+ * this went unnoticed. They DISAGREE when a compound has a FIELD literally
+ * named like a synth property, because then a prefix is registered BOTH as the
+ * compound rollup AND as that field's namespace. PA-REPRODUCED on
+ * `<signup> <errors req> = "" </>`, where `signup.errors` (the rollup) and
+ * `signup.errors.isValid` (the field's own per-field key) are BOTH registered:
+ *
+ *   if=@signup.errors.isValid    → get("signup.errors").isValid      WRONG
+ *                                  (reads `.isValid` off the rollup MAP →
+ *                                   undefined → the gate can never be true)
+ *   if=(@signup.errors.isValid)  → get("signup.errors.isValid")      CORRECT
+ *
+ * ⚠ **So `emitMember` is the RIGHT one on that shape and this function is the
+ * wrong one.** Converging them means moving `emitMember` onto longest-key-first
+ * semantics for BOTH — a change to the AST member path with its own blast
+ * radius. **Filed as its own entry; deliberately NOT done here.**
+ *
+ * **And a FIFTH site applies the rule without calling anything:**
+ * `emit-event-wiring.ts:computeChainBranchCondition`'s `condition.name` arm
+ * emits `_scrml_reactive_get(<the whole dotted path>)` for an if-CHAIN branch
+ * (`else-if=@cfg.errors`) with NO `synthCellKeys` membership test at all, so it
+ * fabricates a key nothing registered and the branch can never be selected.
+ * Separate, pre-existing (verified identical on b0abcbc6 and after this change),
+ * filed as `g-else-if-dotted-cell-ref-emits-unregistered-flat-key` (#692).
+ *
+ * ⚑ **DO NOT READ "shared" AS "every site that needs it now calls it."** The
+ * standing hazard on this surface is N hand-maintained copies of one rule,
+ * drifting. This export reduced N; it did not make N equal 1.
+ */
+export function resolveSynthCellPrefix(
+  segments: readonly string[],
+  synthCellKeys: Set<string> | null | undefined,
+): { dotted: string; tail: string } | null {
+  if (!synthCellKeys || synthCellKeys.size === 0) return null;
+  for (let k = 1; k < segments.length; k++) {
+    if (!SYNTH_PROPERTY_NAMES.has(segments[k] as any)) continue;
+    const dotted = segments.slice(0, k + 1).join(".");
+    if (!synthCellKeys.has(dotted)) continue;
+    const rest = segments.slice(k + 1);
+    return { dotted, tail: rest.length ? "." + rest.join(".") : "" };
+  }
+  return null;
+}
+
+/**
  * g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299) — raw-string
  * synth-surface collapse for `emitExprField`'s client statement fallback.
  *
@@ -994,18 +1081,11 @@ function collapseSynthSurfaceRefsInRaw(raw: string, synthCellKeys: Set<string>):
   const rewriteSeg = (seg: string): string =>
     seg.replace(CHAIN, (m) => {
       const segs = m.slice(1).split(/\s*\.\s*/);
-      // Collapse at the EARLIEST (innermost-from-root) synth property whose dotted
-      // key is registered — identical to emitMember, which collapses at the
-      // receiver member (`@f.errors.length` → `_scrml_reactive_get("f.errors").length`).
-      for (let k = 1; k < segs.length; k++) {
-        if (!SYNTH_PROPERTY_NAMES.has(segs[k] as any)) continue;
-        const dotted = segs.slice(0, k + 1).join(".");
-        if (synthCellKeys.has(dotted)) {
-          const rest = segs.slice(k + 1);
-          const tail = rest.length ? "." + rest.join(".") : "";
-          return `_scrml_reactive_get(${JSON.stringify(dotted)})${tail}`;
-        }
-      }
+      // The collapse rule itself lives in `resolveSynthCellPrefix` (above) so
+      // this raw-string path, `emitMember`, and the `if=`/`show=` toggle lowering
+      // in emit-event-wiring.ts cannot drift apart.
+      const hit = resolveSynthCellPrefix(segs, synthCellKeys);
+      if (hit) return `_scrml_reactive_get(${JSON.stringify(hit.dotted)})${hit.tail}`;
       return m;
     });
 
