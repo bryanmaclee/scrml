@@ -50,3 +50,45 @@ handle `if=` for ordinary markup children (:1159, a display toggle) but routes `
 Baseline captured: pre-commit gate (unit+integration+conformance) 22803 pass / 70 skip / 1 todo /
 0 fail. Whole `bun run test` 30493 pass / 216 skip / 1 todo / 55 fail; browser+lsp+commands+self-host
 run in isolation = 47 fail (happy-dom global-state leak makes the grouping matter).
+
+## FINDING 1 — FIXED + BITE-PROVEN
+
+2026-08-24T19:05 — commit 21d5abcf. `ifExprRaw` on the each-block +
+`emitEachOpenerIfGuardLines` at both markup-derived call sites. Gate emitted INSIDE the
+`_scrml_effect` (tracked read -> reactive) and BEFORE the collection read (SPEC 17.1.2.1: "the
+iterated collection is not read ... while `expr` is false").
+
+Two non-obvious calls, both measured, not reasoned:
+  * READER — `eachAttrRawText`, NOT the per-row `if=` reader's JSON.stringify treatment. SPEC 5.2's
+    cluster-A paragraph carves CONDITION attributes out of the quoted-is-a-static-string rule
+    ("SHALL be parenthesized — if=(@n >= 3) — or quoted — if=\"@n >= 3\""), so a quoted condition is
+    EXPRESSION text. The first cut JSON.stringify'd it and emitted
+    `if (!("_scrml_reactive_get("show")"))` -> E-CODEGEN-INVALID-LOGIC on `if="@show"`, which
+    compiles clean on main. Caught only by varying the value form, per the brief's flag.
+  * LOWERER — `lowerEachExpr` (not `rewriteIterValueExpr`), so a SPEC-42 predicate routes through
+    the structured emitter.
+
+Measured lowering, all six forms SPEC 5.2 admits (head, exit 0 on all six):
+    if=@show           -> if (!(_scrml_cs_reactive_get("show")))
+    if="@show"         -> if (!(_scrml_cs_reactive_get("show")))
+    if=(@n >= 3)       -> if (!((_scrml_cs_reactive_get("n")>=3)))
+    if="@n >= 3"       -> if (!(_scrml_cs_reactive_get("n") >= 3))
+    if="not @show"     -> if (!(!_scrml_cs_reactive_get("show")))
+    if="@rows is some" -> if (!(((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)(_scrml_cs_reactive_get("rows"))))
+At BASE cb5db9c9 all six emit NO gate. `if=!@show` is E-SCOPE-001 on BOTH sides (pre-existing).
+
+BITE PROOF — reverted the COMMITTED emit-each.ts hunk (`git apply -R` of
+`git show 21d5abcf -- compiler/src/codegen/emit-each.ts`; NO stash), re-ran the gate:
+    with fix      20 pass / 0 fail
+    fix reverted   6 pass / 14 fail
+The 6 survivors are exactly the tests that assert a list RENDERS (B1/B2/B3/D2 + the two H-section
+OPENS rows) — controls against over-gating, not bug repros. Recorded IN the test file so nobody
+reads them as coverage they are not (Finding 4's lesson, applied forward).
+
+ALSO FIXED, incidental: the object literal `eachBlockFromMarkupNode` returns has been missing
+`asNames` — and failing types-gate with TS2741 — since Bug 72 (S158). Now `null` (behaviour
+identical; consumers guard with `Array.isArray`). TYPES-BASELINE.json pruned BY HAND, not by
+`--write`: a regenerate would also have absorbed the four diagnostics this branch is already red on
+(2x TS7006 + TS7016 markup-return-scan in emit-each, TS2352 in route-inference — all four verified
+PRE-EXISTING by running `types-gate --check` in a scratch worktree at 0e836a70). Post-fix
+`types-gate --check` reports those same four and nothing else: my delta is zero.

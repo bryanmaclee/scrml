@@ -377,6 +377,17 @@ describe("g-each-opener-if-lift-path — `if=` on a lift-parsed `<each>` gates t
   // -----------------------------------------------------------------------
   // §H — the `if=` VALUE-form matrix (§5.2 cluster-A). The quoted form is the one
   // the first cut of this fix got wrong, in the loudest possible way.
+  //
+  // ⚑ WHICH ROWS BITE ON WHAT — stated because a row that cannot fail reads as
+  // coverage. Measured by reverting the committed `emit-each.ts` hunk: 14 of this
+  // file's 20 tests go red, and the 6 survivors are exactly the ones that assert
+  // a list RENDERS. So:
+  //   * the four CLOSES rows bite on the bug itself (pre-fix they render 2 rows);
+  //   * the two OPENS rows do NOT — pre-fix there is no gate to over-close. They
+  //     bite on a DIFFERENT regression: an over-gating fix, or a reader that emits
+  //     invalid JS (the `hardErrors` assertion is what caught the JSON.stringify
+  //     cut, which fired E-CODEGEN-INVALID-LOGIC on `if="@show"`). Both are real;
+  //     neither is a bug-repro. Same reading applies to B1/B2/B3/D2.
   // -----------------------------------------------------------------------
 
   const FORMS = [
