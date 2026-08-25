@@ -67,7 +67,27 @@ silent.**
 ⚑ **The agent STALLED at 600s during REPORTING, not during work** — all three fixes were committed and
 the worktree clean. The incremental-commit rule paid for itself; a batch-at-the-end agent loses the round.
 ⚑ **What is NOT verified: its differential and bite proof** — the stall ate the report. Do not land on
-the strength of a report that never arrived. The re-review was running at wrap.
+the strength of a report that never arrived.
+⚑⚑ **THE RE-REVIEW LANDED AFTER THE WRAP AND RETURNED A HIGH IN THE ROUND-4 FIX ITSELF — READ THIS
+BEFORE TOUCHING THE BRANCH.** The new §17.1.2 opener `if=` gate lowers the predicate against
+`enclosingScopeVar`, which is **`null` for every lift-parsed `<each>` not inside a `for`**, so an
+ITEM-SCOPED predicate emits a guard that throws. **PA-REPRODUCED at emit:**
+`<each in=@rows key=@.id if=@.on>` inside a `fn` compiles **exit 0, zero diagnostics** and emits
+`if (!(null.on))`; the `as`-alias variant emits `if (!(it.on))` with `it` a free identifier.
+`_scrml_effect` has no `try/catch`, so it propagates out of the module body — whole client dead.
+⚑ **BUT the review's REGRESSION framing is UNCONFIRMED and I measured the difference.** It reported
+that base rendered both rows; on MY fixture **base is ALREADY dead** —
+`ReferenceError: _scrml_reconcile_list is not defined`, i.e. the chunk-pruning gap this very sweep
+fixes. So: **the broken emit is real and certain; whether it is a REGRESSION is fixture-dependent and
+was not established.** Do not carry "it regressed" into a brief without re-deriving it.
+**Also from that review — MED:** `EACH_FACTORY_ALWAYS_EMITTED` holds only `document`, but `_itemFrag`
+is emitted just as unconditionally, so `as _itemFrag` passes all four validator arms and produces the
+exact *"This is a compiler defect … please report it"* message the validator was written to remove.
+**One name short of its own "provable from the emitter" claim.**
+**And LOW:** `emitEachOpenerIfGuardLines` returns `[]` on an unrecognised value shape (e.g. a bareword
+`if`), silently dropping the gate — the fail-OPEN direction §17.1.2.3 names as the dangerous one.
+**Round 5 is NOT dispatched** — the branch is HELD and nothing is on `main`, so this is pickup, not
+an emergency.
 ⚑ **Owed at landing (SPEC is out of the agent's write-set):** the `E-EACH-AS-ALIAS-INVALID` §34 catalog
 row. Ready-to-paste text is in `docs/changes/each-alias-round3-2026-08-24/` and the agent's report.
 Plus **six gap entries it asked me to author** — not yet written.
