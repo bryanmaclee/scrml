@@ -1774,6 +1774,21 @@ export function rewriteBlockBody(
   // client-only `_scrml_reactive_get("cell")`. Defaults to "client" so every
   // existing caller (event wiring, variant guards) is unaffected.
   mode: "client" | "server" = "client",
+  // g-when-handler-multistatement-body-loses-ast-path-lowerings (S374) — OPT-IN
+  // AST-path lowering. When a caller passes a full `EmitExprContext` here, each
+  // statement's expression is parsed to an ExprNode and lowered via
+  // `emitExprField(node, …, astExprCtx)` — the AST path — so `emitMember`'s
+  // interceptions (`@m.insert`→`_scrml_map_insert`, `@s.add`, `<#req>` refs,
+  // `?{}` SQL, synth-cell reads) fire. The default STRING fallback
+  // (`rewriteExprWithDerived`) does NOT do member interception, so a
+  // when-handler body routed through this fn used to mis-lower those forms
+  // (regression introduced by #693/#695, which moved when-handler bodies onto
+  // this path). Absent → byte-identical to the prior behaviour for every
+  // existing caller (event wiring, match arms, each-handlers, variant guards).
+  // Gated to CLIENT mode: the real class (when-effect / when-worker) is
+  // client-side; server-boundary bodies keep the existing rewriteServerExpr
+  // path unchanged (no new server emission).
+  astExprCtx?: EmitExprContext | null,
 ): string {
   // C5 (R27): split block-body statements on top-level `;` / newline, but the
   // scanner MUST be STRING-LITERAL-AWARE — a `;` (or `\n`) INSIDE a `"..."` /
@@ -1827,6 +1842,55 @@ export function rewriteBlockBody(
     ...(engineCtx?.exprCtxExtras ?? {}),
   };
 
+  // g-when-handler-multistatement-body-loses-ast-path-lowerings (S374) — lower a
+  // raw expression string via the best available path. When `astExprCtx` is
+  // present AND we are in client mode, parse the string to an ExprNode and route
+  // it through the AST path (`emitExpr` via `emitExprField`) so member
+  // interception fires; if the string is not a single parseable expression (a
+  // control statement, or a shape `shouldSkipExprParse` rejects), the parser
+  // returns an escape-hatch node and we fall back to the STRING path — with the
+  // full ctx, so `derivedNames` / `synthCellKeys` still apply. Absent → the
+  // original string-only behaviour.
+  // Gate on the function's OWN `mode` param (the authoritative client/server
+  // boundary), not `astExprCtx.mode` — one source of truth (S374 review #3).
+  const useAstPath = astExprCtx != null && mode !== "server";
+  // Resolve the expression parser ONCE per call, not once per statement (#5).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const _astParse = useAstPath
+    ? (require("../ast-builder.js") as {
+        safeParseExprToNodeGlobal: (
+          expr: string,
+          filePath: string,
+          startOffset: number,
+          errors?: unknown,
+        ) => { kind?: string; span?: { end?: number } } | undefined;
+      }).safeParseExprToNodeGlobal
+    : null;
+  const lowerExpr = (raw: string): string => {
+    if (useAstPath && _astParse) {
+      const node = _astParse(raw, "<when-handler-body>", 0, undefined);
+      // Take the AST path ONLY when the parse produced a real node that consumed
+      // the WHOLE statement (S374 review #2). A partial parse — two juxtaposed
+      // expressions on one line, e.g. `foo(1) bar(2)` — parses just the leading
+      // expression; `emitExprField(node, raw)` ignores `raw` when a node is
+      // present, so the trailing tokens would be SILENTLY DROPPED — the exact
+      // silent-statement-drop class this arc closes. Escape-hatch (a control
+      // statement / a `shouldSkipExprParse` shape) AND under-consumption both
+      // fall back to the STRING path, which emits the full text verbatim (with
+      // the full ctx, so `derivedNames` / `synthCellKeys` still apply).
+      if (
+        node &&
+        node.kind !== "escape-hatch" &&
+        typeof node.span?.end === "number" &&
+        raw.slice(node.span.end).trim() === ""
+      ) {
+        return emitExprField(node as Parameters<typeof emitExprField>[0], raw, astExprCtx as EmitExprContext);
+      }
+      return emitExprField(null, raw, astExprCtx as EmitExprContext);
+    }
+    return emitExprField(null, raw, exprCtx);
+  };
+
   const results: string[] = [];
   for (const stmt of stmts) {
     const reactiveAssignMatch = stmt.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)\s*([\s\S]+)$/);
@@ -1846,7 +1910,11 @@ export function rewriteBlockBody(
         // arms the pending-history-restore flag for the dispatcher's
         // composite-arm postMountJs to consume.
         const hist = detectHistoryFormFromString(rawRhs);
-        const valueExpr = emitExprField(null, hist.strippedRhs, exprCtx);
+        // Route through lowerExpr so an engine-bound `@cell = @m.insert(...)` gets
+        // the same AST-path member interception as the plain branch when a caller
+        // supplies astExprCtx (S374 review #4). For every existing caller (which
+        // passes no astExprCtx) this is byte-identical to the prior string path.
+        const valueExpr = lowerExpr(hist.strippedRhs);
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { emitEngineWriteGuard } = require("./emit-engine.ts") as {
           emitEngineWriteGuard: (
@@ -1858,7 +1926,7 @@ export function rewriteBlockBody(
         results.push(emitEngineWriteGuard(engineBinding, valueExpr, hist.isHistoryForm).join("\n"));
         continue;
       }
-      const valueExpr = emitExprField(null, rawRhs, exprCtx);
+      const valueExpr = lowerExpr(rawRhs);
       const binding = machineBindings?.get(name) ?? null;
       if (binding) {
         // §51.5: Emit transition guard instead of plain reactive_set for machine-bound vars
@@ -1875,7 +1943,7 @@ export function rewriteBlockBody(
         results.push(`_scrml_reactive_set("${name}", ${valueExpr})`);
       }
     } else {
-      results.push(emitExprField(null, stmt, exprCtx));
+      results.push(lowerExpr(stmt));
     }
   }
   return results.join("; ");
