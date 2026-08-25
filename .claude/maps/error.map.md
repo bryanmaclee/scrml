@@ -1,19 +1,41 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# generated-at: b9e97f1b (the watermark IS `origin/main` and IS the working tip).
-# **INCREMENTAL over `728bdc92` -> `b9e97f1b` (S371-bryan). SOURCE WINDOW = TWO FILES,
-# ONE COMMENT-ONLY.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run at WRITE time.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# generated-at: f536d35e on `wrap/s372-bryan` (the watermark `8b2e4053` is `merge-base HEAD
+# origin/main`; the commits above it are docs-only, so the source diff is EMPTY).
+# **INCREMENTAL over `b9e97f1b` -> `8b2e4053` (S372-bryan). SOURCE WINDOW = SEVEN FILES, ALL
+# LOWERINGS.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run at WRITE time.
 #
-# **CATALOG FLAT AT 812 — `compiler/SPEC.md` is `--name-only` EMPTY this window, so the §34 count,
-# the buckets and every code-vs-spec row below carry UNCHANGED and were not re-censused.**
-# ⚑ **WHAT DID CHANGE IS A LOCUS, NOT A COUNT: `W-DEAD-FUNCTION` now has a row of its own below
-# (search `W-DEAD-FUNCTION — THE LOCUS`), because the gap ledger carried a WRONG one (it named
-# `codegen/usage-analyzer.ts`) from S369 to S371 and this map had nothing that contradicted it.**
+# **CATALOG FLAT AT 812, AND THIS TIME THE CENSUS WAS RE-EXECUTED RATHER THAN CARRIED.**
+# `bun scripts/s34-census.ts` at `8b2e4053`:
 #
-# **Carried from S368 — CATALOG 810 -> 812 (+2). BUCKETS ESSENTIALLY FLAT.**
-# `bun scripts/s34-census.ts` as executed at `728bdc92` (NOT re-executed this pass — SPEC.md is
-# `--name-only` EMPTY over `728bdc92..b9e97f1b`, so the figures below are unchanged by construction):
+#     812 rows (§34 19352..20235, derived) · 1958 source files · 883 conformance cases
+#     STRUCK 34 · PINNED 343 · IMPL-SITES 302 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112
+#     dispositions: BUILD-ARC 71 · HOME-NO-SHALL 27 · NOMINAL-HOME 10 · ORPHAN-INDEX 4
+#
+# **Every bucket identical to the `728bdc92` run** — expected, since `compiler/SPEC.md` is
+# `--name-only` EMPTY. ⚠ **`filesScanned` moved 1950 -> 1958 and that is NOT a repo fact**: it walks
+# ten directory roots ON DISK and counts whatever gitignored build output the checkout holds. Do not
+# publish it. **ZERO new diagnostic codes this window** — `git diff b9e97f1b..8b2e4053 -- compiler/src/
+# | grep '^+' | grep -oE '"[EWI]-[A-Z0-9-]+"'` returns NOTHING.
+#
+# ⚑ **WHAT THIS PASS ADDS IS A CLASS WITH *NO* DIAGNOSTIC AT ALL, WHICH IS THE HARDEST KIND TO FIND
+# IN A MAP ORGANISED BY CODE.** A `show=` on a structural element, an `else-if=` on one, and a
+# structural `if=` inside an `<each>` row template are all **ACCEPTED AND THEN DISCARDED — exit 0,
+# zero diagnostics, fail-OPEN.** §17.1.2.2/§17.1.2.3 document them as such. There is no `E-`/`W-`
+# code to look up, so a reader working backwards from a code will never reach them; they are reachable
+# only from the SYMPTOM. See "A PREDICATE WITH NO DIAGNOSTIC" below and primary.map.md Task-Shape
+# Routing row 3.
+#
+# **CARRIED, still true and STRENGTHENED this window: `W-DEAD-FUNCTION`'s locus is
+# `route-inference.ts:5614-5616`, NOT `codegen/usage-analyzer.ts`** (search `W-DEAD-FUNCTION — THE
+# LOCUS`). #700 upgraded that from "wrong locus" to **"dead surface"** by reproduce-first: the
+# `FeatureUsage` bitmap `analyzeUsage` computes is never read to gate emission. RE-MEASURED here —
+# `grep -n featureUsage compiler/src/codegen/index.ts` returns **ZERO hits**. **Fixing anything there
+# changes zero emitted bytes.**
+#
+# **Carried from S368 — CATALOG 810 -> 812 (+2). BUCKETS ESSENTIALLY FLAT.** The S368 -> S371 run
+# for comparison (superseded by the re-execution above, which returns identical buckets):
 #
 #     812 rows (§34 19352..20235) · 1950 source files · 883 conformance cases
 #     STRUCK 34 · PINNED 343 · IMPL-SITES 302 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112
@@ -496,6 +518,32 @@ as the `<each>` fix). **LEDGER-SOURCED, not re-executed this pass:** arrow-callb
 (`G-DEAD-FUNCTION-MISSES-ARROW-CALLBACK-BODIES`) and match-ARM call edges
 (`g-ri-dead-function-match-arm-edges`).
 
+## A PREDICATE WITH NO DIAGNOSTIC — the accepted-then-discarded `if=`/`show=` class (NEW section, S372)
+
+**This section exists because this map is organised by CODE, and this class has none.** A reader
+working backwards from an `E-`/`W-` token will never reach it; it is reachable only from the SYMPTOM
+("the compiler accepted my predicate and the content ships anyway"). Everything below is **exit 0,
+zero diagnostics, fail-OPEN** — the dangerous direction: the content the author wrote a predicate to
+WITHHOLD is shipped, and it is invisible during development whenever that predicate is usually true.
+
+| shape | what happens | where it is decided | tracked as |
+|---|---|---|---|
+| `show=` on `<each>` / `<match>` / `<engine>` | **discarded at AST-BUILD.** `grep -rn showCond compiler/src/` returns **ZERO hits** at this watermark — only `ifRaw`/`ifCond` is stamped onto a structural opener (`ast-builder.js:15892`, `:16891`, `:17932`, `:18082`), so there is no field for a gate to read | capture, not emit — `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and nothing else | `g-structural-element-if-chain-and-show-composition-nominal` (MED, open) |
+| `else-if=` on a structural element | silently dropped; an `else` SIBLING after a gated structural element fires **`E-CTRL-001`** instead, because the chain detector recognizes only `kind:"markup"` nodes as chain members | the chain detector | same gap |
+| structural `if=` INSIDE an `<each>` row template | **never gated.** The row renderers (`emit-each.ts`, `emit-lift.js`) do not read `ifCond` at ALL; only `emit-html.ts`'s `emitGatedStructural` (`:1516`) does, and a row template does not route through it | **PA-REPRODUCED at `8b2e4053` by compiling:** `<each in=@.tags if=@shown>` inside an `<each>` row emitted the inner list with ZERO references to `shown`, `@shown = false`, exit 0 | `g-structural-if-inside-each-row-template-fails-open` (MED, open) |
+
+**THE ONE POSITION IN THIS FAMILY THAT DOES WARN — and it is the contrast that makes the rest
+legible.** A MARKUP `if=` on a NON-ROOT element inside a row template emits a create-time append gate
+(`emit-each.ts:1313`) and fires **`W-IF-IN-EACH`**, because it renders correctly and then goes STALE
+rather than never gating at all. §17.7's deferred `W-EACH-PERITEM-IF-*` family is the reactive fix.
+
+⚠ **DO NOT SCOPE THIS FROM `compiler/SPEC.md:11686` — THE SPEC'S OWN TABLE IS STALE THERE.** It still
+says that markup non-root position *"emits nothing — fails CLOSED (never renders)"*. **It does not**;
+the measured-S302 row was overtaken by #416/GH #409 and never updated. Filed in
+`non-compliance.report.md`. **The durable fix for the whole family is ONE diagnostic covering markup
+and structural positions together**; until it lands, an author placing a conditional in either
+position gets no signal on either path.
+
 ## Diagnostic families by feature area — THE ROUTING TABLE
 
 Keyed by PREFIX. A code not named individually below is still routed by its family row.
@@ -674,7 +722,7 @@ compiling stdlib source emitting a browser-DOA bundle, invisible to every prior 
 once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for how to run it.
 
 ## Tags
-#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule
+#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact
 
 ## Links
 - [primary.map.md](./primary.map.md)

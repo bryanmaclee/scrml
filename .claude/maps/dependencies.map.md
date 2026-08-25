@@ -1,15 +1,37 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED.**
-# `git diff --name-only 728bdc92..b9e97f1b -- package.json bun.lock` is **EMPTY** (the manifest
-# streak resumes: one change in twelve windows). The whole source window is `route-inference.ts`
-# (+53) and a comment block in `codegen/emit-each.ts`, and
-# `git diff 728bdc92..b9e97f1b -- compiler/src/route-inference.ts | grep -cE '^[+-]import '`
-# returns **0** — **no new internal edge, no removed one.** Every dependency claim below holds.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: EXTERNAL DEPS STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`);
+# THE INTERNAL MODULE GRAPH GAINED TWO EDGES AND THEY ARE RECORDED BELOW.**
+# `git diff --name-only b9e97f1b..8b2e4053 -- package.json bun.lock` is **EMPTY** (the manifest
+# streak resumes: one change in thirteen windows). No runtime dep, no dev dep, no version moved.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# ⚑ **TWO NEW INTERNAL EDGES, BOTH THE SAME SHAPE — A DUPLICATED RULE COLLAPSED INTO A SHARED
+# EXPORT.** Verified by grep at this watermark, not read off the commit messages:
+#   1. `codegen/emit-event-wiring.ts:3` now imports **`resolveSynthCellPrefix`** from
+#      `codegen/emit-expr.ts:1032` (#704), alongside the pre-existing `emitExprField` and
+#      `reparseRequestRefEscapeHatch`. One consumer: `computeDisplayToggleCondition`'s
+#      `varName`+`dotPath` branch (`emit-event-wiring.ts:541`).
+#   2. `codegen/emit-control-flow.ts:3` now imports **`_objectLiteralArmFromStructuredBody`** from
+#      `codegen/emit-logic.js` (#697), alongside the pre-existing `_matchArmResultIsBlockBody` /
+#      `_blockTailIsValueExpr` / `planBlockArmLift`. One consumer:
+#      `emit-control-flow.ts:2442`, checked BEFORE `emitLogicBody` so an object arm skips
+#      statement emission.
+# ⚠ **NEITHER EXPORT MADE ITS RULE SINGLE-SITE, AND `emit-expr.ts:1029-1030` SAYS SO IN AS MANY
+# WORDS:** *"DO NOT READ 'shared' AS 'every site that needs it now calls it.' … This export reduced
+# N; it did not make N equal 1."* The §55 synth-key rule still has FIVE implementations at this
+# watermark — see the SYNTH-KEY RULE COPIES table below and primary.map.md Task-Shape Routing row 1.
+#
+# One more edge worth knowing, added the same window with NO new import line: `emit-logic.ts`'s
+# **`rewriteBlockBody` gained an opt-in `astExprCtx` parameter** (#703). Passing a full
+# `EmitExprContext` routes each statement through `emitExprField` -> `emitExpr` -> `emitMember`
+# instead of the string fallback `rewriteExprWithDerived`. **Absent the param every existing caller
+# is byte-identical**, so this is a widening of an existing edge, not a new one. Three call sites
+# pass it: the `when-effect` / `when-worker-message` / `when-worker-error` emit sites.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
 # S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
@@ -181,12 +203,12 @@ attribute later means walking this exact list.
 
 | # | Stage | Symbol | The rule |
 |---|---|---|---|
-| 1 | **Capture** | `ast-builder.js` `captureStructuralIfAttr` (:2705) + `structuralHeaderAnchor` (:2797) | Re-parses a SYNTHETIC `<x if=…>` opener through the SAME `tokenizeAttributes` + `parseAttributes` a markup opener uses. The value object is byte-for-byte what `<div if=…>` produces — that is what lets four hosts share one lowering. Offsets rebased −3 so diagnostics anchor in real source. |
+| 1 | **Capture** | `ast-builder.js` `captureStructuralIfAttr` (**:2731** — was cited `:2705`) + `structuralHeaderAnchor` (**:2823** — was `:2797`) | Re-parses a SYNTHETIC `<x if=…>` opener through the SAME `tokenizeAttributes` + `parseAttributes` a markup opener uses. The value object is byte-for-byte what `<div if=…>` produces — that is what lets four hosts share one lowering. Offsets rebased −3 so diagnostics anchor in real source. |
 | 2 | **ExprNode** | `native-walker/attrvalue-exprnode-walker.ts:208` | Populates `ifCond.exprNode` (and strips native's extra `sourceText`). |
-| 3 | **Scope check** | `type-system.ts` `visitStructuralIfAttr` (:12688) → `visitAttr` | **Called BEFORE `scopeChain.push("each:…")`.** The opener predicate is evaluated OUTSIDE the per-item scope, so `if=item.ok` must NOT resolve against the row binding — reordering these two lines silently makes a wrong predicate compile clean. |
+| 3 | **Scope check** | `type-system.ts` `visitStructuralIfAttr` (**defined :13190**, called :12721 + :12811 — the map cited `:12688`, which is neither) → `visitAttr` | **Called BEFORE `scopeChain.push("each:…")`.** The opener predicate is evaluated OUTSIDE the per-item scope, so `if=item.ok` must NOT resolve against the row binding — reordering these two lines silently makes a wrong predicate compile clean. |
 | 4 | **Reader credit (DG)** | `dependency-graph.ts` `creditFromAttrValue` (:2559), called for `ifCond` at :2930 | **`ifRaw` is deliberately NOT in the raw-scan lists** (:2964 / :3020 / :3088 carry that note). A private `/@ident/` scan over the raw text diverges in BOTH directions: it reads inside string literals (over-credit) and misses an `if=fn()` call-ref's `fnTransitiveReads` (under-credit). Without this consumer, a cell read ONLY by a structural gate false-fires `E-DG-002`. |
-| 5 | **Emit** | `codegen/emit-html.ts` `emitGatedStructural` (:1498) → `emitIfMountGate` (:1421); kind test `isGateableIfValue` (:1472) | The sole `if=` lowering; the `E-IF-IN-DISPATCHED-ARM` guard fires here too (:1508). No `ifCond` field ⇒ byte-identical to the pre-§17.1.2 emitter. |
-| — | **Native mirrors** | `native-parser/collect-hoisted.js` `readStructuralIfAttr` (:420); `native-parser/parse-file.js` (:762 match, :1081 each, `stripSourceTextFromValue` :1681) | A landing that adds an AST FIELD to a structural node owes these. An emit-time / runtime / CLI / message-only landing does not. |
+| 5 | **Emit** | `codegen/emit-html.ts` `emitGatedStructural` (**:1516** — was `:1498`) → `emitIfMountGate` (**:1439** — was `:1421`); kind test `isGateableIfValue` (**:1490** — was `:1472`) | The sole `if=` lowering; the `E-IF-IN-DISPATCHED-ARM` guard fires here too (**:1526** — was `:1508`; `refuseConditionalInDispatchedArm` is defined at `:802` and has THREE call sites — `:1526` structural, `:1755` if-chain, `:2745` markup). No `ifCond` field ⇒ byte-identical to the pre-§17.1.2 emitter. |
+| — | **Native mirrors** | `native-parser/collect-hoisted.js` `readStructuralIfAttr` (:420); `native-parser/parse-file.js` (:762 match, :1081 each, `stripSourceTextFromValue` **:1611** (was cited `:1681`)) | A landing that adds an AST FIELD to a structural node owes these. An emit-time / runtime / CLI / message-only landing does not. |
 
 **Field-shape invariant:** `ifRaw` and `ifCond` are **ABSENT, not null**, when the opener has no
 `if=`. The within-node parser-parity canary compares FIELD SETS; null-stamping every
@@ -197,6 +219,47 @@ side actually disagrees about. Precedent on the same node family: `engine-decl.b
 **`ifCond` lives on the AST NODE, not in `engineMeta`.** That placement is load-bearing: it puts the
 predicate out of reach of the JS-substrate emitters that build the engine's cell and rules, which is
 what enforces §17.1.2.1's render-vs-lifecycle split structurally rather than by convention.
+
+## §55 SYNTH-KEY RULE — FIVE COPIES, TWO RESOLUTION ORDERS, ONE OPEN DIVERGENCE (NEW section, S372)
+
+**The rule:** an `@<compound>[.field].<synthProp>` read (`isValid` / `errors` / `touched` /
+`submitted`, the `SYNTH_PROPERTY_NAMES` set imported from `symbol-table.ts`) whose DOTTED key is a
+registered §55 synth cell must lower to `_scrml_reactive_get("<dotted>")` — the flat key — **not** to
+a member access on the compound's value object. The compound is a §6.3 Variant C NAMESPACE whose
+value object carries only its field keys, so the member form reads `undefined` (silent, never mounts)
+or dereferences `null` (a `TypeError` inside `_scrml_boot` → **the whole page never wires**).
+
+**Read this table before you touch any of the five.** #704 exported one implementation to reduce the
+copy count; `emit-expr.ts:1029-1030` states in as many words that this **did not make N equal 1**.
+
+| # | Site | Resolution order | Consults `synthCellKeys`? |
+|---|---|---|---|
+| 1 | `emit-expr.ts` `emitMember` (**:2588**, synth branch **:2623-2631**) via `synthDottedKey` (**:2701**) | **LONGEST key first** — build the WHOLE chain, test that one key, no tail | yes (`ctx.synthCellKeys?.has(dotted)`) |
+| 2 | `emit-expr.ts` **`resolveSynthCellPrefix`** (**:1032**, the export) | **SHORTEST prefix first** — scan segments upward, first synth-property segment whose prefix is registered wins, remainder returned as `tail` | yes (arg) |
+| 3 | `emit-expr.ts` `collapseSynthSurfaceRefsInRaw` (raw-string client-statement fallback) | delegates to #2 | yes |
+| 4 | `emit-event-wiring.ts` `computeDisplayToggleCondition`, `varName`+`dotPath` branch (**:541**) — the `if=`/`show=` toggle | delegates to #2, then applies a shape gate (below) | yes |
+| 5 | `emit-event-wiring.ts` `computeChainBranchCondition`, `condition.name` arm (**:789-791**) — `else-if=@cfg.errors` | **NONE — emits `_scrml_reactive_get(<whole dotted path>)` with no membership test at all**, fabricating a key nothing registered | **no** |
+
+⚠ **#1 AND #2 DISAGREE, AND THE DISAGREEMENT IS FILED, NOT THEORETICAL.** On
+`@signup.errors.isValid` (a compound with a field literally named `errors`) longest-first resolves
+`signup.errors.isValid` and shortest-first resolves `signup.errors` + tail `.isValid` — a read off the
+rollup MAP, permanently `undefined`. **`emitMember` is the CORRECT side on that shape.** Converging
+them means moving `emitMember` onto longest-key-first for both, a change to the AST member path with
+its own blast radius — `g-synth-key-resolution-diverges-between-emitmember-and-shared-helper` (MED,
+open). Site #5 is `g-else-if-dotted-cell-ref-emits-unregistered-flat-key` (MED, open, #692).
+⚠ **THE LEDGER'S LOCUS FOR #5 IS STALE AT THIS WATERMARK** — `docs/known-gaps.md:2561` says
+`emit-event-wiring.ts:647`; the arm is at **:789**, because #704 inserted 192 lines above it. Grep
+for `condition.name`, do not seek `:647`.
+
+**Site #4 carries a SHAPE GATE the other four do not, and it is not optional.** §55 does not give
+every synth cell a scalar: the compound-level `errors` and `touched` rollups are OBJECT MAPS keyed by
+field name, and an object literal is always truthy — collapsing them would turn a gate that read
+`undefined` (never mounts) into one that is unconditionally true, rendering a pristine form's error
+block at boot. The gate is DERIVED from the same key set the collapse reads (invariant 65), never an
+allow-list: `<prefix>.submitted ∈ keys` IS the "prefix is a compound parent" test (§55.7 gives
+`submitted` to parents only), and `seg` names a FIELD iff `<prefix>.<seg>.errors ∈ keys` **AND**
+`<prefix>.<seg>.submitted ∉ keys`. The exact collapse/decline matrix, PA-measured by compiling at
+this watermark, is in domain.map.md.
 
 ## Indirect callee resolution (#284, S303) — a SECOND call graph, on purpose
 
@@ -524,7 +587,7 @@ loader **strips DEFAULT imports**, and `path`'s shim is `import nodePath from "n
 if it passed the host-reach limb every export would `ReferenceError`.
 
 ## Tags
-#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover #synth-key-rule #five-copies #two-resolution-orders #resolve-synth-cell-prefix #emit-member #longest-key-first #shortest-prefix-first #ast-expr-ctx #object-literal-arm #if-cond-consumer-table #line-ref-drift
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,12 +1,15 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-08-24T09:45:00-06:00  commit: b9e97f1b
-# ⚑ **S371-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`728bdc92` -> `b9e97f1b`), NOT RE-WALKED —
-# THIRTEENTH consecutive window with no DB/migration surface movement.** No `migrations/` path, no
-# schema file and no DB command changed; the whole window is `route-inference.ts` + a comment.
+# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
+# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED —
+# FOURTEENTH consecutive window with no DB/migration surface movement.** Re-measured at THIS
+# watermark: `git diff --name-only b9e97f1b..8b2e4053 -- '*migrat*' '*schema*'` returns only two
+# `.claude/maps/` files (this map and `schema.map.md` — i.e. the maps themselves, not source).
+# No `migrations/` path, no schema file and no DB command changed.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced to
-# `b9e97f1b` on the MEASURED ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
+# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
+# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
 # **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED. TWELVE windows with no DB/migration surface
 # movement.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at
 # WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of
