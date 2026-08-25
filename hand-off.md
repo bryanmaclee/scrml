@@ -193,6 +193,16 @@ the render-slot fix's regression test CANNOT be an e2e-render-map cell.
   renumbers the wrong side on a merge (first-in-file order is blind to which side is published).
   Renumbered by hand both times.
 - **Worktrees:** see 6b in the changelog block; the two agent worktrees holding unlanded work are RETAINED.
+- ⚑ **WRAP 6c — MAPS REFRESH DISPATCHED AND STILL IN FLIGHT AT WRAP-CUT; DELIBERATELY NOT COMMITTED.**
+  The mapper had bumped line 3 to `8b2e4053` while line 4 still read `generated-at: b9e97f1b` — a
+  self-contradicting watermark, which is precisely what the MAP-STAMP RULE exists to prevent. I
+  unstaged rather than ship it. The stamp SHA it chose IS a valid ancestor of `origin/main`
+  (verified). **Next session: let it finish, or take the `cloud-maps` scheduled refresh, then commit
+  `.claude/maps/` with an EXPLICIT pathspec.** The maps are ~5 code landings behind (#697 #699 #700
+  #703 #704). ⚑ **Two ROUTING HOLES were named in the dispatch and are worth confirming landed:** no
+  Task-Shape row for `if=`/`show=` lowering or `emit-event-wiring.ts`, and none for
+  `eachBlockFromMarkupNode` / the lift-vs-structural `<each>` split — **both reported independently by
+  two dispatches this session**, which is what makes them measured rather than speculative.
 - **Mechanical stream:** delta-log `[1771]`–`[1773]`, `[1783]`–`[1786]`. Do not re-derive from this
   hand-off what the delta-log and changelog carry.
 - ⚠️ `scripts/ruling-debt.ts` **still not on `origin/main`** — fourth session running. The instrument
