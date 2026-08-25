@@ -2878,6 +2878,27 @@ export function generateClientJs(ctx: CompileContext): string {
     // covers a controller minted from the binding registry rather than a walkable
     // AST shape.
     ["_scrml_find_if_marker(", "ifmount"],
+    // g-when-handler-body-invisible-to-chunk-detection (S372 follow-up) — a
+    // client `navigate(...)` lowers to `_scrml_navigate_soft(` / `_scrml_navigate(`
+    // (rewrite.ts), both DEFINED in the `utilities` chunk. That chunk's pre-emit
+    // gate (detectFromNode `case "bare-expr"`, exprNodeContainsCall "navigate")
+    // only fires for a `navigate()` that is a walkable `bare-expr` AST node. A
+    // `when @dep changes { … }` / `when message from <#w> { … }` handler body is
+    // NOT stored as child bare-expr nodes — it lives only as `bodyRaw` (string) +
+    // `bodyExpr` (STATEMENT 1's ExprNode). So a `navigate()` anywhere in a
+    // when-handler body (single-statement OR statements 2+, the latter newly
+    // EMITTED by #693/#695) is invisible to the pre-emit walk → the `utilities`
+    // chunk is tree-shaken → the emitted `_scrml_navigate_soft(` reference throws
+    // `ReferenceError` on first dependency change. Unlike `reset`/`equality`,
+    // `utilities` has no scope-dependency backstop (CHUNK_DEPENDENCIES) and was
+    // not in this post-emit table, so nothing caught it. Scanning the emitted body
+    // (ground truth, AST-shape-immune — the exact rationale of this table) closes
+    // it. Reference-GATED: a navigate-free page emits neither token and still
+    // tree-shakes `utilities` out — no over-inclusion. The runtime placeholder
+    // slot is still empty here, so this scans only emitted client code, never the
+    // chunk's own `_scrml_navigate` definition.
+    ["_scrml_navigate_soft(", "utilities"],
+    ["_scrml_navigate(", "utilities"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;
