@@ -3508,14 +3508,15 @@ const EACH_FACTORY_ALWAYS_EMITTED = new Set<string>(["document"]);
  *   the synthetic iter var, so the emitted artifact stays VALID JS and the named
  *   diagnostic above is the only thing the author has to read).
  */
-function validateEachAlias(alias: string, markupNode: any): string | null {
+function validateEachAlias(alias: string | null, markupNode: any, nextAttrName?: string | null): string | null {
   const span = markupNode?.span ?? { start: 0, end: 0 };
+  const shown = alias === null ? "as" : `as ${alias}`;
   const fire = (why: string, fix: string): null => {
     if (_eachAliasDiagnostics && markupNode && !_eachAliasReported.has(markupNode)) {
       _eachAliasReported.add(markupNode);
       _eachAliasDiagnostics.push(new CGError(
         "E-EACH-AS-ALIAS-INVALID",
-        `E-EACH-AS-ALIAS-INVALID: \`<each … as ${alias}>\` — ${why}. ` +
+        `E-EACH-AS-ALIAS-INVALID: \`<each … ${shown}>\` — ${why}. ` +
         `The \`as\` clause binds the current iteration value to a LOCAL IDENTIFIER in the ` +
         `row scope (§17.7.2, §17.7.3), and that name becomes the per-item render ` +
         `parameter. ${fix}`,
@@ -3525,6 +3526,31 @@ function validateEachAlias(alias: string, markupNode: any): string | null {
     }
     return null;
   };
+
+  // ⚑ ARM 4 — a DANGLING `as`, added round 4. `readEachAsAlias` returns a null
+  // name for exactly one shape: an `as` with no bareword after it and no
+  // `as=name` value — i.e. `<each in=@rows as key=it>`, where the author typed
+  // `as` and then an attribute instead of a name.
+  //
+  // Before this arm that path was the ONLY malformed-alias shape with no
+  // diagnostic at all, and it produced precisely the failure the other three
+  // arms exist to eliminate: the alias silently resolved to the synthetic iter
+  // var while the body still lowered `${it}` as a bare identifier —
+  //
+  //     (_scrml_each_item, _scrml_each_idx) => it        // `it` never declared
+  //
+  // -> `ReferenceError: it is not defined` at bundle eval, whole client script
+  // dead, exit 0, zero diagnostics. Measured on this branch. It is at least as
+  // likely a typo as `as data-id`, and it was the quieter of the two.
+  if (alias === null) {
+    return fire(
+      nextAttrName
+        ? `the \`as\` clause has no alias name — the next token is the attribute \`${nextAttrName}=\`, not a name`
+        : "the `as` clause has no alias name",
+      "Name the binding — e.g. `as row` — or drop the `as` and read items through the `@.` sigil. " +
+      "Left as-is this compiles at exit 0 and then throws at bundle eval, killing the whole page.",
+    );
+  }
 
   if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(alias)) {
     return fire(
@@ -3602,6 +3628,11 @@ function readEachAsAlias(attrs: any[], asIndex: number): { name: string | null; 
   if (isBarewordAttr(next)) {
     return { name: next.name.trim(), nextIndex: asIndex + 1 };
   }
+  // ⚑ A NULL RETURN HERE IS A DIAGNOSED ERROR, NOT A QUIET FALLBACK (round 4).
+  // The caller routes it into `validateEachAlias` arm 4. Until round 4 it fell
+  // through to the synthetic iter var while the body still lowered `${it}` as a
+  // bare identifier — a `ReferenceError` at bundle eval, exit 0, zero
+  // diagnostics. Do not "simplify" this back into a silent null.
   return { name: null, nextIndex: asIndex };
 }
 
@@ -3670,7 +3701,18 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
       // iter var and the artifact stays valid JS: the named diagnostic is then
       // the ONLY thing the author has to read, instead of a downstream
       // `E-CODEGEN-INVALID-LOGIC` that says "this is a compiler defect".
-      asName = alias.name === null ? null : validateEachAlias(alias.name, markupNode);
+      //
+      // A NULL name is NOT "no `as` clause" — this branch only runs because an
+      // `as` attribute IS present. Null means DANGLING (`as key=it`), which is
+      // arm 4 of the validator, so it is passed through rather than short-
+      // circuited. The following attribute's name goes with it so the message
+      // can say WHICH token was found where a name should be.
+      const _nextAttr = attrs[i + 1];
+      asName = validateEachAlias(
+        alias.name,
+        markupNode,
+        alias.name === null && _nextAttr && typeof _nextAttr.name === "string" ? _nextAttr.name : null,
+      );
       i = alias.nextIndex;
     }
   }
