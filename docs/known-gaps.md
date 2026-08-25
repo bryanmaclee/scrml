@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 55 |
-| MED | 169 |
-| LOW | 72 |
+| MED | 170 |
+| LOW | 74 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2433,6 +2433,59 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > So the trigger is the **three-level compound-nav path to a PER-FIELD synthesized cell** — not synth cells generally (compound-level works), not compound-nav generally (2-level works). Consistent with PRIMER §13.7 B12: per-field synth records live in a distinct `kind:"field"` scope reached only via `lookupQualifiedStateCell`'s extended descent, so 3-level is a separate resolution path the `if=` lowering never learned.
 > **`${@signup.name.touched}` in an INTERPOLATION works correctly** (renders `false` → `true` on interaction), so the per-field synth cells themselves are sound and reactive — this is `if=` lowering specifically.
 > **Severity HIGH:** silent at compile (exit 0; the only diagnostics were an unrelated `W-PROGRAM-SPA-INFERRED` info lint), catastrophic in scope (kills the entire page's reactivity), on the documented §55 auto-synth validity flagship — **and the shape is exactly what SPEC's own stated adopter mental model prescribes.** `SPEC.md:5898`: *"Adopter mental model: 'I'm still typing, don't show field errors yet; I stopped, now show them.'"* The idiomatic way to honour that is to gate on `touched`, and `<errors>` has no `touched` attribute (§55.8 defines only `of=` and `all`), and `if=` on `<errors>` is rejected with `W-ATTR-001` — so **wrapping in `<span if=@field.touched>` is the remaining idiom, and it is precisely the shape that crashes.** Found dog-fooding, not in the ledger. Repro-first re-derive before building.
+
+### g-chunk-reachability-is-approximated-not-computed — ⭐⭐ **ARC.** The runtime chunk-detect walk both UNDER-approximates (a client calls a symbol no shipped chunk defines → dead page at exit 0) and OVER-approximates (a page ships a chunk it never calls). **FOUR carriers of the under-side found in two sessions.** — `NEW S372-bryan (bryan-RULED: land the each-alias sweep WIDE, and this becomes its own arc); HIGH; open`
+<!-- @gap id=g-chunk-reachability-is-approximated-not-computed sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(`detectRuntimeChunks` — the walk that decides which runtime chunks a page ships; it is a hand-extended per-carrier walker, not a computed reachability closure over the emitted client text, so every newly-reached carrier is a separate edit and every unreached one is a silent dead page) prov=ruling:user-voice-scrml.md-S372-bryan-land-wide-and-file-the-over-pull-as-its-own-arc -->
+> **⚑ S372-bryan — RULED, and the ruling is the reason this entry exists.** Surfacing the each-alias byte cost produced a fork: land the sweep WIDE (+94,765 bytes corpus-wide, +0.086%) or narrow it to `each`-tagged markup (drops 63,345 of those bytes, re-hides any genuine off-spine dead page). **bryan ruled: land WIDE, and file the over-pull as its own arc.** This is that arc. **Neither limb of the fork was the root**, which is why the ruling separated them.
+>
+> ### The under-approximation side — FOUR carriers, all the same sentence
+> *The compiler emits a call to something it did not emit, at exit 0, with zero diagnostics.*
+>
+> | carrier | missing symbol | status |
+> |---|---|---|
+> | lift-path `<each>` (incl. a SHIPPED conformance case) | `_scrml_reconcile_list` | [[g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime]] |
+> | `<match>` with a function-call scrutinee | `_scrml_effect` | [[g-match-fncall-scrutinee-prunes-effect-chunk-dead-page]] |
+> | client-side `scrml:NAME` stdlib imports (17 of 21) | `_scrml_stdlib.NAME` | RESOLVED #669 — by a registry, i.e. per-carrier |
+> | `${render X()}` outside a component body | `__scrml_render_X__` | [[g-render-outside-component-emits-undefined-fn]] |
+>
+> Plus two more the each-alias branch's own notes record as still live on `main`
+> (`conformance/cases/style/flat-inline-token-unknown` → `_scrml_effect`; `stdlib/data/form-for` →
+> `_scrml_labels_register`), and one the sweep CLOSED (`shared` on an `<endpoint>` + each-opener shape,
+> PA-executed across the #688 boundary: `ReferenceError` → renders).
+>
+> ⚑ **The recurrence IS the finding.** Six-plus instances, four sessions, each closed by extending a
+> walker by one carrier. pa-base: *repeated review, same class → CONVERGE, do not enumerate.* Every
+> per-carrier fix has been correct and none has been the root.
+>
+> ### The over-approximation side — measured, and the usual label is wrong
+> PA-verified to the byte on `conformance/cases/control-flow/if-in-dispatched-arm-neg`: **+12,669
+> bytes**, 5 such cases = **+63,345**, reconciling exactly with `+27,038` (giti033, USED) and `+4,382`
+> (derived nested-loop, USED) to the **+94,765** total.
+> ⚑ **But "unused" is imprecise and should not be repeated as fact.** The client bundle is
+> **byte-identical** base vs head for those cases — only the runtime chunk grows — and of the 9
+> functions the chunk adds, **8 are never referenced and one IS called**, guarded:
+> `if (typeof _scrml_register_dispatch_remount === "function")`. At base the guard is false and the
+> registration silently skips; at head it fires. **Whether that path does anything observable is
+> UNMEASURED.** So the over-pull is not inert ballast — it switches on a path base was quietly not
+> running, and the narrowing would have switched it back off sight-unseen. That is a second reason the
+> narrowing limb was the wrong answer, independent of fail-open.
+>
+> ### The shape of the arc
+> Replace the hand-extended per-carrier walk with a **computed reachability closure over the emitted
+> client text** — the set of runtime symbols the client actually references, resolved against
+> `RUNTIME_CHUNK_ORDER`. That is the same shape as the fix that closed the stdlib carrier (#669), whose
+> transferable lesson was recorded then and applies here verbatim: **the gate must read the same
+> artifact the outcome depends on.** A walk over AST carriers and a bundle that calls symbols are
+> different artifacts, which is precisely why every carrier has to be discovered by someone hitting it.
+> **Both directions fall out of one computation:** a referenced-but-undefined symbol is a compile ERROR
+> (the compiler can PROVE the artifact is dead — the #669 precedent for `E-STDLIB-CLIENT-CHUNK-MISSING`),
+> and an unreferenced chunk is simply not shipped.
+> **Direction of change:** the error limb is **newly-rejecting** and owes a measured migration — and it
+> will be non-zero, since at least two corpus files are dead pages today and would newly fail. The prune
+> limb is **inert-or-smaller**. Land the detection before the pruning.
+> ⚑ **Sequencing:** this arc SUPERSEDES the per-carrier fixes for the entries above; do not close them
+> individually against it until it lands, and do not let it block the each-alias landing, which bryan
+> ruled goes WIDE now.
 
 ### g-else-if-dotted-cell-ref-emits-unregistered-flat-key — ⭐ an `else-if=@cell.field` chain branch lowers to a FLAT-key lookup for a key that is never registered, so the branch can NEVER be selected — while the identical predicate as a standalone `if=` lowers correctly — `NEW S372-bryan (surfaced by the S239 pass on the if-attr-synth fix; PA-REPRODUCED on BOTH sides of that branch, so PRE-EXISTING); MED; open`
 <!-- @gap id=g-else-if-dotted-cell-ref-emits-unregistered-flat-key sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts:647(`computeChainBranchCondition`'s `condition.name` branch emits `_scrml_reactive_get(<full dotted path>)` for ANY dotted `variable-ref`, with NO `synthCellKeys` membership test — the guard its three sibling call sites all apply) prov=rationale:S372-adversarial-review-of-the-if-attr-synth-fix-PA-reproduced-identically-on-base-and-head-so-pre-existing-not-introduced -->
