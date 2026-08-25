@@ -1,0 +1,10 @@
+<program db="./app.db">
+<schema>
+  items { id: integer primary key, name: text }
+</schema>
+<db src="sqlite:./app.db" tables="items">
+  on mount { loadDashboard() }
+</db>
+function loadDashboard() { }
+<div>hello</div>
+</program>
