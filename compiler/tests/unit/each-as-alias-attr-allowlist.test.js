@@ -28,6 +28,30 @@
  * The BS-structural path promotes its each to a structural `each-block`, which
  * `validateMarkup` never inspects — hence the top-level control below asserts
  * silence for a different reason, and is kept as a fail-safe.
+ *
+ * ═══ ⚑ WHAT VP-1 ACTUALLY REACHES — READ THIS BEFORE ADDING A TEST HERE ═══
+ *
+ * `walkFileAst` reaches ONE of the five positions an `<each>` can occupy.
+ * MEASURED through THIS FILE'S OWN `warningsFor` harness, by planting a
+ * genuinely bogus bareword (`bogusattr`) and counting W-ATTR-001:
+ *
+ *     carrier                alias `as it`   bogus `bogusattr`
+ *     lift-expr.expr.node    0 warnings      1 warning     <- REACHED
+ *     return-stmt (fn body)  0 warnings      0 warnings    <- NOT reached
+ *     markup-value (ternary) 0 warnings      0 warnings    <- NOT reached
+ *     render-spec (derived)  0 warnings      0 warnings    <- NOT reached
+ *     top-level structural   0 warnings      0 warnings    <- not `kind:"markup"`
+ *
+ * The consequence is blunt: **in four of the five carriers, "VP-1 emits no
+ * warning" is not evidence of anything.** Two tests in the first cut of this
+ * file asserted alias-silence in the fn-body and ternary carriers and therefore
+ * PASSED WHETHER OR NOT THE EXEMPTION EXISTED — reverting `eachAliasAttrIndices`
+ * left both of them green. A test that cannot fail is worse than no test,
+ * because it reads as coverage. They are replaced below by REACHABILITY tests
+ * that assert the blindness itself, so the day `walkFileAst` is widened those
+ * tests go RED and force someone to re-verify the exemption in the newly-reached
+ * carriers — which is the moment the assertion becomes meaningful.
+ * Tracked as [[g-vp1-walkfileast-reaches-one-of-five-markup-carriers]].
  */
 
 import { describe, test, expect } from "bun:test";
@@ -90,6 +114,32 @@ const SRC_OF_ALIAS = `<program>
 </program>
 `;
 
+// The SAME bogus bareword, per carrier — the reachability probe. `bogusattr` is
+// not an `<each>` attribute in any position, so a carrier VP-1 actually visits
+// MUST warn on it. Silence here means the walk never arrived.
+const SRC_BOGUS_LIFT = `<program>
+<rows> = ["a", "b"]
+<show> = true
+<div>${DOLLAR}{ if @show { lift <ul><each in=@rows bogusattr key=1><li>x</li></each></ul> } }</div>
+</program>
+`;
+
+const SRC_BOGUS_FN = `<program>
+<rows> = ["a", "b"]
+fn listing() {
+    return <ul><each in=@rows bogusattr key=1><li>x</li></each></ul>
+}
+<div>${DOLLAR}{listing()}</div>
+</program>
+`;
+
+const SRC_BOGUS_TERNARY = `<program>
+<rows> = ["a", "b"]
+<show> = true
+<main>${DOLLAR}{ @show ? <ul><each in=@rows bogusattr key=1><li>x</li></each></ul> : "" }</main>
+</program>
+`;
+
 // A GENUINELY unknown bareword on <each> — not preceded by `as`.
 const SRC_UNKNOWN_BAREWORD = `<program>
 <rows> = ["a", "b"]
@@ -104,14 +154,25 @@ describe("VP-1 — `<each … as NAME>` alias is a binding, not an unrecognized 
     expect(attr001For(warnings, "it")).toEqual([]);
   });
 
-  test("fn-body carrier: `as it` does NOT fire W-ATTR-001 on `it`", () => {
-    const warnings = warningsFor(SRC_FN_ALIAS);
-    expect(attr001For(warnings, "it")).toEqual([]);
+  // ⚠ REPLACES two tests that could not fail. They asserted alias-silence in the
+  // fn-body and ternary carriers — carriers `walkFileAst` never visits — so they
+  // stayed green with the exemption reverted. What follows asserts the REACH
+  // instead, which is the property those carriers actually have.
+
+  test("REACHABILITY: VP-1 never visits the fn-body carrier — its silence proves nothing", () => {
+    // Both halves are the point. The alias is silent AND a genuinely bogus
+    // bareword is silent, so silence here is blindness, not exemption.
+    expect(attr001For(warningsFor(SRC_FN_ALIAS), "it")).toEqual([]);
+    expect(attr001For(warningsFor(SRC_BOGUS_FN), "bogusattr")).toEqual([]);
+    // ⚑ TRIPWIRE. When `walkFileAst` is widened to reach this carrier, the line
+    // above goes RED. That is CORRECT and it is the whole point: at that moment
+    // the exemption must be re-verified here, and a passing test would have
+    // hidden the need.
   });
 
-  test("ternary-markup carrier: `as row` does NOT fire W-ATTR-001 on `row`", () => {
-    const warnings = warningsFor(SRC_TERNARY_ALIAS);
-    expect(attr001For(warnings, "row")).toEqual([]);
+  test("REACHABILITY: VP-1 never visits the ternary markup-value carrier either", () => {
+    expect(attr001For(warningsFor(SRC_TERNARY_ALIAS), "row")).toEqual([]);
+    expect(attr001For(warningsFor(SRC_BOGUS_TERNARY), "bogusattr")).toEqual([]);
   });
 
   test("`of=` count form: `as day` does NOT fire W-ATTR-001 on `day`", () => {
@@ -119,14 +180,34 @@ describe("VP-1 — `<each … as NAME>` alias is a binding, not an unrecognized 
     expect(attr001For(warnings, "day")).toEqual([]);
   });
 
-  test("CONSISTENCY: the two carriers agree — neither warns on the alias", () => {
-    // The pre-fix defect was not just a false positive, it was a false
-    // positive that depended on the enclosing AST field. Assert agreement
-    // directly so a future regression that reintroduces it in ONE carrier
-    // fails here even if the per-carrier tests are read as independent.
-    const lift = attr001For(warningsFor(SRC_LIFT_ALIAS), "it").length;
-    const fnBody = attr001For(warningsFor(SRC_FN_ALIAS), "it").length;
-    expect({ lift, fnBody }).toEqual({ lift: 0, fnBody: 0 });
+  test("CONSISTENCY: the alias is silent in the ONE carrier where silence is a result", () => {
+    // ⚠ REWRITTEN. The first cut compared alias-silence across the lift and
+    // fn-body carriers and called agreement a result — but the fn-body half is
+    // silent unconditionally, so the comparison was half-blind and the whole
+    // assertion reduced to the lift-carrier one.
+    //
+    // The honest pair is: in the carrier VP-1 REACHES, a bogus bareword warns
+    // and the alias does not. That is the exemption doing work, and reverting
+    // `eachAliasAttrIndices` turns it red.
+    const aliasInReachedCarrier = attr001For(warningsFor(SRC_LIFT_ALIAS), "it").length;
+    const bogusInReachedCarrier = attr001For(warningsFor(SRC_BOGUS_LIFT), "bogusattr").length;
+    expect({ alias: aliasInReachedCarrier, bogus: bogusInReachedCarrier })
+      .toEqual({ alias: 0, bogus: 1 });
+  });
+
+  test("CROSS-CARRIER: the two carriers DISAGREE on a bogus attribute — asserted, not fixed", () => {
+    // ⚑ THIS ASSERTS A DEFECT, deliberately. The pre-fix complaint about
+    // W-ATTR-001 was that it was "a property of WHERE the each sat" — and for a
+    // genuinely bad attribute that is STILL true: the lift carrier warns, the
+    // fn-body carrier does not. The alias exemption removed the false positive;
+    // it did not make VP-1's reach uniform, and nothing in this dispatch did.
+    // Asserting the disagreement means the day someone closes
+    // [[g-vp1-walkfileast-reaches-one-of-five-markup-carriers]] this test goes
+    // red and points straight at the change, instead of the fix landing silently
+    // and this file continuing to imply a uniformity that was never verified.
+    const lift = attr001For(warningsFor(SRC_BOGUS_LIFT), "bogusattr").length;
+    const fnBody = attr001For(warningsFor(SRC_BOGUS_FN), "bogusattr").length;
+    expect({ lift, fnBody }).toEqual({ lift: 1, fnBody: 0 });
   });
 
   test("FAIL-SAFE: a bareword NOT preceded by `as` still fires W-ATTR-001", () => {

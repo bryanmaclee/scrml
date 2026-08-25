@@ -1310,8 +1310,36 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   //
   // So the rule is stated ONCE, over field POSITION rather than field NAME: any
   // markup node reachable from a visited node through any chain of
-  // NON-structural intermediates is routed back into `walkNodes`. A fifth
-  // carrier introduced upstream tomorrow is covered without a fifth edit here.
+  // NON-structural intermediates is routed back into `walkNodes`.
+  //
+  // ⚠ AND THAT IS THE WHOLE OF IT. An earlier revision of this comment ended
+  // "a fifth carrier introduced upstream tomorrow is covered without a fifth
+  // edit here." THAT CLAIM IS FALSE and it is corrected here rather than
+  // deleted, because a false closure claim in a comment is how the next author
+  // stops looking.
+  //
+  // The sweep STOPS at any `STRUCTURAL_AST_KINDS` node (the `continue` below),
+  // and `return-stmt` / `lift-expr` / `state-decl` are all ON that list. So the
+  // four carriers above are NOT covered by descent — they are covered because
+  // each is itself a node `walkNodes`/`walkBody` already visits, which is what
+  // calls `sweepOffSpineMarkup(node)` ON it. MEASURED by instrumenting both
+  // arms of this loop and compiling the four reproducers:
+  //
+  //     [route markup]   root.kind=return-stmt  tag=ul     <- covered: root IS the carrier
+  //     [STOP structural] root.kind=function-decl stopped-at=return-stmt
+  //     [route markup]   root.kind=lift-expr    tag=ul     <- covered: root IS the carrier
+  //     [STOP structural] root.kind=if-stmt      stopped-at=lift-expr
+  //     [route markup]   root.kind=state-decl   tag=ul     <- covered: root IS the carrier
+  //
+  // Read the pairs: from the OWNING node the sweep stops dead at the carrier;
+  // it only ever gets in because the carrier is separately on the walk spine.
+  //
+  // THE ACTUAL CLOSURE PROPERTY, stated honestly: a fifth carrier is covered iff
+  // the node that OWNS the off-spine field is one the outer walk already visits.
+  // A new carrier hung off a structural node that is NOT itself walked needs the
+  // outer walk widened — not this sweep. That is a real remaining hole; no live
+  // reproducer for it exists today, which is why it is documented rather than
+  // pre-emptively closed.
   //
   // BOUNDS, deliberately tight:
   //   * Only MARKUP nodes are routed. Structural AST kinds are NOT — the outer
