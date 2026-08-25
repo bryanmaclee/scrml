@@ -3382,6 +3382,172 @@ function emitEachOpenerIfGuardLines(
   ];
 }
 
+// ---------------------------------------------------------------------------
+// `<each … as NAME>` alias validation — the LIFT path
+// ---------------------------------------------------------------------------
+
+/**
+ * Diagnostic sink for the LIFT-parsed each path, published per file by
+ * emit-client's `generateClientJs` and cleared there.
+ *
+ * ⚑ WHY A SECOND SINK RATHER THAN `_eachBindSupportCtx`. That one is set at
+ * `emitEachBodyRenderForFile` ENTRY and dropped in its `finally` — it covers the
+ * BS-structural per-file render pass and nothing else. Its own comment says so:
+ * "so a later caller (or the Tier-0 lift path) never reads a stale file's … error
+ * sink". A lift-parsed each is emitted from emit-lift, OUTSIDE that window, so
+ * `_eachBindSupportCtx` is null exactly where this validation runs. Publishing
+ * from `generateClientJs` mirrors the `setCurrentFileRequestIds` precedent one
+ * line above it there: set once at the per-file client-codegen entry, cleared at
+ * the exit.
+ *
+ * ⚠ NOT VP-1's job, and that is measured rather than assumed. VP-1
+ * (`validators/attribute-allowlist.ts`) already special-cases this exact opener,
+ * so it is the obvious home — and `walkFileAst` reaches only ONE of the five
+ * positions an `<each>` can sit in. Probed with a deliberately bogus attribute
+ * and reading whether `W-ATTR-001` fired:
+ *
+ *     top-level structural   NOT reached
+ *     fn body                NOT reached
+ *     lift-expr              reached
+ *     ternary markup-value   NOT reached
+ *     derived markup cell    NOT reached
+ *
+ * A validator that sees 1 of 5 carriers would re-create the where-it-sits
+ * inconsistency this whole branch exists to remove. The alias is READ here, so it
+ * is checked here.
+ */
+let _eachAliasDiagnostics: CGError[] | null = null;
+
+/** Nodes already reported, so a node normalised twice reports once. */
+let _eachAliasReported: WeakSet<object> = new WeakSet();
+
+/**
+ * Publish (or clear) the per-file diagnostic sink for lift-path each validation.
+ * Called from emit-client's `generateClientJs` entry/exit.
+ */
+export function setEachAliasDiagnosticSink(errors: CGError[] | null): void {
+  _eachAliasDiagnostics = errors;
+  if (errors === null) _eachAliasReported = new WeakSet();
+}
+
+/**
+ * ECMA-262 reserved words. A reserved word passes the identifier SHAPE test and
+ * still cannot be a function parameter, so it needs its own arm — `as class`
+ * emits `(class, _scrml_each_idx) => …`, which is a syntax error.
+ *
+ * This is the ECMAScript grammar's own list, not a scrml policy list.
+ */
+const JS_RESERVED_WORDS: ReadonlySet<string> = new Set([
+  "break", "case", "catch", "class", "const", "continue", "debugger", "default",
+  "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for",
+  "function", "if", "import", "in", "instanceof", "new", "null", "return",
+  "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void",
+  "while", "with", "yield",
+  // strict-mode reserved (emitted code is a module/strict context)
+  "implements", "interface", "let", "package", "private", "protected", "public",
+  "static", "await",
+]);
+
+/**
+ * Bindings the per-item factory ALWAYS emits, so an alias spelling one of them
+ * can never work — in ANY row template, not just some of them.
+ *
+ * ⚑ THIS IS DELIBERATELY NOT "THE JS GLOBALS". A broad global list would reject
+ * WORKING source. Measured by compiling AND EXECUTING the canonical row shape
+ * with fifteen alias names: only `as document` and `as String` broke; `window`,
+ * `console`, `Math`, `Number`, `Array`, `Object`, `JSON`, `Boolean`, `Date`,
+ * `localStorage`, `fetch` and `undefined` all rendered both rows correctly. So
+ * the general property is SHAPE-DEPENDENT — "the alias shadows a global THIS row
+ * template happens to reference" — which is a scope-walk question, not a list
+ * question, and is filed rather than guessed at here (see the dispatch report).
+ *
+ * What IS list-answerable is the UNCONDITIONAL subset, and it is provable from
+ * the emitter rather than assumed:
+ *   * `document` — `emitEachReconcileLines` opens every per-item factory with
+ *     `const _itemFrag = document.createDocumentFragment();`. Shadowing it is
+ *     `TypeError: document.createDocumentFragment is not a function`, whole
+ *     bundle dead, on EVERY each with an `if`-free row template. No shape escapes
+ *     it, so there is no false positive to have.
+ *   * the `_scrml_` prefix — every runtime helper and every synthetic local the
+ *     factory declares carries it (`_scrml_each_idx`, `_scrml_reconcile_list`,
+ *     `_scrml_resolve_item`, …). An alias in that namespace collides with
+ *     compiler-owned names by construction.
+ * `String` is NOT here despite breaking in the measurement: it is emitted only by
+ * a text-interpolation row (`${it}` -> `String(it)`), so it is a case of the
+ * shape-dependent rule above, not of this one.
+ */
+const EACH_FACTORY_ALWAYS_EMITTED = new Set<string>(["document"]);
+
+/**
+ * Validate an `<each … as NAME>` alias read off a LIFT-parsed opener.
+ *
+ * ⚑ THE DEFECT THIS EXISTS FOR (2026-08-24, round 3 finding 2). Before this
+ * branch the lift path never resolved the alias at all — it silently fell back to
+ * the synthetic `_scrml_each_item` — so `as data-id` COMPILED CLEAN on main.
+ * Round 1 made the alias bind, which is correct, and that turned the same source
+ * into a bare `E-CODEGEN-INVALID-LOGIC` whose message names neither `as` nor the
+ * alias and tells the author *"This is a compiler defect … please report"*. It is
+ * not a compiler defect; it is `as data-id`, and the compiler knew that and did
+ * not say it.
+ *
+ * §17.7.2 is the governing text: *"The `as name` clause is OPTIONAL. When
+ * present, it binds the current iteration value to the named IDENTIFIER in the
+ * body scope"*, and §17.7.3: *"The bound `name` is a local identifier per §6.1"*.
+ * `data-id` is not an identifier, so this rejects rather than widens.
+ *
+ * ⚠ THE STRUCTURAL/BS PATH IS WORSE AND IS **NOT** FIXED HERE. The identical
+ * source at top level compiles at exit 0 and emits
+ * `(data, _scrml_each_idx) => (data?.id …)` — the `-id` half of the alias simply
+ * vanishes and the row silently reads the wrong binding. That read happens in
+ * `ast-builder.js`, which is outside this dispatch's write-set; it is FILED with
+ * this reproducer, not fixed. So after this change the two paths BOTH mis-handle
+ * `as data-id`, one loudly and one silently — which is an improvement on one side
+ * and an unchanged defect on the other, not a closed class.
+ *
+ * @returns the alias to use (`null` when rejected — the caller then falls back to
+ *   the synthetic iter var, so the emitted artifact stays VALID JS and the named
+ *   diagnostic above is the only thing the author has to read).
+ */
+function validateEachAlias(alias: string, markupNode: any): string | null {
+  const span = markupNode?.span ?? { start: 0, end: 0 };
+  const fire = (why: string, fix: string): null => {
+    if (_eachAliasDiagnostics && markupNode && !_eachAliasReported.has(markupNode)) {
+      _eachAliasReported.add(markupNode);
+      _eachAliasDiagnostics.push(new CGError(
+        "E-EACH-AS-ALIAS-INVALID",
+        `E-EACH-AS-ALIAS-INVALID: \`<each … as ${alias}>\` — ${why}. ` +
+        `The \`as\` clause binds the current iteration value to a LOCAL IDENTIFIER in the ` +
+        `row scope (§17.7.2, §17.7.3), and that name becomes the per-item render ` +
+        `parameter. ${fix}`,
+        span,
+        "error",
+      ));
+    }
+    return null;
+  };
+
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(alias)) {
+    return fire(
+      `\`${alias}\` is not a valid identifier`,
+      `Rename the alias — e.g. \`as ${alias.replace(/[^A-Za-z0-9_$]+(.)?/g, (_m, c) => (c ? c.toUpperCase() : "")).replace(/^[^A-Za-z_$]+/, "") || "item"}\`.`,
+    );
+  }
+  if (JS_RESERVED_WORDS.has(alias)) {
+    return fire(
+      `\`${alias}\` is a reserved word`,
+      `Rename the alias — e.g. \`as ${alias}Item\`.`,
+    );
+  }
+  if (EACH_FACTORY_ALWAYS_EMITTED.has(alias) || alias.startsWith("_scrml_")) {
+    return fire(
+      `\`${alias}\` shadows a binding the compiler emits into every row factory`,
+      `Rename the alias — e.g. \`as ${alias === "document" ? "doc" : "item"}\`. ` +
+      `Left as-is this compiles at exit 0 and then throws at bundle eval, killing the whole page.`,
+    );
+  }
+  return alias;
+}
+
 /**
  * True when a lift-parsed markup attribute is a BAREWORD — present in the
  * opener with no `=value`. `parseLiftTag` (ast-builder.js) records those as
@@ -3499,7 +3665,12 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     else if (n === "if") ifExprRaw = eachAttrRawText(attr.value);
     else if (n === "as") {
       const alias = readEachAsAlias(attrs, i);
-      asName = alias.name;
+      // §17.7.2 / §17.7.3 — the alias must be a usable local identifier. A
+      // rejected alias returns null, so the caller falls back to the synthetic
+      // iter var and the artifact stays valid JS: the named diagnostic is then
+      // the ONLY thing the author has to read, instead of a downstream
+      // `E-CODEGEN-INVALID-LOGIC` that says "this is a compiler defect".
+      asName = alias.name === null ? null : validateEachAlias(alias.name, markupNode);
       i = alias.nextIndex;
     }
   }

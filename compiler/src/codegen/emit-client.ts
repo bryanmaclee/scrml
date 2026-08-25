@@ -2145,6 +2145,24 @@ export function generateClientJs(ctx: CompileContext): string {
   // falls back to this set whenever the hand-threaded set is empty. Cleared below.
   setCurrentFileRequestIds(fileAST ? collectRequestIds(fileAST) : new Set<string>());
 
+  // g-each-as-alias-invalid-on-lift-path (2026-08-24) — publish the per-file
+  // diagnostic sink emit-each's LIFT-path `<each … as NAME>` validation writes
+  // to. Same lifecycle and the same reason as the request-id set above: set once
+  // at the per-file client-codegen entry, cleared at the exit.
+  //
+  // It cannot ride on emit-each's own `_eachBindSupportCtx` — that one is
+  // established at `emitEachBodyRenderForFile` entry and dropped in its `finally`,
+  // i.e. it covers the BS-structural render pass only, and a lift-parsed each is
+  // emitted from emit-lift OUTSIDE that window. Read the block at
+  // `setEachAliasDiagnosticSink` for the full why, including the measurement that
+  // rules VP-1 out as the home (it reaches 1 of the 5 carriers an `<each>` can
+  // sit in).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { setEachAliasDiagnosticSink } = require("./emit-each.ts") as {
+    setEachAliasDiagnosticSink: (errors: unknown[] | null) => void;
+  };
+  setEachAliasDiagnosticSink((errors as unknown[]) ?? null);
+
   lines.push("// Generated client-side JS for scrml");
   lines.push("// This file is executable browser JavaScript.");
   lines.push("");
@@ -4175,6 +4193,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
   // registered-request id set so it cannot leak into the next file's emission.
   setCurrentFileRequestIds(null);
+  // g-each-as-alias-invalid-on-lift-path — release the per-file alias-diagnostic
+  // sink (and its already-reported node set) for the same reason.
+  setEachAliasDiagnosticSink(null);
 
   return clientCode;
 }

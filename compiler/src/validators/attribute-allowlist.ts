@@ -112,11 +112,29 @@ function isBarewordAttr(attr: unknown): boolean {
  *
  * NOTE the deliberate omission: an alias that is NOT a valid identifier
  * (`as data-id` — `_parseLiftAttrName` merges the `-`) is NOT exempted here, so
- * it still surfaces. Refusing such source outright, with a diagnostic that
- * names `as` and the offending alias, needs a new `E-EACH-AS-ALIAS-INVALID`
- * code and the §34 row that CI's `s34-census --check-new` gate requires — see
- * the dispatch report. Today it still fails CLOSED downstream, which is the
- * correct direction.
+ * it still surfaces.
+ *
+ * ⚑ AND THE REJECTION NOW LIVES ELSEWHERE, DELIBERATELY (round 3, 2026-08-24).
+ * `E-EACH-AS-ALIAS-INVALID` is emitted from `codegen/emit-each.ts`
+ * (`validateEachAlias`), NOT from this validator — even though this validator is
+ * the obvious home and already has the alias in its hand. The reason is measured,
+ * not stylistic: `walkFileAst` reaches exactly ONE of the five positions an
+ * `<each>` can occupy. Probed by planting a bogus attribute and reading whether
+ * `W-ATTR-001` fired:
+ *
+ *     top-level structural   NOT reached
+ *     fn body                NOT reached
+ *     lift-expr              reached
+ *     ternary markup-value   NOT reached
+ *     derived markup cell    NOT reached
+ *
+ * A rejection sited here would fire on 1 of 5 carriers — re-creating the
+ * where-it-sits inconsistency the exemption above exists to remove. The alias is
+ * READ in `eachBlockFromMarkupNode`, so it is CHECKED there.
+ *
+ * ⚠ That same 1-of-5 reach is why `W-ATTR-001` on an `<each>` is only ever a
+ * partial signal, and it is what makes two of the tests in
+ * `each-as-alias-attr-allowlist.test.js` vacuous — see the header there.
  */
 function eachAliasAttrIndices(node: MarkupNode): Set<number> {
   const exempt = new Set<number>();
