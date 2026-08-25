@@ -140,6 +140,22 @@ const SRC_BOGUS_TERNARY = `<program>
 </program>
 `;
 
+// §17.1.2 — `if=` on `<each>`, in the ONE carrier VP-1 reaches.
+const SRC_EACH_IF = `<program>
+<rows> = ["a", "b"]
+<show> = true
+<div>${DOLLAR}{ if @show { lift <ul><each in=@rows as it key=it if=@show><li>x</li></each></ul> } }</div>
+</program>
+`;
+
+// `show=` on `<each>` — §17.1.2.2 records this as NOMINAL, silently dropped.
+const SRC_EACH_SHOW = `<program>
+<rows> = ["a", "b"]
+<show> = true
+<div>${DOLLAR}{ if @show { lift <ul><each in=@rows as it key=it show=@show><li>x</li></each></ul> } }</div>
+</program>
+`;
+
 // A GENUINELY unknown bareword on <each> — not preceded by `as`.
 const SRC_UNKNOWN_BAREWORD = `<program>
 <rows> = ["a", "b"]
@@ -208,6 +224,30 @@ describe("VP-1 — `<each … as NAME>` alias is a binding, not an unrecognized 
     const lift = attr001For(warningsFor(SRC_BOGUS_LIFT), "bogusattr").length;
     const fnBody = attr001For(warningsFor(SRC_BOGUS_FN), "bogusattr").length;
     expect({ lift, fnBody }).toEqual({ lift: 1, fnBody: 0 });
+  });
+
+  // -----------------------------------------------------------------------
+  // §17.1.2 — `if=` is ADMITTED on `<each>`, so VP-1 must not call it unknown
+  // -----------------------------------------------------------------------
+
+  test("`if=` on `<each>` does NOT fire W-ATTR-001 — §17.1.2 admits it", () => {
+    // ⚑ THIS ASSERTION ONLY BECAME CORRECT WHEN THE GATE WAS WIRED. Before the
+    // §17.1.2 `if=` lowering landed for lift-parsed eaches, W-ATTR-001 here was
+    // ACCURATE — the attribute really was dropped and really had no compile-time
+    // effect. Wiring the gate turned the same warning into a FALSE one telling
+    // the author their working predicate was inert. The registry entry and the
+    // emit have to move together; this test is what keeps them together.
+    expect(attr001For(warningsFor(SRC_EACH_IF), "if")).toEqual([]);
+  });
+
+  test("`show=` on `<each>` STILL fires W-ATTR-001 — §17.1.2.2 says it is inert", () => {
+    // The registry gained EXACTLY ONE attribute. `show=` / `else-if=`
+    // composition with the structural trio is NOMINAL and silently dropped
+    // ([[g-structural-element-if-chain-and-show-composition-nominal]]), so the
+    // warning is TRUE for them. Silencing it would be a widening in the wrong
+    // direction, and this test is what stops the next author doing it by
+    // symmetry with `if=`.
+    expect(attr001For(warningsFor(SRC_EACH_SHOW), "show").length).toBe(1);
   });
 
   test("FAIL-SAFE: a bareword NOT preceded by `as` still fires W-ATTR-001", () => {

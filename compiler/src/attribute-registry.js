@@ -483,12 +483,42 @@ ELEMENT_ATTR_REGISTRY.set("render", {
   ]),
 });
 
+// ---------------------------------------------------------------------------
+// <each> — Tier-1 iteration (SPEC §17.7).
+//
+// ⚑ `if=` IS ADMITTED HERE, and leaving it out was a live FALSE WARNING
+// (round 4, 2026-08-24). §17.1.2 (S302) ratified `if=` on exactly three
+// scrml-defined structural elements — `<engine>`, `<match>`, `<each>` — with
+// `<each>`'s semantics given as "the whole iterated list, including `<empty>`".
+//
+// Until the §17.1.2 gate was actually wired for lift-parsed eaches, VP-1's
+// `W-ATTR-001` on `if=` was ACCURATE: the attribute really was dropped and
+// really had "no compile-time effect". Wiring the gate turned that same warning
+// into a FALSE one — it now tells an author their working reactive predicate is
+// inert and should be removed or spell-checked. A diagnostic that contradicts
+// the emit it describes is its own defect, so the registry moves with the emit.
+//
+// ⚠ EXACTLY ONE ATTRIBUTE IS ADDED. `show=` and `else-if=` still warn, and that
+// is CORRECT: §17.1.2.2 records their composition with the structural trio as
+// "NOMINAL — specified, NOT yet implemented", silently dropped, tracked as
+// [[g-structural-element-if-chain-and-show-composition-nominal]]. Registering
+// them would silence a warning about a genuinely inert attribute — a widening in
+// the wrong direction. Add them WHEN the wiring lands, not before.
+//
+// ⚠ SAME CLASS, STILL OPEN ELSEWHERE: `<auth if=>` gates correctly today and
+// `W-ATTR-001` still calls it unrecognized —
+// [[g-w-attr-001-false-on-auth-if-gate-is-applied]] (§17.1.2's own enforcement
+// note names it). `<match>` and `<engine>` are UNREGISTERED here, so VP-1 never
+// reaches them and the trio's remaining two members have no equivalent exposure.
+// ---------------------------------------------------------------------------
+
 ELEMENT_ATTR_REGISTRY.set("each", {
   allowedAttrs: new Map([
     ["in",   attrSpec({ supportsInterpolation: false })],   // collection-iteration source
     ["of",   attrSpec({ supportsInterpolation: false })],   // count-iteration source
     ["as",   attrSpec({ supportsInterpolation: false })],   // iteration-variable name override
     ["key",  attrSpec({ supportsInterpolation: false })],   // diff-key override
+    ["if",   attrSpec({ supportsInterpolation: false })],   // §17.1.2 — gates the WHOLE list
   ]),
 });
 
