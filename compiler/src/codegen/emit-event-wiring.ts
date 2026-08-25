@@ -1,6 +1,6 @@
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
-import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import {
   maybeLowerCancelTimerCallRef,
@@ -508,7 +508,195 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       const encodedCondVar = encodingCtx && encodingCtx.enabled ? encodingCtx.encode(condVarName) : condVarName;
       let conditionCode: string;
       if (b.dotPath) {
-        conditionCode = `(_scrml_reactive_get(${JSON.stringify(encodedCondVar)}).${b.dotPath.slice(condVarName.length + 1)})`;
+        const memberTail = b.dotPath.slice(condVarName.length + 1);
+        // g-if-attr-per-field-synth-cell-crashes-boot (S372) — §55 synth-surface
+        // collapse, the SAME rule the `condExpr` branch above gets for free by
+        // threading `synthCellKeys` into `emitExprField` (the Bug 61 comment at
+        // the top of that branch). This branch consulted NOTHING, so the two
+        // spellings of ONE predicate lowered two different ways:
+        //
+        //   if=(@signup.isValid)   -> _scrml_reactive_get("signup.isValid")   correct
+        //   if=@signup.isValid     -> _scrml_reactive_get("signup").isValid   wrong
+        //
+        // and the second is wrong in two distinct ways, BOTH measured on
+        // b0abcbc6 against the SHIPPED runtime chunk:
+        //
+        //   COMPOUND-LEVEL scalars (`@signup.isValid`, `.submitted`) — the
+        //   compound is a §6.3 Variant C NAMESPACE whose value object carries
+        //   only its field keys, so the member read is permanently `undefined`.
+        //   Falsy, no throw, boot survives, exit 0, zero diagnostics — and the
+        //   gated subtree NEVER MOUNTS however the cell moves. Silent-wrong.
+        //
+        //   PER-FIELD, three-level (`@signup.name.touched` / `.isValid` /
+        //   `.errors`) — that same value object holds `name: null` (the field's
+        //   value lives in the flat cell `signup.name`), so the chain
+        //   DEREFERENCES NULL. The TypeError lands inside `_scrml_nav_rewire`
+        //   under `_scrml_boot`, so it does not merely break this element:
+        //   EVERY `${...}` interpolation on the page never wires. A dead page,
+        //   also at exit 0.
+        //
+        // NOT fixed with `?.`: optional chaining stops the throw while leaving
+        // the condition permanently false, which converts the loud failure into
+        // the silent one rather than resolving either.
+        const synth = resolveSynthCellPrefix([condVarName, ...memberTail.split(".")], ctx.synthCellKeys);
+        // ⚑ S372 REVIEW FINDING 1 — THE COLLAPSE IS GATED ON THE CELL'S SHAPE,
+        // AND THE GATE IS NOT OPTIONAL.
+        //
+        // §55 does NOT give every synth cell a scalar. The COMPOUND-LEVEL
+        // `errors` and `touched` rollups are OBJECT MAPS keyed by field name:
+        //
+        //   _scrml_derived_declare("signup.errors",  () => ({ name: get("signup.name.errors") }));
+        //   _scrml_derived_declare("signup.touched", () => ({ name: get("signup.name.touched") }));
+        //
+        // An object literal is ALWAYS TRUTHY. Collapsing those two would take a
+        // gate that read `undefined` (never mounts) to one that is
+        // unconditionally true — so a pristine, untouched form would render its
+        // error block at boot. MEASURED: base `mount@boot=false`, naive-collapse
+        // `mount@boot=true`, on `<div if=@signup.touched>` and `if=@signup.errors`
+        // with no interaction. That is a visible REGRESSION on the §55 flagship,
+        // so those two rows stay on the pre-existing lowering and remain
+        // BYTE-IDENTICAL to main.
+        //
+        // ⚑ The cell shape is NOT the bug and must not be "fixed" here. §6.11's
+        // table says `touched` is `boolean` and `errors` is `string[]`, and the
+        // implementation disagrees — but PRIMER §13.7 B11 records the object-map
+        // shape as INTENTIONAL per §55 and calls §6.11 a non-blocking spec-prose
+        // drift for a separate amendment. So truthiness over a rollup map is
+        // simply MEANINGLESS, and the broken lowering was masking that. Which of
+        // {always-true, never-true, diagnose} is right is an OPERATOR RULING.
+        // This lowering declines to invent one.
+        //
+        // ⚑ PER-FIELD `.errors` DOES NOT COLLAPSE EITHER, AND THE REASON IS A
+        // METHOD LESSON WORTH MORE THAN THE RULE. Two review rounds justified
+        // collapsing it on "base is a DEAD PAGE there, so there is no working
+        // behaviour to preserve." That was measured on ONE field-declaration
+        // form — the MARKUP-TYPED field, whose compound value is `{name: null}`,
+        // so a 3-level read dereferences null and throws. Vary the declaration
+        // form and the premise evaporates:
+        //
+        //     <name req length(>=2)> = <input type="text"/>   (markup-typed)
+        //     <name req length(>=2)> = ""                     (literal-init)
+        //
+        // With the literal-init form the compound value is `{name: ""}`, so
+        // `get("signup").name.errors` is merely `undefined` — NO crash, boot
+        // alive, gate correctly false. MEASURED base, literal-init:
+        // `ctl="true"`, gate false. Collapsing there takes a CORRECT gate to a
+        // permanently-visible error block. Fatal→wrong on one declaration form
+        // does not license correct→wrong on another, so it declines with the
+        // rollups and is carried under the SAME open ruling.
+        //
+        // ⚑ RESIDUAL, NAMED NOT HIDDEN: `if=@field.errors` on a MARKUP-TYPED
+        // field is still a dead page, exactly as on main. That is an open limb
+        // of the filed HIGH, not something this lowering closed.
+        //
+        // HOW COMPOUND-LEVEL IS DETECTED, without a second hand-maintained list:
+        // `collectSynthCellKeys` gives a compound parent FOUR keys
+        // (errors/isValid/touched/submitted) and a field child THREE (no
+        // `submitted` — §55.7). So `<prefix>.submitted ∈ synthCellKeys` IS the
+        // "prefix is a compound parent" test, derived from the same artifact the
+        // collapse itself reads, so gate and outcome cannot drift (invariant 65).
+        // ⚑ EVERYTHING BELOW IS COMPUTED INSIDE `if (synth)`. The previous cut
+        // dereferenced `synth.tail` one line ABOVE its own null guard and was
+        // safe only by short-circuit accident — `types-gate` caught it as
+        // TS18047 "'synth' is possibly 'null'". Reordering a term or adding any
+        // leaf test true for "" would have made every `if=@x.y` toggle with no
+        // synth hit throw at COMPILE time.
+        if (synth) {
+          const synthLeaf = synth.dotted.slice(synth.dotted.lastIndexOf(".") + 1);
+          const synthPrefix = synth.dotted.slice(0, synth.dotted.lastIndexOf("."));
+          // `<prefix>.submitted ∈ synthCellKeys` IS the "prefix is a compound
+          // parent" test — §55.7 gives `submitted` to parents only.
+          const isCompoundParent = ctx.synthCellKeys?.has(`${synthPrefix}.submitted`) === true;
+
+          // ⚑ THE TAIL MUST LAND ON A SCALAR, NOT MERELY BE NON-EMPTY. A tail
+          // INTO a rollup's value space is still always truthy, and the value
+          // space differs per rollup — measured on the shipped chunk against a
+          // PRISTINE, FULLY-VALID form (`<signup> <name> = "" </>`):
+          //
+          //   errors  maps field -> ARRAY    `@signup.errors.name`  -> []    TRUTHY
+          //   touched maps field -> BOOLEAN  `@signup.touched.name` -> false scalar
+          //
+          // so a field-key tail is fatal on `errors` and CORRECT on `touched`.
+          // A tail that is NOT a field key is a container property
+          // (`.length`) and is scalar on both.
+          //
+          // DERIVED, not enumerated. Same artifact the collapse reads, so gate
+          // and outcome cannot drift (invariant 65); no scalar-tail allow-list
+          // to fall out of date.
+          //
+          // ⚑ TWO TERMS, AND THE SECOND IS NOT OPTIONAL — `<prefix>.<seg>.errors
+          // ∈ keys` ALONE DOES NOT MEAN "seg is a field". `collectSynthCellKeys`
+          // also emits `<compound>.<nestedCompound>.errors`, because a nested
+          // compound gets its own full surface. But the compound-level `errors`
+          // ROLLUP keys only `fieldChildren` — emit-synth-surface.ts:220-232
+          // iterates `fieldChildren`, which EXCLUDES compound-typed children. So
+          // a nested compound name is registered yet is NOT a key of the rollup,
+          // and `get("signup.errors").addr` is `undefined` — a correct false
+          // gate, i.e. exactly the case where collapsing is the right answer.
+          //
+          // The one-term test declined it and fell back to
+          // `get("signup").errors.addr` → `undefined.addr` → TypeError in
+          // `_scrml_boot` → whole page unwired. Inert vs base (base emits the
+          // identical chain — verified) but a fixable dead page.
+          //
+          // `submitted` is the discriminator, and it is compound-ONLY (§55.7):
+          // a nested compound gets `<prefix>.<seg>.submitted` registered, a
+          // field child never does. PA-VERIFIED on a nested fixture:
+          // `signup.addr.submitted` IS in the key set, `signup.name.submitted`
+          // is NOT. So:
+          //
+          //   seg names a FIELD  iff  <prefix>.<seg>.errors ∈ keys
+          //                      AND  <prefix>.<seg>.submitted ∉ keys
+          const tailFirstSeg = synth.tail ? synth.tail.slice(1).split(".")[0] : "";
+          const tailLandsOnFieldValue =
+            tailFirstSeg !== "" &&
+            ctx.synthCellKeys?.has(`${synthPrefix}.${tailFirstSeg}.errors`) === true &&
+            ctx.synthCellKeys?.has(`${synthPrefix}.${tailFirstSeg}.submitted`) !== true;
+
+          // The ALWAYS-TRUTHY set. Truthiness over these is MEANINGLESS, so the
+          // collapse declines and the pre-existing lowering stands — see the
+          // open operator ruling in the block comment above.
+          //   `errors` — the rollup map / the array itself, OR any read that
+          //              lands on a field's error ARRAY. `[]` is as truthy as `{}`.
+          //   `touched` at COMPOUND level — the rollup map itself. A field-key
+          //              tail off it is a plain boolean and DOES collapse.
+          const isAlwaysTruthyGate =
+            (synthLeaf === "errors" && (synth.tail === "" || tailLandsOnFieldValue)) ||
+            (synthLeaf === "touched" && isCompoundParent && synth.tail === "");
+
+          if (!isAlwaysTruthyGate) {
+            // The emitted key is PLAIN, not `encode()`d — byte-identical to what
+            // `emitMember` and the `condExpr` branch produce for the same
+            // predicate, which is the entire point (one predicate, one lowering).
+            //
+            // ⚑ This is safe under a chunk encoding context, but NOT for the
+            // reason a reader might assume: the membership test runs on the
+            // PLAIN `condVarName` + `dotPath`, so it still HITS and the collapse
+            // still fires. What makes the plain key correct is that `encode()`
+            // is a pass-through for unregistered names and only TOP-LEVEL
+            // state-decl names are ever registered (codegen/index.ts) — a DOTTED
+            // synth key never is. If dotted keys are ever registered, this site
+            // must encode and so must `emitMember`, together, or the two
+            // spellings diverge again.
+            return {
+              conditionCode: `(_scrml_reactive_get(${JSON.stringify(synth.dotted)})${synth.tail})`,
+              // ⚑ NOT LOAD-BEARING, AND SAYING SO IS THE POINT. Nothing reads
+              // this VALUE: its sole consumer (the display-toggle block below)
+              // tests `subscribeVars !== undefined` and discards it, and
+              // `computeMountToggleCondition` / the `ifGuard` path drop it
+              // entirely. The dependency that actually re-fires the toggle is
+              // `_scrml_effect`, which DYNAMICALLY TRACKS whatever
+              // `conditionCode` reads when it runs — so the subscription follows
+              // the collapse for free. Reported as the honest field value (the
+              // synth cell IS the dependency; the root compound is not — a write
+              // to `signup.name.touched` notifies nothing keyed `signup`), but do
+              // not add a reader on the strength of this comment, and do not
+              // treat `_scrml_effect` as redundant with it.
+              subscribeVars: [synth.dotted],
+            };
+          }
+        }
+        conditionCode = `(_scrml_reactive_get(${JSON.stringify(encodedCondVar)}).${memberTail})`;
       } else {
         conditionCode = `_scrml_reactive_get(${JSON.stringify(encodedCondVar)})`;
       }
