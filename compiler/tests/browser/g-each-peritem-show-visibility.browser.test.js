@@ -49,12 +49,12 @@ const SRC = [
   "",
 ].join("\n");
 
-function compileSrc() {
+function compileSrc(src = SRC) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const outDir = resolve(TMP_ROOT, `case-${uniq}`, "out");
   mkdirSync(outDir, { recursive: true });
   const input = resolve(TMP_ROOT, `case-${uniq}`, "app.scrml");
-  writeFileSync(input, SRC);
+  writeFileSync(input, src);
   const result = compileScrml({ inputFiles: [input], write: true, outputDir: outDir, log: () => {} });
   const rd = (f) => (existsSync(resolve(outDir, f)) ? readFileSync(resolve(outDir, f), "utf8") : "");
   return {
@@ -66,8 +66,8 @@ function compileSrc() {
 }
 const bodyOf = (html) => (html.match(/<body[^>]*>([\s\S]*?)<\/body>/i) || [, html])[1];
 
-function mount() {
-  const c = compileSrc();
+function mount(src = SRC) {
+  const c = compileSrc(src);
   expect(c.errors).toEqual([]);
   document.body.innerHTML = bodyOf(c.html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "");
   new Function("window", "document",
@@ -108,5 +108,45 @@ describe("g-each-peritem-show-emits-literal-attribute (§17.2 inside <each>)", (
       { id: 3, title: "C", done: false },
     ]);
     expect(m.disp()).toEqual(["", "none", "none"]);
+  });
+
+  // S239 review #2: an UNKEYED <each> must still toggle reactively (the reviewer
+  // flagged that maybeWrapEachPerItemEffect no-ops without a reconcile ctx). It
+  // does not — verified by execution: initial render AND a reactive update both work.
+  const UNKEYED = [
+    "<program>",
+    "${ <tasks> = [ { id: 1, done: false }, { id: 2, done: true } ] }",
+    "  <ul><each in=@tasks as t>",
+    '    <li><span class="badge" show=t.done>D</span></li>',
+    "  </each></ul>",
+    "</program>",
+    "",
+  ].join("\n");
+  test("unkeyed <each>: show= is correct at initial render AND reactive on update", () => {
+    const m = mount(UNKEYED);
+    expect(m.disp()).toEqual(["none", ""]);
+    m.set("tasks", [{ id: 1, done: true }, { id: 2, done: false }]);
+    expect(m.disp()).toEqual(["", "none"]);
+  });
+
+  // S239 review #1: a scrml operator inside a call-ref ARG must lower, not reach
+  // the client JS raw as E-CODEGEN-INVALID-LOGIC (the documented hole in the
+  // sibling class: arm). show='s call-ref routes through lowerEachExpr, so it does.
+  const CALL_OP = [
+    "<program>",
+    "${",
+    "  <rows> = [ { id: 1, status: 1 }, { id: 2, status: 0 } ]",
+    "  function isReady(x) { return x }",
+    "}",
+    "  <ul><each in=@rows key=@.id as t>",
+    '    <li><span class="badge" show=isReady(t.status is some)>D</span></li>',
+    "  </each></ul>",
+    "</program>",
+    "",
+  ].join("\n");
+  test("call-ref with a scrml operator arg compiles + lowers (no E-CODEGEN-INVALID-LOGIC)", () => {
+    const c = compileSrc(CALL_OP);
+    expect(c.errors).toEqual([]); // BITING: pre-#1-fix this was E-CODEGEN-INVALID-LOGIC
+    expect(c.clientJs).not.toMatch(/is some/); // the operator lowered, not raw
   });
 });

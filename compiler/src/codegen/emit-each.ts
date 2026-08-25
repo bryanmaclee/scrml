@@ -2048,7 +2048,15 @@ function renderTemplateAttrToJs(
     if (valKind === "variable-ref") {
       cond = lowerEachExpr(String(val.name ?? ""), iterVarName);
     } else if (valKind === "call-ref") {
-      cond = rewriteIterValueExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
+      // Route the reconstructed call through `lowerEachExpr` (not the bare
+      // `rewriteIterValueExpr` the sibling `class:` call-ref arm uses): it does
+      // the iter-scope rewrite FIRST and only escalates to the structured emitter
+      // when the text carries a §42 operator (`is some`/`not`/…), so a scrml
+      // operator inside a call ARG — `show=isReady(t.status is some)` — lowers
+      // correctly instead of reaching the client JS raw as E-CODEGEN-INVALID-LOGIC
+      // (the documented hole in the class: arm at ~:2005). Byte-identical for an
+      // operator-free call.
+      cond = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     } else if (valKind === "expr") {
       cond = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     } else if (valKind === "string-literal") {
