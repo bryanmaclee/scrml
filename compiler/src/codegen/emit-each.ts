@@ -308,6 +308,19 @@ interface EachBlockAstNode {
    */
   asNames: [string, string] | null;
   keyExprRaw: string | null;
+  /**
+   * SPEC §17.1.2 — the opener-level `if=` predicate, raw (pre-lowering) source
+   * text. Set ONLY by `eachBlockFromMarkupNode`, i.e. only for an each that was
+   * parsed as generic markup by `parseLiftTag` and normalised here.
+   *
+   * The BS-structural `buildBlock` path does NOT populate this: a structural
+   * `<each if=…>` in ordinary markup is gated upstream by the §17.1 ifmount
+   * controller (a `<template>` + `scrml-if-marker` pair emitted into the HTML,
+   * driven from emit-event-wiring), so honouring it a SECOND time here would
+   * double-gate it. A structural each-block therefore leaves this undefined and
+   * every emit below stays byte-identical for it.
+   */
+  ifExprRaw?: string | null;
   bodyChildren: any[];      // full walkable body AST (includes <empty>)
   templateChildren: any[];  // bodyChildren minus the <empty> sub-element
   emptyChild: any | null;   // the <empty> sub-element node, or null
@@ -1671,6 +1684,23 @@ function renderTemplateChildToJs(
         lines.push(l);
       }
     }
+    // SPEC §17.1.2 — the opener `if=` on a MARKUP-DERIVED inner each (one the
+    // top-of-function normalisation promoted from `{kind:"markup", tag:"each"}`).
+    // Emitted AFTER the outer live-keying prelude, so a predicate may reference
+    // the OUTER item, and BEFORE the inner source read, per §17.1.2.1.
+    //
+    // ⚠ SCOPE, and it is narrower than it looks. `ifExprRaw` is populated ONLY by
+    // `eachBlockFromMarkupNode`, so this fires for a LIFT-parsed inner each and
+    // never for a BS-structural one — a structural each-block has no `if` field to
+    // carry (ast-builder does not record one) and is out of this file's reach.
+    // §17.1.2.3 carves the row-template position out of §17.1.2's SHALL and tracks
+    // it as `g-structural-if-inside-each-row-template-fails-open`; this narrows
+    // that gap to the structural path rather than closing it. Honouring the
+    // predicate here is still the right call: the alternative is to keep a
+    // KNOWN-fail-OPEN drop on a shape whose predicate we have already parsed.
+    for (const l of emitEachOpenerIfGuardLines(innerNode, iterVarName, innerMountVar, `${indent}  `)) {
+      lines.push(l);
+    }
     lines.push(`${indent}  const ${innerItemsVar} = ${innerItemsExpr};`);
     for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
       lines.push(l);
@@ -1738,7 +1768,7 @@ function rewriteIterScopeOnly(text: string, iterVarName: string): string {
  * text path on a parse failure or when no predicate is present (common case —
  * avoids the parse round-trip + any emit-expr divergence).
  */
-function lowerEachExpr(text: string, iterVarName: string): string {
+function lowerEachExpr(text: string, iterVarName: string | null): string {
   const preRewritten = rewriteIterValueExpr(text, iterVarName);
   // g-request-is-some-in-each-loop-attr-misroute — does the RAW reference an id
   // this file registered as a `<request>`? Gated to registered-only (mirrors the
@@ -3289,6 +3319,70 @@ function eachAttrRawText(attrVal: any): string | null {
 }
 
 /**
+ * SPEC §17.1.2 / §17.1.2.1 — emit the opener-level `if=` gate for a
+ * MARKUP-DERIVED `<each>` (one normalised by `eachBlockFromMarkupNode`).
+ *
+ * ⚑ THE DEFECT THIS EXISTS FOR (2026-08-24, round 3). `eachBlockFromMarkupNode`
+ * read `in` / `of` / `key` / `as` and had NO `if` branch at all, and both of its
+ * callers emit the reconcile with no gate — so an `if=` on ANY lift-parsed
+ * `<each>` was silently discarded. Measured by EXECUTING the shipped runtime
+ * chunk with `<show> = false`, all four off-spine carriers rendered the FULL
+ * list (2 of 2 `<li>`), exit 0, zero diagnostics:
+ *
+ *     fn listing() { return <ul><each in=@rows if=@show> … </ul> }   return-stmt.markupNode
+ *     ${ if @flag { lift <ul><each in=@rows if=@show> … </ul> } }    lift-expr.expr.node
+ *     ${ @flag ? <ul><each in=@rows if=@show> … </ul> : "" }         markup-value.node
+ *     const <listing> = <ul><each in=@rows if=@show> … </ul>         render-spec.element
+ *
+ * The IDENTICAL source at top level gates correctly (0 of 2), because the
+ * BS-structural path emits a real §17.1 ifmount controller. So — exactly like the
+ * `as`-alias defect this branch opened with — the predicate was honoured or
+ * dropped according to WHERE the each sat, not according to what the author
+ * wrote.
+ *
+ * ⚠ IT WAS INVISIBLE BEFORE THE ROUND-2 CHUNK SWEEP, which is why the round-2
+ * review caught it and the earlier rounds could not. Pre-sweep the same bundles
+ * died at eval with `ReferenceError: _scrml_reconcile_list is not defined` (the
+ * tree-shaken reconciliation chunk), so NOTHING rendered and the missing gate
+ * looked like a working one. Fixing the loud failure exposed the silent one
+ * underneath it. The residual fails OPEN, and §17.1.2.3 names that direction as
+ * the dangerous one: a predicate that is usually true hides the defect straight
+ * through development.
+ *
+ * SHAPE — §17.1.2.1 is explicit and this mirrors it clause for clause: *"the
+ * iterated collection is not read and no rows are reconciled while `expr` is
+ * false; the keyed reconciler state is rebuilt on re-entry."* So the guard sits
+ * INSIDE the `_scrml_effect` (the predicate is a TRACKED read, so a false→true
+ * flip re-renders) and BEFORE the `const <items> = <source>` line (a false
+ * predicate never reads the collection — that read is what would otherwise
+ * subscribe to it). `_scrml_each_clear` empties the mount and the reconciler
+ * diffs against the mount's LIVE children, so re-entry rebuilds from scratch.
+ *
+ * The predicate is lowered in the ENCLOSING scope — the same scope `in=` is
+ * lowered in — through `lowerEachExpr` rather than `rewriteIterValueExpr`, so a
+ * §42 absence predicate (`if=@rows is some`, `if=not @hidden`) routes through the
+ * structured emitter instead of leaking `is some` into the bundle as invalid JS.
+ */
+function emitEachOpenerIfGuardLines(
+  node: EachBlockAstNode,
+  scopeVar: string | null,
+  mountVar: string,
+  indent: string,
+): string[] {
+  const raw = typeof node.ifExprRaw === "string" ? node.ifExprRaw.trim() : "";
+  if (!raw) return [];
+  const cond = lowerEachExpr(raw, scopeVar);
+  if (!cond || !cond.trim()) return [];
+  return [
+    `${indent}// SPEC 17.1.2 opener if= — gate the WHOLE list; collection stays unread while false.`,
+    `${indent}if (!(${cond})) {`,
+    `${indent}  _scrml_each_clear(${mountVar});`,
+    `${indent}  return;`,
+    `${indent}}`,
+  ];
+}
+
+/**
  * True when a lift-parsed markup attribute is a BAREWORD — present in the
  * opener with no `=value`. `parseLiftTag` (ast-builder.js) records those as
  * `{ name, value: { kind: "absent" } }`.
@@ -3370,6 +3464,7 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
   let ofExprRaw: string | null = null;
   let asName: string | null = null;
   let keyExprRaw: string | null = null;
+  let ifExprRaw: string | null = null;
   for (let i = 0; i < attrs.length; i++) {
     const attr = attrs[i];
     if (!attr || typeof attr.name !== "string") continue;
@@ -3377,6 +3472,31 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     if (n === "in") inExprRaw = eachAttrRawText(attr.value);
     else if (n === "of") ofExprRaw = eachAttrRawText(attr.value);
     else if (n === "key") keyExprRaw = eachAttrRawText(attr.value);
+    // SPEC §17.1.2 — `if=` is admitted on `<each>` and gates the whole list.
+    //
+    // ⚑ `eachAttrRawText` IS the right reader here, and the reason is a normative
+    // carve-out rather than convenience. §5.2's general rule is that a QUOTED
+    // attribute value is a static string the compiler "SHALL NOT interpret as an
+    // expression" — but §5.2's cluster-A paragraph carves CONDITION attributes
+    // (`if=` / `show=` / `else-if=`) out of it: an unquoted condition is
+    // atomic-only, and "an operator/compound condition SHALL be parenthesized —
+    // `if=(@n >= 3)` — or quoted — `if="@n >= 3"`". So in condition position the
+    // quoted form is EXPRESSION TEXT, and `eachAttrRawText`'s uniform
+    // trim-and-return over `variable-ref` / `expr` / `string-literal` is exactly
+    // that. Measured attribute shapes reaching here, all three live:
+    //
+    //     if=@show        -> {kind:"variable-ref", name:"@show"}
+    //     if=(@n >= 3)    -> {kind:"expr",         raw:"(@n>=3)"}
+    //     if="@n >= 3"    -> {kind:"string-literal", value:"@n >= 3"}   <- expression
+    //
+    // ⚠ A JSON.stringify treatment of the `string-literal` branch is NOT merely
+    // semantically wrong here, it emits BROKEN JS: `if="@show"` became
+    // `if (!("@show"))`, and a downstream text pass then rewrote the `@show`
+    // INSIDE that JS string literal, yielding `if (!("_scrml_reactive_get("show")"))`
+    // -> `E-CODEGEN-INVALID-LOGIC` on source that compiles clean on `main`.
+    // Measured, on the first cut of this fix. The per-row `if=` reader in
+    // `renderTemplateChildToJs` still does exactly that; see the note there.
+    else if (n === "if") ifExprRaw = eachAttrRawText(attr.value);
     else if (n === "as") {
       const alias = readEachAsAlias(attrs, i);
       asName = alias.name;
@@ -3417,7 +3537,15 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     inExprRaw,
     ofExprRaw,
     asName,
+    // §59.8 / §14.11 `as (k, v)` positional destructure is a BS-structural-path
+    // shape (`readEachAsAlias` reads ONE bareword); the lift path never produces
+    // it. Stated explicitly rather than left `undefined` so the returned literal
+    // actually satisfies `EachBlockAstNode` — this object has been missing the
+    // field, and failing `types-gate` with TS2741, since Bug 72 (S158). Behaviour
+    // is unchanged: every consumer guards with `Array.isArray(node.asNames)`.
+    asNames: null,
     keyExprRaw,
+    ifExprRaw,
     bodyChildren: children,
     templateChildren,
     emptyChild,
@@ -3499,6 +3627,14 @@ export function emitNestedEachFromMarkup(
   // change. `_scrml_mount_track` is the IDENTITY outside a mount, so an <each>
   // on a page with no if= registers nothing and behaves exactly as before.
   lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+  // SPEC §17.1.2 — the opener `if=` gates the whole list. Emitted BEFORE the
+  // source read so a false predicate never reads (and never subscribes to) the
+  // collection, per §17.1.2.1. See emitEachOpenerIfGuardLines for the measured
+  // defect this closes. No-op (zero lines, byte-identical emit) when the opener
+  // carries no `if=`.
+  for (const l of emitEachOpenerIfGuardLines(eachBlock, enclosingScopeVar, innerMountVar, `${indent}  `)) {
+    lines.push(l);
+  }
   lines.push(`${indent}  const ${innerItemsVar} = ${innerItemsExpr};`);
   for (const l of emitEachReconcileLines(eachBlock, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
     lines.push(l);
