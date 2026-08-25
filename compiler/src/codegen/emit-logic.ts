@@ -3809,7 +3809,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // through rewriteBlockBody's multi-statement lowering so every statement runs when
       // the dependency changes. `bodyRaw` carries faithful, parser-derived statement
       // boundaries and is comment-free (ast-builder drops COMMENT tokens).
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", _makeExprCtx(opts));
+      // The when-handler body is wrapped in a plain, NON-async `function(){}`
+      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
+      // so a server-fn / async-peer call cannot strand an `await` in the sync
+      // wrapper (S374 review #1 — latent: top-level when-sites carry no async
+      // colour today, but this makes the sync-wrapper invariant explicit and
+      // future-proof; matches the pre-#693 string path, which never awaited).
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
       return `_scrml_effect(function() { ${body}; });`;
     }
 
@@ -3828,7 +3835,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // call sites, this passes a null engine/machine ctx — an engine/machine-bound
       // `@cell` write inside a worker handler is not routed through the transition
       // guard (a narrow shared limitation, not specific to this path).
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", _makeExprCtx(opts));
+      // The when-handler body is wrapped in a plain, NON-async `function(){}`
+      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
+      // so a server-fn / async-peer call cannot strand an `await` in the sync
+      // wrapper (S374 review #1 — latent: top-level when-sites carry no async
+      // colour today, but this makes the sync-wrapper invariant explicit and
+      // future-proof; matches the pre-#693 string path, which never awaited).
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
       return `${workerVar}.onmessage = function(event) { const ${binding} = event.data; ${body}; };`;
     }
 
@@ -3838,7 +3852,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // through rewriteBlockBody so a >1-statement error handler is not truncated.
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", _makeExprCtx(opts));
+      // The when-handler body is wrapped in a plain, NON-async `function(){}`
+      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
+      // so a server-fn / async-peer call cannot strand an `await` in the sync
+      // wrapper (S374 review #1 — latent: top-level when-sites carry no async
+      // colour today, but this makes the sync-wrapper invariant explicit and
+      // future-proof; matches the pre-#693 string path, which never awaited).
+      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
       return `${workerVar}.onerror = function(${binding}) { ${body}; };`;
     }
 

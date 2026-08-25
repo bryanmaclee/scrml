@@ -32,7 +32,12 @@ function compileToClient(src) {
   writeFileSync(resolve(tmpDir, "app.scrml"), src);
   try {
     const result = compileScrml({ inputFiles: [resolve(tmpDir, "app.scrml")], write: true, outputDir: outDir });
-    return { clientJs: unwrapChunkScope(readFileSync(resolve(outDir, "app.client.js"), "utf-8")), errors: result.errors ?? [] };
+    const cp = resolve(outDir, "app.client.js");
+    // A compile that errors out (e.g. the §5 malformed juxtaposition → loud
+    // E-CODEGEN-INVALID-LOGIC) writes no client.js; return "" so the caller sees
+    // the error rather than a thrown ENOENT.
+    const clientJs = existsSync(cp) ? unwrapChunkScope(readFileSync(cp, "utf-8")) : "";
+    return { clientJs, errors: result.errors ?? [] };
   } finally { if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true }); }
 }
 const noErr = (errors) => expect(errors.filter((e) => e.severity === "error" || e.code?.startsWith("E-"))).toHaveLength(0);
@@ -81,5 +86,37 @@ describe("g-when-handler-multistatement-body-loses-ast-path-lowerings (S374)", (
     noErr(errors);
     expect(clientJs).toContain(`_scrml_reactive_set("a"`);
     expect(clientJs).toContain(`_scrml_reactive_set("b"`);
+  });
+
+  test("§5 the AST path never SILENTLY drops trailing tokens (full-consumption guard)", () => {
+    // S374 review #2: `foo(1) bar(2)` on one line parses to just `foo(1)`; without
+    // the guard the AST path emitted only that and dropped `bar(2)` with zero
+    // diagnostics — a silent statement drop, the exact class this arc closes. The
+    // guard falls back to the string path, so the malformed juxtaposition is either
+    // fully emitted or a LOUD error — never a silent truncation to its first expr.
+    const src =
+      `<div>\n  \${\n    <count> = 0\n    fn foo(x: int) { return x }\n    fn bar(x: int) { return x }\n` +
+      `    when @count changes {\n      foo(1) bar(2)\n    }\n  }\n` +
+      `  <p>\${@count}</p>\n</div>\n`;
+    const { clientJs, errors } = compileToClient(src);
+    const hadError = errors.some((e) => e.severity === "error" || e.code?.startsWith("E-"));
+    const droppedBar = /foo_?\d*\(1\)/.test(clientJs) && !/bar_?\d*\(2\)/.test(clientJs);
+    // BITING: pre-guard, this compiled clean AND emitted only foo(1) (bar silently gone).
+    expect(hadError || !droppedBar).toBe(true);
+  });
+
+  test("§6 a promise-returning call in a when-effect strands NO `await` in the sync wrapper", () => {
+    // S374 review #1: the body is wrapped in a non-async `_scrml_effect(function(){})`;
+    // `clientAsyncBody:false` in the lowering ctx guarantees no `await` is emitted
+    // into it (an `await` in a sync function is a whole-bundle SyntaxError).
+    const src =
+      `<div>\n  \${\n    <count> = 0\n    <res> = 0\n` +
+      `    when @count changes {\n      @res = safeCallAsync(() => fetch("/x"))\n    }\n  }\n` +
+      `  <p>\${@res}</p>\n</div>\n`;
+    const { clientJs, errors } = compileToClient(src);
+    noErr(errors);
+    const m = clientJs.match(/_scrml_effect\(function\(\)\s*\{[\s\S]*?\}\);/g) || [];
+    const effect = m.find((s) => /res/.test(s)) || "";
+    expect(effect).not.toMatch(/\bawait\b/); // BITING: no stranded await in the sync effect wrapper
   });
 });
