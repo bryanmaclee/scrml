@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 56 |
-| MED | 177 |
+| HIGH | 57 |
+| MED | 176 |
 | LOW | 76 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -10254,21 +10254,38 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 > (S89, ABSOLUTE) `0` is a **DEFINED value**, so `@flag is some` is TRUE and the list should render; it
 > was hidden instead. Silent-wrong output, no diagnostic.
 >
-> **Round 6 refuses the shape from codegen** (fires the structural path's existing
-> `E-ATTR-UNQUOTED-OPERATOR`, no new code minted) so nothing silently-wrong ships — **but the split
-> itself is still wrong** and the durable fix is in `parseLiftTag`. Measured across 16 operator forms:
+> **On `main` the truncation is UNFIXED.** A refusal was built on the parked `each-alias-r5` branch
+> (firing the structural path's existing `E-ATTR-UNQUOTED-OPERATOR`, no new code minted) but that
+> branch is frozen at `s375-r7-reviewed` and **never merged**, so nothing guards this today. The
+> durable fix is in `parseLiftTag` either way. Measured across 16 operator forms:
 > the §42 keyword family is the ENTIRE truncation class (every member's leftover run begins with `is`);
 > every punctuation operator survives intact. Quoted and parenthesized forms already lower correctly.
 
-### g-each-opener-if-free-bareword-ships-a-dead-page-on-the-lift-path — an opener predicate naming an identifier that resolves nowhere emits `if (!(nosuchthing))` and kills the whole client
-<!-- @gap id=g-each-opener-if-free-bareword-ships-a-dead-page-on-the-lift-path sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts(refuseItemScopedOpenerIf — deliberately NOT closed in round 6: deciding "this identifier resolves nowhere" needs the symbol table, which codegen does not hold)+compiler/src/type-system.ts(where the structural path's equivalent lives — and it false-fires, see g-structural-each-opener-if-true-false-fires-e-scope-001) prov=rationale:S375-round-5-residual-one-of-eleven-dead-pages-the-round-closed-ten -->
-> `<each in=@rows as it key=it.id if=nosuchthing>` on a lift carrier ships
-> `ReferenceError: nosuchthing is not defined`, whole page dead, exit 0, zero diagnostics. The
-> STRUCTURAL path refuses it with `E-SCOPE-001`.
+### g-lift-each-opener-if-is-silently-dropped-list-renders-ungated — an opener `if=` on a LIFT-parsed `<each>` is discarded entirely; the list renders ungated at exit 0 with zero diagnostics
+<!-- @gap id=g-lift-each-opener-if-is-silently-dropped-list-renders-ungated sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode reads `in`/`of`/`key`/`as` and has no `if` branch at all — the lift-parsed origin is a generic markup node, so the structural path's gate never runs on it) prov=spec:§17.1.2.3-names-fail-OPEN-as-the-dangerous-direction-for-this-attribute -->
+> **⚑ PA-VERIFIED ON `main` `84d29b8d`.** `<each in=@rows key=@.id if=@show>` reached through any LIFT
+> carrier (a `fn` returning markup, a `${… lift …}` block, a ternary markup value, a markup-typed
+> derived cell) compiles at **exit 0** and emits **no guard whatsoever** — the author wrote a predicate
+> to withhold the list and the list renders anyway. §17.1.2.3 names exactly this direction as the
+> dangerous one for this attribute. The STRUCTURAL path gates correctly, so the behaviour depends on
+> WHERE the `<each>` sits.
 >
-> Left open deliberately rather than closed with a codegen-side heuristic: **the structural path's own
-> version of that guess already false-fires** (next entry), so guessing from codegen would import a
-> known defect rather than close one.
+> **⚑ A THREE-ROUND FIX ATTEMPT IS PARKED, NOT LANDED — read this before starting a fourth.** Rounds
+> 5-7 of the each-alias arc are frozen at tag `s375-r7-reviewed` (`ae42e120`, branch `each-alias-r5`),
+> reviewed four times, **never merged**. Each round closed real defects and introduced a new one of
+> ONE class: *the refusal is decided by predicates over the RAW attribute text, while the lowering it
+> guards (`lowerEachExpr` → `rewriteIterValueExpr` → `rewriteContextualSigil`) operates on a
+> NORMALIZED form.* Round 5 used a regex defeated by `@` and by string literals; round 6 replaced arm 1
+> with a parsed ident-set but left arm 3 testing raw text; the fourth review then found
+> `if="@ . on"` still emitting `if (!(null.on))` — a dead page — where `if="@.on"` is correctly
+> refused. **Spelling-dependent refusal, four times, one cause.**
+>
+> **The convergent direction (NOT yet ruled):** decide the refusal from the SAME artifact the lowering
+> consumes — normalize first and test that, or better, have the lowering itself report what it could
+> not vouch for, so there is one traversal and no parallel text predicate free to drift. That is a
+> design question about where this check belongs, which is why the arc was parked rather than
+> re-dispatched. See `docs/changes/each-alias-round5-2026-08-25/progress.md` on the frozen branch for
+> the full per-round record, the 24-shape parity matrix, and the measured migrations.
 
 ### g-structural-each-opener-if-true-false-fires-e-scope-001 — the STRUCTURAL path refuses a literal `if=true` as an unresolvable identifier
 <!-- @gap id=g-structural-each-opener-if-true-false-fires-e-scope-001 sev=MED status=open locus=compiler/src/type-system.ts(visitAttr) prov=rationale:S375-round-6-parity-control-extended-to-acceptance-24-shapes-this-is-one-of-six-where-lift-is-correct-and-structural-is-not -->
