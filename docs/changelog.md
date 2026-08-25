@@ -2,6 +2,30 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S373 — 2026-08-24 (peter · P-Tech1 Windows) — drain continued: three silent-wrong bugs off the board, and the filed root was wrong twice
+
+A DRAIN session on Peter's directive ("#1, then the 3 g-when arcs, then drain"). **Three fixes landed
+with verified quality — and in two of them, reproduce-first falsified the filed root before a line was
+written.** The multi-round S239 discipline stopped a half-fixed class *and* an over-reach from shipping.
+
+- **#697 — `g-library-fn-match-else-arm-object-literal` (HIGH) resolved.** The else/wildcard `match` arm's
+  object literal lowered to `return x` (the in-scope parameter), not the object — silent: `pick(9,77)`
+  returned `77` where `{x:0}` was written. Now lowered as a value in return position, parity with #664's
+  inline path via one shared classifier. The decl-position + type-checker halves of the class are
+  newly-accepting (one-way door) and were routed to the language owner.
+- **#699 — `g-component-prop-worker-handler` (MED) resolved.** A component prop referenced inside a
+  parent-side worker handler leaked as a bare unbound identifier. The fix converged across all
+  `bodyRaw`-emitting when-handler kinds (worker handlers + the `when-effect` sibling the review caught),
+  then narrowed back out of the worker-*self*-handler (separate worker scope — would ship wrong-scope code).
+- **#700 — a `navigate()` in a when-handler no longer prunes the `utilities` runtime chunk.** The filed
+  locus was dead code; reproduce-first re-derived it to a real, *single-statement* `navigate()`-in-handler
+  ReferenceError (the chunk detector is blind to when-handler bodies). Fixed with a reference-gated
+  post-emit chunk gate, matching the codebase's own GITI-036 backstop.
+- **#701 — drain:** the else-arm HIGH marked resolved, four follow-ons filed, and the review floor drained
+  **11 → 0**.
+- **Deferred:** the meatiest g-when follow-on (`g-when-handler-multistatement-body-loses-ast-path-lowerings`,
+  the `rewriteBlockBody` AST-path lowering) — highest blast radius, left for next session.
+
 ## S371 — 2026-08-24 (bryan · ASUS-Vivobook) — the review floor drained to zero, and dog-fooding found three HIGHs the gates cannot see
 
 A session whose durable output was **verification discipline**: eleven PRs, one code landing, two
