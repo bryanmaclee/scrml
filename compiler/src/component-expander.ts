@@ -1102,6 +1102,20 @@ function sourceNeedsLiveFallback(source: string): boolean {
   if (/<\s*(?:each|match)\b/.test(source)) {
     return true;
   }
+  // (4) `${render name(...)}` snippet-render call (g-render-snippet-slot-renders-empty,
+  //   S375-peter). Same divergence-guard class as (3): the NATIVE translator
+  //   discards a Render expr into an empty escape-hatch (translate-expr.js:296
+  //   `case ExprKind.Render: return makeEscapeHatch("Render", "")`), so the
+  //   downstream render-slot detection in `_injectChildrenWalk` never matches and
+  //   the render site renders EMPTY at exit 0. The LEGACY path rewrites
+  //   `render name(...)` → `__scrml_render_name__(...)` (expression-parser.ts:1745),
+  //   which parses as a real call node the detection consumes. Route a
+  //   render-bearing component body through the legacy path so the render slot
+  //   survives re-parse. (The native discard itself is a separate native-parser
+  //   fix — see the gap's translate-expr.js locus.)
+  if (/\brender\s+[A-Za-z_$]/.test(source)) {
+    return true;
+  }
   return false;
 }
 
@@ -3027,7 +3041,7 @@ function expandComponentNode(
       slottedGroups, unslottedChildren,
       ceErrors, componentName, filePath,
       node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-      parametricSnippets,
+      parametricSnippets, counter,
     );
   }
 
@@ -3143,6 +3157,54 @@ function expandComponentNode(
  * If no explicit slot is found, caller children are appended to the end of
  * the component's root element children.
  */
+/**
+ * g-render-snippet-slot-renders-empty (default-pipeline parametric limb, S375-peter).
+ *
+ * A parametric snippet fill `foot={ (v) => <span>F${v}</span> }` rendered via
+ * `${render foot(arg)}` used to be substituted by pushing a
+ * `{ kind:"logic", body:[{ kind:"bare-expr", expr: <substituted-string> }] }`
+ * node. But codegen was migrated to read `exprNode` (Phase 4d Step 8 — the
+ * legacy `bare-expr.expr` string is no longer consumed), so that node emitted
+ * NOTHING: the render site rendered empty at exit 0, zero diagnostics.
+ *
+ * Fix: reparse the (param-substituted) lambda body into REAL AST nodes — markup
+ * bodies inject as markup at the render site (mirroring the `slot=` group path),
+ * plain-expression bodies inject as a `${expr}` interpolation — and `_deepCloneAst`
+ * them with the file-level `counter` so their ids don't collide with the host
+ * file's nodes (#273). Errors from the reparse fold into `ceErrors`.
+ */
+function parseSnippetBodyNodes(
+  body: string,
+  filePath: string,
+  counter: NodeCounter,
+  ceErrors?: CEError[],
+  span?: Span,
+): ASTNode[] {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+  // Distinguish a plain-expression body from a markup body: a plain expression
+  // parses cleanly (not an escape-hatch); markup does not (parseExprToNode only
+  // handles expressions). Wrap accordingly so buildAST sees valid source.
+  const asExpr = parseExprToNode(trimmed, filePath, span?.start ?? 0);
+  const wrapped = asExpr && asExpr.kind !== "escape-hatch"
+    ? `<program>\n\${${trimmed}}\n</program>\n`
+    : `<program>\n${trimmed}\n</program>\n`;
+  const bsOut = splitBlocks(filePath, wrapped);
+  const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
+  if (ceErrors) {
+    for (const e of tabOut.errors ?? []) {
+      if ((e.severity ?? "error") === "error") {
+        ceErrors.push(makeCEError(e.code, e.message, e.tabSpan ?? span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
+      }
+    }
+  }
+  const prog = (tabOut.ast?.nodes ?? []).find(
+    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "program",
+  ) as MarkupNode | undefined;
+  const kids = prog?.children ?? [];
+  return _deepCloneAst(kids, counter) as ASTNode[];
+}
+
 function injectChildren(
   expandedChildren: ASTNode[],
   callerChildren: ASTNode[],
@@ -3153,10 +3215,11 @@ function injectChildren(
   filePath?: string,
   nodeSpan?: Span,
   parametricSnippets?: Map<string, { paramName: string; body: string }>,
+  counter?: NodeCounter,
 ): ASTNode[] {
   // Shared state across recursive calls — slots found in nested markup still count
   const state = { slotFound: false, spreadFound: false };
-  return _injectChildrenWalk(expandedChildren, callerChildren, slottedGroups, unslottedChildren, ceErrors, componentName, filePath, nodeSpan, parametricSnippets, state);
+  return _injectChildrenWalk(expandedChildren, callerChildren, slottedGroups, unslottedChildren, ceErrors, componentName, filePath, nodeSpan, parametricSnippets, state, counter);
 }
 
 function _injectChildrenWalk(
@@ -3170,6 +3233,7 @@ function _injectChildrenWalk(
   nodeSpan?: Span,
   parametricSnippets?: Map<string, { paramName: string; body: string }>,
   state: { slotFound: boolean; spreadFound: boolean } = { slotFound: false, spreadFound: false },
+  counter?: NodeCounter,
 ): ASTNode[] {
   const result: ASTNode[] = [];
 
@@ -3300,12 +3364,13 @@ function _injectChildrenWalk(
           // user-authored scrml expression text).
           const paramRe = new RegExp(`\\b${snippet.paramName}\\b`, "g");
           const substituted = snippet.body.replace(paramRe, () => renderParamMatch.argExpr);
-          // Emit as a bare-expr logic node containing the substituted markup
-          result.push({
-            kind: "logic",
-            body: [{ kind: "bare-expr", expr: substituted, span: child.span }],
-            span: child.span,
-          } as unknown as ASTNode);
+          // g-render-snippet-slot-renders-empty (S375): reparse the substituted
+          // body into REAL AST nodes (fresh ids) so codegen renders it. The old
+          // hand-built `{ bare-expr, expr }` node used the dead legacy `expr:`
+          // field (codegen reads `exprNode` since Phase 4d Step 8) → empty render.
+          if (counter) {
+            result.push(...parseSnippetBodyNodes(substituted, filePath ?? "", counter, ceErrors, child.span));
+          }
         }
         state.slotFound = true;
         continue;
@@ -3318,7 +3383,7 @@ function _injectChildrenWalk(
         (child as MarkupNode).children!, callerChildren,
         slottedGroups, unslottedChildren,
         ceErrors, componentName, filePath, nodeSpan,
-        parametricSnippets, state,
+        parametricSnippets, state, counter,
       );
       result.push({ ...child, children: recursed } as ASTNode);
     } else {
