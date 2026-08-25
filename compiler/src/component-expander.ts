@@ -1113,7 +1113,12 @@ function sourceNeedsLiveFallback(source: string): boolean {
   //   render-bearing component body through the legacy path so the render slot
   //   survives re-parse. (The native discard itself is a separate native-parser
   //   fix — see the gap's translate-expr.js locus.)
-  if (/\brender\s+[A-Za-z_$]/.test(source)) {
+  // Match the CALL form `render name(` specifically (S375 review #3) — not a
+  // bare `render <word>`, which fires on incidental prose ("please render your
+  // account") or a comment and would needlessly route the body onto the legacy
+  // path (skipping the native-only props/call-ref AST upgrades). The render-slot
+  // rewrite target is a call, so the `(` is the load-bearing token.
+  if (/\brender\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(source)) {
     return true;
   }
   return false;
@@ -3182,11 +3187,19 @@ function parseSnippetBodyNodes(
 ): ASTNode[] {
   const trimmed = body.trim();
   if (!trimmed) return [];
-  // Distinguish a plain-expression body from a markup body: a plain expression
-  // parses cleanly (not an escape-hatch); markup does not (parseExprToNode only
-  // handles expressions). Wrap accordingly so buildAST sees valid source.
+  // Distinguish a body that must INTERPOLATE (a string literal, a call, a
+  // member/binary expression — these render their VALUE) from one that renders
+  // AS-IS (markup, or bare text). A bare IDENTIFIER is deliberately treated as
+  // text, NOT interpolated: `foot={ (v) => Active }` wrapped as `${Active}`
+  // would `ReferenceError` on an undefined name and kill the whole page at boot
+  // (S375 review #1). Rendering it as literal text is the safe default — a body
+  // that genuinely means a variable read is written `${var}` or returns markup.
+  // (Span note: buildAST numbers the reparsed nodes against the synthetic
+  // `<program>` wrapper; any diagnostic on malformed snippet content folds into
+  // ceErrors with the render-site `child.span` — an accurate author position.)
   const asExpr = parseExprToNode(trimmed, filePath, span?.start ?? 0);
-  const wrapped = asExpr && asExpr.kind !== "escape-hatch"
+  const interpolate = asExpr && asExpr.kind !== "escape-hatch" && asExpr.kind !== "ident";
+  const wrapped = interpolate
     ? `<program>\n\${${trimmed}}\n</program>\n`
     : `<program>\n${trimmed}\n</program>\n`;
   const bsOut = splitBlocks(filePath, wrapped);
@@ -3368,9 +3381,12 @@ function _injectChildrenWalk(
           // body into REAL AST nodes (fresh ids) so codegen renders it. The old
           // hand-built `{ bare-expr, expr }` node used the dead legacy `expr:`
           // field (codegen reads `exprNode` since Phase 4d Step 8) → empty render.
-          if (counter) {
-            result.push(...parseSnippetBodyNodes(substituted, filePath ?? "", counter, ceErrors, child.span));
-          }
+          // Never silently drop the render node if `counter` is somehow absent
+          // (S375 review #2): fall back to a high-seeded local counter so the
+          // reparsed ids can't collide with the host file's, rather than emitting
+          // nothing — which would reintroduce the exact silent-empty class this fixes.
+          const idCounter = counter ?? { next: 900_000_000 };
+          result.push(...parseSnippetBodyNodes(substituted, filePath ?? "", idCounter, ceErrors, child.span));
         }
         state.slotFound = true;
         continue;

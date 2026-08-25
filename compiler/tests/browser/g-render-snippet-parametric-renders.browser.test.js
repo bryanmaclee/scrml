@@ -86,4 +86,17 @@ describe("g-render-snippet-slot-renders-empty (parametric, default pipeline)", (
     expect(m.errs).toEqual([]);
     expect(m.text(".ch")).toBe("HEADVAL");
   });
+
+  test("§4 a bare-word body renders as text, not a page-killing var interpolation (review #1)", () => {
+    // Pre-hardening: `(v) => Active` wrapped as `${Active}` → ReferenceError at
+    // boot → dead page. A bare identifier body renders as literal text instead.
+    const m = shipMount([
+      "<program>",
+      '${ const Card = <div props={ foot: snippet(v: string) }><div class="cf">${render foot("Z")}</div></div> }',
+      "<Card foot={ (v) => Active } />",
+      "</program>", "",
+    ].join("\n"));
+    expect(m.errs).toEqual([]);
+    expect(m.text(".cf")).toBe("Active"); // rendered as text; no throw
+  });
 });
