@@ -269,3 +269,111 @@ describe("E-STATE-BLOCK-STATEMENT-FORM — block comments", () => {
     expect(stmtFormErrors(compile(src)).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND (S376 adversarial pass) — two defects the first cut shipped.
+//
+// Both are the same species: a claim in the module header that the CODE did not
+// actually enforce. The header said `<engine>` / `<machine>` were excluded, and
+// one of the two arms of `isStateBlock` did not apply the exclusion; the span
+// arithmetic said it was byte-exact, and the column was byte-exact only for a
+// statement that happened to start its own line. Every fixture written before
+// this round put the statement on its own line and used a `<db>` — so the suite
+// agreed with the header rather than with the code.
+// ---------------------------------------------------------------------------
+
+describe("E-STATE-BLOCK-STATEMENT-FORM — the `type:\"state\"` arm is name-guarded too", () => {
+  // BS calls ANY whitespace-form opener `< Name …>` a `type:"state"` node — it is
+  // a SYNTACTIC classification, not a semantic one. Measured over the corpus at
+  // the time of this fix: 123 such nodes, only 44 named `db`; the rest are
+  // `engine`, typestate transition decls, whitespace-form component definitions
+  // and plain HTML. An unguarded arm claimed all of them.
+  test("an engine state-child body does NOT draw this code", () => {
+    // An engine state-child body is a code-default locus (§4.18.1), so the
+    // diagnostic's premise ("ships into the DOM as literal page text") is FALSE
+    // here and its remediation ("move it to the `<program>` body") is wrong
+    // advice. A fatal refuse gate must not fire at a locus it was never scoped
+    // to. The whitespace opener is the one that reached the unguarded arm.
+    const src =
+      `<program>\ntype Phase:enum = { Idle, Active }\n\n` +
+      `<engine for=Phase initial=.Idle>\n` +
+      `    < Idle rule=.Active>\n      on mount { go() }\n    </>\n` +
+      `    <Active rule=.Idle></>\n</>\n\n` +
+      `function go() { }\n<p>\${@phase}</p>\n</program>\n`;
+    expect(stmtFormErrors(compile(src)).length).toBe(0);
+  });
+
+  test("a whitespace-form COMPONENT definition does NOT draw this code", () => {
+    // `< taskItem>` is also `type:"state"` to BS. Same arm, same false claim —
+    // and this shape is far more common in the corpus than the engine one.
+    const src =
+      `<program>\n< taskItem>\n  on mount { go() }\n</>\n` +
+      `function go() { }\n<div>hi</div>\n</program>\n`;
+    expect(stmtFormErrors(compile(src)).length).toBe(0);
+  });
+
+  test("the deprecated `< db>` opener STILL fires — the guard did not blind it", () => {
+    // The load-bearing check on the fix. BS records `name:"db"` on the
+    // whitespace `< db>` node, so name-guarding the `state` arm keeps the one
+    // real corpus instance this module exists for. If `name` were absent there,
+    // the guard would have silently switched the module off.
+    const src =
+      `< db src="./x.db" tables="items">\n` +
+      `    \${\n        <items> = []\n    }\n\n` +
+      `    on mount { loadDashboard() }\n` +
+      `</>\n` +
+      `function loadDashboard() { }\n` +
+      `<div>hello</div>\n`;
+    expect(stmtFormErrors(compile(src)).length).toBe(1);
+  });
+});
+
+describe("E-STATE-BLOCK-STATEMENT-FORM — the reported position", () => {
+  test("a statement sharing the opener's line reports the REAL column", () => {
+    // `<db src="sqlite:./app.db" tables="items">` is 41 characters, so
+    // `on mount` begins at column 42. The text child begins mid-line here, and
+    // `colStart` is an offset into that child's first line, not a source column.
+    // Emitting `colStart + 1` unconditionally reported column 1 — disagreeing
+    // with the byte-exact `span.start` sitting right beside it.
+    const src =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+      `<db src="sqlite:./app.db" tables="items">on mount { go() }</db>\n` +
+      `function go() { }\n<div>hello</div>\n</program>\n`;
+    const d = stmtFormErrors(compile(src));
+    expect(d.length).toBe(1);
+    expect(d[0].line).toBe(5);
+    expect(d[0].column).toBe(42);
+  });
+
+  test("`col` and `span.start` agree — they resolve to the same source byte", () => {
+    // The two coordinates are computed separately, so they can drift apart
+    // silently. This pins them together: re-deriving line/col from the byte
+    // offset must reproduce the reported line/col, whichever fixture shape.
+    const src =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+      `<db src="sqlite:./app.db" tables="items">on mount { go() }</db>\n` +
+      `function go() { }\n<div>hello</div>\n</program>\n`;
+    const d = stmtFormErrors(compile(src));
+    expect(d.length).toBe(1);
+    const upto = src.slice(0, d[0].span.start);
+    expect(upto.split("\n").length).toBe(d[0].line);
+    expect(d[0].span.start - (upto.lastIndexOf("\n") + 1) + 1).toBe(d[0].column);
+  });
+
+  test("a statement on its OWN line still reports correctly (no over-correction)", () => {
+    // The line arithmetic was never wrong and must not be "fixed": `baseLine` is
+    // the line of the child's first character, so `baseLine + li` is already
+    // right at li === 0 and beyond. Here the statement is on line 6, column 3.
+    const src =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+      `<db src="sqlite:./app.db" tables="items">\n  on mount { go() }\n</db>\n` +
+      `function go() { }\n<div>hello</div>\n</program>\n`;
+    const d = stmtFormErrors(compile(src));
+    expect(d.length).toBe(1);
+    expect(d[0].line).toBe(6);
+    expect(d[0].column).toBe(3);
+  });
+});

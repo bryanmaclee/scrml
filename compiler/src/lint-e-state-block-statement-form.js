@@ -21,15 +21,15 @@
  * A state-block body is MARKUP context, not a logic locus. SPEC is explicit in
  * two places (both §34 catalog rows, normative):
  *
- *   - `E-WRITE-NOT-IN-LOGIC-CONTEXT` (SPEC.md:19720): "`<db>` / `<state>`
- *     STATE-block bodies are NOT default-logic-mode loci".
- *   - `W-STATE-BLOCK-BARE-WRITE-DECL` (SPEC.md:19721): "A state-block body is
- *     markup context (SPEC §4)".
+ *   - §34 row `E-WRITE-NOT-IN-LOGIC-CONTEXT` (§40.8, §6.1.1, §6.2): "`<db>` /
+ *     `<state>` STATE-block bodies are NOT default-logic-mode loci".
+ *   - §34 row `W-STATE-BLOCK-BARE-WRITE-DECL` (§38.4, §6, §40.8): "A state-block
+ *     body is markup context (SPEC §4)".
  *
  * §40.8's `default-logic` auto-lift — the mode in which `on mount { … }` IS
  * lifted to logic — is scoped to `<program>` / `<page>` / `<channel>` bodies
- * (SPEC.md:1191, the S111 amendment: `default-logic` is "a distinct third
- * body-mode" owned by §40.8). A state block is none of those, so the identical
+ * (the S111 amendment of 2026-05-20, §4.18: `default-logic` is "a distinct third
+ * body-mode" owned by §40.8; grep SPEC.md for "S111 amendment"). A state block is none of those, so the identical
  * source line that becomes logic one locus up becomes TEXT here. That
  * asymmetry, silently, is the defect.
  *
@@ -68,9 +68,10 @@
  *
  * The dispatching brief proposed reusing the reserved
  * `E-STATE-BLOCK-BARE-WRITE-DECL`. That code is shape-specific, not
- * locus-specific: SPEC.md:20072 defines it as "A bare `@name = init` directly in
- * a `<db>` / `<state>` STATE-block markup body is rejected. Deprecation cycle
- * endpoint — activates after the W-STATE-BLOCK-BARE-WRITE-DECL window". An
+ * locus-specific: its §34 row (§38.4, §6) defines it as "A bare `@name = init`
+ * directly in a `<db>` / `<state>` STATE-block markup body is rejected.
+ * Deprecation cycle endpoint — activates after the
+ * W-STATE-BLOCK-BARE-WRITE-DECL window". An
  * `on mount { … }` block is neither a bare write nor a declaration, and the
  * write form's deprecation window is still OPEN (the W- lint is the active
  * stage). Firing the reserved E- code for a different shape would put the
@@ -102,6 +103,22 @@
  * this module just closed, one severity down (warning, so non-fatal) and in
  * `ast-builder.js`, which was out of scope for that dispatch. Filed, not fixed —
  * do not read the sibling's silence as evidence the shape is fine.
+ *
+ * ── A NOTE ON HOW SPEC IS CITED HERE: BY CODE NAME, NEVER BY LINE ───────────
+ *
+ * These citations used to carry bare SPEC.md line numbers (19720, 20072, and two
+ * others). One of the four ROTTED INSIDE A SINGLE COMMIT: a §34 row
+ * inserted at 19722 pushed `E-STATE-BLOCK-BARE-WRITE-DECL` from 20072 to 20073,
+ * so the comment silently began pointing at `E-CONST-AT-DEPRECATED` instead —
+ * a citation that still LOOKS precise while naming the wrong row. (The other
+ * three were re-verified at the same time and were still correct, which is the
+ * point: rot is silent and per-line, so a spot-check of one proves nothing about
+ * the rest.)
+ *
+ * A §34 code name plus its section list is stable under insertion, is greppable
+ * in one command, and fails LOUDLY rather than silently if the row is renamed or
+ * struck. This repo has a row-provenance gate for exactly this reason. Do not
+ * reintroduce line numbers here.
  *
  * @module lint-e-state-block-statement-form
  */
@@ -142,10 +159,44 @@ const STATE_BLOCK_ON_LIFECYCLE_RE = /^\s*on\s+(mount|dismount)\s*\{/;
  *   - the deprecated whitespace `< db>` is classified `type:"state"`.
  * The one live corpus member of this defect (`samples/htmx-debate-dashboard.scrml:14`)
  * uses the DEPRECATED form, so a markup-only gate would have missed it entirely.
+ *
+ * ── THE TWO ARMS ARE NAME-GUARDED SYMMETRICALLY, AND THAT IS DELIBERATE ──────
+ *
+ * The `state` arm used to return `true` unconditionally while the `markup` arm
+ * was name-guarded. That asymmetry READ as intentional and was not: it made this
+ * module's own documented `<engine>` / `<machine>` exclusion (below) apply to
+ * only ONE of the two ways a block can arrive here.
+ *
+ * `type:"state"` is not a semantic classification — it is what the block
+ * splitter calls ANY whitespace-form opener `< Name …>`. MEASURED over the 2,353
+ * corpus sources at the time of the fix: **123 `type:"state"` nodes, and only 44
+ * of them are named `db`.** The other 79 are `engine` (x31), typestate
+ * transition declarations (`Draft`, `Validated`, `Submission`, `Todo`),
+ * whitespace-form COMPONENT definitions (`taskItem`, `siteHeader`, `sidebar`,
+ * `statusBadge`, …) and even plain HTML (`p`, `div`). The unguarded arm claimed
+ * every one of them.
+ *
+ * PA-REPRODUCED and independently re-reproduced: `on mount { go() }` inside a
+ * `< Idle rule=.Active>` engine state-child drew this code at severity error. At
+ * that locus the diagnostic's PREMISE is false — an engine state-child body is a
+ * code-default locus (§4.18.1), so the statement does NOT ship into the DOM as
+ * page text — and its remediation ("move it to the `<program>` body") is wrong
+ * advice. A fatal refuse gate was giving wrong guidance at a locus it was never
+ * scoped to. No corpus file happened to fire, but that is luck: none of those 79
+ * nodes contains a line beginning `on mount {`. Luck is not scoping.
+ *
+ * The name guard does NOT blind the deprecated-opener arm this module exists to
+ * cover, and that was checked rather than assumed: BS records `name:"db"` on the
+ * `< db>` node (`name:"Idle"` on the engine child), so `< db …>` still matches
+ * and all 44 corpus instances are retained. The canonical `<Idle rule=…>` form
+ * never reached here at all — it is not a `type:"state"` node.
  */
 function isStateBlock(node) {
   if (!node) return false;
-  if (node.type === "state") return true;
+  // Both arms name-guarded — see the note above. `type:"state"` means "a
+  // whitespace-form opener", not "a state block", so it needs the same filter
+  // the markup arm has always had.
+  if (node.type === "state") return STATE_BLOCK_NAMES.has(node.name);
   return node.type === "markup" && STATE_BLOCK_NAMES.has(node.name);
 }
 
@@ -289,8 +340,15 @@ function scanStateBlockChildren(node, filePath, diagnostics) {
   const commentState = { inBlockComment: false };
   for (const child of node.children || []) {
     if (!child || child.type !== "text" || typeof child.raw !== "string") continue;
+    // `child.span` locates `child.raw[0]` in the SOURCE, all three fields
+    // agreeing: `start` is the byte offset and `line`/`col` are its 1-based
+    // position. MEASURED, not assumed — for `<db …>on mount { go() }</db>` BS
+    // records `{start:132, line:5, col:42}` and byte 132 does resolve to line 5,
+    // column 42.
     const baseLine =
       child.span && typeof child.span.line === "number" ? child.span.line : 1;
+    const baseCol =
+      child.span && typeof child.span.col === "number" ? child.span.col : 1;
     const baseStart =
       child.span && typeof child.span.start === "number" ? child.span.start : 0;
 
@@ -305,12 +363,29 @@ function scanStateBlockChildren(node, filePath, diagnostics) {
       const m = masked.match(STATE_BLOCK_ON_LIFECYCLE_RE);
       if (m) {
         const colStart = masked.length - masked.trimStart().length;
+        // ⚠ `colStart` is an offset into `line`, NOT a source column, and the
+        // two coincide only from the SECOND line of the child onward. A text
+        // child can begin mid-line — `<db …>on mount { go() }</db>` puts the
+        // whole child on the opener's line — and for that child line 0 starts at
+        // source column `baseCol`, not at column 1. Emitting `colStart + 1`
+        // unconditionally reported col 1 for a statement at col 42, so `col`
+        // disagreed with the byte-exact `span.start` beside it and any consumer
+        // that navigates by line/col (LSP, editor, formatter) jumped to the
+        // wrong place — in a diagnostic whose entire job is to point at the
+        // offending statement. Every earlier fixture put the statement on its
+        // own line, which is why the suite never saw it.
+        //
+        // The LINE needs no such correction and must not be given one:
+        // `baseLine` is the line of `raw[0]`, which IS line 0 of the child, and
+        // each split consumes exactly one `\n`. So `baseLine + li` is already
+        // right at `li === 0` and at every later line.
+        const col = li === 0 ? baseCol + colStart : colStart + 1;
         const span = {
           file: filePath,
           start: baseStart + offset + colStart,
           end: baseStart + offset + line.length,
           line: baseLine + li,
-          col: colStart + 1,
+          col,
         };
         diagnostics.push({
           filePath,

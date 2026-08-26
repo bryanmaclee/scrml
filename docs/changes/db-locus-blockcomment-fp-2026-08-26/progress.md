@@ -251,7 +251,7 @@ Name-level comparison, not count-level (identical counts can hide a swap):
 
 The 53 are pre-existing on `origin/main` + the feature branch and are untouched by this dispatch.
 
-## 2026-08-26 — status: COMPLETE
+## 2026-08-26 — status: complete (round 1)
 
 Files touched (the brief's allowed set, nothing else):
 - `compiler/src/lint-e-state-block-statement-form.js` — the state machine; header claim corrected.
@@ -261,3 +261,147 @@ Files touched (the brief's allowed set, nothing else):
 
 Not written, per the brief: `ast-builder.js`, `compiler/SPEC.md`, any other lint module,
 `docs/FACTS.md`.
+
+---
+
+# FIX ROUND — S239 adversarial pass, three findings
+
+Base: my own branch tip `b6846e76`. Same MUST-NOT-WRITE list. Every finding was re-reproduced here
+by execution before being touched, per "reviews are claims, not results" — and that discipline paid,
+because one reported symptom did not reproduce.
+
+## FINDING 2 (MEDIUM) — `isStateBlock` defeated its own documented exclusion. REPRODUCED.
+
+The markup arm was name-guarded; the `state` arm returned `true` unconditionally. So the module
+header's `<engine>` / `<machine>` exclusion covered only ONE of the two ways a block arrives here.
+
+Reproduced independently: `on mount { go() }` inside a `< Idle rule=.Active>` engine state-child drew
+`E-STATE-BLOCK-STATEMENT-FORM` at severity **error**. At that locus the diagnostic's premise is
+false — an engine state-child body is a code-default locus (§4.18.1) — and its remediation is wrong
+advice.
+
+**The scope is materially wider than the reporting fixture, and this is the part worth carrying
+forward.** `type:"state"` is not a semantic classification; it is what BS calls ANY whitespace-form
+`< Name …>` opener. Measured over the 2,353 corpus sources:
+
+```
+type:"state" nodes IN  {db,state,schema}: 44
+type:"state" nodes OUT of the set       : 79
+  engine x31 · Todo x6 · Submission x4 · Draft x4 · Validated x4 · profile x3
+  counter x2 · item x2 · badge x2 · taskItem · siteHeader · siteFooter · sidebar
+  statusBadge · addressCard · navItem · widget · userBadge · card · panel · p · div · …
+```
+
+So the unguarded arm claimed **79 nodes it was never scoped to** — engines, typestate transition
+declarations (the very false-positive class the module header cites as MEASURED for the bare-call
+gate), whitespace-form component definitions, and plain HTML. No corpus file fires only because none
+of those 79 contains a line beginning `on mount {`. **Luck, not scoping.**
+
+**The fix's load-bearing premise was verified rather than inherited.** If `type:"state"` nodes did
+not carry `name`, name-guarding would silently switch the module off. Probed BS directly:
+
+```
+deprecated < db> : [{"name":"db","nameType":"string"}]
+engine < Idle>   : [{"name":"Idle","nameType":"string"}]
+engine <Idle>    : []        <- not a type:"state" node at all
+```
+
+That last row also explains why only the whitespace spelling ever false-fired: the canonical
+`<Idle rule=…>` never reached this function.
+
+## FINDING 1 (LOW) — the COLUMN was wrong. The LINE was NOT. Half did not reproduce.
+
+Genuine half: `colStart` is an offset into the child's line, not a source column, and the two
+coincide only from the child's SECOND line on. A text child can begin mid-line, so
+`<db …>on mount { go() }</db>` reported column 1 for a statement at column 42 — `col` disagreeing
+with the byte-exact `span.start` right beside it. Fixed: `li === 0 ? baseCol + colStart : colStart + 1`.
+
+⚠ **The report said BOTH coordinates were wrong, citing `6:1` where the statement is at 5:42. That
+does not reproduce, and no line correction was made.** This pass reported `5:1` — right line, wrong
+column. The `6:1` in the output belongs to **`I-FN-PROMOTABLE`**, whose locus is `function go() { }`
+on line 6; pairing each diagnostic with its own `-->` line shows it plainly:
+
+```
+lint  [I-FN-PROMOTABLE]          --> v10-sameline.scrml:6:1
+error [E-STATE-BLOCK-STATEMENT-FORM] --> v10-sameline.scrml:5:42   (post-fix; 5:1 pre-fix)
+```
+
+Measured ground truth: BS records `{start:132, line:5, col:42}` on the text child, and byte 132 does
+resolve to line 5 column 42 — so `span.line` is the line of `raw[0]`, which IS line 0 of the child,
+and `baseLine + li` is already correct at `li === 0`. **A test now pins the line**, so nobody
+re-reading the original report can "correct" it later.
+
+## FINDING 3 (LOW) — the rotted citation, and the whole class of them
+
+Confirmed: SPEC.md line 20072 is `E-CONST-AT-DEPRECATED`; the intended row is 20073.
+
+**Chose to remove the class, not bump the number** — all four SPEC citations in this module now read
+by §34 CODE NAME plus section list. Reasoning: a code name is stable under insertion, greppable in
+one command, and fails loudly rather than silently if a row is renamed or struck; this repo has a
+row-provenance gate for exactly this reason.
+
+Bidirectional check rather than a spot-fix: the other three (19720 `E-WRITE-NOT-IN-LOGIC-CONTEXT`,
+19721 `W-STATE-BLOCK-BARE-WRITE-DECL`, 1191 the S111 amendment) were re-verified and were all still
+correct. **That is the argument for the change, not against it** — rot is silent and per-line, so
+one correct spot-check proves nothing about the rest. A header note says not to reintroduce them.
+
+## VERIFY — the full case table, exit codes read from the process
+
+| case | exit | fires | note |
+|---|---|---|---|
+| 1 `on mount` bare `<db>` | 1 | 1 | |
+| 2 deprecated `< db>` opener | 1 | 1 | **the guard did not blind it** |
+| 3 `on dismount` | 1 | 1 | |
+| 4 block comment | 0 | 0 | |
+| 5 `//` comment | 0 | 0 | |
+| 6 prose | 0 | 0 | |
+| 7 legal `<program>` locus | 0 | 0 | |
+| 8 engine state-child `< Idle>` | 1 | **0** | false fire GONE; exit 1 is `E-ENGINE-STATE-CHILD-MISSING`, unrelated and correct |
+| 9 engine state-child `<Idle>` | 0 | 0 | |
+| 10 same-line statement | 1 | 1 | now **5:42**, was 5:1 |
+
+One row of this table was asserted wrong by me first (case 9 expected exit 1, copied from case 8) —
+**the code was right and my expectation was wrong.** Second time this dispatch that a hand-written
+expectation, not the implementation, was the defect.
+
+Corpus differential, round-1 module vs round-2 over the same block-splitter output: **2,353 sources,
+base 1 fire / head 1 fire, 0 files where they disagree.** The mis-scoping was real but latent — no
+live corpus victim.
+
+Tests **24 -> 30**. Honest accounting on the six: **4 fail against the round-1 module** (both
+engine/component shapes, the same-line column, and the col-vs-`span.start` agreement check); **2 pass
+on round-1** and are kept as locks — the deprecated-opener regression and the "do not over-correct
+the line" pin.
+
+## FIX ROUND — full suite
+
+- **Original baseline** (pre-everything): 30598 pass / 53 fail / 216 skip / 2 todo.
+- **After round 1**: 30606 pass / 53 fail / 216 skip / 2 todo.
+- **After the fix round**: **30612 pass / 53 fail / 216 skip / 2 todo.**
+- `diff` of the sorted, timing-stripped `(fail)` names, ORIGINAL baseline vs now: **EMPTY.**
+
++14 across both rounds is exactly the 8 + 6 tests added. The 53 pre-existing failures are byte-
+identical in name to the baseline — no new failures, none accidentally fixed, no swap.
+
+## FIX ROUND — status: COMPLETE
+
+Files touched in this round (still inside the brief's allowed set):
+- `compiler/src/lint-e-state-block-statement-form.js` — `isStateBlock` name guard on both arms;
+  `li === 0` column correction; all four SPEC citations converted to §34 code-name form.
+- `compiler/tests/unit/state-block-statement-form.test.js` — 6 added (24 -> 30).
+- `docs/changes/db-locus-blockcomment-fp-2026-08-26/progress.md` — this file.
+
+`compiler/src/api.js` was NOT re-touched this round; `compiler/SPEC.md`, `ast-builder.js` and
+`docs/FACTS.md` remain unwritten, per both briefs.
+
+**Still DEFERRED (unchanged from round 1):** `scanStateBlockBareWriteDecls`
+(`ast-builder.js:1923`) has no comment handling and false-fires
+`W-STATE-BLOCK-BARE-WRITE-DECL` on a commented-out `@count = 0`. Verified by execution; out of
+write scope both rounds.
+
+**NEW, surfaced not fixed:** the whitespace-form `< Idle rule=.Active>` engine state-child is not
+recognised as a state-child by the engine machinery at all — fixture 8 draws
+`E-ENGINE-STATE-CHILD-MISSING` for `.Idle` even though a `< Idle>` block is present, while the
+canonical `<Idle rule=.Active>` compiles clean. That is a separate pre-existing question about the
+deprecated opener's reach into §51, entirely outside this change; noting it because this dispatch
+is what surfaced it.
