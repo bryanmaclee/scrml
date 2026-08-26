@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 58 |
-| MED | 177 |
-| LOW | 79 |
+| MED | 178 |
+| LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2373,6 +2373,69 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 ### g-each-value-form-if-markup-fn-call-branch-stringifies — a value-form `if` inside an `<each>` whose branch CALLS a markup-returning fn renders `[object HTMLSpanElement]`; the identical ternary MOUNTS the node, and pre-#670 the same source rendered EMPTY — a WORSENING introduced by #670 — `NEW S371-bryan (review-floor S239 pass on the merged #670); MED; open`
 <!-- @gap id=g-each-value-form-if-markup-fn-call-branch-stringifies sev=MED status=open locus=compiler/src/codegen/emit-each.ts:1335(interpExprNode is populated only from stmt.exprNode, which an if-stmt does not carry, so it stays null and the markupCapable discriminant at :1467 degrades to isItemRoot) + compiler/src/codegen/emit-each.ts:889(_eachSoleBareExprRaw rejects only LITERAL markup via exprNodeHasMarkupValue — a call whose markup-ness lives in the callee RETURN is invisible there) prov=rationale:S371-review-floor-PA-reproduced-by-execution-both-revisions-pre670-659a5b0f-emits-each-empty-logic-interpolation-skipped-post670-emits-textContent-String-badge-it-while-the-twin-ternary-emits-instanceof-Node-appendChild -->
 > **⚑ S371-bryan: PA-REPRODUCED BY EXECUTION on both revisions; a WORSENING, not a pre-existing limitation.** Found by the review floor's S239 pass on the already-merged **#670**. Repro (one file, two adjacent lines, identical semantics): a `fn badge(x) { return <span class="b">${x}</span> }` plus `<each in=@rows as it>` containing **(A)** `<li>${ if it == "a" { badge(it) } else { "none" } }</li>` and **(B)** `<li>${ it == "a" ? badge(it) : "none" }</li>`. **A** emits `_scrml_each_tn_4.textContent = String((it == "a" ? _scrml_badge_1(it) : "none"))` → `[object HTMLSpanElement]` in the page; **B** emits `_scrml_mv_v_8 instanceof Node → appendChild` and mounts correctly. **The two-revision measurement is the load-bearing half:** on `659a5b0f` (pre-#670) line A emitted `// each: empty logic interpolation skipped` and rendered NOTHING; on `main` (post-#670) it renders visible garbage. So #670's new value-form-`if` lowering **newly routes traffic into** the markup-stringification hole — the same family as [[g-each-nested-markup-interp-stringifies]] and [[g-each-nested-in-fn-body-markup-fn-stringifies]], but reached by a path #670 created. **Corpus blast radius measured ZERO** (`corpus-emit-differential` 659a5b0f→01e2a184: 0 newly-failing, 0 artifact diffs attributable to #670 — the 411 diagnostic changes are all `+W-TYPE-031-UNPROVEN` from #665 and the 37 artifact diffs are stdlib sources from #669). Per [[feedback_corpus_zero_is_not_demand_evidence]] that bounds blast radius and is NOT evidence the shape is unwritten — a markup-returning helper called from a conditional branch is an ordinary thing to write. **Fix direction:** synthesize an ExprNode for the if-stmt branches (or hand the branch exprNodes directly) into `interpMayYieldNode` so `markupCapable` sees the call, and add a non-regression test — the #670 merge-blocker suite has no case for this shape. Peter-lane (each codegen, no language surface). Repro-first re-derive before building.
+
+### g-state-block-statement-form-misses-a-wrapped-statement — one `<div>` inside a `<db>` body re-opens the exact defect `E-STATE-BLOCK-STATEMENT-FORM` closes
+<!-- @gap id=g-state-block-statement-form-misses-a-wrapped-statement sev=MED status=open locus=compiler/src/lint-e-state-block-statement-form.js:scanStateBlockChildren(scans DIRECT text children only — the domain matches the sibling scanStateBlockBareWriteDecls) prov=empirical:S376-PA-reproduced-by-execution -->
+
+> **PA-REPRODUCED at S376 by execution, during the S239 re-review of the gate's own landing.**
+>
+> ```scrml
+> <db src="sqlite:./app.db" tables="items">
+>   <div>
+> on mount { loadDashboard() }
+>   </div>
+> </db>
+> ```
+> → **exit 0, ZERO diagnostics**, and `on mount { loadDashboard() }` ships into the emitted HTML as
+> literal page text (counted: 1 occurrence). That is byte-for-byte the defect ruling 1 refused, one
+> nesting level deeper.
+>
+> **Why it landed anyway, stated honestly:** the scan domain matches the sibling
+> `scanStateBlockBareWriteDecls`, so the two state-block scanners stay consistent, and the sole real
+> corpus instance (`samples/htmx-debate-dashboard.scrml:143`, migrated in the same landing) is a
+> DIRECT text child. The gate closes the measured, corpus-present shape. **The residual is recorded
+> here rather than closed on paper** — the module's original justification for the domain ("nested
+> deeper markup is prose context and is governed by its own element's body mode") was FALSE and was
+> corrected in the same landing: a `<div>` inside a `<db>` body has the same body mode and the same
+> silent-never-runs outcome.
+>
+> **⚑ THE FIX IS A SCOPE RULING, NOT A PATCH — and it is arguably already ruled.** S375 ruling 1 says
+> *logic at a `<db>`/state-block locus is REFUSED*, and a statement inside a `<div>` inside a `<db>`
+> body IS at that locus — which makes widening the scan **conformance with the existing ruling**
+> rather than a new widening. Against that: it is newly-rejecting with an **UNMEASURED** migration
+> (the 1-file population was measured over direct children only), and nested markup in a state-block
+> body is a shape nobody has surveyed. **Measure the nested population from the COMPILER before
+> scoping** — a text grep finds `on mount` in 39 corpus files and that is the wrong referent, exactly
+> as it was for the direct-child count.
+>
+> Sibling residual: [[g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener]].
+
+### g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener — an unpaired `/*` in prose (a glob, a path, a division) silently disarms the gate for the rest of the state block
+<!-- @gap id=g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener sev=LOW status=open locus=compiler/src/lint-e-state-block-statement-form.js:maskCommentRegions(no string-literal state by design; an unterminated /* suppresses to end of block) prov=empirical:S376-PA-reproduced-by-execution -->
+
+> **PA-REPRODUCED at S376 by execution.**
+>
+> ```scrml
+> <db src="sqlite:./app.db" tables="items">
+>   note about src/* paths
+> on mount { loadDashboard() }
+> </db>
+> ```
+> → **exit 0, zero diagnostics.** A glob disarmed a fatal gate for the remainder of the block.
+>
+> **The fail-OPEN direction is DELIBERATE and correct here** — for a refuse gate, suppressing is the
+> safe way to be wrong, and the alternative (a string-literal tracker) would open a "string" at every
+> `don't` in prose and never close it, which is an unbounded suppression region. That reasoning is
+> sound and is not what this entry disputes.
+>
+> **What this entry records is that the residual is BROADER than the module first framed it.** The
+> header described it as "an opener inside a string literal"; a state-block body is PROSE, and
+> ordinary prose carries an unpaired `/*` with no string literal anywhere — a glob (`src/*`,
+> `dist/*`), a path, a division. Corrected in the module header in the same landing.
+>
+> **Fix direction, if ever taken:** treat the opener as a comment only when a matching `*/` exists in
+> the same block, i.e. require pairing before suppressing. That is a narrowing of the suppression
+> region and therefore newly-REJECTING — it owes its own measured migration. Not obviously worth it.
 
 ### g-state-block-bare-write-scan-has-no-comment-state — the sibling Info lint false-fires on a `@name = init` sitting inside a `/* */` block comment in a `<db>`/`<state>` body
 <!-- @gap id=g-state-block-bare-write-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanStateBlockBareWriteDecls(~:1923 — no comment handling at all; its ^(\s*)@ anchor makes the //-form accidentally safe, the block-comment form not) prov=empirical:S376-PA-reproduced-by-execution -->
