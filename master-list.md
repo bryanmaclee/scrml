@@ -105,6 +105,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `4895c004` — wrap(s375): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its class named (#712) — **pushed**
 - `8731799d` — maps(S372): wrap 6c refresh at 8b2e4053 — three routing rows, and six map claims corrected by execution (#707) — **pushed**
 - `b0abcbc6` — wrap(s371): land the stranded wrap — hand-off, changelog, delta-log, dashboard, maps (#689) — **pushed**
 - `2391d483` — wrap(S331) 6c: land the stranded nav-maps regen (#495) — **pushed**
@@ -112,7 +113,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `ef43a7e4` — wrap(s319) addendum: U1 round 3 returned post-wrap — 5 defects fixed, still must not land (#422) — **pushed**
 - `663f31b8` — wrap(s316): crash recovery, five rulings, and a review floor that had never run (#397) — **pushed**
 - `115e8b1b` — wrap(S295): hand-off + changelog — three-lane arc, pa-base v2.6/v2.7, three privacy scrubs (#246) — **pushed**
-- `04477cb1` — wrap(S292): hand-off + changelog + master-list §0 + delta-log [824]-[839] + inbox drain (#220) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
