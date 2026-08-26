@@ -1758,14 +1758,41 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // "row" cell. In a reconcile ctx we fall through to the byte-identical
         // literal append (pre-fix behaviour; the each path owns its own interp).
         const _hasInterp = text.includes("${") || /\$\s*\{/.test(text) || text.includes("$$");
-        if (_hasInterp && !currentLiftReconcileCtx()) {
+        if (_hasInterp) {
           const _tparts = [];
           parseLiftContentParts(text, _tparts);
           for (const _pt of _tparts) {
             if (_pt.type === "expr") {
               const _rw = cleanRenderPlaceholder(emitExprField(null, rewriteRenderCall(_pt.value), liftExprCtx()));
               if (_rw.trim() === "") continue;
-              if (liftExprReadsRequestState(_rw)) {
+              if (currentLiftReconcileCtx()) {
+                // g-emit-lift-reconcile-prefixed-interp-not-lowered (S377): a
+                // reconciled per-item text child with a LITERAL PREFIX directly
+                // before the `${…}` (e.g. `P${it.x}`) stays glued as ONE text
+                // child — the AST only splits an interpolation preceded by a
+                // NON-word char (`n=${…}` / `Val: ${…}` split upstream into a
+                // sibling bare-expr child, which the reconcile path below already
+                // lowers). Pre-fix, such a glued child fell through to the raw
+                // `JSON.stringify(text)` append and shipped a literal `${it.x}`
+                // to the DOM. Split + lower each `${…}` LIVE-KEYED, byte-identical
+                // to the sibling logic-block bare-expr reconcile branch (Bug 64,
+                // S159): stable text node + `maybeWrapLiftPerItemEffect`, so the
+                // interp re-resolves the item by key on every reconcile. The each
+                // path does NOT own this glued child's interp (that was the bug),
+                // so there is no double-emission with the sibling branch.
+                // SCOPE: this closes the GLUED case only (interp shipped as raw
+                // literal). A SEPARATE, pre-existing UPSTREAM bug drops the
+                // whitespace ADJACENT to a non-word-split interp (`Val ${x}` →
+                // "Val7", `Saved ${@cell}` → "Savedhello") — the AST strips the
+                // trailing space when it splits the text child. Different root
+                // (parser, not codegen), broader surface (top-level too), its own
+                // reds in g-emit-lift-markup-text-interp.browser.test.js; NOT
+                // fixed here. See g-ast-markup-text-interp-adjacent-space-dropped.
+                const _tn = genVar('lift_tn');
+                lines.push(`const ${_tn} = document.createTextNode("");`);
+                lines.push(`${elVar}.appendChild(${_tn});`);
+                for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = String((${_rw}) ?? "");`])) lines.push(l);
+              } else if (liftExprReadsRequestState(_rw)) {
                 const _tn = genVar('lift_tn');
                 lines.push(`const ${_tn} = document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
