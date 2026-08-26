@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 57 |
-| MED | 176 |
-| LOW | 78 |
+| HIGH | 58 |
+| MED | 178 |
+| LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2373,6 +2373,124 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 ### g-each-value-form-if-markup-fn-call-branch-stringifies — a value-form `if` inside an `<each>` whose branch CALLS a markup-returning fn renders `[object HTMLSpanElement]`; the identical ternary MOUNTS the node, and pre-#670 the same source rendered EMPTY — a WORSENING introduced by #670 — `NEW S371-bryan (review-floor S239 pass on the merged #670); MED; open`
 <!-- @gap id=g-each-value-form-if-markup-fn-call-branch-stringifies sev=MED status=open locus=compiler/src/codegen/emit-each.ts:1335(interpExprNode is populated only from stmt.exprNode, which an if-stmt does not carry, so it stays null and the markupCapable discriminant at :1467 degrades to isItemRoot) + compiler/src/codegen/emit-each.ts:889(_eachSoleBareExprRaw rejects only LITERAL markup via exprNodeHasMarkupValue — a call whose markup-ness lives in the callee RETURN is invisible there) prov=rationale:S371-review-floor-PA-reproduced-by-execution-both-revisions-pre670-659a5b0f-emits-each-empty-logic-interpolation-skipped-post670-emits-textContent-String-badge-it-while-the-twin-ternary-emits-instanceof-Node-appendChild -->
 > **⚑ S371-bryan: PA-REPRODUCED BY EXECUTION on both revisions; a WORSENING, not a pre-existing limitation.** Found by the review floor's S239 pass on the already-merged **#670**. Repro (one file, two adjacent lines, identical semantics): a `fn badge(x) { return <span class="b">${x}</span> }` plus `<each in=@rows as it>` containing **(A)** `<li>${ if it == "a" { badge(it) } else { "none" } }</li>` and **(B)** `<li>${ it == "a" ? badge(it) : "none" }</li>`. **A** emits `_scrml_each_tn_4.textContent = String((it == "a" ? _scrml_badge_1(it) : "none"))` → `[object HTMLSpanElement]` in the page; **B** emits `_scrml_mv_v_8 instanceof Node → appendChild` and mounts correctly. **The two-revision measurement is the load-bearing half:** on `659a5b0f` (pre-#670) line A emitted `// each: empty logic interpolation skipped` and rendered NOTHING; on `main` (post-#670) it renders visible garbage. So #670's new value-form-`if` lowering **newly routes traffic into** the markup-stringification hole — the same family as [[g-each-nested-markup-interp-stringifies]] and [[g-each-nested-in-fn-body-markup-fn-stringifies]], but reached by a path #670 created. **Corpus blast radius measured ZERO** (`corpus-emit-differential` 659a5b0f→01e2a184: 0 newly-failing, 0 artifact diffs attributable to #670 — the 411 diagnostic changes are all `+W-TYPE-031-UNPROVEN` from #665 and the 37 artifact diffs are stdlib sources from #669). Per [[feedback_corpus_zero_is_not_demand_evidence]] that bounds blast radius and is NOT evidence the shape is unwritten — a markup-returning helper called from a conditional branch is an ordinary thing to write. **Fix direction:** synthesize an ExprNode for the if-stmt branches (or hand the branch exprNodes directly) into `interpMayYieldNode` so `markupCapable` sees the call, and add a non-regression test — the #670 merge-blocker suite has no case for this shape. Peter-lane (each codegen, no language surface). Repro-first re-derive before building.
+
+### g-state-block-statement-form-misses-a-wrapped-statement — one `<div>` inside a `<db>` body re-opens the exact defect `E-STATE-BLOCK-STATEMENT-FORM` closes
+<!-- @gap id=g-state-block-statement-form-misses-a-wrapped-statement sev=MED status=open locus=compiler/src/lint-e-state-block-statement-form.js:scanStateBlockChildren(scans DIRECT text children only — the domain matches the sibling scanStateBlockBareWriteDecls) prov=empirical:S376-PA-reproduced-by-execution -->
+
+> **PA-REPRODUCED at S376 by execution, during the S239 re-review of the gate's own landing.**
+>
+> ```scrml
+> <db src="sqlite:./app.db" tables="items">
+>   <div>
+> on mount { loadDashboard() }
+>   </div>
+> </db>
+> ```
+> → **exit 0, ZERO diagnostics**, and `on mount { loadDashboard() }` ships into the emitted HTML as
+> literal page text (counted: 1 occurrence). That is byte-for-byte the defect ruling 1 refused, one
+> nesting level deeper.
+>
+> **Why it landed anyway, stated honestly:** the scan domain matches the sibling
+> `scanStateBlockBareWriteDecls`, so the two state-block scanners stay consistent, and the sole real
+> corpus instance (`samples/htmx-debate-dashboard.scrml:143`, migrated in the same landing) is a
+> DIRECT text child. The gate closes the measured, corpus-present shape. **The residual is recorded
+> here rather than closed on paper** — the module's original justification for the domain ("nested
+> deeper markup is prose context and is governed by its own element's body mode") was FALSE and was
+> corrected in the same landing: a `<div>` inside a `<db>` body has the same body mode and the same
+> silent-never-runs outcome.
+>
+> **⚑ THE FIX IS A SCOPE RULING, NOT A PATCH — and it is arguably already ruled.** S375 ruling 1 says
+> *logic at a `<db>`/state-block locus is REFUSED*, and a statement inside a `<div>` inside a `<db>`
+> body IS at that locus — which makes widening the scan **conformance with the existing ruling**
+> rather than a new widening. Against that: it is newly-rejecting with an **UNMEASURED** migration
+> (the 1-file population was measured over direct children only), and nested markup in a state-block
+> body is a shape nobody has surveyed. **Measure the nested population from the COMPILER before
+> scoping** — a text grep finds `on mount` in 39 corpus files and that is the wrong referent, exactly
+> as it was for the direct-child count.
+>
+> Sibling residual: [[g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener]].
+
+### g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener — an unpaired `/*` in prose (a glob, a path, a division) silently disarms the gate for the rest of the state block
+<!-- @gap id=g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener sev=LOW status=open locus=compiler/src/lint-e-state-block-statement-form.js:maskCommentRegions(no string-literal state by design; an unterminated /* suppresses to end of block) prov=empirical:S376-PA-reproduced-by-execution -->
+
+> **PA-REPRODUCED at S376 by execution.**
+>
+> ```scrml
+> <db src="sqlite:./app.db" tables="items">
+>   note about src/* paths
+> on mount { loadDashboard() }
+> </db>
+> ```
+> → **exit 0, zero diagnostics.** A glob disarmed a fatal gate for the remainder of the block.
+>
+> **The fail-OPEN direction is DELIBERATE and correct here** — for a refuse gate, suppressing is the
+> safe way to be wrong, and the alternative (a string-literal tracker) would open a "string" at every
+> `don't` in prose and never close it, which is an unbounded suppression region. That reasoning is
+> sound and is not what this entry disputes.
+>
+> **What this entry records is that the residual is BROADER than the module first framed it.** The
+> header described it as "an opener inside a string literal"; a state-block body is PROSE, and
+> ordinary prose carries an unpaired `/*` with no string literal anywhere — a glob (`src/*`,
+> `dist/*`), a path, a division. Corrected in the module header in the same landing.
+>
+> **Fix direction, if ever taken:** treat the opener as a comment only when a matching `*/` exists in
+> the same block, i.e. require pairing before suppressing. That is a narrowing of the suppression
+> region and therefore newly-REJECTING — it owes its own measured migration. Not obviously worth it.
+
+### g-state-block-bare-write-scan-has-no-comment-state — the sibling Info lint false-fires on a `@name = init` sitting inside a `/* */` block comment in a `<db>`/`<state>` body
+<!-- @gap id=g-state-block-bare-write-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanStateBlockBareWriteDecls(~:1923 — no comment handling at all; its ^(\s*)@ anchor makes the //-form accidentally safe, the block-comment form not) prov=empirical:S376-PA-reproduced-by-execution -->
+
+> **PA-REPRODUCED at S376, by execution.** A `<db>` body containing
+> `/* legacy:` / `@count = 0` / `*/` still draws `W-STATE-BLOCK-BARE-WRITE-DECL` on the commented-out
+> line. Compile exits 0 (it is Info), so this costs a spurious warning, not a build.
+>
+> **Found as the deliberate residual of the [[g-if-arm-bare-markup-branch-silently-dropped]]-adjacent
+> ruling-1 arc**, not by a sweep: fixing `E-STATE-BLOCK-STATEMENT-FORM`'s identical defect required a
+> comment state machine, and the dispatch checked whether the sibling scanner shared it. It does — one
+> severity down, and with no comment handling *at all* rather than a partial `//` carve-out. The `//`
+> form is safe here only by accident of the `^(\s*)@` anchor.
+>
+> **Fix direction:** the same mask-don't-skip mechanic now in
+> `compiler/src/lint-e-state-block-statement-form.js` — comment bytes become spaces so the anchored
+> pattern runs against the masked text and spans stay byte-exact. That module is the reference
+> implementation; this is a port, not a design.
+>
+> **⚑ SEQUENCING — do NOT dispatch this standalone.** The locus is `compiler/src/ast-builder.js`, which
+> already carries **two ratified-and-unbuilt rulings sequenced onto it** (ruling 2, the bare-call
+> migration; ruling 3, control-flow at a default-logic body-top) plus the pre-existing comment-flush
+> fix. Whichever lands second clobbers the others. Fold this into whichever of those arcs lands first —
+> it is a few lines against a file that is about to be opened anyway. See
+> `docs/changes/ruling2-bare-call-landing-2026-08-26/DE-RISK.md`.
+
+### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly
+<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=open locus=compiler/src/codegen/emit-html.ts:isValueFormIfStmt(the value-form classifier)+compiler/src/codegen/emit-lift.js:emitIfStmtWithContainer(called from compiler/src/codegen/emit-control-flow.ts:725) prov=adopter:S377-peter-dog-food-routed -->
+
+> **⚑ PA-EXECUTED at S376 with a three-way discriminator — the fix direction the report proposed is NOT the one the evidence supports.** Routed turnkey by S377-peter from a happy-dom dog-food run; the PA reproduced it and then varied the branch VALUE, which changed the diagnosis.
+>
+> | probe | branch content | `Yes` in emitted artifacts | verdict |
+> |---|---|---|---|
+> | `${ if (@on) { <p>Yes</p> } else { <p>No</p> } }` | markup, no `lift` | **0** | **silently dropped** |
+> | `${ if (@on) { "Yes" } else { "No" } }` | string, no `lift` | 1 | works |
+> | `${ if (@on) { lift <p>Yes</p> } else { lift <p>No</p> } }` | markup, with `lift` | 1 | works |
+>
+> All three compile **exit 0**; the only diagnostic on any of them is an unrelated `W-PROGRAM-SPA-INFERRED` info. A structurally identical `<match for=Type>` arm holding `<p>Yes</p>` emits correctly (PA-verified, same session) — which is what makes the `if` case a defect rather than a missing feature.
+>
+> **The discriminator is the branch's VALUE TYPE, not the control-flow form.** A lift-less single-expression branch is admitted when the expression is a string and refused when it is markup. Under Pillar 1 markup IS a first-class value, so `<p>Yes</p>` is a bare expression by the same rule that admits `"Yes"`.
+>
+> **⚑ THIS DOES NOT NEED A NEW RULING — it is already covered by the RATIFIED S371 limb (b).** That ruling says: *amend §17.6 to admit a lift-less single-expression branch as sugar for `lift`, and give `value-form` a normative name.* This entry is the markup-valued instance of exactly that sugar, and `lift` already produces the correct emit (row 3 above), so the lowering target exists. The S377-peter report offered a fresh fork — **(a) auto-lift vs (b) add `E-MARKUP-IN-CONTROL-ARM`** — but (a) IS the standing ruling. Fold this into the §17.6 amendment arc rather than opening a fifth deliberation.
+>
+> **This is the FOURTH measured divergence in the §17.6 value-form area**, after [[g-value-form-control-flow-unspecified]] (RULED S371 limb b), [[g-value-form-if-no-else-renders-nothing]], and the S371 `value-form`-is-not-a-word finding. Repeated review, same class → **converge, do not enumerate**: the amendment should be scoped to state the value-form rule once, over branch VALUES, rather than gaining one clause per witnessed shape.
+>
+> **NOT established by the PA, carried as RELAYED-UNVERIFIED:** the report's second example, a bare-markup body in a `for` arm (`${ for (let x of @xs) { <li>…</li> } }`). §17.4 documents the Tier-0 form WITH `lift`, so "lift required" may be correct there and the defect only the silent drop — a different disposition from the `if` half. The PA's emitted-artifact probes could not discriminate the two `for` shapes and are recorded as inconclusive; **re-derive this half in a DOM before scoping it**, do not inherit it from this entry.
+
+### g-ast-markup-text-interp-adjacent-space-dropped — a space between literal text and an adjacent `${…}` in markup text is dropped: `Saved ${@cell}` renders `Savedhello`
+<!-- @gap id=g-ast-markup-text-interp-adjacent-space-dropped sev=MED status=open locus=searched:compiler/src/tokenizer.ts(~804 read-to-whitespace-or-tag-close),compiler/src/ast-builder.js(text-child construction) — parseLiftContentParts PROVEN INNOCENT by S377-peter (returns [{text:"Saved "},{expr:"@cell"}] with the space intact); the content string reaching the emitter already lacks it prov=adopter:S377-peter-dog-food-routed -->
+
+> **Routed turnkey by S377-peter. RELAYED — the PA has NOT independently reproduced this one.** Reported shapes: `Saved ${@cell}` → `"Savedhello"`; `Val ${x}` in a for-lift → `"Val7"`; `Priority: ${p}` → `"Priority:7"` (the `:` survives, the space after it does not). Scope reported as shared across top-level markup AND for-lift.
+>
+> **It already has a biting gate:** four **pre-existing RED** tests in `compiler/tests/browser/g-emit-lift-markup-text-interp.browser.test.js` (file verified present), expecting `"Saved hello"` and an emit of `createTextNode("Saved ")`. Reported RED on both HEAD and base — pre-existing, not introduced by #716.
+>
+> **The fork is a WHITESPACE-MODEL call and belongs to bryan:** (a) preserve one literal space adjacent to an interpolation boundary, vs (b) fuller significant-whitespace in markup text. HTML collapses whitespace, so the current behaviour *may* be intentional collapse rather than a defect — which is exactly why it is a ruling and not a fix. Test-before-build (S334).
 
 ### g-each-peritem-class-call-ref-operator-arg-not-lowered — inside `<each>`, a `class:NAME=fn(<arg with a §42 operator>)` (e.g. `class:on=isReady(t.status is some)`) reaches the client JS raw → `E-CODEGEN-INVALID-LOGIC` — the `class:` call-ref arm uses bare `rewriteIterValueExpr`, not `lowerEachExpr` — `NEW S375-peter (S239 review of the show=-in-each fix; the show= arm was made robust, class: still carries it); LOW; open`
 <!-- @gap id=g-each-peritem-class-call-ref-operator-arg-not-lowered sev=LOW status=open locus=compiler/src/codegen/emit-each.ts:renderTemplateAttrToJs class:-arm call-ref branch(~:2011 uses rewriteIterValueExpr, not lowerEachExpr) prov=empirical:S375-execution-confirmed -->

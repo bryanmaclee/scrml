@@ -140,7 +140,7 @@
         }
     }
 
-    on mount { loadDashboard() }
+    ${ on mount { loadDashboard() } }
 
     // =========================================================================
     // MARKUP — Dashboard layout
