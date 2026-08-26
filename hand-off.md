@@ -1,14 +1,68 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S375-peter.        -->
-<!--   S375-peter (TOP block) — 4 dog-food fixes + a 7-issue adopter  -->
-<!--     staleness sweep. #710 show= · #713+#714 snippets. The S239    -->
-<!--     review caught a self-introduced bug in EVERY fix. Two items   -->
-<!--     routed to bryan. Read PICKUP §1. [1788]-[1795].               -->
+<!-- hand-off.md — live session state. WRAPPED at S377-peter.        -->
+<!--   S377-peter (TOP block) — 1 dog-food fix (#716, word-glued      -->
+<!--     ${} in for-lift shipped raw literal) + 2 grammar findings     -->
+<!--     ROUTED to bryan's inbox (if/for-arm bare-markup silent-drop  -->
+<!--     ⚑ intersects his RULING-3; interp-adjacent space-drop).       -->
+<!--     Read PICKUP §1. [1796]-[1798].                                -->
+<!--   S375-peter — 4 dog-food fixes + 7-issue adopter sweep.          -->
+<!--     #710 show= · #713+#714 snippets. [1788]-[1795].               -->
 <!--   S372-bryan — 6 PRs. FOUR operator rulings owed (his lane):      -->
 <!--     the §55 rollup-truthiness ruling (4 options) + THREE carried  -->
 <!--     S368 rulings. each-alias HELD. [1771]-[1773],[1783]-[1786].   -->
-<!--   S374/S373/S372-peter — prior peter lane, #693-#705.             -->
 <!-- ============================================================= -->
+
+# scrml — Session 377 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-25. Booted `/boot` Profile A as a SUCCESSOR to a LIVE S376-bryan (his lane: the
+stranded S375 wrap + ratified-unbuilt rulings + each-alias; disjoint from mine). A **dog-food session**:
+build+RUN fresh apps in happy-dom, find silent-wrong render bugs, fix what's in my codegen lane, route
+the grammar-shaped ones turnkey.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. TWO grammar findings routed to bryan (his lane; in his inbox + delta [1797])
+Delivered to `scrml-support/handOffs/incoming/S377-peter-to-bryan-two-grammar-findings.md` (he's LIVE
+on the exact area). NOT peter-lane to fix — they need his ruling:
+- **`g-if-for-arm-bare-markup-silently-dropped`** ⚑ intersects his LIVE RULING-3/E-CONTROL-FLOW-IN-MARKUP.
+  BARE markup in a `for`/`if`/`else` arm renders NOTHING with ZERO diagnostic; a `<match>` arm with the
+  same bare markup renders. Fork: auto-lift (match-consistent) vs diagnose. Traced: emit-lift
+  emitIfStmtWithContainer/emitForStmtWithContainer route only lift-expr/for-stmt children.
+- **`g-ast-markup-text-interp-adjacent-space-dropped`** — space before `${…}` dropped (`Saved ${@cell}`
+  → "Savedhello"). 4 pre-existing reds in g-emit-lift-markup-text-interp.browser.test.js. Traced to the
+  shared tokenizer content-reassembly (parseLiftContentParts proven innocent). Whitespace-model call.
+
+### 2. PETER-LANE follow-ons still open (from S375, buildable or dog-food)
+- `g-each-peritem-class-call-ref-operator-arg-not-lowered` (LOW) — the `class:` arm carries the same
+  call-ref-operator hole #710 fixed for `show=`; converge onto `lowerEachExpr` (execution-confirmed).
+- Dog-food a fresh app beats mining the ledger — this session's #716 came from RUNNING code.
+  [[feedback-dogfooding-beats-mining-the-ledger]]
+
+### 3. REVIEW FLOOR — 2 OWED (state it, don't skip)
+- **#715** (my S375 wrap — MY lane, NOT done this session; a wrap/docs PR) · **#709** (bryan boot-trim, his).
+
+## 🧷 WHAT LANDED (S377-peter) — 1 code PR + this wrap
+- **#716** `g-emit-lift-reconcile-prefixed-interp-not-lowered` (dog-food) — a word-char-glued `${…}` in
+  a `for…lift` reconcile item (`P${it.x}`) shipped the RAW LITERAL to the DOM. Split+lower live-keyed,
+  mirroring the sibling bare-expr reconcile branch. S239-reviewed (fix confirmed correct + well-scoped);
+  claim narrowed to word-glued only; the space-drop residual filed to bryan; helper-extraction declined.
+
+## ⚑ MISSES / lessons (S377)
+- **The review's real catch was an OVERCLAIM, not a bug** — my commit/comment framed the fix as closing
+  "literal-prefixed ${…}" generally; the whitespace-adjacent variant is a SEPARATE upstream root. Narrowed
+  the claim + filed the residual rather than letting it ship as "class closed". [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **Two clean apps beat a forced fix** — match/nested-list/attr/bind probes all passed; the disciplined
+  move was to route the two grammar-shaped findings, not hack a fix outside my lane. [[feedback-stay-in-adopter-lane-not-grammar-decisions]]
+
+## 🧷 STATE (S377 close)
+- **main** `a545bbe7` (#716); coherence 0/0; both repos clean (only scratchpad/); no branches/worktrees.
+- **Suite:** #716 cloud-`gate` GREEN; unit+conformance **19427 pass / 47 skip / 0 fail**. Browser tier
+  (non-required) 49 pre-existing fails, baseline-diff 0-new/0-fixed. Windows/tracking = known non-required.
+- **Review floor:** #716 recorded (finding, self-S239-reviewed); **#715 + #709 OWED**.
+- **Sibling:** S376-bryan LIVE (ast-builder/docs + routed items). Disjoint; the 2 findings delivered to his inbox.
+- **Maps:** surgical emit-lift text-child edit, no new modules/entrypoints → maps unchanged.
 
 # scrml — Session 375 (peter · P-Tech1 Windows) — WRAP
 
