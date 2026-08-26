@@ -59,6 +59,7 @@ import { runWEachPromotable } from "./lint-w-each-promotable.js";
 import { runWEachKey } from "./lint-w-each-key.js";
 import { runWMapIterationOrder } from "./lint-w-map-iteration-order.js";
 import { runWInterpInRawContent } from "./lint-w-interp-in-raw-content.js";
+import { runEStateBlockStatementForm } from "./lint-e-state-block-statement-form.js";
 import { runWInputStateMarkupNonreactive } from "./lint-w-input-state-markup-nonreactive.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
@@ -1197,6 +1198,38 @@ export function compileScrml(options = {}) {
     }
   } catch (e) {
     if (verbose) log(`  [LINT] W-INPUT-STATE-MARKUP-NONREACTIVE pass threw: ${e?.message ?? String(e)}`);
+  }
+
+  // Stage 2.5c: E-STATE-BLOCK-STATEMENT-FORM — a lifecycle STATEMENT in a
+  // `<db>` / `<state>` STATE-block body is REFUSED (ruling 1, S375;
+  // change-id db-state-block-locus-2026-08-25).
+  //
+  // `on mount { loadDashboard() }` in a `<db>` body compiled at exit 0 with zero
+  // diagnostics, shipped into `<body>` as LITERAL PAGE TEXT, and never ran — the
+  // author's initialization silently never happened. A state-block body is
+  // MARKUP context, not a logic locus (§34 E-WRITE-NOT-IN-LOGIC-CONTEXT:
+  // "`<db>` / `<state>` STATE-block bodies are NOT default-logic-mode loci";
+  // §4.18.1), so the §40.8 `on mount` auto-lift that applies in a `<program>` /
+  // `<page>` / `<channel>` body does NOT apply here.
+  //
+  // Runs over the block-split AST (`bsResults`) alongside the two sibling
+  // markup-text lints above — the state-block body's direct text children are
+  // BS-captured text nodes, the identical shape those passes consume. Unlike
+  // them the `E-` prefix + severity:"error" partition this into `result.errors`
+  // (fatal; CLI exit 1), which is the ruling.
+  //
+  // Scope is ONE named form (`on mount {` / `on dismount {`) and the complement
+  // is deliberately refused — bare calls (S368 ruling + a MEASURED typestate
+  // false-positive class), control flow (already `E-CONTROL-FLOW-IN-MARKUP` at
+  // this locus), bare writes (the sibling Info lint's own deprecation cycle),
+  // and prose (must keep compiling). See the module header for the evidence.
+  try {
+    const stateBlockStmtDiags = runEStateBlockStatementForm(bsResults);
+    for (const d of stateBlockStmtDiags) {
+      collectErrors("BS-LINT", [d], d.filePath || null);
+    }
+  } catch (e) {
+    if (verbose) log(`  [LINT] E-STATE-BLOCK-STATEMENT-FORM pass threw: ${e?.message ?? String(e)}`);
   }
 
   // Stage 3: TAB (per-file)
