@@ -3,7 +3,7 @@
 change-id: if-attr-per-field-synth-crash-2026-08-24
 dispatched: S372-bryan, 2026-08-24, base origin/main @ b0abcbc6
 gap: g-if-attr-per-field-synth-cell-crashes-boot (HIGH)
-DONE-PROBE: compile `<span if=@signup.name.touched>` and EXECUTE the shipped artifact — a sibling `${@flag}` interpolation on the same page must render, and no TypeError may reach `_scrml_boot`
+DONE-PROBE: bun docs/changes/if-attr-per-field-synth-crash-2026-08-24/repro-if-attr-synth.mjs
 
 ## The symptom — PA-VERIFIED BY EXECUTION on `b0abcbc6`, reproduce it FIRST
 

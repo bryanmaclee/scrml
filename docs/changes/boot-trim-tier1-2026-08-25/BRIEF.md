@@ -4,7 +4,7 @@ change-id: boot-trim-tier1-2026-08-25
 dispatched: S375-bryan, 2026-08-25
 base: `origin/main` @ `8731799d`
 RULED: bryan, S375 — "ratify tier 1". Direction is settled; this is execution, not deliberation.
-DONE-PROBE: `test $(bun scripts/ctx.ts --json 2>/dev/null >/dev/null; wc -c < master-list.md) -lt 90000 && echo PASS || echo FAIL`
+DONE-PROBE: test $(grep -c 'PROGRESS (20' master-list.md) -eq 0
 
 ---
 

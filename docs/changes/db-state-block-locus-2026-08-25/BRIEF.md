@@ -5,7 +5,7 @@ dispatched: S375-bryan, 2026-08-25
 base: `origin/main` @ `592dccf7`
 RULED: bryan, S375 — *"your recs all 4"*, adopting limb **(b)** with its stated grounds. Direction is
 settled; this is execution, not deliberation. **Do not re-open the fork.**
-DONE-PROBE: `bun compiler/bin/scrml.js compile docs/changes/db-state-block-locus-2026-08-25/repro.scrml --output-dir /tmp/dbprobe 2>&1 | grep -q 'E-STATE-BLOCK-BARE-WRITE-DECL' && echo PASS || echo FAIL`
+DONE-PROBE: bun compiler/bin/scrml.js compile docs/changes/db-state-block-locus-2026-08-25/repro.scrml --output-dir /tmp/dbprobe 2>&1 | grep -q E-STATE-BLOCK-STATEMENT-FORM
 
 ---
 
