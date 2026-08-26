@@ -182,3 +182,90 @@ describe("E-STATE-BLOCK-STATEMENT-FORM — the complement is deliberately NOT co
     expect(stmtFormErrors(compile(src)).length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// db-locus-blockcomment-fp-2026-08-26 — the scan needs COMMENT STATE, not a
+// second pattern.
+//
+// The first cut carved comments out with `if (!/^\s*\/\//.test(line))`, a test
+// with no state, so it recognised only a line-comment-LED line. A block-comment
+// CONTINUATION line reading `on mount { ... }` matched the lifecycle pattern and
+// the compiler REFUSED a legal file at exit 1. A pattern cannot express "am I
+// inside a region that began on an EARLIER line"; only carried state can.
+//
+// These lock BOTH directions. The suppression cases are the reported bug; the
+// FIRING cases are the ones a lazier fix (skip any line near an opener) would
+// silently break, and each of them is a real statement that really would ship
+// into the DOM as page text.
+// ---------------------------------------------------------------------------
+
+// One shared frame so each case differs only in the `<db>` body.
+function withDbBody(body) {
+  return (
+    `<program db="./app.db">\n` +
+    `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+    `<db src="sqlite:./app.db" tables="items">\n` +
+    body +
+    `\n</db>\n` +
+    `function loadDashboard() { }\n` +
+    `function cleanup() { }\n` +
+    `<div>hello</div>\n` +
+    `</program>\n`
+  );
+}
+
+describe("E-STATE-BLOCK-STATEMENT-FORM — block comments", () => {
+  test("a lifecycle line inside a block comment does NOT fire (the reported defect)", () => {
+    const src = withDbBody(`  /* legacy:\non mount { loadDashboard() }\n  */`);
+    expect(stmtFormErrors(compile(src)).length).toBe(0);
+  });
+
+  test("an opener on the SAME line as the match suppresses it", () => {
+    const src = withDbBody(`  /* on mount { loadDashboard() }\n  */`);
+    expect(stmtFormErrors(compile(src)).length).toBe(0);
+  });
+
+  test("a terminator on the same line as a LATER match — the match still fires", () => {
+    const src = withDbBody(`  /* legacy note\n  */ on dismount { cleanup() }`);
+    expect(stmtFormErrors(compile(src)).length).toBe(1);
+  });
+
+  test("the span after a terminator points at the statement, not at the terminator", () => {
+    // `  */ on dismount { cleanup() }` — `on` starts at index 5, so col 6. The
+    // mask replaces comment bytes with SPACES precisely so this stays byte-exact
+    // against the ORIGINAL line.
+    const src = withDbBody(`  /* legacy note\n  */ on dismount { cleanup() }`);
+    const d = stmtFormErrors(compile(src));
+    expect(d.length).toBe(1);
+    expect(d[0].column).toBe(6);
+  });
+
+  test("an opener inside a `//` line opens NOTHING — the next line still fires", () => {
+    const src = withDbBody(`  // see /* below\n  on mount { loadDashboard() }`);
+    expect(stmtFormErrors(compile(src)).length).toBe(1);
+  });
+
+  test("block comments do not nest — one terminator closes an opener-inside-an-opener", () => {
+    const src = withDbBody(`  /* outer /* inner */\n  on mount { loadDashboard() }`);
+    expect(stmtFormErrors(compile(src)).length).toBe(1);
+  });
+
+  test("a trailing `// ...` after a real lifecycle statement does not suppress it", () => {
+    // Regression on the DELETED `^\s*//` carve-out: masking kills only the
+    // comment's own bytes, so the statement before it is untouched.
+    const src = withDbBody(`  on mount { loadDashboard() } // wire the dashboard`);
+    expect(stmtFormErrors(compile(src)).length).toBe(1);
+  });
+
+  test("an unterminated opener suppresses to the end of ITS state block only", () => {
+    // Fail-OPEN inside the block: an unterminated comment is the ambiguous case,
+    // and a REFUSE gate must not reject on ambiguity. The SIBLING block gets a
+    // fresh state and still fires — the suppression is scoped, not global.
+    const src =
+      `<program>\n` +
+      `<state>\n  /* dangling\n  on mount { go() }\n</state>\n` +
+      `<state>\n  on dismount { go() }\n</state>\n` +
+      `function go() { }\n<div>hi</div>\n</program>\n`;
+    expect(stmtFormErrors(compile(src)).length).toBe(1);
+  });
+});

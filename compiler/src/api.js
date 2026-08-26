@@ -1223,13 +1223,37 @@ export function compileScrml(options = {}) {
   // false-positive class), control flow (already `E-CONTROL-FLOW-IN-MARKUP` at
   // this locus), bare writes (the sibling Info lint's own deprecation cycle),
   // and prose (must keep compiling). See the module header for the evidence.
-  try {
-    const stateBlockStmtDiags = runEStateBlockStatementForm(bsResults);
-    for (const d of stateBlockStmtDiags) {
-      collectErrors("BS-LINT", [d], d.filePath || null);
-    }
-  } catch (e) {
-    if (verbose) log(`  [LINT] E-STATE-BLOCK-STATEMENT-FORM pass threw: ${e?.message ?? String(e)}`);
+  // ⚠ NO `try`/`catch` HERE, AND THE ASYMMETRY WITH 2.5 / 2.5b IS THE POINT.
+  // Both siblings above swallow a throw and log it only under `--verbose`. That
+  // is CORRECT for a WARNING: a crashing advisory should not take down a compile
+  // that would otherwise succeed, and the worst case is a lost hint. Invert the
+  // severity and the direction inverts with it. This is an ERROR GATE, so a
+  // swallowed throw means a file that SHOULD be refused compiles at EXIT 0 with
+  // nothing anywhere in the output saying the gate never ran — fail-OPEN, and
+  // the exact silent-success mode this diagnostic exists to close, reintroduced
+  // one layer up. A `--verbose`-only log is not a report; the default invocation
+  // is silent and green.
+  //
+  // The codebase's own convention already splits on severity and this follows
+  // it: the two ERROR-severity lint stages downstream — `LINT-TRY-CATCH` (3.007)
+  // and `REJECT-ASYNC-AWAIT` (3.008, which fires `E-ASYNC-NOT-IN-SCRML` at
+  // severity error) — both run bare through `stage()`, and `stage()` itself does
+  // not catch. 2.5c was following the wrong sibling.
+  //
+  // Catching and re-emitting the throw under this pass's OWN code was rejected:
+  // the code would then mean two unrelated things ("you wrote a lifecycle
+  // statement" / "the scanner broke"), the same catalog incoherence the module
+  // header argues against for reusing `E-STATE-BLOCK-BARE-WRITE-DECL`, and the
+  // corpus differential would report it as newly firing on a file that contains
+  // no such statement.
+  //
+  // `collectErrors("BS-LINT", …)` is unchanged, so the `stage:` line on an
+  // emitted diagnostic is byte-identical; `BS-LINT-STMT-FORM` is a
+  // `--verbose` / `--debug-perf` timing label only.
+  const stateBlockStmtDiags = stage("BS-LINT-STMT-FORM", () =>
+    runEStateBlockStatementForm(bsResults));
+  for (const d of stateBlockStmtDiags) {
+    collectErrors("BS-LINT", [d], d.filePath || null);
   }
 
   // Stage 3: TAB (per-file)

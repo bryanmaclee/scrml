@@ -89,8 +89,19 @@
  * runs over the block-split AST (`bsResults`) from `api.js`, the same stage-2.5
  * slot as `W-INTERP-IN-RAW-CONTENT` and `W-INPUT-STATE-MARKUP-NONREACTIVE` —
  * both of which are markup-text lints over BS output, the identical shape. The
- * detection domain is byte-identical to the sibling's (a state block's DIRECT
- * text children), so nothing is lost by the relocation.
+ * NODE domain is the same as the sibling's (a state block's DIRECT text
+ * children), so nothing is lost by the relocation.
+ *
+ * ⚠ The node domain is the same; the LINE domain is no longer. Since
+ * `db-locus-blockcomment-fp-2026-08-26` this pass masks comment regions before
+ * matching (see `maskCommentRegions`) and the sibling does not — the sibling has
+ * no comment handling at ALL, not even the `//` carve-out this one used to have.
+ * VERIFIED BY EXECUTION at that change: a `@count = 0` sitting inside a
+ * `/* ... *` + `/` block in a `<db>` body still draws
+ * `W-STATE-BLOCK-BARE-WRITE-DECL` at line 4. It is the same false-positive class
+ * this module just closed, one severity down (warning, so non-fatal) and in
+ * `ast-builder.js`, which was out of scope for that dispatch. Filed, not fixed —
+ * do not read the sibling's silence as evidence the shape is fine.
  *
  * @module lint-e-state-block-statement-form
  */
@@ -164,13 +175,118 @@ function buildMessage(keyword) {
 }
 
 /**
+ * Comment delimiters, as STRING constants rather than inline literals.
+ *
+ * Two reasons, both practical: a literal block-comment terminator cannot appear
+ * inside the JSDoc that explains the machine below, and naming the three tokens
+ * makes `maskCommentRegions` read as the state machine it is instead of as a
+ * pile of two-character `indexOf` calls.
+ */
+const LINE_COMMENT_OPEN = "//";
+const BLOCK_COMMENT_OPEN = "/*";
+const BLOCK_COMMENT_CLOSE = "*" + "/";
+
+/**
+ * Mask every COMMENT region of one line with spaces, carrying block-comment
+ * state in and out so a comment that OPENS on one line and CLOSES on another is
+ * modelled correctly.
+ *
+ * ── WHY A STATE MACHINE RATHER THAN A SECOND PATTERN ────────────────────────
+ *
+ * The first cut of this scan carved comments out with a second regex bolted
+ * beside the lifecycle one: `if (!/^\s*\/\//.test(line))`. That test has no
+ * state, so it recognised only a line-comment-LED line, and a block-comment
+ * CONTINUATION line reading `on mount { ... }` matched the lifecycle pattern
+ * and REFUSED a legal file (`db-locus-blockcomment-fp-2026-08-26`). A pattern
+ * cannot express "am I inside a region that began on an EARLIER line" — only
+ * carried state can. So the comment model is a state machine, and the lifecycle
+ * test stays the ONE anchored pattern it always was, run against this
+ * machine's OUTPUT.
+ *
+ * Masking (rather than skipping the line) is what buys the close-then-statement
+ * case: a line whose block comment terminates and is FOLLOWED by
+ * `on dismount { ... }` masks its terminator to spaces, and the anchored
+ * lifecycle pattern still matches the statement — which MUST still fire.
+ * Spaces rather than deletion so `masked.length === line.length` and the span
+ * arithmetic in the caller stays byte-exact against the ORIGINAL source.
+ *
+ * ── WHAT IS DELIBERATELY NOT MODELLED: STRING LITERALS ──────────────────────
+ *
+ * A JS tokenizer would also track `'` / `"` / backtick so a comment opener
+ * inside a string is not an opener. This scan does NOT, and that is deliberate:
+ * a state-block body is MARKUP context, so its text children are PROSE, and
+ * prose is full of apostrophes (`don't`, `it's`). A string-literal tracker over
+ * prose would open a "string" at every contraction and never close it, turning
+ * free text into an unbounded suppression region — a defect in the same family
+ * as the one this fixes. The residual cost is an opener inside a string literal
+ * reading as a comment, which SUPPRESSES the diagnostic. That direction is the
+ * safe one for a REFUSE gate: a false negative restores the pre-lint status quo
+ * (silent page text), while a false positive REJECTS A LEGAL FILE — which is
+ * precisely the defect being closed here.
+ *
+ * @param {string} line — one source line, the `\n` already stripped
+ * @param {{ inBlockComment: boolean }} state — carried across lines; MUTATED
+ * @returns {string} the line with every comment region replaced by spaces
+ */
+function maskCommentRegions(line, state) {
+  let masked = "";
+  let i = 0;
+  while (i < line.length) {
+    if (state.inBlockComment) {
+      // Inside a block comment. scrml/JS block comments do NOT nest, so the
+      // FIRST terminator closes — an opener that appears inside an already-open
+      // comment is inert, and one terminator ends the whole run.
+      const close = line.indexOf(BLOCK_COMMENT_CLOSE, i);
+      if (close === -1) {
+        masked += " ".repeat(line.length - i);
+        i = line.length;
+      } else {
+        masked += " ".repeat(close + BLOCK_COMMENT_CLOSE.length - i);
+        i = close + BLOCK_COMMENT_CLOSE.length;
+        state.inBlockComment = false;
+      }
+      continue;
+    }
+    const lineCommentAt = line.indexOf(LINE_COMMENT_OPEN, i);
+    const blockOpenAt = line.indexOf(BLOCK_COMMENT_OPEN, i);
+    if (lineCommentAt === -1 && blockOpenAt === -1) {
+      masked += line.slice(i);
+      i = line.length;
+    } else if (
+      blockOpenAt === -1 ||
+      (lineCommentAt !== -1 && lineCommentAt < blockOpenAt)
+    ) {
+      // A line comment comes first, so the REST of this line is comment and any
+      // block opener after it is inert — `// see /` + `* below` opens nothing,
+      // and the NEXT line is scanned normally.
+      masked +=
+        line.slice(i, lineCommentAt) + " ".repeat(line.length - lineCommentAt);
+      i = line.length;
+    } else {
+      masked +=
+        line.slice(i, blockOpenAt) + " ".repeat(BLOCK_COMMENT_OPEN.length);
+      i = blockOpenAt + BLOCK_COMMENT_OPEN.length;
+      state.inBlockComment = true;
+    }
+  }
+  return masked;
+}
+
+/**
  * Scan a state block's DIRECT text children for a lifecycle statement form.
  *
  * Only direct text children are scanned — the same domain as the sibling
  * `scanStateBlockBareWriteDecls`. Nested deeper markup is prose context and is
  * governed by its own element's body mode.
+ *
+ * Block-comment state is carried ACROSS the direct text children of ONE state
+ * block, and reset at each state block. So an opener the block splitter
+ * happened to split around — because it parsed an element out of the middle of
+ * a commented-out run — still suppresses what follows. That is both faithful to
+ * comment semantics and the fail-OPEN direction this gate wants.
  */
 function scanStateBlockChildren(node, filePath, diagnostics) {
+  const commentState = { inBlockComment: false };
   for (const child of node.children || []) {
     if (!child || child.type !== "text" || typeof child.raw !== "string") continue;
     const baseLine =
@@ -182,32 +298,32 @@ function scanStateBlockChildren(node, filePath, diagnostics) {
     const lines = child.raw.split("\n");
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      // `//`-led comment lines are not scanned — same carve-out the sibling
-      // write-form scan makes.
-      if (!/^\s*\/\//.test(line)) {
-        const m = line.match(STATE_BLOCK_ON_LIFECYCLE_RE);
-        if (m) {
-          const colStart = line.length - line.trimStart().length;
-          const span = {
-            file: filePath,
-            start: baseStart + offset + colStart,
-            end: baseStart + offset + line.length,
-            line: baseLine + li,
-            col: colStart + 1,
-          };
-          diagnostics.push({
-            filePath,
-            line: span.line,
-            column: span.col,
-            code: DIAGNOSTIC_CODE,
-            // `E-` prefix + severity:"error" partition this into
-            // `result.errors` (fatal; CLI exit 1) — the whole point of the
-            // ruling. The sibling write-form lint stays Info.
-            severity: "error",
-            message: buildMessage(m[1]),
-            span,
-          });
-        }
+      // Comments are masked to spaces FIRST, then the ONE anchored lifecycle
+      // pattern runs against the masked text. Because the mask preserves
+      // length, every column derived below is an offset into the ORIGINAL line.
+      const masked = maskCommentRegions(line, commentState);
+      const m = masked.match(STATE_BLOCK_ON_LIFECYCLE_RE);
+      if (m) {
+        const colStart = masked.length - masked.trimStart().length;
+        const span = {
+          file: filePath,
+          start: baseStart + offset + colStart,
+          end: baseStart + offset + line.length,
+          line: baseLine + li,
+          col: colStart + 1,
+        };
+        diagnostics.push({
+          filePath,
+          line: span.line,
+          column: span.col,
+          code: DIAGNOSTIC_CODE,
+          // `E-` prefix + severity:"error" partition this into
+          // `result.errors` (fatal; CLI exit 1) — the whole point of the
+          // ruling. The sibling write-form lint stays Info.
+          severity: "error",
+          message: buildMessage(m[1]),
+          span,
+        });
       }
       offset += line.length + 1; // +1 for the consumed "\n"
     }
