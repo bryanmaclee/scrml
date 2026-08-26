@@ -1,14 +1,128 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. WRAPPED at S372-bryan.        -->
-<!--   S372-bryan (TOP block) — 6 PRs. FOUR operator rulings owed:    -->
-<!--     the NEW §55 rollup-truthiness ruling (4 options) + THREE      -->
-<!--     carried S368 rulings (was four; #4 is downstream of #2).      -->
-<!--     each-alias HELD at its round-4 tip, re-review in flight.      -->
-<!--     Read PICKUP §1-§3 first. [1771]-[1773], [1783]-[1786].        -->
-<!--   S374/S373/S372-peter — the peter lane, concurrent, #693-#705.   -->
-<!--   S371-bryan — landed by S372 as inherited (#689).                -->
-<!--   S368-bryan — the FOUR rulings this block re-measures to THREE.  -->
+<!-- hand-off.md — live session state. WRAPPED at S377-peter.        -->
+<!--   S377-peter (TOP block) — 1 dog-food fix (#716, word-glued      -->
+<!--     ${} in for-lift shipped raw literal) + 2 grammar findings     -->
+<!--     ROUTED to bryan's inbox (if/for-arm bare-markup silent-drop  -->
+<!--     ⚑ intersects his RULING-3; interp-adjacent space-drop).       -->
+<!--     Read PICKUP §1. [1796]-[1798].                                -->
+<!--   S375-peter — 4 dog-food fixes + 7-issue adopter sweep.          -->
+<!--     #710 show= · #713+#714 snippets. [1788]-[1795].               -->
+<!--   S372-bryan — 6 PRs. FOUR operator rulings owed (his lane):      -->
+<!--     the §55 rollup-truthiness ruling (4 options) + THREE carried  -->
+<!--     S368 rulings. each-alias HELD. [1771]-[1773],[1783]-[1786].   -->
 <!-- ============================================================= -->
+
+# scrml — Session 377 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-25. Booted `/boot` Profile A as a SUCCESSOR to a LIVE S376-bryan (his lane: the
+stranded S375 wrap + ratified-unbuilt rulings + each-alias; disjoint from mine). A **dog-food session**:
+build+RUN fresh apps in happy-dom, find silent-wrong render bugs, fix what's in my codegen lane, route
+the grammar-shaped ones turnkey.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. TWO grammar findings routed to bryan (his lane; in his inbox + delta [1797])
+Delivered to `scrml-support/handOffs/incoming/S377-peter-to-bryan-two-grammar-findings.md` (he's LIVE
+on the exact area). NOT peter-lane to fix — they need his ruling:
+- **`g-if-for-arm-bare-markup-silently-dropped`** ⚑ intersects his LIVE RULING-3/E-CONTROL-FLOW-IN-MARKUP.
+  BARE markup in a `for`/`if`/`else` arm renders NOTHING with ZERO diagnostic; a `<match>` arm with the
+  same bare markup renders. Fork: auto-lift (match-consistent) vs diagnose. Traced: emit-lift
+  emitIfStmtWithContainer/emitForStmtWithContainer route only lift-expr/for-stmt children.
+- **`g-ast-markup-text-interp-adjacent-space-dropped`** — space before `${…}` dropped (`Saved ${@cell}`
+  → "Savedhello"). 4 pre-existing reds in g-emit-lift-markup-text-interp.browser.test.js. Traced to the
+  shared tokenizer content-reassembly (parseLiftContentParts proven innocent). Whitespace-model call.
+
+### 2. PETER-LANE follow-ons still open (from S375, buildable or dog-food)
+- `g-each-peritem-class-call-ref-operator-arg-not-lowered` (LOW) — the `class:` arm carries the same
+  call-ref-operator hole #710 fixed for `show=`; converge onto `lowerEachExpr` (execution-confirmed).
+- Dog-food a fresh app beats mining the ledger — this session's #716 came from RUNNING code.
+  [[feedback-dogfooding-beats-mining-the-ledger]]
+
+### 3. REVIEW FLOOR — 2 OWED (state it, don't skip)
+- **#715** (my S375 wrap — MY lane, NOT done this session; a wrap/docs PR) · **#709** (bryan boot-trim, his).
+
+## 🧷 WHAT LANDED (S377-peter) — 1 code PR + this wrap
+- **#716** `g-emit-lift-reconcile-prefixed-interp-not-lowered` (dog-food) — a word-char-glued `${…}` in
+  a `for…lift` reconcile item (`P${it.x}`) shipped the RAW LITERAL to the DOM. Split+lower live-keyed,
+  mirroring the sibling bare-expr reconcile branch. S239-reviewed (fix confirmed correct + well-scoped);
+  claim narrowed to word-glued only; the space-drop residual filed to bryan; helper-extraction declined.
+
+## ⚑ MISSES / lessons (S377)
+- **The review's real catch was an OVERCLAIM, not a bug** — my commit/comment framed the fix as closing
+  "literal-prefixed ${…}" generally; the whitespace-adjacent variant is a SEPARATE upstream root. Narrowed
+  the claim + filed the residual rather than letting it ship as "class closed". [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **Two clean apps beat a forced fix** — match/nested-list/attr/bind probes all passed; the disciplined
+  move was to route the two grammar-shaped findings, not hack a fix outside my lane. [[feedback-stay-in-adopter-lane-not-grammar-decisions]]
+
+## 🧷 STATE (S377 close)
+- **main** `a545bbe7` (#716); coherence 0/0; both repos clean (only scratchpad/); no branches/worktrees.
+- **Suite:** #716 cloud-`gate` GREEN; unit+conformance **19427 pass / 47 skip / 0 fail**. Browser tier
+  (non-required) 49 pre-existing fails, baseline-diff 0-new/0-fixed. Windows/tracking = known non-required.
+- **Review floor:** #716 recorded (finding, self-S239-reviewed); **#715 + #709 OWED**.
+- **Sibling:** S376-bryan LIVE (ast-builder/docs + routed items). Disjoint; the 2 findings delivered to his inbox.
+- **Maps:** surgical emit-lift text-child edit, no new modules/entrypoints → maps unchanged.
+
+# scrml — Session 375 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-25. Booted `/boot` Profile A as a SUCCESSOR to a LIVE S375-bryan (his boot-trim #709
+landed; disjoint lane). A **dog-food session**: build+RUN fresh apps in happy-dom, find silent-wrong
+render bugs, fix them, harden each through the mandatory S239 review.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. The snippet arc is COMPLETE on the default pipeline; TWO items routed to bryan
+`g-render-snippet-slot-renders-empty` default-pipeline limb RESOLVED (#713) + arity-tolerant fills (#714).
+All snippet fill forms render, no crashes. **Owed by bryan (his road-B / semantics lane, both filed):**
+- **`translate-expr.js:296`** — the NATIVE-parser Render-discard (empty escape-hatch). `--parser=scrml-native`
+  still renders snippets empty. This is the same undefined-`__scrml_render__` crash substrate as bryan's
+  open `g-render-outside-component-emits-undefined-fn` HIGH — converging, one substrate.
+- **`g-parametric-snippet-param-substitution-is-textual-not-ast`** (LOW) — the param substitution is a
+  `\bparam\b` string-replace (matches body prose; breaks on `$`-prefixed param). Pre-existing.
+- **Open §16.6 semantics Q for bryan:** should a snippet-fill ARITY MISMATCH (`(v)=>` on a non-parametric
+  prop) be a COMPILE DIAGNOSTIC? #714 renders it empty (no crash) pending his ruling.
+
+### 2. PETER-LANE follow-ons still open (buildable, or dog-food)
+- `g-each-peritem-class-call-ref-operator-arg-not-lowered` (LOW) — the `class:` arm carries the same
+  call-ref-operator hole #710 fixed for `show=`; converge it onto `lowerEachExpr` (execution-confirmed).
+- The durable: **dog-food a fresh app** beats mining the ledger — all 4 fixes this session came from
+  running code. [[feedback-dogfooding-beats-mining-the-ledger]]
+
+### 3. ADOPTER BACKLOG CLEARED — assetManagement's 9 `docs/scrml-issues/` repros are 7 stale-resolved,
+1 WAI (if-in-each frozen-by-design + warns), 1 out-of-lane (dev-server tooling). Their FINDINGS.md
+pin-bump prerequisites are satisfiable. Worth a note to the adopter's PA so they can close the backlog.
+
+## 🧷 WHAT LANDED (S375-peter) — 4 code PRs + this wrap
+- **#710** `g-each-peritem-show-emits-literal-attribute` (MED) — `show=` inside `<each>` toggles visibility.
+- **#713** `g-render-snippet-slot-renders-empty` default-pipeline limb (HIGH-adjacent) — parametric snippets
+  render (flagship example 12 fixed). Root re-derived (native reparse discards Render).
+- **#714** arity-tolerant snippet lambda fills — closed a crash regression #713 introduced.
+- Adopter staleness sweep (no PR — verification): 7/9 issues confirmed resolved.
+
+## ⚑ MISSES / lessons (S375)
+- **★ The S239 review caught a self-introduced bug in EVERY fix** — a silent trailing-token drop (#710
+  class), a bare-word-body page crash (#713), an arity-mismatch page crash (#714, the review's "silent
+  empty" was actually a crash). Reproduce-each-finding, don't relay. [[feedback-verify-the-bug-class-not-just-reported-instance]]
+- **★ Read the RIGHT result field** — I mis-read compiler diagnostics from `result.errors` when warnings
+  live in `result.warnings`, and nearly built a fix for a non-bug (W-IF-IN-EACH fires fine). Saved
+  [[project-compiler-diagnostic-fields]]. Caught by cross-checking a passing test.
+- **★ The filed locus is a hypothesis** — #713's default-pipeline root was NOT the filed component-expander
+  locus (downstream); re-deriving it by execution is what made the fix correct vs dead code. [[feedback-gap-report-fix-direction-can-be-wrong]]
+- **★ types-gate is Windows-broken** ([[project-types-gate-windows-broken]]) — ran tsc by hand.
+
+## 🧷 STATE (S375 close)
+- **main** `84582f51` (#714); coherence 0/0; both repos clean; no branches/worktrees to clean (only main +
+  persistent scrml-pinned).
+- **Suite:** each PR cloud-`gate` GREEN; unit **17860/0**; full wrap-gate **22844 pass / 99 skip / 6 fail**
+  (the 6 pre-existing integration flakies — self-host/csrf/any-type-forbidden — unchanged from boot baseline).
+  A known FLAKY `any-type-forbidden` (E-TYPE-ANY-FORBIDDEN, ~6.3s) intermittently fails under full-suite
+  load but passes 6/6 in isolation — orthogonal, not a regression.
+- **Review floor:** #710/#713/#714 recorded (finding, self-S239-reviewed); **#709 (bryan boot-trim) OWED** — his lane.
+- **Sibling:** S375-bryan was LIVE (boot-trim #709). Disjoint lane (his §16-semantics/native + the routed items).
+- **Maps:** surgical component-expander + emit-each edits, no new modules/entrypoints → maps unchanged.
 
 # scrml — Session 372 (bryan · ASUS-Vivobook) — WRAP
 

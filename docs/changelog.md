@@ -2,6 +2,57 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S377 — 2026-08-25 (peter · P-Tech1 Windows) — one dog-food fix, two grammar findings routed
+
+A dog-food session: build and RUN fresh apps in happy-dom, fix what lands in the codegen lane, route the
+grammar-shaped findings turnkey. Hunted three fresh apps plus six probe batches; the codegen held up
+across `<match>` arm-swap, nested for-lifts, reconcile keying under removal/reorder, attribute
+interpolation, `bind:value`, and expression/method-call interpolation. One real codegen bug landed; two
+findings that resolve to a grammar decision were characterized and delivered to bryan's inbox.
+
+- **#716 — a word-char-glued `${…}` in a `for…lift` item now interpolates instead of shipping raw.**
+  Inside a reconciled per-item list, a text run whose `${…}` was glued directly to a preceding word char
+  (`P${it.x}`, `x${it.x}`) shipped the literal source `${it.x}` to the DOM; non-word-adjacent forms
+  (`n=${…}`) split upstream and worked, masking the hole in every sample. The reconcile-ctx text branch
+  now splits and lowers each glued `${…}` live-keyed, identical to the sibling bare-expr reconcile path.
+  The adversarial review confirmed the fix correct and well-scoped, and caught an overclaim — the fix was
+  narrowed to the word-glued case and a separate upstream whitespace residual filed.
+- **Routed to bryan (grammar/semantics):** bare markup in a `for`/`if`/`else` arm renders nothing with no
+  diagnostic while a `<match>` arm renders it (intersects the live `E-CONTROL-FLOW-IN-MARKUP` ruling arc);
+  and a space adjacent to a `${…}` interpolation is dropped in markup text (`Saved ${@cell}` →
+  "Savedhello") — a tokenizer whitespace-model call with four pre-existing red tests.
+
+## S375 — 2026-08-25 (peter · P-Tech1 Windows) — four dog-food fixes, and every one had a bug the adversarial review caught
+
+A dog-food session: build and RUN fresh apps in happy-dom, find the silent-wrong render bugs that
+emit-inspection and the gap ledger miss, fix them, and let the mandatory adversarial review harden each.
+The through-line: **every fix carried a self-introduced bug that the review caught** — a silent
+trailing-token drop, and two whole-page crashes — reproduced-then-fixed before landing.
+
+- **#710 — `show=` inside `<each>` toggles visibility (was a no-op attribute).** A per-row `show=<cond>`
+  fell through to the generic path and emitted a literal `show` HTML attribute, so the element rendered
+  unconditionally. Now a per-item reactive `style.display` toggle, mirroring the sibling `class:` binding.
+  The review caught (and the fix closed) a call-ref-operator-argument compile cliff.
+- **Adopter staleness sweep — 7 of 9 `assetManagement` issues verified stale-resolved.** Ran the adopter's
+  filed repros on HEAD: statement-drop, each-wrapper-breaks-grid, ssr-if-false-flash,
+  server-call-hoisted-above-guard, w-dead-false-positive, component-in-each (shipped-runtime), and the
+  fullscrml reassigned-let compile bug are all fixed. The adopter's backlog is cleared.
+- **#713 — parametric snippets render in the default pipeline.** `${render foo(arg)}` filled by a lambda
+  had rendered nothing — including the flagship `examples/12-snippets-slots.scrml`. Re-derived the root
+  (the native re-parse discards the Render node), fixed by routing render-bearing component bodies through
+  the legacy parse path + reparsing the substituted lambda body into real AST nodes. The default-pipeline
+  limb of the open HIGH `g-render-snippet-slot-renders-empty`; the native-parser limb stays with bryan.
+- **#714 — arity-tolerant snippet lambda fills.** A follow-on that both renders the non-parametric
+  zero-arg-lambda form and closes a crash #713 introduced: an arity-mismatched lambda fill left an
+  undefined `__scrml_render_*` call that killed the page. One unified capture loop now renders every valid
+  fill form and never crashes; a genuine arity mismatch renders empty (a compile-diagnostic ruling is
+  deferred to language design).
+- Suite on the landed state: unit **17860 / 0**; snippet + component suites green; each PR's cloud `gate`
+  GREEN; browser-baseline shows no new failures from these changes. Full unit+integration+conformance at
+  wrap: **22844 pass / 99 skip / 6 fail** — the 6 are pre-existing integration flakies (self-host smoke,
+  csrf runtime guard, `any-type-forbidden`), unchanged from the boot baseline and orthogonal to the changed
+  surface. FACTS regenerated per-PR.
+
 ## S372 — 2026-08-24/25 (bryan · ASUS-Vivobook) — the flagship's "Account created." had never rendered, and six walkers share one shape
 
 Booted onto a **stranded S371 wrap** (every artifact written, steps 6/7 never run) and landed it as

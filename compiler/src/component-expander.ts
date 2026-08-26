@@ -2842,23 +2842,68 @@ function expandComponentNode(
     }
   }
 
-  // §16.6 Phase 1.6: Detect parametric snippet lambdas at call site
-  // For each caller attr with kind "expr", check if it matches a parametric snippet prop
+  // §16.6 Phase 1.6 (S375-peter) — capture a lambda fill on ANY snippet prop,
+  // ARITY-TOLERANT (`g-render-snippet-slot-renders-empty` + its non-parametric
+  // sibling + the arity-mismatch crash class).
+  //
+  // The render SITE for a snippet is fixed by the DECL, not the lambda's arity:
+  // a parametric `foo: snippet(v)` is rendered `${render foo(arg)}` (→
+  // parametricSnippets, renderParamMatch); a non-parametric `head: snippet` is
+  // rendered `${render head()}` (→ slottedGroups, renderMatch). So route the
+  // fill by the DECLARED parametric-ness, and admit BOTH `(param) =>` and
+  // zero-arg `() =>` lambdas:
+  //   • parametric prop + `(v) =>`  → substitute v→arg (the canonical form);
+  //   • parametric prop + `() =>`   → body as-is (a zero-arg lambda ignoring arg);
+  //   • non-parametric prop + `() =>` → body into slottedGroups;
+  //   • non-parametric prop + `(v) =>` → body into slottedGroups (v is unbound —
+  //       an author arity mismatch, rendered best-effort, NOT a compiler error).
+  // ⚑ Capturing EVERY lambda fill is load-bearing for correctness, not just
+  // completeness: the #713 `render`-body live-fallback guard rewrites
+  // `render NAME(...)` → `__scrml_render_NAME__(...)`. If a fill is left
+  // uncaptured, the render-slot detection never consumes that call and it
+  // survives into the client as an UNDEFINED-FUNCTION ReferenceError that kills
+  // the whole page at boot. Registering the fill (even an empty body → empty
+  // group) guarantees the call is consumed. (Whether a genuine arity mismatch
+  // should additionally be a compile diagnostic is a §16.6 semantics question,
+  // deferred; the codegen contract here is render-sensibly-and-never-crash.)
   const parametricSnippets = new Map<string, { paramName: string; body: string }>();
-  const lambdaRe = /^\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*=>\s*([\s\S]+)$/;
-
+  const lambdaRe = /^\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\)\s*=>\s*([\s\S]+)$/;
   if (def.snippetProps.size > 0) {
     for (const attr of callerAttrs) {
       if (!attr || !attr.name) continue;
       const snippetDecl = def.snippetProps.get(attr.name);
-      if (!snippetDecl || snippetDecl.snippetParamType === null) continue;
-
-      if (attr.value && (attr.value as Record<string, unknown>).kind === "expr") {
-        const raw = (attr.value as Record<string, unknown>).raw as string;
-        const match = raw.match(lambdaRe);
-        if (match) {
-          parametricSnippets.set(attr.name, { paramName: match[1], body: match[2].trim() });
-        }
+      if (!snippetDecl) continue;
+      if (slottedGroups.has(attr.name)) continue; // a slot= fill already won
+      if (!attr.value || (attr.value as Record<string, unknown>).kind !== "expr") continue;
+      const raw = (attr.value as Record<string, unknown>).raw as string;
+      const match = raw.match(lambdaRe);
+      if (!match) continue;
+      const paramName = match[1] ?? ""; // "" for a zero-arg lambda
+      const body = match[2].trim();
+      if (snippetDecl.snippetParamType !== null) {
+        // Parametric snippet — rendered `render foo(arg)` via renderParamMatch.
+        // Both `(v) =>` (substitute v→arg) and zero-arg `() =>` (body as-is,
+        // ignoring the arg — the "" paramName makes the substitution a no-op)
+        // are arity-compatible.
+        parametricSnippets.set(attr.name, { paramName, body });
+      } else {
+        // Non-parametric snippet — rendered `render head()` via renderMatch (no
+        // arg). A ZERO-ARG lambda's body renders. A `(param) =>` lambda is an
+        // arity MISMATCH — the render site passes no arg, so the param is
+        // unbound and a body that references it would `ReferenceError` at boot.
+        // Register an EMPTY group: the render call is still consumed (so the
+        // #713 live-fallback rewrite's `__scrml_render_NAME__(...)` never
+        // survives as an undefined-fn crash), and the mismatched body — which may
+        // read the unbound param — is NOT emitted, so it cannot crash either.
+        // (Whether an arity mismatch should be a compile diagnostic is a §16.6
+        // semantics question, deferred to bryan.)
+        const nodes = paramName
+          ? []
+          : parseSnippetBodyNodes(
+              body, filePath, counter, ceErrors,
+              node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            );
+        slottedGroups.set(attr.name, nodes);
       }
     }
   }
@@ -3375,8 +3420,12 @@ function _injectChildrenWalk(
           // Function-form .replace() so any `$` chars in argExpr aren't interpreted
           // as `$&` / `$N` backreferences (S100 `01eeda9` bug class — argExpr is
           // user-authored scrml expression text).
-          const paramRe = new RegExp(`\\b${snippet.paramName}\\b`, "g");
-          const substituted = snippet.body.replace(paramRe, () => renderParamMatch.argExpr);
+          // A zero-arg lambda on a parametric prop has an empty paramName — skip
+          // substitution (an empty-name regex `\b\b` would match everywhere and
+          // corrupt the body); the body renders as-is, ignoring the render arg.
+          const substituted = snippet.paramName
+            ? snippet.body.replace(new RegExp(`\\b${snippet.paramName}\\b`, "g"), () => renderParamMatch.argExpr)
+            : snippet.body;
           // g-render-snippet-slot-renders-empty (S375): reparse the substituted
           // body into REAL AST nodes (fresh ids) so codegen renders it. The old
           // hand-built `{ bare-expr, expr }` node used the dead legacy `expr:`
