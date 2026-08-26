@@ -2,6 +2,57 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S377 — 2026-08-25 (peter · P-Tech1 Windows) — one dog-food fix, two grammar findings routed
+
+A dog-food session: build and RUN fresh apps in happy-dom, fix what lands in the codegen lane, route the
+grammar-shaped findings turnkey. Hunted three fresh apps plus six probe batches; the codegen held up
+across `<match>` arm-swap, nested for-lifts, reconcile keying under removal/reorder, attribute
+interpolation, `bind:value`, and expression/method-call interpolation. One real codegen bug landed; two
+findings that resolve to a grammar decision were characterized and delivered to bryan's inbox.
+
+- **#716 — a word-char-glued `${…}` in a `for…lift` item now interpolates instead of shipping raw.**
+  Inside a reconciled per-item list, a text run whose `${…}` was glued directly to a preceding word char
+  (`P${it.x}`, `x${it.x}`) shipped the literal source `${it.x}` to the DOM; non-word-adjacent forms
+  (`n=${…}`) split upstream and worked, masking the hole in every sample. The reconcile-ctx text branch
+  now splits and lowers each glued `${…}` live-keyed, identical to the sibling bare-expr reconcile path.
+  The adversarial review confirmed the fix correct and well-scoped, and caught an overclaim — the fix was
+  narrowed to the word-glued case and a separate upstream whitespace residual filed.
+- **Routed to bryan (grammar/semantics):** bare markup in a `for`/`if`/`else` arm renders nothing with no
+  diagnostic while a `<match>` arm renders it (intersects the live `E-CONTROL-FLOW-IN-MARKUP` ruling arc);
+  and a space adjacent to a `${…}` interpolation is dropped in markup text (`Saved ${@cell}` →
+  "Savedhello") — a tokenizer whitespace-model call with four pre-existing red tests.
+
+## S375 — 2026-08-25 (peter · P-Tech1 Windows) — four dog-food fixes, and every one had a bug the adversarial review caught
+
+A dog-food session: build and RUN fresh apps in happy-dom, find the silent-wrong render bugs that
+emit-inspection and the gap ledger miss, fix them, and let the mandatory adversarial review harden each.
+The through-line: **every fix carried a self-introduced bug that the review caught** — a silent
+trailing-token drop, and two whole-page crashes — reproduced-then-fixed before landing.
+
+- **#710 — `show=` inside `<each>` toggles visibility (was a no-op attribute).** A per-row `show=<cond>`
+  fell through to the generic path and emitted a literal `show` HTML attribute, so the element rendered
+  unconditionally. Now a per-item reactive `style.display` toggle, mirroring the sibling `class:` binding.
+  The review caught (and the fix closed) a call-ref-operator-argument compile cliff.
+- **Adopter staleness sweep — 7 of 9 `assetManagement` issues verified stale-resolved.** Ran the adopter's
+  filed repros on HEAD: statement-drop, each-wrapper-breaks-grid, ssr-if-false-flash,
+  server-call-hoisted-above-guard, w-dead-false-positive, component-in-each (shipped-runtime), and the
+  fullscrml reassigned-let compile bug are all fixed. The adopter's backlog is cleared.
+- **#713 — parametric snippets render in the default pipeline.** `${render foo(arg)}` filled by a lambda
+  had rendered nothing — including the flagship `examples/12-snippets-slots.scrml`. Re-derived the root
+  (the native re-parse discards the Render node), fixed by routing render-bearing component bodies through
+  the legacy parse path + reparsing the substituted lambda body into real AST nodes. The default-pipeline
+  limb of the open HIGH `g-render-snippet-slot-renders-empty`; the native-parser limb stays with bryan.
+- **#714 — arity-tolerant snippet lambda fills.** A follow-on that both renders the non-parametric
+  zero-arg-lambda form and closes a crash #713 introduced: an arity-mismatched lambda fill left an
+  undefined `__scrml_render_*` call that killed the page. One unified capture loop now renders every valid
+  fill form and never crashes; a genuine arity mismatch renders empty (a compile-diagnostic ruling is
+  deferred to language design).
+- Suite on the landed state: unit **17860 / 0**; snippet + component suites green; each PR's cloud `gate`
+  GREEN; browser-baseline shows no new failures from these changes. Full unit+integration+conformance at
+  wrap: **22844 pass / 99 skip / 6 fail** — the 6 are pre-existing integration flakies (self-host smoke,
+  csrf runtime guard, `any-type-forbidden`), unchanged from the boot baseline and orthogonal to the changed
+  surface. FACTS regenerated per-PR.
+
 ## S372 — 2026-08-24/25 (bryan · ASUS-Vivobook) — the flagship's "Account created." had never rendered, and six walkers share one shape
 
 Booted onto a **stranded S371 wrap** (every artifact written, steps 6/7 never run) and landed it as
@@ -1612,6 +1663,12 @@ A **normative-grounding** session. Three PRs landed, but the durable output is `
 
 **Continuity recovered.** S275 died pre-wrap — the fourth unwrapped death in this stretch — leaving its entire record in the delta-log alone. Its hand-off, board entry and user-voice were reconstructed, the last **verbatim from the session JSONL** rather than from summaries. That mattered: the PA had reported the `<main><outlet/></main>` drift backwards, and the transcript showed the approved text read *"a shell with both a **bare** `<main>` and an `<outlet>` → error"* — the word **bare** was load-bearing, the ruling doc was faithful, and the implementation had dropped it and then locked the overreach in with a test. **Durable rule:** when a derived artifact and the implementation disagree, the verbatim session log adjudicates; a terse "A"/"go" ratifies the full text it answered, sub-choices included; and a test asserting a behaviour is not evidence that behaviour was ruled.
 
+## S275 — 2026-07-20 (bryan) — adopter #27 `navigate` reverse-verified from "untouched" to ~80% done; two shell-composition models surfaced and Option A ruled; died pre-wrap, landed nothing
+
+*(Rotated out of `master-list.md` §0 at S375 — this session had **no** changelog block, so the §0 text below is its only surviving narrative and is reproduced verbatim. See `docs/changes/boot-trim-tier1-2026-08-25/`.)*
+
+**S275 (bryan, landed nothing — died pre-wrap; recovered S276):** drove adopter issue **#27 navigate** — a reverse-verify flipped it from "untouched" to "~80% done" (Waves 1a/1b + link-boost already landed), leaving **Wave-1c (cross-chunk)** as the residual; the dispatched agent hit a STOP-IF-BIGGER and correctly refused to build, surfacing that TWO disconnected shell-composition models existed (`<main>`-slot textual composition, May 2026, vs the `<outlet>` soft-nav model §20.8, July 2026). bryan RULED **Option A** (`<outlet>` = the canonical marker-driven route slot). The build completed on-branch but S275 died before landing any of it.
+
 ## S274 — 2026-07-20 (bryan) — freeze-campaign DRAIN: SSR tier-1 leak CLOSED (#120) · freeze-spec reconcile ×5 (#121) · esql4 samples (#122) · ss75 confirmed — the freeze-*spec* campaign is COMPLETE
 
 **⭐ #120 (`f2332c09`) — SSR auth-scoped prerender-leak CLOSED** (a tier-1 cross-user data leak, stranded 17 sessions). Re-implemented the S256 held fix on current main (a faithful byte-for-byte source port, re-anchored where the tenant floor had drifted `emit-server.ts` 929 lines under it). SPEC §52.15.5 "auto-make-safe": an auth-scoped, non-row-scoped server cell (Tier-1 `SELECT *` · unscoped Pattern-C · gated callable) is **auto-omitted from the anonymous-reachable SSR seed** + `window.__scrml_ssr_state`, hydrating client-side behind its per-cell gated `/__serverLoad` (401 for anon); public / row-scoped siblings stay seeded; the coalesced `/__mountHydrate` route is gated per-cell. NEW `compiler/src/codegen/sql-lex.ts` — one LIVE-vs-INERT `${}` SQL-interpolation lexer shared by the classifier (collect.ts) and the param-emitter (rewrite.ts) so they cannot diverge. Retires `W-SSR-PRERENDER-UNSCOPED` → Info `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED`. Composes with §14.8.9 protect + §14.8.10 tenant at the same egress sink. **PA-verified independently** (not the dev-agent's self-report): R26 anon-compose (Alice/Bob + the `accounts` seed key ABSENT, `PublicWidget` served), commit-gate 20996/0, S239 adversarial `/code-review high` (3 non-blocking findings filed as hardening: a callable-gate classifier-share, a SQLite-vs-Postgres `E'…'` lexer nuance, a gated-cell-hydrated-to-`undefined`).
@@ -1929,6 +1986,12 @@ Booted concurrent to S249, took the branch-baton (S249 wrapped+released), became
 - **S249's verify-harden wave** — 58 commits (incl. 2 security fail-opens: JWT auth-bypass, protect-CTE leak) merged to main + pushed to origin.
 - **navigate #27** — SPEC §20.8 Client Router (Nominal/spec-ahead); **Wave-1a** (`<outlet>` + `<program>`-shell foundation) landed + pushed; **Wave-1b** (same-chunk reactive soft-nav) built + banked on its branch — a showstopper (shell-state reset on nav) + input-handler-leak codegen fix pending before it lands.
 - **pre-push hook** — now recompiles the browser-test fixtures before the browser check (a stale `samples/compilation-tests/dist/` was faking failures).
+
+### 2026-07-07/08 (S246 — **CSS ELEVATED to a V1.0 target: the scrml-native CSS model (SPEC §65) becomes a V1.0 gate at the Wave-1 floor**)
+
+*(Rotated out of `master-list.md` §0 at S375 — this session had **no** changelog block, so the §0 text below is its only surviving narrative and is reproduced verbatim. See `docs/changes/boot-trim-tier1-2026-08-25/`.)*
+
+**S246 PROGRESS (2026-07-07/08):** ⭐ **CSS ELEVATED to a V1.0 target** — the scrml-native CSS model (SPEC §65, ratified S244 as v1.next) is now a **V1.0 gate at the Wave-1 floor** (bryan: "it is what it is" — the third native leg is language identity; the ONE deliberate new-feature exception to "no more big feature builds"). §65 APPLIED to SPEC (`59776df8`, Nominal, pushed) + amendments §9.1/§25.7/§26.9/§4.15/§24.4. The §65.11 Wave-1 CALIBRATION dry-run ran (analyzer `compiler/scripts/css-conflict-dryrun.ts` over the 83 `#{}` files) → **R1/R2/R3 boundary carve-outs RATIFIED** (`10d54ff3`; residual hard false-positive rate = 0). Wave-1 V1 scope = the `E-STYLE-CONFLICT` checker + `<theme>` + reset + `:where()`-flat on existing `#{}`; Waves 2-3 (style-as-value, Tailwind-integration) = v1.next. So **V1 = conformance coverage-GROWTH + labeling + the CSS Wave-1 build**. See SPEC §65 + user-voice S246.
 
 ### 2026-07-07 (S245 — **realtime `<channel watches=>` Phase 2 runtime · a HIGH protected-field egress leak · 3 codegen/diagnostic fixes — all adversarially reviewed; concurrent with S244's CSS §65 arc**)
 
@@ -6460,6 +6523,62 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### 2026-08-25 — S375 (bryan): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its defect class named
+
+The session's subject was the PA system, not the compiler. It opened with a request for an instrument
+to measure context occupancy — and the instrument then falsified the PA's own reassurance about the
+trajectory. Four carried operator rulings were taken in one turn with every premise re-derived rather
+than relayed. A three-round compiler arc was deliberately parked rather than pushed to a fourth,
+because its defects turned out to be one class rather than four bugs.
+
+- **`#708` (open, held) `scripts/ctx.ts` — the PA can measure its own context occupancy.** Reads the
+  session transcript's assistant `usage`; the load-bearing detail is that occupancy is
+  `input + cache_creation + cache_read`, since the cache split is a BILLING distinction and reading
+  `input_tokens` alone reports ~2. Validated against the operator's own UI (computed 430,367 = 43.0%
+  against his stated 43%). Bite proven both ways — a bogus `--session` exits 2 rather than answering
+  about a different transcript, a real bug in the first cut caught by writing the bite proof. **Held
+  unreviewed on purpose**: its numbers now underwrite a ratified contract rule.
+- **The boot-cost trajectory, measured across all 43 boots on record.** Earlier-half mean 317,195 →
+  later-half 363,266 (**+15%**); S375's 430,367 is the highest ever; peaks now routinely **88-96%**;
+  working headroom (88% floor − boot%) has gone 53 → **45 points**. Five reference documents are
+  **65%** of a boot; the harness baseline is 13%. Boot is **34-40% regardless of session shape**.
+- **`pa-base v2.16` — the rotation budget (ratified).** *A maintained-tier document SHALL have a size
+  budget; the overflow ROTATES into the write-once tier.* The insight is that this is a **growth
+  process, not an untidy state** — every maintained doc is append-biased, so boot cost is a function
+  of session count and a one-time cleanup merely defers the same position. The mechanism already
+  existed and had been applied exactly once (the hand-off rotates; nothing else did). Carries
+  **"measure before removing"**. First application was pa-base itself: 128,189 → 108,525 chars.
+- **`#709` — boot-trim Tier 1.** `master-list.md` 223,733 → **130,208** (§0 banner region −92.2%);
+  `SPEC-INDEX.md` 89,919 → **72,931** (Summary column −32.2%). Nothing normative moved. The dispatch
+  corrected the brief four times, including that a probe claiming 8 orphaned sessions was measuring
+  session IDs rather than blocks — the real number was 2. Rode along: the SPEC-INDEX §17 row gained
+  the §17.1.2 pointers it had never carried, and the review floor drained **2 → 0** with #707 recorded
+  `verdict=clean` **reviewed by execution**.
+- **`#711` — the each-alias ledger.** 10 gap entries. The 2 §34 rows were **deferred, not landed**:
+  the cloud §34.0 row-provenance gate failed correctly because they named symbols living only on the
+  parked branch — a §34 code lands WITH its impl, and a provenance note pointing at a function nobody
+  can find reads as a verified fire-site. Row text preserved on the parked branch. Includes a
+  self-correction: one entry had been authored from a branch measurement and filed as truth about
+  main, caught by re-verifying every entry against main before merge.
+- **The four carried operator rulings, taken in one turn.** The `<db>`/state-block locus refuses
+  rather than lints (conformance restoration against the S368 bare-call ruling, not new policy); the
+  bare-call migration converts its 2 reproducer files **into conformance cases**; bare control flow at
+  a default-logic body-top gets **both** halves — the §34 row asserting the auto-lift covers that
+  locus is false, and the diagnostic extends to the control-flow statement class; `TILDE_TOKEN_RE` is
+  deferred because the asymmetry does not exist until the bare-call gate lands.
+- **Ruling 1 built and held** — `E-STATE-BLOCK-STATEMENT-FORM`, landed as a new stage-2.5c module with
+  zero `ast-builder.js` edits after the dispatch found the locus was inside the brief's own
+  MUST-NOT-WRITE list. Governing-sentence gate outcome 1; locus **traced, not searched**; complement
+  refused **on measured evidence**; migration measured from the compiler at **1 file** and the STOP
+  honoured. Two operator decisions owed before it lands.
+- **The each-alias arc PARKED** at tag `s375-r7-reviewed` after 3 rounds and **4 adversarial passes**
+  (~1.8M subagent tokens, nothing on main). Every round closed real defects and every pass found a new
+  one — because they were **one class**: the refusal is decided by predicates over the RAW attribute
+  text while the lowering it guards operates on a NORMALIZED form. Round 6's assertion, added to close
+  a fail-open, became a **build-killer** on passes it never enumerated. The convergent direction is a
+  design question about where the check belongs and is deliberately left unruled.
+
 
 ### 2026-08-24 — S372 (peter): a HIGH drained the hard way — parent worker-handler multi-statement fix, and a dog-food cry-wolf routed
 

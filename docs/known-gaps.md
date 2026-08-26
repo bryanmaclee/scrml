@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 55 |
-| MED | 171 |
-| LOW | 74 |
+| HIGH | 57 |
+| MED | 176 |
+| LOW | 78 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2374,6 +2374,14 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 <!-- @gap id=g-each-value-form-if-markup-fn-call-branch-stringifies sev=MED status=open locus=compiler/src/codegen/emit-each.ts:1335(interpExprNode is populated only from stmt.exprNode, which an if-stmt does not carry, so it stays null and the markupCapable discriminant at :1467 degrades to isItemRoot) + compiler/src/codegen/emit-each.ts:889(_eachSoleBareExprRaw rejects only LITERAL markup via exprNodeHasMarkupValue — a call whose markup-ness lives in the callee RETURN is invisible there) prov=rationale:S371-review-floor-PA-reproduced-by-execution-both-revisions-pre670-659a5b0f-emits-each-empty-logic-interpolation-skipped-post670-emits-textContent-String-badge-it-while-the-twin-ternary-emits-instanceof-Node-appendChild -->
 > **⚑ S371-bryan: PA-REPRODUCED BY EXECUTION on both revisions; a WORSENING, not a pre-existing limitation.** Found by the review floor's S239 pass on the already-merged **#670**. Repro (one file, two adjacent lines, identical semantics): a `fn badge(x) { return <span class="b">${x}</span> }` plus `<each in=@rows as it>` containing **(A)** `<li>${ if it == "a" { badge(it) } else { "none" } }</li>` and **(B)** `<li>${ it == "a" ? badge(it) : "none" }</li>`. **A** emits `_scrml_each_tn_4.textContent = String((it == "a" ? _scrml_badge_1(it) : "none"))` → `[object HTMLSpanElement]` in the page; **B** emits `_scrml_mv_v_8 instanceof Node → appendChild` and mounts correctly. **The two-revision measurement is the load-bearing half:** on `659a5b0f` (pre-#670) line A emitted `// each: empty logic interpolation skipped` and rendered NOTHING; on `main` (post-#670) it renders visible garbage. So #670's new value-form-`if` lowering **newly routes traffic into** the markup-stringification hole — the same family as [[g-each-nested-markup-interp-stringifies]] and [[g-each-nested-in-fn-body-markup-fn-stringifies]], but reached by a path #670 created. **Corpus blast radius measured ZERO** (`corpus-emit-differential` 659a5b0f→01e2a184: 0 newly-failing, 0 artifact diffs attributable to #670 — the 411 diagnostic changes are all `+W-TYPE-031-UNPROVEN` from #665 and the 37 artifact diffs are stdlib sources from #669). Per [[feedback_corpus_zero_is_not_demand_evidence]] that bounds blast radius and is NOT evidence the shape is unwritten — a markup-returning helper called from a conditional branch is an ordinary thing to write. **Fix direction:** synthesize an ExprNode for the if-stmt branches (or hand the branch exprNodes directly) into `interpMayYieldNode` so `markupCapable` sees the call, and add a non-regression test — the #670 merge-blocker suite has no case for this shape. Peter-lane (each codegen, no language surface). Repro-first re-derive before building.
 
+### g-each-peritem-class-call-ref-operator-arg-not-lowered — inside `<each>`, a `class:NAME=fn(<arg with a §42 operator>)` (e.g. `class:on=isReady(t.status is some)`) reaches the client JS raw → `E-CODEGEN-INVALID-LOGIC` — the `class:` call-ref arm uses bare `rewriteIterValueExpr`, not `lowerEachExpr` — `NEW S375-peter (S239 review of the show=-in-each fix; the show= arm was made robust, class: still carries it); LOW; open`
+<!-- @gap id=g-each-peritem-class-call-ref-operator-arg-not-lowered sev=LOW status=open locus=compiler/src/codegen/emit-each.ts:renderTemplateAttrToJs class:-arm call-ref branch(~:2011 uses rewriteIterValueExpr, not lowerEachExpr) prov=empirical:S375-execution-confirmed -->
+**Sibling of [[g-each-peritem-show-emits-literal-attribute]] (RESOLVED S375).** The `show=` fix routed its call-ref arm through `lowerEachExpr` (does the iter-scope rewrite first, escalates to the structured emitter only on a §42 operator). The `class:` call-ref arm still uses bare `rewriteIterValueExpr` — its own comment (~:2005-2007) documents this as a deliberate symmetry with the value-attr call-ref arm, deferred as "a separate axis (`serializeCallArgs` vs `serializeCallArgsLowered`)". Execution-confirmed LOW: `class:on=isReady(t.status is some)` inside `<each>` → `E-CODEGEN-INVALID-LOGIC` "Unexpected token" (LOUD, not silent). The convergent fix is to route `class:`'s call-ref through `lowerEachExpr` too (byte-identical for operator-free calls), closing the class of "operator inside a call-ref arg inside an each-body attribute". Peter-lane (each codegen, no language surface). Reproduce-first before building — verify the operator-free call-ref stays byte-identical.
+
+### g-each-peritem-show-emits-literal-attribute — a per-row `show=<cond>` on an element inside an `<each>` emitted `setAttribute("show", …)` (a no-op HTML attribute) instead of a visibility toggle, so the element rendered UNCONDITIONALLY — the `if=` sibling in the same position works, and top-level `show=` works — `NEW S375-peter (dog-food find — a task-list app); MED; RESOLVED S375-peter`
+<!-- @gap id=g-each-peritem-show-emits-literal-attribute sev=MED status=resolved locus=compiler/src/codegen/emit-each.ts:renderTemplateAttrToJs(no show= case → fell through to the generic setAttribute value-attr path) prov=empirical:S375-dog-food-happy-dom-execution-confirmed-initial-and-reactive -->
+**RESOLVED S375-peter (dog-food).** Found running a fresh task-list app in happy-dom: `<span class="badge" show=t.done>DONE</span>` inside `<each in=@tasks as t>` showed the badge on EVERY row. Emitted `_scrml_el.setAttribute("show", String(t.done))` — a literal passthrough attribute (elements have no `show` property; it does nothing) — because `renderTemplateAttrToJs` (emit-each.ts) special-cases `if=` and `class:` but had no `show=` arm, so it fell through to the generic value-attribute `setAttribute` path. **Scoped by execution (each verified):** top-level `show=@flag`/`show=${@flag}` ✅ (reactive display wiring); `if=t.done` inside `<each>` ✅ (structural removal); **`show=t.done` / `show=${t.done}` inside `<each>` ❌**. Spec-valid form (§17.2/§5.2 bare atomic `obj.prop` condition; no each-exclusion). **Fix:** a `show=` arm in `renderTemplateAttrToJs` mirroring the sibling `class:` arm — a per-item reactive `elVar.style.display = (cond) ? "" : "none"` (via `lowerEachExpr` + `maybeWrapEachPerItemEffect`), matching the top-level `show=` display value. **REACTIVE, unlike a nested per-row `if=`** (create-time-frozen — `W-IF-IN-EACH` — because a reactive structural swap leaves `_scrml_group` stale): `show=` only toggles CSS `display`, never adds/removes the element, so it has no group-staleness barrier and re-evaluates on in-place field mutation. Biting merge-blocker `compiler/tests/browser/g-each-peritem-show-visibility.browser.test.js` (3 cases — emit shape, initial render, reactive toggle; 3-fail-pre-fix / 3-pass-post-fix, executes the SHIPPED pruned runtime). Peter-lane (each codegen, no language surface).
+
 ### g-value-form-if-no-else-renders-nothing — ⭐ a value-form `${ if @c { "YES" } }` with NO `else` renders NOTHING (silent-wrong) — SPEC §17.6.4 declares the no-`else` form VALID and useful (`T | not`), and the `else` twin works — `NEW S371-bryan (measured while scoping the §17.6 amendment); MED; open`
 <!-- @gap id=g-value-form-if-no-else-renders-nothing sev=MED status=open locus=compiler/src/codegen/emit-html.ts:656-660(isValueFormIfStmt returns false when node.alternate is absent — "value-form requires an else" — so a no-else if is never classified as a value form and falls through to statement handling, which emits the branch as a dangling no-op expression statement) prov=spec:SPEC.md:11930-11935-§17.6.4-if-as-expression-without-else-is-valid-and-useful-and-the-compiler-SHALL-NOT-emit-an-error-or-warning-for-a-missing-else-arm -->
 > **⚑ S371-bryan: PA-EXECUTED, silent-wrong, on a form SPEC explicitly blesses.** Repro: `<p>${ if @shown { "YES" } }</p>` with `<shown> = true`. **Compiles exit 0 with ZERO diagnostics**, emits the branch as a dangling no-op statement — literally `"YES";` on its own line — and renders `<p><span data-scrml-logic="_scrml_logic_1"></span></p>`: **empty**. The `else` twin (`${ if @c { "A" } else { "B" } }`) lowers to a ternary and renders correctly, so this is a clean two-sided discriminator.
@@ -2621,8 +2629,18 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 >
 > **Repro-first re-derive before building.** Reproducer archived at `docs/changes/if-attr-per-field-synth-crash-2026-08-24/` alongside the sibling probes.
 
-### g-render-snippet-slot-renders-empty — ⭐⭐ `${render name(...)}` renders NOTHING — every named snippet slot is empty, including in the FLAGSHIP `examples/12-snippets-slots.scrml`, exit 0, zero diagnostics — `NEW S371-bryan (dog-food probe of §16 slots; confirmed on a CORPUS file against the SHIPPED runtime); HIGH; open`
+### g-render-snippet-slot-renders-empty — ⭐⭐ `${render name(...)}` renders NOTHING — every named snippet slot is empty, including in the FLAGSHIP `examples/12-snippets-slots.scrml`, exit 0, zero diagnostics — `NEW S371-bryan (dog-food probe of §16 slots; confirmed on a CORPUS file against the SHIPPED runtime); HIGH; PARTIAL — default pipeline RESOLVED S375-peter (PR pending), native-parser limb still open`
 <!-- @gap id=g-render-snippet-slot-renders-empty sev=HIGH status=open locus=compiler/native-parser/translate-expr.js:296(`case ExprKind.Render: return makeEscapeHatch("Render", "", nativeExpr.span)` — the A2 bridge discards propName+argExpr into an empty escape-hatch, silently, zero diagnostics; the native parser itself parses `render name(args)` correctly at parse-expr.js:2659; SECOND site compiler/src/component-expander.ts:3150-3157 for the parametric limb) prov=spec:SPEC.md:11117-§16.8.1-CE-SHALL-emit-a-transient-render-expansion-node-for-every-valid-invocation-TS-consumes-it-codegen-sees-only-inlinedChildren -->
+> **⚑ PARTIAL RESOLUTION S375-peter (dog-food re-derive of the DEFAULT-pipeline root — the operative root differs from the filed hypothesis for the default path).** Re-verified by execution on HEAD: `${render foot(arg)}` rendered EMPTY, and the flagship `examples/12-snippets-slots.scrml` cards were empty (`.card__header`/`.card__body`). **Re-derived root for the DEFAULT pipeline (the filed `component-expander.ts:3150-3157` parametric limb is downstream of it, not the operative cause):** a render-bearing component body is re-parsed by `reparseSynthesizedFile` via the NATIVE path (it does not trip `sourceNeedsLiveFallback`), where `translate-expr.js:296` discards the Render expr into an **empty** escape-hatch (`nativeKind:"Render"`, `raw:""`). So `_injectChildrenWalk`'s render-slot detection (which matches a live `__scrml_render_NAME__(...)` call) never fires — the render site renders empty. **Fix (default pipeline, S375-peter, two composed changes in `component-expander.ts`):** (1) a `sourceNeedsLiveFallback` guard (4) — a render-bearing body routes through the LEGACY path (which rewrites `render name(...)` → `__scrml_render_NAME__(...)` at `expression-parser.ts:1745`, a real call node the detection consumes) — the SAME divergence-guard class as the existing `<each>`/`<match>` rule (3); (2) `parseSnippetBodyNodes` — the parametric limb reparses the param-substituted lambda body into REAL AST nodes with fresh ids (the old code pushed a `{ bare-expr, expr }` node using the dead legacy `expr:` field, invisible to codegen since Phase 4d Step 8). **Verified (shipped pruned runtime):** parametric markup body, parametric plain-expr body, and flagship example 12 all render; `slot=` fill regression intact. Biting merge-blocker `compiler/tests/browser/g-render-snippet-parametric-renders.browser.test.js` (3 cases, 2-fail-pre / 3-pass-post). **STILL OPEN (route to bryan / follow-on):** (a) the **native-parser limb** `translate-expr.js:296` — the Render discard itself, so `--parser=scrml-native` stays broken (bryan's road-B surface); (b) the **non-parametric-lambda fill** `head={ () => <markup/> }` (distinct from `slot=`, which works) — captured nowhere (`snippetProps` gate at `component-expander.ts:2835` skips `snippetParamType===null`, and `lambdaRe` requires a param) → filed [[g-render-snippet-nonparametric-lambda-fill-renders-empty]]. Peter-lane for the default-pipeline codegen; the native limb is language/road-B. [[feedback-gap-report-fix-direction-can-be-wrong]] [[feedback-dogfooding-beats-mining-the-ledger]]
+
+### g-render-snippet-nonparametric-lambda-fill-renders-empty — a NON-parametric snippet prop filled with a zero-arg lambda `head={ () => <markup/> }` (rather than `slot="head"`) renders EMPTY — the lambda is captured nowhere and silently dropped — `NEW S375-peter (surfaced fixing the parametric limb of [[g-render-snippet-slot-renders-empty]]); LOW; RESOLVED S375-peter`
+<!-- @gap id=g-render-snippet-nonparametric-lambda-fill-renders-empty sev=LOW status=resolved locus=compiler/src/component-expander.ts:2866(new zero-arg-lambda capture loop registers the parsed body into slottedGroups) prov=empirical:S375-execution-confirmed-shipped-runtime -->
+**RESOLVED S375-peter (same session as the #713 parametric limb).** Fixed via a single ARITY-TOLERANT lambda-fill capture loop (`component-expander.ts`, replacing the two special-cased loops the S239 review flagged as duplicative). It captures a lambda fill (`(param) =>` OR zero-arg `() =>`) on ANY snippet prop and routes by the DECLARED parametric-ness: a parametric prop → `parametricSnippets` (substitute the param, or body-as-is for a zero-arg lambda — the substitution site guards an empty paramName so `\b\b` can't corrupt the body); a non-parametric prop → `parseSnippetBodyNodes` → `slottedGroups[propName]`. The existing `${render name()}`/`${render foo(arg)}` detection then renders it, and E-COMPONENT-010 sees the prop as provided. ⚑ **This ALSO closed a CRASH REGRESSION introduced by #713:** the #713 `render`-body live-fallback guard rewrites `render NAME(...)` → `__scrml_render_NAME__(...)`, so an arity-MISMATCHED lambda fill (`() =>` on a parametric prop · `(v) =>` on a non-parametric prop) that the old two-loop capture missed left that call UNCONSUMED → an undefined-function ReferenceError that killed the whole page at boot (was silent-empty pre-#713). Capturing every lambda arity guarantees the call is consumed → no undefined-fn crash. The VALID forms render (parametric `(v)=>` substitutes · parametric `()=>` renders body-as-is · non-parametric `()=>` renders body); a genuine arity MISMATCH (non-parametric prop given a `(param) =>` lambda) registers an EMPTY group — the render call is consumed (no undefined-fn crash) AND the mismatched body is not emitted (so a body reading the unbound param cannot `ReferenceError` either) → renders empty. (Whether a mismatch should additionally be a compile diagnostic is a §16.6 semantics question, deferred to bryan.) Verified on the shipped runtime — all four arity combos + double-render + a mismatched-body-reading-the-param, none crash; valid forms + `slot=` + flagship example 12 unaffected. Biting §2/§5/§6/§7/§8 in `g-render-snippet-parametric-renders.browser.test.js`. Depends on the live-fallback guard from #713. [[feedback-verify-the-bug-class-not-just-reported-instance]]
+
+### g-parametric-snippet-param-substitution-is-textual-not-ast — a parametric snippet's `${render foo(arg)}` substitutes the param via a global `\b<param>\b` string-replace over the whole lambda body, so the param name is also replaced where it appears as plain TEXT (`the v value is ${v}` → `the <arg> value is …`), and a `$`-prefixed param name (`($x) =>`) breaks the regex (`\b$x\b` treats `$` as an anchor → never matches → `$x` left undefined at runtime) — `NEW S375-peter (S239 review of the arity-tolerant fix; PRE-EXISTING substitution, re-exposed on the touched line — NOT a regression); LOW; open`
+<!-- @gap id=g-parametric-snippet-param-substitution-is-textual-not-ast sev=LOW status=open locus=compiler/src/component-expander.ts:parametric-limb(`snippet.body.replace(new RegExp('\\b'+paramName+'\\b','g'), argExpr)` — a textual substitution over the raw body, not an AST-scoped identifier rewrite) prov=review:S239-on-the-arity-tolerant-fix -->
+**PRE-EXISTING — the parametric substitution has always been a textual `\b<param>\b` replace; NOT introduced by the arity-tolerant fix (which only added an empty-paramName guard on that line).** Two failure modes: (a) the param name substituted inside author TEXT/string content, not just as an expression identifier — `foo={ (v) => <span>the v value is ${v}</span> }` corrupts "the v value"; (b) a `$`-prefixed param name (legal per the capture regex `[A-Za-z_$]…`) makes `\b$x\b` match nothing → the arg is silently not substituted → `$x` undefined at runtime. The convergent fix is to substitute on the parsed body AST (rename the param IDENTIFIER only, in expression position), not on the raw string — the same string-vs-AST substrate as the S374 g-when lowering. Low: parametric snippets whose param name collides with body prose, or start with `$`, are rare. Peter-lane (default-pipeline codegen). Reproduce-first before building.
+**Sibling of [[g-render-snippet-slot-renders-empty]] (default-pipeline parametric limb RESOLVED S375).** A non-parametric snippet `head: snippet` filled with a lambda `head={ () => <span>HV</span> }` renders empty (compiles clean, exit 0). Execution-confirmed on the shipped runtime: `.ch` empty, control interpolation + `slot=` fill both render. LOW because the canonical `slot="head"` fill form WORKS (verified) — the lambda form is an alternative with a working substitute. Fix direction: capture a zero-arg lambda on a non-parametric snippet prop (extend the capture at `component-expander.ts:2831-2845` to admit `snippetParamType===null` + a `() =>` body, routing it through the same `parseSnippetBodyNodes` injection the parametric limb now uses). Reproduce-first before building. Peter-lane (default-pipeline codegen).
 > **⚑⚑ S372-bryan — TRACED. The locus above replaces "NO LOCUS TRACED", and the BRIEF's framing was WRONG.** Full trace + 17 executed probes: `docs/changes/render-snippet-slot-trace-2026-08-24/TRACE.md`.
 > **THE HEADLINE, PA-VERIFIED INDEPENDENTLY: SPEC §16.8.1's mechanism was NEVER IMPLEMENTED.** `render-expansion` / `renderExpansion` / `inlinedChildren` have **zero hits** across `compiler/src`, `compiler/native-parser`, `scripts`, `stdlib` — the three identifiers exist only in SPEC prose and in the ledger that quotes it. So there is no transient node to break: the earlier framing (*"the break is somewhere between CE expansion and emit"*) described a pipeline stage boundary that **does not exist**. CE implements a different, **undocumented** mechanism instead (`injectChildren` / `_injectChildrenWalk`, `component-expander.ts:2995`/`:3011` — a structural splice keyed on a `call` to `__scrml_render_NAME__`). ⚑ **That is a Rule-4 item for the operator, not something a fix dispatch settles:** either §16.8.1/§16.8.2 is amended to describe the substitution CE actually performs, or the implementation is rebuilt around the specified node.
 > **The decision site, PA-CONFIRMED by reading both lines:** `translate-expr.js:296` blanks `ExprKind.Render` into `makeEscapeHatch("Render", "", …)`. CE's `renderMatch` predicate requires `exprNode.kind === "call"`, sees `escape-hatch`, never matches → the logic node falls through → `emitEscapeHatch` → `rewriteExpr("")` → `""` → a bare `;` in the client and an empty `<span data-scrml-logic>`. ⚑ **The fix EXTENDS an existing mechanism and the precedent is four lines below it:** `ExprKind.MarkupValue` had the identical empty-escape-hatch bug and was fixed by `translateMarkupValueExpr`.
@@ -10208,3 +10226,124 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 ### g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select — a `<schema>` `boolean` column (and a struct field typed `boolean`) read via a raw `?{SELECT paid …}` reaches the client as `1`/`0` (integer), not `true`/`false`; conditionals still work (0/1 truthy) but display (`${e.paid}` → "1") and any bool-shaped consumer see the wrong type — `NEW S370-peter (dog-food); MED; open (needs a SPEC SCOPE ruling — bryan)`
 <!-- @gap id=g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select sev=MED status=open locus=SPEC.md:22293(NORMATIVE SHALL: boolean columns "SHALL emit read-path coercion (`!!value`) … in any generated migration or QUERY HELPER" — a raw ?{} SELECT does not coerce; whether a raw ?{} SELECT counts as a "query helper" is the OPEN scope question)+searched:compiler/src/codegen/emit-server.ts,compiler/src/schema-differ.js(the ?{} result mapping does not thread declared-column types into read-path coercion) prov=adopter-dogfood:peter-S370-schema-paid-boolean-plus-struct-field-boolean-raw-select-returns-1-0-to-client -->
 > **⚑ PA-REPRODUCED BY EXECUTION on `main` @ `3a7203ff`.** `<schema> expenses { … paid: boolean … }` + `type Expense:struct = { … paid: boolean }`; server fn `?{SELECT id, description, amount, paid, settled_at FROM expenses}.all()`. Over the wire: `[{…,"paid":1,…},{…,"paid":0,…}]`. SPEC:22293 mandates read-path `!!value` coercion "in any generated migration or **query helper**." **The open question is scope:** is a raw `?{}` SELECT a "query helper" (→ coerce declared-boolean result columns, a codegen fix) or is coercion only for `schemaFor`/typed-accessor paths (→ raw SELECT is "you get sqlite's 0/1", and the SPEC text should say so)? §12.5 (return serialization) does not independently re-coerce by declared struct-field type. **This is a SPEC-scope ruling, not a clean codegen bug** — filed for bryan. (Everything else in the ?{} SQL core probed clean: multi-param + reuse/dedup §8.2, expression params, LIKE binding, .run() INSERT persistence, UPDATE RETURNING, .get() no-row→null, NULL/real round-trip.)
+
+## §S375 — filed S375-bryan (the each-alias rounds 5+6 arc; every entry PA-verified or dispatch-measured)
+
+> **⚑ THE DIRECTION NOTE, and it reframes five of these entries.** The each-alias branch began as
+> *"make the LIFT path match the STRUCTURAL path."* After round 6 the parity control was extended to
+> ACCEPTANCE as well as refusal across 24 predicate shapes: **18 agree, 6 diverge, and in all six the
+> LIFT path is correct and the STRUCTURAL path is defective.** The migration debt has flipped sides.
+> Gaps `…if-true-false-fires…`, `…parenthesized-atdot…`, `…alias-callee…`, `…empty-value…` and
+> `…reports-compiler-defect…` below ARE that backlog, and they share one locus family
+> (`type-system.ts` / `emit-html.ts`) — a converge candidate, not five patches.
+>
+> **Context, not a new gap:** the arc's own reproducer is a dead page at `origin/main` `8731799d`
+> (`ReferenceError: _scrml_reconcile_list is not defined`, executed against the shipped runtime
+> chunk). That is the already-filed `g-chunk-reachability-is-approximated-not-computed` (HIGH), which
+> the round-4 sweep closes. It is recorded here because it falsified this PA's "base renders ungated
+> but ALIVE" claim, and with it the REGRESSION verdict built on top — a claim made from EMISSION and
+> asserted about EXECUTION.
+
+### g-lift-each-bare-atdot-attr-swallows-the-next-attribute — a bare `@.` attribute value on a lift-parsed `<each>` opener consumes the FOLLOWING attribute's name as a member access; `key=@. if=@.` emits an assignment that mutates every row
+<!-- @gap id=g-lift-each-bare-atdot-attr-swallows-the-next-attribute sev=HIGH status=open locus=compiler/src/ast-builder.js(parseLiftTag — the lift-path attribute split; a bare `@.` value is not terminated at the attribute boundary and runs on into the next attribute NAME) prov=rationale:S375-round-5-dispatch-measured-then-PA-confirmed-by-emission-identical-at-e94ce54b-and-origin-main-so-pre-existing -->
+> **⚑ PA-CONFIRMED BY EMISSION.** `<each in=@rows key=@. if=@.>` inside a `fn` compiles at **exit 0,
+> zero diagnostics**, and emits the key function
+> `(_scrml_each_item, _scrml_each_idx) => _scrml_each_item.if=_scrml_each_item` — a self-referential
+> property **assignment** run once per row per reconcile, whose value is the item, so keying is broken
+> AND every row object is mutated. `key=@. as z` emits `_scrml_each_item.as` and **silently loses the
+> alias**. `key=@. if=@show` fails loud (`E-CODEGEN-INVALID-LOGIC`).
+>
+> **Bounded precisely:** `key=@.` as the LAST attribute is correct, and `key=@.id if=@show` is
+> correct. It is specifically the BARE sigil with anything following it.
+>
+> Identical at `e94ce54b` and at `origin/main` `8731799d` — **pre-existing, not a round-4 regression.**
+> This is also the true mechanism behind what the S375 brief called "Case B — `if=@.` vanishes
+> entirely": the `if` attribute does not exist by the time codegen reads the opener, so the brief's
+> stated premise (`lowerEachExpr` yields empty) is not what happens.
+
+### g-lift-attr-split-truncates-unquoted-is-operator-runs — the lift attribute split truncates an unquoted §42 keyword-operator run at the first whitespace, leaving `is`/`some`/`not`/`given` behind as bareword attributes
+<!-- @gap id=g-lift-attr-split-truncates-unquoted-is-operator-runs sev=MED status=open locus=compiler/src/ast-builder.js(parseLiftTag — same attribute split as the bare-`@.` runaway above; the two are one locus) prov=rationale:S375-round-6-root-of-F2-measured-across-16-operator-forms-the-§42-keyword-family-is-the-entire-truncation-class -->
+> **⚑ PA-REPRODUCED.** `<each in=@rows as it if=@flag is some>` with `<flag> = 0` compiled at **exit 0**
+> and emitted `if (!(_scrml_cs_reactive_get("flag")))` — the `is some` silently dropped. Per §42.1.1
+> (S89, ABSOLUTE) `0` is a **DEFINED value**, so `@flag is some` is TRUE and the list should render; it
+> was hidden instead. Silent-wrong output, no diagnostic.
+>
+> **On `main` the truncation is UNFIXED.** A refusal was built on the parked `each-alias-r5` branch
+> (firing the structural path's existing `E-ATTR-UNQUOTED-OPERATOR`, no new code minted) but that
+> branch is frozen at `s375-r7-reviewed` and **never merged**, so nothing guards this today. The
+> durable fix is in `parseLiftTag` either way. Measured across 16 operator forms:
+> the §42 keyword family is the ENTIRE truncation class (every member's leftover run begins with `is`);
+> every punctuation operator survives intact. Quoted and parenthesized forms already lower correctly.
+
+### g-lift-each-opener-if-is-silently-dropped-list-renders-ungated — an opener `if=` on a LIFT-parsed `<each>` is discarded entirely; the list renders ungated at exit 0 with zero diagnostics
+<!-- @gap id=g-lift-each-opener-if-is-silently-dropped-list-renders-ungated sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode reads `in`/`of`/`key`/`as` and has no `if` branch at all — the lift-parsed origin is a generic markup node, so the structural path's gate never runs on it) prov=spec:§17.1.2.3-names-fail-OPEN-as-the-dangerous-direction-for-this-attribute -->
+> **⚑ PA-VERIFIED ON `main` `84d29b8d`.** `<each in=@rows key=@.id if=@show>` reached through any LIFT
+> carrier (a `fn` returning markup, a `${… lift …}` block, a ternary markup value, a markup-typed
+> derived cell) compiles at **exit 0** and emits **no guard whatsoever** — the author wrote a predicate
+> to withhold the list and the list renders anyway. §17.1.2.3 names exactly this direction as the
+> dangerous one for this attribute. The STRUCTURAL path gates correctly, so the behaviour depends on
+> WHERE the `<each>` sits.
+>
+> **⚑ A THREE-ROUND FIX ATTEMPT IS PARKED, NOT LANDED — read this before starting a fourth.** Rounds
+> 5-7 of the each-alias arc are frozen at tag `s375-r7-reviewed` (`ae42e120`, branch `each-alias-r5`),
+> reviewed four times, **never merged**. Each round closed real defects and introduced a new one of
+> ONE class: *the refusal is decided by predicates over the RAW attribute text, while the lowering it
+> guards (`lowerEachExpr` → `rewriteIterValueExpr` → `rewriteContextualSigil`) operates on a
+> NORMALIZED form.* Round 5 used a regex defeated by `@` and by string literals; round 6 replaced arm 1
+> with a parsed ident-set but left arm 3 testing raw text; the fourth review then found
+> `if="@ . on"` still emitting `if (!(null.on))` — a dead page — where `if="@.on"` is correctly
+> refused. **Spelling-dependent refusal, four times, one cause.**
+>
+> **The convergent direction (NOT yet ruled):** decide the refusal from the SAME artifact the lowering
+> consumes — normalize first and test that, or better, have the lowering itself report what it could
+> not vouch for, so there is one traversal and no parallel text predicate free to drift. That is a
+> design question about where this check belongs, which is why the arc was parked rather than
+> re-dispatched. See `docs/changes/each-alias-round5-2026-08-25/progress.md` on the frozen branch for
+> the full per-round record, the 24-shape parity matrix, and the measured migrations.
+
+### g-structural-each-opener-if-true-false-fires-e-scope-001 — the STRUCTURAL path refuses a literal `if=true` as an unresolvable identifier
+<!-- @gap id=g-structural-each-opener-if-true-false-fires-e-scope-001 sev=MED status=open locus=compiler/src/type-system.ts(visitAttr) prov=rationale:S375-round-6-parity-control-extended-to-acceptance-24-shapes-this-is-one-of-six-where-lift-is-correct-and-structural-is-not -->
+> `<each in=@rows as it key=it.id if=true>` exits 1 with `E-SCOPE-001` on the structural path. `true` is
+> a literal, not an identifier. The LIFT path accepts it and renders correctly — the two paths disagree
+> in the OVER-refusing direction.
+
+### g-structural-each-opener-if-parenthesized-atdot-silently-gates-the-whole-list-off — parenthesising or quoting an `@.` opener predicate escapes the refusal and renders zero rows, silently
+<!-- @gap id=g-structural-each-opener-if-parenthesized-atdot-silently-gates-the-whole-list-off sev=MED status=open locus=compiler/src/type-system.ts prov=rationale:S375-round-6-parity-control-the-refusal-is-spelling-dependent-which-is-the-Rule-7-shape-one-level-up -->
+> On the STRUCTURAL path `if=(@.on)` and `if="@.on"` compile **clean (exit 0, zero diagnostics)** and
+> render **0 rows** — a silent fail-CLOSED. The bare and member forms of the identical predicate
+> correctly fire `E-SYNTAX-064`, so **the refusal is spelling-dependent**: adding parentheses or quotes
+> escapes it. A guard whose trigger depends on how the author spaced the same expression is the Rule 7
+> shape one level up.
+
+### g-structural-each-opener-if-alias-callee-silently-gates-list-off — `if=it()` compiles clean on the structural path and renders zero rows
+<!-- @gap id=g-structural-each-opener-if-alias-callee-silently-gates-list-off sev=MED status=open locus=compiler/src/type-system.ts prov=rationale:S375-round-6-parity-control-companion-to-the-parenthesized-atdot-and-if-true-entries-one-locus-family -->
+> `<each in=@rows as it key=it.id if=it()>` on the STRUCTURAL path compiles clean and renders ZERO rows;
+> the LIFT path refuses it `E-SCOPE-001`. Companion to the two entries above — same locus, same class.
+
+### g-structural-each-opener-if-empty-value-silently-gates-list-off — `if=""` compiles clean on the structural path and renders zero rows
+<!-- @gap id=g-structural-each-opener-if-empty-value-silently-gates-list-off sev=MED status=open locus=compiler/src/type-system.ts+compiler/src/codegen/emit-html.ts prov=rationale:S375-round-6-parity-control-the-lift-path-refuses-this-as-E-EACH-OPENER-IF-EMPTY-and-structural-does-not -->
+> `if=""` on the STRUCTURAL path compiles clean and renders ZERO rows. The LIFT path refuses it with
+> `E-EACH-OPENER-IF-EMPTY` (minted S375 round 5) precisely because §17.1.2.3 names fail-OPEN as the
+> dangerous direction for this attribute — the structural path has the same hole and no code for it.
+
+### g-structural-each-opener-if-reports-compiler-defect-for-unanalyzable-predicate — the structural path blames the compiler for author errors the lift path now names precisely
+<!-- @gap id=g-structural-each-opener-if-reports-compiler-defect-for-unanalyzable-predicate sev=LOW status=open locus=compiler/src/codegen/emit-html.ts+compiler/src/type-system.ts prov=analogy:the-same-class-round-3-minted-E-EACH-AS-ALIAS-INVALID-to-close-on-the-lift-path -->
+> A bareword `if` and `if=(@.on is some)` on the STRUCTURAL path both surface as
+> `E-CODEGEN-INVALID-LOGIC` — *"This is a compiler defect (codegen produced malformed output). Please
+> report it."* — for **author errors**, which the lift path now names precisely. Same class that round 3
+> minted `E-EACH-AS-ALIAS-INVALID` to close on the other side.
+
+### g-test-suite-writes-stray-zero-file-into-repo-root — something in the test path writes a file literally named `0` into the repo root, which then defeats the pre-commit docs-only fast path
+<!-- @gap id=g-test-suite-writes-stray-zero-file-into-repo-root sev=LOW status=open locus=searched:scripts/,compiler/tests/,.github/(grepped for `grep -c … SPEC.md` and for bare `> 0` / `2> 0` redirects — no locus found) prov=rationale:S375-observed-three-times-each-time-immediately-after-a-full-suite-run-and-once-swept-into-a-commit-by-git-add--A -->
+> A file named `0` containing the single line `compiler/SPEC.md:0` — the output shape of `grep -c`
+> redirected to a file literally named `0` — appears in the repo root **after every full test-suite
+> run**. Observed three times at S375.
+>
+> **Two costs, neither obvious.** (1) It has no extension, so it defeats the pre-commit hook's
+> docs-only fast path (`grep -vE '(\.md$|\.txt$|^handOffs/)'`) and an all-documentation commit runs the
+> full unit+integration+conformance suite — roughly 20 minutes of wall clock at S375 alone. (2) It is
+> swept into commits by `git add -A`; it reached PR #709 before being caught and force-pushed out.
+>
+> **Locus NOT found** and recorded as such per the base §2 locus-or-recorded-search rule rather than
+> guessed. The `grep -c` output shape is the strongest lead: something redirects a count to `0` where
+> `2>&1` or `>&2` was meant.

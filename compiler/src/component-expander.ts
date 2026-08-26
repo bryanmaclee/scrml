@@ -1102,6 +1102,25 @@ function sourceNeedsLiveFallback(source: string): boolean {
   if (/<\s*(?:each|match)\b/.test(source)) {
     return true;
   }
+  // (4) `${render name(...)}` snippet-render call (g-render-snippet-slot-renders-empty,
+  //   S375-peter). Same divergence-guard class as (3): the NATIVE translator
+  //   discards a Render expr into an empty escape-hatch (translate-expr.js:296
+  //   `case ExprKind.Render: return makeEscapeHatch("Render", "")`), so the
+  //   downstream render-slot detection in `_injectChildrenWalk` never matches and
+  //   the render site renders EMPTY at exit 0. The LEGACY path rewrites
+  //   `render name(...)` → `__scrml_render_name__(...)` (expression-parser.ts:1745),
+  //   which parses as a real call node the detection consumes. Route a
+  //   render-bearing component body through the legacy path so the render slot
+  //   survives re-parse. (The native discard itself is a separate native-parser
+  //   fix — see the gap's translate-expr.js locus.)
+  // Match the CALL form `render name(` specifically (S375 review #3) — not a
+  // bare `render <word>`, which fires on incidental prose ("please render your
+  // account") or a comment and would needlessly route the body onto the legacy
+  // path (skipping the native-only props/call-ref AST upgrades). The render-slot
+  // rewrite target is a call, so the `(` is the load-bearing token.
+  if (/\brender\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(source)) {
+    return true;
+  }
   return false;
 }
 
@@ -2823,23 +2842,68 @@ function expandComponentNode(
     }
   }
 
-  // §16.6 Phase 1.6: Detect parametric snippet lambdas at call site
-  // For each caller attr with kind "expr", check if it matches a parametric snippet prop
+  // §16.6 Phase 1.6 (S375-peter) — capture a lambda fill on ANY snippet prop,
+  // ARITY-TOLERANT (`g-render-snippet-slot-renders-empty` + its non-parametric
+  // sibling + the arity-mismatch crash class).
+  //
+  // The render SITE for a snippet is fixed by the DECL, not the lambda's arity:
+  // a parametric `foo: snippet(v)` is rendered `${render foo(arg)}` (→
+  // parametricSnippets, renderParamMatch); a non-parametric `head: snippet` is
+  // rendered `${render head()}` (→ slottedGroups, renderMatch). So route the
+  // fill by the DECLARED parametric-ness, and admit BOTH `(param) =>` and
+  // zero-arg `() =>` lambdas:
+  //   • parametric prop + `(v) =>`  → substitute v→arg (the canonical form);
+  //   • parametric prop + `() =>`   → body as-is (a zero-arg lambda ignoring arg);
+  //   • non-parametric prop + `() =>` → body into slottedGroups;
+  //   • non-parametric prop + `(v) =>` → body into slottedGroups (v is unbound —
+  //       an author arity mismatch, rendered best-effort, NOT a compiler error).
+  // ⚑ Capturing EVERY lambda fill is load-bearing for correctness, not just
+  // completeness: the #713 `render`-body live-fallback guard rewrites
+  // `render NAME(...)` → `__scrml_render_NAME__(...)`. If a fill is left
+  // uncaptured, the render-slot detection never consumes that call and it
+  // survives into the client as an UNDEFINED-FUNCTION ReferenceError that kills
+  // the whole page at boot. Registering the fill (even an empty body → empty
+  // group) guarantees the call is consumed. (Whether a genuine arity mismatch
+  // should additionally be a compile diagnostic is a §16.6 semantics question,
+  // deferred; the codegen contract here is render-sensibly-and-never-crash.)
   const parametricSnippets = new Map<string, { paramName: string; body: string }>();
-  const lambdaRe = /^\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*=>\s*([\s\S]+)$/;
-
+  const lambdaRe = /^\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\)\s*=>\s*([\s\S]+)$/;
   if (def.snippetProps.size > 0) {
     for (const attr of callerAttrs) {
       if (!attr || !attr.name) continue;
       const snippetDecl = def.snippetProps.get(attr.name);
-      if (!snippetDecl || snippetDecl.snippetParamType === null) continue;
-
-      if (attr.value && (attr.value as Record<string, unknown>).kind === "expr") {
-        const raw = (attr.value as Record<string, unknown>).raw as string;
-        const match = raw.match(lambdaRe);
-        if (match) {
-          parametricSnippets.set(attr.name, { paramName: match[1], body: match[2].trim() });
-        }
+      if (!snippetDecl) continue;
+      if (slottedGroups.has(attr.name)) continue; // a slot= fill already won
+      if (!attr.value || (attr.value as Record<string, unknown>).kind !== "expr") continue;
+      const raw = (attr.value as Record<string, unknown>).raw as string;
+      const match = raw.match(lambdaRe);
+      if (!match) continue;
+      const paramName = match[1] ?? ""; // "" for a zero-arg lambda
+      const body = match[2].trim();
+      if (snippetDecl.snippetParamType !== null) {
+        // Parametric snippet — rendered `render foo(arg)` via renderParamMatch.
+        // Both `(v) =>` (substitute v→arg) and zero-arg `() =>` (body as-is,
+        // ignoring the arg — the "" paramName makes the substitution a no-op)
+        // are arity-compatible.
+        parametricSnippets.set(attr.name, { paramName, body });
+      } else {
+        // Non-parametric snippet — rendered `render head()` via renderMatch (no
+        // arg). A ZERO-ARG lambda's body renders. A `(param) =>` lambda is an
+        // arity MISMATCH — the render site passes no arg, so the param is
+        // unbound and a body that references it would `ReferenceError` at boot.
+        // Register an EMPTY group: the render call is still consumed (so the
+        // #713 live-fallback rewrite's `__scrml_render_NAME__(...)` never
+        // survives as an undefined-fn crash), and the mismatched body — which may
+        // read the unbound param — is NOT emitted, so it cannot crash either.
+        // (Whether an arity mismatch should be a compile diagnostic is a §16.6
+        // semantics question, deferred to bryan.)
+        const nodes = paramName
+          ? []
+          : parseSnippetBodyNodes(
+              body, filePath, counter, ceErrors,
+              node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            );
+        slottedGroups.set(attr.name, nodes);
       }
     }
   }
@@ -3027,7 +3091,7 @@ function expandComponentNode(
       slottedGroups, unslottedChildren,
       ceErrors, componentName, filePath,
       node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-      parametricSnippets,
+      parametricSnippets, counter,
     );
   }
 
@@ -3143,6 +3207,62 @@ function expandComponentNode(
  * If no explicit slot is found, caller children are appended to the end of
  * the component's root element children.
  */
+/**
+ * g-render-snippet-slot-renders-empty (default-pipeline parametric limb, S375-peter).
+ *
+ * A parametric snippet fill `foot={ (v) => <span>F${v}</span> }` rendered via
+ * `${render foot(arg)}` used to be substituted by pushing a
+ * `{ kind:"logic", body:[{ kind:"bare-expr", expr: <substituted-string> }] }`
+ * node. But codegen was migrated to read `exprNode` (Phase 4d Step 8 — the
+ * legacy `bare-expr.expr` string is no longer consumed), so that node emitted
+ * NOTHING: the render site rendered empty at exit 0, zero diagnostics.
+ *
+ * Fix: reparse the (param-substituted) lambda body into REAL AST nodes — markup
+ * bodies inject as markup at the render site (mirroring the `slot=` group path),
+ * plain-expression bodies inject as a `${expr}` interpolation — and `_deepCloneAst`
+ * them with the file-level `counter` so their ids don't collide with the host
+ * file's nodes (#273). Errors from the reparse fold into `ceErrors`.
+ */
+function parseSnippetBodyNodes(
+  body: string,
+  filePath: string,
+  counter: NodeCounter,
+  ceErrors?: CEError[],
+  span?: Span,
+): ASTNode[] {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+  // Distinguish a body that must INTERPOLATE (a string literal, a call, a
+  // member/binary expression — these render their VALUE) from one that renders
+  // AS-IS (markup, or bare text). A bare IDENTIFIER is deliberately treated as
+  // text, NOT interpolated: `foot={ (v) => Active }` wrapped as `${Active}`
+  // would `ReferenceError` on an undefined name and kill the whole page at boot
+  // (S375 review #1). Rendering it as literal text is the safe default — a body
+  // that genuinely means a variable read is written `${var}` or returns markup.
+  // (Span note: buildAST numbers the reparsed nodes against the synthetic
+  // `<program>` wrapper; any diagnostic on malformed snippet content folds into
+  // ceErrors with the render-site `child.span` — an accurate author position.)
+  const asExpr = parseExprToNode(trimmed, filePath, span?.start ?? 0);
+  const interpolate = asExpr && asExpr.kind !== "escape-hatch" && asExpr.kind !== "ident";
+  const wrapped = interpolate
+    ? `<program>\n\${${trimmed}}\n</program>\n`
+    : `<program>\n${trimmed}\n</program>\n`;
+  const bsOut = splitBlocks(filePath, wrapped);
+  const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
+  if (ceErrors) {
+    for (const e of tabOut.errors ?? []) {
+      if ((e.severity ?? "error") === "error") {
+        ceErrors.push(makeCEError(e.code, e.message, e.tabSpan ?? span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
+      }
+    }
+  }
+  const prog = (tabOut.ast?.nodes ?? []).find(
+    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "program",
+  ) as MarkupNode | undefined;
+  const kids = prog?.children ?? [];
+  return _deepCloneAst(kids, counter) as ASTNode[];
+}
+
 function injectChildren(
   expandedChildren: ASTNode[],
   callerChildren: ASTNode[],
@@ -3153,10 +3273,11 @@ function injectChildren(
   filePath?: string,
   nodeSpan?: Span,
   parametricSnippets?: Map<string, { paramName: string; body: string }>,
+  counter?: NodeCounter,
 ): ASTNode[] {
   // Shared state across recursive calls — slots found in nested markup still count
   const state = { slotFound: false, spreadFound: false };
-  return _injectChildrenWalk(expandedChildren, callerChildren, slottedGroups, unslottedChildren, ceErrors, componentName, filePath, nodeSpan, parametricSnippets, state);
+  return _injectChildrenWalk(expandedChildren, callerChildren, slottedGroups, unslottedChildren, ceErrors, componentName, filePath, nodeSpan, parametricSnippets, state, counter);
 }
 
 function _injectChildrenWalk(
@@ -3170,6 +3291,7 @@ function _injectChildrenWalk(
   nodeSpan?: Span,
   parametricSnippets?: Map<string, { paramName: string; body: string }>,
   state: { slotFound: boolean; spreadFound: boolean } = { slotFound: false, spreadFound: false },
+  counter?: NodeCounter,
 ): ASTNode[] {
   const result: ASTNode[] = [];
 
@@ -3298,14 +3420,22 @@ function _injectChildrenWalk(
           // Function-form .replace() so any `$` chars in argExpr aren't interpreted
           // as `$&` / `$N` backreferences (S100 `01eeda9` bug class — argExpr is
           // user-authored scrml expression text).
-          const paramRe = new RegExp(`\\b${snippet.paramName}\\b`, "g");
-          const substituted = snippet.body.replace(paramRe, () => renderParamMatch.argExpr);
-          // Emit as a bare-expr logic node containing the substituted markup
-          result.push({
-            kind: "logic",
-            body: [{ kind: "bare-expr", expr: substituted, span: child.span }],
-            span: child.span,
-          } as unknown as ASTNode);
+          // A zero-arg lambda on a parametric prop has an empty paramName — skip
+          // substitution (an empty-name regex `\b\b` would match everywhere and
+          // corrupt the body); the body renders as-is, ignoring the render arg.
+          const substituted = snippet.paramName
+            ? snippet.body.replace(new RegExp(`\\b${snippet.paramName}\\b`, "g"), () => renderParamMatch.argExpr)
+            : snippet.body;
+          // g-render-snippet-slot-renders-empty (S375): reparse the substituted
+          // body into REAL AST nodes (fresh ids) so codegen renders it. The old
+          // hand-built `{ bare-expr, expr }` node used the dead legacy `expr:`
+          // field (codegen reads `exprNode` since Phase 4d Step 8) → empty render.
+          // Never silently drop the render node if `counter` is somehow absent
+          // (S375 review #2): fall back to a high-seeded local counter so the
+          // reparsed ids can't collide with the host file's, rather than emitting
+          // nothing — which would reintroduce the exact silent-empty class this fixes.
+          const idCounter = counter ?? { next: 900_000_000 };
+          result.push(...parseSnippetBodyNodes(substituted, filePath ?? "", idCounter, ceErrors, child.span));
         }
         state.slotFound = true;
         continue;
@@ -3318,7 +3448,7 @@ function _injectChildrenWalk(
         (child as MarkupNode).children!, callerChildren,
         slottedGroups, unslottedChildren,
         ceErrors, componentName, filePath, nodeSpan,
-        parametricSnippets, state,
+        parametricSnippets, state, counter,
       );
       result.push({ ...child, children: recursed } as ASTNode);
     } else {

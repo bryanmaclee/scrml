@@ -2028,6 +2028,49 @@ function renderTemplateAttrToJs(
     return;
   }
 
+  // ---- (1b) show= — per-item reactive visibility toggle (§17.2) ------------
+  // g-each-peritem-show-emits-literal-attribute (S375, dog-food): without this
+  // arm, `show=` fell through to the generic value-attribute path below and
+  // emitted `setAttribute("show", String(cond))` — a no-op HTML attribute — so
+  // the element rendered UNCONDITIONALLY (silent-wrong: the condition had zero
+  // effect). Mirror the top-level `show=` wiring (`el.style.display = cond ? ""
+  // : "none"`) inline on `elVar`, resolving the condition against the iteration
+  // item exactly as the sibling `class:` arm above does.
+  //
+  // REACTIVE (wrapped in maybeWrapEachPerItemEffect), UNLIKE a nested per-row
+  // `if=` (which is create-time-frozen — W-IF-IN-EACH — because a reactive
+  // structural swap would leave `_scrml_group` stale). `show=` only toggles CSS
+  // `display`; it never adds or removes the element, so it has none of that
+  // group-staleness barrier and re-evaluates on in-place field mutation, matching
+  // the Tier-0 top-level `show=` and the sibling `class:` binding.
+  if (aName === "show") {
+    let cond: string;
+    if (valKind === "variable-ref") {
+      cond = lowerEachExpr(String(val.name ?? ""), iterVarName);
+    } else if (valKind === "call-ref") {
+      // Route the reconstructed call through `lowerEachExpr` (not the bare
+      // `rewriteIterValueExpr` the sibling `class:` call-ref arm uses): it does
+      // the iter-scope rewrite FIRST and only escalates to the structured emitter
+      // when the text carries a §42 operator (`is some`/`not`/…), so a scrml
+      // operator inside a call ARG — `show=isReady(t.status is some)` — lowers
+      // correctly instead of reaching the client JS raw as E-CODEGEN-INVALID-LOGIC
+      // (the documented hole in the class: arm at ~:2005). Byte-identical for an
+      // operator-free call.
+      cond = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
+    } else if (valKind === "expr") {
+      cond = lowerEachExpr(String(val.raw ?? ""), iterVarName);
+    } else if (valKind === "string-literal") {
+      cond = JSON.stringify(String(val.value ?? ""));
+    } else {
+      cond = "false";
+    }
+    if (!cond) cond = "false";
+    for (const _l of maybeWrapEachPerItemEffect(
+      [`${indent}${elVar}.style.display = (${cond}) ? "" : "none";`], iterVarName, indent,
+    )) lines.push(_l);
+    return;
+  }
+
   // ---- (2) event handlers — inline addEventListener -----------------------
   const ev = eventNameForAttr(aName);
   if (ev !== null) {
