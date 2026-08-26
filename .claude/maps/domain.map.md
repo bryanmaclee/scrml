@@ -1,31 +1,47 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# ⚑ **S372-bryan: `compiler/SPEC.md` IS `--name-only` EMPTY FOR THE SECOND CONSECUTIVE WINDOW
-# (37,539 lines, unchanged), so every §-anchored claim below still ANCHORS — but TWO in-place
-# corrections and ONE new section landed, because the CODE moved under three §-surfaces.**
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
+# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
+# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
+# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
 #
-# **CORRECTION 1 (§17.1.2.3) — THIS MAP CARRIED A SPEC TABLE ROW THAT IS FALSE AT THIS WATERMARK,
-# AND SO DOES THE SPEC.** The row *"markup `if=` on a NON-ROOT element inside a row template — emits
-# nothing, fails CLOSED (never renders)"* is measured-S302 and was overtaken by #416/GH #409.
-# **PA-REPRODUCED HERE BY COMPILING:** it emits a real create-time append gate
-# (`if (_scrml_each_item.ok) _scrml_frag_3.appendChild(_scrml_el_4);`) plus a `W-IF-IN-EACH`
-# warning. Corrected in the table below with the executed evidence; **`compiler/SPEC.md:11686` still
-# carries the stale row** and is flagged in `non-compliance.report.md`.
+# ⚑ **S376: `compiler/SPEC.md` MOVED BY EXACTLY ONE LINE (37,539 -> 37,540) AND THAT ONE LINE IS A
+# LANGUAGE RULING, NOT AN EDIT.** The whole diff is a single new §34 catalog row at `SPEC.md:19722`
+# — `E-STATE-BLOCK-STATEMENT-FORM` — which makes NORMATIVE what §34's
+# `E-WRITE-NOT-IN-LOGIC-CONTEXT` and `W-STATE-BLOCK-BARE-WRITE-DECL` rows had only implied:
+# **a `<db>` / `<state>` / `<schema>` STATE-block body is MARKUP context, so the §40.8
+# `default-logic` auto-lift does not reach it, and logic written there is now REFUSED rather than
+# silently shipped as page text.** Its own section below. (`SPEC-INDEX.md` also moved 110 lines —
+# that is #709's boot-trim ROTATION of amendment narrative out of the index preamble; no §-anchor,
+# line range or rule changed, so every §-anchored claim in this map still anchors.)
 #
-# **CORRECTION 2 (§17.2) — `show=` ON A STRUCTURAL ELEMENT IS NOT MERELY UNWIRED, IT IS NEVER
-# CAPTURED.** `grep -rn showCond compiler/src/` returns **ZERO hits** at this watermark: only
-# `ifCond` is stamped onto an `<each>`/`<match>`/`<engine>` node (`ast-builder.js:15892`, `:16891`,
-# `:17932`, `:18082`), so there is no field for a `show=` gate to read. That is stronger than
-# "silently dropped" and it tells you where the fix starts.
+# **THE RULING BEHIND IT, because the code is downstream of it and a reader will ask:** S375
+# ruling 1, limb (b) — *logic at a state-block locus is REFUSED, not linted* — with the S376 decision
+# to allocate a FRESH code rather than fire the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`. Per S368
+# (logic at a markup locus is REFUSED, not linted) this is conformance restoration against a ruling
+# already made, not new policy.
 #
-# **NEW SECTION — the §55 synth-surface COLLAPSE MATRIX (#704).** Four spellings, four different
-# lowerings, two of them deliberately DECLINED pending an operator ruling. PA-MEASURED by compiling
-# at this watermark, not read off the commit message.
+# **CARRIED FROM S372 AND RE-VERIFIED BY EXECUTION AT THIS WATERMARK — both still hold:**
+#   · **CORRECTION 1 (§17.1.2.3)** — a markup `if=` on a NON-ROOT element inside a row template does
+#     NOT "emit nothing and fail closed"; it emits a real create-time append gate plus `W-IF-IN-EACH`.
+#     **`compiler/SPEC.md:11686` STILL carries the stale row** — re-checked here, still flagged in
+#     `non-compliance.report.md`.
+#   · **CORRECTION 2 (§17.2)** — `show=` on a STRUCTURAL element is never CAPTURED, not merely
+#     unwired. **RE-GREPPED at this watermark: `grep -rn showCond compiler/src/` returns ZERO hits**,
+#     and only `ifCond` is stamped (`ast-builder.js:15892`, `:16891`, `:17932`, `:18082` — all four
+#     line refs re-verified individually and all four still land on the `ifRaw`/`ifCond` spread).
+#     ⚠ **DO NOT CONFUSE THAT WITH THIS WINDOW'S #710**, which wired `show=` on an ordinary element
+#     INSIDE an `<each>` row template. Those are different loci: #710 did not give a STRUCTURAL
+#     `<each show=…>` a field to read, and `showCond` still does not exist.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
-# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
+# **THREE CLIENT-CODEGEN LOWERINGS ALSO LANDED AND EACH CLOSES A SILENT-WRONG-OUTPUT CLASS** —
+# `show=` inside `<each>` (#710), parametric/arity-tolerant snippet fills (#713/#714), and a
+# word-char-glued `${…}` in a for-lift reconcile child (#716). Sections below.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED for the un-touched §-surfaces. The
+# line-3 stamp advanced `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376);
+# the §-surfaces this window's diff touched are RE-WALKED and marked as such.)
 # **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
 # S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
@@ -1125,7 +1141,7 @@ codegen fell through to `inner = ""` and skipped it. **But a later `${nm}` still
 **WHOLE list** with it. Exit 0. No diagnostic. An empty list and a green compile.
 
 **The ruling (bryan, S339) is FAIL-CLOSED: reject the form loudly rather than ship a broken render.**
-`emit-each.ts:1416` fires and returns. **WIDENED at #515/#516 (S340-peter, bryan #508-review F2+F3):**
+**`emit-each.ts:1361`** fires and returns (⚑ **CORRECTED S376 from `:1416` — re-grepped; this file is unchanged below line 2028 this window, so the citation was already stale at the prior watermark**). **WIDENED at #515/#516 (S340-peter, bryan #508-review F2+F3):**
 the guard scans EVERY body position (`body.find`), not just `body[0]` — a decl in a non-first
 statement (`${ @.id  let nm = @.name }`) slipped the old guard and re-produced the same silent
 miscompile one statement over — and keys on the full name-binding decl-kind SET
@@ -1579,6 +1595,183 @@ written FOUR ways — shorthand/bare × mixed-return-call/member-expr — all as
 0), and `shorthand-option-label-preserved` (**the counter-gate**: it exists specifically to fail if
 anyone re-widens the refusal past RCDATA). Plus `browser/g-each-shorthand-rcdata-parent.browser.test.js`.
 
+## §4.18.1 / §40.8 / §34 — a STATE-BLOCK body is MARKUP context, and logic there is now REFUSED (NEW section, S376, #718)
+
+**The rule, in one sentence: `on mount { … }` is LOGIC in a `<program>` / `<page>` / `<channel>` body
+and TEXT in a `<db>` / `<state>` / `<schema>` body, and until #718 nothing said so.**
+
+**Where the asymmetry comes from.** §4.18.1 defines two body modes — free-text (plain markup) and
+code-default (engine state-child, `match` block-arm, `:`-shorthand). `<program>` / `<page>` /
+`<channel>` bodies are NEITHER: they are `default-logic`, "a distinct THIRD body-mode owned by §40.8"
+(the S111 R3 reconciliation, 2026-05-20 — grep `SPEC.md` for "S111 amendment"). **A state block is
+none of the three.** Its body is ordinary markup context, so §40.8's auto-lift — the mechanism that
+turns a body-top `on mount { … }` into logic — does not reach it. §34 already said this twice, in the
+`E-WRITE-NOT-IN-LOGIC-CONTEXT` row (*"`<db>` / `<state>` STATE-block bodies are NOT
+default-logic-mode loci"*) and the `W-STATE-BLOCK-BARE-WRITE-DECL` row (*"A state-block body is
+markup context (SPEC §4)"*). **What it did not say is what HAPPENS to the statement.**
+
+**What happened to it: nothing, loudly.** The statement stayed in markup context, shipped into
+`<body>` as literal page text, and never ran. Exit 0, zero diagnostics. **This is the
+"my app doesn't load" failure mode, not a dropped assignment** — the page displays its own source and
+the author's initialization silently never happened.
+
+**As of #718 it is `E-STATE-BLOCK-STATEMENT-FORM`, severity error, CLI exit 1** (§34 row at
+`SPEC.md:19722`; emitter `compiler/src/lint-e-state-block-statement-form.js` at `api.js` Stage 2.5c).
+PA-VERIFIED at this watermark by compiling the landed reproducer.
+
+**⚑ THE MESSAGE HAD TO BE MADE TRUE AT ALL THREE LOCI, AND ITS FIRST CUT WAS NOT.** It asserted flatly
+that the statement "ships into the DOM as literal page text". MEASURED by compiling and counting
+occurrences in the emitted HTML: `<db>` body -> **1**, deprecated `< state>` body -> **1**,
+`<schema>` body -> **0**. **A `<schema>` body is consumed as DDL, so the statement is DISCARDED rather
+than rendered.** The refusal is still correct at that locus — it never runs either way — but the
+stated REASON was false there. Corrected in WORDING, not by carving `schema` out of the name set,
+because removing the locus would restore the silence the diagnostic exists to end.
+
+**⚠ THE COMPLEMENT AT THIS LOCUS IS STILL LEGAL, ON EVIDENCE.** A bare call (`loadDashboard()`) in a
+state-block body remains accepted — the S368 bare-call ruling explicitly rejected "diagnose every
+non-declaration run", and there is a MEASURED false-positive class: a TYPESTATE transition
+declaration (`validate() => < Validated> { }`) sits inside a `< Draft>` block that the block splitter
+classifies `type:"state"`, so a bare-call gate at this locus would reject **4 live conformance cases**
+under `conformance/cases/type-state-codes/`. Out of scope by evidence, not by omission.
+
+**⚠ AND `type:"state"` IS NOT A SEMANTIC CLASSIFICATION — this bites any pass that walks BS output.**
+It is what the block splitter calls **ANY whitespace-form opener `< Name …>`**. MEASURED over the
+2,353 corpus sources at the time of the fix: **123 `type:"state"` nodes, and only 44 are named `db`.**
+The other 79 are `engine` (×31), typestate transition declarations (`Draft`, `Validated`,
+`Submission`, `Todo`), whitespace-form COMPONENT definitions (`taskItem`, `siteHeader`, `sidebar`,
+`statusBadge`, …) and plain HTML (`p`, `div`). A pass that treats `type:"state"` as "a state block"
+claims all 123. **Name-guard both arms.** Related: invariant 70's `<each>` two-parse-origin split —
+same species, different node.
+
+**⚠ THE DEPRECATED WHITESPACE OPENER IS THE ONE THE CORPUS ACTUALLY USED.** The canonical no-space
+`<db>` is BS-classified `type:"markup"` with `name:"db"`; the deprecated `< db>` is classified
+`type:"state"`. **The single live corpus member of this defect
+(`samples/htmx-debate-dashboard.scrml:143`) used the DEPRECATED form**, so a markup-only gate would
+have missed it entirely. Migration measured at exactly one file across 2,194 `.scrml`; the fix wraps
+it as `${ on mount { loadDashboard() } }` (verified against the landed diff).
+
+**TWO OPEN HOLES, PA-REPRODUCED BY COMPILING AT THIS WATERMARK:** a `<div>` one level inside a `<db>`
+body re-opens the defect at exit 0 with the statement in the HTML
+(`g-state-block-statement-form-misses-a-wrapped-statement`, MED); and any unpaired `/`+`*` in prose —
+a glob, a path, a spaceless division — opens a comment region and DISARMS the gate for the rest of
+the block, also exit 0 with the statement shipped
+(`g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener`, LOW). **A glob disarms
+a fatal gate.** error.map.md · structure.map.md · `docs/known-gaps.md`.
+
+## §17.2 — `show=` INSIDE an `<each>` is a REACTIVE per-item toggle; a nested `if=` is CREATE-TIME FROZEN. The asymmetry is the rule (NEW section, S376, #710)
+
+**Before #710, `show=` on an element inside an `<each>` row template fell through to the generic
+value-attribute path and emitted `setAttribute("show", String(cond))` — a no-op HTML attribute.** The
+element rendered UNCONDITIONALLY; the condition had zero effect; exit 0, no diagnostic. A dog-food
+find (`g-each-peritem-show-emits-literal-attribute`).
+
+**Now:** `emit-each.ts`'s `renderTemplateAttrToJs` carries an explicit `show=` arm (arm **1b**, added
+directly after the `class:` arm), emitting `elVar.style.display = (cond) ? "" : "none"` and wrapping
+it in `maybeWrapEachPerItemEffect`. **PA-VERIFIED BY COMPILING at this watermark** — a
+`<span show=t.done>` inside `<each in=@tasks key=@.id as t>` emits:
+
+    _scrml_mount_track(_scrml_effect(() => {
+      let t = _scrml_resolve_item(_mount, _scrml_each_key_1);
+      if (t === null) return;
+      _scrml_el_4.style.display = (t.done) ? "" : "none";
+    }));
+
+and **zero `setAttribute("show"`** in the client bundle. It re-resolves the item BY KEY inside the
+effect, so it survives reconcile.
+
+**⚑ THE RULE THIS SECTION EXISTS FOR — `show=` IS REACTIVE HERE AND `if=` IS NOT, AND THAT IS
+DELIBERATE, NOT AN OVERSIGHT.** A nested per-row `if=` inside `<each>` is create-time-frozen
+(`W-IF-IN-EACH`, §17.1, #416) because a reactive STRUCTURAL swap would leave `_scrml_group` stale — the
+element is added or removed, and the group bookkeeping cannot follow. **`show=` only toggles CSS
+`display`; it never adds or removes the element, so it has none of that barrier** and re-evaluates on
+in-place field mutation, matching the Tier-0 top-level `show=` and the sibling `class:` binding.
+**Before you make a per-item binding reactive, ask whether it changes the DOM SHAPE.**
+
+**⚠ AND THE `call-ref` ARM ROUTES DIFFERENTLY FROM ITS `class:` SIBLING, ON PURPOSE.** The `show=`
+call-ref branch reconstructs the call and pushes it through `lowerEachExpr`, not the bare
+`rewriteIterValueExpr` the `class:` call-ref arm uses. `lowerEachExpr` does the iter-scope rewrite
+FIRST and escalates to the structured emitter only when the text carries a §42 operator — so
+`show=isReady(t.status is some)` lowers correctly instead of reaching the client JS raw as
+`E-CODEGEN-INVALID-LOGIC`. **That hole is still OPEN in the `class:` arm** (documented in-source at
+~`emit-each.ts:2005`); the two arms are byte-identical for an operator-free call.
+
+**⚠ DO NOT CONFUSE THIS WITH `show=` ON A STRUCTURAL ELEMENT.** `<each show=…>` / `<match show=…>` /
+`<engine show=…>` are still never CAPTURED — `grep -rn showCond compiler/src/` returns ZERO hits at
+this watermark, and only `ifCond` is stamped onto those nodes. #710 changed the row-template locus,
+not the structural one. See the §17.2 SSR-hide section below and §55 above.
+
+## §16.6 — a snippet fill is routed by the DECL's parametric-ness, ARITY-TOLERANTLY; and a `render`-bearing body forces the legacy path (NEW section, S376, #713/#714)
+
+**Two silent-empty classes and one crash class, all in `component-expander.ts`, all closed together.**
+
+**(1) The render SITE is fixed by the DECLARATION, not by the fill's arity.** A parametric
+`foo: snippet(v)` renders as `${render foo(arg)}` (via `parametricSnippets` / `renderParamMatch`); a
+non-parametric `head: snippet` renders as `${render head()}` (via `slottedGroups` / `renderMatch`).
+Phase 1.6 now routes every lambda fill by the DECLARED parametric-ness and admits BOTH `(param) =>`
+and zero-arg `() =>`:
+
+| decl | fill | outcome |
+|---|---|---|
+| parametric | `(v) =>` | substitute `v` -> arg (the canonical form) |
+| parametric | `() =>` | body as-is; the empty `paramName` makes substitution a no-op |
+| non-parametric | `() =>` | body into `slottedGroups` |
+| non-parametric | `(v) =>` | **arity mismatch — EMPTY group**, body not emitted (it may read an unbound param) |
+
+**⚑ CAPTURING EVERY LAMBDA FILL IS LOAD-BEARING FOR CORRECTNESS, NOT COMPLETENESS.** The #713
+live-fallback guard rewrites `render NAME(...)` -> `__scrml_render_NAME__(...)`. **If a fill is left
+uncaptured, the render-slot detection never consumes that call and it survives into the client as an
+UNDEFINED-FUNCTION `ReferenceError` that kills the whole page at boot.** Registering the fill — even
+as an empty group — guarantees the call is consumed. So the arity-mismatch row above is not
+politeness; an unregistered mismatch is a dead page. **Whether a genuine arity mismatch should ALSO
+be a compile diagnostic is a §16.6 semantics question, DEFERRED to the operator — the codegen
+contract here is render-sensibly-and-never-crash.**
+
+**(2) A parametric fill used to substitute into a node codegen no longer reads.** The old path pushed
+`{ kind:"logic", body:[{ kind:"bare-expr", expr: <substituted-string> }] }`, but codegen migrated to
+`exprNode` (Phase 4d Step 8) and the legacy `bare-expr.expr` STRING is no longer consumed — **so the
+node emitted NOTHING and the render site rendered empty at exit 0.** `parseSnippetBodyNodes` now
+reparses the substituted body into REAL AST nodes and `_deepCloneAst`s them with the file-level
+`counter` so ids cannot collide with the host file's (#273).
+**⚠ A bare IDENTIFIER body is treated as TEXT, not interpolated** — `foot={ (v) => Active }` wrapped
+as `${Active}` would `ReferenceError` on an undefined name and kill the page at boot. A body that
+genuinely means a variable read is written `${var}` or returns markup.
+**⚠ And `counter` is defensively defaulted to a high-seeded local (`{ next: 900_000_000 }`) rather
+than dropping the render node** — emitting nothing would reintroduce the exact silent-empty class the
+fix closes.
+
+**(3) `sourceNeedsLiveFallback` gained a RENDER-BEARING guard, and it matches the CALL form.** The
+NATIVE translator discards a `Render` expr into an empty escape hatch
+(`translate-expr.js:296`, `case ExprKind.Render: return makeEscapeHatch("Render", "")`), so
+`_injectChildrenWalk`'s render-slot detection never matches and the site renders EMPTY at exit 0. The
+LEGACY path rewrites `render name(...)` -> `__scrml_render_name__(...)`
+(`expression-parser.ts:1745`), which parses as a real call node the detection consumes — so a
+render-bearing component body is routed onto the legacy path. **The guard is
+`/\brender\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(/` — the `(` is load-bearing.** A bare `render <word>`
+would fire on incidental prose ("please render your account") or a comment and needlessly route the
+body off the native path, skipping the native-only props/call-ref AST upgrades. **The native discard
+itself is a separate, still-open native-parser fix.**
+
+## for-lift reconcile — a WORD-CHAR-GLUED `${…}` was shipping as literal text (NEW section, S376, #716)
+
+**`emit-lift.js`'s reconcile path used to skip interpolation lowering entirely.** The guard was
+`if (_hasInterp && !currentLiftReconcileCtx())`, on the theory that "the each path owns its own
+interp". **It does not own the GLUED case, and that was the bug.** The AST only splits an
+interpolation preceded by a NON-word character — `n=${…}` / `Val: ${…}` split upstream into a sibling
+bare-expr child, which the reconcile branch already lowered. A LITERAL PREFIX glued directly to the
+interp (`P${it.x}`) stays as ONE text child, fell through to the raw `JSON.stringify(text)` append,
+and **shipped a literal `${it.x}` to the DOM.**
+
+Now the reconcile context gets its own branch: split, then lower each `${…}` LIVE-KEYED — stable text
+node + `maybeWrapLiftPerItemEffect` — byte-identical to the sibling logic-block bare-expr reconcile
+branch (Bug 64, S159). No double-emission, because the each path never owned this child.
+
+**⚠ SCOPE, STATED IN-SOURCE AND WORTH CARRYING: a SEPARATE, PRE-EXISTING UPSTREAM BUG IS NOT FIXED
+HERE.** The AST strips the whitespace ADJACENT to a non-word-split interp — `Val ${x}` -> `"Val7"`,
+`Saved ${@cell}` -> `"Savedhello"`. **Different root (parser, not codegen), broader surface (top-level
+too), its own reds** in `g-emit-lift-markup-text-interp.browser.test.js`. Tracked as
+`g-ast-markup-text-interp-adjacent-space-dropped`. **Do not read #716 as closing the interp-in-lift
+class; it closed the glued limb of it.**
+
 ## §17.2 `show=` — the SSR-hide was REVERTED, and the reason generalises (#464, S328, operator-ruled)
 
 **There is NO SSR `display:none` injection for `show=` in this compiler.** #450 added one; **#464
@@ -2029,7 +2222,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main #section-55 #synth-surface #collapse-matrix #ruling-gated #rollup-map-truthiness #declaration-form-premise #section-17-1-2-3 #fail-open #show-cond-absent #structural-if-row-template #spec-stale-table
+#scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main #section-55 #synth-surface #collapse-matrix #ruling-gated #rollup-map-truthiness #declaration-form-premise #section-17-1-2-3 #fail-open #show-cond-absent #structural-if-row-template #spec-stale-table #e-state-block-statement-form #state-block-body-is-markup #§4-18-1 #§40-8-default-logic #schema-body-is-ddl #type-state-is-not-semantic #show-in-each-reactive #if-in-each-frozen #§16-6-snippet-arity #parse-snippet-body-nodes #render-bearing-live-fallback #glued-interp-lift-reconcile
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,15 +1,24 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED.**
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
+# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
+# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
+# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
+# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
+# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
+# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED.**
 # Re-measured at THIS watermark: `grep -cE '^[+-].*(process\.env|Bun\.env)'` over the WHOLE
 # window's `compiler/ scripts/ .github/ package.json` diff returns **0**, and `.env*` /
 # `bunfig.toml` / `tsconfig*` / `package.json` / `bun.lock` are all `--name-only` **EMPTY**.
-# No env var, no feature flag, no config key moved.
+# No env var, no feature flag, no config key moved. The window's one NEW module
+# (`compiler/src/lint-e-state-block-statement-form.js`) reads no environment and takes no flag —
+# its only configuration surface is the `DIAGNOSTIC_CODE` / `STATE_BLOCK_NAMES` constants, which
+# are source, not config.
 #
 # content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
-# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
+# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.**
 # Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the
 # source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
@@ -107,7 +116,7 @@ A map stamp is now exactly as old as the last PA wrap.**
 No secret VALUE appears anywhere in this map set.
 
 ## Tags
-#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56
+#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56 #zero-env-diff
 
 ## Links
 - [primary.map.md](./primary.map.md)

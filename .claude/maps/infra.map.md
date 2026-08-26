@@ -1,14 +1,20 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED.**
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
+# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
+# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
+# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
+# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
+# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
+# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED.**
 # Re-measured at THIS watermark: `.github/` is `--name-only` **EMPTY** over the window — no
 # workflow, job, secret, runner or required check moved. No `Dockerfile`, no `docker-compose.*`,
 # no `*.tf` and no `k8s/` path exists in the repo at this watermark either.
 #
 # content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
-# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
+# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **CURRENCY RE-VERIFIED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676).** Ancestry
 # CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source
 # diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
@@ -75,7 +81,7 @@ the App-token approach was replaced by the fine-grained `MAPS_PAT` at `b5ec120b`
 Do not go looking for an App install.
 
 ## Tags
-#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows
+#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows #zero-infra-diff
 
 ## Links
 - [primary.map.md](./primary.map.md)

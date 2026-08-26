@@ -2,6 +2,53 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S376 — 2026-08-26 (bryan · ASUS-Vivobook) — the instrument that underwrote a ratified rule was printing the opposite of the truth
+
+Booted onto a **stranded S375 wrap** and landed it, took the two owed ruling-1 decisions, then built
+ruling 1 through three adversarial rounds. The session's durable output is not the diagnostic — it is
+that **two instruments this project relies on were reporting confidently false things**, and that the
+PA's own probes failed the same way eight times in one day.
+
+**The framing:** ruling 1(A) *reversed* an S375 ratification on evidence the reserved §34 row supplies
+about itself, and `ctx.ts` — the probe `pa-base v2.16` §2 names for every maintained-document budget —
+was inflating its own output totals 2x and printing a mechanistically-worded conclusion that was the
+opposite of what its data said. The PA had relayed that conclusion to the operator twice.
+
+- **The stranded S375 wrap LANDED** — `#711` gaps ledger, `#712` wrap. The delta-log auto-merge had
+  silently produced DUPLICATE `[1788]`-`[1798]` across both sessions' appends; rebuilt as main's file
+  plus this side's twelve renumbered `[1799]`-`[1810]` (the unpublished side moves, per S372).
+- **`#718` ruling 1 — `E-STATE-BLOCK-STATEMENT-FORM`.** `on mount { … }` in a `<db>` body compiled at
+  exit 0, shipped as literal page text, and never ran. Three adversarial rounds, **a real defect in
+  each**: a block-comment false positive at Error; `isStateBlock` name-guarding one arm but not the
+  other (79 of 123 `type:"state"` nodes were not state blocks — no corpus file fired only by luck);
+  and three false statements in the artifact's own prose. §34 row lands with the impl; the measured
+  1-file migration done and the diagnostic's own suggested fix verified by execution before use.
+- **`#708` `ctx.ts` reviewed and merged.** Eight findings, all reproduced, all fixed in one round.
+  The HIGH: Claude Code writes one assistant message as N JSONL records each carrying an identical
+  `message.usage`, so output/thinking/turn totals were 2x. `residentOutput` was computed correctly, so
+  the tool compared a right number to a doubled one and concluded half the session's output had been
+  dropped. Truth: the residual is `lastOutput`, and subtracting it residuals to **exactly 0 on 56 of
+  77 transcripts**.
+- **Review floor 5 → 0**, with the two that could actually fail given real probes — `#709` on rotation
+  safety (38 of 38 removed lines carried) and `#711` on locus resolution (12 of 12 path tokens resolve).
+- **Peter's two routed S377 findings absorbed**, and the load-bearing one **reframed**: bare markup in
+  an `if` arm drops silently, but `{ "Yes" }` works and `{ lift <p>Yes</p> }` works — the discriminator
+  is the branch's VALUE TYPE, which makes it the markup instance of the already-ratified S371 limb (b),
+  not the new fork it was routed as.
+- **Thread board 3 ERROR → 0**, and one repaired probe was hiding a **FAIL**: the boot-trim done-probe
+  measured `wc -c` of `master-list.md` against a `< 90000` threshold the rotation never targeted, while
+  `pa-base v2.16` says in terms to budget against the probe's number and never `wc -c`.
+- **Memory consolidation, operator-ratified** — six entries into one (`the-probe-answered-a-different-question`),
+  after measuring that memory is **1.4% of a boot** and therefore not the bloat. 23/23 claims verified
+  carried before deletion.
+- **Two contract amendments:** `bun --cwd <path> run <script>` silently no-ops at exit 0; and a
+  cwd-blind `pkill -f` is a **cross-worktree destructive act** — the leak class is not only writes, and
+  unlike a leaked write it leaves no trace on the agent side.
+
+**Suite:** pre-commit gate green throughout (29,250 pass / 0 fail on the gated subset). Cloud `gate`
+green on both merges. One `startup_failure` on `#708` required a re-run — `gh pr checks` renders a
+CANCELLED run as `fail`, which is the wrong-referent class arriving in the wrap itself.
+
 ## S377 — 2026-08-25 (peter · P-Tech1 Windows) — one dog-food fix, two grammar findings routed
 
 A dog-food session: build and RUN fresh apps in happy-dom, fix what lands in the codegen lane, route the
