@@ -6524,6 +6524,62 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-25 — S375 (bryan): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its defect class named
+
+The session's subject was the PA system, not the compiler. It opened with a request for an instrument
+to measure context occupancy — and the instrument then falsified the PA's own reassurance about the
+trajectory. Four carried operator rulings were taken in one turn with every premise re-derived rather
+than relayed. A three-round compiler arc was deliberately parked rather than pushed to a fourth,
+because its defects turned out to be one class rather than four bugs.
+
+- **`#708` (open, held) `scripts/ctx.ts` — the PA can measure its own context occupancy.** Reads the
+  session transcript's assistant `usage`; the load-bearing detail is that occupancy is
+  `input + cache_creation + cache_read`, since the cache split is a BILLING distinction and reading
+  `input_tokens` alone reports ~2. Validated against the operator's own UI (computed 430,367 = 43.0%
+  against his stated 43%). Bite proven both ways — a bogus `--session` exits 2 rather than answering
+  about a different transcript, a real bug in the first cut caught by writing the bite proof. **Held
+  unreviewed on purpose**: its numbers now underwrite a ratified contract rule.
+- **The boot-cost trajectory, measured across all 43 boots on record.** Earlier-half mean 317,195 →
+  later-half 363,266 (**+15%**); S375's 430,367 is the highest ever; peaks now routinely **88-96%**;
+  working headroom (88% floor − boot%) has gone 53 → **45 points**. Five reference documents are
+  **65%** of a boot; the harness baseline is 13%. Boot is **34-40% regardless of session shape**.
+- **`pa-base v2.16` — the rotation budget (ratified).** *A maintained-tier document SHALL have a size
+  budget; the overflow ROTATES into the write-once tier.* The insight is that this is a **growth
+  process, not an untidy state** — every maintained doc is append-biased, so boot cost is a function
+  of session count and a one-time cleanup merely defers the same position. The mechanism already
+  existed and had been applied exactly once (the hand-off rotates; nothing else did). Carries
+  **"measure before removing"**. First application was pa-base itself: 128,189 → 108,525 chars.
+- **`#709` — boot-trim Tier 1.** `master-list.md` 223,733 → **130,208** (§0 banner region −92.2%);
+  `SPEC-INDEX.md` 89,919 → **72,931** (Summary column −32.2%). Nothing normative moved. The dispatch
+  corrected the brief four times, including that a probe claiming 8 orphaned sessions was measuring
+  session IDs rather than blocks — the real number was 2. Rode along: the SPEC-INDEX §17 row gained
+  the §17.1.2 pointers it had never carried, and the review floor drained **2 → 0** with #707 recorded
+  `verdict=clean` **reviewed by execution**.
+- **`#711` — the each-alias ledger.** 10 gap entries. The 2 §34 rows were **deferred, not landed**:
+  the cloud §34.0 row-provenance gate failed correctly because they named symbols living only on the
+  parked branch — a §34 code lands WITH its impl, and a provenance note pointing at a function nobody
+  can find reads as a verified fire-site. Row text preserved on the parked branch. Includes a
+  self-correction: one entry had been authored from a branch measurement and filed as truth about
+  main, caught by re-verifying every entry against main before merge.
+- **The four carried operator rulings, taken in one turn.** The `<db>`/state-block locus refuses
+  rather than lints (conformance restoration against the S368 bare-call ruling, not new policy); the
+  bare-call migration converts its 2 reproducer files **into conformance cases**; bare control flow at
+  a default-logic body-top gets **both** halves — the §34 row asserting the auto-lift covers that
+  locus is false, and the diagnostic extends to the control-flow statement class; `TILDE_TOKEN_RE` is
+  deferred because the asymmetry does not exist until the bare-call gate lands.
+- **Ruling 1 built and held** — `E-STATE-BLOCK-STATEMENT-FORM`, landed as a new stage-2.5c module with
+  zero `ast-builder.js` edits after the dispatch found the locus was inside the brief's own
+  MUST-NOT-WRITE list. Governing-sentence gate outcome 1; locus **traced, not searched**; complement
+  refused **on measured evidence**; migration measured from the compiler at **1 file** and the STOP
+  honoured. Two operator decisions owed before it lands.
+- **The each-alias arc PARKED** at tag `s375-r7-reviewed` after 3 rounds and **4 adversarial passes**
+  (~1.8M subagent tokens, nothing on main). Every round closed real defects and every pass found a new
+  one — because they were **one class**: the refusal is decided by predicates over the RAW attribute
+  text while the lowering it guards operates on a NORMALIZED form. Round 6's assertion, added to close
+  a fail-open, became a **build-killer** on passes it never enumerated. The convergent direction is a
+  design question about where the check belongs and is deliberately left unruled.
+
+
 ### 2026-08-24 — S372 (peter): a HIGH drained the hard way — parent worker-handler multi-statement fix, and a dog-food cry-wolf routed
 
 The drain-mode pivot: get real HIGHs off the board with verified quality rather than dog-food more (which only grows the list). One HIGH landed after a three-round adversarial review that twice caught real bugs; a dog-food find and three review-surfaced follow-ons were filed/routed turnkey.
