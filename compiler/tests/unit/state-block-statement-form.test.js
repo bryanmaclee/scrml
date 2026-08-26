@@ -377,3 +377,100 @@ describe("E-STATE-BLOCK-STATEMENT-FORM — the reported position", () => {
     expect(d[0].column).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ROUND 3 — KNOWN-OPEN PINS. These assert what the compiler DOES today, and
+// what it does today is WRONG. They exist so nobody reads silence as coverage.
+//
+// A passing test normally means "this behaviour is correct". These two mean the
+// opposite: "this behaviour is a recorded hole, and if you close it, this test
+// is the thing you delete." If one of them starts failing, that is very likely
+// GOOD NEWS — check whether the hole was closed deliberately before restoring it.
+//
+// Neither is fixed here on purpose. Widening the scan domain changes which loci
+// a FATAL gate reaches, which is a scope decision for the operator, not a
+// judgement call for whoever is next in this file.
+// ---------------------------------------------------------------------------
+
+describe("E-STATE-BLOCK-STATEMENT-FORM — KNOWN OPEN (pinned, not endorsed)", () => {
+  test("KNOWN OPEN: a lifecycle statement nested one element deep is MISSED", () => {
+    // Verified by compiling and reading the emitted HTML: this ships
+    // `on mount { loadDashboard() }` into `<body>` verbatim and the client
+    // bundle only DECLARES the function — the hook never runs. Byte-for-byte
+    // the defect this gate exists to close, one nesting level deeper.
+    //
+    // The scan walks only the state block's DIRECT text children, matching the
+    // sibling `scanStateBlockBareWriteDecls` node domain so the two scanners
+    // cannot drift. That is a defensible first landing, NOT coverage.
+    const src =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+      `<db src="sqlite:./app.db" tables="items">\n` +
+      `  <div>\non mount { loadDashboard() }\n  </div>\n</db>\n` +
+      `function loadDashboard() { }\n<div>hello</div>\n</program>\n`;
+    expect(stmtFormErrors(compile(src)).length).toBe(0); // <- WRONG, and recorded
+  });
+
+  test("KNOWN OPEN: an unpaired comment opener in PROSE disarms the rest of the block", () => {
+    // No string literal and no code — a GLOB does it. `src/*` opens a block
+    // comment that never closes, so every following line in this state block is
+    // masked out and the statement below is missed. It ships into the HTML.
+    //
+    // The fail-OPEN direction is deliberate and correct for a refuse gate (a
+    // false positive rejects a legal file, which is the defect this module was
+    // written to close). The BREADTH is what is pinned here: it is globs, paths
+    // and spaceless division, not exotic source.
+    const src =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+      `<db src="sqlite:./app.db" tables="items">\n` +
+      `  note about src/* paths\non mount { loadDashboard() }\n</db>\n` +
+      `function loadDashboard() { }\n<div>hello</div>\n</program>\n`;
+    expect(stmtFormErrors(compile(src)).length).toBe(0); // <- WRONG, and recorded
+
+    // A URL is NOT the same shape and must not be conflated with it: `//` is a
+    // LINE comment, so it disarms only the remainder of its own line. The
+    // statement on the NEXT line still fires.
+    const withUrl =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n</schema>\n` +
+      `<db src="sqlite:./app.db" tables="items">\n` +
+      `  docs at https://example.com/guide\n  on mount { loadDashboard() }\n</db>\n` +
+      `function loadDashboard() { }\n<div>hello</div>\n</program>\n`;
+    expect(stmtFormErrors(compile(withUrl)).length).toBe(1);
+  });
+});
+
+describe("E-STATE-BLOCK-STATEMENT-FORM — the message is true at every locus it fires on", () => {
+  test("`<schema>` fires, and the message does not claim the statement is rendered", () => {
+    // `schema` is in STATE_BLOCK_NAMES, so this is a live locus. Measured by
+    // compiling a marker: a `<db>` body's text reaches the HTML (1 occurrence),
+    // a `<schema>` body's does NOT (0) — it is consumed as DDL. The refusal is
+    // still right (it never runs either way); what must not happen is a FATAL
+    // gate asserting a reason that is false at one of its own loci.
+    const src =
+      `<program db="./app.db">\n` +
+      `<schema>\n  items { id: integer primary key, name: text }\n` +
+      `  on mount { loadDashboard() }\n</schema>\n` +
+      `function loadDashboard() { }\n<div>hello</div>\n</program>\n`;
+    const d = stmtFormErrors(compile(src));
+    expect(d.length).toBe(1);
+    // Names the locus it actually fired on...
+    expect(d[0].message).toContain("<schema>");
+    // ...and does NOT make the unqualified render claim that is false here.
+    expect(d[0].message).not.toContain(
+      "does NOT apply here and the statement would ship into the DOM",
+    );
+    // The claim that IS true at every locus.
+    expect(d[0].message).toContain("never run");
+  });
+
+  test("the `<db>` locus still gets the page-text explanation", () => {
+    // The render limb is TRUE at `<db>` (measured: 1 occurrence in the HTML), so
+    // correcting the wording must not have flattened it away.
+    const d = stmtFormErrors(compile(CANON_MOUNT));
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("ships into the DOM as literal page text");
+    expect(d[0].message).toContain("consumed as DDL");
+  });
+});

@@ -405,3 +405,152 @@ recognised as a state-child by the engine machinery at all — fixture 8 draws
 canonical `<Idle rule=.Active>` compiles clean. That is a separate pre-existing question about the
 deprecated opener's reach into §51, entirely outside this change; noting it because this dispatch
 is what surfaced it.
+
+---
+
+# ROUND 3 — three places the artifact STATED something untrue
+
+Base `f0c805af`. **No logic change**: the only non-comment edit in the module is the diagnostic
+message string. The scan domain was deliberately NOT widened — that changes which loci a fatal gate
+reaches and is a scope decision for the operator. All three findings re-reproduced by execution
+first.
+
+## 1 — the DOMAIN RATIONALE was false (MEDIUM). REPRODUCED.
+
+The header read *"nested deeper markup is prose context and is governed by its own element's body
+mode."* It is governed nowhere.
+
+```scrml
+<db src="sqlite:./app.db" tables="items">
+  <div>
+on mount { loadDashboard() }
+  </div>
+</db>
+```
+→ **exit 0, zero diagnostics.** Emitted HTML:
+
+```html
+  <div>
+on mount { loadDashboard() }
+  </div>
+```
+
+and the client bundle contains exactly one `loadDashboard` reference — `function
+_scrml_loadDashboard_1() {`, the DECLARATION. Never invoked, so the hook never runs. Byte-for-byte
+the defect this gate exists to close, one nesting level deeper.
+
+Replaced with the honest rationale: the domain matches `scanStateBlockBareWriteDecls` so the two
+scanners over the same locus cannot drift — a defensible **first landing**, not coverage — and the
+nested case is a **KNOWN OPEN residual**, now recorded in the header and pinned by a test.
+
+## 2 — the MESSAGE PREMISE was false at `<schema>` (LOW-MEDIUM). REPRODUCED.
+
+`schema` is in `STATE_BLOCK_NAMES`, so it is a live locus, and the message asserted flatly that the
+statement *"would ship into the DOM as literal page text."*
+
+Isolated the property from the gate by using a non-lifecycle marker (so the gate does not fire and
+HTML is actually emitted), then counted occurrences:
+
+| locus | marker in emitted HTML |
+|---|---|
+| `<db>` body | **1** |
+| deprecated `< state>` body | **1** |
+| `<schema>` body | **0** |
+
+A `<schema>` body is consumed as DDL — the statement is discarded, not rendered.
+
+**Chose to correct the WORDING, not carve `schema` out**, and the reasoning is recorded in the
+module: the refusal at `<schema>` is sound on its own terms — a lifecycle block there is silently
+dropped, which is precisely the silence this diagnostic exists to end — so removing the locus would
+restore that silence to buy an easier sentence. The message now leads with the claim that is true
+everywhere (it never runs), splits the two outcomes explicitly, and names `<schema>`, which it had
+omitted entirely.
+
+⚠ Grounding the `<state>` limb needed care: a canonical `<state>` opener draws `E-MARKUP-001` and
+exits 1, so no HTML exists to inspect. The deprecated `< state>` form compiles, and that is what the
+measurement above used. Without that step the corrected sentence would have carried a NEW unverified
+claim — the exact thing this round is fixing.
+
+## 3 — the FAIL-OPEN RESIDUAL was framed far too narrowly (LOW). REPRODUCED.
+
+The header called it *"an opener inside a string literal."* A state-block body is PROSE; no string
+literal is needed and no code either.
+
+```scrml
+<db src="sqlite:./app.db" tables="items">
+  note about src/* paths
+on mount { loadDashboard() }
+</db>
+```
+→ **exit 0, zero diagnostics**, statement present in the HTML. **A glob disarmed a fatal gate.**
+
+Trigger set MEASURED against the state machine rather than guessed:
+
+```
+glob             leaves-block-OPEN=true    "note about src/* paths"
+recursive glob   leaves-block-OPEN=true    "matches **/*.js in the tree"
+bare path+star   leaves-block-OPEN=true    "see assets/*"
+division         leaves-block-OPEN=true    "ratio is a/b not a/*b"
+url              leaves-block-OPEN=false   "docs at https://example.com/guide"
+balanced comment leaves-block-OPEN=false
+plain prose      leaves-block-OPEN=false
+```
+
+The URL row is worth keeping distinct: `//` is a LINE comment, so it disarms only the remainder of
+its own line, never the block. Conflating the two would overstate the hole. The **direction** is
+unchanged and still correct for a refuse gate; only the stated **breadth** is corrected.
+
+## VERIFY — ten prior cases byte-identical, three new
+
+| case | exit | fires | | case | exit | fires |
+|---|---|---|---|---|---|---|
+| 1 `on mount` bare `<db>` | 1 | 1 | | 8 engine `< Idle>` | 1 | 0 |
+| 2 deprecated `< db>` | 1 | 1 | | 9 engine `<Idle>` | 0 | 0 |
+| 3 `on dismount` | 1 | 1 | | 10 same-line | 1 | 1 |
+| 4 block comment | 0 | 0 | | R1 nested `<div>` | 0 | 0 **KNOWN OPEN** |
+| 5 `//` comment | 0 | 0 | | R2 `<schema>` locus | 1 | 1 |
+| 6 prose | 0 | 0 | | R3 glob disarms | 0 | 0 **KNOWN OPEN** |
+| 7 legal `<program>` | 0 | 0 | | | | |
+
+Tests **30 -> 34**. Two PIN known-open holes — they assert what the compiler does today and today it
+is WRONG, so each carries an explicit note that a failure is probably GOOD NEWS and that closing the
+hole means deleting the test. Two assert message accuracy and both FAIL against the round-2 module.
+
+## A self-inflicted defect this round
+
+The first draft of the residual note embedded `/^\s*/` and a literal recursive glob inside JSDoc.
+Both contain a comment terminator, so the comment ended early and the module stopped parsing. Caught
+by an explicit `import()` parse check rather than by the tests, then swept for the whole class
+(`grep` for every non-line-leading terminator) rather than spot-fixed. Worth recording: writing
+*about* comment syntax inside a comment is its own hazard, and this module now does a lot of it.
+
+## ROUND 3 — full suite
+
+- Original pre-dispatch baseline: 30598 pass / 53 fail / 216 skip / 2 todo.
+- After round 1: 30606 · after round 2: 30612 · **after round 3: 30616 pass / 53 fail / 216 skip /
+  2 todo.**
+- `diff` of the sorted, timing-stripped `(fail)` NAMES, original baseline vs now: **EMPTY.**
+
++18 across three rounds is exactly the 8 + 6 + 4 tests added. The 53 pre-existing failures are
+byte-identical in name to the baseline throughout — no new failures, none accidentally fixed, no
+swap.
+
+## ROUND 3 — status: COMPLETE
+
+Stopping rule honoured: the only non-comment change in the module this round is the diagnostic
+message string. Verified mechanically — filtering the diff to non-comment, non-blank lines returns
+the message literal and nothing else. **No control flow touched, no domain widened.**
+
+### Open items carried forward (none of them fixed here, all recorded)
+
+1. **Nested-markup domain hole** — a lifecycle statement one element deep inside a state block is
+   missed and ships as page text. Pinned by test. **Widening the domain is the operator's scope
+   call**, since it changes which loci a fatal gate reaches.
+2. **Unpaired comment opener in prose** — a glob/path/spaceless-division disarms the gate for the
+   rest of the block. Pinned by test. Fail-open direction is deliberate; only the framing was wrong.
+3. **`scanStateBlockBareWriteDecls`** (`ast-builder.js:1923`) has no comment handling and false-fires
+   `W-STATE-BLOCK-BARE-WRITE-DECL` on a commented-out `@count = 0`. Out of write scope all three
+   rounds.
+4. **Whitespace-form engine state-child** `< Idle rule=.Active>` is not recognised as a state-child
+   by the engine machinery at all (draws `E-ENGINE-STATE-CHILD-MISSING` where the canonical spelling
+   compiles clean). Separate pre-existing §51 question; surfaced by this dispatch.

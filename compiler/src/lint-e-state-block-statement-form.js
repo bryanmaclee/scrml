@@ -209,19 +209,37 @@ function isStateBlock(node) {
  * `E-WRITE-NOT-IN-LOGIC-CONTEXT` and the corpus differential duly reported that
  * code as newly firing on `samples/htmx-debate-dashboard.scrml` — a phantom.
  * Cite the SPEC SECTION (`§34`, `§4.18.1`), never the code token.
+ *
+ * ⚠ THE MESSAGE MUST BE TRUE AT ALL THREE LOCI IN `STATE_BLOCK_NAMES`, AND IT
+ * WAS NOT. It asserted flatly that the statement "would ship into the DOM as
+ * literal page text". MEASURED by compiling and counting occurrences in the
+ * emitted HTML: `<db>` body -> 1, deprecated `< state>` body -> 1,
+ * `<schema>` body -> **0**. A `<schema>` body is consumed as DDL, so the
+ * statement is discarded rather than rendered — the refusal is still correct
+ * (it never runs either way) but the stated REASON was false at that locus.
+ *
+ * This is the same species as the round-2 `isStateBlock` defect and the domain
+ * rationale below: a fatal gate asserting something untrue about one of its own
+ * loci. Corrected in WORDING rather than by carving `schema` out of the name
+ * set, because the refusal at `<schema>` is sound on its own terms — a lifecycle
+ * block there is silently dropped, which is exactly the silence this diagnostic
+ * exists to end. Removing the locus would restore that silence to buy an easier
+ * sentence.
  */
 function buildMessage(keyword) {
   return (
     `a lifecycle block \`on ${keyword} { ... }\` written directly in a ` +
-    `state-block (\`<db>\` / \`<state>\`) body is not logic and will never run. ` +
-    `A state-block body is MARKUP context, not a logic locus — \`<db>\` / ` +
-    `\`<state>\` bodies are not \`default-logic\` loci (§34, §4.18.1), so the ` +
-    `\`on ${keyword}\` auto-lift ` +
-    `that applies in a \`<program>\` / \`<page>\` / \`<channel>\` body (§40.8) ` +
-    `does NOT apply here and the statement would ship into the DOM as literal ` +
-    `page text. Move the lifecycle block OUT of the state-block body to the ` +
-    `\`<program>\` / \`<page>\` body, where \`on ${keyword} { ... }\` is lifted ` +
-    `to logic; or wrap it in an explicit \`\${ ... }\` logic block.`
+    `state-block (\`<db>\` / \`<state>\` / \`<schema>\`) body is not logic and ` +
+    `will never run. A state-block body is not a logic locus — those bodies are ` +
+    `not \`default-logic\` loci (§34, §4.18.1), so the \`on ${keyword}\` ` +
+    `auto-lift that applies in a \`<program>\` / \`<page>\` / \`<channel>\` ` +
+    `body (§40.8) does NOT apply here. In a \`<db>\` / \`<state>\` body the ` +
+    `statement is left in MARKUP context and ships into the DOM as literal page ` +
+    `text; a \`<schema>\` body is consumed as DDL, so it is discarded instead. ` +
+    `Either way it never runs. Move the lifecycle block OUT of the state-block ` +
+    `body to the \`<program>\` / \`<page>\` body, where ` +
+    `\`on ${keyword} { ... }\` is lifted to logic; or wrap it in an explicit ` +
+    `\`\${ ... }\` logic block.`
   );
 }
 
@@ -261,7 +279,7 @@ const BLOCK_COMMENT_CLOSE = "*" + "/";
  * Spaces rather than deletion so `masked.length === line.length` and the span
  * arithmetic in the caller stays byte-exact against the ORIGINAL source.
  *
- * ── WHAT IS DELIBERATELY NOT MODELLED: STRING LITERALS ──────────────────────
+ * ── WHAT IS DELIBERATELY NOT MODELLED, AND WHAT THAT REALLY COSTS ───────────
  *
  * A JS tokenizer would also track `'` / `"` / backtick so a comment opener
  * inside a string is not an opener. This scan does NOT, and that is deliberate:
@@ -269,11 +287,31 @@ const BLOCK_COMMENT_CLOSE = "*" + "/";
  * prose is full of apostrophes (`don't`, `it's`). A string-literal tracker over
  * prose would open a "string" at every contraction and never close it, turning
  * free text into an unbounded suppression region — a defect in the same family
- * as the one this fixes. The residual cost is an opener inside a string literal
- * reading as a comment, which SUPPRESSES the diagnostic. That direction is the
- * safe one for a REFUSE gate: a false negative restores the pre-lint status quo
- * (silent page text), while a false positive REJECTS A LEGAL FILE — which is
- * precisely the defect being closed here.
+ * as the one this fixes.
+ *
+ * ⚠ DO NOT READ THE RESIDUAL AS "SOMEONE WROTE A STRING LITERAL". That framing
+ * was in this comment and it badly understates the trigger: ANY unpaired `/`+`*`
+ * pair in ordinary prose opens a comment and disarms the gate for the REST OF
+ * THE STATE BLOCK. No string literal is required, and no code either.
+ * PA-REPRODUCED and re-reproduced here — a `<db>` body reading
+ * `note about src/* paths` followed by `on mount { loadDashboard() }` compiles
+ * at **exit 0 with zero diagnostics** and ships the statement into the HTML.
+ * A glob disarmed a fatal gate.
+ *
+ * The realistic triggers, MEASURED against this machine rather than guessed:
+ *   OPENS a comment  — a glob (`src/*`), a recursive glob (a double-star
+ *                      followed by `/` then `*.js`), a bare path-with-star
+ *                      (`assets/*`), a spaceless division (`a/*b`)
+ *   does NOT         — a URL (`https://…`): its `//` is a LINE comment, so it
+ *                      disarms only the remainder of THAT line, never the block
+ *   does NOT         — a balanced comment, plain prose, or regex-looking text
+ *                      whose slashes never form an opener
+ *
+ * The DIRECTION is still right and is not up for revision here: a false negative
+ * restores the pre-lint status quo (silent page text), while a false positive
+ * REJECTS A LEGAL FILE — precisely the defect this module was written to close.
+ * What is recorded is the true BREADTH, so the next reader sizes the hole from
+ * globs and paths rather than from a string literal nobody would write here.
  *
  * @param {string} line — one source line, the `\n` already stripped
  * @param {{ inBlockComment: boolean }} state — carried across lines; MUTATED
@@ -326,9 +364,26 @@ function maskCommentRegions(line, state) {
 /**
  * Scan a state block's DIRECT text children for a lifecycle statement form.
  *
- * Only direct text children are scanned — the same domain as the sibling
- * `scanStateBlockBareWriteDecls`. Nested deeper markup is prose context and is
- * governed by its own element's body mode.
+ * Only direct text children are scanned. The reason is CONSISTENCY WITH THE
+ * SIBLING, not coverage: this is byte-for-byte the node domain
+ * `scanStateBlockBareWriteDecls` (`ast-builder.js`) walks, so the two scanners
+ * over the same locus cannot drift apart on which nodes they see.
+ *
+ * ⚠ THIS DOMAIN IS A KNOWN OPEN HOLE, AND THE PREVIOUS RATIONALE FOR IT WAS
+ * FALSE. It used to read "nested deeper markup is prose context and is governed
+ * by its own element's body mode." It is not governed anywhere.
+ * PA-REPRODUCED and re-reproduced here by compiling and reading the emitted
+ * HTML: a `<div>` inside a `<db>` body whose text is `on mount { … }` compiles
+ * at **exit 0 with zero diagnostics**, the statement ships into `<body>`
+ * verbatim (1 occurrence in the HTML), and the client bundle only DECLARES the
+ * function — it is never invoked, so the hook never runs. That is byte-for-byte
+ * the defect this gate exists to close, one nesting level deeper.
+ *
+ * Scoping the first landing to the sibling's domain is defensible. Claiming the
+ * nested case is handled elsewhere is not. Widening the domain is a SCOPE
+ * decision for the operator (it changes which loci a FATAL gate reaches), so it
+ * is recorded here and in a pinning test rather than taken unilaterally — but
+ * nobody should read the silence as coverage.
  *
  * Block-comment state is carried ACROSS the direct text children of ONE state
  * block, and reset at each state block. So an opener the block splitter
