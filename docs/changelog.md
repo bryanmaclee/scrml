@@ -2,6 +2,26 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S377 — 2026-08-25 (peter · P-Tech1 Windows) — one dog-food fix, two grammar findings routed
+
+A dog-food session: build and RUN fresh apps in happy-dom, fix what lands in the codegen lane, route the
+grammar-shaped findings turnkey. Hunted three fresh apps plus six probe batches; the codegen held up
+across `<match>` arm-swap, nested for-lifts, reconcile keying under removal/reorder, attribute
+interpolation, `bind:value`, and expression/method-call interpolation. One real codegen bug landed; two
+findings that resolve to a grammar decision were characterized and delivered to bryan's inbox.
+
+- **#716 — a word-char-glued `${…}` in a `for…lift` item now interpolates instead of shipping raw.**
+  Inside a reconciled per-item list, a text run whose `${…}` was glued directly to a preceding word char
+  (`P${it.x}`, `x${it.x}`) shipped the literal source `${it.x}` to the DOM; non-word-adjacent forms
+  (`n=${…}`) split upstream and worked, masking the hole in every sample. The reconcile-ctx text branch
+  now splits and lowers each glued `${…}` live-keyed, identical to the sibling bare-expr reconcile path.
+  The adversarial review confirmed the fix correct and well-scoped, and caught an overclaim — the fix was
+  narrowed to the word-glued case and a separate upstream whitespace residual filed.
+- **Routed to bryan (grammar/semantics):** bare markup in a `for`/`if`/`else` arm renders nothing with no
+  diagnostic while a `<match>` arm renders it (intersects the live `E-CONTROL-FLOW-IN-MARKUP` ruling arc);
+  and a space adjacent to a `${…}` interpolation is dropped in markup text (`Saved ${@cell}` →
+  "Savedhello") — a tokenizer whitespace-model call with four pre-existing red tests.
+
 ## S375 — 2026-08-25 (peter · P-Tech1 Windows) — four dog-food fixes, and every one had a bug the adversarial review caught
 
 A dog-food session: build and RUN fresh apps in happy-dom, find the silent-wrong render bugs that
