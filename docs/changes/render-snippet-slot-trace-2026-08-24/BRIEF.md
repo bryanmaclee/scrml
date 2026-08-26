@@ -3,7 +3,7 @@
 change-id: render-snippet-slot-trace-2026-08-24
 dispatched: S372-bryan, 2026-08-24, base origin/main @ b0abcbc6
 gap: g-render-snippet-slot-renders-empty (HIGH)
-DONE-PROBE: this brief produces a REPORT naming the decision site; it lands no compiler change
+DONE-PROBE: test -f docs/changes/render-snippet-slot-trace-2026-08-24/TRACE.md
 
 ## ⚑ THIS IS A TRACE DISPATCH. DO NOT FIX ANYTHING.
 

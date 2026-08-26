@@ -118,3 +118,29 @@ for (const [label, cond] of shapes) {
   if (r.flatKeys.length) console.log(`     flat keys exist: ${r.flatKeys.join(", ")}`);
   console.log("");
 }
+
+// ── EXIT CONTRACT (added S376-bryan) ───────────────────────────────────────────
+// Added because the thread board's DONE-PROBE must read a VERDICT, and this script
+// printed its discriminator while always exiting 0 — the pa-base §8 "probe that
+// reports less than it measured" shape. Exit 0 iff the control interpolation wired
+// (boot survived); exit 1 otherwise.
+{
+  const verdict = run(
+    [
+      "<program>",
+      "<flag> = true",
+      "<signup>",
+      '    <name req length(>=2)> = <input type="text"/>',
+      "</>",
+      "",
+      "<span if=@signup.name.touched>GATED</span>",
+      '<p id="ctl">${@flag}</p>',
+      "",
+      "</program>",
+      "",
+    ].join("\n"),
+  );
+  const ok = String(verdict.control).includes("true");
+  console.log(`EXIT CONTRACT: control=${verdict.control} → ${ok ? "PASS (exit 0)" : "FAIL (exit 1)"}`);
+  process.exit(ok ? 0 : 1);
+}
