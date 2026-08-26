@@ -1,18 +1,37 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED —
-# THIRD consecutive window.** Re-measured at THIS watermark, not carried:
-# `git diff --name-only b9e97f1b..8b2e4053 -- compiler/src/codegen/emit-server.ts
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
+# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
+# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
+# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
+# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
+# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
+# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED —
+# FOURTH consecutive window.** Re-measured at THIS watermark, not carried:
+# `git diff --name-only 8b2e4053..fc6df72e -- compiler/src/codegen/emit-server.ts
 # compiler/src/protect-analyzer.ts compiler/src/auth-graph.ts
-# compiler/src/commands/select-request-onion.js compiler/runtime/stdlib/ lsp/` is **EMPTY**. Seven
-# `compiler/src` files moved in the window (`ast-builder.js`, `component-expander.ts`, and five under
-# `codegen/`) and **not one is on the auth surface**; the window is entirely §55 `if=` toggle
-# lowering, §18 match arms, and §4.12.4 when-handler bodies.
+# compiler/src/commands/select-request-onion.js compiler/runtime/ lsp/` is **EMPTY**. FIVE
+# `compiler/src` files moved in the window and **not one is on the auth surface**: one NEW pre-AST
+# diagnostic module (`lint-e-state-block-statement-form.js`), its `api.js` Stage-2.5c wiring, and
+# three client-codegen lowerings (`codegen/emit-each.ts`, `codegen/emit-lift.js`,
+# `component-expander.ts`). No route, guard, session, protect-floor or token-lifecycle byte moved.
+#
+# ⚑ **BUT ONE ROW IN THIS MAP WAS WRONG AND IS CORRECTED — a zero-diff surface is not a correct map.**
+# The request-pipeline table's "HOW it wraps dispatch" row named
+# **`compiler/src/codegen/emit-server.ts:~454-521`** as the emitter of `_scrml_dispatch` /
+# `_scrml_onion_dispatch`. **Neither symbol exists anywhere under `compiler/src/codegen/`** —
+# `grep -rn '_scrml_onion_dispatch' compiler/src/codegen/` returns nothing. Both are emitted by the
+# HOST (`commands/build.js:514` and `:521`), and `emit-server.ts:~454-521` is §20.5/§52
+# `@currentUser`-query-gate code with nothing to do with the onion. The row had the right NUMBER
+# against the wrong FILE. **Wrong since #654 (`b74f7363`) — carried through every window since**,
+# and never caught because the auth surface kept measuring zero-diff and the map kept being
+# stamp-advanced rather than read. Split into rows 2 and 2b below. structure.map.md carried the
+# identical error and is corrected there.
 #
 # content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
-# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
+# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.
 # The prior pass RE-WALKED this map after a ten-window streak and found the request pipeline had
 # moved hard; that content is one window old and carries in full.** Ancestry CHECKED (invariant 48);
@@ -194,7 +213,8 @@ unused session infra; a false NEGATIVE re-opens a 500.**
 | Step | File | What it decides |
 |---|---|---|
 | 1. WHICH onion | `compiler/src/commands/select-request-onion.js` | `selectRequestOnion(serverModules)` → `{ onion, error }`. Zero candidates → `null` (no onion, byte-identical pre-onion output). One → mount it. **More than one → `E-MW-007`.** |
-| 2. HOW it wraps dispatch | `compiler/src/codegen/emit-server.ts:~454-521` | Splits the pipeline remainder into `_scrml_dispatch(req, server)`, wraps it in `_scrml_onion_dispatch(req, server)`. Emits `export const _scrml_mw_pipeline = _scrml_mw_wrap` + `export const _scrml_mw_declared_in = "<source>.scrml"`. |
+| 2. WHAT the onion IS (codegen) | `compiler/src/codegen/emit-server.ts` — gate `_scrml_hasMW` **`:2934`**, wrapper `function _scrml_mw_wrap(downstream)` **`:3093`**, exports `_scrml_mw_pipeline` **`:3230`** and `_scrml_mw_declared_in` **`:3247`** | Emits the onion and its mount CONTRACT. Nothing more. |
+| 2b. HOW dispatch is split and wrapped (host, **NOT codegen**) | `compiler/src/commands/build.js:511-525` — `async function _scrml_dispatch(req, server)` **`:514`**, `function _scrml_onion_dispatch(req, server)` **`:521`** (`return _scrml_mw_pipeline_0(downstream)(req)`) | ⚑ **CORRECTED S376 — THIS ROW USED TO SAY `emit-server.ts:~454-521` AND THAT IS A WRONG FILE, NOT A DRIFTED LINE.** `grep -rn '_scrml_onion_dispatch\|_scrml_dispatch' compiler/src/codegen/` returns **NOTHING**; both symbols are emitted by the HOST. `emit-server.ts:~454-521` is §20.5/§52 `@currentUser`-query-gate code, unrelated to the onion. Wrong since #654 (`b74f7363`) — every window since. structure.map.md carried the identical error and is corrected there too. |
 | 3. WHO mounts it (prod) | `compiler/src/commands/build.js:22, 284-302, 343-347` | Scans emitted modules for `_scrml_mw_pipeline`; imports the winner under the ALIAS `_scrml_mw_pipeline_0` (every hosting module exports the same NAME). Throws with `err.scrmlCode` / `err.scrmlSources` on conflict. |
 | 4. WHO mounts it (dev) | `compiler/src/commands/dev.js:23, 179-200, 311-383` | Rebuilds `registeredOnions` on every recompile; **mounts the SAME onion the built server does**, deliberately — a dev/prod split here is the exact defect the work removed. Conflict prints via `formatOnionConflict` at `:381`. |
 
@@ -339,7 +359,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness
 
 ## Links
 - [primary.map.md](./primary.map.md)

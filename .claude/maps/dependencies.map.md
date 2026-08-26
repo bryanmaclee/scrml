@@ -1,37 +1,39 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# ⚑ **S372-bryan: EXTERNAL DEPS STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`);
-# THE INTERNAL MODULE GRAPH GAINED TWO EDGES AND THEY ARE RECORDED BELOW.**
-# `git diff --name-only b9e97f1b..8b2e4053 -- package.json bun.lock` is **EMPTY** (the manifest
-# streak resumes: one change in thirteen windows). No runtime dep, no dev dep, no version moved.
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
+# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
+# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
+# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
 #
-# ⚑ **TWO NEW INTERNAL EDGES, BOTH THE SAME SHAPE — A DUPLICATED RULE COLLAPSED INTO A SHARED
-# EXPORT.** Verified by grep at this watermark, not read off the commit messages:
-#   1. `codegen/emit-event-wiring.ts:3` now imports **`resolveSynthCellPrefix`** from
-#      `codegen/emit-expr.ts:1032` (#704), alongside the pre-existing `emitExprField` and
-#      `reparseRequestRefEscapeHatch`. One consumer: `computeDisplayToggleCondition`'s
-#      `varName`+`dotPath` branch (`emit-event-wiring.ts:541`).
-#   2. `codegen/emit-control-flow.ts:3` now imports **`_objectLiteralArmFromStructuredBody`** from
-#      `codegen/emit-logic.js` (#697), alongside the pre-existing `_matchArmResultIsBlockBody` /
-#      `_blockTailIsValueExpr` / `planBlockArmLift`. One consumer:
-#      `emit-control-flow.ts:2442`, checked BEFORE `emitLogicBody` so an object arm skips
-#      statement emission.
-# ⚠ **NEITHER EXPORT MADE ITS RULE SINGLE-SITE, AND `emit-expr.ts:1029-1030` SAYS SO IN AS MANY
-# WORDS:** *"DO NOT READ 'shared' AS 'every site that needs it now calls it.' … This export reduced
-# N; it did not make N equal 1."* The §55 synth-key rule still has FIVE implementations at this
-# watermark — see the SYNTH-KEY RULE COPIES table below and primary.map.md Task-Shape Routing row 1.
+# ⚑ **S376: EXTERNAL DEPS STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`); THE
+# INTERNAL GRAPH GAINED ONE EDGE INTO AN ENTIRELY NEW NODE.**
+# `git diff --name-only 8b2e4053..fc6df72e -- package.json bun.lock` is **EMPTY** — no runtime dep,
+# no dev dep, no version moved. `bun` and `typescript` unchanged.
 #
-# One more edge worth knowing, added the same window with NO new import line: `emit-logic.ts`'s
-# **`rewriteBlockBody` gained an opt-in `astExprCtx` parameter** (#703). Passing a full
-# `EmitExprContext` routes each statement through `emitExprField` -> `emitExpr` -> `emitMember`
-# instead of the string fallback `rewriteExprWithDerived`. **Absent the param every existing caller
-# is byte-identical**, so this is a widening of an existing edge, not a new one. Three call sites
-# pass it: the `when-effect` / `when-worker-message` / `when-worker-error` emit sites.
+# ⚑ **ONE NEW INTERNAL EDGE, AND UNLIKE THE LAST TWO WINDOWS' EDGES IT IS NOT A DEDUPLICATION — IT
+# IS A NEW PIPELINE STAGE.** Verified by grep at this watermark:
+#   · `api.js:62` now imports **`runEStateBlockStatementForm`** from
+#     `./lint-e-state-block-statement-form.js` (NEW module, #718), alongside the eight sibling
+#     `lint-*.js` imports. One consumer: the **Stage 2.5c** block in `compileScrml`
+#     (`api.js:1203-1257`), which calls it on `bsResults` and drains the result through
+#     `collectErrors("BS-LINT", …)`.
+#   · **THE NEW NODE IS A LEAF: `lint-e-state-block-statement-form.js` imports NOTHING.** No
+#     `ast-builder`, no `type-system`, no shared helper — it is 486 lines of self-contained scanning
+#     over the block-splitter's output shape. That is deliberate and it is the reason it can run at
+#     Stage 2.5c at all: **anything it imported from a later stage would invert the pipeline order.**
+#     ⚠ The flip side is that its `STATE_BLOCK_NAMES` set and its `STATE_BLOCK_ON_LIFECYCLE_RE` are
+#     COPIES of `ast-builder.js`'s `_STATE_BLOCK_BARE_WRITE_NAMES` (`:1160`) and
+#     `TOPLEVEL_ON_LIFECYCLE_RE` (`:756-757`) — **a fourth and fifth instance of the shared-rule
+#     duplication this map already tracks in the §55 section.** Nothing enforces that they stay in
+#     step; a name added to one does not reach the other.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
-# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
+# ⚠ **NEITHER OF THE PRIOR WINDOW'S EXPORTS MADE ITS RULE SINGLE-SITE, AND THAT STILL HOLDS.** The
+# §55 five-copies / two-resolution-orders table below is unchanged this window and was re-checked.
+#
+# content generated-at: `728bdc92` (the S368 pass — CARRIED for the EXTERNAL-dep half. The line-3
+# stamp advanced `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the
+# MEASURED ZERO-DIFF above; the INTERNAL graph is re-walked every window and is current.)
 # **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
 # S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
 # (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
@@ -141,6 +143,7 @@ parsing, cell-accessor-rename), so this widens the internal consumer set, not th
 |---|---|---|
 | CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
+| **BS-LINT (Stage 2.5 / 2.5b / 2.5c) — three passes that read BLOCK-SPLITTER output, before the AST exists** | `lint-w-interp-in-raw-content.js` (2.5) · `lint-w-input-state-markup-nonreactive.js` (2.5b) · **`lint-e-state-block-statement-form.js` (2.5c, NEW #718)** | `collectErrors("BS-LINT", …)` → `result.warnings` for 2.5/2.5b, **`result.errors` for 2.5c** (`E-` prefix + `severity:"error"`; CLI exit 1). ⚑ **THE NEW NODE IMPORTS NOTHING — it is a leaf by necessity, since anything it pulled from a later stage would invert pipeline order.** Cost: its `STATE_BLOCK_NAMES` / `STATE_BLOCK_ON_LIFECYCLE_RE` are COPIES of `ast-builder.js:1160` / `:756-757`, unenforced. ⚠ **2.5 and 2.5b wrap their call in `try`/`catch`; 2.5c deliberately does NOT** — a swallowed throw in an error gate is fail-OPEN. error.map.md. |
 | Parse (live) | ast-builder.js, expression-parser.ts | type-system.ts, symbol-table.ts, codegen. **`expression-parser.ts` now also exports `forEachIdentInExprNode`**, consumed by `emit-server.ts`'s D-5 module-const resolvability check. |
 | Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js. **Parity obligation PAID this window** for `ifRaw`/`ifCond` — see the §17.1.2 chain below. |
 | Tag-canonicalize (Stage 3.055 TC) | tag-canonicalizer.ts | landmark-tag.ts + api.js |
@@ -587,7 +590,7 @@ loader **strips DEFAULT imports**, and `path`'s shim is `import nodePath from "n
 if it passed the host-reach limb every export would `ReferenceError`.
 
 ## Tags
-#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover #synth-key-rule #five-copies #two-resolution-orders #resolve-synth-cell-prefix #emit-member #longest-key-first #shortest-prefix-first #ast-expr-ctx #object-literal-arm #if-cond-consumer-table #line-ref-drift
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover #synth-key-rule #five-copies #two-resolution-orders #resolve-synth-cell-prefix #emit-member #longest-key-first #shortest-prefix-first #ast-expr-ctx #object-literal-arm #if-cond-consumer-table #line-ref-drift #bs-lint-stage-2-5c #leaf-module-imports-nothing #copied-state-block-names #copied-lifecycle-regex #unenforced-duplication
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,15 +1,27 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# ⚑ **S372-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`b9e97f1b` -> `8b2e4053`), NOT RE-WALKED —
-# FOURTEENTH consecutive window with no DB/migration surface movement.** Re-measured at THIS
-# watermark: `git diff --name-only b9e97f1b..8b2e4053 -- '*migrat*' '*schema*'` returns only two
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
+# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
+# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
+# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
+# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
+# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
+# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED —
+# FIFTEENTH consecutive window with no DB/migration surface movement.** Re-measured at THIS
+# watermark: `git diff --name-only 8b2e4053..fc6df72e -- '*migrat*' '*schema*'` returns only the two
 # `.claude/maps/` files (this map and `schema.map.md` — i.e. the maps themselves, not source).
 # No `migrations/` path, no schema file and no DB command changed.
+# ⚠ **ONE ADJACENCY WORTH KNOWING AND IT IS NOT A MIGRATION CHANGE.** The window's new diagnostic
+# `E-STATE-BLOCK-STATEMENT-FORM` names `<schema>` in its locus set (`STATE_BLOCK_NAMES = {db, state,
+# schema}`, `lint-e-state-block-statement-form.js`), so a lifecycle statement written directly in a
+# `<schema>` body is now REFUSED. It touches no DDL, no differ and no migration command — a
+# `<schema>` body is consumed as DDL, so such a statement was silently DISCARDED before. See
+# error.map.md.
 #
 # content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) on the MEASURED ZERO-DIFF recorded in the
-# ⚑ note above, not on a re-walk. Working tip at write time: `b78e444d` on `wrap/s372-bryan`.)
+# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
+# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
 # **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED. TWELVE windows with no DB/migration surface
 # movement.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at
 # WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of
@@ -291,7 +303,7 @@ Also see error.map.md (the exact §34 fire sites) and schema.map.md (the lowerin
 inventory and `isEffectivelyImmutable`).
 
 ## Tags
-#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage
+#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage #schema-body-is-ddl #state-block-statement-form-adjacency
 
 ## Links
 - [primary.map.md](./primary.map.md)

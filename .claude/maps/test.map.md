@@ -1,25 +1,63 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-25T05:21:37-06:00  commit: 8b2e4053
-# generated-at: f536d35e on `wrap/s372-bryan` (the watermark `8b2e4053` is `merge-base HEAD
-# origin/main`; the commits above it are docs-only, so the source diff is EMPTY).
-# **INCREMENTAL over `b9e97f1b` -> `8b2e4053` (S372-bryan).** Ancestry CHECKED (invariant 48);
-# outbound MAP-STAMP check run at WRITE time.
+# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
+# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
+# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
+# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
+# **INCREMENTAL over `8b2e4053` -> `fc6df72e` (S376).** Ancestry CHECKED (invariant 48); outbound
+# MAP-STAMP check run at WRITE time.
 #
-# **+7 test files, ZERO deleted — 1,387 -> 1,394** (`docs/FACTS.md` at this watermark, and the
-# recursive filesystem count agrees exactly). Conformance corpus **FLAT at 883 for the SIXTH window
-# running**. §34 **FLAT at 812** — `compiler/SPEC.md` is `--name-only` EMPTY and **zero new
-# diagnostic codes landed**, re-verified by scanning the whole window's diff for added `"[EWI]-…"`
-# tokens (returns nothing).
+# **+4 test files, ZERO deleted — 1,394 -> 1,398** (`docs/FACTS.md`; `find compiler/tests -name
+# '*.test.js' | wc -l` returns **1398**, agreeing exactly). Conformance corpus **FLAT at 883 for the
+# SEVENTH window running**. §34 **812 -> 813** — one new code, `E-STATE-BLOCK-STATEMENT-FORM`.
 #
-# ⚠ **CORRECTION TO THIS MAP'S OWN NUMBER: the "338 PINNED at this HEAD" below is STALE.**
-# `bun scripts/s34-census.ts` RE-EXECUTED at this watermark returns **PINNED 343**, and `--full`
-# returns the same 343 — so the two modes do NOT disagree and never did. Full buckets at this
-# watermark: STRUCK 34 · PINNED 343 · IMPL-SITES 302 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 ·
-# FALSE-CLAIM 112. ⚠ And `filesScanned` reads **1958** here vs 1950 last window — that figure walks
-# ten directory roots ON DISK, so it counts gitignored build output and **is not a repo fact**.
+# ⚑ **THE COUNT IN THIS MAP'S OWN "Test Categories" HEADING WAS WRONG AND CONTRADICTED THIS HEADER.**
+# It read "**1,387** `*.test.js` total, +1 this window" while the header two screens up said 1,394 —
+# **one file, two totals, seven apart.** Re-derived at this watermark and RECONCILED, because the
+# discrepancy has a cause worth recording rather than a number worth patching:
 #
-# ─── THE SEVEN NEW FILES, AND ALL SEVEN ARE `g-`-NAMED REGRESSION PINS ON THIS WINDOW'S LOWERINGS ───
+#     browser 98 · commands 14 · conformance 133 · e2e-render-map 2 · integration 213 ·
+#     lsp 11 · self-host 4 · unit 909   =  1,384 across the eight CATEGORY dirs
+#     + 14 files sitting at `compiler/tests/*.test.js` ROOT level (no category dir)
+#     =  1,398 total, which is `docs/FACTS.md`'s figure exactly
+#
+# **The 14 root-level files are the gap.** Any count derived by summing the category directories —
+# which is what a per-dir walk does, and what `flogence/scripts/mapgen.ts` reports — lands on 1,384
+# and looks authoritative. **Sum the dirs and you are 14 short; the root level is a category with no
+# directory.** Both figures are now printed side by side in the Test Categories heading.
+#
+# ⚠ **`filesScanned` reads 1963 here vs 1958 last window and is STILL NOT A REPO FACT** — the census
+# walks ten directory roots ON DISK, so it counts gitignored build output. Do not use it as a delta.
+# Full §34 buckets re-executed at this watermark: STRUCK 34 · PINNED 343 · IMPL-SITES 303 ·
+# DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112.
+#
+# ─── THE FOUR NEW FILES — AND **THREE OF THE FOUR ARE IN THE TIER THE MERGE GATE DOES NOT RUN** ───
+#
+# Category split: **1 unit, 3 browser.** That split is the finding, not a statistic:
+# `.git/hooks/pre-commit` runs unit + integration + conformance + root `*.test.js`, and
+# **`compiler/tests/browser/` is not in that set** (see "THE BROWSER TIER IS NOW GATED" below for
+# what does run it). So three of this window's four new regression pins are outside the commit gate.
+#   · **`unit/state-block-statement-form.test.js` (#718, 476L)** — the ONE gated file. Pins
+#     `E-STATE-BLOCK-STATEMENT-FORM` across seven `describe` blocks: the reported defect, the
+#     deliberately-uncovered complement (bare calls / control flow / bare writes / prose), block
+#     comments, the `type:"state"` name guard, the reported COLUMN, the message's truth at every
+#     locus, and a **`KNOWN OPEN (pinned, not endorsed)`** block that asserts the nested-`<div>`
+#     hole's CURRENT (wrong) behaviour so the fix flips a red rather than going unnoticed.
+#     **PA-EXECUTED at this watermark: 34 pass / 0 fail / 53 expect() calls in 416ms.**
+#   · `browser/g-each-peritem-show-visibility.browser.test.js` (#710) — `show=` inside `<each>`
+#     toggles `style.display` rather than emitting a literal `show` attribute.
+#   · `browser/g-render-snippet-parametric-renders.browser.test.js` (#713/#714) — a parametric
+#     snippet fill renders at its `${render foo(arg)}` site instead of empty.
+#   · `browser/browser-lift-prefixed-interp.test.js` (#716) — a word-char-glued `${…}` in a for-lift
+#     reconcile child lowers instead of shipping the literal text.
+#
+# ⚑ **AND THE REASON THAT SPLIT MATTERS HERE RATHER THAN IN build.map.md:** all three browser pins
+# guard SILENT-WRONG-OUTPUT classes — a literal `show` attribute, an empty render slot, a literal
+# `${…}` in the DOM. **Every one of them compiles green.** A regression in any of the three passes
+# the commit gate, passes `bun test compiler/tests/unit`, and is caught only by the browser tier.
+#
+# ─── PRIOR WINDOW (S372) — the seven files it added, retained ───
 #
 # Category split: **6 unit, 1 browser** — and the tier matters (see the merge-gate note below;
 # `.git/hooks/pre-commit` runs unit + integration + conformance + root `*.test.js`, and
@@ -143,21 +181,25 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1,387** `*.test.js` total, +1 this window)
+## Test Categories (compiler/tests/, **1,398** `*.test.js` total at `fc6df72e`, +4 this window)
 
-⚑ **S371: the per-category table below is LAST window's recount at `728bdc92`, carried. This window added exactly ONE file — `unit/wdead-each-opener-expr-reachability.test.js` — so `unit` is +1 and every other category is unchanged; the categories were NOT re-counted this pass.** Fresh RECURSIVE recount at `728bdc92`, all 9 categories individually re-verified; agrees with
-`docs/FACTS.md` (which reads `test files | 1,387` at THIS watermark — **FACTS is the citable
-authority; do not hardcode a competing number**). Net **+8** this pass, decomposing as **unit +16 · integration +17 · conformance
-+1 · browser +2 · commands +6** against the prior map's figures.
+⚑ **CORRECTED S376 — this heading carried `1,387` while the header of this same file carried `1,394`.** Re-derived here: **1,384 across the eight category dirs + 14 at `compiler/tests/*.test.js` ROOT level = 1,398**, which is `docs/FACTS.md` exactly. **A per-directory walk misses the 14 root-level files and lands on 1,384 looking authoritative** — that is where the drift came from. Quote 1,398, or quote 1,384 and say "category dirs only".
 
-⚑ **THOSE PER-CATEGORY DELTAS ARE MOSTLY A RECOUNT, NOT NEW TESTS — and that is the finding.** Only
-EIGHT files were added by this window's PRs. The rest of the apparent movement is the prior map's
-breakdown having been non-recursive: **its own stated sum (885+196+132+92+11+8+4+2 = 1330, +14 =
-"1378") is arithmetically 1,344**, a 34-file shortfall published as a verification. **This one sums
-by execution — **RE-COUNTED RECURSIVELY AT `8b2e4053`: 908+213+133+95+14+14+11+4+2 = 1,394**, which agrees exactly with `docs/FACTS.md` (unit 908 · integration 213 · conformance 133 · browser 95 · commands 14 · TOP-LEVEL 14 · lsp 11 · self-host 4 · e2e-render-map 2). The S371 figure was `…= 1,386`.** Treat the prior per-category numbers as
-superseded, not as a baseline to diff against.
+⚑ **S376: THE PER-CATEGORY TABLE BELOW IS RE-DERIVED BY EXECUTION AT `fc6df72e`, NOT CARRIED — AND
+TWO OF ITS ROWS WERE WRONG AGAINST THE PROSE IN THIS SAME SECTION.** The table read Unit **901** and
+Browser **94** while the paragraph immediately above it read unit **908** and browser **95** for the
+same watermark. Both table rows are now `find`-derived:
 
-**ZERO deletions, fourth window running.**
+    find compiler/tests/<dir> -name '*.test.js' | wc -l
+
+    browser 98 · commands 14 · conformance 133 · e2e-render-map 2 · integration 213 ·
+    lsp 11 · self-host 4 · unit 909            = 1,384  (category dirs)
+    + 14 at `compiler/tests/*.test.js` root    = 1,398  (= `docs/FACTS.md`, exactly)
+
+**`docs/FACTS.md` reads `test files | 1,398` at this watermark and is the citable authority — do not
+hardcode a competing number.** This window's +4: unit +1, browser +3.
+
+**ZERO deletions, fifth window running.**
 
 Carried: the conformance-TIER row counts `compiler/tests/conformance/*.test.js` — the artifact-level
 harnesses — and is a DIFFERENT number from the 883 conformance CASES under `conformance/cases/`;
@@ -165,10 +207,10 @@ harnesses — and is a DIFFERENT number from the 883 conformance CASES under `co
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **901** | `gate` (blocking) + pre-commit + pre-push |
+| Unit | `compiler/tests/unit/**/*.test.js` | **909** (+1: `state-block-statement-form.test.js`; ⚑ **the table read `901` while the prose four lines above it read `908` — corrected S376 by `find`**) | `gate` (blocking) + pre-commit + pre-push |
 | Integration | `compiler/tests/integration/**/*.test.js` | **213** | `tracking` (non-blocking) + **pre-commit** + pre-push |
 | Conformance | `compiler/tests/conformance/**/*.test.js` | **133** | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | **94** | `gate` (BLOCKING) + `tracking` — via the NAME-SET check. ⚠ **NOT in the pre-commit set** (`.git/hooks/pre-commit:39`) |
+| Browser | `compiler/tests/browser/**/*.test.js` | **98** (+3 this window; ⚑ **the table read `94` while the prose read `95` — corrected S376 by `find`**) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check. ⚠ **NOT in the pre-commit set** (`.git/hooks/pre-commit:39`) |
 | Commands | `compiler/tests/commands/**/*.test.js` | **14** | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
@@ -647,7 +689,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout
+#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed
 
 ## Links
 - [primary.map.md](./primary.map.md)
