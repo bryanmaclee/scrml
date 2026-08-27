@@ -1,78 +1,68 @@
-# scrml — Session 376 (bryan · ASUS-Vivobook) — WRAP
+# scrml — Session 378 (peter · P-Tech1 Windows) — WRAP
 
-**Date:** 2026-08-26. Booted `/boot` Profile A onto a **stranded S375 wrap**, as SUCCESSOR to a LIVE
-S375-peter (who then wrapped, ran S377, and wrapped again beneath this session).
-
-**The framing, because it reorders the rest: two instruments this project relies on were reporting
-confidently false things, and my own probes failed the same way eight times in one day.** The
-diagnostic that landed is ordinary. What is worth carrying is that a ratified rule's probe was
-printing the opposite of its own data, and that six memory entries written to prevent exactly my
-failure mode did not fire.
+**Date:** 2026-08-26. Booted `/boot` Profile A. A **drain session**: 4 open HIGHs resolved and one
+root-traced, across two commits of real fixes and one of de-risking. The framing worth carrying:
+running the review floor *honestly* (S239) surfaced two live defects nobody had located — a stray
+`0` file bryan had searched for three times, and a CRLF parse break that made `state.ts --check` red
+at every Windows session for a bogus reason while masking a real staleness. And verify-first paid
+off again: three "open" HIGHs on the shortlist were already fixed by #652 and just never flipped.
 
 ---
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-### 1. ⚠️ ONE OPERATOR DECISION, NEW — the gate has a one-`<div>` bypass
+### 1. THE S378 CONTINUITY PR IS IN FLIGHT — `s378-peter-drain` (3 commits), gate running
 
-`E-STATE-BLOCK-STATEMENT-FORM` landed (#718) and scans **direct text children only**. PA-reproduced:
+Pushed at wrap. Three commits, all gates green locally (`state.ts --check` + `facts.ts --check` PASS,
+`delta-lint` PASS): `e7979aac` (CRLF/stray-0 tooling + 3 g-delta-lint HIGHs verify-closed) · `a7d82d83`
+(g-string-prop HIGH fix) · `df58f6aa` (g-unexpanded-markup root trace). **First action: confirm the
+cloud gate is green and merge**, then the drain counts are real. Nothing else is blocked on it.
 
-```scrml
-<db src="sqlite:./app.db" tables="items">
-  <div>
-on mount { loadDashboard() }
-  </div>
-</db>
-```
-→ **exit 0, zero diagnostics**, ships into the HTML as literal page text. The original defect, one
-nesting level deeper. Filed `g-state-block-statement-form-misses-a-wrapped-statement` (MED), pinned
-by a known-open test.
+### 2. ⚠️ THE PETER-LANE SILENT-WRONG HIGH VEIN IS EXHAUSTED — this is the load-bearing handoff
 
-**Why it is a RULING and not a patch:** S375 ruling 1 says *logic at a `<db>`/state-block locus is
-REFUSED*, and a statement inside a `<div>` inside a `<db>` body **is** at that locus — so widening the
-scan is arguably **conformance with the ruling already made**, not a new widening. Against that: it is
-newly-rejecting with an **UNMEASURED** migration (the 1-file population was measured over direct
-children only). ⚑ **Measure the nested population FROM THE COMPILER before scoping** — a text grep
-finds `on mount` in 39 corpus files and that is the wrong referent, exactly as it was the first time.
+I triaged every open HIGH. None is a clean, turnkey, peter-lane drain anymore. They are all: **bryan-lane**
+(the auto-await arc — `g-server-call-nested-in-expression`, `g-inferred-async-call-value-position`; the
+param-default security boundary — `g-trigger-3-parameter-default-not-scanned` + its 2 twins, needs §12
+co-sign; soft-nav — `g-route-timer-poll`, `g-soft-nav-head-sync`; handle/route — `g-handle-onion-404`,
+`g-handle-middleware-call`), **ruling-gated** (`g-tare` blocks #501; the default-logic pair), **sequenced**
+behind DRAFT #579, or **an arc** (item 3). Do NOT re-pick these as "clean drains" — verify-first will burn
+the session confirming they need a ruling/co-sign. **The next peter productive move is one of:** (a) take
+the g-unexpanded-markup arc (item 3, root-traced + ready), or (b) dog-food an adopter program (net-adder —
+discovery, not drain; the productive vein per memory, but it grows the count).
 
-### 2. RULINGS 2 AND 3 — ratified, unbuilt, still SEQUENCED on `ast-builder.js`
+### 3. g-unexpanded-markup (HIGH) — ROOT-TRACED, ready for a focused arc (NOT a drain)
 
-Unchanged from S375 except that they are now **de-risked**:
-`docs/changes/ruling2-bare-call-landing-2026-08-26/DE-RISK.md` carries the measured base drift (the
-held build `7d5fe573` is 42 commits behind), per-file OCC verdicts (`ast-builder.js` has **2**
-intervening writes → real 3-way merge, NOT a wholesale pull; `symbol-table.ts` has 0 → wholesale-safe),
-and the prediction that the merge is CLEAN because the hunks are disjoint (main touched ~L3655/~L13600,
-the build touches ~L42/~L756/~L1837). **That is a prediction from hunk offsets, not a performed merge.**
+Re-verified on HEAD + root isolated this session (see delta `[1826]`). It is **E-MARKUP-001 bypassed when a
+lowercase element name matches a cross-file import**: same-file `<phase/>` errors correctly; cross-file
+`import { phase }` puts it in `importedRegistry` with a non-`unknown` kind → `resolveName`
+(`name-resolver.ts:359-361`) skips the gate (`:448`) → `<phase />` ships silently at exit 0. **Fix
+direction (owed work):** make a lowercase mount resolving to an imported NON-mountable kind reach the same
+error same-file gives — but FIRST enumerate which `importedRegistry` kinds are legitimately tag-mountable
+(imported components/state-types) vs not (cells), or the tightening rejects valid imported mounts. That
+enumeration + a corpus differential is the arc. Peter-lane (compute).
 
-⚑ A third item now wants to ride the same file: `g-state-block-bare-write-scan-has-no-comment-state`
-(LOW) — the sibling scanner false-fires on a commented-out `@count = 0`. Few lines, same file. **Do
-not dispatch it standalone.**
+### 4. THREE FINDINGS ROUTED TO BRYAN this session (his tooling / boundary lanes)
 
-### 3. ⚠️ THE EACH-ALIAS ARC IS STILL PARKED — untouched this session
+- `g-thread-probe-guard-admits-prose-after-a-real-first-token` (MED) — the S278 malformed-probe guard
+  passes any prose that starts with a real command, then runs it with side effects (a DONE-PROBE is meant
+  read-only). This is what let the stray-`0` probe run. `threads.ts` tooling.
+- `g-delta-lint-fix-renumbers-the-already-published-side-of-a-union-merge` (MED) — the second, still-open
+  half of the S365 `--fix` hazard, split out when I verify-closed the partial-blindness half. Needs a
+  merge-orientation design call. `delta-lint.ts` tooling.
+- (the `substitutePropsInRawExpr`-string-literal LOW residual is peter-lane, filed, not routed.)
 
-Frozen at tag `s375-r7-reviewed` (`ae42e120`). The convergent direction is **still unruled**. Its
-worktree is RETAINED. A future round still owes a real 3-way merge against #710.
+### 5. CARRIED FORWARD FROM S376-bryan — bryan-lane, untouched by me, still open
 
-### 4. PETER'S TWO ROUTED FINDINGS — one is smaller than it was routed as
-
-`g-if-arm-bare-markup-branch-silently-dropped` (HIGH) — PA-reproduced AND re-diagnosed: `{ "Yes" }`
-works, `{ lift <p>Yes</p> }` works, `{ <p>Yes</p> }` drops silently. The discriminator is the branch's
-**VALUE TYPE**, so it is the markup instance of the **already-ratified S371 limb (b)** amendment, not
-the fresh fork it was routed as. It is the FOURTH divergence in that area — the §17.6 amendment should
-state the rule once over branch VALUES rather than gain a clause per witnessed shape.
-The `for` half is **RELAYED-UNVERIFIED** and must be re-derived in a DOM. Return-leg delivered.
-
-`g-ast-markup-text-interp-adjacent-space-dropped` (MED) — RELAYED, not reproduced by me. Has four
-pre-existing RED browser tests. A whitespace-MODEL ruling for bryan.
-
-### 5. HELD / OPEN
-
-| | state |
-|---|---|
-| each-alias | parked, worktree retained |
-| ruling-1 worktree `a5d573c6f9c8f078c` | superseded by #718 — **removable next session** |
-| `#655` `#640` `#559` `#501` + 3 DRAFTs | untouched, pre-existing |
-| 91 worktrees under `.claude/worktrees/` | **cross-session debt**, surfaced not swept — see 6b below |
+- **Ruling-1 one-`<div>` bypass** (`g-state-block-statement-form-misses-a-wrapped-statement`, MED) — the
+  operator decision: is widening `E-STATE-BLOCK-STATEMENT-FORM` to nested `<db>` children conformance with
+  S375 ruling 1, or a newly-rejecting change with an unmeasured migration? ⚑ **Measure the nested population
+  FROM THE COMPILER, not a text grep.**
+- **Rulings 2 & 3** — ratified, unbuilt, sequenced on `ast-builder.js` (real 3-way merge; `DE-RISK.md`
+  carries the analysis). `g-state-block-bare-write-scan-has-no-comment-state` (LOW) rides the same file — do
+  not dispatch standalone.
+- **each-alias arc** — parked at `s375-r7-reviewed` (`ae42e120`), worktree retained, direction still unruled.
+- `g-if-arm-bare-markup-branch-silently-dropped` (HIGH, §17.6 limb-b instance) + `g-ast-markup-text-interp-adjacent-space-dropped` (MED) — bryan's §17.6 / whitespace-model rulings.
+- ruling-1 worktree `a5d573c6f9c8f078c` superseded by #718 — removable. `91 worktrees` cross-session debt, not swept (see 6b). `#655`/`#640`/`#559`/`#501`/3 DRAFTs pre-existing.
 
 ---
 

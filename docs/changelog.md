@@ -6571,6 +6571,21 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-26 — S378 (peter): a drain session — 4 HIGHs cleared, two live defects found by running the review floor honestly
+
+Cleared the two owed reviews and, in doing so, surfaced two real defects nobody had located. Then drained
+three stale HIGHs by verify-close and fixed a fourth. Closed with an honest finding: the peter-lane
+silent-wrong HIGH vein is exhausted — every remaining open HIGH needs a bryan ruling, a security co-sign,
+or is a multi-session arc. Branch `s378-peter-drain` (3 commits); `state.ts --check` + `facts.ts --check`
++ `delta-lint` all PASS.
+
+- **Stray `0` file at repo root — root-caused and fixed** (`g-test-suite-writes-stray-zero-file-into-repo-root`, LOW, resolved). bryan had searched three times without finding it; it was a prose `DONE-PROBE` in a docs BRIEF run by `threads.ts`, whose `… returns > 0 …` tail bash-parsed `> 0` as a redirect. Filed the guard-hardening class-gap.
+- **CRLF gate-mask fixed** (`g-state-delta-parse-splits-on-lf-only-crlf-breaks-the-gate`, MED, resolved). `state.ts`/`delta-lint.ts` split the delta-log on `"\n"` only, so on any Windows checkout the entry parse failed on all 1533 entries — `--check` red at every Peter session, masking a real `@generated:recent-sessions` staleness. Fixed both to `/\r?\n/` (LF-identical; CI always green).
+- **Three g-delta-lint HIGHs verify-closed** — all fixed by #652 and never flipped in the ledger; verified at HEAD (`delta-lint-partial-parse.test.js` 14/0). Split out the still-open union-merge `--fix` half.
+- **A string prop in an expr/value attr now lowers to the quoted literal** (`g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot`, HIGH, resolved). Was spliced as a bare identifier → a boot-killing ReferenceError. Also **retired the #81/S268 fail-closed drop**: `title=(label)` now wires as `title="hi"` instead of being silently dropped.
+- **g-unexpanded-markup root-traced** (HIGH, still open): the cross-file case is `E-MARKUP-001` being bypassed for a lowercase element matching an import — locus moved from `searched:` to traced, fix-direction scoped. A name-resolution arc, not force-landed.
+- Reviewed #720 (S239, finding). #718's "owed" status is the review-debt marker-regex bug that PR #721 fixes, not a real debt.
+
 ### 2026-08-25 — S375 (bryan): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its defect class named
 
 The session's subject was the PA system, not the compiler. It opened with a request for an instrument
