@@ -245,7 +245,11 @@ export function headingMarkerDrift(srcText?: string): { line: number; id: string
     const hStatus = tail[1].toLowerCase();
     let mStatus: string | null = null;
     for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-      const mm = lines[j].match(/<!--\s*@gap\s+[^>]*status=(\w+)/);
+      // S378: `[^\n]*` not `[^>]*` — a marker whose prov=/locus= value contains a literal
+      // `>` was TRUNCATED here and read as no-marker, so headingMarkerDrift reported NO drift
+      // for an entry whose heading and marker disagree. S334 fixed this exact class in this
+      // file's MAIN parser (see the note above gapCounts); this was the straggler.
+      const mm = lines[j].match(/<!--\s*@gap\s+[^\n]*status=(\w+)/);
       if (mm) { mStatus = mm[1].toLowerCase(); break; }
       if (/^### /.test(lines[j])) break;
     }

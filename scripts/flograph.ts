@@ -78,7 +78,8 @@ export type Edge = { from: string; type: string; target: string; verified: boole
 
 // ── Parse ────────────────────────────────────────────────────────────────────
 const GAP_RE = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(\S+)\s*-->/;
-const NODE_RE = /<!--\s*@node\s+([^>]*?)-->/;
+// S378: `[^\n]*?` not `[^>]*?` — same class as the S378 review-floor defect.
+const NODE_RE = /<!--\s*@node\s+([^\n]*?)-->/;
 const LINK_RE = /\[\[([^\]]+)\]\]/g;
 
 function attrs(s: string): Record<string, string> {

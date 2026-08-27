@@ -142,7 +142,8 @@ export interface Marker {
  */
 export function parseMarkers(text: string): Marker[] {
   const out: Marker[] = [];
-  const re = /<!--\s*@corpus-zero\s+([^>]*?)-->/g;
+  // S378: `[^\n]*?` not `[^>]*?` — same class as the S378 review-floor defect.
+  const re = /<!--\s*@corpus-zero\s+([^\n]*?)-->/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const bag: Record<string, string> = {};

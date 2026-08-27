@@ -170,7 +170,9 @@ interface Ledger { path: string; pending: boolean; derived: boolean; }
  * instead of passing silently — an unobservable fallback was itself one of the findings.
  */
 function resolveVoiceLedger(who: string, paProfileText: string): Ledger {
-  const mk = paProfileText.match(/<!--\s*@ledger\s+([^>]*?)-->/);
+  // S378: `[^\n]*?` not `[^>]*?` — see scripts/review-debt.ts parseLedger. A `>` inside an
+  // attribute value truncated the bag and the ledger silently failed to resolve.
+  const mk = paProfileText.match(/<!--\s*@ledger\s+([^\n]*?)-->/);
   if (mk) {
     const attrs = mk[1];
     const path = attrs.match(/\bpath=([^\s]+)/)?.[1];
