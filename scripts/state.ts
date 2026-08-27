@@ -660,7 +660,10 @@ export function parseDeltaLog(text: string) {
   // Line-indexed scoping (was: split on /^## Session /m). Same scope — the LAST session section —
   // but it yields real FILE line numbers, which the unparsed-line diagnostic below needs in order to
   // name an offending line the operator can go and look at.
-  const all = text.split("\n");
+  // ⚑ Split on /\r?\n/, not "\n": on a CRLF checkout (every Windows clone) a plain "\n" split leaves a
+  // trailing \r on each line, and DELTA_ENTRY's `$` anchor then fails against it — 0 of N entries match,
+  // --check refuses with PARTIAL PARSE at EVERY session close for a bogus reason (S378). LF-identical.
+  const all = text.split(/\r?\n/);
   const lastHeader = all.reduce((acc, ln, i) => (/^## Session /.test(ln) ? i : acc), -1);
   const sessHeader =
     "S" + (lastHeader >= 0 ? all[lastHeader].replace(/^## Session /, "") : (all[0] ?? "")).trim();
