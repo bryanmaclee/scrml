@@ -1519,24 +1519,18 @@ function renderTemplateChildToJs(
     //
     // g-match-per-item-in-each-frozen-on-field-change (S380): the dispatch must
     // RE-FIRE on a same-key reconcile (an item's discriminant field changes), or
-    // the arm freezes at its create-time value while the sibling
-    // `${item.field}` interpolation updates. A keyed reconcile REUSES the item
-    // node without re-running this factory, so a bare create-time call never sees
-    // the new value. Wrap it in the SAME item-resolve effect the interpolations
-    // use: reading the discriminant off the freshly `_scrml_resolve_item`-ed item
-    // tracks it, so the effect re-runs and re-dispatches when the field changes.
-    const _outerCtx = currentEachReconcileCtx();
-    if (_outerCtx && _outerCtx.iterVar === iterVarName) {
-      lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
-      lines.push(`${indent}  let ${_outerCtx.iterVar} = _scrml_resolve_item(${_outerCtx.mountVar}, ${_outerCtx.keyVar});`);
-      lines.push(`${indent}  if (${_outerCtx.iterVar} === null) return;`);
-      for (const l of emitDestructureBindingLines(_outerCtx.destructure, _outerCtx.iterVar, `${indent}  `)) {
-        lines.push(l);
-      }
-      lines.push(`${indent}  ${dispatchFnName}(${mountVar}, ${discriminant});`);
-      lines.push(`${indent}}));`);
-    } else {
-      lines.push(`${indent}${dispatchFnName}(${mountVar}, ${discriminant});`);
+    // the arm freezes at its create-time value while the sibling `${item.field}`
+    // interpolation updates. A keyed reconcile REUSES the item node without
+    // re-running this factory, so a bare create-time call never sees the new
+    // value. Route through the SAME per-item effect wrapper the interpolations
+    // use (`maybeWrapEachPerItemEffect`): it re-resolves the iter var (and any
+    // enclosing-each var the discriminant reads, for a nested each) via
+    // `_scrml_resolve_item`, so reading the discriminant tracks it and the effect
+    // re-dispatches on a field change. Outside a reconcile ctx it returns the bare
+    // line unchanged (matching the interpolation's own behaviour on that path).
+    const _dispatchLine = `${indent}${dispatchFnName}(${mountVar}, ${discriminant});`;
+    for (const l of maybeWrapEachPerItemEffect([_dispatchLine], iterVarName, indent)) {
+      lines.push(l);
     }
     return;
   }

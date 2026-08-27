@@ -1157,6 +1157,15 @@ export function emitVariantGuardedRender(
     dispatcherLines.push(`  const _mount = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
     dispatcherLines.push(`  if (!_mount) return;`);
   }
+  // Same-value short-circuit — skip the dispose + innerHTML rebuild when the value
+  // is UNCHANGED (=== holds for enum unit-variant string tags). A payload-bearing
+  // variant is a fresh tagged-object each dispatch (=== fails) so it correctly still
+  // rebuilds. Prevents a per-item reconcile effect (the S380 per-item-<match> fix)
+  // from tearing down + re-parsing an UNCHANGED arm on every list update — which
+  // would lose focus/selection/nested state in that arm and waste re-parse work.
+  // A fresh mount (remount / new row node) has no cached value → renders normally.
+  dispatcherLines.push(`  if (_mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] === _v) return;`);
+  dispatcherLines.push(`  _mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] = _v;`);
   // Variant tag extraction. Unit variants live as bare string tags ("Idle");
   // payload-bearing variants live as `{ variant: "X", data: { fieldName: val } }`
   // tagged-objects per SPEC §51.3.2 / emit-client.ts:emitEnumVariantObjects.
