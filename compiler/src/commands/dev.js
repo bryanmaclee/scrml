@@ -16,7 +16,7 @@
  */
 
 import { statSync, readdirSync, watch } from "fs";
-import { resolve, dirname, join, basename } from "path";
+import { resolve, dirname, join, basename, relative } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
@@ -196,6 +196,14 @@ let registeredWsHandlers = null;
 /** @type {Array<(downstream: Function) => Function>} */
 let registeredOnions = [];
 
+// §52.13 — served documents whose scope is `auth="required"`, mapping the
+// SERVE_DIR-relative .html path (LOWERCASED — see build.js for the case-insensitive
+// rationale) to its module's auth guard. Gated in the dev static-serving path so
+// `scrml dev` matches the production `_server.js`
+// (g-auth-required-does-not-protect-the-served-html-document).
+/** @type {Map<string, (req: Request) => (Response | null)>} */
+let registeredProtectedDocs = new Map();
+
 /**
  * Test/introspection accessor for the currently mounted §40.3 onion. Still an
  * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
@@ -300,6 +308,7 @@ export async function loadServerRoutes(outputDir) {
   registeredRoutes = [];
   registeredWsHandlers = null;
   registeredOnions = [];
+  registeredProtectedDocs = new Map();
 
   // F-COMPILE-001 Option A: outputDir may be a tree when sources have nested
   // subdirectories. Walk recursively for *.server.js entries.
@@ -348,6 +357,15 @@ export async function loadServerRoutes(outputDir) {
       // _scrml_ws_handlers has shape { open, message, close }, not { path, method, handler }.
       if (exportName === "_scrml_ws_handlers") {
         allWsHandlers.push(value);
+        continue;
+      }
+
+      // §52.13 — the served-document auth guard `{ guard }`. Register it against
+      // this module's .html (derived from the filename, lowercased) so the dev
+      // static path gates the document exactly like the production server.
+      if (exportName === "_scrml_protected_document" && typeof value.guard === "function") {
+        const htmlRel = relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html").toLowerCase();
+        registeredProtectedDocs.set(htmlRel, value.guard);
         continue;
       }
 
@@ -998,6 +1016,18 @@ export async function devDispatch(req, server, serveDir, opts) {
     try {
       const st = statSync(candidate);
       if (st.isFile()) {
+        // §52.13 — gate an auth-required document BEFORE serving it, so `scrml dev`
+        // matches the production `_server.js`: an unauthenticated request redirects
+        // to loginRedirect instead of leaking the rendered markup
+        // (g-auth-required-does-not-protect-the-served-html-document).
+        if (registeredProtectedDocs.size > 0) {
+          const _rel = relative(serveDir, candidate).split(/[\\/]/).join("/").toLowerCase();
+          const _guard = registeredProtectedDocs.get(_rel);
+          if (_guard) {
+            const _gate = _guard(req);
+            if (_gate) return _gate;
+          }
+        }
         // Inject hot-reload script into HTML responses
         if (candidate.endsWith(".html")) {
           const html = await file.text();

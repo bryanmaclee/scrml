@@ -226,6 +226,11 @@ export function discoverServerRoutes(outputDir) {
         middlewareNames.push(name);
       } else if (name === "_scrml_mw_declared_in") {
         // Provenance for the onion above, not a route. Captured separately.
+      } else if (name === "_scrml_protected_document") {
+        // §52.13 — the served-document auth guard `{ guard }`, NOT a route. It is
+        // captured separately (below) and imported under a unique alias by the
+        // entry generator; leaving it here would push a malformed `{guard}` entry
+        // into the `routes` array and bare-import it alongside its own alias.
       } else {
         routeNames.push(name);
       }

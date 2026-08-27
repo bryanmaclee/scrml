@@ -96,6 +96,34 @@ describe("§52.13 — auth-required document is gated in the served-document dis
     expect(entry).toContain("rel.toLowerCase()");
   });
 
+  test("the guard is NOT leaked into the route registry (discoverServerRoutes excludes it)", () => {
+    const { mods } = build(SECURE);
+    const mod = mods.find((m) => m.filename.includes("secure"));
+    // Regression for the S239 finding: `_scrml_protected_document` must NOT be a
+    // route (it is a `{guard}` object, not `{path,method,handler}`) — else it is
+    // double-imported and pushed into the `routes` array as a malformed entry.
+    expect(mod.routeNames).not.toContain("_scrml_protected_document");
+    const { entry } = build(SECURE);
+    expect(entry).not.toMatch(/\{ _scrml_protected_document,/); // no bare double-import
+  });
+
+  test("`scrml dev` gates the auth-required document too (dev/prod parity)", async () => {
+    const { out } = build(SECURE);
+    // dev.js keeps module-level route state; import lazily and drive devDispatch.
+    const { loadServerRoutes, devDispatch } = await import("../../src/commands/dev.js");
+    await loadServerRoutes(out);
+    const probe = async (path) => {
+      const res = await devDispatch(new Request("http://localhost" + path, { headers: {} }), null, out, {});
+      const body = res && res.status === 200 ? await res.clone().text() : "";
+      return { status: res ? res.status : 0, leaked: /SECRET DASHBOARD/.test(body) };
+    };
+    // Unauthenticated document requests (incl. a case variant) redirect, no leak.
+    expect(await probe("/secure.html")).toEqual({ status: 302, leaked: false });
+    expect(await probe("/SECURE.html")).toEqual({ status: 302, leaked: false });
+    // A non-protected sibling asset still serves.
+    expect((await probe("/secure.css")).status).toBe(200);
+  });
+
   test("a NON-auth program gets no protected-document wiring (output unchanged)", () => {
     const { mods, entry } = build(`<program>\n  <page><h1>Public</h1></page>\n</program>\n`, "public");
     expect(mods.every((m) => !m.protectedDocument)).toBe(true);
