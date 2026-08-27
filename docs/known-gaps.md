@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 58 |
-| MED | 178 |
-| LOW | 80 |
+| HIGH | 55 |
+| MED | 180 |
+| LOW | 79 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -9793,7 +9793,8 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Fix direction:** classify on the execution-context attributes (`lang=` / `mode=` / `route=` / `db=` / `port=`), not on `name=` presence. The refusal is about the CONTEXT being unbuilt; the name is addressing metadata and should not gate a safety check. Newly-REJECTING (a program that compiled now errors) → reversible, owes a measured corpus migration before landing.
 
 ### g-delta-lint-gate-vacuous-on-zero-population — the `delta-lint` blocking CI gate reports PASS over a delta-log containing the exact duplicate it exists to catch, whenever its parser matches zero entries — `NEW S365-bryan (found by the S239 pass on instrument-integrity; PA-REPRODUCED against the gate I had landed hours earlier and vouched for); HIGH; open`
-<!-- @gap id=g-delta-lint-gate-vacuous-on-zero-population sev=HIGH status=open locus=scripts/delta-lint.ts(the live-scope entry parser + the PASS path — no degenerate-population guard) prov=rationale:S365-bryan-S239-finding-4-PA-reproduced-exit-codes-measured-directly-not-through-a-pipe-canonical-separator-with-a-real-duplicate-exit-1-correct-same-duplicate-with-the-separator-drifted-from-middot-to-hyphen-exit-0-PASS-empty-file-exit-0-PASS -->
+<!-- @gap id=g-delta-lint-gate-vacuous-on-zero-population sev=HIGH status=resolved locus=scripts/delta-lint.ts(refuseDegenerateScope — total===0 with content is exit 2) prov=rationale:S365-bryan-S239-finding-4-PA-reproduced-exit-codes-measured-directly-not-through-a-pipe-canonical-separator-with-a-real-duplicate-exit-1-correct-same-duplicate-with-the-separator-drifted-from-middot-to-hyphen-exit-0-PASS-empty-file-exit-0-PASS -->
+> **RESOLVED — landed in #652 (`ce096f58`, "instrument: close delta-lint partial blindness"), ledger flipped S378-peter on verify.** `refuseDegenerateScope()` (delta-lint.ts:144, called :175) now exits 2 whenever the parser matches zero entries in a non-empty scope — separator-drift, truncation, and empty-file cases each get a distinct diagnostic. Pinned by `compiler/tests/unit/delta-lint-partial-parse.test.js §4` (separator drift → exit 2; empty → exit 2; comments-only → exit 2). Verified at HEAD S378: the full test is **14 pass / 0 fail**.
 > **⚑ S365-bryan: PA-REPRODUCED, and this is a defect in a gate I landed the same session and recorded as bite-proven.**
 >
 > | input | delta-lint result |
@@ -9829,7 +9830,8 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **Same class as the known happy-dom global-state leak** ([[g-browser-tier-happydom-global-state-leak]] family) — an environmental leak, not a regression, and the F1 tests were re-pinned onto the limiter's own signal (reached-consistently vs 429) rather than the incidental CSRF status. Filed because it is a **live trap for the next author** who writes an executing server test with cookie auth and reads the failure as a product bug.
 
 ### g-delta-lint-partially-blind-on-emoji-kind-entries — `delta-lint` and `state.ts` share a regex that cannot parse `[NNNN] <emoji> <kind> · body`, so FOUR live delta-log entries are invisible to the duplicate gate AND to the digest projection, today, at exit 0 — `NEW S365-bryan (found by the instrument-integrity RE-review; PA-REPRODUCED against the live file); HIGH; open`
-<!-- @gap id=g-delta-lint-partially-blind-on-emoji-kind-entries sev=HIGH status=open locus=scripts/delta-lint.ts(the ENTRY regex)+scripts/state.ts(byte-identical copy of it) prov=rationale:S365-bryan-re-review-finding-A-PA-reproduced-by-re-implementing-the-scripts-own-parser-against-the-live-file-1402-bracketed-lines-in-scope-1398-ENTRY-matched-4-unparsed-561-562-565-727-each-carrying-an-emoji-token-before-the-kind-while-the-gate-prints-1398-entries-PASS -->
+<!-- @gap id=g-delta-lint-partially-blind-on-emoji-kind-entries sev=HIGH status=resolved locus=scripts/delta-lint.ts(ENTRY regex marker group + refuseUnparsedEntries)+scripts/state.ts(same widened regex + PARTIAL PARSE guard) prov=rationale:S365-bryan-re-review-finding-A-PA-reproduced-by-re-implementing-the-scripts-own-parser-against-the-live-file-1402-bracketed-lines-in-scope-1398-ENTRY-matched-4-unparsed-561-562-565-727-each-carrying-an-emoji-token-before-the-kind-while-the-gate-prints-1398-entries-PASS -->
+> **RESOLVED — landed in #652 (`ce096f58`), ledger flipped S378-peter on verify.** ENTRY was widened to `/^\[(?<seq>\d+)\]\s+(?:(?<marker>[^\w\s]\S*)\s+)?(?<kind>\S+)\s+·\s+(?<body>.*)$/` — the optional `marker` group counts `[NNNN] <emoji> <kind> · body` — and `refuseUnparsedEntries()` (delta-lint.ts:208) now exits 2 whenever `bracketed !== total` so a *future* convention drift can never re-hollow the gate (the widen-plus-residual-check bryan specified). `scripts/state.ts` carries the same widened regex + a PARTIAL PARSE refusal (parseDeltaLog). Verified at HEAD S378: `[561] ⚡ find · …` parses (kind=find); the live log is bracketed 1533 / parsed 1533 / unparsed 0; test §2 (marker + astral surrogate) and §3 (narrow-widen residual) green — 14 pass / 0 fail.
 > **⚑ S365-bryan: PA-REPRODUCED against the live `handOffs/delta-log.md`, and this is the SECOND hole in the same gate in one session.**
 >
 > The regex is `/^\[(\d+)\]\s+(\S+)\s+·\s+(.*)$/` — three tokens. The writing convention drifted to `[NNNN] <emoji> <kind> · body`, which is four. Measured on the live file:
@@ -9851,7 +9853,8 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > ⚑ **The sharpest part:** the very same fix round applied exactly this partial-vs-total insight to `corpus-zero-debt.ts` (all-or-nothing guard → per-root guard) and did not carry it one file over. The insight was in hand and did not generalise.
 
 ### g-delta-lint-fix-corrupts-log-under-partial-blindness — `delta-lint --fix` computes `maxSeq` from VISIBLE entries only, so under partial blindness it renumbers a duplicate onto a number that already exists in the invisible region, creating a real new duplicate, then reports PASS — `NEW S365-bryan (found by the instrument-integrity RE-review; reproduced end-to-end by the reviewer); HIGH; open`
-<!-- @gap id=g-delta-lint-fix-corrupts-log-under-partial-blindness sev=HIGH status=open locus=scripts/delta-lint.ts(the --fix renumber path — maxSeq derived from parsed entries, not from all bracketed lines) prov=rationale:S365-bryan-re-review-finding-B-reviewer-reproduced-end-to-end-tail-region-drift-fix-renumbered-a-duplicate-to-1620-which-already-existed-at-line-2602-in-the-invisible-region-then-the-confirm-step-printed-1328-entries-max-1620-PASS-exit-0 -->
+<!-- @gap id=g-delta-lint-fix-corrupts-log-under-partial-blindness sev=HIGH status=resolved locus=scripts/delta-lint.ts(--fix path bracketed!==total guard :282 + refuseUnparsedEntries upstream) prov=rationale:S365-bryan-re-review-finding-B-reviewer-reproduced-end-to-end-tail-region-drift-fix-renumbered-a-duplicate-to-1620-which-already-existed-at-line-2602-in-the-invisible-region-then-the-confirm-step-printed-1328-entries-max-1620-PASS-exit-0 -->
+> **RESOLVED — landed in #652 (`ce096f58`), ledger flipped S378-peter on verify.** Two layers: `refuseUnparsedEntries()` already exits 2 before `--fix` runs on any partial parse, AND an explicit guard at the write site (delta-lint.ts:282 — `if (bracketed !== total) … process.exit(2)`) refuses to renumber against a maxSeq derived from a partial population, so the destructive verb states its own precondition. Pinned by test §5 (`--fix` under a partial parse → exit 2 and the log is BYTE-IDENTICAL; `--fix` on a clean parse renumbers to a number no ENTRY holds). Verified at HEAD S378: 14 pass / 0 fail. ⚑ **NOT closed by this:** the distinct union-merge-orientation `--fix` hazard (first-in-file order is blind to which side a peer repo already checkpointed) remains open with an interim printed warning (test §5 pins the warning) — that is a separate, still-open concern, out of scope here.
 > **⚑ S365-bryan: RELAYED from the re-review, which reproduced it end-to-end; I have reproduced its PRECONDITION ([[g-delta-lint-partially-blind-on-emoji-kind-entries]]) but not this consequence directly.**
 >
 > With a drift in the tail region, `--fix` derives `maxSeq` from the entries it can see. The reviewer's run renumbered a duplicate to `[1620]` — **a number that already existed at line 2602 inside the invisible region** — manufacturing a genuine new collision, and the "re-run without `--fix` to confirm" step then printed `1328 entries … max [1620] — PASS`, exit 0.
@@ -9859,6 +9862,24 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 > **The tail is the realistic drift site** (a new writer appends there), so this is the live configuration of the hazard rather than a contrived one.
 >
 > **Compounds with a rule already recorded this session:** `--fix` was ALREADY known to renumber the wrong side on a merge (it keeps first-in-file order, which is blind to which side is already published — delta-log `[1686]`, and I warned Peter about it by inbox the same day). So the verb now has two independent ways to damage the file it maintains. **Recommend `--fix` be gated on a clean parse — refuse to renumber anything while `bracketed !== total`** — and, separately, that the merge-orientation hazard be handled by making `--fix` refuse outright on a file with unmerged-side ambiguity rather than by operator memory.
+
+### g-delta-lint-fix-renumbers-the-already-published-side-of-a-union-merge — `--fix` keeps first-in-file order when renumbering a duplicate, which is blind to which side of a `merge=union` result a peer repo (the flogence bridge) has already checkpointed, so it can renumber the PUBLISHED side and desync the cursor — the second, still-open half of the S365 `--fix` hazard split out when the partial-parse half closed — `NEW S378-peter (split from g-delta-lint-fix-corrupts-log-under-partial-blindness on verify-close of #652); MED; open (bryan-lane — needs a merge-orientation design call)`
+<!-- @gap id=g-delta-lint-fix-renumbers-the-already-published-side-of-a-union-merge sev=MED status=open locus=scripts/delta-lint.ts(the --fix renumber loop keeps first-occurrence-in-file, no notion of which side a union-merge already published) prov=rationale:S378-peter-the-clean-parse-guard-that-closed-the-partial-blindness-half-explicitly-does-NOT-make-fix-safe-on-a-merge-result-delta-lint.ts-277-280-and-test-5-pins-only-an-interim-printed-warning — routed:bryan-continuity-tooling -->
+> Split out of [[g-delta-lint-fix-corrupts-log-under-partial-blindness]] (resolved #652) because it is a
+> distinct root with a distinct fix. `.gitattributes` gives `handOffs/delta-log.md` `merge=union`, which
+> keeps BOTH sides of a concurrent tail-append and thereby TRADES a merge conflict for a possible
+> duplicate sequence — a trade the file's own header says is "only safe because delta-lint is loud about
+> duplicates in CI." So `--fix` running on a union-merge result is the NORMAL remedy path, not a corner
+> case. But `--fix` renumbers by first-occurrence-in-file order, which carries no information about which
+> of the two merged entries a peer repo already absorbed. If it renumbers the **published** side, the
+> flogence bridge (which uses the sequence as a checkpoint cursor) reads the moved entry as new and the
+> original as absorbed — a silent desync.
+>
+> The clean-parse guard that closed the partial-blindness half is explicitly documented as NOT covering
+> this (delta-lint.ts:277–280), and test §5 pins only the interim printed **warning**, not a refusal.
+> **Fix direction (bryan's call):** either refuse `--fix` outright when the file shows union-merge
+> ambiguity, or thread merge-side/published-cursor awareness into the renumber so only the unpublished
+> side moves. Needs the merge-orientation design decision, hence bryan-lane.
 
 <!-- ============ S365-bryan — Q5 ruling + the Q1 arc's measurements ============ -->
 
@@ -10452,7 +10473,7 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 > minted `E-EACH-AS-ALIAS-INVALID` to close on the other side.
 
 ### g-test-suite-writes-stray-zero-file-into-repo-root — something in the test path writes a file literally named `0` into the repo root, which then defeats the pre-commit docs-only fast path
-<!-- @gap id=g-test-suite-writes-stray-zero-file-into-repo-root sev=LOW status=open locus=searched:scripts/,compiler/tests/,.github/(grepped for `grep -c … SPEC.md` and for bare `> 0` / `2> 0` redirects — no locus found) prov=rationale:S375-observed-three-times-each-time-immediately-after-a-full-suite-run-and-once-swept-into-a-commit-by-git-add--A -->
+<!-- @gap id=g-test-suite-writes-stray-zero-file-into-repo-root sev=LOW status=resolved locus=docs/changes/spec-17-6-value-form-amendment-2026-08-24/BRIEF.md:7(the malformed DONE-PROBE)+scripts/threads.ts:runProbe(executes it via bash -c cwd=ROOT) prov=rationale:S378-peter-root-caused-and-fixed-the-locus-bryan-searched-3x-and-could-not-find -->
 > A file named `0` containing the single line `compiler/SPEC.md:0` — the output shape of `grep -c`
 > redirected to a file literally named `0` — appears in the repo root **after every full test-suite
 > run**. Observed three times at S375.
@@ -10465,3 +10486,54 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 > **Locus NOT found** and recorded as such per the base §2 locus-or-recorded-search rule rather than
 > guessed. The `grep -c` output shape is the strongest lead: something redirects a count to `0` where
 > `2>&1` or `>&2` was meant.
+>
+> **RESOLVED — S378-peter.** Root cause found: it was NOT a script redirect typo and NOT the test
+> suite. It was a **malformed `DONE-PROBE` executed as a shell command by `scripts/threads.ts`** (a boot
+> probe — the "after a full suite run" attribution conflated a co-running boot/threads probe with the
+> suite). `docs/changes/spec-17-6-value-form-amendment-2026-08-24/BRIEF.md:7` carried a PROSE probe
+> `grep -c "value-form" compiler/SPEC.md returns > 0 AND the three repros …`; `threads.ts` runs each
+> `DONE-PROBE` via `bash -c` with `cwd=ROOT`, so bash parsed `> 0` as a redirect (writing the `grep -rc`
+> output `compiler/SPEC.md:0` to a file `0`) and `returns`/`AND`/… as extra grep file-args. bryan's grep
+> missed it because the locus is probe **data** in a `docs/changes/*/BRIEF.md`, not a script. Fixed by
+> rewriting the probe to `grep -q "value-form" compiler/SPEC.md` (valid, no redirect, still correctly
+> OPEN until the amendment lands). Verified: a full `bun scripts/boot.ts` run now leaves no `0`.
+>
+> ⚑ **Class not fully closed** — see `g-thread-probe-guard-admits-prose-after-a-real-first-token`
+> (the S278 guard checks only the first token, so any prose probe that *starts* with a real command
+> passes validation and runs, redirects and all). Routed to bryan's `threads.ts` tooling lane.
+
+### g-thread-probe-guard-admits-prose-after-a-real-first-token — the S278 malformed-probe guard passes any prose that STARTS with a real command, then runs it with side effects (a DONE-PROBE is meant to be a read-only assertion)
+<!-- @gap id=g-thread-probe-guard-admits-prose-after-a-real-first-token sev=MED status=open locus=scripts/threads.ts:validateProbe(bash -n syntax check + first-token command-v — both pass a prose sentence like `grep … returns > 0 AND the three repros …`, which is VALID bash whose first token is a real command)+runProbe(then runs it via bash -c cwd=ROOT) prov=rationale:S378-peter-found-while-root-causing-g-test-suite-writes-stray-zero-file — routed:bryan-threads.ts-tooling-lane -->
+> The S278 guard was built to reject prose that runs to a non-zero exit (the false-OPEN class). It
+> validates in two steps: `bash -n -c <probe>` (parses?) and `command -v` on the first token. **Both
+> pass a prose sentence that happens to be valid bash and starts with a real command.** The witness:
+> `grep -c "value-form" compiler/SPEC.md returns > 0 AND the three repros below behave …` parses
+> cleanly, first token `grep` resolves — so it RAN, `> 0` redirected `grep`'s output to a file `0`, and
+> the trailing prose became extra grep args. That instance was fixed at its source (it caused
+> `g-test-suite-writes-stray-zero-file-into-repo-root`), but the guard will admit the **next** one.
+>
+> **Why it matters beyond a stray file:** a `DONE-PROBE` is a *read-only assertion* run at `cwd=ROOT`.
+> A prose probe of the shape `… > <tracked-file> …` would silently **clobber** a real repo file — the
+> `0` case was benign only because the redirect target was the literal `0`. Latent silent-destructive.
+>
+> **Fix direction (bryan's call):** a DONE-PROBE has no business writing — reject any probe whose parse
+> contains an output/append/heredoc redirection (`>`,`>>`,`<<`) at validate time, and/or run it under
+> `set -o noclobber` in a scratch cwd with the repo readable but not the write target. Simplest robust
+> check: reject a redirection operator in the token stream; a legit assertion never needs one.
+
+### g-state-delta-parse-splits-on-lf-only-crlf-breaks-the-gate — state.ts + delta-lint.ts split the delta-log on newline-only, so on a CRLF checkout every entry keeps a trailing carriage-return and the entry-shape anchor fails on all of them: the @generated currency gate refuses with PARTIAL PARSE at every session close (Windows-local; CI on Linux is unaffected)
+<!-- @gap id=g-state-delta-parse-splits-on-lf-only-crlf-breaks-the-gate sev=MED status=resolved locus=scripts/state.ts:663(parseDeltaLog `text.split("\n")`)+scripts/delta-lint.ts:79(`raw.split("\n")`) prov=rationale:S378-peter-found-while-verifying-720s-recent-sessions-claim-the-crlf-break-was-masking-it -->
+> **Found while running the S239 pass on #720** (whose claim is that `state.ts --check` is red at every
+> session close for a *structural* reason). On this Windows checkout `--check` exited 2 with a totally
+> different failure: 1533 delta-log lines start with `[NNNN]` but **0 matched the entry shape**. Root:
+> `parseDeltaLog` splits on `"\n"` (state.ts:663) and `delta-lint.ts` on `"\n"` (:79); with
+> `core.autocrlf=true` the working tree is CRLF, so every line keeps a trailing `\r` and `DELTA_ENTRY`'s
+> end-anchor cannot match it. The parse refusal fires *before* the `recent-sessions` check bryan
+> described, so it **masked** the real (confirmed) staleness and made `--check` red at every Peter
+> session for a bogus reason — the cry-wolf shape #720 flags, doubled.
+>
+> **RESOLVED — S378-peter.** Both splits changed to `/\r?\n/` (LF-identical; git stores LF via autocrlf,
+> so CI was always green — this was local-Windows DX only, the same class as the @generated regen
+> scripts). Verified: `delta-lint` PASS (1533 entries, max [1822]); `--check` now reaches and reports
+> the true `@generated:recent-sessions` staleness. No write-output change (the split feeds *matching*,
+> not the regenerated section text).

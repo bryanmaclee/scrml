@@ -4,7 +4,9 @@ change-id: spec-17-6-value-form-amendment-2026-08-24
 authored: S371-bryan, 2026-08-24 (Tier-2 prep — NOT yet dispatched)
 ruling: user-voice-scrml.md S371, bryan verbatim: "value-form b"
 gaps: g-value-form-control-flow-unspecified (RULED) + g-value-form-if-no-else-renders-nothing
-DONE-PROBE: grep -c "value-form" compiler/SPEC.md returns > 0 AND the three repros below behave per the amended text
+DONE-PROBE: grep -q "value-form" compiler/SPEC.md
+<!-- probe is the cheap deterministic half (the normative name landed in SPEC); the "three repros behave" half is verified by the conformance cases this brief owns (§ "What the amendment owes" item 6), not shell-probable here. Prior prose form (`… returns > 0 AND the three repros …`) bash-parsed `> 0` as a redirect and wrote a stray file `0` at repo root every boot (S378). -->
+
 
 ## The ruling
 
