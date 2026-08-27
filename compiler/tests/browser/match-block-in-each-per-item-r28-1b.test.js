@@ -232,12 +232,12 @@ describe("R28-1b §2 — each <li> renders its own match arm in happy-dom", () =
     // `<li>` (the old key is gone), re-running the per-item factory → the new
     // item dispatches against ITS value (Published).
     //
-    // NB (out of R28-1b scope, pre-existing each limitation): a SAME-key item
-    // whose discriminant field changes in-place does NOT re-render, because
-    // keyed reconciliation reuses the existing DOM node without re-running the
-    // per-item factory. This affects ALL per-item template content equally —
-    // e.g., a same-key `${article.title}` change does not update either. It is
-    // the general each per-item-reactivity gap, not specific to match-in-each.
+    // NB (CORRECTED S380): a SAME-key item whose discriminant field changes
+    // in-place DOES re-render now. The per-item interpolation was always reactive
+    // (wrapped in an item-resolve effect); S380 fixed the per-item MATCH to
+    // re-dispatch the same way (g-match-per-item-in-each-frozen-on-field-change,
+    // covered by g-match-per-item-in-each-reconcile.browser.test.js). The old NB
+    // here claimed neither re-rendered — that was stale.
     app.set("articles", [{ id: 2, status: "Published", title: "Only" }]);
     lis = app.mountEl().querySelectorAll("li");
     expect(lis.length).toBe(1);
