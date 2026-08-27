@@ -172,7 +172,17 @@ interface Ledger { path: string; pending: boolean; derived: boolean; }
 function resolveVoiceLedger(who: string, paProfileText: string): Ledger {
   // S378: `[^\n]*?` not `[^>]*?` — see scripts/review-debt.ts parseLedger. A `>` inside an
   // attribute value truncated the bag and the ledger silently failed to resolve.
-  const mk = paProfileText.match(/<!--\s*@ledger\s+([^\n]*?)-->/);
+  // ⚑ S378 round 3 (adversarial finding 3): matchAll + first NON-placeholder. A non-global
+  // `.match()` takes only the FIRST marker, so if a profile ever documents its own shape
+  // above the real one — the exact case the guard below is written for — the widened class
+  // matches the EXAMPLE, the guard rejects it, and the real marker below is never consulted:
+  // boot silently drops to the prose fallback. Pre-widening the example was unmatchable and
+  // the real marker was found, so the round-2 guard alone made this strictly worse.
+  const marks = [...paProfileText.matchAll(/<!--\s*@ledger\s+([^\n]*?)-->/g)];
+  const mk = marks.find(m => {
+    const p = m[1].match(/\bpath=([^\s]+)/)?.[1];
+    return p && !p.startsWith("<");
+  });
   if (mk) {
     const attrs = mk[1];
     const path = attrs.match(/\bpath=([^\s]+)/)?.[1];

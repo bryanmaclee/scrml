@@ -4,6 +4,25 @@ change-id: match-scrutinee-arity-diagnostic-2026-08-24
 dispatched: S371-bryan, 2026-08-24, base origin/main @ 25b77946
 gap: g-library-mode-multi-scrutinee-match-misparsed-as-single (MED, RE-SCOPED S371)
 DONE-PROBE: bun compiler/bin/scrml.js compile <paren-less product-arm match> emits E-MATCH-SCRUTINEE-ARITY, not E-CODEGEN-INVALID-LOGIC
+<!-- ⚑ S378 — THIS PROBE IS PROSE AND IS NOT RUNNABLE. Left AS-IS deliberately; read why.
+     `scripts/threads.ts` executes each DONE-PROBE as shell. This line passes the structural
+     validator (`bash -n` rc 0, `command -v bun` ok) so the board waves it through and the thread
+     resolves OPEN — which is currently the CORRECT answer, but UNFALSIFIABLE: it would read OPEN
+     forever, including after the fix lands. That is the S278 false-OPEN class. (No side effect:
+     the `<paren-less` input redirect fails before the `>` is performed, unlike the value-form
+     probe repaired this session, which was writing a file into the repo root on every boot.)
+     This is the FIFTH prose DONE-PROBE. A commit message of mine called the value-form one
+     'the FOURTH (S376 repaired three)', which implied the class was closed. It is not.
+     ⚑ WHY IT IS NOT FIXED HERE, stated rather than quietly skipped: the DONE condition is
+     BEHAVIOURAL (a paren-less multi-scrutinee head must emit E-MATCH-SCRUTINEE-ARITY), so it
+     needs a committed reproducer to compile. The code EXISTS in compiler/src today — it simply
+     cannot FIRE for this shape (S371: the check sits inside the multi-scrutinee typecheck a
+     1-scrutinee head never enters) — so the obvious `grep -rq 'E-MATCH-SCRUTINEE-ARITY'
+     compiler/src/` probe would flip this thread to a FALSE DONE. I drafted exactly that, caught
+     it by running it, and reverted. My attempt at a reproducer fired E-DG-002 instead, so I do
+     not have the shape verified and will not guess it into a probe.
+     WHAT A CORRECT PROBE NEEDS: a committed `repro.scrml` in this change dir whose compile
+     output is grepped for the code. Owner: whoever takes this arc. -->
 
 ## The symptom (PA-VERIFIED BY EXECUTION on 25b77946 — reproduce it first)
 

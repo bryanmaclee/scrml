@@ -126,8 +126,14 @@ describe("review-debt parseLedger — ordinary shape", () => {
   });
 
   test("the live ledger parses and contains the entry the S378 defect hid", async () => {
-    const f = Bun.file("docs/pr-reviews.md");
-    if (!(await f.exists())) return; // path-independent: skip rather than fail from another cwd
+    // ⚑ S378 round 3 (adversarial finding 6). This used a cwd-relative `Bun.file("docs/...")`
+    // with `if (!exists) return`, so a runner invoked from anywhere else turned the ONE
+    // assertion that proves #718 is visible into a SILENT PASS. In a file whose docstring
+    // quotes pa-base §8 on gates that cannot fail, that was the same shape — a test that
+    // disarms itself is not a test. Resolve against the checkout, and let a missing ledger FAIL.
+    const ledger = new URL("../../../docs/pr-reviews.md", import.meta.url).pathname;
+    const f = Bun.file(ledger);
+    expect(await f.exists()).toBe(true);
     const m = parseLedger(await f.text());
     expect(m.size).toBeGreaterThan(300);
     expect(m.has(718)).toBe(true); // the marker the pre-fix regex could not see
@@ -210,5 +216,68 @@ describe("sibling marker parsers — the shapes the widening got wrong", () => {
     const example = "<!-- @node id=<kebab-id> kind=<kind> status=<status> [sev=<sev>] -->";
     expect(/<!--\s*@node\s+([^>]*?)-->/.test(example)).toBe(false); // was immune by accident
     expect(/<!--\s*@node\s+([^\n]*?)-->/.test(example)).toBe(true);  // now matches -> must be guarded
+  });
+});
+
+/**
+ * ── S378 ROUND 3 ─────────────────────────────────────────────────────────────
+ * Round 2's fixes were themselves wrong in TWO places, each the mirror of the
+ * defect it repaired. These pin the shapes so a fourth swing cannot regress them.
+ */
+
+describe("@gap status read — three regexes failed in three directions; the BAG does not", () => {
+  // The attribute bag, as scripts/state.ts now reads it in BOTH of its parsers.
+  const statusFromBag = (line) => {
+    const m = line.match(/<!--\s*@gap\s+([\s\S]*?)\s*-->/);
+    if (!m) return null;
+    const attrs = new Map();
+    for (const pair of m[1].trim().split(/\s+/)) {
+      const eq = pair.indexOf("=");
+      if (eq > 0 && !attrs.has(pair.slice(0, eq))) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
+    }
+    return attrs.get("status") ?? null;
+  };
+
+  test("a `>` inside a value does not truncate (the S378 defect)", () => {
+    expect(statusFromBag('<!-- @gap id=y locus=Map<number,X> sev=LOW status=open -->')).toBe("open");
+  });
+
+  test("trailing prose after the marker cannot win (round 2's greedy defect)", () => {
+    const line = "<!-- @gap id=x sev=MED status=open --> and prose says status=resolved later";
+    expect(statusFromBag(line)).toBe("open");
+  });
+
+  test("a `status=` inside a prov= narrative cannot win (round 3's lazy defect)", () => {
+    // This is the repo's house style — `prov=rationale:<long-kebab-narrative>` — so it was
+    // reachable, not theoretical. The lazy regex read `open`; the truth is `resolved`.
+    const line = "<!-- @gap id=x sev=MED prov=rationale:heading-said-status=open-but-the-fix-landed status=resolved -->";
+    expect(statusFromBag(line)).toBe("resolved");
+    expect(line.match(/<!--\s*@gap\s+[^\n]*?status=(\w+)[^\n]*?-->/)[1]).toBe("open"); // documents the trap
+  });
+
+  test("the bag is immune BY CONSTRUCTION: a whitespace split makes an embedded key a VALUE", () => {
+    // `prov=...status=open...` is ONE token whose key is `prov`. No pattern tuning involved.
+    const line = "<!-- @gap id=x status=resolved prov=a:status=open -->";
+    expect(statusFromBag(line)).toBe("resolved");
+  });
+});
+
+describe("placeholder guards — identity fields only, never every value", () => {
+  // scripts/corpus-zero-debt.ts. Round 2 guarded ALL values, which erased a real
+  // self-reported VIOLATION whose narrative `note=` merely began with a scrml tag —
+  // failing toward CLEAN, the direction the guard existed to prevent.
+  const dropsMarker = (bag) => (bag.role ?? "").startsWith("<") || (bag.disposition ?? "").startsWith("<");
+
+  test("a narrative note beginning `<db>` does NOT erase a real violation", () => {
+    expect(dropsMarker({ role: "load-bearing", by: "S380-x", note: "<db>-shape-dropped" })).toBe(false);
+  });
+
+  test("a genuine format example (placeholder ROLE) is still dropped", () => {
+    expect(dropsMarker({ role: "<role>", disposition: "<disposition>" })).toBe(true);
+  });
+
+  test("the round-2 over-broad shape is the one that fails toward CLEAN", () => {
+    const overBroad = (bag) => Object.values(bag).some((v) => String(v).startsWith("<"));
+    expect(overBroad({ role: "load-bearing", note: "<db>-shape-dropped" })).toBe(true); // erases it
   });
 });

@@ -80,13 +80,21 @@ export type Edge = { from: string; type: string; target: string; verified: boole
 const GAP_RE = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(\S+)\s*-->/;
 // S378: `[^\n]*?` not `[^>]*?` — same class as the S378 review-floor defect.
 const NODE_RE = /<!--\s*@node\s+([^\n]*?)-->/;
-// ⚑ S378 round 2 (adversarial finding 2). A marker whose id is an angle-bracket PLACEHOLDER
-// is a doc's own FORMAT EXAMPLE, not a node. Under the pre-S378 `[^>]*?` such a line was
-// unmatchable by accident; widening to `[^\n]*?` admits it, and this corpus ALREADY contains
-// one — `scrml-support/docs/flogence-graph-mvp-spec-2026-06-17.md:32`, the graph's own spec.
-// Left unguarded it inserts a phantom node AND rebinds `current`, so every subsequent [[link]]
-// in that document is attributed to the placeholder. Same guard as scripts/state.ts.
-const isPlaceholderId = (id) => !id || String(id).startsWith("<");
+// ⚑ S378. A marker whose id is an angle-bracket PLACEHOLDER is a doc's own FORMAT EXAMPLE,
+// not a node. Under the pre-S378 `[^>]*?` such a line was unmatchable by accident; widening to
+// `[^\n]*?` admits it, and unguarded it inserts a phantom node AND rebinds `current`, so every
+// subsequent [[link]] in that document is attributed to the placeholder. Same guard as state.ts.
+//
+// ⚑ ROUND-3 CORRECTION — MY OWN ROUND-2 JUSTIFICATION WAS FALSE, and it is the same class this
+// PR files as findings against #718 ("false STATEMENTS in the artifact's own prose"). It claimed
+// "this corpus ALREADY contains one — scrml-support/docs/flogence-graph-mvp-spec-2026-06-17.md:32".
+// VERIFIED BY EXECUTION: that file is in NO corpus mode — `defaultCorpus()` is known-gaps.md +
+// master-list.md, and even `--with-support --with-archive` (345 files) does not reach it, because
+// it sits directly under `scrml-support/docs/`, not `docs/deep-dives/`. Reaching it needs an
+// explicit `--corpus`. The guard is kept as DEFENSIVE — the hazard is real the moment anyone
+// points --corpus at the graph's own spec — but it is latent, not live, and saying otherwise
+// was exactly the overclaim this session keeps catching in other people's work.
+const isPlaceholderId = (id: string | undefined | null): boolean => !id || String(id).startsWith("<");
 const LINK_RE = /\[\[([^\]]+)\]\]/g;
 
 function attrs(s: string): Record<string, string> {
