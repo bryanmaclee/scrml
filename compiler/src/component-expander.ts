@@ -2537,6 +2537,14 @@ function substituteProps(
               let parsed: ExprNode | null = null;
               try { parsed = parseExprToNode(exprVal.raw, exprVal.span?.file ?? "", exprVal.span?.start ?? 0); } catch { parsed = null; }
               if (parsed && parsed.kind !== "escape-hatch") {
+                // Route through the structured path whenever a string prop name appears
+                // in the raw — including when it only appears INSIDE a string literal.
+                // substitutePropsInExprNode leaves string-literal nodes untouched, so a
+                // non-reference like `("has note here")` (prop `note`) round-trips
+                // verbatim; the legacy raw rewrite below would instead rewrite the word
+                // inside the string (`note`->`x`) and emit a double-paren bare splice.
+                // The structured path is therefore the SAFE lowering for this shape, not
+                // just the primary `title=(label)` identifier case (S239 #2544/#2547).
                 const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
                 let raw = exprVal.raw;
                 try { raw = emitStringFromTree(replaced); } catch { /* keep original */ }
