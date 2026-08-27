@@ -76,7 +76,10 @@ const ENTRY = /^\[(?<seq>\d+)\]\s+(?:(?<marker>[^\w\s]\S*)\s+)?(?<kind>\S+)\s+·
 const BRACKETED = /^\[\d+\]/;
 
 const raw = readFileSync(LOG, "utf8");
-const lines = raw.split("\n");
+// Split on /\r?\n/, not "\n": on a CRLF checkout (Windows, core.autocrlf=true) a plain "\n" split
+// leaves a trailing \r on every line, so the ENTRY-shape match below fails on all of them and the lint
+// mis-reports a fully-unparsed log locally (same class as state.ts parseDeltaLog, S378). LF-identical.
+const lines = raw.split(/\r?\n/);
 
 // SCOPE. The log numbered PER-SESSION until `## Session 236` (2026-07-03) and has run on a
 // single global counter since, with no further section headers. Both consumers agree with

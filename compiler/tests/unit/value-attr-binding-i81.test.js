@@ -1101,34 +1101,39 @@ describe("§i81.12 — Axiom ① writer-ownership conflict (E-ATTR-WRITER-CONFLI
 });
 
 // ---------------------------------------------------------------------------
-// §i81.13 — component-root string-prop crash, FAIL CLOSED (S268 fix-round finding 1)
+// §i81.13 — component-root string-prop value-attr, now WIRED CORRECTLY (S380 real fix,
+// supersedes the S268 fail-closed drop)
 //
-// A STRING prop referenced in a value-attr expression on a component ROOT is
-// substituted by the expander as a BARE token (`title=(label)` → `((hi))`), a
-// free identifier that throws ReferenceError at DOMContentLoaded inside the
-// shared wiring handler → dead page. The lowerability gate now scope-walks the
-// lowered expression on `_expandedFrom` roots and drops it (W-CG-VALUE-ATTR-COMPONENT-PROP),
-// restoring the pre-#81 no-crash behavior. (Execution proof is in
-// compiler/tests/browser/browser-i81-component-root-crash.test.js.)
+// HISTORY: a STRING prop referenced in a value-attr expression on a component ROOT was
+// substituted by the expander as a BARE token (`title=(label)` → `((hi))`), a free
+// identifier that threw ReferenceError at DOMContentLoaded → dead page. S268 mitigated by
+// DROPPING the binding + warning (W-CG-VALUE-ATTR-COMPONENT-PROP) — no crash, but the prop
+// silently never wired. S380 fixes the ROOT (g-string-prop-in-is-some...): the expander now
+// routes a string-literal prop in an `expr`/value attr through parseExprToNode +
+// node-level substitution, so `title=(label)` with `label="hi"` lowers to the QUOTED literal
+// `("hi")` and WIRES — the mitigation no longer triggers for this shape.
+// (Execution proof is in compiler/tests/browser/browser-i81-component-root-crash.test.js.)
+// The fail-closed drop remains for the residual escape-hatch/unparseable sub-shape only.
 // ---------------------------------------------------------------------------
-describe("§i81.13 — component-root string-prop value-attr fails closed (no page crash)", () => {
-  test("string prop in a root value-attr expr is dropped with a warning, not emitted as a free ident", () => {
+describe("§i81.13 — component-root string-prop value-attr wires correctly (S380 real fix)", () => {
+  test("string prop in a root value-attr expr lowers to the quoted literal and wires (no drop, no free ident)", () => {
     const src = `<program>
       \${ const Badge = <span title=(label) props={ label: string }>badge</> }
       <Badge label="hi"/>
     </program>`;
     const r = compile(src);
-    // Non-fatal warning, not a compile error.
+    // No compile error, and the S268 fail-closed mitigation no longer fires — the prop wires.
     expect(r.errors).toEqual([]);
-    expect(diagCodes(r)).toContain("W-CG-VALUE-ATTR-COMPONENT-PROP");
-    // The crashing free-identifier binding is NOT emitted (pre-#81 no-crash parity).
-    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-title");
+    expect(diagCodes(r)).not.toContain("W-CG-VALUE-ATTR-COMPONENT-PROP");
+    // The binding IS emitted now, lowered to the quoted string literal — never the free ident.
+    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-title");
+    expect(emittedClient(r)).toContain('("hi")');
     expect(emittedClient(r)).not.toContain("((hi))");
-    // And the emitted bundle is a valid ES module (no free-ident SyntaxError-adjacent leak).
+    // And the emitted bundle is a valid ES module.
     expectParses(emittedClient(r));
   });
 
-  test("an UNRELATED reactive binding on another element still wires (no dead-page blast radius)", () => {
+  test("the wired title site coexists with an UNRELATED reactive binding (both wire)", () => {
     const src = `<program>
       \${ const Badge = <span title=(label) props={ label: string }>badge</> }
       <count> = 0
@@ -1136,8 +1141,8 @@ describe("§i81.13 — component-root string-prop value-attr fails closed (no pa
       <p data-n=(@count)>n</p>
     </program>`;
     const r = compile(src);
-    // The title site drops; the data-n site is untouched and wires reactively.
-    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-title");
+    // The title site now wires (quoted literal); the data-n site wires reactively.
+    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-title");
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-data-n="[^"]+"/);
     expect(emittedClient(r)).toContain('_scrml_cs_reactive_get("count")');
   });
@@ -1154,5 +1159,26 @@ describe("§i81.13 — component-root string-prop value-attr fails closed (no pa
     // not "any value-attr on a root").
     expect(diagCodes(r)).not.toContain("W-CG-VALUE-ATTR-COMPONENT-PROP");
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-title="[^"]+"/);
+  });
+
+  // Guard the structured-path routing against a plausible "only divert when a real
+  // identifier was substituted" tightening: it must ALSO cover a prop name that appears
+  // only INSIDE a string literal. The structured path leaves string-literal nodes
+  // untouched (verbatim round-trip); the legacy raw rewrite would instead rewrite the
+  // word inside the string (`note`->its value) and emit a double-paren bare splice.
+  // This test FAILS if that regression returns. (S380 — S239 #2544/#2547.)
+  test("a string prop name that only appears inside a string literal is preserved verbatim (not rewritten)", () => {
+    const src = `<program>
+      \${ const Tag = <span title=("has note here") props={ note: string }>t</> }
+      <Tag note="x"/>
+    </program>`;
+    const r = compile(src);
+    expect(r.errors).toEqual([]);
+    // The literal text is untouched; the prop VALUE ("x") never leaks into the string.
+    expect(emittedClient(r)).toContain("has note here");
+    expect(emittedClient(r)).not.toContain("has x here");
+    // No double-paren bare-splice artifact from the legacy raw rewrite.
+    expect(emittedClient(r)).not.toContain('(("has x here"))');
+    expectParses(emittedClient(r));
   });
 });
