@@ -4,7 +4,16 @@ change-id: spec-17-6-value-form-amendment-2026-08-24
 authored: S371-bryan, 2026-08-24 (Tier-2 prep — NOT yet dispatched)
 ruling: user-voice-scrml.md S371, bryan verbatim: "value-form b"
 gaps: g-value-form-control-flow-unspecified (RULED) + g-value-form-if-no-else-renders-nothing
-DONE-PROBE: grep -c "value-form" compiler/SPEC.md returns > 0 AND the three repros below behave per the amended text
+DONE-PROBE: grep -q 'value-form' compiler/SPEC.md
+<!-- ⚑ S378: the previous DONE-PROBE was PROSE — `grep -c "value-form" compiler/SPEC.md returns > 0
+     AND the three repros ...` — and scripts/threads.ts EXECUTES this line as shell. The shell read
+     `> 0` as a REDIRECT and wrote a file literally named `0` into the repo root on EVERY boot,
+     containing grep's output. That stray `./0` was mis-diagnosed at S375 as a random artifact and
+     `git add -A` swept it into a pushed PR. This is the FOURTH prose DONE-PROBE (S376 repaired
+     three) and the first one found to have a SIDE EFFECT rather than merely failing to evaluate.
+     Replaced with the runnable assertion the arc actually makes: the amendment is done when
+     `value-form` has a normative name in SPEC.md (0 occurrences today, so this reads OPEN — which
+     is correct, and now for a real reason). The three repros stay prose BELOW, out of the probe. -->
 
 ## The ruling
 
