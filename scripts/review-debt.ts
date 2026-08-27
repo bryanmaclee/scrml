@@ -60,7 +60,22 @@ function parseLedger(text: string): Map<number, Reviewed> {
   const out = new Map<number, Reviewed>();
   // Parse the MARKER, never the prose. An entry that is not in this shape is
   // not an entry — same discipline as scripts/state.ts on `@gap`.
-  const re = /<!--\s*@review\s+([^>]*?)-->/g;
+  //
+  // ⚑ S378 (g-review-debt-marker-regex-cannot-match-a-probe-containing-gt): the
+  // body class was `[^>]*?`, which EXCLUDES `>` — so a marker whose own `probe=`
+  // text contained a `>` never matched and its PR read as UNRECORDED. On this
+  // project that is not an edge case: the probe text routinely quotes scrml tags
+  // (`<db>`, `<each>`, `<program>`) and diagnostic position arrows (`5:1 -> 5:42`),
+  // so the failure rate rose with how THOROUGH the review write-up was. Witnessed:
+  // #718 — a three-round adversarial pass, recorded on main by the S376 tail — was
+  // reported OWED at the S378 boot, first `>` at char 1147 of a 3778-char marker.
+  // It failed toward DEBT (safe), but a floor that cannot see its own best records
+  // is the pa-base §8 hollow-gate shape from the other side.
+  //
+  // `[^\n]*?` keeps the documented one-marker-per-line contract (an unclosed
+  // marker matches nothing rather than swallowing the markers after it, so the
+  // failure direction stays toward debt) while admitting `>` inside the body.
+  const re = /<!--\s*@review\s+([^\n]*?)-->/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const bag: Record<string, string> = {};
