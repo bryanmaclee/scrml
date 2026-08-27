@@ -3462,29 +3462,46 @@ function _injectChildrenWalk(
       }
 
       if (renderParamMatch && parametricSnippets) {
-        // §16.6: ${render name(expr)} → substitute parametric snippet lambda body
+        // §16.6: ${render name(expr)} → render the parametric snippet lambda body
+        // with its param bound to the render arg.
         const snippet = parametricSnippets.get(renderParamMatch.name);
         if (snippet) {
-          // Replace all occurrences of paramName with argExpr in the lambda body.
-          // Function-form .replace() so any `$` chars in argExpr aren't interpreted
-          // as `$&` / `$N` backreferences (S100 `01eeda9` bug class — argExpr is
-          // user-authored scrml expression text).
-          // A zero-arg lambda on a parametric prop has an empty paramName — skip
-          // substitution (an empty-name regex `\b\b` would match everywhere and
-          // corrupt the body); the body renders as-is, ignoring the render arg.
-          const substituted = snippet.paramName
-            ? snippet.body.replace(new RegExp(`\\b${snippet.paramName}\\b`, "g"), () => renderParamMatch.argExpr)
-            : snippet.body;
-          // g-render-snippet-slot-renders-empty (S375): reparse the substituted
-          // body into REAL AST nodes (fresh ids) so codegen renders it. The old
-          // hand-built `{ bare-expr, expr }` node used the dead legacy `expr:`
-          // field (codegen reads `exprNode` since Phase 4d Step 8) → empty render.
           // Never silently drop the render node if `counter` is somehow absent
-          // (S375 review #2): fall back to a high-seeded local counter so the
-          // reparsed ids can't collide with the host file's, rather than emitting
-          // nothing — which would reintroduce the exact silent-empty class this fixes.
+          // (S375 review #2): a high-seeded local counter keeps the reparsed ids
+          // from colliding with the host file's, rather than emitting nothing.
           const idCounter = counter ?? { next: 900_000_000 };
-          result.push(...parseSnippetBodyNodes(substituted, filePath ?? "", idCounter, ceErrors, child.span));
+          const trimmedBody = snippet.body.trim();
+          if (snippet.paramName && trimmedBody === snippet.paramName) {
+            // The body IS exactly the param → a param REFERENCE; render the arg
+            // VALUE. parseSnippetBodyNodes classifies a bare identifier as TEXT (so
+            // a non-param name like `Active` renders literally instead of throwing
+            // a ReferenceError), so the bare-param body must be replaced wholesale
+            // with the arg here — the AST identifier substitution below never sees
+            // a text node.
+            result.push(...parseSnippetBodyNodes(renderParamMatch.argExpr, filePath ?? "", idCounter, ceErrors, child.span));
+          } else {
+            // g-parametric-snippet-param-substitution-is-textual-not-ast: substitute
+            // the param at the AST level (identifier positions only), NOT via a
+            // textual `\b<param>\b` replace over the raw body — which corrupted the
+            // param name where it appears as author TEXT (`the v value`) and never
+            // matched a `$`-prefixed name (`\b$x\b` treats `$` as an anchor). Parse
+            // the body into REAL AST nodes (fresh ids so codegen renders them —
+            // g-render-snippet-slot-renders-empty S375), then rename the param
+            // IDENTIFIER to the arg expression through the same node-level
+            // substitution component-prop expansion uses; markup / text literals are
+            // left untouched. A zero-arg lambda on a parametric prop has an empty
+            // paramName — no substitution (the body renders as-is, ignoring the arg).
+            let nodes = parseSnippetBodyNodes(snippet.body, filePath ?? "", idCounter, ceErrors, child.span);
+            if (snippet.paramName) {
+              let argNode: ExprNode | null = null;
+              try { argNode = parseExprToNode(renderParamMatch.argExpr, filePath ?? "", child.span?.start ?? 0); } catch { argNode = null; }
+              if (argNode) {
+                const paramMap = new Map<string, ExprNode>([[snippet.paramName, argNode]]);
+                nodes = nodes.map((n) => substituteProps(n, new Map<string, string>(), paramMap));
+              }
+            }
+            result.push(...nodes);
+          }
         }
         state.slotFound = true;
         continue;
