@@ -9542,33 +9542,38 @@ Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
 
 Related: [[g-spa-runtime-gzip-budget-knife-edge]] is unaffected. dpa-031 D2/D3 are the sibling defects of instance 1 and are filed with the dPA's other routed defects.
 
-> **⭐ ROOT TRACED — S378-peter (re-verified instance 1 on HEAD, then isolated the mechanism).** The
-> surviving instance is NOT "an engine mount fails to expand" — it is **E-MARKUP-001 being BYPASSED for a
-> lowercase element whose name matches a cross-file import**, so an invalid tag-mount ships silently
-> instead of drawing the loud error the same-file path already gives. Discriminator (all on HEAD):
-> - **same-file** `<phase/>` (engine auto-cell) → **`E-MARKUP-001` (loud, correct)** — the auto-cell is
->   NOT in the same-file resolution registry, so `resolveName` returns `unknown` and the gate fires.
-> - **cross-file, `import { phase }` + `<phase/>`** → **silent survival** — `phase` is now in the
->   `importedRegistry`, so `resolveName` (name-resolver.ts:359-361) returns a non-`unknown` kind, and
->   `maybeEmitMarkupUnknown` (name-resolver.ts:448 `if (resolvedKind !== "unknown") return`) skips. Nothing
->   downstream expands a cell-as-tag, so `<phase />` lands in `main.html` at exit 0.
-> - **cross-file WITHOUT importing `phase`** → `E-MARKUP-001` fires again. **The import is the suppressor.**
-> - contrast: a plain state cell `<count/>` resolves to a cell kind and gets the TARGETED
->   `E-CELL-NO-RENDER-SPEC` (use `${@count}`), never silent — so cells ARE recognized; the engine auto-cell
->   is the one that resolves to `unknown` same-file yet to a real kind when imported.
+> **⭐ S378-peter — INVESTIGATED on HEAD; a first trace was RETRACTED, and the corrected finding relocates
+> the fix.** ⚠ **RETRACTION:** an intermediate S378 note claimed the root was "E-MARKUP-001 being bypassed
+> for a lowercase element matching a cross-file import" and proposed tightening `name-resolver.ts` to make
+> `<phase/>` error. **That direction is WRONG and was NOT landed** — a prototype of it broke four
+> `c15-cross-file-engine-mount.test.js` cases (§C15.11/12/13). **Cross-file `<phase/>` is a SUPPORTED
+> feature** (`collectCrossFileEngineMounts` / `emitCrossFileEngineMount` in `emit-engine.ts`, §21.8/§C15,
+> gated on `exportRegistry` `category==="engine"`), so E-MARKUP-001 NOT firing cross-file is CORRECT. The
+> caught regression is the falsify-the-claim lesson working: a plausible name-resolver trace was refuted by
+> the C15 baseline before it shipped.
 >
-> **Locus (traced, was `searched:`):** `compiler/src/name-resolver.ts` — the asymmetry between the
-> `importedRegistry` (which carries `phase` with a non-`unknown` kind) and the same-file gate set
-> (`buildLocalDeclaredNames`/`buildSameFileRegistry`, which does NOT carry the engine auto-cell). **Fix
-> direction:** make a lowercase markup element resolving to an imported NON-MOUNTABLE kind (a cell /
-> engine-cell) reach the same error as same-file — ideally `E-CELL-NO-RENDER-SPEC` (the plain-cell
-> answer), else `E-MARKUP-001`. ⚠ Requires knowing exactly which `importedRegistry` kinds are legitimately
-> tag-mountable (imported components/state-types) vs not (cells) so the tightening does not reject a valid
-> imported mount — that enumeration is the remaining work and the regression risk. **NOT a clean drain — a
-> name-resolution arc; verified + root-traced + fix-scoped here, not landed.** Peter-lane (compute).
-> The entry's proposed post-emit `isKnownElementName`-over-the-EMIT detector remains the durable
+> **Corrected observable (compile + emission on HEAD, both the bare `import { phase }` shape AND the full
+> §C15.11 `export type Phase` + `import { Phase, phase }` happy-path — IDENTICAL output):** the mount emits
+> the client.js §21.8 "engine mount" marker, BUT leaves `<phase />` a **dead self-closing literal** in the
+> HTML, and the engine's state child markup renders NOWHERE — a state with a visible `<span
+> id="marker">IDLE-CONTENT</span>` produces `IDLE-CONTENT` in neither the HTML nor the client.js. So the
+> marker fires but the slot is never populated.
+>
+> **Why the C15 suite is green over this:** `c15-cross-file-engine-mount.test.js` §C15.11–13 assert only
+> that the client.js contains the marker STRING — they never mount the HTML or assert the rendered DOM.
+> This is the same coverage hole [[g-e2e-render-map-classifies-renders-empty-as-green]] names: nothing
+> reads the emitted artifact against the runtime for this construct.
+>
+> ⚠ **STILL OPEN — the intended runtime semantics of a cross-file `<phase/>` mount are NOT established.**
+> Same-file `<phase/>` errors (`E-MARKUP-001`), so it cannot serve as a working control, and it is not
+> confirmed whether an engine's state CHILD markup is meant to render at the mount at all (the same-file
+> engine idiom renders `${@phase}` / a component, not state children). Landing a fix requires reading the
+> §21.8/§C15 mount contract to know what `<phase/>` SHOULD produce — this is the third hypothesis and the
+> prior two were wrong, so it is NOT guessed here. **Fix locus is `emit-engine.ts` / the §C15 cross-file
+> mount wiring, NOT name-resolver.** Engine/machine codegen is specialized — recommend dispatch to bryan or
+> a spec-grounded arc. The post-emit `isKnownElementName`-over-the-EMIT detector remains the durable
 > class-level complement (owes a corpus population count before landing, per §8).
-<!-- @gap id=g-unexpanded-markup-element-survives-into-emitted-html sev=HIGH status=open locus=compiler/src/name-resolver.ts:359-361(importedRegistry resolves an imported engine auto-cell to a non-unknown kind)+:448(maybeEmitMarkupUnknown skips when kind!=unknown, so the cross-file lowercase mount escapes the gate the same-file path applies) prov=dd:scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md(instance 1, D1) + rationale:S378-peter-re-verified-on-HEAD-and-traced-the-import-suppresses-E-MARKUP-001-mechanism-instance-2-was-already-withdrawn -->
+<!-- @gap id=g-unexpanded-markup-element-survives-into-emitted-html sev=HIGH status=open locus=compiler/src/codegen/emit-engine.ts(collectCrossFileEngineMounts/emitCrossFileEngineMount — the §21.8 marker fires but the `<phase/>` HTML slot is never populated with the engine's rendered state; §C15 mount contract must be read to know intended output)+SEARCHED-AND-EXONERATED:compiler/src/name-resolver.ts(E-MARKUP-001 correctly does NOT fire — cross-file mount is a supported feature) prov=dd:scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md(instance 1, D1) + rationale:S378-peter-retracted-the-name-resolver-trace-after-it-broke-4-c15-tests-corrected-observable-is-a-dead-html-slot-with-the-client-marker-present-intended-semantics-unestablished -->
 
 ### G-DESTRUCTURED-PARAM-DEFAULT-SHIPS-SERVER-ONLY-STDLIB-TO-THE-BROWSER — a pattern-bound parameter default reaching `scrml:auth` emits NO `.server.js` and ships argon2id client-side — `NEW S347; HIGH; open (PA-reproduced on main; PRE-EXISTING)`
 

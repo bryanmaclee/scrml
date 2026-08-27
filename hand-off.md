@@ -30,16 +30,20 @@ the session confirming they need a ruling/co-sign. **The next peter productive m
 the g-unexpanded-markup arc (item 3, root-traced + ready), or (b) dog-food an adopter program (net-adder —
 discovery, not drain; the productive vein per memory, but it grows the count).
 
-### 3. g-unexpanded-markup (HIGH) — ROOT-TRACED, ready for a focused arc (NOT a drain)
+### 3. g-unexpanded-markup (HIGH) — a spec-grounded engine-mount arc (NOT name-resolver; NOT a clean drain)
 
-Re-verified on HEAD + root isolated this session (see delta `[1826]`). It is **E-MARKUP-001 bypassed when a
-lowercase element name matches a cross-file import**: same-file `<phase/>` errors correctly; cross-file
-`import { phase }` puts it in `importedRegistry` with a non-`unknown` kind → `resolveName`
-(`name-resolver.ts:359-361`) skips the gate (`:448`) → `<phase />` ships silently at exit 0. **Fix
-direction (owed work):** make a lowercase mount resolving to an imported NON-mountable kind reach the same
-error same-file gives — but FIRST enumerate which `importedRegistry` kinds are legitimately tag-mountable
-(imported components/state-types) vs not (cells), or the tightening rejects valid imported mounts. That
-enumeration + a corpus differential is the arc. Peter-lane (compute).
+⚠ **Correction (see delta `[1828]`, gap entry rewritten):** an S378 trace that blamed `name-resolver`
+(E-MARKUP-001 bypassed by a cross-file import) was **RETRACTED** — a prototype broke 4
+`c15-cross-file-engine-mount.test.js` cases. Cross-file `<phase/>` is a **SUPPORTED feature**
+(`emit-engine.ts` `collectCrossFileEngineMounts`, §21.8/§C15), so E-MARKUP-001 correctly does NOT fire.
+The real observable (compile+emission on HEAD, both bare and full-happy-path imports): the client.js §21.8
+mount MARKER fires but `<phase />` stays a **dead literal in the HTML** and the engine's state child
+markup renders nowhere. **The C15 suite is green because it asserts only the client-marker string, never
+the HTML/DOM** (same coverage hole as `g-e2e-render-map`). ⚠ **The INTENDED runtime semantics of the mount
+are unestablished** (same-file `<phase/>` errors, so no working control; unclear if state child markup is
+meant to render at the mount). Landing a fix needs the §21.8/§C15 mount contract read first — locus
+`emit-engine.ts`, not name-resolver. Engine/machine codegen is specialized → **recommend bryan or a
+spec-grounded arc**, not a mechanical peter pickup. Two hypotheses have already been wrong here.
 
 ### 4. THREE FINDINGS ROUTED TO BRYAN this session (his tooling / boundary lanes)
 
