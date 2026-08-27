@@ -901,8 +901,9 @@ it silently *drops a diagnostic* (fails toward accepting bad source) rather than
 nesting is not a common shape — but it is the exact shape a match-heavy adopter file grows into, and the
 loss is invisible.
 
-### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
-<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:astSqlQueryUsesSession+_scrml_session_bind+session-prologue-splice(root:interpolation-captured-as-raw-text-at-rewrite.ts:387) prov=spec:§20.5.15427 -->
+### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; RESOLVED (fix LANDED S323-peter, marker flipped S380-peter — stale-marker verify-close)`
+<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=resolved locus=compiler/src/codegen/emit-server.ts:astSqlQueryUsesSession+_scrml_session_bind+session-prologue-splice(root:interpolation-captured-as-raw-text-at-rewrite.ts:387) prov=spec:§20.5.15427 -->
+> **STALE-MARKER VERIFY-CLOSE — S380-peter.** The fix was BUILT + LANDED at S323-peter (Direction B, bryan-ruled S316) but the `status=open` marker was never flipped. Re-verified by execution on HEAD `3fc407bd`: the probe (`?{INSERT … ${session.userId} …}` in an `auth` + `db=` program) compiles exit 0 and the emitted `.server.js` now binds `const session = _scrml_session_bind(_scrml_req._scrml_sess)` (definition present in-file) before the SQL — no free `session`, no ReferenceError. GH #357 confirmed already CLOSED. [[feedback-staleness-spot-check-catches-silently-fixed-gaps]] (Live sibling NOT fixed: [[g-session-ambient-unlowered-trust-boundary-inversion]] — `${@session.userId}` in `?{}` still lowers to the client body; a distinct trust-inversion gap, stays open.)
 
 Adopter **dc / DanceCard** (a third adopter alongside aM and RediLedger), filed against `a4a4d55f`. **PA-REPRODUCED on `16783d6d`** — not taken on report.
 
