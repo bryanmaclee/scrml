@@ -61,6 +61,17 @@
 
 import type { CompileContext } from "./context.ts";
 import { nsId } from "./chunk-namespace.ts";
+import { collectDerivedVarNames } from "./reactive-deps.ts";
+
+// Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
+// (called 2–3× per match block) does not re-walk the whole AST each time.
+const _derivedNamesCache = new WeakMap<object, Set<string>>();
+function derivedNamesFor(fileAST: unknown): Set<string> {
+  if (!fileAST || typeof fileAST !== "object") return new Set();
+  let s = _derivedNamesCache.get(fileAST as object);
+  if (!s) { s = collectDerivedVarNames(fileAST as Record<string, unknown>); _derivedNamesCache.set(fileAST as object, s); }
+  return s;
+}
 
 interface MatchBlockAstNode {
   id: number;
@@ -222,6 +233,12 @@ interface OnExprResolution {
    *  when on= is auto-implied to an engine variable (Shape A). Null when
    *  on= is a non-cell expression (Shape B effect mode). */
   variantSubscribeName: string | null;
+  /** True when the subscribed cell is a DERIVED cell — the dispatcher must wire
+   *  via an EFFECT on `variantExprAccessor` (`_scrml_derived_get`) rather than
+   *  `_scrml_reactive_subscribe`, which never fires on a derived recompute.
+   *  `variantSubscribeName` is KEPT (drives `_armCellName` / arm-payload-each
+   *  stamping); only the subscription mechanism changes. */
+  derivedScrutinee?: boolean;
   /** Member-access sub-path suffix applied to the subscribed cell, e.g.
    *  ".state" for `on=@cell.state`. Empty string for a bare `@cell` ref or
    *  an auto-implied engine var. GITI-031 (2026-06-23) — Shape A subscribe
@@ -297,6 +314,21 @@ function resolveOnExpr(
     const cellRefMatch = expr.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)$/);
     if (cellRefMatch) {
       const cellName = cellRefMatch[1];
+      // A DERIVED cell (`const <x> = …`) recomputes through the derived mechanism;
+      // Shape A's plain `_scrml_reactive_subscribe` never fires on that recompute,
+      // so the match arm freezes at its initial value while a sibling `${@x}`
+      // interpolation (and `if=@x`) update correctly. Route a derived scrutinee
+      // through Shape B (effect + `_scrml_derived_get`) — the effect auto-tracks the
+      // derived cell exactly as the interpolation's `_scrml_effect` does. Plain
+      // cells keep Shape A. (g-match-on-derived-cell-scrutinee-frozen, S380 dog-food.)
+      if (derivedNamesFor(fileAST).has(cellName)) {
+        return {
+          variantExprAccessor: `_scrml_derived_get(${JSON.stringify(cellName)})`,
+          variantSubscribeName: cellName,
+          subscribeSubPath: "",
+          derivedScrutinee: true,
+        };
+      }
       return {
         variantExprAccessor: `_scrml_reactive_get(${JSON.stringify(cellName)})`,
         variantSubscribeName: cellName,
@@ -325,6 +357,18 @@ function resolveOnExpr(
     if (memberMatch) {
       const rootCell = memberMatch[1];
       const path = memberMatch[2];
+      // The bare-cell-via-interpolation form (`on=${@x}`, empty path) reaches
+      // here rather than the cellRefMatch above. A DERIVED cell here needs the
+      // same effect+derived_get wiring as the bare form — a plain subscribe on it
+      // never fires on recompute (g-match-on-derived-cell-scrutinee-frozen).
+      if (path === "" && derivedNamesFor(fileAST).has(rootCell)) {
+        return {
+          variantExprAccessor: `_scrml_derived_get(${JSON.stringify(rootCell)})`,
+          variantSubscribeName: rootCell,
+          subscribeSubPath: "",
+          derivedScrutinee: true,
+        };
+      }
       return {
         variantExprAccessor: `(_scrml_reactive_get(${JSON.stringify(rootCell)}))${path}`,
         variantSubscribeName: rootCell,
@@ -1163,6 +1207,9 @@ export function emitMatchBodyRenderForFile(
         // The helper's DOMContentLoaded initial-fire bridges Shape A's
         // "subscribe doesn't fire at init" gap.
         variantSubscribeName: onResolved.variantSubscribeName,
+        // A derived-cell scrutinee keeps its subscribeName (for `_armCellName`)
+        // but wires via an effect on the derived accessor, not reactive_subscribe.
+        ...(onResolved.derivedScrutinee ? { derivedScrutinee: true } : {}),
         // GITI-031 (2026-06-23) -- when on= is a member-access (`@cell.state`)
         // the subscribe path fires the callback with the WHOLE cell value, so
         // the dispatch + DOMContentLoaded-init paths apply this sub-path to

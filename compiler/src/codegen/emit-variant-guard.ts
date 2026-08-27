@@ -221,6 +221,13 @@ export interface VariantGuardOptions {
   mountAttr?: string;
   renderFnPrefix?: string;
   variantSubscribeName?: string | null;
+  /** When true, the subscribed cell is a DERIVED cell: wire the dispatcher via an
+   *  `_scrml_effect` on `variantExprAccessor` (which reads `_scrml_derived_get`)
+   *  rather than `_scrml_reactive_subscribe`, which never fires on a derived
+   *  recompute. `variantSubscribeName` is KEPT non-null (drives `_armCellName` /
+   *  arm-payload-each stamping); only the subscription mechanism differs, and the
+   *  effect fires at init so no separate DOMContentLoaded init-fire is emitted. */
+  derivedScrutinee?: boolean;
   /**
    * GITI-031 (2026-06-23) -- member-access sub-path suffix applied to the
    * subscribed cell, e.g. ".state" for `on=@cell.state`. When set (Shape A
@@ -1100,6 +1107,10 @@ export function emitVariantGuardedRender(
   //     reactive bindings. Reserved for future match-block-form consumer
   //     when `on=` is a non-cell expression.
   const subscribeName = opts.variantSubscribeName ?? null;
+  // A derived-cell scrutinee keeps `subscribeName` (for `_armCellName`) but wires
+  // via an effect on the derived accessor — `_scrml_reactive_subscribe` never
+  // fires on a derived recompute (g-match-on-derived-cell-scrutinee-frozen).
+  const derivedScrutinee = opts.derivedScrutinee === true;
   // GITI-031 (2026-06-23) -- Shape-A member-access sub-path suffix (e.g.
   // ".state"). When non-empty, the subscribe callback receives the WHOLE
   // subscribed-cell value and the DOMContentLoaded init-fire reads the whole
@@ -1293,7 +1304,14 @@ export function emitVariantGuardedRender(
   // is undefined) — the exact defect this fix removes.
   if (!itemScoped) {
     // Subscribe to variant changes — fires on set, not at init.
-    if (subscribeName !== null) {
+    if (subscribeName !== null && derivedScrutinee) {
+      // Derived-cell scrutinee — wire via an effect on the derived accessor (a
+      // plain reactive_subscribe never fires on a derived recompute). The effect
+      // fires at init too, so no separate DOMContentLoaded init-fire below.
+      dispatcherLines.push(`_scrml_effect(function() {`);
+      dispatcherLines.push(`  ${dispatchFnName}(${variantExprAccessor()});`);
+      dispatcherLines.push(`});`);
+    } else if (subscribeName !== null) {
       // Shape A — subscribe-only, fires on set, not at init.
       // GITI-031 — when on= is a member-access (`@cell.state`), the subscribe
       // callback fires with the WHOLE cell value, so wrap the dispatch to apply
@@ -1323,7 +1341,7 @@ export function emitVariantGuardedRender(
   // first wire, then re-wires fresh — same result).
   // Item-scoped mode has no module-init DOMContentLoaded fire either — the
   // each factory dispatches every item explicitly at create/reconcile time.
-  if (!itemScoped && subscribeName !== null) {
+  if (!itemScoped && subscribeName !== null && !derivedScrutinee) {
     // navigate-wave1c — the initial dispatch defers to DOMContentLoaded on an
     // ordinary page load (unchanged). When this dispatcher's chunk is INJECTED
     // after boot (a cross-chunk soft-nav loading a route whose content carries an
