@@ -2,6 +2,40 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S378 — 2026-08-26/27 (bryan · ASUS-Vivobook) — verification itself was the subject
+
+**Landed:** `#721` — the review-floor instrument could not match a marker whose `probe=` text
+contained a `>`, so a PR's review read as UNRECORDED and **the miss rate rose with how thorough the
+write-up was** (scrml tags, `->` arrows). Five adversarial rounds, fifteen findings, **every one in
+the collateral** — the primary fix was clean from round 1. Round 5 mutation-proved my sibling pins
+HOLLOW (reverting all three fixes left the suite green), so the four sibling widenings were
+REVERTED OUT and re-filed rather than patched a sixth time.
+
+**Built, verified, NOT landed:** rulings 2 + 3 on `worktree-agent-a91805a13f51a8596` @ `28ce5b90` —
+gate 29368/0, corpus differential **0 of 7380 for a third round**, migration unchanged, four fix
+rounds, all 15 findings closed and PA-verified by execution. Held because the S239 pass returned 5
+findings in each of three rounds, four of round 3's five in ruling 2's bare-call recognizer, and the
+mandated re-review did not fit alongside a safe wrap.
+
+**Filed:** `g-flograph-gap-re-drops-281-of-818-gap-markers` (**HIGH** — the script prints *"must
+match state.ts: HIGH open=9"* against a true 58) · `g-marker-parsers-share-an-untested-regex-class`
+(MED) · `g-threads-executes-prose-done-probes-with-side-effects` (MED, resolved).
+
+**The durable findings, in one line each:**
+- A prose `DONE-PROBE` containing `returns > 0` was executed as shell and **wrote a file into the
+  repo root every boot**. S375 recorded that stray `./0` as a pathspec failure; it was a tracked
+  instrument, every session, and nobody asked which one.
+- **`maskCommentRegions` is safe only over text that cannot contain a string literal.** Landed and
+  reverted twice in one session on two wrong domain arguments, both mine. A tripwire test now
+  guards it, because re-applying it makes findings DISAPPEAR rather than fail loudly.
+- **A corpus-derived migration zero bounds the CORPUS, not the adopter** — the corpus is 100%
+  LLM-authored, so it cannot contain the shape a human writing release notes produces.
+- **`E-BARE-CALL` does not exist anywhere**, yet a ratified S375 ruling names it and three sessions
+  relayed it. My brief cited a grep for it returning 0 as PA-VERIFIED evidence.
+- **A test that stays green when you revert the code under test is worse than no test** — it reads
+  as coverage and gets argued from.
+- **Converge-don't-enumerate is a rule about shared DOMAIN, not shared code shape.**
+
 ## S376 — 2026-08-26 (bryan · ASUS-Vivobook) — the instrument that underwrote a ratified rule was printing the opposite of the truth
 
 Booted onto a **stranded S375 wrap** and landed it, took the two owed ruling-1 decisions, then built

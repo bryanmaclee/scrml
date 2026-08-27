@@ -16,14 +16,29 @@ from landing; what is worth carrying is the method.
 
 ### 1. ⚠️ RULINGS 2 + 3 ARE BUILT AND VERIFIED BUT **NOT LANDED** — one fix round was in flight at wrap
 
-Branch **`worktree-agent-a91805a13f51a8596`**, worktree RETAINED. Last reported SHA `52d94959`; a
-**fourth fix round was dispatched and had not reported when this session closed** — so **read the
-branch tip and its `progress.md` before assuming anything about its state.**
+Branch **`worktree-agent-a91805a13f51a8596`**, worktree RETAINED. **FINAL SHA `28ce5b90`**, tree
+clean, gate 29368 pass / 0 fail, corpus differential **0 of 7380 for the third round running**,
+migration UNCHANGED (no STOP). Four fix rounds ran; all 15 findings closed.
+
+**⚑ WHY IT IS NOT LANDED, and this is a deliberate call, not an unfinished one.** The S239 pass
+found 5 findings in EACH of three rounds, and **four of round 3's five were in ruling 2's bare-call
+recognizer**. The contract requires a re-review after a fix round; I did not have the budget for a
+fourth pass PLUS a safe wrap, and landing without it — on precisely the surface that has produced
+defects every single round — is the green-report failure this session spent the day documenting.
+The dispatch reached the same read independently and said so: *"Three rounds have each found real
+defects in this one recognizer. I would not assume a fourth finds nothing... the ruling-3
+control-flow work is solid (clean three rounds) and the bare-call recognizer is the part that has
+needed every round."*
+
+**NEXT SESSION: run ONE S239 pass on `28ce5b90`. If clean, land. If it finds more in the bare-call
+recognizer again, SPLIT — land ruling 3 + the LOW rider, hold the bare-call gate as its own arc.**
 
 **What is verified BY MY OWN EXECUTION** (not relayed) on `52d94959` and on a merged tree:
 | probe | result |
 |---|---|
 | `< state>` + `if (1) { }` (deprecated opener) | caught, exit 1 |
+| `Updated(2026) — release notes are below.` (em dash, NON-parseable) | exit 0 — prose renders |
+| `Total(5); five in all` | exit 0 — prose renders |
 | `notify("Done :)")` | caught, exit 1 |
 | `loadData(); initApp()` | caught, exit 1 |
 | `Updated(2026) release notes are below.` | exit 0 — prose still renders |
