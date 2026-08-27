@@ -1,3 +1,178 @@
+# scrml — Session 378 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-26/27. Booted `/boot` Profile A, SOLO (S376-bryan and S377-peter both wrapped
+beneath). Boot **33.4%** — down from S375's 43.0%; the ratified rotation is holding.
+
+**The framing, because it reorders the rest: this session's subject was VERIFICATION ITSELF.** Two
+instruments that underwrite ratified rules were wrong. A probe had been writing a file into the repo
+root every boot for weeks and the evidence had already been mis-diagnosed. My own pins were
+mutation-proved hollow. And of the ~30 adversarial findings raised against my work, **the majority
+were in changes I made while fixing the previous round.** The compiler work landed or is one round
+from landing; what is worth carrying is the method.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ RULINGS 2 + 3 ARE BUILT AND VERIFIED BUT **NOT LANDED** — one fix round was in flight at wrap
+
+Branch **`worktree-agent-a91805a13f51a8596`**, worktree RETAINED. Last reported SHA `52d94959`; a
+**fourth fix round was dispatched and had not reported when this session closed** — so **read the
+branch tip and its `progress.md` before assuming anything about its state.**
+
+**What is verified BY MY OWN EXECUTION** (not relayed) on `52d94959` and on a merged tree:
+| probe | result |
+|---|---|
+| `< state>` + `if (1) { }` (deprecated opener) | caught, exit 1 |
+| `notify("Done :)")` | caught, exit 1 |
+| `loadData(); initApp()` | caught, exit 1 |
+| `Updated(2026) release notes are below.` | exit 0 — prose still renders |
+| glob `src/*.js` + `const @total = 1` | `W-CONST-AT-DEPRECATED` fires again (my regression reverted) |
+
+**Ruling 3's control-flow work has been verified CLEAN across three review rounds.** Ruling 2's
+bare-call recognizer has produced findings in every round — **4 of round 3's 5 were in it.** If the
+fourth round did not converge, **the split is the move: land ruling 3 + the LOW rider, hold the
+bare-call gate.** I did not do it here only because the surgery is real and I was near the floor.
+
+**⚑ THE LANDING MECHANIC IS NOT A FILE-DELTA.** The branch was cut at `a1c14878`, BEFORE #721
+merged, so a raw diff shows `scripts/review-debt.ts`, `master-list.md`, `docs/pr-reviews.md` and
+`compiler/tests/unit/review-debt-marker.test.js` as **REVERSALS**. A wholesale pull silently
+clobbers #721. VERIFIED: those four are stale views (the agent never touched them);
+`docs/known-gaps.md` IS touched by both and needs the 3-way. `git merge-tree origin/main <branch>`
+exits **0** — use a real merge, then re-verify the merged tree, because a clean 3-way proves
+textual disjointness and not semantics.
+
+### 2. ⚠️ TWO OPERATOR DECISIONS OWED, both now MEASURED so they are decidable
+
+- **The one-`<div>` bypass** (`g-state-block-statement-form-misses-a-wrapped-statement`, MED).
+  **Corpus population: ZERO** — full corpus emit captured (1906 sources / 7380 artifacts / 1839
+  HTML), swept for a lifecycle statement shipping as page text, bite-proven against a known
+  positive. So closing it is newly-rejecting with a measured-zero migration, and ruling 1's own
+  wording ("logic at a `<db>`/state-block locus is REFUSED") already reaches it — conformance, not
+  a widening. **Bound: the sweep covers the 1839 sources that compiled and emitted.**
+- **The F2 prose bound** — `Updated(2026)` ALONE on a line still fires `E-CALL-NOT-IN-LOGIC-CONTEXT`.
+  Recorded in the §34 row and pinned, but **unratified**. It is a judgement call about how much
+  prose the gate may bill the adopter for.
+
+### 3. ⚑ `E-BARE-CALL` DOES NOT EXIST — and a ratified ruling names it
+
+The S375 ruling text says *"conformance cases asserting `E-BARE-CALL` fires."* **That code has never
+existed anywhere** — not on main, not in the held build. The real code is
+`E-CALL-NOT-IN-LOGIC-CONTEXT`. Three sessions relayed the name without one grep, and my dispatch
+brief cited *"PA-VERIFIED: `E-BARE-CALL` does not exist on main — grep returns 0"* as evidence the
+gate was unlanded. **I grepped a name that never existed and read the zero as a finding.** The
+conclusion was accidentally true; the evidence was worthless. **A ratified ruling can name a code
+that does not exist, and nothing in the pipeline checks that.**
+
+### 4. HELD / OPEN
+
+| | state |
+|---|---|
+| rulings branch `worktree-agent-a91805a13f51a8596` | **retain** — built, verified, fix round in flight |
+| each-alias | still parked at `s375-r7-reviewed`, untouched this session |
+| `#655` worktree-sweep method | **gate green, not draft, its owed bite proof is DONE** (below) — recommend landing |
+| `#640` `#559` `#501` + 3 DRAFTs | untouched, pre-existing |
+| worktrees | 19 sweepable / 55 genuinely unlanded — **nothing swept** |
+
+---
+
+## 🔭 DURABLE FINDINGS
+
+### A. The review floor could not see its own most thorough records
+`review-debt.ts` parsed markers with `[^>]*?`, a class that EXCLUDES `>`. A marker whose `probe=`
+text contained a `>` never matched and its PR read as UNRECORDED — and on this project the probe
+text routinely quotes scrml tags (`<db>`, `<each>`) and position arrows (`5:1 -> 5:42`), so **the
+miss rate rose with how thorough the review was.** Landed as #721. Second consecutive session where
+the instrument underwriting a ratified rule was itself wrong (`ctx.ts` at S376).
+
+### B. ⭐⭐ Fifteen findings across five rounds on #721, and EVERY ONE was in the collateral
+The primary fix was clean from round 1. Rounds 2-5 found defects only in the four *sibling* parsers
+I widened alongside it — and twice they were the **mirror** of the fix before (`state.ts` went
+greedy-captures-LAST, then lazy-captures-FIRST, the latter beaten by a `prov=rationale:…status=…`
+narrative, which is the house style). **Round 5 was decisive: my sibling pins were MUTATION-PROVED
+HOLLOW** — they tested regex literals and reimplementations declared in the test file, so reverting
+all three fixes left the suite 26/26 green. **I reverted all four widenings out of the PR** and
+re-filed them, because there was no mechanism by which round 6 would have been the last.
+**The generalisable rule: a test that stays green when you revert the code under test is worse than
+no test, because it reads as coverage and gets argued from.**
+
+### C. ⭐⭐ Converge-don't-enumerate is a rule about shared DOMAIN, not shared code shape
+I ordered `maskCommentRegions` folded into a mirror scanner, citing its own banner *"THERE SHALL BE
+ONE OF THESE, NOT TWO."* It caused a **regression**: a `/*` inside `src/*.js` opens a block comment
+that never closes and silences the lint for the rest of the body. I then compounded it by ruling
+that the `<db>` twin should KEEP its masking because that domain was "validated" — **also wrong**;
+`<db>` bodies hold string VALUES, and a string value holds globs, paths, URLs, regexes. Both
+reverted. **Corrected rule, recorded at both loci: `maskCommentRegions` is safe only where the
+scanned text cannot contain a string literal — neither scanner qualifies.** And: closing a
+false-FIRE by importing a false-SILENCE trades a visible wrong warning for an invisible missing
+one; for a lint, silence is the worse direction.
+
+### D. ⭐ A corpus-derived migration zero bounds the CORPUS, not the adopter
+Ruling 2's gate hard-errored on `Updated(2026) release notes are below.` — prose that renders on
+main. The migration had measured **zero**, correctly. **The corpus is 100% LLM-authored (S368), so
+it cannot contain the shape a human writing release notes produces**, and bryan is the one human
+writing scrml. The dispatch wrote that distinction into the §34 row, the source comment, the
+conformance rationale and its progress.md unprompted — the recurrence is the cost, not the fix.
+
+### E. A prose DONE-PROBE was writing to the repo root every boot, and S375 mis-diagnosed the evidence
+`threads.ts` executes each `DONE-PROBE:` as shell. One was prose containing `returns > 0`; the shell
+read `> 0` as a redirect and wrote `compiler/SPEC.md:0` into a file named `0`. **The S375 misses list
+records that stray `./0` being swept into a pushed PR and files it as a pathspec failure.** It was
+not a stray — a tracked instrument created it every session and nobody asked which one. Fourth prose
+DONE-PROBE (S376 fixed three) and the first with a SIDE EFFECT. A **fifth** is live in
+`match-scrutinee-arity-diagnostic`; I annotated it rather than closing it, because the obvious probe
+would have flipped that thread to a FALSE DONE (I drafted it, ran it, reverted it).
+
+### F. #655 already carried the worktree-sweep method, and I re-derived it from scratch first
+The hand-off asked for a cleanup arc, so I built one — and produced two probes that were BOTH the
+wrong referent in sequence (`rev-list` misses squash merges; `gh pr list --head` misses everything
+landed by the file-delta protocol). **PR #655, open since 08-23, is titled "both obvious tests are
+wrong under squash-merge."** `gh pr list` is in the boot report and I read it as a queue of in-flight
+landings rather than as a place prior art lives. **An open PR is a knowledge store.** I did complete
+the bite proof #655 named as its remaining work — both directions — and ran the proven probe:
+**19 sweepable / 55 genuinely unlanded of 74**, 4.2 GB of 9.3 GB reclaimable. NOTHING SWEPT.
+
+---
+
+## ⚑ MISSES (mine)
+
+1. **★ I widened four instruments I could not verify, and wrote pins that could not fail.** Five
+   rounds, fifteen findings, all collateral. Reverted.
+2. **★ I ordered a fold-in that caused a regression, then ruled the twin safe on a domain
+   distinction that does not exist.** Both reverted; the corrected rule is recorded at both loci.
+3. **★ I cited a grep for `E-BARE-CALL` returning 0 as PA-VERIFIED evidence** — a name that has
+   never existed. Vacuous probe, inside a brief that warns about vacuous probes.
+4. **★ I relayed "6 pre-existing integration flakies" from a hand-off; the true figure is 53-55**,
+   and it moved by 2 between two runs of the same unmodified tree. The dispatch discarded my number
+   and used set-comparison, which is the correct instrument.
+5. **★ The zsh word-splitting trap, third instance in two sessions, with the entry loaded** — an
+   unquoted `$s` made `bun "scripts/threads.ts --open"` one bogus filename, reported **`clean`** on
+   the actual culprit, and sent me ~15 minutes into an innocent file.
+6. **★ I introduced a Windows break (`new URL().pathname`) in the very fix that made a test honest.**
+   The `windows` lane caught it. Making the test honest is what made the latent break observable.
+
+---
+
+## 🧷 STATE
+
+- **main** `4e561434` (#721). Coherence 0/0 both repos. `state.ts --check` passes BOTH generated
+  sections — `recent-sessions` included, for the first time this session.
+- **Gaps: HIGH 59 · MED 179 · LOW 80 · Nominal 7.** Filed this session:
+  `g-flograph-gap-re-drops-281-of-818-gap-markers` (**HIGH** — 281 of 818 dropped; the script prints
+  *"must match state.ts: HIGH open=9"* against a true 58, off by 84%) ·
+  `g-marker-parsers-share-an-untested-regex-class` (MED, the arc) ·
+  `g-threads-executes-prose-done-probes-with-side-effects` (MED, resolved).
+- **Debts:** review floor **0** (320/320) · issue-debt 0 · dpa 0 unrun, **18 ADVISORY awaiting
+  bryan** — that is the real backlog on this project, and it is decisions, not capacity.
+- **Concurrent:** SOLO throughout.
+- **RELAYED-UNVERIFIED, do not propagate:** the dispatch reported that bare control flow in a
+  **whitespace-form engine body** still ships as page text. **I could not reproduce it** on two
+  shapes — one errored for unrelated reasons, the other correctly fired `E-CONTROL-FLOW-IN-MARKUP`.
+  Check before filing.
+- **Mechanical stream:** delta-log `[1823]`-`[1840]`. Do not re-derive from this hand-off what the
+  delta-log and changelog carry.
+
+
 # scrml — Session 376 (bryan · ASUS-Vivobook) — WRAP
 
 **Date:** 2026-08-26. Booted `/boot` Profile A onto a **stranded S375 wrap**, as SUCCESSOR to a LIVE
