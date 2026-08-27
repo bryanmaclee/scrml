@@ -105,7 +105,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `c2f47530` — wrap(s376): the instrument that underwrote a ratified rule was printing the opposite of the truth (#719) — **pushed**
+- `a1c14878` — wrap(s376) tail: record the two owed reviews, and name why this gate is red at EVERY session close (#720) — **pushed**
 - `4895c004` — wrap(s375): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its class named (#712) — **pushed**
 - `8731799d` — maps(S372): wrap 6c refresh at 8b2e4053 — three routing rows, and six map claims corrected by execution (#707) — **pushed**
 - `b0abcbc6` — wrap(s371): land the stranded wrap — hand-off, changelog, delta-log, dashboard, maps (#689) — **pushed**
