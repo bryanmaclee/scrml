@@ -1516,7 +1516,22 @@ function renderTemplateChildToJs(
     lines.push(`${indent}${fragmentVar}.appendChild(${mountVar});`);
     // Per-item dispatch. The dispatch fn tears down any prior wiring on the
     // mount (per-mount dispose) and re-renders the arm for THIS item's value.
-    lines.push(`${indent}${dispatchFnName}(${mountVar}, ${discriminant});`);
+    //
+    // g-match-per-item-in-each-frozen-on-field-change (S380): the dispatch must
+    // RE-FIRE on a same-key reconcile (an item's discriminant field changes), or
+    // the arm freezes at its create-time value while the sibling `${item.field}`
+    // interpolation updates. A keyed reconcile REUSES the item node without
+    // re-running this factory, so a bare create-time call never sees the new
+    // value. Route through the SAME per-item effect wrapper the interpolations
+    // use (`maybeWrapEachPerItemEffect`): it re-resolves the iter var (and any
+    // enclosing-each var the discriminant reads, for a nested each) via
+    // `_scrml_resolve_item`, so reading the discriminant tracks it and the effect
+    // re-dispatches on a field change. Outside a reconcile ctx it returns the bare
+    // line unchanged (matching the interpolation's own behaviour on that path).
+    const _dispatchLine = `${indent}${dispatchFnName}(${mountVar}, ${discriminant});`;
+    for (const l of maybeWrapEachPerItemEffect([_dispatchLine], iterVarName, indent)) {
+      lines.push(l);
+    }
     return;
   }
 
