@@ -82,8 +82,18 @@ describe("§52.13 — auth-required document is gated in the served-document dis
     expect(entry).toContain("_SCRML_PROTECTED_DOCS = new Map");
     expect(entry).toMatch(/\["secure\.html", _scrml_pd_0\.guard\]/);
     // ...and the static-file branch consults it BEFORE serving (or 304-ing) the file.
-    expect(entry).toContain("_SCRML_PROTECTED_DOCS.get(rel)");
+    expect(entry).toContain("_SCRML_PROTECTED_DOCS.get(rel.toLowerCase())");
     expect(entry).toContain("if (_scrml_doc_gate) return _scrml_doc_gate;");
+  });
+
+  test("the gate matches case-insensitively (no /SECURE.html bypass on a case-insensitive FS)", () => {
+    const { entry } = build(SECURE);
+    // On a case-insensitive filesystem the OS resolves `GET /SECURE.html` to the
+    // `secure.html` file, but `rel` keeps the request casing. A case-exact map
+    // would miss and LEAK the document (verified by hand: /SECURE.html + /Secure.HTML
+    // returned 200 with the secret before this). Key + lookup are both lowercased.
+    expect(entry).toMatch(/\["secure\.html", _scrml_pd_0\.guard\]/); // key already lowercase
+    expect(entry).toContain("rel.toLowerCase()");
   });
 
   test("a NON-auth program gets no protected-document wiring (output unchanged)", () => {

@@ -380,9 +380,14 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     lines.push("// §52.13 — served documents whose scope is `auth=\"required\"`; the guard");
     lines.push("// redirects an unauthenticated request to loginRedirect (302) before the");
     lines.push("// static file is served (g-auth-required-does-not-protect-the-served-html-document).");
+    // Keys are LOWERCASED and looked up lowercased: on a case-insensitive
+    // filesystem the OS resolves `GET /SECURE.html` to the `secure.html` file, but
+    // the SERVE_DIR-relative path keeps the request's casing — a case-exact map
+    // would miss and leak the document. Over-protect (never under-protect): a
+    // case variant of a protected path is gated, matching the file the OS serves.
     lines.push("const _SCRML_PROTECTED_DOCS = new Map([");
     for (const pd of protectedDocs) {
-      lines.push(`  [${JSON.stringify(pd.htmlRel)}, ${pd.alias}.guard],`);
+      lines.push(`  [${JSON.stringify(pd.htmlRel.toLowerCase())}, ${pd.alias}.guard],`);
     }
     lines.push("]);");
     lines.push("");
@@ -528,7 +533,7 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     // §52.13 — gate an auth-required document BEFORE serving (or 304-ing) it: an
     // unauthenticated request redirects to loginRedirect instead of leaking the
     // rendered markup (g-auth-required-does-not-protect-the-served-html-document).
-    dispatchBody.push("        const _scrml_doc_guard = _SCRML_PROTECTED_DOCS.get(rel);");
+    dispatchBody.push("        const _scrml_doc_guard = _SCRML_PROTECTED_DOCS.get(rel.toLowerCase());");
     dispatchBody.push("        if (_scrml_doc_guard) {");
     dispatchBody.push("          const _scrml_doc_gate = _scrml_doc_guard(req);");
     dispatchBody.push("          if (_scrml_doc_gate) return _scrml_doc_gate;");
