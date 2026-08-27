@@ -61,6 +61,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { nsId } from "./chunk-namespace.ts";
+import { collectDerivedVarNames } from "./reactive-deps.ts";
 
 interface MatchBlockAstNode {
   id: number;
@@ -297,6 +298,21 @@ function resolveOnExpr(
     const cellRefMatch = expr.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)$/);
     if (cellRefMatch) {
       const cellName = cellRefMatch[1];
+      // A DERIVED cell (`const <x> = …`) recomputes through the derived mechanism;
+      // Shape A's plain `_scrml_reactive_subscribe` never fires on that recompute,
+      // so the match arm freezes at its initial value while a sibling `${@x}`
+      // interpolation (and `if=@x`) update correctly. Route a derived scrutinee
+      // through Shape B (effect + `_scrml_derived_get`) — the effect auto-tracks the
+      // derived cell exactly as the interpolation's `_scrml_effect` does. Plain
+      // cells keep Shape A. (g-match-on-derived-cell-scrutinee-frozen, S380 dog-food.)
+      const derivedNames = collectDerivedVarNames(fileAST);
+      if (derivedNames.has(cellName)) {
+        return {
+          variantExprAccessor: `_scrml_derived_get(${JSON.stringify(cellName)})`,
+          variantSubscribeName: null,
+          subscribeSubPath: "",
+        };
+      }
       return {
         variantExprAccessor: `_scrml_reactive_get(${JSON.stringify(cellName)})`,
         variantSubscribeName: cellName,
