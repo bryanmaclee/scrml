@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 60 |
+| HIGH | 61 |
 | MED | 179 |
 | LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -39,6 +39,11 @@
 <!-- ⚑ S345 filing batch — the S342 arc-audit backlog (bryan-ratified): 40 entries sourced from scrml-support/handOffs/s342-arc-audit/ (classify-write, g263, derived-transitive, harness, tare-pr501, dead-session) -->
 
 <!-- ⚑ S378-bryan filing batch 2 — surfaced by the FIFTH adversarial round on #721, which found the sibling surface is BIGGER than the PR that was touching it -->
+
+<!-- ⚑ S379-bryan filing batch 2 — surfaced by the round-9 adversarial pass on the #724 branch; PRE-EXISTING, PA-reproduced end-to-end, filed rather than fixed in that arc -->
+
+### g-session-store-keyed-per-compilation-unit-not-per-program — `_scrml_session_db_path` is derived from **the emitting unit's own `import.meta.dir`**, so a program whose pages compile to nested output directories opens **two or more separate SQLite session stores**, and a login on one page is invisible to another. PA-REPRODUCED END-TO-END on `48f0aaf8`: a two-page program (`index.scrml` calling `session.set`, `pages/admin/panel.scrml` reading `session.isAuth`) compiles clean — **0 errors, 0 warnings** — and emits `dist/index.server.js` → `<app>/dist/.scrml-sessions.db` alongside `dist/admin/panel.server.js` → `<app>/dist/admin/.scrml-sessions.db`. The write lands in the first file; the nested page's auth middleware reads the second; **`session.isAuth` is false forever and nothing anywhere says so.** ⚑ **This violates a normative SHALL the emitter's own comment block quotes verbatim** — §20.5 / #282, *"the READ middleware and the WRITE path SHALL consult the SAME durable store"* — so it is a Rule 4 item, not a design gap: the code asserts the property it breaks. The #282 fix (a durable path-keyed store, replacing an in-memory one) is correct and works; **per-PATH is necessary and NOT sufficient once units emit at different depths**, and that second half was never stated. The existing conformance case misses it because `pages/reader.scrml` has its `pages/` prefix stripped and lands in the SAME directory as the entry — a fixture that cannot exhibit the defect it would be the natural pin for. **Fix direction: key the store on the PROGRAM's output root, not the emitting unit's directory** — a codegen change with its own migration (any adopter with an existing nested-page session store has live sessions in the wrong file), which is why it is filed rather than folded into the arc that surfaced it. Blast radius: every multi-page app with a page in a subdirectory AND `<program auth="session">`. Silent, adopter-facing, and auth-shaped — `NEW S379-bryan (round-9 S239 pass on the #724 dev-server branch, which touched the adjacent lines; PA-reproduced by compiling a two-page fixture and resolving both emitted paths); **HIGH**; open`
+<!-- @gap id=g-session-store-keyed-per-compilation-unit-not-per-program sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(_scrml_session_db_path emit) prov=spec:§20.5-the-READ-middleware-and-the-WRITE-path-SHALL-consult-the-SAME-durable-store -->
 
 <!-- ⚑ S379-bryan filing batch 1 — adopter issue #724, both halves PA-reproduced by execution on main `48f0aaf8`; one root cause -->
 
