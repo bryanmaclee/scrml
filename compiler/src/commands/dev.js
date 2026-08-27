@@ -2,20 +2,29 @@
  * @module commands/dev
  * scrml dev subcommand.
  *
- * Compile + watch + Bun.serve() static file server pointing at output dir.
- * Default port 3000.
+ * Compile + watch + serve, default port 3000.
  *
- * Server function routes: after each compilation pass, *.server.js files in the
- * output directory are scanned and dynamically imported. Any export whose value
- * has shape `{ path, method, handler }` is registered as a live route. Incoming
- * requests are matched against registered routes BEFORE the static file fallback.
+ * ARCHITECTURE (issue #724). The parent process compiles and watches; the actual
+ * app runs in a CHILD process (`runDevChildServer`) behind a STABLE reverse proxy
+ * the parent owns. On every successful recompile the parent respawns the child.
+ * The reason is Bun's module cache: within one process Bun never re-evaluates a
+ * recompiled `*.server.js` (a `?t=` query on a `file://` URL is ignored), so an
+ * in-process reload served the STALE handler; copying the bundle to a fresh path
+ * defeats the cache but relocates the `import.meta.dir`-anchored session store. A
+ * fresh child process re-evaluates the whole server graph AND keeps
+ * `import.meta.dir` at the real output dir, so state beside the bundle survives.
  *
- * WebSocket channels: exports named `_scrml_ws_handlers` are collected and merged
- * into the Bun.serve() `websocket:` option. Channel upgrade routes (isWebSocket: true)
- * have their handler called as `handler(req, server)` so server.upgrade() can be invoked.
+ * Server function routes / WebSocket channels: inside the child, after each
+ * compilation pass, `*.server.js` files are scanned and imported — exports shaped
+ * `{ path, method, handler }` become live routes; `_scrml_ws_handlers` exports are
+ * merged into the Bun.serve() `websocket:` option (see `loadServerRoutes`). The
+ * parent reverse-proxies HTTP and WebSocket upgrades to the child, and serves the
+ * dev-infra endpoints (`/_scrml/live-reload` SSE, the hot-reload client) itself so
+ * the reload stream is stable across child respawns.
  */
 
-import { statSync, readdirSync, watch } from "fs";
+import { statSync, readdirSync, watch, writeFileSync, rmSync, readFileSync } from "fs";
+import { tmpdir } from "os";
 import { resolve, dirname, join, basename, relative } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
@@ -173,6 +182,7 @@ function parseArgs(args) {
 /** @type {Array<{ path: string, method: string, handler: Function, isWebSocket?: boolean }>} */
 let registeredRoutes = [];
 
+
 /** @type {{ open: Function, message: Function, close: Function } | null} */
 let registeredWsHandlers = null;
 
@@ -295,8 +305,12 @@ export function getCompileFailure() {
  * §40.3 handle() onion shape (as emitted by emit-server.ts):
  *   export const _scrml_mw_pipeline = _scrml_mw_wrap   // wrap(downstream) -> handler
  *
- * Bun caches ES module imports by specifier. To force a reload after
- * recompilation we append a `?t=<timestamp>` cache-buster to the import URL.
+ * FRESHNESS (issue #724): Bun caches ES modules by resolved path and never
+ * re-evaluates a recompiled `*.server.js` in the same process — a `?t=` query on a
+ * `file://` URL is ignored, and copying the bundle to a fresh path relocates the
+ * `import.meta.dir`-anchored session store. The dev server therefore loads routes
+ * in a CHILD process (`runDevChildServer`) that is respawned on every recompile;
+ * this function runs ONCE per process, so a plain import is always fresh here.
  *
  * Exported so the unit tests can mount a REAL compiled module's exports without
  * starting a dev server (same reason as `noteCompileResult`).
@@ -315,7 +329,6 @@ export async function loadServerRoutes(outputDir) {
   const serverFiles = findOutputFiles(outputDir, ".server.js");
   if (serverFiles.length === 0) return;
 
-  const cacheBuster = Date.now();
   const allWsHandlers = [];
   // §40.3/§40.8 — every module that hosts a request onion, with the `.scrml`
   // source that DECLARES it (emit-server stamps `_scrml_mw_declared_in`). One is
@@ -323,12 +336,10 @@ export async function loadServerRoutes(outputDir) {
   const onionCandidates = [];
 
   for (const { absPath, relPath } of serverFiles) {
-    // Absolute file URL with cache-buster so Bun re-evaluates on each reload.
-    const fileUrl = `file://${absPath}?t=${cacheBuster}`;
-
+    // First (and only) import of this path in this process — always fresh.
     let mod;
     try {
-      mod = await import(fileUrl);
+      mod = await import(`file://${absPath}`);
     } catch (err) {
       console.error(`[dev] Failed to import ${relPath}: ${err.message}`);
       continue;
@@ -711,6 +722,18 @@ export function broadcastReload() {
  * `/_scrml/fn/*`), so it cannot collide with an author route.
  */
 export const HOT_RELOAD_SRC = "/_scrml/hot-reload.js";
+
+/**
+ * The one line the app CHILD process prints to stdout once its server is bound,
+ * carrying the ephemeral port it landed on. The parent proxy waits for exactly
+ * this line (readiness + port in a single signal); every other child stdout line
+ * is forwarded to the parent's terminal verbatim.
+ */
+export const CHILD_READY_PREFIX = "__SCRML_DEV_CHILD_READY__ ";
+
+// Unique-suffix counter for the per-spawn child config file (avoids a same-ms
+// collision between two child spawns in one parent process).
+let childCfgSeq = 0;
 
 /**
  * The hot-reload client itself. Served AS A FILE at `HOT_RELOAD_SRC`, not
@@ -1111,6 +1134,37 @@ export async function devDispatch(req, server, serveDir, opts) {
  * @param {string} serveDir
  * @returns {object} Bun.serve() config
  */
+/**
+ * The dev-INFRASTRUCTURE endpoints, served identically by the child's
+ * `buildServeConfig` and (under #724) the parent proxy — factored to ONE place so
+ * the two can never drift. Returns a Response for a dev-infra path, else null.
+ *
+ *   /_scrml/live-reload  → the SSE hot-reload stream
+ *   HOT_RELOAD_SRC       → the same-origin hot-reload client script (§39.2.5-safe)
+ *   POST /_scrml/log     → §20.6 client log() forwarding (fire-and-forget 204)
+ *
+ * @param {string} pathname
+ * @param {Request} req
+ * @returns {Promise<Response|null>}
+ */
+export async function serveDevInfra(pathname, req) {
+  if (pathname === "/_scrml/live-reload") return createSseResponse();
+  if (pathname === HOT_RELOAD_SRC) return createHotReloadScriptResponse();
+  if (pathname === "/_scrml/log" && req.method.toUpperCase() === "POST") {
+    try {
+      const payload = await req.json();
+      const side = (payload && typeof payload.side === "string") ? payload.side : "client";
+      const msg = (payload && typeof payload.msg === "string") ? payload.msg : "";
+      const loc = (payload && typeof payload.loc === "string") ? payload.loc : "";
+      console.log(`[${side}] ${msg}${loc ? ` (${loc})` : ""}`);
+    } catch {
+      // Malformed payload — ignore (a dev convenience must never 500 a page).
+    }
+    return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+  return null;
+}
+
 export function buildServeConfig(opts, serveDir) {
   const config = {
     port: opts.port,
@@ -1127,44 +1181,12 @@ export function buildServeConfig(opts, serveDir) {
       const url = new URL(req.url);
       const pathname = url.pathname;
 
-      // SSE hot-reload endpoint
-      if (pathname === "/_scrml/live-reload") {
-        return createSseResponse();
-      }
-
-      // The hot-reload CLIENT. A same-origin `<script src>` rather than an
-      // inline script, so `<program headers="strict">`'s pinned
-      // `default-src 'self'` (§39.2.5) — which the mounted handle() onion now
-      // sets on dev's HTML responses too — accepts it. Served here, ahead of
-      // the compile-failure short-circuit, so the error overlay's copy of the
-      // tag resolves while the project does not compile.
-      if (pathname === HOT_RELOAD_SRC) {
-        return createHotReloadScriptResponse();
-      }
-
-      // §20.6 (F2=B) — client log() forwarding endpoint. In development the
-      // compiled client `_scrml_log` POSTs each tagged client-side log here so
-      // the developer sees ONE unified view in the terminal (terminal-as-the-
-      // single-view): server `log()` already prints to this terminal, and now
-      // client `log()` does too. Payload: { side:"client", loc, msg }. The
-      // print mirrors the runtime line format `[client] <msg> (loc)`. Fire-and-
-      // forget on the client side; this handler never blocks the page.
-      if (pathname === "/_scrml/log" && req.method.toUpperCase() === "POST") {
-        try {
-          const payload = await req.json();
-          const side = (payload && typeof payload.side === "string") ? payload.side : "client";
-          const msg = (payload && typeof payload.msg === "string") ? payload.msg : "";
-          const loc = (payload && typeof payload.loc === "string") ? payload.loc : "";
-          const locSuffix = loc ? ` (${loc})` : "";
-          console.log(`[${side}] ${msg}${locSuffix}`);
-        } catch {
-          // Malformed payload — ignore (a dev convenience must never 500 a page).
-        }
-        return new Response(null, {
-          status: 204,
-          headers: { "Access-Control-Allow-Origin": "*" },
-        });
-      }
+      // Dev-infra endpoints (SSE hot-reload, the hot-reload client, client log()
+      // forwarding) — shared with the parent proxy via serveDevInfra so the two
+      // never drift. Served ahead of the compile-failure short-circuit so the
+      // error overlay's script tag resolves while the project does not compile.
+      const infra = await serveDevInfra(pathname, req);
+      if (infra) return infra;
 
       // ------------------------------------------------------------------
       // adopter-#517 — compile-failure short-circuit. While the last compile
@@ -1253,11 +1275,253 @@ export function launchingProcessGone(launchPpid) {
 }
 
 /**
+ * CHILD-PROCESS app server (issue #724). The parent `scrml dev` compiles and
+ * watches; the actual app runs in THIS short-lived child, respawned on every
+ * recompile. A fresh process has a fresh module registry, so a recompiled
+ * `*.server.js` — and its whole cross-file server graph — is always re-evaluated
+ * (Bun never re-imports a changed module within one process), while
+ * `import.meta.dir` stays the real output dir so the session store that lives
+ * beside the bundle survives across reloads. Binds an EPHEMERAL port and prints
+ * `${CHILD_READY_PREFIX}<port>` so the parent learns the port AND that the server
+ * is up in one signal. Runs the full `buildServeConfig` dispatch; its own
+ * `/_scrml/live-reload` + hot-reload endpoints are simply never reached because
+ * the parent proxy serves those from its own stable port.
+ *
+ * @param {string} serveDir
+ * @param {object} opts   parsed dev opts (the port is overridden to 0 here)
+ * @returns {Promise<never>}
+ */
+export async function runDevChildServer(serveDir, opts) {
+  await loadServerRoutes(serveDir);
+  const server = Bun.serve(buildServeConfig({ ...opts, port: 0 }, serveDir));
+  // C18 (§38.6): channel `broadcast()` runs in THIS child; publishing on the
+  // child server reaches the parent's upstream proxy socket, which forwards to
+  // the browser — so realtime survives the proxy.
+  globalThis._scrml_active_server = server;
+  console.log(`${CHILD_READY_PREFIX}${server.port}`);
+
+  // Orphan guard — if the parent dev process dies, do not linger holding the port.
+  const launchPpid = process.ppid;
+  const guard = setInterval(() => {
+    if (!launchingProcessGone(launchPpid)) return;
+    try { server.stop(true); } catch { /* already stopped */ }
+    process.exit(0);
+  }, 2000);
+  guard.unref?.();
+  await new Promise(() => {});
+}
+
+/**
+ * Spawn a fresh app-child (`runDevChildServer`) and resolve once it reports ready.
+ * The child config is handed over via a temp JSON file (robust across however the
+ * `scrml` CLI was invoked, unlike reconstructing argv). Child stdout is scanned
+ * for the ready marker and otherwise forwarded to this terminal; stderr inherits.
+ *
+ * @returns {Promise<{ proc: object, port: number }>}
+ */
+async function spawnAppChild(serveDir, opts) {
+  const cfgPath = join(tmpdir(), `scrml-dev-child-${process.pid}-${childCfgSeq++}.json`);
+  writeFileSync(cfgPath, JSON.stringify({ serveDir, opts }));
+
+  const proc = Bun.spawn(
+    [process.execPath, process.argv[1], "dev", "--__dev-child", cfgPath],
+    { stdout: "pipe", stderr: "inherit", stdin: "ignore" },
+  );
+
+  let port;
+  try {
+    port = await new Promise((resolvePort, rejectPort) => {
+      const timer = setTimeout(
+        () => rejectPort(new Error("app child did not become ready within 15s")),
+        15000,
+      );
+      (async () => {
+        const decoder = new TextDecoder();
+        let buf = "";
+        for await (const chunk of proc.stdout) {
+          buf += decoder.decode(chunk, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl);
+            buf = buf.slice(nl + 1);
+            if (line.startsWith(CHILD_READY_PREFIX)) {
+              clearTimeout(timer);
+              resolvePort(Number(line.slice(CHILD_READY_PREFIX.length).trim()));
+            } else {
+              console.log(line); // forward the child's own logs (route registration, etc.)
+            }
+          }
+        }
+        // stdout closed before the ready marker → the child died starting up.
+        clearTimeout(timer);
+        rejectPort(new Error("app child exited before reporting ready"));
+      })().catch(rejectPort);
+    });
+  } catch (err) {
+    // Never leak the spawned process on a failed/slow start (the #577 orphan class).
+    try { proc.kill(); } catch { /* already gone */ }
+    try { rmSync(cfgPath, { force: true }); } catch { /* n/a */ }
+    throw err;
+  }
+
+  try { rmSync(cfgPath, { force: true }); } catch { /* child already read it */ }
+  return { proc, port };
+}
+
+/**
+ * Reverse-proxy one HTTP request to the app child. Bodies are buffered (dev
+ * payloads are small) to sidestep streaming/duplex differences. `redirect:
+ * "manual"` relays the child's 3xx verbatim on Bun (verified: Bun returns the
+ * real status + Location, not a WHATWG opaque-redirect). The response is rebuilt
+ * so a `content-encoding` header can be dropped — `fetch` already DECODED the body,
+ * so relaying that header would make the browser double-decode — while a copied
+ * Headers preserves multiple `Set-Cookie` values intact (the state #724 protects).
+ *
+ * @param {URL} url  the already-parsed request URL
+ */
+async function proxyHttpToChild(req, url, childPort) {
+  const target = `http://127.0.0.1:${childPort}${url.pathname}${url.search}`;
+  const method = req.method.toUpperCase();
+  // Keep the browser's original Host so app code that builds absolute URLs /
+  // redirects (or does a Host check) sees the real dev host, not the child's
+  // ephemeral 127.0.0.1 port. Bun's fetch honours an explicit Host header.
+  const headers = stripHopByHop(new Headers(req.headers));
+  const hasBody = method !== "GET" && method !== "HEAD";
+  try {
+    const resp = await fetch(target, {
+      method,
+      headers,
+      body: hasBody ? await req.arrayBuffer() : undefined,
+      redirect: "manual",
+    });
+    const outHeaders = stripHopByHop(new Headers(resp.headers));
+    // Bun's fetch transparently DECODES the compressed body (gzip/deflate/br/zstd
+    // — verified on Bun 1.4.0), so `resp.body` is already plaintext; relaying the
+    // stale `content-encoding` would make the browser double-decode, and the
+    // pre-decode `content-length` would truncate it. The scrml child never sets
+    // `content-encoding`, so this only ever fires on an adopter's own middleware —
+    // strip both and let Bun re-derive the length.
+    outHeaders.delete("content-encoding");
+    outHeaders.delete("content-length");
+    return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: outHeaders });
+  } catch (err) {
+    return new Response(`[dev] proxy error: ${err.message}`, { status: 502 });
+  }
+}
+
+/** Drop per-connection hop-by-hop headers a reverse proxy must not forward end-to-end. */
+function stripHopByHop(headers) {
+  for (const h of ["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer"]) {
+    headers.delete(h);
+  }
+  return headers;
+}
+
+/**
+ * Open the upstream socket to the app child and pair it with the browser socket
+ * (issue #724, §38 channels). Both directions are queued until their socket is
+ * ready, so neither end races: the upstream's own `open`/`message`/`close`
+ * listeners are attached HERE, synchronously at creation — before Bun later fires
+ * the parent `open(ws)` — so an upstream event that arrives first is buffered, not
+ * lost. `ws.data` carries the shared pairing state.
+ *
+ * @param {Request} req
+ * @param {object} srv  the Bun server (for `srv.upgrade`)
+ * @param {URL} url
+ * @param {number} childPort
+ * @returns {Response|undefined}
+ */
+function proxyWebSocketToChild(req, srv, url, childPort) {
+  // Forward the auth-bearing request headers so a `<channel auth>` upgrade
+  // handler's `_scrml_auth_check(req)` sees the browser's session cookie (Bun's
+  // WebSocket honours a `headers` option). Without this, authenticated §38.5
+  // channels that worked in prod would 401 under `scrml dev`.
+  const fwd = {};
+  const cookie = req.headers.get("cookie");
+  if (cookie) fwd.Cookie = cookie;
+  const auth = req.headers.get("authorization");
+  if (auth) fwd.Authorization = auth;
+  // NB: `Sec-WebSocket-Protocol` is deliberately NOT forwarded — scrml channels do
+  // not negotiate a subprotocol, and the parent's `srv.upgrade` cannot echo the
+  // child's chosen subprotocol back to the browser, so forwarding it would make a
+  // subprotocol-requiring browser close on the unconfirmed handshake.
+
+  const upstream = new WebSocket(
+    `ws://127.0.0.1:${childPort}${url.pathname}${url.search}`,
+    Object.keys(fwd).length ? { headers: fwd } : undefined,
+  );
+  // Deliver binary channel frames as ArrayBuffer (ServerWebSocket.send accepts
+  // ArrayBuffer/TypedArray/string but throws on a Blob — the browser default).
+  upstream.binaryType = "arraybuffer";
+  const st = { upstream, browser: null, upOpen: false, toUpstream: [], toBrowser: [], closed: false };
+
+  upstream.addEventListener("open", () => {
+    st.upOpen = true;
+    for (const m of st.toUpstream) { try { upstream.send(m); } catch { /* closing */ } }
+    st.toUpstream = [];
+  });
+  upstream.addEventListener("message", (e) => {
+    if (st.browser) { try { st.browser.send(e.data); } catch { /* closing */ } }
+    else st.toBrowser.push(e.data);
+  });
+  const closeBoth = (code, reason) => {
+    st.closed = true;
+    if (st.browser) {
+      // A close code of `undefined` (an upstream `error` with no code) is not a
+      // valid argument to ServerWebSocket.close and can throw — close cleanly.
+      try { code === undefined ? st.browser.close() : st.browser.close(code, reason); }
+      catch { /* already closed */ }
+    }
+  };
+  upstream.addEventListener("close", (e) => closeBoth(e.code, e.reason));
+  upstream.addEventListener("error", () => closeBoth());
+
+  const ok = srv.upgrade(req, { data: st });
+  if (!ok) { try { upstream.close(); } catch { /* n/a */ } return new Response("WebSocket upgrade failed", { status: 400 }); }
+  return undefined;
+}
+
+/** WebSocket handlers for the parent's Bun.serve — the browser-facing half of the pair. */
+const wsProxyHandlers = {
+  open(ws) {
+    const st = ws.data;
+    st.browser = ws;
+    // Drain anything the upstream already delivered before this socket existed.
+    for (const m of st.toBrowser) { try { ws.send(m); } catch { /* closing */ } }
+    st.toBrowser = [];
+    // Upstream already gone? Close this side too.
+    if (st.closed) { try { ws.close(); } catch { /* closed */ } }
+  },
+  message(ws, message) {
+    const st = ws.data;
+    if (st.upOpen && st.upstream.readyState === 1) {
+      try { st.upstream.send(message); } catch { /* closing */ }
+    } else {
+      st.toUpstream.push(message);
+    }
+  },
+  close(ws) { try { ws.data.upstream.close(); } catch { /* closed */ } },
+};
+
+/**
  * Entry point for the dev subcommand.
  *
  * @param {string[]} args — raw argv slice after "dev"
  */
 export async function runDev(args) {
+  // #724 child-process mode: re-entered by spawnAppChild with a config file path.
+  // Run ONLY the app server (no compile/watch/proxy) and return.
+  const childFlag = args.indexOf("--__dev-child");
+  if (childFlag !== -1) {
+    const cfgPath = args[childFlag + 1];
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    // The child owns its config file from here — delete it immediately so a later
+    // hard-kill of either process cannot leak it in the temp dir.
+    try { rmSync(cfgPath, { force: true }); } catch { /* parent may have removed it */ }
+    await runDevChildServer(cfg.serveDir, cfg.opts);
+    return;
+  }
+
   const opts = parseArgs(args);
 
   if (opts.inputFiles.length === 0) {
@@ -1274,21 +1538,94 @@ export async function runDev(args) {
   // Resolve the serve directory the same way the server does.
   const serveDir = outputDir || join(dirname(opts.inputFiles[0]), "dist");
 
-  // Load server routes from the initial compilation output.
-  await loadServerRoutes(serveDir);
+  // #724: run the app in a fresh CHILD process (respawned per recompile) and put
+  // a STABLE reverse proxy in front of it. The parent never re-imports a
+  // `*.server.js`, so it can never serve a stale handler; the child, being a new
+  // process each reload, always re-evaluates the whole server graph while keeping
+  // `import.meta.dir` (and the session store beside the bundle) intact.
+  // `childPort` is 0 until the first child reports ready; the proxy returns a 503
+  // "starting" during that window. The parent port is bound BEFORE the child spawns
+  // (below) so there is never a moment with no server — even if the first child
+  // hangs at import, requests get a 503 instead of connection-refused.
+  let appChild = null;
+  let childPort = 0;
 
-  // Start static file server with WebSocket support if channels were found.
-  // Bun.serve() returns a server object that supports server.reload(config)
-  // to update routes/ws handlers without dropping connections.
-  let server = Bun.serve(buildServeConfig(opts, serveDir));
-  // C18 (§38.6): expose Bun.serve() handle for the broadcast() helper
-  // injected into channel-scoped server functions. Refreshed on every
-  // server.reload() since reload() returns the same server instance.
+  // Serialize respawns: overlapping edit-bursts must not each read the same
+  // `appChild` as `old` and orphan the intermediate child (the #577 orphan class).
+  // Chaining makes each respawn read the CURRENT child (set by the prior link) as
+  // its `old`, so every spawned child is either the live one or gets killed.
+  let respawnChain = Promise.resolve();
+  function respawnAppChild(newServeDir) {
+    const run = respawnChain.then(async () => {
+      const old = appChild;
+      const fresh = await spawnAppChild(newServeDir, opts);
+      appChild = fresh;
+      childPort = fresh.port;
+      // Grace period before killing the old child so a request already mid-flight
+      // to it is not reset into a 502. New requests already go to `fresh`.
+      if (old) {
+        const t = setTimeout(() => { try { old.proc.kill(); } catch { /* gone */ } }, 3000);
+        t.unref?.();
+      }
+    });
+    // The NEXT respawn chains off a settled promise even if THIS one fails, so a
+    // single bad spawn can never wedge future hot reloads; the caller still awaits
+    // `run` and sees this respawn's own success/failure.
+    respawnChain = run.catch(() => {});
+    return run;
+  }
+  function killAppChild() { try { appChild?.proc.kill(); } catch { /* already gone */ } }
+  process.on("exit", killAppChild);
+  process.on("SIGINT", () => { killAppChild(); process.exit(0); });
+  process.on("SIGTERM", () => { killAppChild(); process.exit(0); });
+
+  // The STABLE public server: dev-infra endpoints are served here (so the
+  // hot-reload SSE stream survives every child respawn); everything else is
+  // reverse-proxied to the current app child.
+  let server = Bun.serve({
+    port: opts.port,
+    idleTimeout: opts.idleTimeout ?? 120,
+    async fetch(req, srv) {
+      const url = new URL(req.url);
+      const pathname = url.pathname;
+      // Dev-infra endpoints — served by the STABLE parent (never proxied) so the
+      // SSE stream survives child respawns and the log stays a fast 204 even while
+      // a compile is failing. Same helper the child uses, so no drift.
+      const infra = await serveDevInfra(pathname, req);
+      if (infra) return infra;
+      // WebSocket upgrade (§38 channels) → reverse-proxy to the child. Handled
+      // BEFORE the compile-failure short-circuit so a channel reconnect during a
+      // failing compile keeps talking to the last-good child instead of getting an
+      // HTML body and thrashing its retry loop.
+      if ((req.headers.get("upgrade") || "").toLowerCase() === "websocket") {
+        if (!childPort) return new Response("[dev] app server is starting…", { status: 503 });
+        return proxyWebSocketToChild(req, srv, url, childPort);
+      }
+      // While the last compile is failing, serve the real error at every app
+      // request (adopter-#517) rather than proxying to the last-good child.
+      const failure = getCompileFailure();
+      if (failure) return buildCompileErrorResponse(req, failure);
+      // No child bound yet (first boot still starting, or a failed initial spawn).
+      if (!childPort) return new Response("[dev] app server is starting…", { status: 503, headers: { "Retry-After": "1" } });
+      return proxyHttpToChild(req, url, childPort);
+    },
+    websocket: wsProxyHandlers,
+  });
   globalThis._scrml_active_server = server;
 
-  // Log the port Bun actually BOUND (`server.port`), not the requested one:
-  // `--port 0` asks the OS for an ephemeral port, and `opts.port` would print
-  // `localhost:0`. Harnesses (and humans) read the real port back from here.
+  // Spawn the initial app child AFTER the parent port is bound (above). A first
+  // bundle that hangs or throws at import therefore degrades to a 503/error page,
+  // never a downed port, and recovers on the next successful recompile. The
+  // "Serving" line prints AFTER the child is ready so it keeps its "ready to serve"
+  // meaning (harnesses and humans wait on it).
+  try {
+    appChild = await spawnAppChild(serveDir, opts);
+    childPort = appChild.port;
+  } catch (err) {
+    console.error(`[dev] initial app server failed to start: ${err.message}`);
+    console.error(`[dev] serving errors until the next successful recompile.`);
+  }
+
   console.log(`[dev] Serving ${serveDir} at http://localhost:${server.port}`);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
 
@@ -1526,19 +1863,33 @@ export async function runDev(args) {
       watchFile(f);
     }
     if (success) {
-      // Reload server routes to pick up any changes to server functions.
-      await loadServerRoutes(recompileOutputDir || serveDir);
-      // Reload the Bun.serve() instance to update WebSocket handlers if they changed.
-      // server.reload() updates the config in-place, preserving existing connections.
+      // #724: respawn the app child so the recompiled server bundle (and its whole
+      // cross-file server graph) is re-evaluated in a fresh process. The parent's
+      // stable proxy — and its SSE hot-reload stream — is untouched, so the reload
+      // signal below is reliable across the swap.
       try {
-        server.reload(buildServeConfig(opts, serveDir));
-      } catch {
-        // Fallback: stop and restart (drops SSE connections, browser auto-reconnects)
-        server.stop(true);
-        server = Bun.serve(buildServeConfig(opts, serveDir));
+        await respawnAppChild(recompileOutputDir || serveDir);
+      } catch (err) {
+        // The compile SUCCEEDED but the fresh child would not start. Surface it as
+        // an error page (not a silent stale bundle — the exact #724 symptom) and
+        // signal a reload so the developer SEES it; the next successful edit clears
+        // it via runOnce's own noteCompileResult.
+        console.error(`[dev] failed to restart app server: ${err.message}`);
+        noteCompileResult({
+          errors: [{
+            stage: "DEV",
+            code: "DEV-SERVER-RESTART-FAILED",
+            message: `The app server failed to restart: ${err.message}. Save again to retry.`,
+            file: "",
+            line: 0,
+            column: 0,
+            severity: "error",
+          }],
+          warnings: [],
+        });
+        broadcastReload();
+        return;
       }
-      // C18 (§38.6): refresh broadcast() handle after reload/restart.
-      globalThis._scrml_active_server = server;
       // Signal all connected browsers to reload.
       broadcastReload();
       if (sseClients.size > 0) {
