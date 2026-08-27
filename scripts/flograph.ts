@@ -80,6 +80,13 @@ export type Edge = { from: string; type: string; target: string; verified: boole
 const GAP_RE = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(\S+)\s*-->/;
 // S378: `[^\n]*?` not `[^>]*?` — same class as the S378 review-floor defect.
 const NODE_RE = /<!--\s*@node\s+([^\n]*?)-->/;
+// ⚑ S378 round 2 (adversarial finding 2). A marker whose id is an angle-bracket PLACEHOLDER
+// is a doc's own FORMAT EXAMPLE, not a node. Under the pre-S378 `[^>]*?` such a line was
+// unmatchable by accident; widening to `[^\n]*?` admits it, and this corpus ALREADY contains
+// one — `scrml-support/docs/flogence-graph-mvp-spec-2026-06-17.md:32`, the graph's own spec.
+// Left unguarded it inserts a phantom node AND rebinds `current`, so every subsequent [[link]]
+// in that document is attributed to the placeholder. Same guard as scripts/state.ts.
+const isPlaceholderId = (id) => !id || String(id).startsWith("<");
 const LINK_RE = /\[\[([^\]]+)\]\]/g;
 
 function attrs(s: string): Record<string, string> {
@@ -144,7 +151,9 @@ function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edge
     const node = line.match(NODE_RE);
     if (node) {
       const a = attrs(node[1]);
-      if (a.id) {
+      // ⚑ S378 round 2: reject the format-example placeholder BEFORE it can become a node or
+      // rebind `current` (see isPlaceholderId above — the triggering line is live in the tree).
+      if (a.id && !isPlaceholderId(a.id)) {
         const n: Node = { id: a.id, kind: a.kind ?? "node", status: a.status ?? "current", sev: a.sev ?? null, file, line: i + 1 };
         if (nodes.has(n.id) && nodes.get(n.id)!.kind !== "doc") dupes.push(`${n.id} (${rel(file)}:${i + 1})`);
         nodes.set(n.id, n);

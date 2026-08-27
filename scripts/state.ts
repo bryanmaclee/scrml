@@ -249,7 +249,16 @@ export function headingMarkerDrift(srcText?: string): { line: number; id: string
       // `>` was TRUNCATED here and read as no-marker, so headingMarkerDrift reported NO drift
       // for an entry whose heading and marker disagree. S334 fixed this exact class in this
       // file's MAIN parser (see the note above gapCounts); this was the straggler.
-      const mm = lines[j].match(/<!--\s*@gap\s+[^\n]*status=(\w+)/);
+      // ⚑ S378 round 2 (adversarial finding 1). This must be LAZY and TERMINATED.
+      // The old `[^>]*` was IMPLICITLY bounded by the marker s own `>`; a naive widen to
+      // `[^\n]*` is greedy and unterminated, so it runs to EOL and captures the LAST
+      // `status=` on the line — trailing prose, or a second marker. Demonstrated:
+      //   "<!-- @gap id=x sev=MED status=open --> ... prose says status=resolved"
+      //   old -> open   naive-widen -> resolved   lazy+terminated -> open
+      // That would make headingMarkerDrift compare the heading against the WRONG value and
+      // silently report no drift for a genuinely drifted entry. Anchoring on `-->` matches
+      // this file s own main parser at gapCounts.
+      const mm = lines[j].match(/<!--\s*@gap\s+[^\n]*?status=(\w+)[^\n]*?-->/);
       if (mm) { mStatus = mm[1].toLowerCase(); break; }
       if (/^### /.test(lines[j])) break;
     }

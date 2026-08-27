@@ -89,10 +89,31 @@ export function parseLedger(text: string): Map<number, Reviewed> {
   const re = /<!--\s*@review\s+([^\n]*?)-->/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
+    // ⚑ S378 round 2 (adversarial finding 5) — FIRST-WINS, not last-wins.
+    //
+    // The bag is a naive whitespace split, so ANY `key=value` token appearing inside a
+    // narrative `probe=` is indistinguishable from a real field. Under last-wins that
+    // silently RE-KEYS the entry: a probe describing an earlier review ("… re-review of
+    // pr=500 …", "… superseded by=S377-x …") would move the record onto the wrong PR —
+    // the wrong PR reads REVIEWED and the real one stays OWED. Failing toward clean on
+    // one side is the direction this instrument must not have.
+    //
+    // The widening in this very commit is what makes it reachable: the markers newly
+    // admitted are precisely the long narrative ones (#708's is 3.7 KB of prose).
+    //
+    // First-wins is correct for the documented field order (`pr verdict by date probe
+    // [note]`): every real field precedes the narrative, so a duplicate inside `probe=`
+    // can only ever come later and is ignored. ⚑ The one honest cost: `note=` also comes
+    // after `probe=`, so a literal "note=" inside a probe narrative wins over the real
+    // one. That is accepted deliberately — `note` is display-only, while `pr`/`verdict`/
+    // `by` decide whether an obligation is discharged. Protect the load-bearing fields.
     const bag: Record<string, string> = {};
     for (const kv of m[1].trim().split(/\s+/)) {
       const i = kv.indexOf("=");
-      if (i > 0) bag[kv.slice(0, i)] = kv.slice(i + 1);
+      if (i > 0) {
+        const k = kv.slice(0, i);
+        if (!(k in bag)) bag[k] = kv.slice(i + 1);
+      }
     }
     // ⚑ PLACEHOLDER GUARD (S378, adversarial-review finding 3). The ledger
     // documents its own marker syntax in a fenced block: `pr=<n> verdict=… by=<N>`.

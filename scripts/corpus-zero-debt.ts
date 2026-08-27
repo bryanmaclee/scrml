@@ -151,6 +151,13 @@ export function parseMarkers(text: string): Marker[] {
       const i = kv.indexOf("=");
       if (i > 0) bag[kv.slice(0, i)] = kv.slice(i + 1);
     }
+    // ⛑ S378 round 2 (adversarial finding 4). Skip a doc s own FORMAT EXAMPLE. This module s
+    // header documents the marker shape, and `markerCloses()` returns true on `role=blast-radius`
+    // ALONE — while `owed` is `hits > 0 && closed === 0 && violations === 0`. So one pasted
+    // example containing a `<who>` placeholder (now matchable post-widening) would silently
+    // discharge that artifact s ENTIRE corpus-zero debt. Failure direction is toward CLEAN,
+    // which is the one that loses obligations rather than inventing them.
+    if (Object.values(bag).some(v => v.startsWith("<"))) continue;
     out.push({ role: (bag.role ?? "unknown").toLowerCase(), disposition: bag.disposition?.toLowerCase(), by: bag.by, raw: m[0] });
   }
   return out;

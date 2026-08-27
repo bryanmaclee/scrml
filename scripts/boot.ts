@@ -177,7 +177,14 @@ function resolveVoiceLedger(who: string, paProfileText: string): Ledger {
     const attrs = mk[1];
     const path = attrs.match(/\bpath=([^\s]+)/)?.[1];
     const status = (attrs.match(/\bstatus=([^\s]+)/)?.[1] ?? "live").toLowerCase();
-    if (path) return { path, pending: status === "pending", derived: true };
+    // ⛑ S378 round 2 (adversarial finding 3). Reject an angle-bracket PLACEHOLDER path.
+    // This file s own docstring prints the marker shape; if a pa-profile ever documents it as
+    // `path=<path>`, the pre-S378 `[^>]*?` could not match it and the widened class can. The
+    // consequence is the bad one: `path` resolves to the LITERAL "<path>" and we return
+    // `derived: true`, which is exactly the flag that SUPPRESSES the "fallback, unobservable"
+    // warning the S337 rework added. The boot read-set would then mandate a file that cannot
+    // exist, with the warning that would have surfaced it deliberately silenced.
+    if (path && !path.startsWith("<")) return { path, pending: status === "pending", derived: true };
   }
   // ── fallback: no marker on this profile. Derive from prose, and SAY SO (derived:false).
   const sec = paProfileText.match(/^#{1,6}\s.*\{\{user_voice_ledger\}\}.*\n([\s\S]*?)(?=\n#{1,6}\s|(?![\s\S]))/m);
