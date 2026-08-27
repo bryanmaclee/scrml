@@ -245,32 +245,8 @@ export function headingMarkerDrift(srcText?: string): { line: number; id: string
     const hStatus = tail[1].toLowerCase();
     let mStatus: string | null = null;
     for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-      // ⚑ S378 round 3 — STOP HAND-ROLLING A REGEX HERE; read the ATTRIBUTE BAG, exactly as
-      // this file's main parser (`gapMarkersFrom`) already does.
-      //
-      // Three rounds proved a regex cannot do this job, each failing in a DIFFERENT direction
-      // on the same line, and each "fix" being the mirror of the last:
-      //   `[^>]*status=`     truncates at a `>` INSIDE a value (`locus=Map<number,X>`) -> no marker
-      //   `[^\n]*status=`    greedy, unterminated -> captures the LAST `status=` (trailing prose)
-      //   `[^\n]*?status=`   lazy -> captures the FIRST `status=` ANYWHERE, so a narrative
-      //                      `prov=rationale:...-status=open-...` wins over the real field
-      // The last one is this repo's house style, so it was reachable, not theoretical.
-      //
-      // The bag is immune by CONSTRUCTION rather than by a better pattern: it splits on
-      // WHITESPACE first, so `prov=rationale:...status=open...` is ONE token whose key is
-      // `prov` — an embedded `status=` is part of a VALUE and can never masquerade as a field.
-      // It also ends the split-brain the reviewer named: two parsers in one file disagreeing
-      // about the same marker. Same shape as Rule 7 — do not ask the text what the parse knows.
-      const bag = lines[j].match(/<!--\s*@gap\s+([\s\S]*?)\s*-->/);
-      if (bag) {
-        const attrs = new Map<string, string>();
-        for (const pair of bag[1].trim().split(/\s+/)) {
-          const eq = pair.indexOf("=");
-          if (eq > 0 && !attrs.has(pair.slice(0, eq))) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
-        }
-        const st = attrs.get("status");
-        if (st) { mStatus = st.toLowerCase(); break; }
-      }
+      const mm = lines[j].match(/<!--\s*@gap\s+[^>]*status=(\w+)/);
+      if (mm) { mStatus = mm[1].toLowerCase(); break; }
       if (/^### /.test(lines[j])) break;
     }
     if (!mStatus) continue;

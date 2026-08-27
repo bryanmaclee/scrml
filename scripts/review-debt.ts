@@ -129,10 +129,21 @@ export function parseLedger(text: string): Map<number, Reviewed> {
     // toward CLEAN, which is the direction that loses obligations rather than
     // inventing them.
     //
-    // The sibling instrument already guards this explicitly (`scripts/state.ts`,
-    // `if (!id || id.startsWith("<")) continue;` — "a marker whose id is an
-    // angle-bracket PLACEHOLDER is the doc's own FORMAT EXAMPLE, not an entry").
-    // Same guard, same reason — do not rely on `Number()` to reject a placeholder.
+    // The sibling instrument guards this explicitly (`scripts/state.ts`, `if (!id ||
+    // id.startsWith("<")) continue;`). Same guard, same reason.
+    //
+    // ⚑ S378 round 5 — HONEST LABEL: this guard is DEFENSE-IN-DEPTH and is currently
+    // UNREACHABLE, and it is not pinned by any test. MUTATION-PROVED: deleting the line
+    // leaves 15/15 green, because `Number("<n>")` is already NaN and the existing
+    // `!Number.isFinite` check rejects it one line below. Worse for the round-2 finding
+    // that asked for it: the scenario cited there — the format example rewritten with a
+    // CONCRETE `pr=385` — is not caught by this guard either, since `385` does not begin
+    // `<`. So it protects nothing `Number()` does not already.
+    // KEPT anyway, deliberately: it is free, it states intent at the point of decision,
+    // and it becomes load-bearing the moment the bag gains a non-numeric identity field.
+    // But it is recorded as unpinned rather than left to read as covered — an unreachable
+    // guard with a test that cannot fail is the §8 hollow-gate shape one level in, and
+    // that is the exact defect this session removed from the sibling pins.
     if (!bag.pr || bag.pr.startsWith("<")) continue;
     const pr = Number(bag.pr);
     if (!Number.isFinite(pr)) continue;

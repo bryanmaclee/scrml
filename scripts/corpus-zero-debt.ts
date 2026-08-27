@@ -142,8 +142,7 @@ export interface Marker {
  */
 export function parseMarkers(text: string): Marker[] {
   const out: Marker[] = [];
-  // S378: `[^\n]*?` not `[^>]*?` — same class as the S378 review-floor defect.
-  const re = /<!--\s*@corpus-zero\s+([^\n]*?)-->/g;
+  const re = /<!--\s*@corpus-zero\s+([^>]*?)-->/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const bag: Record<string, string> = {};
@@ -151,22 +150,6 @@ export function parseMarkers(text: string): Marker[] {
       const i = kv.indexOf("=");
       if (i > 0) bag[kv.slice(0, i)] = kv.slice(i + 1);
     }
-    // ⛑ S378 round 2 (adversarial finding 4). Skip a doc s own FORMAT EXAMPLE. This module s
-    // header documents the marker shape, and `markerCloses()` returns true on `role=blast-radius`
-    // ALONE — while `owed` is `hits > 0 && closed === 0 && violations === 0`. So one pasted
-    // example containing a `<who>` placeholder (now matchable post-widening) would silently
-    // discharge that artifact s ENTIRE corpus-zero debt. Failure direction is toward CLEAN,
-    // which is the one that loses obligations rather than inventing them.
-    // ⚑ S378 round 3 (adversarial finding 1) — guard the DECISION fields ONLY.
-    // Round 2 added this as `Object.values(bag).some(...)`, which drops the WHOLE marker
-    // when ANY value starts `<` — including a narrative `note=`. Reproduced: a real
-    // `role=load-bearing` marker whose note begins `<db>-shape-dropped-...` went from
-    // violations=1 to violations=0, so `owed` stayed false and --check exited 0 on an
-    // artifact that DECLARES a violation. That is the fail-toward-CLEAN direction this
-    // guard was added to prevent, reintroduced by the guard itself. And a note quoting
-    // `<db>`/`<each>` is exactly why the widening was needed in the first place.
-    // The siblings guard the IDENTITY field only (review-debt: `pr`; state.ts: `id`).
-    if ((bag.role ?? "").startsWith("<") || (bag.disposition ?? "").startsWith("<")) continue;
     out.push({ role: (bag.role ?? "unknown").toLowerCase(), disposition: bag.disposition?.toLowerCase(), by: bag.by, raw: m[0] });
   }
   return out;

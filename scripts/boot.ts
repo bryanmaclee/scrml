@@ -170,31 +170,12 @@ interface Ledger { path: string; pending: boolean; derived: boolean; }
  * instead of passing silently — an unobservable fallback was itself one of the findings.
  */
 function resolveVoiceLedger(who: string, paProfileText: string): Ledger {
-  // S378: `[^\n]*?` not `[^>]*?` — see scripts/review-debt.ts parseLedger. A `>` inside an
-  // attribute value truncated the bag and the ledger silently failed to resolve.
-  // ⚑ S378 round 3 (adversarial finding 3): matchAll + first NON-placeholder. A non-global
-  // `.match()` takes only the FIRST marker, so if a profile ever documents its own shape
-  // above the real one — the exact case the guard below is written for — the widened class
-  // matches the EXAMPLE, the guard rejects it, and the real marker below is never consulted:
-  // boot silently drops to the prose fallback. Pre-widening the example was unmatchable and
-  // the real marker was found, so the round-2 guard alone made this strictly worse.
-  const marks = [...paProfileText.matchAll(/<!--\s*@ledger\s+([^\n]*?)-->/g)];
-  const mk = marks.find(m => {
-    const p = m[1].match(/\bpath=([^\s]+)/)?.[1];
-    return p && !p.startsWith("<");
-  });
+  const mk = paProfileText.match(/<!--\s*@ledger\s+([^>]*?)-->/);
   if (mk) {
     const attrs = mk[1];
     const path = attrs.match(/\bpath=([^\s]+)/)?.[1];
     const status = (attrs.match(/\bstatus=([^\s]+)/)?.[1] ?? "live").toLowerCase();
-    // ⛑ S378 round 2 (adversarial finding 3). Reject an angle-bracket PLACEHOLDER path.
-    // This file s own docstring prints the marker shape; if a pa-profile ever documents it as
-    // `path=<path>`, the pre-S378 `[^>]*?` could not match it and the widened class can. The
-    // consequence is the bad one: `path` resolves to the LITERAL "<path>" and we return
-    // `derived: true`, which is exactly the flag that SUPPRESSES the "fallback, unobservable"
-    // warning the S337 rework added. The boot read-set would then mandate a file that cannot
-    // exist, with the warning that would have surfaced it deliberately silenced.
-    if (path && !path.startsWith("<")) return { path, pending: status === "pending", derived: true };
+    if (path) return { path, pending: status === "pending", derived: true };
   }
   // ── fallback: no marker on this profile. Derive from prose, and SAY SO (derived:false).
   const sec = paProfileText.match(/^#{1,6}\s.*\{\{user_voice_ledger\}\}.*\n([\s\S]*?)(?=\n#{1,6}\s|(?![\s\S]))/m);

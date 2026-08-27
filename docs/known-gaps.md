@@ -30,13 +30,21 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 58 |
-| MED | 178 |
+| HIGH | 59 |
+| MED | 179 |
 | LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
 <!-- ⚑ S345 filing batch — the S342 arc-audit backlog (bryan-ratified): 40 entries sourced from scrml-support/handOffs/s342-arc-audit/ (classify-write, g263, derived-transitive, harness, tare-pr501, dead-session) -->
+
+<!-- ⚑ S378-bryan filing batch 2 — surfaced by the FIFTH adversarial round on #721, which found the sibling surface is BIGGER than the PR that was touching it -->
+
+### g-flograph-gap-re-drops-281-of-818-gap-markers — `scripts/flograph.ts` `GAP_RE` requires `-->` to follow `status=` IMMEDIATELY (`…status=(\S+)\s*-->`), so **every** `@gap` marker carrying a trailing `locus=` or `prov=` — which `pa-base` v2.9 made REQUIRED and which is now the house style — fails to match and is dropped from the graph. **MEASURED on `docs/known-gaps.md`: 281 of 818 marker lines dropped (34%).** The consequence is not silent: the script prints `GAP round-trip (must match state.ts): HIGH open=9 · MED open=76 · LOW open=41` while `state.ts`'s own `@generated` table in the same file reads **58 / 178 / 80** — so an instrument that ANNOUNCES a round-trip agreement has been reporting a false match, off by **84% on HIGH**. Same defect class as the S334 fix to `state.ts`'s main parser and the S378 fix to `review-debt.ts`, left standing two lines above a line S378 edited — `NEW S378-bryan (adversarial round 5 on #721; PA-reproduced by execution: 818 marker lines, 537 matched, 281 dropped, and the printed round-trip line disagrees with the generated table); **HIGH**; open`
+<!-- @gap id=g-flograph-gap-re-drops-281-of-818-gap-markers sev=HIGH status=open locus=scripts/flograph.ts(GAP_RE) prov=empirical:S378-round-5-measured-281-of-818-dropped-and-the-must-match-state-ts-round-trip-line-prints-9-76-41-against-a-true-58-178-80 -->
+
+### g-marker-parsers-share-an-untested-regex-class — the repo has **five** `<!-- @marker … -->` attribute-bag parsers (`review-debt.ts` `@review`, `state.ts` `@gap` ×2, `boot.ts` `@ledger`, `corpus-zero-debt.ts` `@corpus-zero`, `flograph.ts` `@node`/`@gap`) and **no shared parser and no test harness for any of them**. Every one hand-rolls a regex over the same shape, and the class has now produced defects in four separate sessions (S299, S307, S334, S358, S378). ⚑ **S378 attempted to converge them inside a focused fix and that attempt is the evidence this needs its own arc:** across five adversarial rounds the sibling widenings produced a defect in EVERY round — a greedy form capturing the LAST `status=`, then a lazy form capturing the FIRST (beaten by a `prov=rationale:…status=…` narrative, the house style), an over-broad placeholder guard that ERASED a self-reported violation by matching a narrative `note=`, a prefix-only guard that admits `path=user-voice-<who>.md`, and a `\bstatus=` scan that reads a hyphen-adjacent narrative value. **The sibling changes were REVERTED out of #721 entirely rather than landed unverified** — `docs/pr-reviews.md` `@review pr=721` records the reasoning. The blocker is structural, not effort: these scripts have no import-and-pin harness, so a "test" written for them tests a reimplementation and passes with the fix reverted (MUTATION-PROVED at S378: all three sibling fixes reverted, 34/34 + 20/20 still green). **The arc:** one shared marker-bag parser, exported, with pins that import it — the shape `state.ts`'s `gapMarkersFrom` already has and the other four lack. Fixing `g-flograph-gap-re-drops-281-of-818-gap-markers` belongs inside it — `NEW S378-bryan (the five-round #721 review, and the honest scope line on why the collateral was reverted); MED; open`
+<!-- @gap id=g-marker-parsers-share-an-untested-regex-class sev=MED status=open locus=searched:scripts/review-debt.ts,scripts/state.ts,scripts/boot.ts,scripts/corpus-zero-debt.ts,scripts/flograph.ts prov=empirical:S378-five-adversarial-rounds-each-found-a-defect-in-the-hand-rolled-sibling-guards-and-the-pins-written-for-them-were-mutation-proved-hollow -->
 
 <!-- ⚑ S378-bryan filing batch — 1 instrument defect found at boot by the probe disagreeing with the ledger it reads (PA-reproduced by execution, RESOLVED same session) -->
 

@@ -142,11 +142,8 @@ describe("review-debt parseLedger — ordinary shape", () => {
 
 /**
  * ── S378 ROUND 2 ─────────────────────────────────────────────────────────────
- * The adversarial re-review found five defects, ALL of them in the collateral
- * widenings rather than in the primary fix: the placeholder hazard was reasoned
- * about carefully for `review-debt.ts` and then the same widening shipped to four
- * sibling parsers WITHOUT the guard, and with a different (unbounded) regex shape
- * in one of them. These pin the corrections.
+ * FIRST-wins, so a narrative `probe=` cannot silently re-key an entry onto the
+ * wrong PR. These import the SHIPPED `parseLedger`, so a revert goes red.
  */
 
 describe("review-debt parseLedger — round 2: FIRST-wins, so a narrative probe cannot re-key the entry", () => {
@@ -173,111 +170,21 @@ describe("review-debt parseLedger — round 2: FIRST-wins, so a narrative probe 
   });
 });
 
-describe("sibling marker parsers — the shapes the widening got wrong", () => {
-  // scripts/state.ts headingMarkerDrift. The old `[^>]*` was IMPLICITLY terminated by the
-  // marker's own `>`; a naive widen to `[^\n]*` is greedy AND unterminated, so it reads past
-  // the marker to the LAST `status=` on the line.
-  test("@gap drift regex is lazy AND terminated, so it reads the marker's own status", () => {
-    const line = "<!-- @gap id=x sev=MED status=open --> and the prose says status=resolved later";
-    const NAIVE = /<!--\s*@gap\s+[^\n]*status=(\w+)/;         // the regression
-    const FIXED = /<!--\s*@gap\s+[^\n]*?status=(\w+)[^\n]*?-->/; // what shipped
-    expect(line.match(NAIVE)[1]).toBe("resolved"); // documents the trap
-    expect(line.match(FIXED)[1]).toBe("open");     // the marker's own value
-  });
-
-  test("@gap drift regex still admits a `>` inside an attribute value (the S378 point)", () => {
-    // ⚑ ORDER MATTERS, and getting it wrong is how this test first shipped GREEN-then-RED.
-    // `[^>]*` is only blind when the `>` precedes the field being read. The overlay states
-    // attributes "are allowed in any order", so both arrangements are legal markers.
-    const gtAfter  = '<!-- @gap id=y sev=LOW status=open locus=Map<number,X> prov=rationale:a->b -->';
-    const gtBefore = '<!-- @gap id=y locus=Map<number,X> sev=LOW status=open -->';
-    const FIXED = /<!--\s*@gap\s+[^\n]*?status=(\w+)[^\n]*?-->/;
-    const OLD   = /<!--\s*@gap\s+[^>]*status=(\w+)/;
-
-    expect(gtAfter.match(FIXED)[1]).toBe("open");
-    expect(gtBefore.match(FIXED)[1]).toBe("open");
-
-    expect(OLD.test(gtAfter)).toBe(true);   // old happened to work — `status=` came first
-    expect(OLD.test(gtBefore)).toBe(false); // the real pre-S378 blindness
-  });
-
-  // scripts/flograph.ts + scripts/boot.ts + scripts/corpus-zero-debt.ts all guard on the same
-  // shape: a value that begins `<` is a doc's own FORMAT EXAMPLE, never an entry.
-  test("the placeholder predicate rejects an angle-bracket example and accepts a real id", () => {
-    const isPlaceholder = (id) => !id || String(id).startsWith("<");
-    expect(isPlaceholder("<kebab-id>")).toBe(true);
-    expect(isPlaceholder("<path>")).toBe(true);
-    expect(isPlaceholder("")).toBe(true);
-    expect(isPlaceholder(undefined)).toBe(true);
-    expect(isPlaceholder("g-real-gap-id")).toBe(false);
-  });
-
-  test("the @node format example in the tree is matchable post-widening — hence the guard", () => {
-    const example = "<!-- @node id=<kebab-id> kind=<kind> status=<status> [sev=<sev>] -->";
-    expect(/<!--\s*@node\s+([^>]*?)-->/.test(example)).toBe(false); // was immune by accident
-    expect(/<!--\s*@node\s+([^\n]*?)-->/.test(example)).toBe(true);  // now matches -> must be guarded
-  });
-});
-
 /**
- * ── S378 ROUND 3 ─────────────────────────────────────────────────────────────
- * Round 2's fixes were themselves wrong in TWO places, each the mirror of the
- * defect it repaired. These pin the shapes so a fourth swing cannot regress them.
+ * ⚑ WHAT IS DELIBERATELY *NOT* HERE, and why — S378 round 5.
+ *
+ * Earlier revisions of this file carried three more describe blocks covering the sibling
+ * marker parsers (`state.ts` heading-drift, `corpus-zero-debt.ts`, `flograph.ts`). They
+ * tested REGEX LITERALS AND REIMPLEMENTATIONS DECLARED IN THIS FILE — not the shipped
+ * code — so they could not fail no matter what those scripts did.
+ *
+ * That was MUTATION-PROVED, not argued: with all three sibling fixes reverted in the
+ * scripts, this file still reported 26/26 green. A test that stays green while the code
+ * under test is reverted is the pa-base §8 hollow gate this file's own docstring invokes,
+ * one level in — and it was worse than no test, because it read as coverage.
+ *
+ * The sibling changes were REVERTED out of this PR entirely and re-filed as their own arc
+ * (`g-marker-parsers-share-an-untested-regex-class`), because the real blocker is that
+ * those instruments have no test harness to pin them WITH. When that arc lands, its pins
+ * belong next to each script's own parser — imported, not reimplemented.
  */
-
-describe("@gap status read — three regexes failed in three directions; the BAG does not", () => {
-  // The attribute bag, as scripts/state.ts now reads it in BOTH of its parsers.
-  const statusFromBag = (line) => {
-    const m = line.match(/<!--\s*@gap\s+([\s\S]*?)\s*-->/);
-    if (!m) return null;
-    const attrs = new Map();
-    for (const pair of m[1].trim().split(/\s+/)) {
-      const eq = pair.indexOf("=");
-      if (eq > 0 && !attrs.has(pair.slice(0, eq))) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
-    }
-    return attrs.get("status") ?? null;
-  };
-
-  test("a `>` inside a value does not truncate (the S378 defect)", () => {
-    expect(statusFromBag('<!-- @gap id=y locus=Map<number,X> sev=LOW status=open -->')).toBe("open");
-  });
-
-  test("trailing prose after the marker cannot win (round 2's greedy defect)", () => {
-    const line = "<!-- @gap id=x sev=MED status=open --> and prose says status=resolved later";
-    expect(statusFromBag(line)).toBe("open");
-  });
-
-  test("a `status=` inside a prov= narrative cannot win (round 3's lazy defect)", () => {
-    // This is the repo's house style — `prov=rationale:<long-kebab-narrative>` — so it was
-    // reachable, not theoretical. The lazy regex read `open`; the truth is `resolved`.
-    const line = "<!-- @gap id=x sev=MED prov=rationale:heading-said-status=open-but-the-fix-landed status=resolved -->";
-    expect(statusFromBag(line)).toBe("resolved");
-    expect(line.match(/<!--\s*@gap\s+[^\n]*?status=(\w+)[^\n]*?-->/)[1]).toBe("open"); // documents the trap
-  });
-
-  test("the bag is immune BY CONSTRUCTION: a whitespace split makes an embedded key a VALUE", () => {
-    // `prov=...status=open...` is ONE token whose key is `prov`. No pattern tuning involved.
-    const line = "<!-- @gap id=x status=resolved prov=a:status=open -->";
-    expect(statusFromBag(line)).toBe("resolved");
-  });
-});
-
-describe("placeholder guards — identity fields only, never every value", () => {
-  // scripts/corpus-zero-debt.ts. Round 2 guarded ALL values, which erased a real
-  // self-reported VIOLATION whose narrative `note=` merely began with a scrml tag —
-  // failing toward CLEAN, the direction the guard existed to prevent.
-  const dropsMarker = (bag) => (bag.role ?? "").startsWith("<") || (bag.disposition ?? "").startsWith("<");
-
-  test("a narrative note beginning `<db>` does NOT erase a real violation", () => {
-    expect(dropsMarker({ role: "load-bearing", by: "S380-x", note: "<db>-shape-dropped" })).toBe(false);
-  });
-
-  test("a genuine format example (placeholder ROLE) is still dropped", () => {
-    expect(dropsMarker({ role: "<role>", disposition: "<disposition>" })).toBe(true);
-  });
-
-  test("the round-2 over-broad shape is the one that fails toward CLEAN", () => {
-    const overBroad = (bag) => Object.values(bag).some((v) => String(v).startsWith("<"));
-    expect(overBroad({ role: "load-bearing", note: "<db>-shape-dropped" })).toBe(true); // erases it
-  });
-});
