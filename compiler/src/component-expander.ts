@@ -3061,7 +3061,17 @@ function expandComponentNode(
         if (decl.default !== null) {
           props.set(decl.name, decl.default); // use declared default
         } else if (decl.optional) {
-          props.set(decl.name, "null"); // optional with no default → null
+          // An optional SNIPPET prop that was actually FILLED (via `slot=` →
+          // slottedGroups, or a lambda → parametricSnippets) is PRESENT: its
+          // `<prop> is some` guard must be true. The generic null-fill makes the
+          // guard `null !== null` (always false) and silently drops the FILLED
+          // slot's guarded region — g-snippet-prop-in-is-some-guard-substitutes-null
+          // (breaks the flagship examples/12). Fill a truthy sentinel for a present
+          // snippet (the render path uses slottedGroups directly, not this value);
+          // keep `null` only for a genuinely absent optional.
+          const snippetPresent = decl.isSnippet
+            && (slottedGroups.has(decl.name) || parametricSnippets.has(decl.name));
+          props.set(decl.name, snippetPresent ? "true" : "null");
         }
       }
     }
