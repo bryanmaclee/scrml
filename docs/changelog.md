@@ -2,6 +2,45 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S380 — 2026-08-27 (peter · Windows) — a dog-food sweep + a stranded-PR recovery: 12 PRs
+
+**The arc:** booted as successor to S379-bryan, recovered a stranded/conflicting wrap PR, drained the
+adopter-fix ledger to its clean floor, then ran a 3-agent **dog-food sweep** (build + execute a fresh
+app in happy-dom against the SHIPPED runtime) that surfaced **4 fresh silent-wrong bugs none of which
+were in the ledger** — 3 fixed end-to-end, 1 correctly routed to bryan once verify-before-build showed
+it was gated on a ruling. Every code fix went through the S239 adversarial pass, and the pass caught a
+real issue on **every single one** — including two self-introduced regressions and a reviewer
+false-positive that the "reproduce on the pre-change base" rule disproved.
+
+**Landed (12 PRs):**
+- `#726` — **g-string-prop-in-is-some** (HIGH): a string prop consumed by `if=(prop is some)` lowered
+  to a boot-killing bare identifier; recovered from the stranded #722 onto a clean branch (#722 closed
+  superseded).
+- `#728` — **§52.13 auth-required-document** (HIGH, security): `<program auth="required">` served its
+  rendered document to anonymous requests at 200. Fixed in the build's `_server.js` static dispatch +
+  extended to `scrml dev` (dev/prod parity). The S239 pass caught a self-introduced case-insensitive
+  `/SECURE.html` bypass. The filed locus (emit-server.ts) was wrong — the real one was commands/build.js.
+- `#730` — verify-close of **g-session-not-rewritten-inside-sql-interpolation** (HIGH): a stale marker;
+  the fix landed S323, GH #357 already closed.
+- `#731` — **g-parametric-snippet-param-substitution** (LOW): the `\b<param>\b` textual replace corrupted
+  author text and broke `$`-params; converged onto AST-scoped identifier substitution.
+- `#732` — **g-match-on-derived-cell-scrutinee-frozen** (HIGH, dog-food): a `<match>` on a derived cell
+  never re-dispatched on recompute (Shape A subscribe vs Shape B effect).
+- `#733` — **g-snippet-prop-in-is-some-guard-substitutes-null** (HIGH, dog-food): a FILLED optional
+  snippet was substituted as `null` in its `is some` guard → the slot silently dropped; **unbreaks the
+  flagship `examples/12-snippets-slots.scrml`**.
+- `#735` — **g-match-per-item-in-each-frozen-on-field-change** (HIGH, dog-food): a per-item `<match>` in
+  an `<each>` froze on a same-key field change; the S239 pass caught a latent nested-each class gap + a
+  self-introduced over-render, and the fix converged onto the existing per-item effect helper.
+- `#729`, `#734`, `#736` — review-floor markers.
+
+**Routed to bryan:** **g-bare-ref-attr-value-emits-literal-not-binding** (HIGH) — a bare `attr=@cell` on
+a string attribute emits the literal name, not a reactive binding; blocked on the #81 writer-ownership
+ruling per an explicit in-source comment. Filed in the bryan-lane queue with fork directions.
+
+**Gate:** cloud `gate` GREEN at each merge; the local 17,914-test unit suite green on the hot-path
+snippet change; ~7 pre-existing Windows/happy-dom each+match failures unchanged throughout.
+
 ## S378 — 2026-08-26/27 (bryan · ASUS-Vivobook) — verification itself was the subject
 
 **Landed:** `#721` — the review-floor instrument could not match a marker whose `probe=` text
