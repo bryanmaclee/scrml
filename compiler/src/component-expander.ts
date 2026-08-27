@@ -2506,9 +2506,49 @@ function substituteProps(
           // downstream consumes it as the member-access base. When an exprNode is
           // present the structured path above already handled it.
           if (!exprVal.exprNode && typeof exprVal.raw === "string") {
-            const subbed = substitutePropsInRawExpr(exprVal.raw, props);
-            if (subbed !== exprVal.raw) {
-              return { ...attr, value: { ...exprVal, raw: subbed } };
+            // g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot (S378-peter).
+            // This is an EXPRESSION context. The legacy raw-text rewrite below splices a
+            // STRING-LITERAL prop's value as a BARE identifier (`note`->`present`), which
+            // is a ReferenceError that throws in `_scrml_boot` and silently kills the
+            // whole page (exit 0 at compile). It cannot simply be quoted in the text,
+            // either: a §42 predicate lowering downstream (`is some` -> `!== null`) is a
+            // text transform keyed on an identifier LHS, so `"present" is some` survives
+            // literally into invalid JS.
+            //
+            // When — and ONLY when — a string-literal prop actually appears in this raw,
+            // route through the STRUCTURED path: parse with scrml's own §42-aware parser
+            // (it models `is some`/`==`/member as nodes and constant-folds a literal
+            // operand), substitute at the node level, and attach the exprNode so the
+            // if=/show= emitter lowers from the node — the string prop becomes the quoted
+            // literal / folded predicate rather than a bare identifier. Every other case
+            // (var / member / call props, incl. the loop-emitter raws with `@.` sigils
+            // this branch was built for) keeps the byte-identical legacy raw rewrite.
+            let usedStructured = false;
+            const stringPropInRaw = (() => {
+              if (!propExprMap) return false;
+              for (const [name, node] of propExprMap.entries()) {
+                if (!name || !node || node.kind !== "lit" || (node as LitExpr).litType !== "string") continue;
+                const re = new RegExp(`(^|[^.A-Za-z0-9_$])(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![A-Za-z0-9_$])`);
+                if (re.test(exprVal.raw)) return true;
+              }
+              return false;
+            })();
+            if (stringPropInRaw) {
+              let parsed: ExprNode | null = null;
+              try { parsed = parseExprToNode(exprVal.raw, exprVal.span?.file ?? "", exprVal.span?.start ?? 0); } catch { parsed = null; }
+              if (parsed && parsed.kind !== "escape-hatch") {
+                const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
+                let raw = exprVal.raw;
+                try { raw = emitStringFromTree(replaced); } catch { /* keep original */ }
+                usedStructured = true;
+                return { ...attr, value: { ...exprVal, raw, exprNode: replaced } };
+              }
+            }
+            if (!usedStructured) {
+              const subbed = substitutePropsInRawExpr(exprVal.raw, props);
+              if (subbed !== exprVal.raw) {
+                return { ...attr, value: { ...exprVal, raw: subbed } };
+              }
             }
           }
         }
@@ -2632,6 +2672,7 @@ function substitutePropsInRawExpr(raw: string, props: Map<string, string>): stri
   }
   return out;
 }
+
 
 // ---------------------------------------------------------------------------
 // Class attribute merging

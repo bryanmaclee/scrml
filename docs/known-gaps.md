@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 55 |
+| HIGH | 54 |
 | MED | 180 |
-| LOW | 79 |
+| LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2800,7 +2800,37 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > **Same class as** [[g-match-fncall-scrutinee-prunes-effect-chunk-dead-page]] and [[g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime]]: *the compiler emits a call to something it did not emit, at exit 0.* **Fourth carrier.**
 
 ### g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot — ⭐⭐ a STRING prop consumed by `if=(prop is some)` is substituted as a BARE UNQUOTED IDENTIFIER → `ReferenceError` inside boot → **every later element on the page never mounts** — no snippet involved, exit 0, zero diagnostics — `NEW S372-bryan (Q2 discriminator on the render-slot trace; PA-REPRODUCED + EXECUTED with an independent canary); HIGH; open`
-<!-- @gap id=g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot sev=HIGH status=open locus=compiler/src/component-expander.ts:2338-2339(the raw-string prop-substitution path → `substitutePropsInRawExpr` at :2452-2464 splices the prop's VALUE as text with no quoting, so a string prop becomes a bare identifier in the emitted condition; the in-source comment at :2333-2337 already names the behaviour but reasons only about the member-access-base case; the STRUCTURED sibling `substitutePropsInExprNode` at :1583 is the parallel to route to) prov=rationale:S372-PA-EXECUTED-canary-probe-if-note-is-some-with-note-eq-present-lowers-to-present-not-equal-null-and-a-later-independent-if-at-ok-canary-never-mounts -->
+<!-- @gap id=g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot sev=HIGH status=resolved locus=compiler/src/component-expander.ts(the `expr`-attr-with-no-exprNode raw path, ~:2508: now routes a string-literal-prop expr attr through parseExprToNode + substitutePropsInExprNode) prov=rationale:S372-PA-EXECUTED-canary-probe-if-note-is-some-with-note-eq-present-lowers-to-present-not-equal-null-and-a-later-independent-if-at-ok-canary-never-mounts -->
+> **RESOLVED — S378-peter (`fix/s378-string-prop-in-expr-attr`), repro-first re-derived per the entry's own instruction.**
+> The stated fix direction (route through the structured `substitutePropsInExprNode`) was right in
+> spirit, but the in-source comment's reason for NOT doing it — *"a structured re-parse is unreliable, §42
+> keywords aren't plain JS"* — is **false**: scrml's own `parseExprToNode` models `is some`/`is not`/`==`
+> /member as nodes (verified: `note is some` → `binary{op:"is-some"}`). And a naive text-quoting fix
+> (splice `"present"` into the raw) does NOT work — the downstream §42 lowering is a text transform keyed
+> on an identifier LHS, so `"present" is some` survives literally into `E-CODEGEN-INVALID-LOGIC`.
+>
+> **The fix** (component-expander.ts ~:2508): for an `expr` attr with no exprNode, **only when a
+> string-literal prop actually appears in the raw**, parse it, run the node-level substitution (string
+> prop → quoted `LitExpr`), and attach the exprNode so the `if=`/`show=` emitter lowers from the node.
+> Every other prop kind (var / member / call / null) and every raw that does not carry a string prop
+> keeps the **byte-identical** legacy raw rewrite — including the loop-emitter raws with `@.` sigils this
+> branch was built for. Verified: `if=(note is some)`, `show=`, `== "x"`, `.length` all lower to the
+> quoted literal; the independent `if=@ok` canary now MOUNTS (boot no longer killed).
+>
+> ⭐ **Superseded a workaround.** This is the same root as **#81/S268**, which had fail-closed by
+> *dropping* the unsafe component-root value attr (`title=(label)` → dropped, W-CG-VALUE-ATTR-COMPONENT-PROP,
+> silent data loss). With the root fixed, `title=(label)` now WIRES as `title="hi"`. The
+> `loweredExprHasFreeIdentifier` guard STAYS as defense-in-depth for non-string free identifiers; this
+> shape simply no longer reaches it. `browser-i81-component-root-crash.test.js` updated to assert the
+> corrected behavior + a new §42-condition repro (canary-mount execution test). Red-before-green proven.
+>
+> ⚑ **NOT fixed here (still open, scoped out per the entry's warning):** (1) the `\b`+paramName textual
+> substitution the original entry pointed at is the SNIPPET path (component-expander.ts ~:3468/:3854),
+> already filed as [[g-parametric-snippet-param-substitution-is-textual-not-ast]] — a different function
+> from the one fixed here. (2) `substitutePropsInRawExpr`'s own leading-identifier rewrite can still
+> rewrite a prop name that appears INSIDE a string literal for the prop kinds that remain on the raw path
+> (a var prop in `if=(data == "data")`) — filed as
+> [[g-substitutepropsinrawexpr-rewrites-prop-name-inside-a-string-literal]].
 > **⚑ S372-bryan: PA-REPRODUCED AND EXECUTED — this is INDEPENDENT of the snippet/`render` surface.** Agent-surfaced during the Q2 discriminator; I reproduced it from scratch before filing. Whole reproducer, no snippet anywhere:
 > ```scrml
 > <program>
@@ -2821,6 +2851,22 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > **Severity HIGH:** silent at compile, page-wide at runtime, and the trigger is an ordinary shape — a string prop plus a presence guard. Same *consequence* class as [[g-if-attr-per-field-synth-cell-crashes-boot]] (a throw inside `_scrml_boot` kills every later wiring), different root.
 > ⚑ **Harness note carried from the trace, because it nearly produced a false pass:** the first canary check matched the string inside an unmounted `<template>` and read as PASSING. **Exclude `<template>` content before asserting a mount.**
 > **Fix direction:** route the substitution through the STRUCTURED path (`substitutePropsInExprNode`, `:1583`) rather than raw-string splicing — the parallel already exists. ⚠ The raw path also does `new RegExp("\\b" + paramName + "\\b", "g")` over body text, which rewrites inside string literals and attribute values; that is a latent defect of its own and should be scoped explicitly, not fixed incidentally. **Repro-first re-derive before building.**
+
+### g-substitutepropsinrawexpr-rewrites-prop-name-inside-a-string-literal — a prop name that appears as a word inside a STRING LITERAL in an `expr` attr is rewritten by the raw-text substitution, so `if=(data == "data")` with a var prop `data=@thing` emits `_get("thing") === "@thing"` (the literal `"data"` corrupted) — silent wrong output — `NEW S378-peter (found while fixing the string-prop sibling; PA-reproduced on HEAD); LOW; open`
+<!-- @gap id=g-substitutepropsinrawexpr-rewrites-prop-name-inside-a-string-literal sev=LOW status=open locus=compiler/src/component-expander.ts:substitutePropsInRawExpr(the leading-identifier `(^|[^.A-Za-z0-9_$])(name)` rewrite runs over the whole raw incl. inside `"…"` regions; the boundary before a quote is a non-ident char, so a prop name that is a standalone word inside a string literal matches) prov=rationale:S378-peter-the-string-prop-shape-now-routes-through-the-structured-parser-and-is-immune-this-residual-affects-the-prop-kinds-still-on-the-raw-path-var-member-call -->
+> Sibling of [[g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot]] (resolved S378). The
+> string-prop shape now routes through `parseExprToNode` (which respects string-literal boundaries), so
+> it is immune. But the prop kinds that REMAIN on the raw `substitutePropsInRawExpr` path — var / member /
+> call — still get a naive leading-identifier text rewrite that does not exclude string-literal regions.
+> **PA-reproduced on HEAD:** `const Box = <div props={data:string}>… if=(data == "data")…`, called
+> `<Box data=@thing/>` (`@thing="xyz"`), emits `_scrml_cs_reactive_get("thing") === "@thing"` — the
+> `data` inside the literal `"data"` was rewritten to `"@thing"`, so the comparison is against the wrong
+> string, silently. **Trigger is narrow** (a prop name must appear as a standalone word inside a string
+> literal in an expr attr), hence LOW. **Fix direction:** the convergent fix is the same as the sibling —
+> route the raw expr through the structured parser for ALL prop kinds when it parses cleanly (rename the
+> IDENTIFIER node only), falling back to the raw rewrite only for genuinely-unparseable raws. Deliberately
+> NOT widened in the S378 fix (which was scoped to string props to keep var/loop paths byte-identical).
+> Peter-lane. Repro-first re-derive before building.
 
 ### g-e2e-render-map-classifies-renders-empty-as-green — ⭐ the e2e tier DOES mount the corpus and read the DOM — and it classifies `renders-empty` as **GREEN**, with no partial-emptiness detector, so a flagship whose every card is empty records `renders-clean` — `NEW S372-bryan (surfaced by the render-slot trace; PA-VERIFIED by reading the classifier); MED; open`
 <!-- @gap id=g-e2e-render-map-classifies-renders-empty-as-green sev=MED status=open locus=compiler/tests/e2e-render-map/e2e-render-map.test.js:44(`const GREEN_STATES = new Set(["renders-clean", "renders-empty", "needs-server"])`) + compiler/tests/e2e-render-map/render-detectors.js:249-254(the terminal branch asks only `if (bodyText.trim() === "")` → renders-empty, else renders-clean — there is no PARTIAL-emptiness detector, so a page with any surviving text reads clean) prov=rationale:S372-review-of-the-render-slot-trace-the-why-it-survived-line-in-the-sibling-gap-was-FALSE-something-does-look-at-the-DOM-and-calls-it-green -->
