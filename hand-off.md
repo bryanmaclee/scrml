@@ -1,3 +1,68 @@
+# scrml — Session 380 (peter · Windows) — WRAP
+
+**Date:** 2026-08-27. Booted `/boot` Profile A as successor to S379-bryan. A very large session: a
+stranded-PR recovery + 12 PRs landed + a 3-agent dog-food sweep that found 4 fresh silent-wrong bugs.
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ STRANDED: S379-bryan's wrap is unmerged — RECOVER IT
+`origin/wrap/s379` is **17 commits ahead of main, never merged** (a WIP wrap: `wrap(s379) wip: bank
+[1880]-[1881]…`). The S379 board (`../scrml-support/handOffs/active-sessions/S379.md`) still says LIVE
+but has not updated since 05:14, and there has been ZERO main activity from bryan since #725 — every
+commit on main since `0ff7942d` is S380-peter's. This is the [[feedback-detect-stranded-unwrapped-
+session-at-boot]] pattern. **bryan's S379 hand-off/delta-log updates live only on that branch** — my
+S380 wrap advanced main's hand-off from the S378 base, so wrap/s379 will conflict when recovered.
+Recovering it (3-way merge of hand-off/delta-log/known-gaps, re-gate, land) is a bryan-lane task; I
+did NOT merge another PA's wrap (single-writer discipline).
+
+### 2. Review floor: 2 OWED — both bryan's S379 lane
+`#723` (wrap/s378 docs) and `#725` (gaps S379 adopter #724). All 12 of S380-peter's are recorded.
+
+### 3. Open follow-ons filed this session
+- **`g-snippet-param-in-attr-interp-and-each-raw-unsubstituted`** (LOW, PRE-EXISTING) — a snippet param
+  in a string-literal-attr `${}` or an each/match raw field isn't substituted. The convergent fix is
+  the "converge snippet-param onto the component-prop substitution substrate" direction (group 4).
+- **`g-bare-ref-attr-value-emits-literal-not-binding`** (HIGH) — ROUTED to bryan, BLOCKED on the #81
+  writer-ownership ruling (per an explicit in-source comment at emit-html.ts:3200-3205). In the
+  bryan-queue with fork directions.
+- **The server-only credential-leak family** (HIGH, ruling-pending-bryan) — RE-CONFIRMED LIVE by the
+  S380 staleness sweep (hashPassword/argon2id/API_SECRET → browser; `${@session.userId}` in `?{}` →
+  client body). Worth a dedicated confidentiality-envelope pass. In the bryan-queue.
+
+### 4. Maps — refresh OWED
+S380 touched significant codegen surface (emit-each · emit-match · emit-variant-guard · component-
+expander · emit-html · commands/build.js · commands/dev.js). `.claude/maps/` was NOT refreshed at wrap
+(context economy at a long session's end). A `project-mapper` incremental over these is owed next boot.
+
+## 🔭 DURABLE METHOD FINDINGS
+- **S239 caught a real issue on EVERY code fix this session** (7 code PRs). The adversarial pass is
+  load-bearing, not ceremony: stale-test gate-blockers, self-built corruptions, self-introduced
+  regressions (an `_armCellName` null-out; an over-render), a latent nested-each class gap — and once
+  a **reviewer false-positive**. The "reproduce a regression on the pre-change base" rule fired in BOTH
+  directions: it caught my own bugs AND disproved a reviewer's "this is a regression" premise (#731,
+  #735). Verify-on-base is the arbiter, not the review's assertion.
+- **Verify-before-build caught a lane misroute:** Bug 3 (bare `attr=@cell`) looked like a clean
+  spec-settled peter fix, but the emit-html source explicitly gates it on the #81 ruling → bryan-lane.
+- **A `git checkout HEAD -- <file>` clobbered an UNCOMMITTED fix** mid-session (the each fix), because
+  a baseline-compare reverted the working tree to the last commit. Caught immediately (the test failed),
+  re-applied, and COMMITTED before continuing. [[feedback-isolate-agents-that-do-git-ops-in-main-tree]]
+  extends to your OWN git ops: commit a fix before any `git checkout` that touches its file.
+- **The pre-commit hook let stale unit tests through** on #726 (the S239 pass caught them) — do not
+  treat a green pre-commit as proof; the cloud gate + S239 are the real gates.
+
+## 🧷 STATE
+- **main** `cd6bfda7`. Cloud `gate` GREEN. FACTS current. Working tree clean (scratchpad only).
+- **12 PRs landed** (S380-peter): #726 g-string-prop · #728 §52.13 auth-doc (security) · #730
+  session-SQL verify-close · #731 parametric-snippet-param AST · #732 derived-match · #733
+  snippet-is-some (flagship ex.12) · #735 per-item-match-reconcile · #729/#734/#736 review markers.
+  Recovery: #722 (stranded S378-peter drain) recovered → #726, #722 CLOSED superseded.
+- **Dog-food sweep** (3 agents, happy-dom, shipped runtime): Bug 2→#732, Bug 4→#733, Bug 1→#735, Bug 3
+  routed to bryan (#81). All 4 PA-executed + re-verified.
+- Bryan-queue (`../scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md`): 2 S380 addenda.
+- Worktree `scrml-pinned [app-pinned]` present — NOT this session's; left in place.
+
+---
+
 # scrml — Session 378 (bryan · ASUS-Vivobook) — WRAP
 
 **Date:** 2026-08-26/27. Booted `/boot` Profile A, SOLO (S376-bryan and S377-peter both wrapped
