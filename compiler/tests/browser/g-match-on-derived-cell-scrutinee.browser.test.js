@@ -91,6 +91,48 @@ describe("g-match-on-derived-cell-scrutinee (S380 dog-food)", () => {
     expect(app.text("[data-arm]")).toBe("HIGH");
   });
 
+  test("the INTERPOLATED derived form `on=${@derived}` also re-dispatches (whole bug class)", () => {
+    // The `${@lvl}` form reaches resolveOnExpr's member-access branch, not the
+    // bare cellRefMatch — it must get the same derived effect wiring, or the class
+    // is only half-closed (S239 finding on the first cut).
+    const app = mount(`<program>
+  type Lvl:enum = .Low | .High
+  <count> = 0
+  const <lvl>: Lvl = @count >= 3 ? Lvl.High : Lvl.Low
+  function inc() { @count = @count + 1 }
+  <div>
+    <button id="i" onclick=inc()>+</button>
+    <match for=Lvl on=\${@lvl}>
+      <Low><span data-arm>LOW</span></Low>
+      <High><span data-arm>HIGH</span></High>
+    </match>
+  </div>
+</program>
+`);
+    expect(app.errs).toEqual([]);
+    app.click("#i"); app.click("#i"); app.click("#i");
+    expect(app.text("[data-arm]")).toBe("HIGH");
+  });
+
+  test("an arm-payload <each> on a DERIVED-cell match still binds (no _armCellName regression)", () => {
+    // Routing a derived scrutinee must KEEP variantSubscribeName (the _armCellName
+    // that stamps arm-payload eaches); an early cut set it null and this each threw
+    // `items is not defined` (S239 finding).
+    const app = mount(`<program>
+  type R:enum = { Loading, Ready(items: string[]) }
+  <ok> = true
+  <rows>: string[] = ["a", "b", "c"]
+  const <st>: R = @ok ? R.Ready(@rows) : R.Loading
+  <match for=R on=@st>
+    <Loading><span>L</span></Loading>
+    <Ready(items)><ul><each in=items as x><li data-x>\${x}</li></each></ul></Ready>
+  </match>
+</program>
+`);
+    expect(app.errs).toEqual([]);
+    expect([...document.querySelectorAll("[data-x]")].map((e) => e.textContent.trim())).toEqual(["a", "b", "c"]);
+  });
+
   test("a <match> on a PLAIN cell still re-dispatches (Shape A unregressed)", () => {
     const app = mount(`<program>
   type Lvl:enum = .Low | .High
