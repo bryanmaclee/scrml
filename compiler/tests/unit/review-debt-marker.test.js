@@ -31,6 +31,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { parseLedger } from "../../../scripts/review-debt.ts";
 
 describe("review-debt parseLedger — the S378 defect", () => {
@@ -131,7 +132,13 @@ describe("review-debt parseLedger — ordinary shape", () => {
     // assertion that proves #718 is visible into a SILENT PASS. In a file whose docstring
     // quotes pa-base §8 on gates that cannot fail, that was the same shape — a test that
     // disarms itself is not a test. Resolve against the checkout, and let a missing ledger FAIL.
-    const ledger = new URL("../../../docs/pr-reviews.md", import.meta.url).pathname;
+    // ⚑ S378 round 6 — `fileURLToPath`, NOT `new URL(...).pathname`. On Windows `.pathname`
+    // yields `/D:/a/scrml/...` (a leading slash before the drive letter), which is not a valid
+    // path — the S262/#473 break this repo's own `scripts/boot.ts` header names in terms.
+    // I introduced it HERE while fixing this test's self-disarm, and the `windows` CI lane —
+    // whose job title is literally "catches `\` vs `/` OS-path bugs" — caught it on the very
+    // next push. Making the test honest is what made the latent break observable.
+    const ledger = fileURLToPath(new URL("../../../docs/pr-reviews.md", import.meta.url));
     const f = Bun.file(ledger);
     expect(await f.exists()).toBe(true);
     const m = parseLedger(await f.text());
