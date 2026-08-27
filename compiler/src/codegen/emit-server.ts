@@ -2777,6 +2777,18 @@ export function generateServerJs(
     lines.push(`}`);
     lines.push("");
 
+    // §52.13 — `auth="required"` gates EVERY request to this scope, including the
+    // request for the page's own statically-rendered document. The per-route auth
+    // check above only guards server FUNCTIONS; the document is served by the
+    // build's `_server.js` static-file dispatch, which has no auth context. Export
+    // a guard the entry generator mounts in front of THIS module's served .html so
+    // an unauthenticated GET for the document redirects to loginRedirect (302)
+    // instead of leaking the rendered markup at 200
+    // (g-auth-required-does-not-protect-the-served-html-document).
+    lines.push("// --- §52.13 protected-document guard (mounted by _server.js static dispatch) ---");
+    lines.push("export const _scrml_protected_document = { guard: (req) => _scrml_auth_check(req) };");
+    lines.push("");
+
     if (csrf === "auto") {
       lines.push("// --- CSRF token generation and validation ---");
       lines.push("function _scrml_generate_csrf() {");

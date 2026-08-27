@@ -226,15 +226,30 @@ export function discoverServerRoutes(outputDir) {
         middlewareNames.push(name);
       } else if (name === "_scrml_mw_declared_in") {
         // Provenance for the onion above, not a route. Captured separately.
+      } else if (name === "_scrml_protected_document") {
+        // §52.13 — the served-document auth guard `{ guard }`, NOT a route. It is
+        // captured separately (below) and imported under a unique alias by the
+        // entry generator; leaving it here would push a malformed `{guard}` entry
+        // into the `routes` array and bare-import it alongside its own alias.
       } else {
         routeNames.push(name);
       }
     }
 
+    // §52.13 — a module that exports `_scrml_protected_document` guards its own
+    // served .html document. Derive that document's SERVE_DIR-relative path from
+    // the module filename (emit-server names `<base>.server.js` beside `<base>.html`
+    // from the same source), normalized to forward slashes to match URL pathnames.
+    // The entry generator mounts the guard in front of that document in the static
+    // dispatch (g-auth-required-does-not-protect-the-served-html-document).
+    const protectedDocument = /export\s+const\s+_scrml_protected_document\s*=/.test(source)
+      ? relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html")
+      : null;
+
     if (routeNames.length > 0 || wsHandlerNames.length > 0 || middlewareNames.length > 0) {
       // `filename` carries the relative path under outputDir so the generated
       // `_server.js` can import via `./${filename}` regardless of nesting.
-      result.push({ filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn });
+      result.push({ filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn, protectedDocument });
     }
   }
 
@@ -301,6 +316,13 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   if (onionModule) onionAliasFor.set(onionModule, "_scrml_mw_pipeline_0");
   const hasOnion = onionModule != null;
 
+  // §52.13 — modules whose served .html document is auth-protected. Each exports
+  // `_scrml_protected_document = { guard }`; the guard is imported under a unique
+  // alias (the export name is identical across modules) and mounted in front of
+  // that document in the static dispatch below
+  // (g-auth-required-does-not-protect-the-served-html-document).
+  const protectedDocs = [];
+
   lines.push("// scrml production server — compiler-generated");
   lines.push("// DO NOT EDIT. Regenerate with: scrml build");
   lines.push("");
@@ -345,10 +367,34 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
       // (every onion-hosting module exports the same `_scrml_mw_pipeline`).
       const alias = onionAliasFor.get(mod);
       if (alias) specifiers.push(`_scrml_mw_pipeline as ${alias}`);
+      // §52.13 — a unique alias per protected module (the export name collides).
+      if (mod.protectedDocument) {
+        const pdAlias = `_scrml_pd_${protectedDocs.length}`;
+        specifiers.push(`_scrml_protected_document as ${pdAlias}`);
+        protectedDocs.push({ htmlRel: mod.protectedDocument, alias: pdAlias });
+      }
       if (specifiers.length > 0) {
         lines.push(`import { ${specifiers.join(", ")} } from "./${filename}";`);
       }
     }
+    lines.push("");
+  }
+
+  // §52.13 — the protected-document registry consulted by the static dispatch.
+  if (protectedDocs.length > 0) {
+    lines.push("// §52.13 — served documents whose scope is `auth=\"required\"`; the guard");
+    lines.push("// redirects an unauthenticated request to loginRedirect (302) before the");
+    lines.push("// static file is served (g-auth-required-does-not-protect-the-served-html-document).");
+    // Keys are LOWERCASED and looked up lowercased: on a case-insensitive
+    // filesystem the OS resolves `GET /SECURE.html` to the `secure.html` file, but
+    // the SERVE_DIR-relative path keeps the request's casing — a case-exact map
+    // would miss and leak the document. Over-protect (never under-protect): a
+    // case variant of a protected path is gated, matching the file the OS serves.
+    lines.push("const _SCRML_PROTECTED_DOCS = new Map([");
+    for (const pd of protectedDocs) {
+      lines.push(`  [${JSON.stringify(pd.htmlRel.toLowerCase())}, ${pd.alias}.guard],`);
+    }
+    lines.push("]);");
     lines.push("");
   }
 
@@ -488,6 +534,16 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   dispatchBody.push("        // set membership) are immutable; the HTML entry is no-cache; other");
   dispatchBody.push("        // static assets revalidate via ETag / Last-Modified → 304.");
   dispatchBody.push('        const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
+  if (protectedDocs.length > 0) {
+    // §52.13 — gate an auth-required document BEFORE serving (or 304-ing) it: an
+    // unauthenticated request redirects to loginRedirect instead of leaking the
+    // rendered markup (g-auth-required-does-not-protect-the-served-html-document).
+    dispatchBody.push("        const _scrml_doc_guard = _SCRML_PROTECTED_DOCS.get(rel.toLowerCase());");
+    dispatchBody.push("        if (_scrml_doc_guard) {");
+    dispatchBody.push("          const _scrml_doc_gate = _scrml_doc_guard(req);");
+    dispatchBody.push("          if (_scrml_doc_gate) return _scrml_doc_gate;");
+    dispatchBody.push("        }");
+  }
   dispatchBody.push("        const headers = _scrml_cache_headers(rel, st);");
   dispatchBody.push('        const inm = req.headers.get("if-none-match");');
   dispatchBody.push("        if (headers.ETag && inm) {");
