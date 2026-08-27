@@ -9541,7 +9541,34 @@ Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
 **The cheap detector, and it is the durable half.** By construction, **no lowercase element that is not a known HTML/SVG/MathML element (or a hyphenated custom element) should survive into emitted HTML** — every scrml structural element and every expandable construct is supposed to be gone by then. `isKnownElementName` already exists (landed S264 for `E-MARKUP-001`) and can be reused against the emit rather than the source. That is a post-emit assertion, not a new analysis, and it would have caught **both** instances at their landing commit. Same shape as the S346 lesson that a probe must read the artifact the obligation is about.
 
 Related: [[g-spa-runtime-gzip-budget-knife-edge]] is unaffected. dpa-031 D2/D3 are the sibling defects of instance 1 and are filed with the dPA's other routed defects.
-<!-- @gap id=g-unexpanded-markup-element-survives-into-emitted-html sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/component-expander.ts,compiler/src/codegen/emit-form-for.ts,compiler/src/codegen/emit-machines.ts — the expansion sites are known, the SHARED root is not established prov=dd:scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md (instance 1, D1) + rationale:instance-2-found-PA-direct-while-verifying-an-unrelated-claim-and-the-common-root-is-explicitly-unverified -->
+
+> **⭐ ROOT TRACED — S378-peter (re-verified instance 1 on HEAD, then isolated the mechanism).** The
+> surviving instance is NOT "an engine mount fails to expand" — it is **E-MARKUP-001 being BYPASSED for a
+> lowercase element whose name matches a cross-file import**, so an invalid tag-mount ships silently
+> instead of drawing the loud error the same-file path already gives. Discriminator (all on HEAD):
+> - **same-file** `<phase/>` (engine auto-cell) → **`E-MARKUP-001` (loud, correct)** — the auto-cell is
+>   NOT in the same-file resolution registry, so `resolveName` returns `unknown` and the gate fires.
+> - **cross-file, `import { phase }` + `<phase/>`** → **silent survival** — `phase` is now in the
+>   `importedRegistry`, so `resolveName` (name-resolver.ts:359-361) returns a non-`unknown` kind, and
+>   `maybeEmitMarkupUnknown` (name-resolver.ts:448 `if (resolvedKind !== "unknown") return`) skips. Nothing
+>   downstream expands a cell-as-tag, so `<phase />` lands in `main.html` at exit 0.
+> - **cross-file WITHOUT importing `phase`** → `E-MARKUP-001` fires again. **The import is the suppressor.**
+> - contrast: a plain state cell `<count/>` resolves to a cell kind and gets the TARGETED
+>   `E-CELL-NO-RENDER-SPEC` (use `${@count}`), never silent — so cells ARE recognized; the engine auto-cell
+>   is the one that resolves to `unknown` same-file yet to a real kind when imported.
+>
+> **Locus (traced, was `searched:`):** `compiler/src/name-resolver.ts` — the asymmetry between the
+> `importedRegistry` (which carries `phase` with a non-`unknown` kind) and the same-file gate set
+> (`buildLocalDeclaredNames`/`buildSameFileRegistry`, which does NOT carry the engine auto-cell). **Fix
+> direction:** make a lowercase markup element resolving to an imported NON-MOUNTABLE kind (a cell /
+> engine-cell) reach the same error as same-file — ideally `E-CELL-NO-RENDER-SPEC` (the plain-cell
+> answer), else `E-MARKUP-001`. ⚠ Requires knowing exactly which `importedRegistry` kinds are legitimately
+> tag-mountable (imported components/state-types) vs not (cells) so the tightening does not reject a valid
+> imported mount — that enumeration is the remaining work and the regression risk. **NOT a clean drain — a
+> name-resolution arc; verified + root-traced + fix-scoped here, not landed.** Peter-lane (compute).
+> The entry's proposed post-emit `isKnownElementName`-over-the-EMIT detector remains the durable
+> class-level complement (owes a corpus population count before landing, per §8).
+<!-- @gap id=g-unexpanded-markup-element-survives-into-emitted-html sev=HIGH status=open locus=compiler/src/name-resolver.ts:359-361(importedRegistry resolves an imported engine auto-cell to a non-unknown kind)+:448(maybeEmitMarkupUnknown skips when kind!=unknown, so the cross-file lowercase mount escapes the gate the same-file path applies) prov=dd:scrml-support/docs/deep-dives/ad-hoc-shared-reactive-state-2026-08-16.md(instance 1, D1) + rationale:S378-peter-re-verified-on-HEAD-and-traced-the-import-suppresses-E-MARKUP-001-mechanism-instance-2-was-already-withdrawn -->
 
 ### G-DESTRUCTURED-PARAM-DEFAULT-SHIPS-SERVER-ONLY-STDLIB-TO-THE-BROWSER — a pattern-bound parameter default reaching `scrml:auth` emits NO `.server.js` and ships argon2id client-side — `NEW S347; HIGH; open (PA-reproduced on main; PRE-EXISTING)`
 
