@@ -6673,6 +6673,32 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-28 — S382 (peter): the OWED dev.js maps refresh, a workaround-shed reframed to currency, and three dog-food HIGHs verify-first-routed to bryan with turnkey root-causes
+
+A docs-only session that closed the S381 OWED maps item, corrected an adopter app's stale
+self-documentation, and — most substantially — took all three S381 peter-candidate dog-food HIGHs
+through a verify-first pass. Every one confirmed the S381 pickup's prediction (the peter-lane
+silent-wrong HIGH vein is bryan-gated), but each was converted from a vague finding into a precise,
+root-caused, turnkey bryan brief. The recurring lesson: a dog-food finding's fix-lane label is a
+hypothesis — B3's and A1's stated mechanisms were both partly wrong and only survived contact with
+the emitter/SPEC once re-derived.
+
+- **#1 — dev.js maps re-refresh (OWED from S381).** Corrected every `commands/dev.js` citation across
+  the auth/primary/structure maps for the #724 in-process→child-process rewrite, resolved the three
+  provenance caveats, and rewrote the serving-model prose to the parent-proxy/respawned-child model.
+- **#3 — assetManagement workaround currency (committed to a separate aM branch).** Reframed "shed the
+  workarounds" to a currency pass after verify-first showed Tier-1 is stable/superior working code on a
+  field-production app (not dead weight); corrected the stale pin generation (`854a6a9b`, not `#110`) and
+  recorded that the pin-bump sweep is blocked by the open `_scrml_region_track` regression.
+- **#2/B3 (HIGH → bryan)** — `fail .Variant` bare shorthand rejected by E-ERROR-009; root-caused to
+  `type-system.ts:10071` and a §19.3.1-vs-§14.10 grammar conflict (flagship 09 + login broken since S236);
+  recommendation is a §62.2 conformance restoration.
+- **#2/A1 (HIGH → bryan)** — engine multi-step form stuck on step 1; root-caused to the initial-state SSR
+  double-render (empty `wire_<InitialState>`), an engine SSR-hydration model call.
+- **New gap (MED)** `g-corpus-differential-gate-blind-to-standing-breakage` — the corpus emit gate is
+  differential, so a source broken before the baseline (flagship 09/login since S236) is invisible; a
+  compile-floor pass is the peter-lane fix.
+
 ### 2026-08-25 — S375 (bryan): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its defect class named
 
 The session's subject was the PA system, not the compiler. It opened with a request for an instrument

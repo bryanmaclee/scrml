@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 60 |
-| MED | 179 |
+| HIGH | 59 |
+| MED | 180 |
 | LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -10533,12 +10533,36 @@ were hypotheses; two bounced to bryan on verify-before-build).
   false-fires on the §6.7 canvas-ref pattern + violates §6.1.2 loop-locals). Full brief + 2 forks in
   `../scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md` (S381 addendum). Crux: params/local vs
   loop-alias are all `kind:"variable"`, no discriminator.
-- **`g-engine-decl-coupled-bind-dead-on-state-remount` (HIGH, UNVERIFIED by PA).** In an `<engine>` state
-  body, a decl-coupled `<signup><name/></>` (render-by-tag) input's bind wiring emits into the global
-  `_scrml_bind_rewire` but `wire_<State>` is empty and never re-runs after the engine's innerHTML remount →
-  the remounted inputs have no listeners; flagship 05 (multi-step-form) is stuck on step 1. Plain
-  `bind:value` in the same state body works (goes into `wire_<State>`). Likely adopter-lane wiring, but
-  engine-internals have been design-adjacent — verify the lane before building.
+- **`g-engine-decl-coupled-bind-dead-on-state-remount` (HIGH → BRYAN; VERIFIED + ROOT-CAUSED S382-peter).**
+  Flagship 05 (multi-step-form) is stuck on step 1: the initial `<engine for=Step initial=.Info>` state's
+  inputs are never wired, so `@signup.*.isValid` never flips and the Next button stays disabled. **The
+  finding's original mechanism was close but incomplete — the true root is the INITIAL-STATE / SSR
+  double-render, not "decl-coupled → global".**
+  - **Mechanism (emitted-JS confirmed, HEAD).** The `initial=` state is rendered TWICE: (1) SSR'd into
+    `app.html` inside the engine mount (render-by-tag ids `5/7/9`, wired ONCE at boot by the global
+    `_scrml_bind_rewire` + render-by-tag pass over `document`); (2) client-rendered by the engine's
+    `render_Info()` with FRESH ids (`13/15/17`). On the first dispatch the engine does `_mount.innerHTML =
+    render_Info()` — discarding the already-hydrated SSR view (`5/7/9`) and injecting `13/15/17`, which the
+    global pass (already run, and it queried `document` before these existed) never wired, and which
+    **`wire_Info` — the per-state wire the dispatcher calls at that exact point — is EMPTY** and cannot wire.
+    Non-initial states (Preferences/Confirm) are NOT SSR'd, so their binds route to the arm context and
+    `wire_Preferences`/`wire_Confirm` are populated and work (incl. plain `bind:value`). So it is not
+    decl-coupled-vs-plain; it is initial-vs-non-initial. Back→Info would also be dead (empty `wire_Info`).
+  - **Why `wire_Info` is empty.** `emit-variant-guard.ts:520-526` emits the no-op shell `function
+    wire_<State>(_root){ return function(){}; }` iff the state has ZERO arm-tagged bindings
+    (`wireableLogic/Events/Renders/Directives/Binds/ValueAttrs` all empty). The initial state's binds were
+    CLAIMED by the top-level `emit-html`/`emit-bindings` pass (because it IS rendered at top level for SSR,
+    ids `5/7/9`), so the engine's per-state collection sees nothing → empty shell.
+  - **Fix direction + LANE (bryan — engine SSR-hydration model).** The complete fix requires the initial
+    state's per-state wire to be POPULATED (its binds collected into the arm/state context with the client
+    ids `13/15/17`, so both the initial dispatch and Back→Info re-wire) — OR the engine ADOPTS the hydrated
+    SSR initial view and skips the first innerHTML re-render (but that alone leaves Back→Info dead, so the
+    populated wire is still needed). Both touch the §51/§52 SSR-hydration ⟂ engine-render interaction
+    (`emit-engine.ts` + the top-level-vs-arm binding registration + `_scrml_register_dispatch_remount`);
+    real regression surface across engine/match examples, and **no DOM/e2e gate exists to catch a
+    mis-wire** ([[g-corpus-differential-gate-blind-to-standing-breakage]], same C15/e2e-render-map class).
+    Engine dispatch-model + SSR hydration is bryan's lane; root-cause is turnkey. Repro: `examples/05` on
+    HEAD (compiles clean; DOM-dead). <!-- @gap id=g-engine-decl-coupled-bind-dead-on-state-remount sev=HIGH status=open locus=compiler/src/codegen/emit-variant-guard.ts -->
 - **`g-derived-engine-projection-ignored` (HIGH → BRYAN).** `<engine for=T derived=@src>` with body
   projection arms emits TWO substrates: §51.0.J (identity, the read path via `_scrml_cs_reactive_get`) +
   §51.9 (the correct map, `_scrml_derived_fns`, never consulted). The §51.0.J identity is DELIBERATE — the
@@ -10550,11 +10574,33 @@ were hypotheses; two bounced to bryan on verify-before-build).
   lifted-`for` path does `setAttribute("checked", …)` unconditionally (never removeAttribute). `class:done`
   on the same element correctly treats `0` as falsy. Open Q: is one-way boolean-attr binding supported, or
   bind:checked-only (→ missing-diagnostic)? Flagship 18.
-- **`g-fail-variant-shorthand-rejected-by-ts-context` (HIGH).** `fail .Variant` (bare-variant shorthand)
-  is rejected by E-ERROR-009 at the TS stage — the `! E` return-error type context is not applied to bare
-  `fail` (qualified `fail E.Variant` compiles). Docs (d2-server-function.md) + match-arm precedent say the
-  shorthand is intended → likely a semantic bug (apply the type context), but confirm intent. Flagship 09
-  does not compile.
+- **`g-fail-variant-shorthand-rejected-by-ts-context` (HIGH → BRYAN; verified S382-peter).** `fail .Variant`
+  (bare-variant shorthand) is rejected by E-ERROR-009 at the TS stage; qualified `fail E.Variant` compiles.
+  **S382-peter VERIFIED + ROOT-CAUSED + SPEC-checked → it is a SPEC-INTERNAL grammar-reconciliation RULING,
+  routed bryan.**
+  - **Repro (HEAD):** flagship `09-error-handling` fails to compile — **4× E-ERROR-009** (`validate` ×3 +
+    `submit` ×1); `login.scrml` too. ⚠ The reject fires ONLY when the declared error enum RESOLVES: a
+    canonical `type ContactError:enum = {…}` decl → E-ERROR-009; a non-canonical `enum ContactError {…}`
+    (whose enum doesn't register) → check SKIPPED (`type-system.ts:10068`, `validVariants===null`) so bare
+    fail passes VACUOUSLY. So a naive minimal repro can *mask* the bug — use the canonical `type X:enum=` form.
+  - **Root (`type-system.ts:10071`, landed `760e9f83`/S236 = the E-ERROR-009 mint).** For bare `fail .V` the
+    parser sets `enumType=""`; the check's shape-(4) branch (`failEnum===""`) treats empty-enum as "not a
+    valid variant" and fires — it never defaults `failEnum` to `declaredType`, which is IN SCOPE at `:10052`.
+    The peter build once ruled is ~3 lines: when `failEnum==="" && failVariant!==""`, set `failEnum =
+    declaredType` and fall through to the shape-(1/3) variant validation (so a bare `.Nonexistent` still fires
+    shape-1; built-in `Error` default still works).
+  - **SPEC conflict (why bryan, not a unilateral fix).** TWO normative sections disagree: **§19.3.1:14185**
+    grammar production `fail-stmt ::= 'fail' enum-type ('.'|'::') variant-name` REQUIRES the enum-type; but
+    **§14.10:9436** states the GENERAL bare-variant rule ("the constructor callee may be **bare**
+    (`.OnePlayer(...)`, resolved against the surrounding-declaration enum)", `E-VARIANT-AMBIGUOUS` only on a
+    union) and §19.3.2 makes `fail` a variant CONSTRUCTION. Docs (`d2-server-function.md:98`) list `fail
+    .Variant`; corpus = **5** `.scrml` use bare `fail .` (incl. flagship 09 + login) vs 23 qualified.
+    Reconciling two normative sections is a ruling. **Recommendation: conformance restoration per §62.2** —
+    amend §19.3.1 to admit the bare form (enum inferred from the declared `! E`; the fail position is
+    unambiguous), then land the `:10071` fix. (Alt = REJECT + rewrite the 5 corpus files to qualified, but
+    that contradicts §14.10 + the docs + a flagship.) Precedent: the S310 `g-failable-error-type-non-enum-
+    spec-vs-corpus-conflict` ("needs a RULING per §62.2") and the S313 "conformance restoration, build is
+    Peter's" pattern. **COLLATERAL:** 09+login broke at S236 and no gate caught it → [[g-corpus-differential-gate-blind-to-standing-breakage]].
 - **`g-bind-value-on-checkbox-text-semantics` (MED → BRYAN).** `bind:value` on `<input type=checkbox>`
   wires `input`/`event.target.value` (text semantics) → the toggle never updates the bool; idiom is
   `bind:checked`. Coerce-to-checked vs reject-with-diagnostic is a design call.
@@ -10568,3 +10614,18 @@ the guards are unnecessary: negated block `if=!@x`; `<each>`→`<tr>` in `<tbody
 `<select>` + bind:value (#131); dynamic `class=`/`style=` outside `<each>` (#110); keyed-each
 reversal/front-insert; same-key reconcile (#735); function calls inside `<each>`; derived cells + reactive
 ternaries. A cleanup pass on `pjoliver11/assetManagement` could remove them.
+
+## S382-peter — coverage-hole surfaced while root-causing the fail-shorthand HIGH
+
+### g-corpus-differential-gate-blind-to-standing-breakage — a corpus source broken since before the baseline is invisible to the emit gate; flagship 09 + login have failed E-ERROR-009 since S236 and nothing flagged it — `NEW S382-peter; MED; open`
+`examples/` IS a corpus root (`corpus-emit-differential.ts:92` `DEFAULT_ROOTS`), but that gate is a
+**base-vs-head DIFFERENTIAL** — it diffs each source's emission across two commits. A file that fails to
+COMPILE identically on both sides produces no differential, so it is GREEN. `760e9f83` (S236) minted
+E-ERROR-009 with the shape-(4) bare-`fail` reject; flagship `09-error-handling` and `login.scrml` have used
+the bare `fail .Variant` form and thus failed to compile ever since — invisible to the emit gate for the
+same reason, and there is NO absolute "every corpus/flagship source must compile at exit 0" gate. Same CLASS
+as the C15 client-marker-only and `g-e2e-render-map` DOM coverage holes (a gate that asserts a delta, never
+an absolute floor). Fix direction (peter-lane tooling): an absolute compile-floor pass over the corpus roots
+(exit 1 on any source that fails to compile on HEAD), run in the codegen pre-land set — would have caught 09
+at S236 and gates the eventual fail-shorthand ruling's corpus rewrite either way. Surfaced by the S382
+root-cause of [[g-fail-variant-shorthand-rejected-by-ts-context]]. <!-- @gap id=g-corpus-differential-gate-blind-to-standing-breakage sev=MED status=open locus=scripts/corpus-emit-differential.ts -->
