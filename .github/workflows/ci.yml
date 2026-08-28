@@ -149,6 +149,15 @@ jobs:
         run: bun scripts/browser-baseline.ts --check
       - name: Snippet gate (every public-cited .scrml still compiles)
         run: bun scripts/snippet-gate.js
+      # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
+      # example/benchmark apps) must build on HEAD. corpus-emit-differential is base-vs-head and by its
+      # HARD REQ 5 treats compile-failure as DATA, so a program broken since before the baseline is
+      # invisible to it — that is how examples/09 failed to compile from S236 uncaught for months
+      # (g-corpus-differential-gate-blind-to-standing-breakage). Known-broken programs are baselined
+      # (scripts/corpus-compile-floor.baseline.json, each naming its gap); a NEW break — or a stale
+      # baseline entry — fails.
+      - name: Compile-floor gate (every showcase program still builds on HEAD)
+        run: bun scripts/corpus-compile-floor.ts --check
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
       - name: SPEC-INDEX totals gate (the navigation map's own counts still match SPEC.md)
