@@ -1,9 +1,59 @@
-# scrml — Session 381 (peter · Windows) — WRAP
+# scrml — Session 382 (peter · Windows) — WRAP
 
-**Date:** 2026-08-27/28. Booted `/boot` Profile A, successor to S380-peter (SOLO; S379-bryan still
-stranded — see below). A large two-lane session: shipped the #724 dev-server fix (a full
-process-isolation rewrite, Linux-verified), landed the S380 maps refresh, then a 3-agent dog-food
-sweep whose top pick (C1) verify-before-build correctly bounced to bryan's lane.
+**Date:** 2026-08-28. Booted `/boot` Profile A, successor to S381-peter (SOLO). A docs-only session:
+did the OWED #724 dev.js maps re-refresh (#1), reframed the assetManagement workaround "shed" to a
+currency pass (#3, committed to its own aM branch), then verify-first-dispositioned all three S381
+peter-candidate dog-food HIGHs (#2). Every one came back **bryan-gated** exactly as the S381 pickup
+predicted — but converted from vague findings into precise, turnkey, root-caused briefs.
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. Nothing is blocked; the productive peter-lane picks are the two tooling gaps I filed
+No fix is owed back. The three dog-food HIGHs are turnkey **bryan** pickups (see §2). The peter-lane
+work I'd pick up next:
+- **`g-corpus-differential-gate-blind-to-standing-breakage` (MED, filed this session).** Build the
+  absolute compile-floor pass — exit 1 on any corpus-root source that fails to compile on HEAD —
+  in the codegen pre-land set. Would have caught flagship 09 at S236. Clean peter-lane tooling
+  (the delta-lint/review-debt class). **This is my recommended next drain.**
+- **The `_scrml_region_track` SPA regression** that pins assetManagement off HEAD (blocks the whole
+  workaround sweep + app HEAD-tracking). Likely bryan's soft-nav lane, so probably repro+route — but
+  it's the real unlock for the aM app and a genuine adopter-blocker.
+
+### 2. Three dog-food HIGHs — VERIFY-FIRST DONE, all → bryan, turnkey in known-gaps.md
+Do NOT re-verify these as peter drains — S382 confirmed all three need a bryan ruling/engine-model call:
+- **B3 `g-fail-variant-shorthand-rejected-by-ts-context` (HIGH).** Root `type-system.ts:10071`. Bare
+  `fail .V` → `enumType=""` → E-ERROR-009 shape-(4) fires; `declaredType` never applied. SPEC conflict:
+  §19.3.1 grammar (enum-type required) vs §14.10 general bare-variant rule + docs + 5 corpus files.
+  **Recommendation: conformance restoration per §62.2** — amend §19.3.1, then the `:10071` fix (~3 lines).
+  Flagship 09 + login broken since S236. Ruling is bryan's; the build is then a trivial peter follow-on.
+- **A1 `g-engine-decl-coupled-bind-dead-on-state-remount` (HIGH).** NOT "decl-coupled → global" — it is
+  the **initial-state SSR double-render**. `initial=` state SSR'd (`app.html`, ids `5/7/9`, globally
+  wired) + engine client-renders (`13/15/17`) but `wire_<InitialState>` is EMPTY (`emit-variant-guard.ts:520`
+  — its binds were claimed by the top-level SSR pass) → first-dispatch `innerHTML` replace kills it.
+  Fix = populate `wire_<InitialState>` (and/or adopt the SSR view) — §51/§52 SSR-hydration ⟂ engine-render,
+  bryan's engine-model lane. Flagship 05 DOM-dead. **No DOM gate exists to catch a mis-wire** (§1 gap).
+- **B2 `g-checked-expr-attr-always-checked-for-falsy`** = a re-witness of the already-filed bryan gap
+  `g-value-attr-bool-attr-silent-drop` (gated on the #81 writer-ownership ruling; even the diagnostic
+  mitigation is bryan's). No new work — reconcile the two ids.
+
+### 3. Review floor: 18 OWED (#718–#740), carried
+Unchanged this session (docs-only). The boot probe flagged 2 code-bearing carve-outs (#578, #397) to read.
+
+### 4. Maps watermark left at `0dd659a1` deliberately
+This session's maps edit was a targeted `dev.js` incremental (the #724 anchors), not a full remap —
+bumping the whole-set stamp to `c1f93dfb` would falsely claim the entire set was re-verified. The
+dev.js citations ARE current to `c1f93dfb`; the rest of the set is as of `0dd659a1`. WARN-only, not gated.
+
+## WHAT LANDED (S382)
+
+**Docs-only continuity PR (this wrap).** Maps dev.js refresh (auth/primary/structure) + known-gaps
+dispositions (B3 + A1 root-causes, new coverage-hole gap) + `state.ts` gap-counts regen. No compiler/src.
+
+**assetManagement (separate repo, own branch `docs/scrml-workaround-currency` `8d8022b`, LOCAL/unpushed):**
+workaround-currency pass — pin-generation correction + 4 comment de-fangs. See delta `[1914]`.
+
+## PRIOR — S381 below
+
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
