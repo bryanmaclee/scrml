@@ -10518,3 +10518,53 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 > **Locus NOT found** and recorded as such per the base §2 locus-or-recorded-search rule rather than
 > guessed. The `grep -c` output shape is the strongest lead: something redirects a count to `0` where
 > `2>&1` or `>&2` was meant.
+
+---
+
+## S381-peter — dog-food sweep findings (3 agents, happy-dom, flagship examples + real assetManagement app)
+
+All verified-on-HEAD with minimal repros (scratchpad, this session). Fix-lane re-derived (agent labels
+were hypotheses; two bounced to bryan on verify-before-build).
+
+- **`g-at-sigil-on-non-reactive-local-silent-undefined` (HIGH → BRYAN, brief filed).** `@name` on a
+  function param / local `const`/`let` reads `undefined` silently (`@nm` → "hi undefined"); `@alias.field`
+  in `<each>` CRASHES (opaque TypeError). Locus `type-system.ts:7825` (read-side accept). NORMATIVE §6.1.2
+  ruling (which bindings `@name` resolves against; §6.7 refs). A narrowed fix was built + REVERTED (S239:
+  false-fires on the §6.7 canvas-ref pattern + violates §6.1.2 loop-locals). Full brief + 2 forks in
+  `../scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md` (S381 addendum). Crux: params/local vs
+  loop-alias are all `kind:"variable"`, no discriminator.
+- **`g-engine-decl-coupled-bind-dead-on-state-remount` (HIGH, UNVERIFIED by PA).** In an `<engine>` state
+  body, a decl-coupled `<signup><name/></>` (render-by-tag) input's bind wiring emits into the global
+  `_scrml_bind_rewire` but `wire_<State>` is empty and never re-runs after the engine's innerHTML remount →
+  the remounted inputs have no listeners; flagship 05 (multi-step-form) is stuck on step 1. Plain
+  `bind:value` in the same state body works (goes into `wire_<State>`). Likely adopter-lane wiring, but
+  engine-internals have been design-adjacent — verify the lane before building.
+- **`g-derived-engine-projection-ignored` (HIGH → BRYAN).** `<engine for=T derived=@src>` with body
+  projection arms emits TWO substrates: §51.0.J (identity, the read path via `_scrml_cs_reactive_get`) +
+  §51.9 (the correct map, `_scrml_derived_fns`, never consulted). The §51.0.J identity is DELIBERATE — the
+  rich `derived=match @x {…}` form is NOT YET PARSED (emit-engine.ts:3310-3324). Half-implemented feature;
+  `@derived` mirrors the raw source. Flagship 14 risk banner never renders. Route to bryan (projection-form
+  + substrate-reconciliation ruling).
+- **`g-checked-expr-attr-always-checked-for-falsy` (HIGH).** One-way `checked=<expr>` renders CHECKED for
+  any falsy value — emits the raw source text as a literal string attr (`checked="f0"`), no reactive wiring;
+  lifted-`for` path does `setAttribute("checked", …)` unconditionally (never removeAttribute). `class:done`
+  on the same element correctly treats `0` as falsy. Open Q: is one-way boolean-attr binding supported, or
+  bind:checked-only (→ missing-diagnostic)? Flagship 18.
+- **`g-fail-variant-shorthand-rejected-by-ts-context` (HIGH).** `fail .Variant` (bare-variant shorthand)
+  is rejected by E-ERROR-009 at the TS stage — the `! E` return-error type context is not applied to bare
+  `fail` (qualified `fail E.Variant` compiles). Docs (d2-server-function.md) + match-arm precedent say the
+  shorthand is intended → likely a semantic bug (apply the type context), but confirm intent. Flagship 09
+  does not compile.
+- **`g-bind-value-on-checkbox-text-semantics` (MED → BRYAN).** `bind:value` on `<input type=checkbox>`
+  wires `input`/`event.target.value` (text semantics) → the toggle never updates the bool; idiom is
+  `bind:checked`. Coerce-to-checked vs reject-with-diagnostic is a design call.
+- **`g-engine-invalid-transition-thrown-not-caught-at-compile` (MED → BRYAN).** A write to an
+  unreachable-from-current variant throws `E-ENGINE-INVALID-TRANSITION` at runtime (flagship 14
+  FEATHER-in-Fire); only a `W-ENGINE-SELF-WRITE-DETECTED` lint at compile. Engine reachability semantics.
+
+### S381-peter — STALE workarounds CONFIRMED fixed-on-HEAD (assetManagement app can shed them)
+Agent C re-checked the app's `// compiler-bug workaround` comments on HEAD; these now work correctly and
+the guards are unnecessary: negated block `if=!@x`; `<each>`→`<tr>` in `<tbody>`; `<each>`→`<option>` in
+`<select>` + bind:value (#131); dynamic `class=`/`style=` outside `<each>` (#110); keyed-each
+reversal/front-insert; same-key reconcile (#735); function calls inside `<each>`; derived cells + reactive
+ternaries. A cleanup pass on `pjoliver11/assetManagement` could remove them.

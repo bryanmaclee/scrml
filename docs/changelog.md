@@ -1,6 +1,35 @@
 # scrml — Recent Fixes & Work In Flight
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
+## S381 — 2026-08-28 (peter · Windows) — the #724 dev-server rewrite (Linux-verified) + a dog-food sweep
+
+**The arc:** booted as successor to S380-peter. Fixed adopter issue **#724** (`scrml dev` served stale
+server routes after an edit) — which turned out to require a full **dev-server rewrite**, not a patch:
+the in-process module re-import can never re-evaluate a recompiled bundle (Bun caches ESM by path), and
+the two obvious copy-based fixes each traded one silent-wrong for another (a per-file copy misses
+cross-file server imports; a whole-tree copy relocates the `import.meta.dir` session store). The fix
+runs the app in a **child process behind a stable reverse proxy**, respawned fresh per recompile.
+Hardened over **four S239 adversarial rounds** (WS proxy race/auth-cookies/binary frames, orphan-child
+leaks, header hygiene, respawn-failure surfacing, bind-before-spawn) and **spot-checked on real Linux
+via WSL** at Peter's request, since CI's dev-CLI tests can't run in the sandbox. Then a 3-agent
+**dog-food sweep** over the flagship examples + the real assetManagement app surfaced 7 fresh findings;
+the top pick (C1) was built, and **verify-before-build via the S239 pass caught it as a normative-SPEC
+change** (it broke the §6.7 canvas-ref pattern) — correctly reverted and routed to bryan turnkey.
+
+**Landed (2 PRs):**
+- `#738` — **#724 dev-server stale routes** (adopter-visible): process-isolation rewrite of `scrml dev`
+  (child process + parent reverse-proxy, respawn per recompile). Serves recompiled server routes with no
+  restart; sessions/WebSocket channels/cookies preserved. Adopter issue #724 closed.
+- `#739` — **S380 maps incremental refresh**: corrected drifted citations + new §52.13/§51.3/§16.6.1
+  sections (the dev.js anchors predate #738's rewrite — a re-refresh is owed).
+
+**Dog-food findings (triaged, NOT landed):** C1 (`@`-on-a-non-reactive-local → silent `undefined`/crash;
+turnkey bryan brief — normative §6.1.2 ruling), A1 (engine decl-coupled bind dies on remount), B1
+(derived-engine projection no-op — §51.0.J half-implemented, bryan), B2 (`checked=<expr>` falsy), B3
+(`fail .Variant` won't compile), A2 + B4 (checkbox/engine semantics, bryan). Agent C also confirmed ~8
+assetManagement workaround comments are now stale/fixed-on-HEAD. All banked to `docs/known-gaps.md` +
+the bryan-queue.
+
 
 ## S380 — 2026-08-27 (peter · Windows) — a dog-food sweep + a stranded-PR recovery: 12 PRs
 
