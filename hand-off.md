@@ -1,3 +1,78 @@
+# scrml — Session 381 (peter · Windows) — WRAP
+
+**Date:** 2026-08-27/28. Booted `/boot` Profile A, successor to S380-peter (SOLO; S379-bryan still
+stranded — see below). A large two-lane session: shipped the #724 dev-server fix (a full
+process-isolation rewrite, Linux-verified), landed the S380 maps refresh, then a 3-agent dog-food
+sweep whose top pick (C1) verify-before-build correctly bounced to bryan's lane.
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. Maps re-refresh OWED — #724 rewrote dev.js AFTER #739's maps refresh
+#739 (S380 maps) cited `commands/dev.js` anchors against pre-#724 HEAD. #738 (#724) then **rewrote
+dev.js** (in-process serve → child-process reverse-proxy; new exports `runDevChildServer`,
+`serveDevInfra`, `CHILD_READY_PREFIX`; `loadServerRoutes` simplified). The maps' dev.js anchors
+(`auth.map.md`, `primary.map.md`) are now stale. A `project-mapper` incremental over dev.js is owed.
+
+### 2. C1 (dog-food) is a turnkey bryan-lane brief — NORMATIVE §6.1.2 ruling
+`@name` on a non-reactive local (`@param`/`@localConst` → silent `undefined`; `@alias.field` →
+opaque crash) is a real assetManagement footgun, but fixing it is a **normative `@name`-resolution
+ruling** (§6.1.2 lists the valid set; §6.7 adds refs). I built a fix, S239 caught it false-fires on
+the §6.7 canvas-ref pattern + violates §6.1.2 loop-locals, reverted it. Full post-mortem + 2 forks
+in `../scrml-support/handOffs/S358-peter-bryan-lane-low-queue.md` (S381 addendum). The crux for
+bryan: params/local-const/let AND loop-aliases are all `kind:"variable"` with no discriminator.
+
+### 3. Remaining dog-food findings (banked in docs/known-gaps.md — S381 dog-food block)
+- **A1 (HIGH):** engine decl-coupled `<x><f/></>` bind dies on engine state remount (flagship 05
+  stuck on step 1) — the bind wiring emits into global `_scrml_bind_rewire` but `wire_<State>` is
+  empty and never re-runs after the engine's innerHTML remount. UNVERIFIED by me; likely
+  adopter-lane wiring, but engine-internals have repeatedly been design-adjacent this session
+  (verify the lane before building).
+- **B1 (HIGH → bryan):** derived-engine `derived=@x` projection ignored — §51.0.J emits an
+  IDENTITY substrate (the rich `derived=match` form is unparsed) that shadows the §51.9 projection
+  map. Half-implemented feature, not a codegen bug. Route to bryan.
+- **B3 (HIGH):** `fail .Variant` shorthand won't compile (E-ERROR-009 — the TS stage doesn't apply
+  the `! E` type context to bare `fail`); breaks flagship 09. Docs + match-arm precedent say the
+  shorthand is intended → likely a semantic bug, but confirm intent (borderline bryan).
+- **B2 (HIGH):** one-way `checked=<expr>` always renders checked for falsy (emits the raw source
+  text as a literal string attr). Needs: is one-way boolean-attr binding supported, or bind:checked-only?
+- **A2 (MED → bryan):** `bind:value` on a checkbox emits text/`input`/`.value` semantics → inert.
+  Coerce-to-checked vs reject is a design call.
+- **B4 (MED → bryan):** engine `E-ENGINE-INVALID-TRANSITION` thrown at runtime (flagship 14
+  FEATHER-in-Fire) — authoring + a missing compile-time reachability catch. Engine semantics.
+
+### 4. Bonus: ~8 assetManagement workaround comments are STALE (fixed-on-HEAD)
+Agent C confirmed these now work correctly on HEAD (the app can shed the workarounds): negated
+block `if=!@x`; `<each>`→`<tr>` in `<tbody>`; `<each>`→`<option>` in `<select>` + bind:value;
+dynamic `class=`/`style=` outside `<each>` (#110); keyed-each reversal/front-insert; same-key
+reconcile (#735 holds); function calls inside `<each>`; derived cells + reactive ternaries. A
+cleanup pass on assetManagement could remove the guarding comments/imperative paints.
+
+### 5. ⚠️ S379-bryan STILL stranded (carried from S380)
+`origin/wrap/s379` remains 17 commits ahead, unmerged. Bryan-lane recovery (3-way on
+hand-off/delta-log/known-gaps). Not mine to merge (single-writer). [[feedback-detect-stranded-unwrapped-session-at-boot]]
+
+## 🔭 DURABLE METHOD FINDINGS
+- **verify-before-build + S239 caught TWO normative-SPEC changes mislabeled as codegen bugs (B1, C1).**
+  Dog-food agents label fix-lanes optimistically ("codegen, fixable in emit"); anything touching
+  engine internals or `@`-resolution must be re-derived against the emitter/SPEC first. S239 is the
+  arbiter — C1 passed my repros + 20 examples + app + full unit/conformance and STILL had a
+  confirmed §6.7 regression.
+- **Linux spot-check via WSL is the fitness test for dev-server/OS-sensitive fixes** — CI's
+  tracking-tier dev-CLI tests can't run (pre-existing sandbox baseline), so a green gate says nothing
+  about them. `git clone /mnt/c/...` into WSL-native FS, run the e2e there. [[project-dev-server-cli-tests-fail-in-ci]]
+- **#724 was a dev-server rewrite, not a patch** — the copy-based in-process fixes each had a fatal
+  trade (transitive-stale vs session-store-wipe); process isolation was the only correct substrate.
+
+## 🧷 STATE
+- **main** `a9f03e91` (#738). Cloud gate GREEN, windows GREEN, tracking FAIL (pre-existing dev-CLI
+  baseline — NOT a regression, verified on pre-#738 main). FACTS current. Tree clean (scratchpad only).
+- **2 PRs landed:** #738 (#724 dev-server process-isolation), #739 (S380 maps refresh).
+- **C1 NOT landed** (correctly — reverted as normative-SPEC; turnkey bryan brief written).
+- Worktree `scrml-pinned [app-pinned]` present — pre-existing, NOT this session's; left in place.
+- Review floor: #725/#723 (bryan S379) + #738/#739 (S239-reviewed inline; mark on next floor pass).
+
+---
+
 # scrml — Session 380 (peter · Windows) — WRAP
 
 **Date:** 2026-08-27. Booted `/boot` Profile A as successor to S379-bryan. A very large session: a
