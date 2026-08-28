@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 59 |
-| MED | 180 |
+| MED | 181 |
 | LOW | 80 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -10638,7 +10638,37 @@ are BASELINED (`scripts/corpus-compile-floor.baseline.json`, one entry per progr
 [[g-fail-variant-shorthand-rejected-by-ts-context]]); a NEW break fails, and a STALE baseline entry (its
 program now compiles, or is no longer enumerated) ALSO fails, so the baseline can only shrink to truth
 (the delta-lint/browser-baseline discipline — not a rotting allowlist). Anti-truncation: full enumeration
-printed + a `MIN_PROGRAMS` floor (exit 2 on collapse). **REMAINING (why still open, not resolved):** the
-floor covers should-all-compile PROGRAM roots only. `conformance/`+`samples/` carry intentional-ERROR
-cases → need per-case expected-code metadata before an absolute floor won't false-positive; `stdlib/` are
-library modules needing module-compile semantics. Those are the follow-on to close this fully. <!-- @gap id=g-corpus-differential-gate-blind-to-standing-breakage sev=MED status=narrowed locus=scripts/corpus-compile-floor.ts -->
+printed + a `MIN_PROGRAMS` floor (exit 2 on collapse). **REMAINING — and S382 verify-first RESHAPED it:**
+the floor covers should-all-compile PROGRAM roots. The other roots are NOT clean floor targets, contrary
+to the first framing: **`samples/` is NOT a should-compile corpus** (measured: 25+ of ~40 top-level samples
+fail to compile on HEAD — debate/gauntlet/dev-perspective experiments, E-CTX-003/E-STYLE-001/E-TYPE-025;
+extending the floor there would need a large un-per-gap-tracked baseline). **`conformance/`+`samples/compilation-tests/`
+self-gate** via `expected.json` + `conformance-corpus.test.js` — EXCEPT for a distinct positive-case hole
+now split out as [[g-conformance-runner-passes-a-clean-intent-case-that-emits-a-fatal-error]]. `stdlib/` needs
+module-compile semantics. So the showcase-program floor is the correct absolute-floor boundary; the residual
+is the conformance-runner sibling gap, not a floor extension. <!-- @gap id=g-corpus-differential-gate-blind-to-standing-breakage sev=MED status=narrowed locus=scripts/corpus-compile-floor.ts -->
+
+### g-conformance-runner-passes-a-clean-intent-case-that-emits-a-fatal-error — a conformance case that intends to compile clean but emits an unexpected FATAL error still PASSES, because the codes-check is a superset over ALL codes (fatal and non-fatal alike) and does not assert compile-success — `NEW S382-peter; MED; open`
+Same coverage-hole CLASS as [[g-corpus-differential-gate-blind-to-standing-breakage]], but inside the
+language's OWN conformance harness. `conformance/run.ts` `runCase` (`:441-442,:509`) passes a case when
+`missing = expect.codes \ emitted = ∅` AND `forbidden = expect.notCodes ∩ emitted = ∅` (a SUPERSET check —
+by design it allows incidental codes, run.ts:7). It makes NO fatal-vs-non-fatal distinction and does NOT
+assert the compile SUCCEEDED. So a case that intends to compile clean — `expect.codes` lists no fatal `E-`
+code — but emits a fatal error passes silently, UNLESS it also carries a runtime assertion (`input`/`dom`/
+`state`) whose execution would break. **Measured on HEAD (883 cases):** 502 are clean-intent (no fatal code
+expected); **22 of them emit a fatal `E-` error, carry no runtime assertion, and STILL PASS the codes-check.**
+~16 are `-neg` cases whose `expect.codes:[]` declares intent loosely (they fail-as-intended NOW — a LATENT
+hole: if the bug clears they pass a broken state ungated); **the ~6 non-`neg` cases are LIVE victims** —
+confirmed 2 by inspecting `expected.json`: `reactive/server-fn-param-passthrough-clean` (description: "the
+corrected CLEAN form … asserts the whole family stays absent" — yet emits fatal `E-SQL-004`, only
+`notCodes:[E-REACTIVE-003]`) and `components/bind-non-bindable-prop-clean` (its OWN description admits
+"impl#1 currently still emits a spurious `E-ATTR-011` on this genuinely-valid form … `notCodes` asserts
+only that E-COMPONENT-013 stays silent" — a KNOWINGLY-broken valid form, assertion narrowed around the
+spurious fatal). **Fix direction (conformance-runner hardening, `run.ts`):** for a clean-intent case (no
+fatal `E-` in `expect.codes`/`codeCounts`), assert the emission carried NO fatal error not explicitly
+listed — i.e. add an implicit no-unexpected-fatal check. **Migration (why it is an arc, not a one-liner):**
+turning that on surfaces the ~22 at once; each needs triage — a real regression gets fixed, a knowingly-
+spurious one (bind-non-bindable-prop-clean) gets its fatal explicitly recorded (a `codes`/`codeCounts` entry
+or an `allowFatal` opt-in) so the intent is HONEST rather than narrowed-around. Touches the §62.2 conformance
+contract surface → co-derive the "clean-intent" definition + the opt-in with bryan. Surfaced while scoping
+the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-peter). <!-- @gap id=g-conformance-runner-passes-a-clean-intent-case-that-emits-a-fatal-error sev=MED status=open locus=conformance/run.ts -->
