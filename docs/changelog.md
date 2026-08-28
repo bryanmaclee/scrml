@@ -6673,6 +6673,25 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-28 — S382 (peter, continuation): the compile-floor gate, a conformance-runner coverage-hole, and — the headline — the assetManagement pin-bump blocker PROVEN FIXED on HEAD
+
+After the first wrap, "keep going" carried the session into three more wins. **The standout: the
+`_scrml_region_track` SPA regression that pinned Peter's real assetManagement app off HEAD since S31
+(~350 sessions) is fixed** — verified end to end on current HEAD: the app compiles clean, region_track is
+a top-level runtime function loaded before every client, and the HEAD-built server boots and serves every
+page with the rich portal hydrating client-side at zero errors (run safely against a DB copy on a test
+port — production untouched). The pin can bump; the whole workaround sweep unblocks. Peter drives the
+actual migration next session.
+
+- **The compile-floor gate (#742)** — `scripts/corpus-compile-floor.ts`, wired into CI: an absolute floor
+  requiring every shipped showcase program (37) to compile on HEAD, with a self-pruning baseline. Its
+  first run confirmed exactly one break (flagship 09, the known B3 bug). Closes the standing-breakage half
+  of the corpus coverage hole.
+- **Conformance-runner coverage-hole (#743)** — measured that `conformance/run.ts`'s superset codes-check
+  passes a clean-intent case that emits a fatal error (22 exposed cases, live victims confirmed); and that
+  `samples/` is not a should-compile corpus, so the showcase-program floor is the right boundary. Filed for
+  bryan's §62.2 co-derivation.
+
 ### 2026-08-28 — S382 (peter): the OWED dev.js maps refresh, a workaround-shed reframed to currency, and three dog-food HIGHs verify-first-routed to bryan with turnkey root-causes
 
 A docs-only session that closed the S381 OWED maps item, corrected an adopter app's stale

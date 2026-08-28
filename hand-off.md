@@ -1,23 +1,33 @@
 # scrml — Session 382 (peter · Windows) — WRAP
 
-**Date:** 2026-08-28. Booted `/boot` Profile A, successor to S381-peter (SOLO). A docs-only session:
-did the OWED #724 dev.js maps re-refresh (#1), reframed the assetManagement workaround "shed" to a
-currency pass (#3, committed to its own aM branch), then verify-first-dispositioned all three S381
-peter-candidate dog-food HIGHs (#2). Every one came back **bryan-gated** exactly as the S381 pickup
-predicted — but converted from vague findings into precise, turnkey, root-caused briefs.
+**Date:** 2026-08-28. Booted `/boot` Profile A, successor to S381-peter (SOLO). A big multi-arc session
+(re-wrapped after "keep going" carried it well past the first wrap): the OWED #724 dev.js maps refresh
+(#1), the aM workaround "shed" reframed to a currency pass (#3), all three S381 dog-food HIGHs verify-first
+root-caused → bryan (#2), the **compile-floor gate built + merged** (#742), a **conformance-runner
+coverage-hole measured + filed** (#743), and the headline — **the region-track regression that pinned the
+assetManagement app off HEAD is PROVEN FIXED, with a structural functional pass green.** 3 PRs merged.
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-### 1. Nothing is blocked; the productive peter-lane picks are the two tooling gaps I filed
-No fix is owed back. The three dog-food HIGHs are turnkey **bryan** pickups (see §2). The peter-lane
-work I'd pick up next:
-- **`g-corpus-differential-gate-blind-to-standing-breakage` (MED, filed this session).** Build the
-  absolute compile-floor pass — exit 1 on any corpus-root source that fails to compile on HEAD —
-  in the codegen pre-land set. Would have caught flagship 09 at S236. Clean peter-lane tooling
-  (the delta-lint/review-debt class). **This is my recommended next drain.**
-- **The `_scrml_region_track` SPA regression** that pins assetManagement off HEAD (blocks the whole
-  workaround sweep + app HEAD-tracking). Likely bryan's soft-nav lane, so probably repro+route — but
-  it's the real unlock for the aM app and a genuine adopter-blocker.
+### 1. ⭐ PETER DRIVES THE aM PIN-BUMP — the region-track blocker is FIXED (runtime-verified this session)
+This is the headline and Peter's explicit next move. The `_scrml_region_track`-undefined SPA regression
+that pinned `../assetManagement` at S31 (`854a6a9b`) is **gone on current HEAD** — the pin note is ~350
+sessions stale. Runtime-proven (delta `[1921]`): aM compiles clean on HEAD (194 routes), region_track is a
+top-level fn loaded before every client + executes clean in a DOM; the HEAD-built server boots (:3299, a
+COPY of app.db), serves `/login`+`/portal` 200 with the portal client hydrating ZERO errors. **Structural/
+hydration layer green → the pin can bump with high confidence.** REMAINING (Peter's migration, needs creds +
+touches live data): the live auth/CRUD/click-soft-nav/Google-Sheet flows. On the bump, the aM currency
+branch `docs/scrml-workaround-currency` (local) lands too, and the whole Tier-1/Tier-2 workaround sweep
+becomes removable (per-class status in `assetManagement/docs/scrml-workaround-audit-s61.md`). Memory
+[[assetmanagement-pin-blocked-off-head-by-region-track]] carries the full verification.
+
+### 1b. Peter-lane tooling picks (if not driving the aM bump)
+- **The compile-floor gate is DONE + merged** (#742, `scripts/corpus-compile-floor.ts`, live in CI). The
+  natural follow-on is NOT a floor extension — S382 proved samples/ isn't should-compile and conformance
+  self-gates. The residual is the conformance-runner fix (§2, bryan's §62.2 call).
+- **`g-conformance-runner-passes-a-clean-intent-case-that-emits-a-fatal-error` (MED, filed #743)** — the
+  fix (no-unexpected-fatal check + triage the ~22 exposed cases) is a real arc touching the §62.2 contract;
+  co-derive the "clean-intent" definition + opt-in with bryan before building.
 
 ### 2. Three dog-food HIGHs — VERIFY-FIRST DONE, all → bryan, turnkey in known-gaps.md
 Do NOT re-verify these as peter drains — S382 confirmed all three need a bryan ruling/engine-model call:
@@ -44,13 +54,18 @@ This session's maps edit was a targeted `dev.js` incremental (the #724 anchors),
 bumping the whole-set stamp to `c1f93dfb` would falsely claim the entire set was re-verified. The
 dev.js citations ARE current to `c1f93dfb`; the rest of the set is as of `0dd659a1`. WARN-only, not gated.
 
-## WHAT LANDED (S382)
+## WHAT LANDED (S382) — 3 PRs merged
 
-**Docs-only continuity PR (this wrap).** Maps dev.js refresh (auth/primary/structure) + known-gaps
-dispositions (B3 + A1 root-causes, new coverage-hole gap) + `state.ts` gap-counts regen. No compiler/src.
+- **#741** (`917b11a3`) — wrap-1: dev.js maps refresh (auth/primary/structure) + dog-food HIGH dispositions
+  (B3 + A1 root-causes) + the coverage-hole gap. Docs-only.
+- **#742** (`573dc972`) — **the compile-floor gate** (`scripts/corpus-compile-floor.ts` + baseline, wired
+  into CI `gate`). Absolute floor over 37 showcase programs; first run caught exactly flagship 09.
+- **#743** (`1fab6c6b`) — samples-not-floorable finding + the measured conformance-runner coverage-hole gap.
+- **Region-track WIN (finding, no PR needed):** the aM pin-bump blocker proven fixed on HEAD + functional
+  pass green (delta `[1921]`). Durable in memory; Peter drives the bump next session.
 
 **assetManagement (separate repo, own branch `docs/scrml-workaround-currency` `8d8022b`, LOCAL/unpushed):**
-workaround-currency pass — pin-generation correction + 4 comment de-fangs. See delta `[1914]`.
+workaround-currency pass — pin-generation correction + 4 comment de-fangs (delta `[1914]`). Lands on the bump.
 
 ## PRIOR — S381 below
 
