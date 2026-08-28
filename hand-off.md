@@ -1,3 +1,166 @@
+# scrml — Session 379 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-27/28. Booted `/boot` Profile A onto a stranded S378 wrap. Boot read the
+concurrent-session board once, found no live sibling, and never read it again — which is the
+session's structural mistake and the frame for everything below.
+
+**The framing: I spent this session hardening a fix that should not have been built, and the
+durable output is the method, not the code.** Adopter #724 was real and I root-caused it correctly
+in the first hour. Then eleven adversarial rounds and ~46 findings went into an approach whose
+shared premise nobody examined — while S381-peter, live on the board since the previous afternoon,
+solved the same bug in his own lane with a mechanism I never enumerated.
+
+---
+
+## ⏭ NEXT-SESSION PICKUP (read this FIRST)
+
+### 1. ⚠️ RULING 3 IS HELD AND NEEDS A RULING — the only thing genuinely waiting on bryan
+
+Branch **`worktree-agent-a84d38ac3c1c30a4b`**, FINAL **`79894418`**, worktree RETAINED, tree clean.
+Five S239 rounds. **The root is diagnosed and it is structural, not a bug count.**
+
+`E-CONTROL-FLOW-IN-MARKUP`'s recognizer has only ever covered **braced `if`/`for`/`while`**. Ruling 3
+extended its **LOCUS**, not its **COVERAGE**. PA-CONFIRMED on `main`, at the pre-existing markup
+locus, all shipping raw source into the DOM with zero diagnostics: `if (@a) log(1)` (braceless) ·
+`switch (@a) { }` · `outer: for (…) { … }` · `do { … } while (@a)`.
+
+⚑ **Why no enumeration closes it:** `if (@a) log(1)` and `if (you ask) we deliver` differ ONLY in
+whether the tail is code or prose. **The `{` is the entire discriminator** — which is why the
+recognizer requires it and why prose survives. A braceless control-flow statement at a body-top
+cannot be diagnosed by any regex without also refusing prose. That is not a cell in a matrix; it is
+a permanent hole in the approach, inside the class ruling 3 exists to close. Same wall the bare-call
+gate hit: S371's *"recognise the valid forms and refuse the complement"* needs a tree, and at
+TAB-time on a raw text run there is none.
+
+**PA recommendation: land the stable half, hold the arms.**
+- **Land:** the bare-call excision (corpus differential is exactly the gate, zero other deltas) ·
+  the F5 `col` fix · the `default-logic-exemption` extraction · the LOW rider · the **Rule 4 half**
+  of the doc corrections (*the §34 row claimed the §40.8 auto-lift covered this locus; it did not —
+  the locus was covered by NEITHER*), which is true regardless of the ruling.
+- **Hold:** ruling 3's new arms, for a grammar-derived implementation.
+- ⚑ **The doc corrections CANNOT land whole.** The same §34 row also says the code *"now fires at
+  BOTH loci"* and the §40.8 bullet says a body-top statement **SHALL** fire. Held arms make both
+  FALSE on landing — shipping the exact over-claiming-row defect this landing was written to
+  correct. Carve it as ruling 2 was carved, or do not land the docs.
+
+**What survives a hold is the problem statement, and it is worth more than the code:** a
+**52-fixture cross-axis corpus** that already encodes the axes it took five rounds to find
+(`mk-`markup-REAL 6: main 6 / r3 2 / r4 6 · `dl-`§40.8-REAL 6: 0/2/2 · `pr-mk`markup-PROSE 16:
+4/0/4 · `pr-dl`§40.8-PROSE 16: 0/0/0), the two-recognizer **DO-NOT-MERGE** note carrying the history
+in both directions, and the statement-end scanner's four-guard structure. **Land those as
+SPECIFICATION for whoever builds the grammar version, never as a dormant gate.**
+
+### 2. ✅ #724 IS CLOSED — by Peter, and my branch is dead
+
+`a9f03e91` (#738, S381-peter): **run the app in a respawned child process.** PA-verified on main
+`29c07e60` with my own two-half reproducer — `v1`→`v2` on the wire, `alpha_1`/`ver_2` both 200,
+zombie `ver_1` 404, **zero generation symlinks**. Gap flipped OPEN→RESOLVED against his SHA.
+
+**Branch `worktree-agent-a32b0ece32da0ac4d` (`a6b4579c`) is SUPERSEDED — do not land it, do not
+mine it for fixes.** Its 1519 lines of scaffolding exist solely to keep the import in-process.
+⚑ **Round 11 found a MEDIUM in it that was never reverted:** the `outputTreeReadState` walk I
+insisted on makes `-o .` register **zero** server routes when any directory under the project is
+unreadable (PA-reproduced: control registers, `node_modules/.cache` mode 000 → `Not found` from
+boot). Irrelevant now, recorded because it is the evidence for finding D below.
+
+### 3. OPEN / OWED
+
+| | state |
+|---|---|
+| **PR #727** session-store HIGH | **OPEN, still reproduces on `29c07e60`** — the session's one surviving code-adjacent deliverable |
+| review floor | **11 OWED** (`#723`/`#725`/`#727` mine; `#740`-`#744` Peter's) — see below |
+| each-alias | still parked at `s375-r7-reviewed`, untouched two sessions running |
+| `#655` `#640` `#559` `#501` + 3 DRAFTs | untouched, pre-existing |
+
+---
+
+## 🔭 DURABLE FINDINGS — the session's actual output
+
+### A. Five axis rules, one per way work goes wrong
+Earned across both arcs, and they compose rather than overlap:
+1. **No consolidation without a domain argument.** Three self-inflicted defects came from merging
+   two things that looked alike (`maskCommentRegions`, `pidIsAlive`, one recognizer / two loci).
+2. **No platform interface without a negative-case test.** *An interface that exists on the dev
+   machine is not an interface that exists.* (`/proc/self/ns/pid` silently disabled cleanup on
+   macOS and Windows while the docs claimed otherwise.)
+3. **A diff cannot show you the line your change made false.** A LOCALITY assumption: a docstring
+   450 lines away went false when a commit block retired its premise, and six passes could not see
+   it because neither region changed at the same time as the other.
+4. **A converging finding-KIND is not a converged one while any input shape remains unexercised.**
+   The one that governs the others — it is about how a REVIEW goes wrong.
+5. **A deferral backed by a stated reason is evidence; overriding it needs a stronger reason than a
+   rhetorical one.** Three of the last four defects on the #724 branch came from a fix I demanded
+   over the agent's correct objection.
+
+### B. ⭐ The option space had three candidates and the answer was not in it
+A / B / C (rename-entry · copy-tree · symlink) were enumerated, measured by execution, and C was
+picked on evidence. The measurement was sound; the **enumeration** was not. All three differ only
+in *how to mint a new specifier for an in-process import*. Peter's answer is not in that space
+because the space was implicitly *"given that we re-import in-process…"*. I priced B against C
+twice, re-priced it at round 8 on request, and recorded a revisit trigger — **all inside a frame
+whose shared premise I never wrote down.** Eleven rounds checked the answer; none checked the
+question. **When you enumerate options, write down what they all assume.**
+
+### C. ⭐ Instrument-change beats another round, and the rate rising is the signal it worked
+Six diff passes found 41 findings and could not see multi-owner state, contradicting comments, or
+invariants stated in one place and unenforced in another. A **whole-file coherence read** found
+three execution-verified defects immediately. Introduced-findings then went **6 → 9**, which reads
+as divergence and is the opposite: a previously-unsampled population was sampled for the first
+time. **When a review series stops finding mechanism defects and starts finding bookkeeping ones,
+change instruments rather than adding rounds** — and when the uncovered thing is an INPUT SHAPE, no
+amount of re-reading finds it; build a matrix (7 layouts, 6 PASS, 1 honestly not-exercisable).
+
+### D. Fixes caused more defects than the original work did
+Split on the #724 branch: original `7·2·0·1·0·1` (dead after round 2) against introduced
+`0·7·6·5·6·6·9·5·3`. **Round count is the wrong convergence signal; original-vs-introduced is the
+right one**, and severity is a third thing again. A stopping rule must key on a quantity the work
+does not manufacture — *"no findings"* fails that on any actively-edited surface.
+
+### E. A one-shot latch that prevents spam also prevents correction
+Found only by running the layout matrix: degraded mode said *"will keep serving the FIRST compile
+until you restart"*, the condition cleared, the reload recovered — and the false claim stood as the
+adopter's last word. **A suppression mechanism is a state machine with an exit condition; every
+latched warning owes an answer to "what happens when this stops being true?"**
+
+---
+
+## ⚑ MISSES (mine)
+
+1. **★★ I read the concurrent-session board once.** Boot step 0.5 is written as a boot step and I
+   executed it as one. Peter registered S380/S381/S382 and was live in the lane I had borrowed from
+   15:48 the previous day. **A present-tense signal read once at boot is past-tense for the rest of
+   the session** — re-read it at every arc boundary, minimally before dispatching a fix round.
+2. **★★ I took an adopter bug out of Peter's standing lane** on "he isn't live", which was true when
+   I decided it and carried no expiry.
+3. **★★ Five authoring errors, one class — a plausible inference stated with the confidence of a
+   verified fact:** the symlink placement requirement (would have shipped a silent no-op) · a
+   relayed stale LOW-rider description · `fs.symlinkSync` stubbing advice that does not work on Bun ·
+   the `pidIsAlive` consolidation (shipped a container-hang HIGH) · the `outputTreeReadState` walk
+   (killed `-o .` entirely). **The gate caught every one; my authoring, not my checking, is the weak
+   link.**
+4. **★ Nine wrong-referent probes**, every one caught by treating a disagreement with a report as a
+   question about MY measurement first — and none by recall. The clean-command ones were right; the
+   clever compound-shell ones were wrong, without exception.
+5. **★ I corrected a conclusion without correcting the reasoning that produced it** — `[1866]` fixed
+   the regression half of a claim and left the "bonus" half standing, which the dispatch then had to
+   retract from a measurement I had not thought to take.
+
+---
+
+## 🧷 STATE
+
+- **main** `29c07e60` — 19 commits ahead of my boot base, **18 of them Peter's**. Coherence 0/0 both repos.
+- **Gaps:** see the `@generated` block — my `g-dev-server-reimport…` flipped to RESOLVED; the new
+  `g-session-store-keyed-per-compilation-unit-not-per-program` (HIGH) rides PR #727.
+- **Review floor: 11 OWED.** Mine are `#723` (S378's tail wrap, merged at my boot), `#725`, `#727` —
+  all docs-only carve-outs, recorded this wrap. `#740`-`#744` are Peter's.
+- **Concurrent:** S380/S381/S382-peter all wrapped beneath this session. **Not solo, and I proceeded as if I were.**
+- **Worktrees:** `agent-a84d38ac3c1c30a4b` (ruling 3, **RETAIN** — held pending the ruling) ·
+  `agent-a32b0ece32da0ac4d` (**superseded, swept this wrap**).
+- **Maps:** no compiler source landed from this session → **maps unchanged, deliberately not refreshed.**
+- **Mechanical stream:** delta-log `[1844]`-`[1895]`. Do not re-derive from this hand-off what the
+  delta-log and changelog carry.
+
 # scrml — Session 382 (peter · Windows) — WRAP
 
 **Date:** 2026-08-28. Booted `/boot` Profile A, successor to S381-peter (SOLO). A big multi-arc session
