@@ -10617,7 +10617,7 @@ ternaries. A cleanup pass on `pjoliver11/assetManagement` could remove them.
 
 ## S382-peter — coverage-hole surfaced while root-causing the fail-shorthand HIGH
 
-### g-corpus-differential-gate-blind-to-standing-breakage — a corpus source broken since before the baseline is invisible to the emit gate; flagship 09 + login have failed E-ERROR-009 since S236 and nothing flagged it — `NEW S382-peter; MED; open`
+### g-corpus-differential-gate-blind-to-standing-breakage — a corpus source broken since before the baseline is invisible to the emit gate; flagship 09 + login have failed E-ERROR-009 since S236 and nothing flagged it — `NEW S382-peter; MED; PARTIALLY ADDRESSED S382-peter (compile-floor built for showcase programs; conformance/samples/stdlib remain)`
 `examples/` IS a corpus root (`corpus-emit-differential.ts:92` `DEFAULT_ROOTS`), but that gate is a
 **base-vs-head DIFFERENTIAL** — it diffs each source's emission across two commits. A file that fails to
 COMPILE identically on both sides produces no differential, so it is GREEN. `760e9f83` (S236) minted
@@ -10628,4 +10628,17 @@ as the C15 client-marker-only and `g-e2e-render-map` DOM coverage holes (a gate 
 an absolute floor). Fix direction (peter-lane tooling): an absolute compile-floor pass over the corpus roots
 (exit 1 on any source that fails to compile on HEAD), run in the codegen pre-land set — would have caught 09
 at S236 and gates the eventual fail-shorthand ruling's corpus rewrite either way. Surfaced by the S382
-root-cause of [[g-fail-variant-shorthand-rejected-by-ts-context]]. <!-- @gap id=g-corpus-differential-gate-blind-to-standing-breakage sev=MED status=open locus=scripts/corpus-emit-differential.ts -->
+root-cause of [[g-fail-variant-shorthand-rejected-by-ts-context]].
+
+**S382-peter — PARTIALLY ADDRESSED: `scripts/corpus-compile-floor.ts` built + wired into the CI `gate`
+job.** An ABSOLUTE floor: every shipped showcase PROGRAM (32 top-level `examples/*.scrml` + 5 multi-file
+example/benchmark apps = 37) must compile at exit 0 on HEAD. First run confirmed exactly ONE break —
+`examples/09-error-handling` (the B3 fail-shorthand bug) — everything else clean. Known-broken programs
+are BASELINED (`scripts/corpus-compile-floor.baseline.json`, one entry per program naming its gap: 09 →
+[[g-fail-variant-shorthand-rejected-by-ts-context]]); a NEW break fails, and a STALE baseline entry (its
+program now compiles, or is no longer enumerated) ALSO fails, so the baseline can only shrink to truth
+(the delta-lint/browser-baseline discipline — not a rotting allowlist). Anti-truncation: full enumeration
+printed + a `MIN_PROGRAMS` floor (exit 2 on collapse). **REMAINING (why still open, not resolved):** the
+floor covers should-all-compile PROGRAM roots only. `conformance/`+`samples/` carry intentional-ERROR
+cases → need per-case expected-code metadata before an absolute floor won't false-positive; `stdlib/` are
+library modules needing module-compile semantics. Those are the follow-on to close this fully. <!-- @gap id=g-corpus-differential-gate-blind-to-standing-breakage sev=MED status=narrowed locus=scripts/corpus-compile-floor.ts -->

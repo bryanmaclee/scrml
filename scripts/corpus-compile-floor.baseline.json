@@ -1,0 +1,10 @@
+{
+  "_comment": "Known-broken showcase programs the compile-floor tolerates, each tracked under a filed gap. A baselined program does NOT fail the floor; a NEW break does. The floor ALSO fails if a baselined entry starts compiling (or is no longer enumerated) — prune it then. Add an entry ONLY for a genuinely-tracked bug; remove it the moment the fix or example-rewrite lands. See scripts/corpus-compile-floor.ts.",
+  "entries": [
+    {
+      "id": "examples/09-error-handling.scrml",
+      "gap": "g-fail-variant-shorthand-rejected-by-ts-context",
+      "note": "bare `fail .Variant` shorthand rejected by E-ERROR-009 since S236 (760e9f83). §19.3.1 grammar vs §14.10 bare-variant rule — awaiting bryan ruling (§62.2 conformance restoration recommended). Root: type-system.ts:10071. Prune when the ruling lands and 09 compiles."
+    }
+  ]
+}
