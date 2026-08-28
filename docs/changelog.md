@@ -6673,6 +6673,58 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-28 — S379 (bryan): #724 root-caused and superseded, ruling 3 held on a structural root, and five axis rules
+
+A session whose code output was almost entirely superseded and whose method output is the reason to
+read it. Adopter #724 (`scrml dev` serving stale server routes) was reproduced on current main
+within the hour and root-caused to a false premise stated in a comment — *"Bun caches ES module
+imports by specifier, so a `?t=` cache-buster forces a reload."* True on Node, false on Bun, which
+is why it survived review: the reload ran on every save and re-imported the cached module. The
+worse half was silent wrong routing — adding a server fn renumbers `__ri_route_<name>_<N>`, so the
+client called routes the running server did not have and a whole feature vanished with no
+diagnostic.
+
+**The fix that landed is not the fix this session built.** While eleven adversarial rounds hardened
+a per-generation-symlink mechanism, S381-peter — live on the concurrent-session board since the
+previous afternoon — shipped `a9f03e91` (#738): respawn the app in a child process, so a fresh
+process gets fresh module identity for free. PA-verified on `29c07e60` with this session's own
+reproducer. The three candidates enumerated here (rename-entry / copy-tree / symlink) were measured
+by execution and the measurement was sound; the **enumeration** was not, because all three differ
+only in how to mint a new specifier for an in-process import. Eleven rounds checked the answer and
+none checked the question.
+
+**Ruling 3 is HELD pending an operator ruling, on a diagnosed structural root** rather than a bug
+count. `E-CONTROL-FLOW-IN-MARKUP`'s recognizer has only ever covered braced `if`/`for`/`while`;
+ruling 3 extended its locus, not its coverage. Braceless `if (@a) log(1)`, `switch`, labelled `for`
+and `do…while` all ship raw source into the DOM on `main` today. `if (@a) log(1)` and
+`if (you ask) we deliver` differ only in whether the tail is code or prose — **the `{` is the
+entire discriminator**, so no regex closes the class without also refusing prose. The recommendation
+is to land the stable half (bare-call excision, the F5 `col` fix, the extraction, and the Rule 4
+half of the doc corrections) and hold the arms for a grammar-derived implementation.
+
+- **#725** — filed `g-dev-server-reimport-cache-bust-is-a-no-op-on-bun` (HIGH); flipped to RESOLVED
+  this wrap against Peter's `a9f03e91`, with the fix-direction miss recorded rather than overwritten.
+- **#727 (OPEN)** — filed `g-session-store-keyed-per-compilation-unit-not-per-program` (HIGH), the
+  session's one surviving code-adjacent deliverable and still reproducing on `29c07e60`. A two-page
+  program compiles clean and opens **two separate SQLite session stores**, so a login on the root
+  page is invisible to a nested page's auth middleware — a Rule 4 item, since the emitter's own
+  comment quotes the §20.5/#282 SHALL it breaks. The existing conformance case cannot exhibit it.
+- **#723** — merged at boot; S378's tail wrap, structurally the one PR always left owed at a close.
+- **Held:** `worktree-agent-a84d38ac3c1c30a4b` (`79894418`, ruling 3) — retained with a 52-fixture
+  cross-axis corpus and a two-recognizer DO-NOT-MERGE note, to be landed as specification if the
+  arms are held. **Superseded and swept:** `worktree-agent-a32b0ece32da0ac4d`.
+- **Method output** (delta-log `[1844]`-`[1895]`): five axis rules — no consolidation without a
+  domain argument · no platform interface without a negative-case test · a diff cannot show you the
+  line your change made false · a converging finding-*kind* is not a converged one while any input
+  shape is unexercised · a stated deferral is evidence and overriding it needs more than a
+  rhetorical reason. Plus: instrument-change beats another round, a rising finding-rate after an
+  instrument change is evidence the instrument works, and a one-shot latch that prevents spam also
+  prevents correction.
+- **Process:** the concurrent-session board was read once at boot and never again, while a sibling
+  was live in a lane this session had borrowed. Boot step 0.5 is a present-tense signal; read once,
+  it is past-tense for the rest of the session.
+
+
 ### 2026-08-28 — S382 (peter, continuation): the compile-floor gate, a conformance-runner coverage-hole, and — the headline — the assetManagement pin-bump blocker PROVEN FIXED on HEAD
 
 After the first wrap, "keep going" carried the session into three more wins. **The standout: the
