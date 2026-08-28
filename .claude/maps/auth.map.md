@@ -1,6 +1,34 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
+# updated: 2026-08-27T17:17:26-06:00  commit: 0dd659a1
+# generated-at: 0dd659a1 (S380 window, INCREMENTAL_UPDATE — mapper pass, not a full re-walk).
+# Verified: `git merge-base --is-ancestor 48f0aaf8 0dd659a1` exits 0 (48f0aaf8 = wrap(s378), the prior
+# map's effective content watermark); HEAD == origin/main == 0dd659a1 at write time.
+#
+# ⚑ **SCOPED RE-CHECK OVER `48f0aaf8..0dd659a1` (S380, 12 PRs) — the auth surface is NOT zero-diff
+# this window: `emit-server.ts` (+12), `commands/build.js` (+58), `commands/dev.js` (+32, committed)
+# all moved, all for ONE feature: §52.13 below.** Everything else in this file that predates this
+# window was spot-checked against current HEAD only where the diff touched it; unrelated sections
+# carry from the prior pass unchanged.
+#
+# **Four numeric citations in the §40.3 table were STALE, caused directly by the §52.13 insertion
+# landing ABOVE every one of them in both `emit-server.ts` and `commands/build.js` — corrected
+# in place, inline, rather than re-narrated:** row 2 (`:2934/:3093/:3230/:3247` -> `:2946/:3105/
+# :3242/:3259`, +12 each), row 2b (`:511-525/:514/:521` -> `:567-581/:570/:577`, +56 each — the
+# LARGER shift here is because row 2b sits below BOTH the §52.13 `discoverServerRoutes` block AND
+# the `generateServerEntry` protectedDocs/import/registry blocks), row 3 (`284-302, 343-347` ->
+# `299-317, 365-369`), row 4's `formatOnionConflict` anchor (`:381` -> `:399`, dev.js's
+# `registeredProtectedDocs` decl adds ~8 lines above the mount block). Row 4's own `23, 179-200,
+# 311-383` range needed only the tail corrected (`311-383` -> `320-401`) — `179-200` sits entirely
+# ABOVE the dev.js insertion point and is untouched.
+#
+# ⚠ **PROVENANCE CAVEAT ON `commands/dev.js` SPECIFICALLY.** The working tree carries an UNCOMMITTED
+# local edit to `dev.js` (the module-cache-bust mechanism, unrelated to §52.13 — see non-compliance
+# findings) on top of committed HEAD. Every `dev.js` line anchor in this file was verified against
+# **committed HEAD (`0dd659a1`)**, not the dirty working tree, per this map set's CURRENT-TRUTH
+# scope (committed source is the truth; an uncommitted WIP edit is not yet current). If that edit
+# lands, re-verify the three `dev.js` anchors below (`:199`, `:366`, `:1019`) before trusting them.
+#
 # generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
 # `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
 # (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
@@ -213,10 +241,10 @@ unused session infra; a false NEGATIVE re-opens a 500.**
 | Step | File | What it decides |
 |---|---|---|
 | 1. WHICH onion | `compiler/src/commands/select-request-onion.js` | `selectRequestOnion(serverModules)` → `{ onion, error }`. Zero candidates → `null` (no onion, byte-identical pre-onion output). One → mount it. **More than one → `E-MW-007`.** |
-| 2. WHAT the onion IS (codegen) | `compiler/src/codegen/emit-server.ts` — gate `_scrml_hasMW` **`:2934`**, wrapper `function _scrml_mw_wrap(downstream)` **`:3093`**, exports `_scrml_mw_pipeline` **`:3230`** and `_scrml_mw_declared_in` **`:3247`** | Emits the onion and its mount CONTRACT. Nothing more. |
-| 2b. HOW dispatch is split and wrapped (host, **NOT codegen**) | `compiler/src/commands/build.js:511-525` — `async function _scrml_dispatch(req, server)` **`:514`**, `function _scrml_onion_dispatch(req, server)` **`:521`** (`return _scrml_mw_pipeline_0(downstream)(req)`) | ⚑ **CORRECTED S376 — THIS ROW USED TO SAY `emit-server.ts:~454-521` AND THAT IS A WRONG FILE, NOT A DRIFTED LINE.** `grep -rn '_scrml_onion_dispatch\|_scrml_dispatch' compiler/src/codegen/` returns **NOTHING**; both symbols are emitted by the HOST. `emit-server.ts:~454-521` is §20.5/§52 `@currentUser`-query-gate code, unrelated to the onion. Wrong since #654 (`b74f7363`) — every window since. structure.map.md carried the identical error and is corrected there too. |
-| 3. WHO mounts it (prod) | `compiler/src/commands/build.js:22, 284-302, 343-347` | Scans emitted modules for `_scrml_mw_pipeline`; imports the winner under the ALIAS `_scrml_mw_pipeline_0` (every hosting module exports the same NAME). Throws with `err.scrmlCode` / `err.scrmlSources` on conflict. |
-| 4. WHO mounts it (dev) | `compiler/src/commands/dev.js:23, 179-200, 311-383` | Rebuilds `registeredOnions` on every recompile; **mounts the SAME onion the built server does**, deliberately — a dev/prod split here is the exact defect the work removed. Conflict prints via `formatOnionConflict` at `:381`. |
+| 2. WHAT the onion IS (codegen) | `compiler/src/codegen/emit-server.ts` — gate `_scrml_hasMW` **`:2946`**, wrapper `function _scrml_mw_wrap(downstream)` **`:3105`**, exports `_scrml_mw_pipeline` **`:3242`** and `_scrml_mw_declared_in` **`:3259`** (⚑ CORRECTED S380 — all four shifted +12: the §52.13 protected-document guard export was inserted at `:2780-2790`, above every one of these) | Emits the onion and its mount CONTRACT. Nothing more. |
+| 2b. HOW dispatch is split and wrapped (host, **NOT codegen**) | `compiler/src/commands/build.js:567-581` — `async function _scrml_dispatch(req, server)` **`:570`**, `function _scrml_onion_dispatch(req, server)` **`:577`** (⚑ CORRECTED S380 — both shifted +56: the §52.13 protected-document-registry code (`discoverServerRoutes` + `generateServerEntry` additions, `build.js:226-245`/`:319-390`) landed above the dispatch split) (`return _scrml_mw_pipeline_0(downstream)(req)`) | ⚑ **CORRECTED S376 — THIS ROW USED TO SAY `emit-server.ts:~454-521` AND THAT IS A WRONG FILE, NOT A DRIFTED LINE.** `grep -rn '_scrml_onion_dispatch\|_scrml_dispatch' compiler/src/codegen/` returns **NOTHING**; both symbols are emitted by the HOST. `emit-server.ts:~454-521` is §20.5/§52 `@currentUser`-query-gate code, unrelated to the onion. Wrong since #654 (`b74f7363`) — every window since. structure.map.md carried the identical error and is corrected there too. |
+| 3. WHO mounts it (prod) | `compiler/src/commands/build.js:22, 299-317, 365-369` (⚑ CORRECTED S380 — was `284-302, 343-347`; +15/+22 respectively, same §52.13 insertion) | Scans emitted modules for `_scrml_mw_pipeline`; imports the winner under the ALIAS `_scrml_mw_pipeline_0` (every hosting module exports the same NAME). Throws with `err.scrmlCode` / `err.scrmlSources` on conflict. |
+| 4. WHO mounts it (dev) | `compiler/src/commands/dev.js:23, 179-200, 320-401` | Rebuilds `registeredOnions` on every recompile; **mounts the SAME onion the built server does**, deliberately — a dev/prod split here is the exact defect the work removed. Conflict prints via `formatOnionConflict` at `:399` (⚑ CORRECTED S380 — was `:381`; the §52.13 `registeredProtectedDocs` registry adds ~8 lines above the mount block, `dev.js:199-204`). |
 
 **WHAT COUNTS AS DECLARING AN ONION** (the gate is `_scrml_hasMW` in emit-server; a non-pipeline module exports no `_scrml_mw_pipeline` at all, so the selector never sees it):
 
@@ -233,8 +261,36 @@ unused session infra; a false NEGATIVE re-opens a 500.**
 
 `[CORS preflight] → [logging] → [rate limit] → handle() PRE → _scrml_dispatch → handle() POST`
 
-- **Stage 1 is the CORS preflight and it SHORT-CIRCUITS** (`emit-server.ts:3115`, `if (_scrml_mw_req.method === 'OPTIONS')`). It reaches neither logging nor rate-limit, and **it does not reach `handle()`** — deliberately: a preflight carries no credentials, so an auth-enforcing `handle()` would reject it and the browser's real request would never be sent.
-- **`ratelimit=` is PER-ROUTE** (`:2997-3020`, §4.15/§40.2) — it counts only requests a route serves, not the HTML/CSS/runtime/bundle sub-requests of one page load.
+- **Stage 1 is the CORS preflight and it SHORT-CIRCUITS** (`emit-server.ts:3127`, `if (_scrml_mw_req.method === 'OPTIONS')`; ⚑ CORRECTED S380 from `:3115` — the §52.13 guard export lands above it). It reaches neither logging nor rate-limit, and **it does not reach `handle()`** — deliberately: a preflight carries no credentials, so an auth-enforcing `handle()` would reject it and the browser's real request would never be sent.
+- **`ratelimit=` is PER-ROUTE** (`:3009-3032`, §4.15/§40.2; ⚑ CORRECTED S380 from `:2997-3020`, same +12 shift) — it counts only requests a route serves, not the HTML/CSS/runtime/bundle sub-requests of one page load.
+
+## §52.13 — an `auth="required"` scope also gates its OWN served `.html` document (NEW, S380, #728)
+
+**Before this, `auth="required"` only guarded server FUNCTIONS.** The page's own statically-rendered
+document is served by the build's `_server.js` static-file dispatch (or `scrml dev`'s static path),
+which has no auth context at all — an unauthenticated `GET /secure.html` returned 200 with the fully
+rendered markup, leaking whatever the page's initial server-render put there
+(`g-auth-required-does-not-protect-the-served-html-document`).
+
+**The fix threads one guard through all three layers, codegen -> build host -> dev host:**
+
+| Layer | File | What it does |
+|---|---|---|
+| 1. EXPORT the guard | `compiler/src/codegen/emit-server.ts:2780-2790` | Any module whose scope is `auth="required"` now ALSO emits `export const _scrml_protected_document = { guard: (req) => _scrml_auth_check(req) };` (`:2789`) — reuses the SAME check the per-route gate calls, so document and function share one verdict. |
+| 2. DISCOVER + REGISTER (build) | `compiler/src/commands/build.js` — `discoverServerRoutes` excludes the export from `routeNames` and derives `protectedDocument` (the module's served `.html` path) via regex at `:245`; `generateServerEntry` collects `protectedDocs` (`:319-324`), imports each guard under a unique alias `_scrml_pd_<n>` (the export name collides across modules, `:370-373`), and builds a LOWERCASED `rel -> guard` map `_SCRML_PROTECTED_DOCS` (`:383-390`) | Static dispatch consults the map BEFORE cache headers / ETag are computed (`:538-545`) — an unauthenticated request 302s to `loginRedirect` and never reaches the file read or a 304. |
+| 3. MIRROR (dev) | `compiler/src/commands/dev.js` (committed HEAD `0dd659a1`) — module-level `registeredProtectedDocs` Map (`:199-204`), registered per module in `loadServerRoutes` (`:366`), consulted in `devDispatch`'s static-file branch (`:1019-1026`) | Identical mechanism, so `scrml dev` and the built server agree — no dev/prod split, the same principle §40.3's onion work established. |
+
+**Case-insensitivity is deliberate and OVER-protects, never under-protects.** Both sides lowercase the
+map key AND the lookup key. On a case-insensitive filesystem the OS resolves `GET /SECURE.html` to
+`secure.html`, but the SERVE_DIR-relative path used for cache/ETag logic keeps the REQUEST's original
+casing — a case-EXACT map would miss on that request and leak the document. Gating every case variant
+of a protected path is the safe direction to be wrong in (matches error.map.md's §14.8.11
+graceful-degrade precedent: over-restrict, never under-restrict).
+
+**Scope: documents only, not assets.** The guard mounts on the `.html` entry document path
+specifically — CSS/JS/other static assets under the same route are unaffected by this change (they
+carry no page content to leak and were already `no-cache`/immutable per their own contract, see
+build.map.md's "Content-addressed build assets" section).
 
 ## `<program>`-level declarative auth config
 | Field | Values | Purpose |
@@ -359,7 +415,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental
 
 ## Links
 - [primary.map.md](./primary.map.md)
