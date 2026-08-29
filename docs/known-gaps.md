@@ -30,15 +30,23 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 58 |
-| MED | 181 |
-| LOW | 80 |
+| HIGH | 59 |
+| MED | 182 |
+| LOW | 82 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
 <!-- ⚑ S345 filing batch — the S342 arc-audit backlog (bryan-ratified): 40 entries sourced from scrml-support/handOffs/s342-arc-audit/ (classify-write, g263, derived-transitive, harness, tare-pr501, dead-session) -->
 
 <!-- ⚑ S378-bryan filing batch 2 — surfaced by the FIFTH adversarial round on #721, which found the sibling surface is BIGGER than the PR that was touching it -->
+
+<!-- ⚑ S383-bryan filing batch 2 — surfaced by the S239 adversarial pass on the ruling-3 stable-half carve. The HIGH is NOT about ruling 3 at all: the review was reading a conformance fixture and found the fixture was ratifying a live §40.8 defect nobody had filed. Both PA-reproduced by execution on `f6207495`. -->
+
+### g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line — a single line of PROSE at a `<program>` / `<page>` / `<channel>` §40.8 default-logic body-top **silently disables the auto-lift for every declaration below it in the same text run.** The declaration is not lifted, not compiled, and not diagnosed — it ships into the emitted `<body>` as literal page text. **PA-REPRODUCED by execution, three shapes, on `f6207495`:** (a) `<program>` + `function greet() { return 1 }` ALONE → `greet` IS lifted, appears in `case.client.js`, absent from the HTML (1 warning + 1 lint); (b) the SAME declaration with **one prose line above it** → `greet` is in **zero** client-JS files, appears in the HTML as literal text, and the compile emits **ZERO diagnostics** — not even a warning; (c) the structural state-decl form, `<program>` + prose + `<x> = 0` + `${@x}` → the decl ships as page text and the compile fails on the **READ** with `E-STATE-UNDECLARED`, **so the one diagnostic the author does get blames the wrong line entirely** and names a fix ("add a `<x> = <init>` declaration") that is already present two lines above. A blank line between the prose and the declaration does not help. ⚑ **This contradicts §40.8's own S123 amendment**, which explicitly puts function declarations (`function name() { … }`, `fn name(…) { … }`), the structural state-decl form `<name> = expr`, the derived form `const <name> = expr`, type declarations, `let`/`const` locals and `import` declarations IN the auto-lift set — with no stated dependency on the declaration LEADING its run. ⚑ **Severity is HIGH on the silence, not on the shape.** Writing a sentence above a helper is not an exotic authoring act; it is what a person does. The (b) form is the dangerous one — a dead function, a working build, exit 0, nothing red — and per [[project_no_human_has_written_scrml_before_bryan]] the corpus is 100% LLM-authored, so the shape that produces it (prose-then-code at a body-top) is exactly what a HUMAN writes and the corpus therefore under-represents. **Same family as the ruling-3 hole and found beside it, but a DIFFERENT defect:** ruling 3 is about a control-flow STATEMENT not being REFUSED at this locus; this is about an ordinary DECLARATION not being LIFTED at it. Fixing either does not fix the other. **Direction of change when fixed: the lift widening is inert-to-fixing** (a program that shipped dead text starts working) **but the (c) shape's `E-STATE-UNDECLARED` disappearing is a diagnostic delta that owes a measured migration.** Cross-ref `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md` and the conformance pin `ctrl-012-default-logic-multiline-prose-neg`, which is being re-aimed this session to flag this as an open defect rather than ratify it as correct (§62.2 — an unflagged green case would have frozen the bug into the versioned contract) — `NEW S383-bryan (S239 adversarial pass on the ruling-3 carve; reviewer surfaced it against a fixture, PA reproduced all three shapes by execution); **HIGH**; open`
+<!-- @gap id=g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line sev=HIGH status=open locus=compiler/src/ast-builder.js:liftBareDeclarations prov=empirical:S383-PA-reproduced-three-shapes-declaration-alone-lifts-into-client-js-declaration-under-one-prose-line-ships-as-page-text-with-zero-diagnostics-and-the-state-decl-form-fails-on-the-read-with-a-misleading-E-STATE-UNDECLARED -->
+
+### g-markup-body-const-at-scan-has-no-comment-state — `scanMarkupBodyConstAtDecls` (`W-CONST-AT-DEPRECATED`) carries the **identical** comment-state residual already filed for its sibling at [[g-state-block-bare-write-scan-has-no-comment-state]]: it walks text children with the same per-line anchored-regex strategy and has no block-comment state, so a commented-out `const @name` inside a `/* … */` region still warns. **It is now TESTED and was UNREGISTERED** — `compiler/tests/unit/state-block-bare-write-comment-state.test.js` pins the residual for BOTH scanners (see its `CONST_AT` constant and the note at ~:196 that the identical fix in this scanner was a live behavioural change), while the ledger carried an id for only one of them. ⚑ **The fix is NOT to share the sibling's helper** — that is the standing DO-NOT-SHARE rule this arc re-documented: `maskCommentRegions` is safe only over text that cannot contain a string literal, and a markup body is exactly where `src/*.js` in a class or attribute value opens a phantom block comment that never closes. It was folded in and reverted TWICE in one session on two different wrong domain arguments. Closing this properly needs a **string-aware** comment scanner, which is a larger thing than either helper. Filed so the second scanner has an id to cite rather than living as a comment inside a test — `NEW S383-bryan (S239 adversarial pass on the ruling-3 carve, finding 6b; PA-verified the ledger carried zero mentions of this scanner); **LOW**; open`
+<!-- @gap id=g-markup-body-const-at-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanMarkupBodyConstAtDecls prov=empirical:S383-review-found-the-residual-pinned-by-a-new-test-for-both-scanners-while-the-ledger-registered-only-the-sibling -->
 
 <!-- ⚑ S383-bryan filing batch — 2 findings from the S239 review-floor pass on #742 (compile-floor gate) + #738 (dev-server child process); both PA-reproduced by execution on main `a042f3fd` -->
 
@@ -2469,7 +2477,20 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > region and therefore newly-REJECTING — it owes its own measured migration. Not obviously worth it.
 
 ### g-state-block-bare-write-scan-has-no-comment-state — the sibling Info lint false-fires on a `@name = init` sitting inside a `/* */` block comment in a `<db>`/`<state>` body
-<!-- @gap id=g-state-block-bare-write-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanStateBlockBareWriteDecls(~:1923 — no comment handling at all; its ^(\s*)@ anchor makes the //-form accidentally safe, the block-comment form not) prov=empirical:S376-PA-reproduced-by-execution -->
+<!-- @gap id=g-state-block-bare-write-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanStateBlockBareWriteDecls prov=empirical:S376-PA-reproduced-by-execution -->
+<!-- ⚑ S383 — the `locus=` above was edited TWICE, and the second edit is the instructive one.
+     (1) The LINE NUMBER was dropped (it read `(~:1923`). It was correct on main and went stale in
+         the very commit that lands this arc's +40-line banner, which moves the function to :1963.
+         The S378 lesson applied a second time: a line number in a ledger entry rots against the
+         change it describes; the SYMBOL does not.
+     (2) That edit deleted `(~:1923` but left its CLOSING PAREN behind — an unbalanced delimiter
+         inside a machine-read attribute value, caught by the adversarial pass, not by a probe.
+         `state.ts --check` tolerates it, which is exactly why it survived: the whole point of a
+         MACHINE-READABLE field (pa-base v2.9) is that a probe can read it, and the next probe that
+         reads `locus=` to a bracket boundary would trip. So the explanatory prose was moved OUT of
+         the attribute value entirely — a field holds a value, and prose belongs in the entry body:
+         this scan has no comment handling at all; its `^(\s*)@` anchor makes the `//`-form
+         accidentally safe and the block-comment form not. -->
 
 > **PA-REPRODUCED at S376, by execution.** A `<db>` body containing
 > `/* legacy:` / `@count = 0` / `*/` still draws `W-STATE-BLOCK-BARE-WRITE-DECL` on the commented-out

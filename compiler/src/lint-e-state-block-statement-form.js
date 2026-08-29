@@ -313,6 +313,57 @@ const BLOCK_COMMENT_CLOSE = "*" + "/";
  * What is recorded is the true BREADTH, so the next reader sizes the hole from
  * globs and paths rather than from a string literal nobody would write here.
  *
+ * ── ⚑ DO NOT SHARE THIS FUNCTION — IT WAS EXPORTED, APPLIED TWICE, AND ────────
+ * ── REVERTED TWICE, IN ONE SESSION, ON TWO DIFFERENT WRONG ARGUMENTS ─────────
+ *
+ * The two sibling scanners in `ast-builder.js` — `scanStateBlockBareWriteDecls`
+ * (`W-STATE-BLOCK-BARE-WRITE-DECL`) and `scanMarkupBodyConstAtDecls`
+ * (`W-CONST-AT-DEPRECATED`) — walk text children with the same per-line
+ * anchored-regex strategy and have the same block-comment false-fire this
+ * machine closes here. Both were wired to it. Both were reverted, because both
+ * regressed a live lint:
+ *
+ *   markup body — a `<div>` reading `Files under src/*.js are ignored.` then
+ *                 `const @total = 1`: the glob's `/*` opened a comment that
+ *                 never closed and the real declaration STOPPED warning.
+ *   `<db>` body — `@pattern = "src/*.js"` / `@count = 0` / `@other = 1`: the
+ *                 same glob, inside a quoted STRING VALUE, silenced the rest of
+ *                 the body. A/B MEASURED, 3 warnings before, 1 after.
+ *
+ * ⚑ THE SECOND REVERT IS THE INSTRUCTIVE ONE. It was defended on the ground
+ * that a `<db>` body is "structured" while a markup body is "prose". **That
+ * domain distinction does not exist.** A `<db>` body holds string values, and a
+ * string value holds globs, paths, URLs and regexes — every phantom-comment
+ * opener there is.
+ *
+ * ⚑ THE GENERAL RULE, which is the durable output of getting this wrong twice:
+ * **`maskCommentRegions` is only safe over text that CANNOT contain a string
+ * literal.** This module's own domain — a `<db>`/`<state>` opener's block body
+ * scanned for a LIFECYCLE STATEMENT — is where it is used and where it stays.
+ * Neither sibling's domain qualifies, and "converge, don't enumerate" is a rule
+ * about a shared DOMAIN, not about a shared code SHAPE.
+ *
+ * The residual there is a spurious WARNING; importing this machine trades it for
+ * an INVISIBLE MISSING one, and for a lint, silence is the worse failure.
+ * Closing it properly needs a STRING-AWARE comment scanner, which is a different
+ * and larger thing than this helper. A source-level tripwire in
+ * `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts this
+ * function is NOT EXPORTED. **This function is therefore module-private: do not
+ * re-export it to satisfy a third consumer.**
+ *
+ * ⛑ S383 — WHY A TRIPWIRE WHEN BEHAVIOURAL TESTS ALREADY EXIST, stated honestly
+ * because an earlier draft of this banner overstated it. It claimed re-applying
+ * the helper makes findings "DISAPPEAR rather than fail loudly". MEASURED by
+ * actually re-applying it — export, import into `ast-builder.js`, call it in
+ * `scanStateBlockBareWriteDecls`, then revert — FOUR tests go RED. It does fail
+ * loudly, today. The narrower true statement: those behavioural tests exist only
+ * because this was got wrong TWICE and measured after the fact, and they cover
+ * only the shapes someone thought to write. The same helper applied to a
+ * different scanner, or over a domain with no glob fixture, regresses SILENTLY —
+ * a lint that stops firing is invisible unless a test already names that shape.
+ * The tripwire catches the enabling step (making it reachable) at review time,
+ * instead of depending on the fixture set being complete.
+ *
  * @param {string} line — one source line, the `\n` already stripped
  * @param {{ inBlockComment: boolean }} state — carried across lines; MUTATED
  * @returns {string} the line with every comment region replaced by spaces

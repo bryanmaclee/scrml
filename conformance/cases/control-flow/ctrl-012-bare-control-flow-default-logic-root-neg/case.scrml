@@ -1,0 +1,6 @@
+<program>
+${ if (1) { } }
+<page>
+  <h1>Hi</h1>
+</page>
+</program>
