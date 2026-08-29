@@ -68,11 +68,22 @@
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 
-const FIXTURE_DIR = "/tmp/s378-state-block-comment-state-fixtures";
-mkdirSync(FIXTURE_DIR, { recursive: true });
+// ⛑ S383 (R5) — `mkdtempSync`, NOT a fixed `/tmp/<fixed-name>` path.
+// This file used to write fixtures into a guessable, shared, world-traversable
+// directory via `mkdirSync` + `writeFileSync`, and `writeFileSync` FOLLOWS
+// SYMLINKS: on a multi-user box another user can pre-create the directory, or
+// plant a symlink at a fixture name, and the test writes through it. That is
+// byte-for-byte the shape this same landing files against `dev.js`
+// (`g-dev-child-config-written-to-a-predictable-world-readable-tmp-path`), so
+// shipping it in this arc's own new test would have been the rule not applying
+// to its author. `mkdtempSync` returns a fresh 0700 directory with a random
+// suffix. Both sibling tests in this tier already do this
+// (`state-block-statement-form.test.js`, `control-flow-in-markup-reject.test.js`).
+const FIXTURE_DIR = mkdtempSync(join(tmpdir(), "s378-comment-state-"));
 
 const CODE = "W-STATE-BLOCK-BARE-WRITE-DECL";
 const CONST_AT = "W-CONST-AT-DEPRECATED";
@@ -201,16 +212,38 @@ describe("S378 — the two scanners bite, and phantom comments must not silence 
   });
 
   // Kept as defence in depth, and WIDENED past the old regex's blind spots: any
-  // way of USING the helper has to NAME it, so a non-comment occurrence of the
-  // identifier anywhere in `ast-builder.js` catches the named, namespace and
-  // dynamic-import forms alike. (The file's own banners mention it deliberately;
-  // those are comments and are stripped before the check.)
+  // way of USING the helper has to NAME it, so an occurrence of the identifier in
+  // a CODE position catches the named, namespace and dynamic-import forms alike.
+  // The "must not be EXPORTED" test above remains the PRIMARY defence; this one
+  // is the second line.
+  //
+  // ⛑ S383 (R4) — THIS TEST'S FIRST CUT WAS VACUOUS, AND IT FAILED BY THIS PR'S
+  // OWN RULE. It stripped comments with `.replace(/\/\*[\s\S]*?\*\//g, "")` — a
+  // comment model that is NOT string-aware, which is the exact defect this whole
+  // file exists to document. `ast-builder.js` already contains a slash-star
+  // inside a STRING literal today (`:16153`, `line.startsWith("/*")`).
+  // REPRODUCED: plant `const m = "/* sql-ref ";` followed by a real
+  // `maskCommentRegions(...)` call and then a `" */"` string — the stripper
+  // swallows from the first literal to the next `*/`, the call vanishes with it,
+  // and this test reported GREEN with a live reference in the file.
+  //
+  // The check is now LINE-LOCAL, so no window can swallow anything: every line
+  // mentioning the identifier must be a COMMENT line. A code reference —
+  // `import { maskCommentRegions }`, `lint.maskCommentRegions(x)`, a destructured
+  // dynamic import, or `/* c */ maskCommentRegions(a)` — sits on a line that is
+  // not comment-led and is flagged. The residual is a FALSE RED if someone writes
+  // a non-JSDoc block comment whose interior lines lack a leading `*`; that is a
+  // human-resolves-in-seconds failure, versus a false GREEN nobody ever sees.
   test("TRIPWIRE — ast-builder.js must not REFERENCE maskCommentRegions in code", () => {
     const src = readFileSync(join(import.meta.dir, "../../src/ast-builder.js"), "utf8");
-    const codeOnly = src
-      .replace(/\/\*[\s\S]*?\*\//g, "")   // block comments
-      .replace(/^[ \t]*\/\/[^\n]*$/gm, ""); // whole-line line comments
-    expect(codeOnly.includes("maskCommentRegions")).toBe(false);
+    const offenders = src
+      .split("\n")
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => line.includes("maskCommentRegions"))
+      // A comment line: `//`-led, or the ` * ` interior/opener of a block comment.
+      .filter(({ line }) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .map(({ line, n }) => `${n}: ${line.trim()}`);
+    expect(offenders).toEqual([]);
     // …and the banners that DO mention it must still be there, so this test
     // cannot pass by the banners having been deleted.
     expect(src.includes("maskCommentRegions")).toBe(true);

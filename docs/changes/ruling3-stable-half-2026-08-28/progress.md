@@ -591,3 +591,139 @@ job.
 All five premises held on reproduction. The one correction is to my own prior work,
 not to the review: the "DISAPPEAR rather than fail loudly" claim in F5 was mine, the
 reviewer was right to flag it, and measurement confirmed the reviewer rather than me.
+
+---
+
+# FIX ROUND 2 — the re-review at `ffdcf0e3` (COMPLETE)
+
+Six findings; R1-R5 mine, R6 PA-owned and already fixed. **All five premises
+reproduced before fixing. All five held.** One carried a caveat I had to look
+outside my own tree to settle (R5).
+
+## R1 (MED) — the false claim's THIRD site, in the code the SPEC row points at · `015e5b9e`
+
+`ast-builder.js` still asserted as current fact that the gate "never touches the
+default-logic roots (where the §40.8 auto-lift handles bare control flow)".
+
+VERIFIED BY GREP over `compiler/ conformance/ docs/ scripts/` — **five** hits:
+`SPEC.md:19817` (PA-owned, corrected in parallel), this line, and three that quote
+it and immediately refute it (`progress.md`, `PROBLEM-STATEMENT.md`, the
+`non-leading-residual-neg` rationale). **The only LIVE assertion in the tree**,
+exactly as the review said.
+
+REACHABILITY CHECKED AT SOURCE: `SPEC.md:19817` ends *"Emitted by
+`liftBareDeclarations` at `compiler/src/ast-builder.js`"* — it names this function,
+so a maintainer following the corrected §34 row lands on the struck premise.
+`handOffs/delta-log.md` [1825] already recorded the same reasoning for the first two
+sites (*"half A ships half-done if only the §34 row is corrected"*); the third binds
+identically.
+
+Corrected to: the gate does not reach that locus because `parentType === "markup"`
+is its COMPLEMENT, and **nothing else covers it** — §40.8 S123 (`SPEC.md:394`) says
+the auto-lift covers DECLARATIONS ONLY. Hole OPEN, pointer to
+`PROBLEM-STATEMENT.md`. ⚑ The struck wording is deliberately **not** reproduced
+verbatim — same call as F4's dead symbol last round — so
+`grep -rn "auto-lift handles" compiler/src/` now returns **nothing**. Comment-only:
+the diff carries no non-comment lines.
+
+## R2 (MED) — the last narrated output property · `d3375d8b`
+
+PREMISE VERIFIED AT SOURCE: `run.ts:441` is
+`ex.codes.filter((code) => !emittedSet.has(code))` — with `codes: []` that list is
+empty and **can never be violated**.
+
+`ctrl-012-default-logic-prose-neg` given the same whole-tree `dom` its two siblings
+got, value read out of the runner (deliberately-wrong assert, take the `got:`).
+
+MUTATION-PROVEN against the named risk — a SILENT text-drop at the §40.8 locus:
+
+| | prose-neg |
+|---|---|
+| before this commit | **GREEN** while all three prose lines were deleted from `<body>` |
+| after | **RED**, alongside its two siblings |
+
+## R3 (LOW) — silence claimed, one code forbidden · `d3375d8b`
+
+MEASURED BEFORE PINNING, through the runner: with `E-`, `W-` **and** `I-` all
+forbidden, all four cases report **ZERO** prefix violations — every silence claim
+was accurate, the gap was purely enforcement.
+
+All four now forbid the `E-` and `W-` families (`run.ts:446-450`); the two
+rationales saying "zero errors" now say "zero errors and zero warnings", so claim
+and assertion match. ⚑ **`I-` deliberately unpinned** — the advisory/lint stream is
+a separate partition (S92/S93) and may gain a hint here without that being a
+regression in what these cases protect.
+
+MUTATION-PROVEN, and it took **two** mutations because one did not reach every case:
+
+| mutation | result |
+|---|---|
+| a differently-named `E-` code for a body-top TEXT block | the three prose/residual cases RED; `root-neg` green — correctly, its fixture is `${ if (1) { } }`, a LOGIC block with no body-top text run |
+| the same code for ANY default-logic body | **all FOUR RED**, including `root-neg` |
+
+The second exists because "measured on three of four" leaves one pin unproven, and
+an unprovable pin is the failure mode this arc keeps filing.
+
+## R4 (LOW) — ⚑ MY TRIPWIRE WAS VACUOUS, BY THIS PR'S OWN RULE · `5d562185`
+
+It stripped comments with a **non-string-aware** regex — the exact thing this file
+exists to argue is unsafe. I wrote it inside the fix for it.
+
+CONFIRMED LATENT at source: `ast-builder.js:16153` already holds a slash-star inside
+a STRING literal (`line.startsWith("/*")`).
+
+REPRODUCED, not reasoned about — planted a `"/* sql-ref "` string, a real
+`maskCommentRegions(...)` call, and a `" */"` string. The stripper swallowed the
+window and **the tripwire reported GREEN with a live reference in the file.**
+
+Fixed LINE-LOCALLY (every mentioning line must be comment-led), so no window can
+swallow anything. Verified the five legitimate mentions are all comment-led, so
+there is no false-RED tax. Planted string-hidden call → **RED**, naming the line;
+planted namespace import+call → **RED** (last round's widening re-verified); clean
+→ GREEN.
+
+⚑ **I did not take the suggested "assert on raw text" form**, and the reason is
+scope-relevant: it would have forced the identifier out of `ast-builder.js`'s
+banners to avoid an instant RED, and those banners naming the helper are what the
+third attempt greps for. The line-local form is non-vacuous AND keeps them.
+Residual stated at the site: a non-JSDoc block comment whose interior lines lack a
+leading `*` false-REDs — seconds for a human, safe direction. The
+must-not-be-EXPORTED test remains PRIMARY and the comment now says so.
+
+## R5 (LOW) — a fixed, guessable, shared `/tmp` path · `5d562185`
+
+CONFIRMED: `mkdirSync("/tmp/s378-…-fixtures")` + `writeFileSync`, which follows
+symlinks; both siblings in this tier already use `mkdtempSync`
+(`state-block-statement-form.test.js:32`, `control-flow-in-markup-reject.test.js:26`).
+
+⚑ **THE CITED GAP IS NOT IN MY TREE, AND THE REVIEW IS STILL RIGHT.**
+`g-dev-child-config-written-to-a-predictable-world-readable-tmp-path` does **not**
+appear in `docs/known-gaps.md` at my base `a042f3fd`; it **is** on `origin/main`
+(now `88dc214e`), having landed after this worktree was cut. Recorded because a
+future reader checking the citation from this branch would find nothing and might
+conclude the review was wrong.
+
+Now `mkdtempSync(join(tmpdir(), "s378-comment-state-"))`; verified the created
+directory is **`drwx------`**.
+
+## R6 — PA-owned, already fixed. Noted for completeness.
+
+## FIX-ROUND-2 VERIFICATION
+
+- `bun scripts/facts.ts --check` → **exit 0** (`246,370 -> 246,386`, from R1's
+  comment block). ⚑ Regenerated **LAST** this time — applying the round-1 lesson
+  rather than re-learning it.
+- `bun scripts/corpus-compile-floor.ts --check` → **PASS**
+- Conformance → **888 pass / 0 fail**
+- The four touched unit files → **54 pass / 0 fail**
+- Corpus differential vs `origin/main`, re-run at the round-2 tip: intersection
+  **2,365 files, ZERO delta**; the only set difference is the 4 kept `ctrl-012`
+  `case.scrml`, reported explicitly so an addition cannot mask a change.
+- `grep -rn "MUT-" compiler/src/` → empty.
+
+## NOTHING IN THIS ROUND WAS FOUND WRONG
+
+All five premises held. The two corrections are to my own work, not the review:
+the vacuous comment-stripper (R4) and the fixed `/tmp` path (R5) were both mine,
+both were the PR's own documented rules failing to bind their author, and the
+reviewer caught both.

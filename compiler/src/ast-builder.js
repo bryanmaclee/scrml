@@ -1857,12 +1857,28 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // SHIPPED RAW into the DOM. Per §17.4 / §7 it MUST be wrapped in a `${ ... }`
     // logic block. Fire `E-CONTROL-FLOW-IN-MARKUP` (§34) ONCE and RECOVER by
     // dropping the text block (emit nothing — the construct ships NEITHER
-    // `for(){}` NOR `${...}` into the DOM). Gated `parentType === "markup"` so it
-    // never touches the default-logic roots (where the §40.8 auto-lift handles
-    // bare control flow), the canonical `${ for/lift }` form (a `logic` block,
-    // never a markup `text` child), an `if=`/`show=` attribute (an attr, not a
-    // body text run), or `<each>`/`<match>` (structural markup elements). See
+    // `for(){}` NOR `${...}` into the DOM). Gated `parentType === "markup"`, so it
+    // does not reach the canonical `${ for/lift }` form (a `logic` block, never a
+    // markup `text` child), an `if=`/`show=` attribute (an attr, not a body text
+    // run), or `<each>`/`<match>` (structural markup elements). See
     // BARE_CONTROL_FLOW_IN_MARKUP_RE for the false-fire exclusions (prose/idents).
+    //
+    // ⛑ S383 — THIS COMMENT USED TO SAY THE GATE never touches the default-logic
+    // roots BECAUSE THE §40.8 AUTO-LIFT ALREADY COVERED BARE CONTROL FLOW THERE.
+    // THAT WAS FALSE, and it is the exact claim this arc exists to strike. (The
+    // struck wording is deliberately not reproduced verbatim, so a grep for the
+    // live claim does not hit this file.) The gate does not reach a
+    // `<program>`/`<page>`/`<channel>` body-top because `parentType === "markup"`
+    // is the COMPLEMENT of that locus — but nothing else covers it either:
+    // §40.8's S123 amendment (`SPEC.md:394`) says the auto-lift covers
+    // DECLARATIONS ONLY. So bare control flow there is handled by NEITHER the
+    // lift nor this diagnostic; it compiles at exit 0 and ships into `<body>` as
+    // page text. THE HOLE IS OPEN. Ruling 3 directed the fix and it is HELD —
+    // the recognizer needs a `{` to tell code from prose, so braceless `if`,
+    // `switch`, a labelled `for` and `do`/`while` all ship raw at BOTH loci.
+    // See `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`.
+    // ⚑ SPEC §34's row points a reader here by name, so a wrong premise in this
+    // comment is one `grep` away from being re-derived as current fact.
     if (
       block.type === "text" &&
       parentType === "markup" &&
