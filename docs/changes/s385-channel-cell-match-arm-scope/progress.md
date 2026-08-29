@@ -140,3 +140,161 @@ vs. the top-level-mount build (h2) which emits 8 channel-wiring references. So t
 only a diagnostics defect: **a channel mounted inside a match arm is silently dropped from codegen
 and shipped to the DOM as a bogus literal tag.** The E-STATE-UNDECLARED over-fire is the *only*
 thing currently making this shape fail loudly.
+
+---
+
+## Phase 2 — the fix (COMPLETE for the non-each arm; variant A NOT closed)
+
+### The defects were TWO independent bugs, not one shared root
+
+**Defect 1** — three separate AST walks all descended only into `node.children`, and a `<match>` is
+`kind: "match-block"` with **no `children` at all** (arm bodies hang off `armBodyChildren`):
+
+| walker | file | consequence of the gap |
+|---|---|---|
+| `_expandChannelNode` | `component-expander.ts` | mount never inlined → cells absent from scopeChain → false `E-STATE-UNDECLARED` |
+| arm-body consume gate | `codegen/emit-match.ts` | gate probed raw text for a **PascalCase** opener; a channel alias is camelCase → never matched → raw `<probeChan/>` re-emitted **verbatim into the HTML string** |
+| `collectChannelNodes` + `collectChannelFunctionMap` + `collectChannelCellMap` | `codegen/emit-channel.ts` | even once inlined, the whole WebSocket layer (route + IIFE + cell mirror) was never emitted |
+
+**Defect 2 — the PA hypothesis was WRONG, and so was mine initially.** The span is populated
+correctly at the fire site all along. Measured directly:
+
+```
+[S385] fire span = {"file":".../typo-top.scrml","start":66,"end":75,"line":6,"col":14}
+```
+
+The type-system is blameless. `compile.js`'s `formatError`/`formatWarning` read only the FLAT
+`filePath`/`line`/`column` fields, while stage diagnostics carry location in a `span` object
+(`{file,start,end,line,col}` — note `col` vs `column`). So a fully-located diagnostic printed with
+no location at all. **Not specific to `E-STATE-UNDECLARED`**: a plain top-level `${@typoCell}` in a
+`<div>` was equally location-less, and no stage diagnostic ever printed a `:line:col` under
+`scrml compile`. `build.js` and `dev.js` already do `e.line ?? e.span?.line`; `compile.js` never got
+the same treatment — and `compile` is the command the adopter was running.
+
+### A hazard that shaped the fix — why the walk is a CURATED field list
+
+My first attempt walked *every* array-of-nodes generically. Measured, that is WRONG:
+
+```
+j-each.scrml  each-block: bodyChildren / templateChildren share 3 node identities (incl. markup/probeChan)
+a.scrml       logic: body / imports share 1 identity; body / typeDecls share 1 identity
+```
+
+A generic walk visits such a mount **twice** and produces two independent `_cloneChannelDecl`
+copies — duplicate channel wiring, observed live as a doubled inline. Aliased arrays are also
+silently DE-ALIASED if one field is rewritten and its twin is not. The final walk is therefore the
+minimal overlap-free set `children` / `body` / `armBodyChildren`; `armBodyChildren` shares no element
+identity with `match-block.bodyChildren`. `each-block` bodies are deliberately NOT walked.
+
+### What is fixed and what is NOT
+
+Fixed: **mount + read inside the same non-each `<match>` arm** (variant L) — was a hard
+`E-STATE-UNDECLARED` emitting a bogus literal tag with zero wiring; now compiles clean and emits the
+same file-level WebSocket layer a top-level mount produces.
+
+**NOT fixed: variant A, the adopter's exact shape** — see Phase 3 step 1 and the open-question
+section below.
+
+---
+
+## Phase 3 — empirical verification, per numbered step
+
+**1. Recompile the reproducer — `a.scrml` MUST compile clean, exit 0. → FAILED (honest result).**
+`a.scrml` still exits 1 with `E-STATE-UNDECLARED`. Its arm is **each-bearing**, so ast-builder's
+S316 path blanks `children` and stashes the body as raw text BEFORE CE runs. There is no node for
+CE to walk. See the open question below. It now at least reports a precise location:
+`a.scrml:11:18` plus a source-context snippet.
+
+**2. Symptom-specific check + a genuine-typo location probe. → PASS.**
+A constructed `@typoCell` case now prints:
+```
+error [E-STATE-UNDECLARED]: bare `@typoCell` read with no reactive cell in scope. ...
+  --> .../typo-top.scrml:6:14
+      5 |     <div>
+ >    6 |         <p>${@typoCell}</p>
+```
+Location AND source context, where pre-fix there was neither.
+
+**3. Full variant matrix re-run, PRE vs POST, both measured by execution.**
+(`WIRED` = emitted client carries `_scrml_ws_probe`; `LITERAL` = a raw `<probeChan` tag shipped.)
+
+| # | shape | PRE | POST | verdict |
+|---|---|---|---|---|
+| A | mount + read in an **each-bearing** arm | FAIL, LITERAL | FAIL, LITERAL | **unchanged — NOT fixed** |
+| B | no mount at all | FAIL | FAIL | unchanged (arguably correct) |
+| C | top-level mount, read outside | CLEAN, WIRED | CLEAN, WIRED | inert |
+| D | mount in each-bearing arm, no read | CLEAN, LITERAL | CLEAN, LITERAL | unchanged |
+| E | same-file local cell in arm | CLEAN | CLEAN | inert |
+| F | read inside an `<each>`, top-level mount | CLEAN, WIRED | CLEAN, WIRED | inert |
+| G | `<each in=@undeclaredName>` | CLEAN | CLEAN | **out-of-scope guard HOLDS** |
+| H/H2 | top-level mount, read **inside** the arm | CLEAN, WIRED | CLEAN, WIRED | inert |
+| I | mount in arm, read **outside** the match | FAIL, LITERAL | FAIL, **WIRED**, no literal | improved, still FAIL |
+| J | mount inside an `<each>` body | FAIL | FAIL | unchanged (deliberately untouched) |
+| K | mount inside an `<if>` body | CLEAN, WIRED | CLEAN, WIRED | inert |
+| **L** | **mount + read in the same non-each arm** | **FAIL, LITERAL** | **CLEAN, WIRED** | **FIXED** |
+| M | adopter workaround: top-level mount, each-bearing arm | CLEAN, WIRED | CLEAN, WIRED | inert |
+
+Exactly ONE row flips verdict, and it flips toward the contract.
+
+**4. Variant G guard — must STILL compile clean. → PASS.** `<each in=@totallyUndeclaredName>`
+compiles clean before and after. The out-of-scope false negative is untouched, and is now pinned by
+an explicit guard test so it cannot start rejecting silently.
+
+**5. Real adopter sources + corpus sweep. → PASS, byte-identical.**
+952 files swept (`gauntlet-r25/dev-*.scrml` + `examples/**` + `samples/**`), recording each file's
+full diagnostic CODE SET and pass/fail verdict, once on `56473410` and once on the fix:
+
+```
+$ diff sweep-PRE.txt sweep-POST.txt
+$ echo $?
+0
+```
+**Zero files changed, in either direction.** 728 OK / 224 FAIL, unchanged. The four `gauntlet-r25`
+adopter files carry identical diagnostic sets before and after (none of them contains
+`E-STATE-UNDECLARED`).
+
+**6. Full suite. → PASS, no new failures.**
+- Pre-commit gate (unit + integration + conformance + top-level): **0 fail**, and it gated both
+  fix commits.
+- Full `bun run test`: **55 fail** on the fix vs **59 fail (+1 error)** on base `56473410` —
+  measured by reverting the five source files and re-running. My change strictly REDUCES failures.
+- Authoritative browser check: `bun scripts/browser-baseline.ts --check` →
+  `PASS — browser failure name set matches the baseline (48 asserted)`.
+- `bun run types:check`: 4 NEW diagnostics — **identical on base**, in `emit-each.ts` /
+  `route-inference.ts`, files I never touched. Pre-existing on `origin/main`; my changes add zero.
+
+---
+
+## Phase 4 — direction-of-change (measured, not assumed)
+
+| class | count | evidence |
+|---|---|---|
+| **inert** | 952 of 952 corpus files | `diff sweep-PRE sweep-POST` → empty |
+| **newly-accepting** | 1 shape (variant L) | FAIL → CLEAN, and toward SPEC §6.1.2 |
+| **newly-rejecting** | **0** | variant G guard holds; corpus diff empty; browser baseline name-set identical |
+| **semantics-changed** | 1 shape (variants I + L) | emitted output changes from "bogus literal `<probeChan/>` tag, no wiring" to "correct file-level WebSocket layer". Strictly a repair — the prior output could not work at runtime under any input. |
+
+Assumed-zero was not accepted anywhere: the 952-file sweep was run twice and diffed.
+
+---
+
+## OPEN — variant A, the adopter's shape. NOT fixed, and it needs a ruling.
+
+`a.scrml` fails because ast-builder (`ast-builder.js:15922-15975`, the S316
+`g-nested-each-in-match-arm-drops-diagnostics` fix) BLANKS an **each-bearing** bare-body match arm
+(`children: []`) to avoid the S153 `collectEachBlocks` double-emit, stashing the body as raw text in
+`_reparseEachArmBodyRaw`. At CE time the mount is not a node, it is a string. `type-system.ts:13036`
+re-parses that string locally with throwaway ids — and those nodes never pass through CE.
+
+Closing it requires BOTH:
+- CE learning to see mounts inside a stranded raw arm body, and
+- codegen wiring a channel for an each-bearing arm — whose emitter deliberately excludes that case
+  (`!/<\s*each\b/` at `emit-match.ts`) so the each id-restamping is not lost.
+
+That is a rework of machinery with S153 / S177 / S316 history, on a live adopter's flagship path.
+It is not a surgical fix and I did not invent semantics for it.
+
+**Verified workaround for the adopter (compiled, not asserted):** move the `<probeChan/>` mount out
+of the arm to `<program>` level. Variant M — top-level mount, each-bearing arm containing both the
+`${@stamp}` read and the `<each in=@items>` — **compiles clean and emits the channel wiring.**
+That is a one-line source move that unblocks the gate today.
