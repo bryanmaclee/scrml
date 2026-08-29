@@ -1,0 +1,10 @@
+<program>
+    ${
+        import { "probe" as probeChan } from './chan.scrml'
+        <rows> = [1, 2]
+    }
+    <probeChan/>
+    <each in=@rows as r>
+        <li>${@stamp}</li>
+    </each>
+</program>
