@@ -5,7 +5,7 @@ import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collec
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
-import { collectReactiveVarNames } from "./reactive-deps.ts";
+import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
@@ -37,6 +37,12 @@ import {
 } from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
 import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
+// g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,
+// sliced from the SINGLE client-runtime source, inlined into a standalone
+// `.server.js` that references `_scrml_map_*` (reachability-gated below). Without
+// it a server fn building/returning a map or set throws `ReferenceError:
+// _scrml_map_from_entries is not defined` at request time (green compile).
+import { SERVER_VALUE_NATIVE_MAP_HELPER } from "../runtime-template.js";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -1465,6 +1471,12 @@ export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): str
   if (emitted.includes("_scrml_structural_eq(")) {
     emitted = injectAfterHeader(emitted, SERVER_STRUCTURAL_EQ_HELPER);
   }
+  // g-value-native-map-set-server-runtime — a value-export const that is a map/set
+  // literal (`export const M = ["a": 1]`) lowers to `_scrml_map_from_entries(`.
+  // Same reachability-gated inline the route-handler path runs (shared slice).
+  if (/_scrml_map_[a-z]/.test(emitted)) {
+    emitted = injectAfterHeader(emitted, SERVER_VALUE_NATIVE_MAP_HELPER);
+  }
   if (emitted.includes("_scrml_wire_encode(")) {
     emitted = injectAfterHeader(emitted, SERVER_WIRE_ENCODER_HELPER);
   }
@@ -1628,6 +1640,46 @@ export function generateServerJs(
   // emission is scoped to THIS file; drained into `errors` after emission below.
   resetSessionValueUseErrors();
   const fnNodes: any[] = ctxForCache?.analysis?.fnNodes ?? collectFunctions(fileAST);
+
+  // g-value-native-map-set-server-runtime (Part A — server-side map/set method
+  // lowering). The client path (emit-functions.ts) threads a per-function set of
+  // NON-REACTIVE LOCAL map/set names into the emit-expr context so a `.insert` /
+  // `.add` / `.getOr` / bracket-read on a local `[K:V]` / `set[K]` lowers to the
+  // `_scrml_map_*` runtime surface. The server-fn body path historically did NOT
+  // thread these, so `.insert` survived as a verbatim method call `m.insert(...)`
+  // — and the runtime map is a tagged PLAIN object with NO methods, so once the
+  // runtime is inlined (Part B) that call would throw `m.insert is not a function`
+  // at request time. Compute the file-wide fn-return map kinds ONCE, then key a
+  // per-fnNode memo (mirrors emit-functions.ts) so each server-fn body opts object
+  // can spread in its own local map/set names. A fn with no local map/set yields
+  // three empty sets → nothing is spread → that bundle is byte-unchanged.
+  const _fnReturnMapKinds = buildFnReturnMapKinds(fileAST);
+  const _localMapSetOptsMemo = new Map<any, {
+    localMapVarNames?: Set<string>;
+    localSetVarNames?: Set<string>;
+    localOrderedMapVarNames?: Set<string>;
+  }>();
+  const localMapSetOptsFor = (fnNode: any): {
+    localMapVarNames?: Set<string>;
+    localSetVarNames?: Set<string>;
+    localOrderedMapVarNames?: Set<string>;
+  } => {
+    if (_localMapSetOptsMemo.has(fnNode)) return _localMapSetOptsMemo.get(fnNode)!;
+    const { localMapVarNames: _m, localSetVarNames: _s, localOrderedMapVarNames: _o } =
+      collectLocalMapSetNames(fnNode, _fnReturnMapKinds);
+    // Omit empty sets so the emitted opts object (and thus a non-map server fn's
+    // output) is byte-identical to the pre-fix emission (spread of `{}`).
+    const opts: {
+      localMapVarNames?: Set<string>;
+      localSetVarNames?: Set<string>;
+      localOrderedMapVarNames?: Set<string>;
+    } = {};
+    if (_m.size > 0) opts.localMapVarNames = _m;
+    if (_s.size > 0) opts.localSetVarNames = _s;
+    if (_o.size > 0) opts.localOrderedMapVarNames = _o;
+    _localMapSetOptsMemo.set(fnNode, opts);
+    return opts;
+  };
 
   // Issue #26 (P0 auth-bypass) — per-file stdlib async classifier inputs,
   // computed ONCE for the file and threaded into every server-fn body opts
@@ -3645,6 +3697,8 @@ export function generateServerJs(
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
+        // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
+        ...localMapSetOptsFor(fnNode),
       };
 
       for (const stmt of body) {
@@ -4075,6 +4129,10 @@ export function generateServerJs(
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
+        // g-value-native-map-set-server-runtime (Part A): local map/set names so
+        // `.insert`/`.add`/`.getOr`/bracket-read lower to the `_scrml_map_*`
+        // runtime surface (empty → nothing spread → byte-unchanged).
+        ...localMapSetOptsFor(fnNode),
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -4265,6 +4323,8 @@ export function generateServerJs(
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
+        // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
+        ...localMapSetOptsFor(fnNode),
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -4893,6 +4953,8 @@ export function generateServerJs(
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
+        // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
+        ...localMapSetOptsFor(_peerInfo.fnNode),
       };
       const _peerBodyLines: string[] = [];
       for (const stmt of (_peerInfo.fnNode.body ?? [])) {
@@ -5475,6 +5537,8 @@ export function generateServerJs(
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
+        // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
+        ...localMapSetOptsFor(fnNode),
       };
       const wsBody: any[] = fnNode.body ?? [];
       const _wsBodyLines: string[] = [];
@@ -5750,6 +5814,25 @@ export function generateServerJs(
     // above any function that might call it (the first blank line following
     // the imports). Helper source is the shared SERVER_STRUCTURAL_EQ_HELPER.
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_STRUCTURAL_EQ_HELPER);
+  }
+
+  // g-value-native-map-set-server-runtime — §59 value-native map/set runtime
+  // inlining. A `[K:V]` / `set[K]` literal lowers to `_scrml_map_from_entries(`
+  // and a `.insert`/`.add`/`.getOr`/… method lowers to `_scrml_map_insert(` etc.
+  // (see the localMapVarNames threading into the server-fn opts above). Those
+  // `_scrml_map_*` helpers live only in the client SCRML_RUNTIME; a standalone
+  // `.server.js` never imports it, so without this inline the server body throws
+  // `ReferenceError: _scrml_map_from_entries is not defined` at request time
+  // (green compile). Mirrors the structural-eq / enum-table server inlines: the
+  // helper source is the single client-runtime slice (no drift), and the inject
+  // is REACHABILITY-GATED on a `_scrml_map_*` call surviving in the assembled
+  // body — a bundle with no map/set use is byte-unchanged. `_scrml_map_` (with a
+  // trailing underscore) matches the `_scrml_map_<fn>` call surface but NOT the
+  // `__scrml_map` value tag (whose next char is never a lowercase letter here),
+  // and the inlined helper is not yet present at this scan, so the probe only
+  // sees genuine body references.
+  if (/_scrml_map_[a-z]/.test(finalEmitted)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_VALUE_NATIVE_MAP_HELPER);
   }
 
   // M-7C-D-12 Track 2 (§57 Wire Format) — encoder helper post-emit detection.
