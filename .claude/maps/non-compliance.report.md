@@ -7,6 +7,11 @@
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
 # **INCREMENTAL over `8b2e4053` -> `fc6df72e` (S376). SOURCE WINDOW = FIVE FILES, ONE OF THEM NEW.**
 # Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check passes.
+# ⛑ **S383/S384 CITATION-ONLY UPDATE (see N17's resolution block below). THE SCAN WAS NOT RE-RUN and
+# lines 3–4 are DELIBERATELY NOT MOVED — this pass touched only citations on the nine compiler-source
+# files that moved over `0dd659a1..ff4b37e5`. `origin/main` advanced to `9f75061c` (`wrap(s383)`)
+# mid-pass; `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY, so the source state read is
+# `ff4b37e5` and every anchor holds at `9f75061c`.**
 # scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, with
 # every LIVE finding REPRODUCED BY COMPILING or by grepping source at this watermark — not relayed.
 
@@ -416,7 +421,7 @@ ship as raw `for(){}` text into the DOM."* **It ships.** Compiled at this waterm
     </program>
 
 Two siblings of the same class reproduce identically (`log("M1");`, and a `//` comment flushing the
-run around it). The mechanism is structural: the emit site (`ast-builder.js:1857-1860`) is gated
+run around it). The mechanism is structural: the emit site (`ast-builder.js:1882-1885`, `TABError` push at `:1906`; ⛑ S383, was `:1857-1860`) is gated
 `parentType === "markup"`, the **COMPLEMENT** of the §40.8 default-logic locus, so the diagnostic
 **cannot** fire there. **This is a doc describing behaviour the code does not have — pa.md Rule 4,
 and it is in the NORMATIVE document.** ⚠ **Compounding it, `W-PROGRAM-REDUNDANT-LOGIC` actively
@@ -428,9 +433,29 @@ the comment limb has a complete-but-unlanded fix
 limb is covered by NEITHER and is the one that contradicts the SPEC row. **Either the row's claim is
 corrected, or the gate is widened to the §40.8 locus — but the row cannot stay as written.**
 
+⛑ **N17 — RESOLVED ON THE DOC LIMB AT S383, `ff4b37e5`; STILL OPEN ON THE BEHAVIOUR LIMB. This is a
+CITATION-ONLY UPDATE to an otherwise `fc6df72e`-stamped report — the scan was NOT re-run.** The fork
+this finding posed was answered by taking the FIRST branch. `SPEC.md:19823` (the §34 row),
+`SPEC.md:11765` (§17.4 prose) and a NEW `SPEC.md:23063` (§40.8 bullet) now all state that the
+auto-lift covers **DECLARATIONS ONLY** and that the default-logic body-top is covered by **NEITHER**
+the lift nor the code; the row's *Does NOT fire* entry for that locus now carries the explicit rider
+*"NOT because that locus is safe … Do not read this entry as coverage."* **The Rule-4 violation in the
+normative document is CLOSED.** The BEHAVIOUR is unchanged and was RE-REPRODUCED at `ff4b37e5` by
+compiling — `<program>` + `if (1) { }` exits 0 and the emitted `dist/*.html` `<body>` carries the
+literal line. ⚑ **The second branch (widen the gate) was deliberately NOT taken: ruling 3's
+enforcement arm is HELD** (bryan, S383, *"land the stable half"*) — `BARE_CONTROL_FLOW_AT_BODY_TOP_RE`,
+`findControlFlowStatementEnd`, `_DEFAULT_LOGIC_ROOT_NAMES` and an `isStateBlockBody` parameter are at
+**ZERO occurrences** across `compiler/src/` + `compiler/tests/`, grepped this pass. The reason is
+structural, not effort: the recognizer needs a `{`, so braceless `if`, `switch`, a labelled `for` and
+`do`/`while` ship raw **at the pre-existing markup locus too**. Grammar-derived arc:
+`docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. ⚑ **And the class gained a FOURTH HIGH
+this window** — `g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line`: one prose
+line at this body-top silently disables the lift for every declaration below it, with zero
+diagnostics.
+
 **⚑ N18 — A NAVIGATION GAP IN THIS MAP SET, REPORTED INDEPENDENTLY BY TWO DISPATCHES BEFORE ANYONE
 FILED IT: THE §40.8 / auto-lift SURFACE HAD NO ROUTING ROW AT ALL.** Three HIGH defects of one class
-landed on `liftBareDeclarations` (`ast-builder.js:1161`) in a single session, and `§40.8` appeared in
+landed on `liftBareDeclarations` (`ast-builder.js:1170`; ⛑ S383 +9, was `:1161`) in a single session, and `§40.8` appeared in
 primary.map.md only under `keep-alive` (invariant 29) and the one-onion rule — **neither of which
 mentions lifting.** `liftBareDeclarations` appeared nowhere in any map. **The absence was not a
 judgement that the surface did not matter; it was that nothing had ever routed through it, so no
@@ -537,7 +562,7 @@ source comment and the primary routing row agree. Do not resolve it by reading.
 `<div data-scrml-each-mount>` is **not** uniformly retired. `runtime-template.js:2217` describes the
 replacement as foster-safe "unlike the old `<div data-scrml-each-mount>`" (nested each), but
 `emit-ssr-render.ts:411` states *"Only a TOP-LEVEL each mounts to a static `data-scrml-each-mount`
-div"* and `runtime-template.js:3121` still does a `[data-scrml-each-mount]` querySelector.
+div"* and `runtime-template.js:3172` still REFERS to a `[data-scrml-each-mount]` querySelector (⛑ **S384: `:3121` was ALREADY WRONG; re-derived by grep — and note `:2268` records the wrapper as REPLACED, so this finding wants re-verification by execution before it is acted on**).
 **Suggested disposition: amend the finding from "SPEC describes a retired attribute" to "SPEC
 describes it without the top-level/nested split the code makes."** The SPEC text at `:32624` is not
 false — it is under-specified.
