@@ -206,8 +206,11 @@ describe("A5-6 §A5-6.8 — initial-arm at module-init", () => {
 </>`;
     const { errors, clientJs } = compileToClientJs(src, "init");
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
+    // S386 idle-fire twin — the watchdog arm now seeds timers/internal/history
+    // (positional args 4/5/6) so a watchdog-fired transition arms its
+    // destination's <onTimeout>. This engine has none, so all three are `null`.
     expect(clientJs).toContain(
-      `_scrml_engine_arm_idle_watchdog("phase", __scrml_engine_phase_idle, __scrml_engine_phase_transitions);`,
+      `_scrml_engine_arm_idle_watchdog("phase", __scrml_engine_phase_idle, __scrml_engine_phase_transitions, null, null, null);`,
     );
   });
 });
@@ -250,6 +253,8 @@ describe("A5-6 §A5-6.10 — runtime helpers in template", () => {
     expect(rt).toContain("function _scrml_engine_arm_idle_watchdog(");
     expect(rt).toContain("function _scrml_engine_reset_idle_watchdog(");
     // Reset is called in both _scrml_engine_direct_set + _scrml_engine_advance.
-    expect(rt).toMatch(/_scrml_engine_reset_idle_watchdog\(varName,\s*idleEntry,\s*table\)/);
+    // S386 idle-fire twin — the call now threads timersTable/internalTable/
+    // historyMap after `table`, so match the call prefix (trailing args allowed).
+    expect(rt).toMatch(/_scrml_engine_reset_idle_watchdog\(varName,\s*idleEntry,\s*table[,)]/);
   });
 });

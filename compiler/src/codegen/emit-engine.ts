@@ -1687,15 +1687,67 @@ export function emitEngineCellHydrationInit(meta: EngineMetadata): string[] {
  * `_scrml_engine_arm_state_timers` looks up the initial state's row in the
  * timer-config table and is a no-op when the row is empty.
  */
-export function emitEngineInitialArm(meta: EngineMetadata): string[] {
+/**
+ * S386 — derive the four "surface" arg strings shared by BOTH initial-arm call
+ * sites (the onTimeout state-timer arm and the onIdle watchdog arm). Each is the
+ * per-engine table/const identifier when the engine declares that surface, else
+ * the literal `"null"` (the runtime short-circuits — tree-shake). Both arm calls
+ * seed these so a timer- or idle-FIRED transition threads them through the whole
+ * chain (see `_scrml_engine_make_timer_setter` in the runtime). Centralizing the
+ * derivation keeps a future gating change in ONE place.
+ *
+ * `decl` resolves the history surface. A history-BEARING engine
+ * (`engineHasHistoryAttrs`) whose seed is derived WITHOUT a `decl` would silently
+ * null its historyMap — losing timer/idle-fired history capture from the initial
+ * state. That is a latent trap, so fail LOUD here instead of nulling silently
+ * (the sole production caller, `emitEngineInitialArmsForFile`, always passes the
+ * decl; only decl-less unit-test callers on non-history engines omit it).
+ */
+function engineInitialArmSurfaceArgs(
+  meta: EngineMetadata,
+  decl?: EngineDeclLike,
+): { timers: string; idle: string; internal: string; history: string } {
+  if (decl == null && engineHasHistoryAttrs(meta)) {
+    throw new Error(
+      `emitEngineInitialArm: engine '${meta.varName}' declares history attrs but its ` +
+        `initial-arm was derived without a decl — the historyMap seed would be silently ` +
+        `nulled, dropping timer/idle-fired history capture from the initial state. ` +
+        `Pass the engine decl.`,
+    );
+  }
+  return {
+    timers: engineHasOnTimeoutElements(meta)
+      ? engineTimersTableName(meta.varName)
+      : "null",
+    idle: engineHasIdleWatchdog(meta)
+      ? engineIdleWatchdogName(meta.varName)
+      : "null",
+    internal: engineHasInternalRules(meta)
+      ? engineInternalTransitionTableName(meta.varName)
+      : "null",
+    history: decl && engineHasDiscoverableHistoryAttrs(meta, decl)
+      ? engineHistoryMapName(meta.varName)
+      : "null",
+  };
+}
+
+export function emitEngineInitialArm(meta: EngineMetadata, decl?: EngineDeclLike): string[] {
   const lines: string[] = [];
   if (engineHasOnTimeoutElements(meta)) {
     const initial = resolveEngineInitialVariant(meta);
     if (initial) {
       const tableName = engineTransitionTableName(meta.varName);
       const timersTableName = engineTimersTableName(meta.varName);
+      // S386 §51.0.M chained-onTimeout — seed the initial state's timer arm with
+      // the idle/internal/history surfaces so a timer-fired transition threads
+      // them through the whole chain. Without seeding here, undefined would
+      // propagate from the initial state and timer-fired transitions could never
+      // reset the idle watchdog, honor the internal path, or capture history.
+      // Positional args 5/6/7 of _scrml_engine_arm_state_timers: idleEntry,
+      // internalTable, historyMap.
+      const surface = engineInitialArmSurfaceArgs(meta, decl);
       lines.push(`// §51.0.M onTimeout initial-arm: ${meta.varName} (${meta.forType}) entering ${initial}`);
-      lines.push(`_scrml_engine_arm_state_timers(${JSON.stringify(meta.varName)}, ${JSON.stringify(initial)}, ${timersTableName}, ${tableName});`);
+      lines.push(`_scrml_engine_arm_state_timers(${JSON.stringify(meta.varName)}, ${JSON.stringify(initial)}, ${timersTableName}, ${tableName}, ${surface.idle}, ${surface.internal}, ${surface.history});`);
     }
   }
   // A5-6 §51.0.R (S77) — engine-wide event-timeout watchdog initial-arm.
@@ -1704,8 +1756,14 @@ export function emitEngineInitialArm(meta: EngineMetadata): string[] {
   if (engineHasIdleWatchdog(meta)) {
     const tableName = engineTransitionTableName(meta.varName);
     const idleConstName = engineIdleWatchdogName(meta.varName);
+    // S386 idle-fire twin — seed the watchdog arm with the timers/internal/
+    // history surfaces so a watchdog-FIRED transition arms its destination
+    // state's <onTimeout>, honors the internal path, and captures history,
+    // exactly like the onTimeout initial-arm above. Positional args 4/5/6 of
+    // _scrml_engine_arm_idle_watchdog: timersTable, internalTable, historyMap.
+    const surface = engineInitialArmSurfaceArgs(meta, decl);
     lines.push(`// §51.0.R onIdle watchdog initial-arm: ${meta.varName} (${meta.forType})`);
-    lines.push(`_scrml_engine_arm_idle_watchdog(${JSON.stringify(meta.varName)}, ${idleConstName}, ${tableName});`);
+    lines.push(`_scrml_engine_arm_idle_watchdog(${JSON.stringify(meta.varName)}, ${idleConstName}, ${tableName}, ${surface.timers}, ${surface.internal}, ${surface.history});`);
   }
   return lines;
 }
@@ -1725,7 +1783,7 @@ export function emitEngineInitialArmsForFile(fileAST: any): string[] {
   const lines: string[] = [];
   for (const decl of decls) {
     const meta = decl._record!.engineMeta!;
-    const armLines = emitEngineInitialArm(meta);
+    const armLines = emitEngineInitialArm(meta, decl);
     for (const l of armLines) lines.push(l);
   }
   return lines;

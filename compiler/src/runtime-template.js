@@ -5106,7 +5106,7 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
     //   - DO reset the idle watchdog: §51.0.R counts ANY transition as
     //     engine activity, internal included.
     _scrml_state[varName] = target;
-    if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+    if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
     return false;
   }
   if (!_scrml_engine_check_transition(currentTag, targetTag, table)) {
@@ -5147,11 +5147,13 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   _scrml_engine_audit_push(varName, currentTag, targetTag);
   // Arm timers for the INCOMING state-child. Re-entering the same state-child
   // (current === target) re-arms a fresh timer per §51.12.4 reset semantics.
-  if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table);
+  // S386: thread idleEntry/internalTable/historyMap so a timer armed here re-
+  // arms the destination's timers on fire (chained <onTimeout>).
+  if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table, idleEntry, internalTable, historyMap);
   // A5-6 §51.0.R — reset the engine's idle watchdog on every successful
   // transition (machine-wide event-timeout). idleEntry is null when the
   // engine declares no <onIdle> (tree-shake).
-  if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+  if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
   return true;
 }
 
@@ -5183,7 +5185,7 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
     // subscribers, do NOT touch timers, do NOT touch history. Idle watchdog
     // resets per §51.0.R (internal IS engine activity).
     _scrml_state[varName] = target;
-    if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+    if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
     return false;
   }
   if (!_scrml_engine_check_transition(currentTag, targetTag, table)) {
@@ -5204,8 +5206,10 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
   if (timersTable != null) _scrml_engine_clear_state_timers(varName, currentTag, timersTable);
   _scrml_reactive_set(varName, target);
   _scrml_engine_audit_push(varName, currentTag, targetTag);
-  if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table);
-  if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+  // S386: thread idleEntry/internalTable/historyMap so a timer armed here re-
+  // arms the destination's timers on fire (chained <onTimeout>).
+  if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table, idleEntry, internalTable, historyMap);
+  if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
   return true;
 }
 
@@ -5340,7 +5344,7 @@ function _scrml_engine_dispatch_message(
   // resolved the current state (external === false) and the engine has an
   // \`<onIdle>\` watchdog.
   if (external === false && idleEntry != null) {
-    _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+    _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
   }
   return external;
 }
@@ -5373,12 +5377,39 @@ function _scrml_engine_dispatch_message(
 // composite keys avoid collision when an app mixes both surfaces or uses the
 // same state name across multiple engines.
 
-function _scrml_engine_arm_state_timers(varName, stateName, timersTable, table) {
+// S386 — shared timer-setter factory. Both the state-timer arm and the idle-
+// watchdog arm route a timer-fire write through _scrml_engine_direct_set with
+// the FULL table set (timers/idle/internal/history) captured in a closure, so a
+// timer- or idle-fired transition re-arms the destination's timers, resets the
+// watchdog, honors the internal path, and captures history EXACTLY like a
+// user-driven transition. This is the substrate whose incompleteness caused the
+// S386 freeze — keep it the ONE place any future direct_set arg is threaded.
+// isHistoryRestore stays default-false (a timer/idle fire is never a structured
+// .history-restore write).
+function _scrml_engine_make_timer_setter(varName, table, timersTable, idleEntry, internalTable, historyMap) {
+  return function (tg) {
+    _scrml_engine_direct_set(varName, tg, table, timersTable, idleEntry, internalTable, historyMap);
+  };
+}
+
+function _scrml_engine_arm_state_timers(varName, stateName, timersTable, table, idleEntry, internalTable, historyMap) {
   // Arm every <onTimeout> entry attached to stateName on engine varName.
   // table is the engine's transition table — needed so the timer's setterFn
   // can route through _scrml_engine_direct_set and enforce the rule= contract
   // at fire time (defensive — A5-3 typer already validated to= compile-time,
   // so a legitimate <onTimeout> never throws here).
+  //
+  // S386 §51.0.M chained-onTimeout fix — idleEntry/internalTable/historyMap are
+  // threaded through so a TIMER-FIRED transition re-arms the destination state's
+  // timers (freeze fix), resets the idle watchdog (§51.0.R), honors the internal
+  // path (§51.0.O), and captures history on exit (§51.0.N) EXACTLY like a
+  // module-init / user-driven transition. Before this, the setterFn passed only
+  // (vn, tg, tbl) so the on-entry re-arm inside _scrml_engine_direct_set (guarded
+  // by \`if (timersTable != null)\`) was skipped after the first fire, freezing the
+  // chain. These extra tables are captured in the setterFn closure so they
+  // propagate through every timer-induced transition. They are undefined only
+  // when the caller has no such surface (tree-shake — the runtime treats
+  // undefined as null and short-circuits).
   if (timersTable == null) return;
   var list = timersTable[stateName];
   if (!Array.isArray(list) || list.length === 0) return;
@@ -5413,10 +5444,9 @@ function _scrml_engine_arm_state_timers(varName, stateName, timersTable, table) 
     var target = ent.target;
     // setterFn: route the timer-fire write through the engine's transition
     // table (A5-4 §51.0.M Semantics — a timer-induced transition is a legal
-    // transition event that obeys the rule= contract).
-    var setterFn = (function (vn, tbl) {
-      return function (tg) { _scrml_engine_direct_set(vn, tg, tbl); };
-    })(varName, table);
+    // transition event that obeys the rule= contract). See
+    // _scrml_engine_make_timer_setter for the full-table-set rationale.
+    var setterFn = _scrml_engine_make_timer_setter(varName, table, timersTable, idleEntry, internalTable, historyMap);
     _scrml_machine_arm_timer(timerKey, ms, target, {
       fromVariant: stateName,
       label: null,
@@ -5490,11 +5520,21 @@ function _scrml_engine_clear_named_timer(varName, stateName, name) {
 // collide with state-child timer keys (state names start with PascalCase, not
 // double-underscore).
 
-function _scrml_engine_arm_idle_watchdog(varName, idleEntry, table) {
+function _scrml_engine_arm_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap) {
   // Arm the engine's machine-wide idle watchdog (A5-6 §51.0.R).
   // table is the engine's transition table — the setterFn routes the
   // watchdog-fire write through _scrml_engine_direct_set so rule= validation
   // applies (§51.0.R sub-A1: rule=-honoring fires).
+  //
+  // S386 idle-fire twin — the watchdog-fire transition is a full transition:
+  // its destination state's <onTimeout> timers must arm, the internal path must
+  // be honored, and history must be captured, EXACTLY like a timer-fired or
+  // user-driven transition. So thread timersTable/idleEntry/internalTable/
+  // historyMap into the setterFn's direct_set call. Before this, the setterFn
+  // passed only (vn, tg, tbl), so an onIdle-fired transition landed on a state
+  // whose own <onTimeout> never armed — the same freeze class as the timer-fire
+  // path, reverse trigger. idleEntry is passed so the destination's engine-wide
+  // watchdog re-arms on entry (direct_set's on-entry reset block).
   if (idleEntry == null) return;
   var ms;
   if (typeof idleEntry.ms === "number") {
@@ -5508,9 +5548,10 @@ function _scrml_engine_arm_idle_watchdog(varName, idleEntry, table) {
   }
   var timerKey = varName + "::__idle";
   var target = idleEntry.target;
-  var setterFn = (function (vn, tbl) {
-    return function (tg) { _scrml_engine_direct_set(vn, tg, tbl); };
-  })(varName, table);
+  // S386 idle-fire twin — same full-table-set setterFn as the state-timer arm
+  // (see _scrml_engine_make_timer_setter). idleEntry is threaded so the
+  // destination's engine-wide watchdog re-arms on entry.
+  var setterFn = _scrml_engine_make_timer_setter(varName, table, timersTable, idleEntry, internalTable, historyMap);
   _scrml_machine_arm_timer(timerKey, ms, target, {
     fromVariant: null,
     label: null,
@@ -5520,15 +5561,17 @@ function _scrml_engine_arm_idle_watchdog(varName, idleEntry, table) {
   });
 }
 
-function _scrml_engine_reset_idle_watchdog(varName, idleEntry, table) {
+function _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap) {
   // Reset the watchdog: clear any pending timer + re-arm. Called after
   // every successful _scrml_engine_direct_set / _scrml_engine_advance commit
   // (per A5-6 §51.0.R "reset on every transition" semantics). Module-init
   // arm uses _scrml_engine_arm_idle_watchdog directly (no clear needed).
+  // S386 idle-fire twin — forward the table set so the re-armed watchdog's
+  // setterFn carries them (see _scrml_engine_arm_idle_watchdog).
   if (idleEntry == null) return;
   var timerKey = varName + "::__idle";
   _scrml_machine_clear_timer(timerKey);
-  _scrml_engine_arm_idle_watchdog(varName, idleEntry, table);
+  _scrml_engine_arm_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
 }
 
 // ---------------------------------------------------------------------------
