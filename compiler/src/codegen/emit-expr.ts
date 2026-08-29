@@ -3184,7 +3184,25 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
         getVariantFieldSchema: (variantName: string) => string[] | null;
       };
       const variantName = name.slice(1);
-      const fieldNames = getVariantFieldSchema(variantName);
+      // g-server-fn-bare-dot-payload-variant — the emit-control-flow registry
+      // (getVariantFieldSchema) is populated by setVariantFieldsForFile, which
+      // runs on the CLIENT emit pass ONLY. On the SERVER pass it returns null,
+      // so a bare-dot payload constructor `.Variant(args)` inside a
+      // `server function` body fell through to the broken `"Variant"(args)`
+      // string-as-function emission (runtime `TypeError: "Variant" is not a
+      // function`). The rewriter registry carries the identical field schema and
+      // IS populated on BOTH passes (setVariantFieldsForRewriter runs in
+      // generateClientJs AND generateServerJs), so consult it as a FALLBACK to
+      // resolve the field names on the server pass. Fallback only: on the client
+      // the primary lookup hits first (byte-identical output), and the fail /
+      // match binding paths that also read getVariantFieldSchema are left
+      // untouched (they keep their existing null-schema server behavior).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getVariantFieldSchemaFromRewriter } = require("./rewrite.ts") as {
+        getVariantFieldSchemaFromRewriter: (variantName: string) => string[] | null;
+      };
+      const fieldNames = getVariantFieldSchema(variantName)
+        ?? getVariantFieldSchemaFromRewriter(variantName);
       if (fieldNames !== null) {
         // Emit `{ variant: "X", data: { field0: arg0, field1: arg1, ... } }`.
         // Truncate to min(args.length, fieldNames.length) so an over-long
