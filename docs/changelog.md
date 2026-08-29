@@ -6673,6 +6673,77 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-29 — S383 (bryan) + S384 (peter): two ratified landings, and the reviews found more than the building did
+
+bryan ratified two items in one line — *"land the stable half. ratify the 13.7 cut."* Both landed.
+What the session is actually worth reading for is the adversarial record: twelve findings across two
+review rounds on ruling 3, and **four of the six new board entries came out of adversarial passes
+rather than out of writing code**. S384-peter ran concurrently on a non-intersecting lane and
+deferred his fat wrap here, making this a double wrap.
+
+**The §13.7 cut (#746).** `pa-base v2.16` §2's rotation rule executed against the largest read in a
+Profile-A boot: `docs/PA-SCRML-PRIMER.md` went 222,802 → 125,388 chars (**−43.7%**), with §13.7
+byte-identical at the new `docs/PA-SCRML-REFERENCE.md` and a stub pointer left behind. Byte-exactness
+was verified twice — once by the dispatch, once independently by the PA deriving the destination
+range from its own heading rather than reusing the agent's line numbers. ⚑ The dispatch corrected the
+PA's model of the citation graph: 249 inbound `§13.7` references, and one of them is a **write
+directive** (`scrml-js-codegen-engineer.md:166` instructs the canonical codegen agent to update
+§13.7 when an AST contract lands). A pure read-pointer stub would have had the next codegen dispatch
+append a row to the stub and fork the table; both the stub and the destination now redirect writes.
+
+**Ruling 3, the stable half (#750).** Ruling 3 (S375) directed both halves — correct the false §34
+claim, and extend `E-CONTROL-FLOW-IN-MARKUP` to the §40.8 default-logic body-top. The correction
+landed; **the arms are held.** They are held because extending the LOCUS does not extend the
+COVERAGE: the recognizer requires a `{`, so `if (@a) log(1)`, `switch (@a) { }`, a labelled `for` and
+`do…while` all still ship raw source into the DOM at the pre-existing markup locus — and
+`if (@a) log(1)` differs from `if (you ask) we deliver` only in whether the tail is code or prose.
+No text-level recognizer separates them without also refusing prose, which renders and is a working
+shape. Verified on main: four held symbols at zero, the diagnostic at exactly one fire site, corpus
+differential **empty** across 2,365 files. The 52-fixture cross-axis corpus, the two-recognizer
+DO-NOT-MERGE note and the four-guard safety property landed as SPECIFICATION at
+`docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`, deliberately not as a dormant gate.
+⚑ The doc half could not land whole — it asserts the code *"now fires at BOTH loci"* and that a
+body-top statement **SHALL** fire, both false with the arms held. Landing it verbatim would have
+shipped the exact over-claiming-row defect the correction exists to remove.
+
+**The find that was not about ruling 3 at all.** An adversarial reviewer reading a *conformance
+fixture* found the fixture was ratifying a live §40.8 defect nobody had filed: one line of prose at a
+default-logic body-top **silently disables the auto-lift for every declaration below it**. Reproduced
+three ways — a `function` declaration alone lifts into the client bundle; the same declaration with
+one prose line above it lands in zero client-JS files, ships into `<body>` as literal text, and emits
+**zero diagnostics**; the state-decl form fails on the *read* with a misleading `E-STATE-UNDECLARED`
+naming a fix already present two lines above. Filed HIGH. Severity is the silence: writing a sentence
+above a helper is what a person does, and per S368 the corpus is 100% LLM-authored, so prose-then-code
+is exactly the shape a *human* writes and the corpus under-represents.
+
+**Review floor — both code-bearing PRs drained (#747).** #742's compile-floor gate earned a MED: its
+`notes` carrying `"root missing: <root>"` print only under `if (!check)` while CI invokes `--check`,
+and `MIN_PROGRAMS=25` sits twelve below the live population of 37 — so losing `benchmarks/` (three
+programs, including **todomvc**) passes green *and silent*. That is §8's coverage-removal blind spot
+occurring inside the gate whose own header quotes it. #738's dev-server rewrite earned a LOW
+(predictable world-readable `/tmp` config, mode measured at 664); the rest held under a deliberate
+hunt for a zombie child or a port leak, and recording *that* is as much the floor's job.
+
+**S384-peter (#748, #749), absorbed at #752.** Two dog-food HIGH codegen fixes: server bare-dot
+payload-variant constructors emitting `"Variant"(args)` as a string-called-as-function, and server
+value-native map/set failing in two layers (runtime not inlined into `.server.js`, then methods
+client-gated). He read the S383 board registration, took a non-intersecting lane, and routed his
+shared-doc writes through the inbox rather than racing live `known-gaps`/`pr-reviews` edits — the
+concurrent-session protocol working, and working *because a board file existed to read*. His three
+routed findings were PA-reproduced before filing, including a measured incoherence: inside a
+dispatched `<match>` arm, `if=` is loudly refused, `<each>` works, `show=` works, and a nested
+`<match>` silently drops. Three behaviours across four constructs. Filed HIGH and routed back to
+bryan as a fork; PA recommends supporting rather than refusing, on the root-vs-position rule.
+
+**The session's own lesson, recorded because it recurred four times.** A rule you just wrote down is
+not a rule you are following. The false claim ruling 3 exists to strike survived in the source at the
+emission site its own corrected SPEC row points readers to. The `maskCommentRegions` tripwire was
+*proven* vacuous using precisely the non-string-aware comment model the same PR documents at length.
+The arc filed a CWE-377 `/tmp` gap against `dev.js` while shipping the identical shape in its own new
+test. And the PA blind-clobbered a sibling's merged work with a directory-wide checkout ten minutes
+after avoiding that exact class twice for a generated file. All four were caught by reading a
+produced artifact — a staged set, a planted mutation, a grep — and none by remembering.
+
 ### 2026-08-28 — S379 (bryan): #724 root-caused and superseded, ruling 3 held on a structural root, and five axis rules
 
 A session whose code output was almost entirely superseded and whose method output is the reason to
