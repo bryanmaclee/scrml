@@ -4469,15 +4469,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // mid-expression at depth 0 — false for a ternary consequent `cond ? @cell
     // : alt`. Incremented on a depth-0 `?`, decremented on the matching `:`.
     let ternaryDepth = 0;
-    // markup-value-in-expression-2026-06-17 (b) — markup-as-value in a ternary
-    // ARM. `sawTernaryAtRoot` latches true once a depth-0 `?` opens a ternary in
-    // this RHS. When set, the `markupRootClosed` boundary (the Cluster-C S190
-    // markup-RHS over-consumption break, below) must STAND DOWN: a markup arm
-    // closing (`<span>p</span>`) does NOT complete the RHS value — the `:` and
-    // the alternate arm `<span>n</span>` still follow. Pre-fix, the consequent
-    // arm's close set markupRootClosed → the break fired at the `:` → the
-    // alternate arm was DROPPED → `() => ... > 0 ?)` → E-CODEGEN-INVALID-LOGIC.
-    let sawTernaryAtRoot = false;
+    // markup-value-in-expression-2026-06-17 (b) / g-derived-markup-cell-drops-
+    // sibling-fn — markup-as-value in a ternary ARM. The `markupRootClosed`
+    // boundary (the Cluster-C S190 markup-RHS over-consumption break, below) must
+    // STAND DOWN WHILE MID-TERNARY: a consequent markup arm closing
+    // (`<span>p</span>`) does NOT complete the RHS value — the `:` and the
+    // alternate arm `<span>n</span>` still follow. The break therefore keys on
+    // `ternaryDepth === 0` (re-armed at ternary COMPLETION) and `markupRootClosed`
+    // is reset at the `:` separator, so the break fires only once the WHOLE
+    // ternary value is done — not at the consequent's close (which pre-fix DROPPED
+    // the alternate arm → `() => ... > 0 ?)` → E-CODEGEN-INVALID-LOGIC) and not
+    // for the entire remainder of the block (which swallowed a following sibling
+    // `function` into the cell's raw init).
     // g-ternary-arrow-sql-e-error-003 (2026-06-27) — the ternary-body SIBLING of
     // the ss50 `=>`-direct concise-arrow SQL-capture below. A concise arrow whose
     // body is a TERNARY with a `?{}` SQL block in an arm (`(x) => cond ? ?{`…`} : alt`)
@@ -4565,11 +4568,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // skipped; a `;`/`}` would have broken via the existing depth-0 guards. The
       // only thing this break can affect is a genuine markup-value RHS, since
       // `markupRootClosed` is set only after real markup (`markupEverOpened`).
-      // markup-value-in-expression-2026-06-17 (b): when the RHS is a ternary
-      // (sawTernaryAtRoot), a closed markup ARM does NOT complete the value —
-      // the alternate arm still follows. Suppress the markup-RHS-complete break
-      // so the whole `cond ? <markup> : <markup>` ternary survives to codegen.
-      if (markupRootClosed && depth === 0 && !sawTernaryAtRoot) break;
+      // markup-value-in-expression-2026-06-17 (b): when the RHS is a ternary, a
+      // closed markup ARM does NOT complete the value — the alternate arm still
+      // follows. But once the ENTIRE ternary is complete (the alternate arm's
+      // markup has closed and `ternaryDepth` has returned to 0), the value IS
+      // done and the break MUST fire, or the collector vacuums the following
+      // sibling statement (`function`, a `<cell> = …` decl, …) into this markup-
+      // derived cell's raw body — silent data loss (g-derived-markup-cell-drops-
+      // sibling-fn: `const <b> = @c ? <span>…</span> : <span>…</span>` followed by
+      // `function f()` swallowed `f`, so the fn was never emitted and its onclick
+      // call site emitted a bare undefined name → ReferenceError at click).
+      // Keying on `ternaryDepth === 0` stands the break down ONLY while genuinely
+      // mid-ternary and re-arms it at completion. `markupRootClosed` is reset at
+      // the ternary separator `:` (see the ternary tracking below) so a
+      // consequent-arm close does not spuriously trip this break before the
+      // alternate arm is even read.
+      if (markupRootClosed && depth === 0 && ternaryDepth === 0) break;
       if (stopAt && tok.text === stopAt && depth === 0) break;
       // BLOCK_REF at depth 0 is a statement boundary — the child block
       // (sql, error-effect, meta) should be its own AST node, not part of a bare-expr.
@@ -5185,8 +5199,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // correct ternary state. `?.`/`??` tokenize as OPERATOR (not PUNCT "?"),
       // so optional-chaining / nullish-coalescing do not perturb the count.
       if (depth === 0 && angleDepth === 0 && tok.kind === "PUNCT") {
-        if (tok.text === "?") { ternaryDepth++; sawTernaryAtRoot = true; }
-        else if (tok.text === ":" && ternaryDepth > 0) ternaryDepth--;
+        if (tok.text === "?") { ternaryDepth++; }
+        else if (tok.text === ":" && ternaryDepth > 0) {
+          ternaryDepth--;
+          // g-derived-markup-cell-drops-sibling-fn — crossing into the alternate
+          // arm: a CONSEQUENT markup arm that already closed (markupRootClosed) is
+          // NOT the completion of the whole ternary value. Clear the flag so the
+          // markup-RHS-complete break above does not fire in the gap between `:`
+          // and the alternate arm; it re-arms only when the alternate arm's own
+          // markup closes (with ternaryDepth back at 0), which IS completion.
+          markupRootClosed = false;
+        }
       }
       // g-ternary-arrow-sql-e-error-003: latch that this expression's top-level
       // body is a concise arrow (a depth-0 `=>`). Used by the BLOCK_REF
