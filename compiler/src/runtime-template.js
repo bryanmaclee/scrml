@@ -5599,6 +5599,16 @@ function _scrml_engine_reset_idle_watchdog(varName, idleEntry, table) {
 // NO cycle-guard (unlike _scrml_structural_eq, which kept one defensively for
 // malformed JS-host values).
 
+// __SCRML_MAP_RUNTIME_START__ (server-inline slice boundary, g-value-native-map-set-server-runtime)
+// The self-contained §59 value-native map/set runtime block below (fnv1a +
+// value-canonical + HAMT primitives + the _scrml_map_* surface). A standalone
+// .server.js never imports the client runtime, so emit-server.ts slices THIS
+// exact region between the START/END markers and inlines it (reachability-gated
+// on _scrml_map_ appearing in the server body) — the single-source pattern the
+// structural-eq / enum-table server inlines use, so the server copy can never
+// drift from the client one. Everything between the markers MUST be pure
+// function declarations (hoistable, no top-level executable statement) so the
+// slice is safe to inject after the module header.
 // _scrml_fnv1a(str) — FNV-1a 32-bit hash, output as a zero-padded 8-char base36
 // string. Transcribed VERBATIM from compiler/src/codegen/fnv1a-hash.ts (a
 // compile-time TS util; the runtime needs its own copy). Constants are
@@ -6122,6 +6132,7 @@ function _scrml_map_decode(x) {
   }
   return m;
 }
+// __SCRML_MAP_RUNTIME_END__ (server-inline slice boundary)
 
 // §52.8 SSR pre-render seed (chunk: 'ssr')
 //
@@ -6321,6 +6332,50 @@ function _scrml_log(side, loc) {
 }
 
 ${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
+
+/**
+ * g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,
+ * sliced VERBATIM out of SCRML_RUNTIME between the `__SCRML_MAP_RUNTIME_START__`
+ * / `__SCRML_MAP_RUNTIME_END__` markers, for INLINING into a standalone
+ * `.server.js` that references `_scrml_map_*` (a server fn returning / building a
+ * map or set). The bundle never imports the client runtime, so without this the
+ * server body throws `ReferenceError: _scrml_map_from_entries is not defined` at
+ * request time (green compile, silent).
+ *
+ * Sliced from the SINGLE client-runtime source (not a hand-copied duplicate) so
+ * the server copy can NEVER drift from the client one — the same single-source
+ * discipline the enum-lookup-table server port (ss22) uses. emit-server.ts gates
+ * the inline on `_scrml_map_` appearing in the assembled server body, so a bundle
+ * with no map/set use is byte-unchanged.
+ *
+ * Wrapped with a header/footer comment; the sliced region is pure `function`
+ * declarations (verified by the START-marker contract), so injecting it after the
+ * module header is hoist-safe.
+ */
+export const SERVER_VALUE_NATIVE_MAP_HELPER = (() => {
+  const startTag = "// __SCRML_MAP_RUNTIME_START__";
+  const endTag = "// __SCRML_MAP_RUNTIME_END__";
+  const s = SCRML_RUNTIME.indexOf(startTag);
+  const e = SCRML_RUNTIME.indexOf(endTag);
+  // Defensive: if a future edit removes/renames a marker, fail LOUD at first use
+  // (an empty helper would resurface the ReferenceError as a silent runtime bug).
+  if (s === -1 || e === -1) {
+    throw new Error(
+      "runtime-template.js: value-native map/set runtime slice markers " +
+        "(__SCRML_MAP_RUNTIME_START__/__SCRML_MAP_RUNTIME_END__) not found — " +
+        "the server map-runtime inline (g-value-native-map-set-server-runtime) is broken.",
+    );
+  }
+  // Advance past the START marker's own line so the marker comment itself is not
+  // carried into the server bundle.
+  const bodyStart = SCRML_RUNTIME.indexOf("\n", s + startTag.length);
+  const body = SCRML_RUNTIME.slice(bodyStart, e);
+  return (
+    "\n// --- §59 value-native map/set runtime (inlined for server, no client runtime here) ---\n" +
+    body.trim() +
+    "\n\n"
+  );
+})();
 
 /**
  * Runtime filename used in external mode.

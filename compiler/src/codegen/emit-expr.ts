@@ -2090,7 +2090,7 @@ function isAwaitedCombinatorCall(node: ExprNode, ctx: EmitExprContext): boolean 
   if (ctx.peerAwaitable === false) return false;
   const obj = (call.callee as MemberExpr).object;
   const isMapSetReceiver =
-    ctx.mode === "client" &&
+    mapSetLoweringBoundaryOk(obj, ctx) &&
     (mapCellBareName(obj, ctx) !== null || setCellBareName(obj, ctx) !== null);
   if (isMapSetReceiver) return false;
   return callbackReachesAsync(call.args[0], (nm) => combinatorIsAsyncName(nm, ctx));
@@ -2640,7 +2640,7 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
   // map cell, or `.size` on a non-map cell, falls through. The reactive receiver
   // lowers via `emitExpr` to `_scrml_reactive_get("m")`; the local stays bare.
   if (
-    ctx.mode === "client" &&
+    mapSetLoweringBoundaryOk(node.object, ctx) &&
     !node.optional &&
     node.property === "size" &&
     mapCellBareName(node.object, ctx) !== null
@@ -2755,6 +2755,38 @@ function setCellBareName(objNode: ExprNode, ctx: EmitExprContext): string | null
 }
 
 /**
+ * g-value-native-map-set-server-runtime (Part A) — boundary gate for the
+ * value-native map/set lowerings (`.size` / bracket-read / set-native methods /
+ * map methods). Historically every one gated on `ctx.mode === "client"`, so a
+ * server-fn body left `m.insert(...)` / `m["k"]` / `m.size` UN-lowered as verbatim
+ * member/index/call expressions — and the runtime map is a tagged PLAIN object
+ * with NO methods, so those threw `m.insert is not a function` (or read a JS-array
+ * index) at request time.
+ *
+ * The lowering fires on the CLIENT boundary unconditionally (byte-identical to
+ * before), and on the SERVER boundary ONLY for a bare, non-reactive LOCAL
+ * receiver. Two guards make that safe:
+ *   1. The server-fn emit opts (emit-server.ts) thread ONLY the per-fn
+ *      `localMapVarNames`/`localSetVarNames`; they NEVER thread the reactive
+ *      `mapVarNames`/`setVarNames`, so a classifier can only match a LOCAL
+ *      server-side. A reactive `@m` receiver returns null there and is untouched.
+ *   2. This helper additionally requires a bare (non-`@`) ident receiver, so even
+ *      if reactive names were threaded server-side in future, the reactive path
+ *      (whose server semantics read the request body, not a live map) stays out.
+ */
+function mapSetLoweringBoundaryOk(recvNode: ExprNode | undefined | null, ctx: EmitExprContext): boolean {
+  if (ctx.mode === "client") return true;
+  if (ctx.mode !== "server") return false;
+  // Server branch reads recvNode directly, and a caller may pass
+  // `node.callee.object` BEFORE confirming the callee is a member (so it can be
+  // undefined for a plain-ident call) — null-guard before the field reads.
+  return !!recvNode
+    && recvNode.kind === "ident"
+    && typeof (recvNode as IdentExpr).name === "string"
+    && !(recvNode as IdentExpr).name.startsWith("@");
+}
+
+/**
  * §59.6 (D4 / ss52) — Resolve the bare ROOT cell name of an index chain,
  * returning it only if it is a known value-native map — reactive `@m` OR a
  * non-reactive LOCAL `m`. Walks through nested `index` objects so a nested-map
@@ -2783,7 +2815,14 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
   // recurses: an inner `index` whose root is the same map cell re-enters this
   // branch and emits its own `_scrml_map_get`, so a chain of N brackets nests N
   // map-gets without special-casing depth.
-  if (ctx.mode === "client" && mapIndexRootName(node, ctx) !== null) {
+  // g-value-native-map-set-server-runtime (Part A): fires on the client boundary
+  // and — for the local case only — on the server boundary. A nested read's
+  // immediate `.object` is an inner `index`, not an ident, so the per-receiver
+  // bare-ident guard cannot apply here; instead the server safety rests on the
+  // opts contract (server threads ONLY local map names, never reactive ones, so
+  // `mapIndexRootName` resolves to a LOCAL server-side). The inner `emitExpr`
+  // recursion re-enters this branch for each bracket level.
+  if ((ctx.mode === "client" || ctx.mode === "server") && mapIndexRootName(node, ctx) !== null) {
     const receiver = emitExpr(node.object, ctx);
     const key = emitExpr(node.index, ctx);
     return `_scrml_map_get(${receiver}, ${key})`;
@@ -2939,10 +2978,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   //                    algebra implementation — surfaced as methods, not
   //                    re-implemented (limit-primitives).
   if (
-    ctx.mode === "client" &&
     node.callee.kind === "member" &&
     !node.callee.optional &&
-    typeof node.callee.property === "string"
+    typeof node.callee.property === "string" &&
+    mapSetLoweringBoundaryOk(node.callee.object, ctx)
   ) {
     // ss52 — reactive `@s` OR non-reactive local `s` set receiver.
     const setBareName = setCellBareName(node.callee.object, ctx);
@@ -2991,10 +3030,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // (`.getOr` → `_scrml_map_get_or`, `.insertAll` → `_scrml_map_insert_all`,
   // `.sortedBy` → `_scrml_map_sorted_by`).
   if (
-    ctx.mode === "client" &&
     node.callee.kind === "member" &&
     !node.callee.optional &&
-    typeof node.callee.property === "string"
+    typeof node.callee.property === "string" &&
+    mapSetLoweringBoundaryOk(node.callee.object, ctx)
   ) {
     // ss52 — reactive `@m` OR non-reactive local `m` map receiver.
     const bareName = mapCellBareName(node.callee.object, ctx);
@@ -3288,9 +3327,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   ) {
     // A value-native map/set cell receiver is not an array — its clean-family-named
     // methods (none exist today) are never array combinators. Guard against a
-    // future collision (client-mode only — server has no reactive map/set cells).
+    // future collision. Covers a server-fn LOCAL map/set too (Part A) via the
+    // shared boundary gate, not just the client reactive path.
     const isMapSetReceiver =
-      ctx.mode === "client" &&
+      mapSetLoweringBoundaryOk(node.callee.object, ctx) &&
       (mapCellBareName(node.callee.object, ctx) !== null ||
         setCellBareName(node.callee.object, ctx) !== null);
     if (
