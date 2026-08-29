@@ -82,6 +82,7 @@ export function collectChannelNodes(nodes: any[]): any[] {
         if (Array.isArray(node.children)) {
           visit(node.children);
         }
+        visitArmBodies(node, visit);
         continue;
       }
 
@@ -92,11 +93,36 @@ export function collectChannelNodes(nodes: any[]): any[] {
       if (Array.isArray(node.children)) {
         visit(node.children);
       }
+      visitArmBodies(node, visit);
     }
   }
 
   visit(nodes);
   return result;
+}
+
+/**
+ * S385 — descend into a `<match>` block's per-arm bodies.
+ *
+ * `g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`:
+ * every channel collector in this file walked `node.children` and nothing else.
+ * A `<match>` is `kind: "match-block"` and has NO `children` at all — its arm
+ * bodies hang off `armBodyChildren` (S177, one markup wrapper per variant). So a
+ * cross-file channel that CE inlined into a match arm (§38.12) was invisible to
+ * `collectChannelNodes` / `collectChannelFunctionMap` / `collectChannelCellMap`,
+ * and the whole WebSocket layer for it — route, IIFE, cell mirror — was silently
+ * never emitted. The page still lowered sibling `${@cell}` reads to
+ * `_scrml_reactive_get("cell")`, so the cell simply never existed at runtime.
+ *
+ * Deliberately walks `armBodyChildren` ONLY. `each-block` parks its body in BOTH
+ * `bodyChildren` and `templateChildren` and those two arrays SHARE element
+ * identities, so descending them would collect the same channel node twice and
+ * emit duplicate wiring (measured S385). `match-block.bodyChildren` holds just
+ * the raw body text node and carries no arm markup.
+ */
+function visitArmBodies(node: any, visit: (nodeList: any[]) => void): void {
+  if (node.kind !== "match-block") return;
+  if (Array.isArray(node.armBodyChildren)) visit(node.armBodyChildren);
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +501,7 @@ export function collectChannelFunctionMap(nodes: any[]): Map<string, string> {
       }
       if (Array.isArray(n.children)) visit(n.children);
       if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+      visitArmBodies(n, visit); // S385 — see visitArmBodies
     }
   }
 
@@ -509,6 +536,7 @@ export function collectChannelCellMap(nodes: any[]): Map<string, Set<string>> {
       }
       if (Array.isArray(n.children)) visit(n.children);
       if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+      visitArmBodies(n, visit); // S385 — see visitArmBodies
     }
   }
 

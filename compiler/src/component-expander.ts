@@ -4858,41 +4858,65 @@ function _expandChannelNode(
       const inlined = _cloneChannelDecl(sourceDecl, counter, alias.sourceKey, m.span);
       return inlined;
     }
-    // Not a cross-file channel ref — recurse into children
-    const newChildren = m.children
-      ? m.children.map((c) => _expandChannelNode(c, aliases, fileASTMap, filePath, counter, errors))
-      : m.children;
-    if (newChildren !== m.children) {
-      return { ...m, children: newChildren };
-    }
-    return node;
+    // Not a cross-file channel ref — fall through to the child walk below.
   }
 
-  // State node — recurse into children
-  if (node.kind === "state") {
-    const s = node as any;
-    if (Array.isArray(s.children)) {
-      const newChildren = s.children.map((c: any) => _expandChannelNode(c, aliases, fileASTMap, filePath, counter, errors));
-      if (newChildren.some((nc: any, i: number) => nc !== s.children[i])) {
-        return { ...s, children: newChildren };
-      }
-    }
-    return node;
-  }
+  // g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm
+  // (S385) — the child-bearing fields this walk descends into.
+  //
+  // Before S385 this function recursed into exactly three kinds —
+  // `markup`→`children`, `state`→`children`, `logic`→`body` — and returned every
+  // other node kind UNWALKED. That under-walks the normative CHX algorithm at
+  // SPEC §38.12.2, whose step is an unqualified "Walk F.ast.nodes: For each
+  // markup node M with M.tag in aliasMap". `<match>` fell straight into the gap:
+  // it is `kind: "match-block"`, NOT `"markup"`, so the walk never entered it at
+  // all, and its per-arm bodies live in `armBodyChildren` (S177 — one wrapper
+  // per arm), never in `children`.
+  //
+  // Consequence: a cross-file channel mounted inside a `<match>` arm was never
+  // inlined, so its cells never reached the type-system's scopeChain and a
+  // `@cell` read of that channel fired a false `E-STATE-UNDECLARED` — directly
+  // contradicting SPEC §6.1.2, which names "a CE-inlined cross-file channel cell
+  // (§38.12)" in the set that SHALL be in scope. (`<if>` was never affected: it
+  // happens to be a `markup` node with a plain `children` array.)
+  //
+  // ⚠ Why this is a CURATED field list and NOT a generic "walk every array of
+  // nodes" — measured S385, this matters. Several AST nodes expose the SAME
+  // child node identities under two different array fields:
+  //   - `each-block.bodyChildren` and `each-block.templateChildren` share their
+  //     element identities outright. A generic walk visits such a mount TWICE
+  //     and produces two independent `_cloneChannelDecl` copies — i.e. duplicate
+  //     channel wiring — which was observed directly.
+  //   - `logic.body` aliases `logic.imports` and `logic.typeDecls`; replacing a
+  //     node under one field but not the other silently DE-ALIASES the AST.
+  // So the set below is deliberately minimal and overlap-free: `armBodyChildren`
+  // shares no element identity with `bodyChildren` on a `match-block`.
+  //
+  // NOT extended to `each-block` bodies: that is the aliasing hazard above AND a
+  // channel decl inlined into an `<each>` body lands its `export function` in
+  // each-body scope, which fires E-EACH-BODY-DECL-UNSUPPORTED (§17.7.3). That
+  // shape needs a ruling, not a silent widening — see the S385 report.
+  const CHILD_FIELDS = ["children", "body", "armBodyChildren"] as const;
 
-  // Logic node — recurse into body where markup may live (BLOCK_REF inlined nodes)
-  if (node.kind === "logic") {
-    const l = node as LogicNode;
-    if (Array.isArray(l.body)) {
-      const newBody = l.body.map((stmt: any) => _expandChannelNode(stmt, aliases, fileASTMap, filePath, counter, errors));
-      if (newBody.some((nb: any, i: number) => nb !== l.body[i])) {
-        return { ...l, body: newBody as any };
-      }
+  let changed = false;
+  const patch: Record<string, unknown> = {};
+  const rec = node as unknown as Record<string, unknown>;
+  for (const key of CHILD_FIELDS) {
+    const val = rec[key];
+    if (!Array.isArray(val)) continue;
+    const next = val.map((c) =>
+      c && typeof c === "object" && typeof (c as ASTNode).kind === "string"
+        ? _expandChannelNode(c as ASTNode, aliases, fileASTMap, filePath, counter, errors)
+        : c
+    );
+    if (next.some((nc, i) => nc !== val[i])) {
+      patch[key] = next;
+      changed = true;
     }
-    return node;
   }
-
-  return node;
+  // Identity-preserving: an untouched subtree returns the very same object, so
+  // every file with no mount in a nested container sees a byte-identical AST.
+  return changed ? ({ ...rec, ...patch } as unknown as ASTNode) : node;
 }
 
 /**
