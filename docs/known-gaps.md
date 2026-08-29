@@ -2477,8 +2477,20 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > region and therefore newly-REJECTING — it owes its own measured migration. Not obviously worth it.
 
 ### g-state-block-bare-write-scan-has-no-comment-state — the sibling Info lint false-fires on a `@name = init` sitting inside a `/* */` block comment in a `<db>`/`<state>` body
-<!-- @gap id=g-state-block-bare-write-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanStateBlockBareWriteDecls — no comment handling at all; its ^(\s*)@ anchor makes the //-form accidentally safe, the block-comment form not) prov=empirical:S376-PA-reproduced-by-execution -->
-<!-- ⚑ S383: the line number was DROPPED from the locus above (it read `(~:1923`). It was correct on main and went stale in the very commit that lands this arc's +40-line banner, which moves the function to :1963 — the S378 lesson applied a second time: a line number in a ledger entry rots against the change it describes; the SYMBOL does not. -->
+<!-- @gap id=g-state-block-bare-write-scan-has-no-comment-state sev=LOW status=open locus=compiler/src/ast-builder.js:scanStateBlockBareWriteDecls prov=empirical:S376-PA-reproduced-by-execution -->
+<!-- ⚑ S383 — the `locus=` above was edited TWICE, and the second edit is the instructive one.
+     (1) The LINE NUMBER was dropped (it read `(~:1923`). It was correct on main and went stale in
+         the very commit that lands this arc's +40-line banner, which moves the function to :1963.
+         The S378 lesson applied a second time: a line number in a ledger entry rots against the
+         change it describes; the SYMBOL does not.
+     (2) That edit deleted `(~:1923` but left its CLOSING PAREN behind — an unbalanced delimiter
+         inside a machine-read attribute value, caught by the adversarial pass, not by a probe.
+         `state.ts --check` tolerates it, which is exactly why it survived: the whole point of a
+         MACHINE-READABLE field (pa-base v2.9) is that a probe can read it, and the next probe that
+         reads `locus=` to a bracket boundary would trip. So the explanatory prose was moved OUT of
+         the attribute value entirely — a field holds a value, and prose belongs in the entry body:
+         this scan has no comment handling at all; its `^(\s*)@` anchor makes the `//`-form
+         accidentally safe and the block-comment form not. -->
 
 > **PA-REPRODUCED at S376, by execution.** A `<db>` body containing
 > `/* legacy:` / `@count = 0` / `*/` still draws `W-STATE-BLOCK-BARE-WRITE-DECL` on the commented-out
