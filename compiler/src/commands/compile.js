@@ -12,7 +12,7 @@ import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
-import { stripRedundantCode } from "./diagnostic-format.js";
+import { stripRedundantCode, resolveDiagLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
 // ---------------------------------------------------------------------------
@@ -377,15 +377,16 @@ function formatError(err, cwd) {
   parts.push(`${label}${code ? " " + code : ""}: ${stripRedundantCode(err.code, err.message)}`);
 
   // Source location
-  if (err.filePath || err.file) {
-    const filePath = err.filePath || err.file;
+  const loc0 = resolveDiagLocation(err);
+  if (loc0.filePath) {
+    const filePath = loc0.filePath;
     const relPath = relative(cwd, filePath);
-    const loc = err.line ? `:${err.line}${err.column ? ":" + err.column : ""}` : "";
+    const loc = loc0.line ? `:${loc0.line}${loc0.column ? ":" + loc0.column : ""}` : "";
     parts.push(`  ${c.cyan("-->")} ${relPath}${loc}`);
 
     // Source context
-    if (err.line) {
-      const ctx = getSourceContext(filePath, err.line);
+    if (loc0.line) {
+      const ctx = getSourceContext(filePath, loc0.line);
       if (ctx) parts.push(ctx.trimEnd());
     }
   }
@@ -417,10 +418,11 @@ function formatWarning(warn, cwd) {
   const code = warn.code ? c.dim(`[${warn.code}]`) : "";
   let msg = `${label}${code ? " " + code : ""}: ${stripRedundantCode(warn.code, warn.message)}`;
 
-  if (warn.filePath || warn.file) {
-    const filePath = warn.filePath || warn.file;
-    const relPath = relative(cwd, filePath);
-    const loc = warn.line ? `:${warn.line}` : "";
+  // S385 — read the `span` carrier too; see resolveDiagLocation.
+  const wloc = resolveDiagLocation(warn);
+  if (wloc.filePath) {
+    const relPath = relative(cwd, wloc.filePath);
+    const loc = wloc.line ? `:${wloc.line}${wloc.column ? ":" + wloc.column : ""}` : "";
     msg += `\n  ${c.cyan("-->")} ${relPath}${loc}`;
   }
 
