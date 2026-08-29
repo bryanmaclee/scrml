@@ -5,6 +5,28 @@
 # Verified: `git merge-base --is-ancestor 48f0aaf8 0dd659a1` exits 0 (48f0aaf8 = wrap(s378), the prior
 # map's effective content watermark); HEAD == origin/main == 0dd659a1 at write time.
 #
+# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
+# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
+# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
+# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
+# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — LINES 3–4 **DELIBERATELY NOT MOVED** ━━━
+#
+# Re-checked against `origin/main` == HEAD == **`ff4b37e5`**. This is a CITATION pass over the auth
+# surface, not a re-walk, so the stamp stays at `0dd659a1` (the S382 pattern).
+#
+# ⛑ **THE AUTH SURFACE IS BEHAVIOURALLY ZERO-DIFF THIS WINDOW — BUT `emit-server.ts` MOVED ANYWAY,
+# AND EVERY ANCHOR IN THIS FILE SHIFTED +52. FIFTH consecutive window where this file's citations
+# drift from a landing that has NOTHING to do with auth** (invariant 73, third occurrence in a row).
+# The mover is #749's value-native map/set server runtime: an import at `emit-server.ts:45` and a
+# ~40-line `localMapSetOptsFor` block at `:1644`, both landing ABOVE the whole auth/onion region.
+# `select-request-onion.js`, `protect-analyzer.ts`, `auth-graph.ts`, `compiler/runtime/` and `lsp/`
+# are all `--name-only` **EMPTY** over `0dd659a1..ff4b37e5`.
+#
+# ⛑ **`commands/dev.js` — RE-VERIFIED CURRENT, NOT STALE, AND NOT EDITED.**
+# `git diff --stat c1f93dfb..ff4b37e5 -- compiler/src/commands/dev.js` is **EMPTY**. Every dev.js
+# anchor in this file was re-executed against `ff4b37e5` and holds: `:32`, `:207`, `:215`, `:321`,
+# `:325`, `:379`, `:394`-`:414`, `:447`, `:1150`, `:1294`, `:1511`.
+#
 # ⚑ **SCOPED RE-CHECK OVER `48f0aaf8..0dd659a1` (S380, 12 PRs) — the auth surface is NOT zero-diff
 # this window: `emit-server.ts` (+12), `commands/build.js` (+58), `commands/dev.js` (+32, committed)
 # all moved, all for ONE feature: §52.13 below.** Everything else in this file that predates this
@@ -168,7 +190,7 @@ strict-mode TypeError rather than a silent shadow write to the session object. S
 - **`g-session-get-reserved-key-read-disclosure` (MED — re-scored from HIGH S325; still open, still
   ROUTED-TO-BRYAN). ⚠ THIS ENTRY MOVED TWICE THIS WINDOW AND THE LEDGER RECORDS ONLY ONE OF THE MOVES.**
   - **What is now CLOSED (silently, as a side-landing of #452):** the PROTOTYPE-CHAIN read. `get(key)`
-    is `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null` at `emit-server.ts:2593`.
+    is `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null` at `emit-server.ts:2692` — ⛑ **S384: `:2593` was ALREADY WRONG pre-window (it named a `lines.push("  };")`); RE-DERIVED BY GREP, not shifted.**
     Pre-fix and MEASURED on the emitted helper: `.get("__proto__")` returned `Object.prototype`, and
     `.get("constructor")` / `.get("toString")` / `.get("hasOwnProperty")` / `.get("valueOf")` /
     `.get("isPrototypeOf")` each returned a FUNCTION — `_rec` is `{ ...rec }`, a plain object, so the
@@ -267,8 +289,8 @@ unused session infra; a false NEGATIVE re-opens a 500.**
 
 `[CORS preflight] → [logging] → [rate limit] → handle() PRE → _scrml_dispatch → handle() POST`
 
-- **Stage 1 is the CORS preflight and it SHORT-CIRCUITS** (`emit-server.ts:3127`, `if (_scrml_mw_req.method === 'OPTIONS')`; ⚑ CORRECTED S380 from `:3115` — the §52.13 guard export lands above it). It reaches neither logging nor rate-limit, and **it does not reach `handle()`** — deliberately: a preflight carries no credentials, so an auth-enforcing `handle()` would reject it and the browser's real request would never be sent.
-- **`ratelimit=` is PER-ROUTE** (`:3009-3032`, §4.15/§40.2; ⚑ CORRECTED S380 from `:2997-3020`, same +12 shift) — it counts only requests a route serves, not the HTML/CSS/runtime/bundle sub-requests of one page load.
+- **Stage 1 is the CORS preflight and it SHORT-CIRCUITS** (`emit-server.ts:3179`, `if (_scrml_mw_req.method === 'OPTIONS')`; ⛑ CORRECTED S384 from `:3127`, **+52** — #749's map/set runtime import + Part-A opts block land above it. It was `:3115` before S380's §52.13 shift). It reaches neither logging nor rate-limit, and **it does not reach `handle()`** — deliberately: a preflight carries no credentials, so an auth-enforcing `handle()` would reject it and the browser's real request would never be sent.
+- **`ratelimit=` is PER-ROUTE** (`:3061-3084`, §4.15/§40.2; ⛑ CORRECTED S384 from `:3009-3032`, same **+52** shift; `:2997-3020` before S380) — it counts only requests a route serves, not the HTML/CSS/runtime/bundle sub-requests of one page load.
 
 ## §52.13 — an `auth="required"` scope also gates its OWN served `.html` document (NEW, S380, #728)
 
@@ -282,7 +304,7 @@ rendered markup, leaking whatever the page's initial server-render put there
 
 | Layer | File | What it does |
 |---|---|---|
-| 1. EXPORT the guard | `compiler/src/codegen/emit-server.ts:2780-2790` | Any module whose scope is `auth="required"` now ALSO emits `export const _scrml_protected_document = { guard: (req) => _scrml_auth_check(req) };` (`:2789`) — reuses the SAME check the per-route gate calls, so document and function share one verdict. |
+| 1. EXPORT the guard | `compiler/src/codegen/emit-server.ts:2832-2842` (⛑ S384 +52, was `:2780-2790`) | Any module whose scope is `auth="required"` now ALSO emits `export const _scrml_protected_document = { guard: (req) => _scrml_auth_check(req) };` (`:2841`; ⛑ S384 +52, was `:2789`) — reuses the SAME check the per-route gate calls, so document and function share one verdict. |
 | 2. DISCOVER + REGISTER (build) | `compiler/src/commands/build.js` — `discoverServerRoutes` excludes the export from `routeNames` and derives `protectedDocument` (the module's served `.html` path) via regex at `:245`; `generateServerEntry` collects `protectedDocs` (`:319-324`), imports each guard under a unique alias `_scrml_pd_<n>` (the export name collides across modules, `:370-373`), and builds a LOWERCASED `rel -> guard` map `_SCRML_PROTECTED_DOCS` (`:383-390`) | Static dispatch consults the map BEFORE cache headers / ETag are computed (`:538-545`) — an unauthenticated request 302s to `loginRedirect` and never reaches the file read or a 304. |
 | 3. MIRROR (dev) | `compiler/src/commands/dev.js` (RE-VERIFIED against current HEAD `c1f93dfb`, post-#738 rewrite — see the resolved PROVENANCE CAVEAT above) — module-level `registeredProtectedDocs` Map declared `:215`, reset `:325`, set per module in `loadServerRoutes` `:379`, consulted in `devDispatch`'s static-file branch `:1046-1048` | Identical mechanism, so `scrml dev` and the built server agree — no dev/prod split, the same principle §40.3's onion work established. **`devDispatch` now runs inside the respawned CHILD process** (`runDevChildServer`, `:1294`), not the top-level dev process; `registeredProtectedDocs` is rebuilt fresh in every child via `loadServerRoutes` (`:321`), so a stale guard cannot survive a respawn. |
 

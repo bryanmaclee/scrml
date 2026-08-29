@@ -5,6 +5,24 @@
 # codegen surface S380 touched; NOT a full re-walk). `git merge-base --is-ancestor 48f0aaf8 0dd659a1`
 # exits 0; HEAD == origin/main == 0dd659a1.
 #
+# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
+# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
+# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
+# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
+# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — THE WHOLE-SET STAMP ON LINES 3–4 IS **DELIBERATELY NOT MOVED** ━━━
+#
+# Nine compiler-source files re-verified against `origin/main` == HEAD == **`ff4b37e5`**
+# (`git merge-base --is-ancestor 0dd659a1 ff4b37e5` exits 0). NOT a re-walk of this map; lines 3–4
+# stay at `0dd659a1` (the S382 pattern — bumping a whole-set stamp on a partial pass falsely claims
+# the whole file was re-verified). Corrections below carry a `⛑ S383` / `⛑ S384` marker.
+#
+# **TWO NEW SECTIONS THIS PASS, both read from the actual diff, not from commit messages:**
+#   · **§59.7 (NEW)** — #749's value-native map/set SERVER runtime and #748's server-pass
+#     variant-field fallback. The shared shape is *a lowering that was silently client-only*.
+#   · **§40.8 (AMENDED)** — ruling 3's arms are **HELD, not landed**; the §34 row that used to
+#     contradict behaviour has been CORRECTED, so the doc/behaviour contradiction this map recorded
+#     is CLOSED while the behaviour hole stays OPEN — and the class gained a FOURTH HIGH member.
+#
 # **TWO NEW SECTIONS ADDED THIS PASS, BOTH VERIFIED AGAINST THE ACTUAL S380 DIFF, NOT INFERRED FROM
 # COMMIT MESSAGES:**
 #   · **§16.6.1** — #726/#731/#733, three `component-expander.ts` fixes sharing one root shape
@@ -50,8 +68,9 @@
 #     `non-compliance.report.md`.
 #   · **CORRECTION 2 (§17.2)** — `show=` on a STRUCTURAL element is never CAPTURED, not merely
 #     unwired. **RE-GREPPED at this watermark: `grep -rn showCond compiler/src/` returns ZERO hits**,
-#     and only `ifCond` is stamped (`ast-builder.js:15892`, `:16891`, `:17932`, `:18082` — all four
-#     line refs re-verified individually and all four still land on the `ifRaw`/`ifCond` spread).
+#     and only `ifCond` is stamped (`ast-builder.js:16010`, `:17009`, `:18050`, `:18200` — ⛑ S383,
+#     all four **+118**, were `:15892`/`:16891`/`:17932`/`:18082`; each re-verified individually this
+#     pass and each still lands on the `ifRaw`/`ifCond` spread).
 #     ⚠ **DO NOT CONFUSE THAT WITH THIS WINDOW'S #710**, which wired `show=` on an ordinary element
 #     INSIDE an `<each>` row template. Those are different loci: #710 did not give a STRUCTURAL
 #     `<each show=…>` a field to read, and `showCond` still does not exist.
@@ -149,16 +168,25 @@
 # that code would have raised.** And `W-PROGRAM-REDUNDANT-LOGIC` actively routes authors INTO the
 # broken mode — it tells you to remove the `${…}` wrapper, and the wrapped form is the one that works.
 # ⚠ **THE BARE-CALL LIMB IS A RULING, NOT A FIX.** §40.8 (`SPEC.md:22813-22814`) enumerates what
-# auto-lifts (DECLARATIONS), carves out writes with a diagnostic, and is **SILENT on a bare call** —
+# auto-lifts (DECLARATIONS), carves out writes with a diagnostic, and is **SILENT on a bare call** — (⛑ S383: the anchor to its left was WRONG BEFORE THIS WINDOW TOO — the S123 amendment is `SPEC.md:23062`, and `:22813-22814` is §19.9.6 shadow-table SQL prose. The NEW ruling-3 bullet sits at `SPEC.md:23063`.)
 # so *"searched §40.8, no governing sentence found"* is a FINDING that converts it into an operator
 # decision. The fork: **(a) lift every text run** (closes it, but prose written directly in a
 # `<program>` body then parses as logic) vs **(b) diagnose non-declaration runs** (closes it, but
 # must then reject `const bias = 1.2` followed by `log(x)`, which compiles today). **Either needs
-# SPEC text. Nobody should guess.** ⚑ **The bare-`if` limb is NOT covered by that ruling** and it
-# contradicts a §34 row outright — `E-CONTROL-FLOW-IN-MARKUP`'s own text claims the auto-lift *"fires
-# only at `<program>`/`<page>`/`<channel>` direct-child roots"* and that without it such a construct
-# *"would ship as raw `for(){}` text into the DOM."* **It ships.** The emit site
-# (`ast-builder.js:1857-1860`) is gated `parentType === "markup"`, the COMPLEMENT of the §40.8 locus.
+# SPEC text. Nobody should guess.** ⚑ **The bare-`if` limb is NOT covered by that ruling.**
+# ⛑ **CORRECTED S383 — the clause that used to follow ("and it contradicts a §34 row outright") IS
+# NOW STALE AND HAS BEEN STRUCK. The §34 row was CORRECTED this window.** `SPEC.md:19823` (§34),
+# `SPEC.md:11765` (§17.4) and a NEW `SPEC.md:23063` (§40.8) all now say the auto-lift covers
+# DECLARATIONS ONLY and that this locus is covered by **NEITHER** the lift nor the diagnostic.
+# **The doc/behaviour contradiction is CLOSED; the behaviour hole is OPEN** — PA-RE-REPRODUCED at
+# `ff4b37e5`: `<program>` + `if (1) { }` exits 0 and the emitted `<body>` carries the literal line
+# `if (1) { }`. The emit site (`ast-builder.js:1882-1885`; ⛑ S383, was `:1857-1860`) is gated
+# `parentType === "markup"`, the COMPLEMENT of the §40.8 locus. ⛑ **Ruling 3's ENFORCEMENT arm is
+# HELD, not landed** — `BARE_CONTROL_FLOW_AT_BODY_TOP_RE`, `findControlFlowStatementEnd`,
+# `_DEFAULT_LOGIC_ROOT_NAMES` and an `isStateBlockBody` parameter are at ZERO occurrences in
+# `compiler/src/` + `compiler/tests/` (grepped this pass). ⛑ **And the class gained a FOURTH HIGH:**
+# `g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line` — one prose line at this
+# body-top silently disables the lift for every declaration below it, with zero diagnostics.
 # ⚑ **AND THE CLASS IS WIDER THAN §40.8.** A corpus sweep read from source found at least four live
 # members OUTSIDE it — most sharply **`on mount { loadDashboard() }` inside a `<db>` state-block body
 # ships as page text and the mount hook NEVER RUNS** (`samples/htmx-debate-dashboard.scrml:143`,
@@ -751,8 +779,8 @@ durable fix is ONE diagnostic covering both positions
 **AND `show=` NEVER GETS THAT FAR.** §17.1.2.2 says `else-if=` and `show=` on a structural element
 are "silently dropped". **Measured at this watermark the mechanism is upstream of emission:
 `showCond` does not exist anywhere in `compiler/src/`.** The ast-builder stamps only
-`ifRaw`/`ifCond` onto `<match>` (`ast-builder.js:15892`, `:18082`), `<each>` (`:16891`) and
-`<engine>` (`:17932`), and `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and
+`ifRaw`/`ifCond` onto `<match>` (`ast-builder.js:16010`, `:18200`), `<each>` (`:17009`) and
+`<engine>` (`:18050`) — ⛑ S383, all four **+118** — and `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and
 nothing else. A `show=` on a structural opener is discarded at AST-build, so the fix starts at
 capture, not at emit (`g-structural-element-if-chain-and-show-composition-nominal`, MED, open).
 
@@ -781,7 +809,7 @@ byte-identical to the pre-§17.1.2 emitter). Hand-rolling the wrap at a new host
 divergence grows back.
 
 **The runtime mount contract WIDENED — and the unmount is a LIVE SPAN, not a node list.**
-`_scrml_mount_template` (`runtime-template.js:1429`) went from "exactly one element child" to "one or
+`_scrml_mount_template` (`runtime-template.js:1480`; ⛑ **S384 — `:1429` was ALREADY WRONG; re-derived by grep**) went from "exactly one element child" to "one or
 more top-level nodes", because a gated `<each>` has no element to wrap: its mount is a COMMENT FENCE
 (`<!--scrml-each:ID-->…<!--/scrml-each:ID-->`), and an element wrapper is not available to it —
 `<each>` is legal directly inside `<ul>`, `<tbody>` and `<select>`, where a wrapper `<div>` is invalid
@@ -1005,7 +1033,7 @@ failure mode is what makes `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` an obligatio
 nice-to-have.
 
 **WHAT THE IMPLEMENTATION ACTUALLY DOES TODAY — verify against this, not against the contract.**
-- `_scrml_destroy_scope` (`runtime-template.js:1339`) performs the §6.7.2 four steps and is reachable
+- `_scrml_destroy_scope` (`runtime-template.js:1390`; ⛑ **S384 — `:1339` was ALREADY WRONG (a doc-comment `*`); re-derived by grep, and this file's sub-:5599 region did NOT move this window, so the drift predates it**) performs the §6.7.2 four steps and is reachable
   **ONLY** through `_scrml_unmount_scope` (:1469) — the `if=` path. The navigation path never calls
   it.
 - `_scrml_nav_apply_html` (:2996) calls `_scrml_teardown_region(liveOutlet)` (:3026), which drains
@@ -1192,7 +1220,7 @@ for crawlers or slow connections, and no DOM adoption.** That fallback is correc
 returning a bare `null`, so the adopter got nothing at all.**
 
 It now returns `{ fallback: <reason> }` and `buildSsrEachRenderers` — given `errors` and `filePath`
-by `emit-server.ts:5162` — turns that reason into an **Info** lint. The reasons it can name: the
+by `emit-server.ts:5360` (⛑ **S384: `:5162` was ALREADY WRONG pre-window; re-derived by grep**) — turns that reason into an **Info** lint. The reasons it can name: the
 iteration shape is not `in=`; the row template has N root elements (multi-root); the root is not a
 markup element; the row produced no server-renderable content; or an `SsrUnsupported` message from
 `nodeToParts` (a non-field-read interpolation — call / ternary / method / `@cell` read — a non-literal
@@ -1270,7 +1298,7 @@ other understated the dependency — and had to be re-diagnosed against HEAD bef
 
 **CORRECTION THIS WINDOW (#452, a side-landing of the `Response` arc): `session.get(key)` is now an
 OWN-PROPERTY read.** `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null`
-(`emit-server.ts:2593`). Pre-fix it was an ordinary property read, so it resolved up
+(`emit-server.ts:2692`; ⛑ **S384: `:2593` was ALREADY WRONG pre-window — re-derived by grep, not shifted**). Pre-fix it was an ordinary property read, so it resolved up
 `Object.prototype` for any key the record does not carry — measured on the emitted helper,
 `.get("__proto__")` returned `Object.prototype` and `.get("constructor"/"toString"/"valueOf"/…)` each
 returned a FUNCTION, with a function value reaching a `?{}` bind as an **HTTP 500 from a
@@ -1339,7 +1367,7 @@ sources, base->head delta ZERO, measured two independent ways. The unreached sha
 emitter paths (CPS / failable-fn wrapper, module top-level init, markup-interpolation lift). See
 `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources` (HIGH, open). Its sibling
 `g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn` (HIGH, open) is on the RUNTIME reset
-path — `runtime-template.js:1168` re-invokes the init thunk without awaiting, so a cell can be correct
+path — `runtime-template.js:1219` re-invokes the init thunk without awaiting (⛑ **S384: `:1168` was ALREADY WRONG — a doc-comment line; re-derived by grep**), so a cell can be correct
 at mount and wrong after `reset()`. The absorb-sequencing ruling that governs the fix (option **C**:
 await the IIFE AND keep its `.catch`, §13.2 vs §19.6) is **RULED but NOT BUILT**.
 
@@ -1806,6 +1834,67 @@ itself is a separate, still-open native-parser fix.**
 
 **Both #732 and #735 are the SAME underlying lesson from two different angles: `<match>`/`<engine>` dispatch wiring has as many "how does this scrutinee change" cases as the reactive-cell model has update mechanisms, and a NEW mechanism (derived recompute; per-item reconcile reuse) is invisible to a dispatcher built when only ONE mechanism (mutable-cell `.set()`, create-time-only per-item) existed.** Before adding a new scrutinee/dispatch shape, check `resolveOnExpr` and the per-item wrapper decision both cover it — see the GITI-031 member-access sub-path precedent this section's fixes both extend (schema.map.md's `LogicBinding` section covers the sibling `directiveIsFormValue` case of the same "which write mechanism" question).
 
+## §59 / §52 — TWO LOWERINGS THAT WERE SILENTLY CLIENT-ONLY, AND THE SERVER PAID AT REQUEST TIME (NEW section, ⛑ S384, #748/#749)
+
+**The shared shape, and it is the transferable part: a codegen branch gated `ctx.mode === "client"` is
+not a *client optimisation* — it is a SERVER HOLE, and the compile stays GREEN either way.** Both
+defects below emitted a clean bundle and threw at REQUEST time. Neither is a parse or type failure,
+so nothing upstream can catch them; the only signal is running the server.
+
+**(1) `g-value-native-map-set-server-runtime` — a server fn that builds or returns a `[K:V]` map or a
+`set[K]` threw `ReferenceError: _scrml_map_from_entries is not defined`.** Two independent halves,
+both landed:
+
+  · **Part A — the METHOD lowering (`codegen/emit-expr.ts`).** Every value-native map/set lowering
+    (`.size`, bracket read, set-native methods, map methods, the combinator-collision guard) gated on
+    `ctx.mode === "client"`. Server-fn bodies therefore left `m.insert(…)` / `m["k"]` / `m.size` as
+    VERBATIM member/index/call expressions — and the runtime map is a **tagged PLAIN object with no
+    methods**, so those became `m.insert is not a function` or a JS-array index read. The gate is now
+    a shared helper, `mapSetLoweringBoundaryOk(recvNode, ctx)` (`emit-expr.ts:2777`), which returns
+    true unconditionally on the CLIENT boundary (byte-identical output) and on the SERVER boundary
+    **only for a bare, non-reactive, non-`@` LOCAL receiver.** ⚑ **Two independent guards make that
+    safe, and both are load-bearing:** (i) `emit-server.ts` threads ONLY the per-fn
+    `localMapVarNames`/`localSetVarNames` and **never** the reactive `mapVarNames`/`setVarNames`, so a
+    classifier can only match a LOCAL server-side; (ii) the helper additionally demands a bare ident
+    receiver, so even if reactive names were threaded here later, the reactive path — whose server
+    semantics read the REQUEST BODY, not a live map — stays out. ⚠ **The bracket-read site
+    (`emitIndex` at `:2805`, the map branch at `:2825`) is the one exception and it says so in source:** a nested read's immediate
+    `.object` is an inner `index`, not an ident, so the per-receiver guard cannot apply and the safety
+    rests on the opts contract alone.
+  · **Part B — the RUNTIME (`runtime-template.js` + `emit-server.ts`).** A standalone `.server.js`
+    never imports the client runtime, so the `_scrml_map_*` helpers simply were not there.
+    `runtime-template.js` now exports **`SERVER_VALUE_NATIVE_MAP_HELPER` (:6355)**, an IIFE that
+    slices the §59 runtime VERBATIM out of `SCRML_RUNTIME` between two marker comments —
+    `// __SCRML_MAP_RUNTIME_START__` (**:5602**) and `// __SCRML_MAP_RUNTIME_END__` (**:6135**).
+    `emit-server.ts` injects it after the module header at TWO sites — the value-only path
+    (**:1478**, in `generateValueOnlyServerJs`) and the assembled route-handler path (**:5835**, in
+    `generateServerJs`; the import is `:45`) — each **REACHABILITY-GATED** on
+    `/_scrml_map_[a-z]/` surviving in the emitted body, so a bundle with no map/set use is
+    byte-unchanged. ⚑ **Single-source by construction, not by discipline:** there is no second copy to
+    drift, exactly as with the structural-eq and enum-lookup-table server ports. ⚑ **The slice
+    contract is stated in source and is the thing to preserve:** everything between the markers MUST
+    be pure hoistable `function` declarations, and a missing/renamed marker makes the IIFE **THROW at
+    first use** — deliberately loud, because an empty helper would resurface the original
+    `ReferenceError` as a silent runtime bug.
+
+**(2) `g-server-fn-bare-dot-payload-variant` — a bare-dot payload constructor `.Variant(args)` inside
+a `server function` body emitted the broken `"Variant"(args)` (runtime `TypeError: "Variant" is not a
+function`).** Root cause is a REGISTRY POPULATED ON ONE PASS ONLY: `getVariantFieldSchema` reads the
+`emit-control-flow.ts` registry, which `setVariantFieldsForFile` populates on the **CLIENT** emit pass
+alone, so on the server pass it returns `null` and the constructor site fell through to the
+string-as-function emission. The fix reads the OTHER registry: **`getVariantFieldSchemaFromRewriter(variantName)`
+(`codegen/rewrite.ts:151`)** exposes `_rewriterVariantFields`, populated by `setVariantFieldsForRewriter`,
+which runs in **BOTH** `generateClientJs` and `generateServerJs` and carries the identical
+`buildVariantFieldsRegistry` data. It applies the SAME collision policy (a name in >1 enum in the file
+returns `null`, so the caller falls through to qualified `Enum.Variant` dispatch). ⚑ **Deliberately
+NOT folded into `getVariantFieldSchema`, and the reason is a coverage boundary, not taste:** the
+fail-state lowering (`emit-logic.ts:emitFailExpr`) and the match / `!{}` binding-projection paths also
+read `getVariantFieldSchema` and MUST keep their existing server-pass behaviour (a null schema → a
+bare-value `.data`). **Only the constructor call site in `emit-expr.ts` opts into the fallback**, so
+those paths remain byte-identical. ⚠ The call site uses a `require("./rewrite.ts")` inside `emitCall`
+rather than a top-level import — a deliberate cycle-avoidance, flagged in source with an eslint
+disable.
+
 ## for-lift reconcile — a WORD-CHAR-GLUED `${…}` was shipping as literal text (NEW section, S376, #716)
 
 **`emit-lift.js`'s reconcile path used to skip interpolation lowering entirely.** The guard was
@@ -2011,7 +2100,7 @@ double-writing one at top level rarer still.
 ## The `<machine>` keyword is REMOVED (§63.7 / §51.0.L, ruled S305, landed S307)
 
 **`<machine>` is not a deprecated alias any more. It does not compile.** `E-DEPRECATED-001` (Error)
-fires from `ast-builder.js:16839`; `W-DEPRECATED-001` is a §34 tombstone. Any doc presenting it as
+fires from `ast-builder.js:17347` (⛑ **S383: `:16839` was ALREADY WRONG pre-window — re-derived by grep, not shifted**); `W-DEPRECATED-001` is a §34 tombstone. Any doc presenting it as
 "deprecated but still compiles / hard-removal at v0.3.0" is stale — `docs/PA-SCRML-PRIMER.md`,
 `compiler/PIPELINE.md` and `compiler/SPEC-INDEX.md`'s authored half all still do.
 
@@ -2115,8 +2204,8 @@ dropped, the function returning `undefined`), with **zero diagnostics**. `= if �
 hit `E-CODEGEN-INVALID-LOGIC` (a different, louder failure, which is why only the `match`-tail shape
 went undetected long enough to reach a filed gap).
 
-**Topology: `rejectFnEqualsBody` (`ast-builder.js:3755`) fires at FOUR duplicated decl-body call
-sites** (`:9310` / `:9592` / `:12645` / `:12946` — the same four-site duplication `E-FN-ARROW-BODY`
+**Topology: `rejectFnEqualsBody` (`ast-builder.js:3927`, throw at `:3930`) fires at FOUR duplicated decl-body call
+sites** (`:9487` / `:9769` / `:12825` / `:13126`) — ⛑ **S383: these six anchors were ALREADY WRONG before this window (`:3755` / `:9310`/`:9592`/`:12645`/`:12946`), not merely shifted; RE-DERIVED BY GREP.** The same four-site duplication `E-FN-ARROW-BODY`
 already lives at) **plus a FIFTH site that behaves differently on purpose: the `export` re-parse**
 (`:11625-11654`). Before this fix, that re-parse SWALLOWED every sub-error from its inner parse
 (including this one) — an exported form of the shorthand compiled to a silently-empty exported
