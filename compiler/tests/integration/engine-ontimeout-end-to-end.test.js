@@ -453,3 +453,195 @@ describe("A5-4 §6 — tree-shake when no <onTimeout>", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// §7 — §51.0.M chained <onTimeout>: a timer-fired transition re-arms the
+//      destination state's timers so the chain progresses through ALL states
+//      (S386 regression — machine used to transition once then FREEZE because
+//      the timer setterFn dropped the timers-table on the re-arm path).
+// ---------------------------------------------------------------------------
+
+describe("§51.0.M §7 — chained <onTimeout> progresses through every state (S386)", () => {
+  test("Red -> Green -> Yellow -> Red cycles (does not freeze after first fire)", () => {
+    const src = `<program>
+\${
+  type Light:enum = { Red, Green, Yellow }
+}
+<engine for=Light initial=.Red>
+  <Red rule=.Green>
+    <onTimeout after=1s to=.Green/>
+  </>
+  <Green rule=.Yellow>
+    <onTimeout after=1s to=.Yellow/>
+  </>
+  <Yellow rule=.Red>
+    <onTimeout after=1s to=.Red/>
+  </>
+</>
+</program>`;
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-chain");
+    try {
+      expect(errors.filter(e => e.severity === "error")).toEqual([]);
+      const evalCtx = makeEvaluator(runtimeJs, clientJs);
+      // Initial: Red, one timer armed at module-init.
+      expect(evalCtx.read("light")).toBe("Red");
+      expect(evalCtx.pendingTimers().length).toBe(1);
+      // Each 1s tick advances one hop AND re-arms the destination's timer.
+      evalCtx.tick(1000);
+      expect(evalCtx.read("light")).toBe("Green");
+      expect(evalCtx.pendingTimers().length).toBe(1); // destination re-armed
+      evalCtx.tick(1000);
+      expect(evalCtx.read("light")).toBe("Yellow");
+      expect(evalCtx.pendingTimers().length).toBe(1);
+      // The critical regression assertion: the chain reaches the THIRD hop and
+      // wraps back to the initial state — pre-fix it froze at Green forever.
+      evalCtx.tick(1000);
+      expect(evalCtx.read("light")).toBe("Red");
+      expect(evalCtx.pendingTimers().length).toBe(1);
+      // And keeps cycling.
+      evalCtx.tick(1000);
+      expect(evalCtx.read("light")).toBe("Green");
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 — a chain that ends in a GENUINE terminal state (no <onTimeout>) STOPS:
+//      no pending timer after the terminal is entered (caution: re-arm must
+//      not manufacture a timer for a state that declares none).
+// ---------------------------------------------------------------------------
+
+describe("§51.0.M §8 — chained <onTimeout> stops at a terminal state", () => {
+  test("Loading -> Working -> Done(terminal) leaves zero pending timers", () => {
+    const src = `<program>
+\${
+  type Phase:enum = { Loading, Working, Done }
+}
+<engine for=Phase initial=.Loading>
+  <Loading rule=.Working>
+    <onTimeout after=1s to=.Working/>
+  </>
+  <Working rule=.Done>
+    <onTimeout after=1s to=.Done/>
+  </>
+  <Done></>
+</>
+</program>`;
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-terminal");
+    try {
+      expect(errors.filter(e => e.severity === "error")).toEqual([]);
+      const evalCtx = makeEvaluator(runtimeJs, clientJs);
+      expect(evalCtx.read("phase")).toBe("Loading");
+      expect(evalCtx.pendingTimers().length).toBe(1);
+      evalCtx.tick(1000);
+      expect(evalCtx.read("phase")).toBe("Working");
+      expect(evalCtx.pendingTimers().length).toBe(1); // Working's timer re-armed
+      evalCtx.tick(1000);
+      // Terminal Done reached — NO onTimeout, so the re-arm is a no-op and the
+      // machine correctly stops (no runaway/manufactured timer).
+      expect(evalCtx.read("phase")).toBe("Done");
+      expect(evalCtx.pendingTimers().length).toBe(0);
+      // Further ticks change nothing — machine is at rest.
+      evalCtx.tick(5000);
+      expect(evalCtx.read("phase")).toBe("Done");
+      expect(evalCtx.pendingTimers().length).toBe(0);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — §51.0.R idle watchdog is RESET by a timer-fired transition (S386
+//      threads idleEntry through the timer setterFn). An engine with both a
+//      chained <onTimeout> and an <onIdle> must not let the idle watchdog fire
+//      while timer activity keeps advancing the machine.
+// ---------------------------------------------------------------------------
+
+describe("§51.0.R §9 — timer-fired transition resets the idle watchdog (S386)", () => {
+  test("onTimeout activity pushes the onIdle deadline forward", () => {
+    const src = `<program>
+\${
+  type Phase:enum = { Loading, Working, Bored }
+}
+<engine for=Phase initial=.Loading>
+  <Loading rule=(.Working | .Bored)>
+    <onTimeout after=5s to=.Working/>
+  </>
+  <Working rule=(.Loading | .Bored)></>
+  <Bored></>
+  <onIdle after=8s to=.Bored/>
+</>
+</program>`;
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-idle-reset");
+    try {
+      expect(errors.filter(e => e.severity === "error")).toEqual([]);
+      const evalCtx = makeEvaluator(runtimeJs, clientJs);
+      // Module-init: Loading + its 5s onTimeout + the 8s idle watchdog pending.
+      expect(evalCtx.read("phase")).toBe("Loading");
+      expect(evalCtx.pendingTimers().length).toBe(2);
+      // At 5s the onTimeout fires Loading->Working. That transition must RESET
+      // the idle watchdog (idleEntry threaded through the timer setterFn), so
+      // the idle deadline moves from 8s to 5s+8s=13s.
+      evalCtx.tick(5000);
+      expect(evalCtx.read("phase")).toBe("Working");
+      // At total 8s the ORIGINAL idle deadline would have fired -> Bored. With
+      // the reset, it does NOT: the machine is still Working.
+      evalCtx.tick(3000);
+      expect(evalCtx.read("phase")).toBe("Working");
+      // Past the reset deadline (total > 13s) the idle watchdog finally fires.
+      evalCtx.tick(6000);
+      expect(evalCtx.read("phase")).toBe("Bored");
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10 — idle-fire TWIN of §7: a state entered via the <onIdle> watchdog whose
+//       destination has its OWN <onTimeout> must chain (the watchdog-fired
+//       transition arms the destination's timers). Closes the class — same
+//       freeze, reverse trigger (idle-fire instead of timer-fire).
+// ---------------------------------------------------------------------------
+
+describe("§51.0.R §10 — onIdle-fired transition arms its destination's <onTimeout> (S386 twin)", () => {
+  test("Active --(idle)--> Loading --(onTimeout)--> Done chains without freezing", () => {
+    const src = `<program>
+\${
+  type Phase:enum = { Active, Loading, Done }
+}
+<engine for=Phase initial=.Active>
+  <Active rule=.Loading></>
+  <Loading rule=.Done>
+    <onTimeout after=3s to=.Done/>
+  </>
+  <Done></>
+  <onIdle after=5s to=.Loading/>
+</>
+</program>`;
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "idle-chain");
+    try {
+      expect(errors.filter(e => e.severity === "error")).toEqual([]);
+      const evalCtx = makeEvaluator(runtimeJs, clientJs);
+      // Module-init: Active (no <onTimeout>) + the 5s idle watchdog only.
+      expect(evalCtx.read("phase")).toBe("Active");
+      expect(evalCtx.pendingTimers().length).toBe(1);
+      // At 5s the idle watchdog fires Active->Loading. TWIN FIX: entering
+      // Loading must arm its own <onTimeout> (and the watchdog re-arms). So two
+      // timers are pending: Loading's onTimeout + the reset idle watchdog.
+      // Pre-fix this was 0 (nothing re-armed) and the machine froze at Loading.
+      evalCtx.tick(5000);
+      expect(evalCtx.read("phase")).toBe("Loading");
+      expect(evalCtx.pendingTimers().length).toBe(2); // no double-arm (would be 3)
+      // At 5s+3s the destination's onTimeout fires Loading->Done — the chain
+      // continues past the idle-fired hop. Pre-fix: still frozen at Loading.
+      evalCtx.tick(3000);
+      expect(evalCtx.read("phase")).toBe("Done");
+    } finally {
+      cleanup();
+    }
+  });
+});
