@@ -121,6 +121,39 @@ export function setVariantFieldsForRewriter(
   _rewriterVariantFieldCollisions = collisions ?? null;
 }
 
+/**
+ * g-server-fn-bare-dot-payload-variant — read the rewriter's per-file variant→
+ * payload-field registry, applying the SAME collision policy as
+ * `emit-control-flow.ts:getVariantFieldSchema` (a name present in >1 enum in the
+ * file returns null → the caller falls through to the qualified `Enum.Variant`
+ * dispatch). Returns the ordered declared field-name list, or null for an
+ * unknown / unit / collision variant.
+ *
+ * Why this exists SEPARATELY from getVariantFieldSchema:
+ *   - `getVariantFieldSchema` reads the emit-control-flow registry, which is
+ *     populated by `setVariantFieldsForFile` — called on the CLIENT emit pass
+ *     ONLY (emit-client.ts:generateClientJs). On the SERVER pass it stays null,
+ *     so `emit-expr.ts:emitCall` could not resolve a bare-dot `.Variant(args)`
+ *     payload constructor's field names and fell through to the broken
+ *     `"Variant"(args)` string-as-function emission (runtime TypeError).
+ *   - THIS registry (`_rewriterVariantFields`) is populated by
+ *     `setVariantFieldsForRewriter`, which runs on BOTH passes (generateClientJs
+ *     AND generateServerJs) and carries the identical `buildVariantFieldsRegistry`
+ *     data, so consulting it as a fallback resolves the field names on the server
+ *     pass too.
+ *
+ * Deliberately NOT folded into `getVariantFieldSchema`: the fail-state lowering
+ * (`emit-logic.ts:emitFailExpr`) and the match / `!{}` binding-projection paths
+ * ALSO read `getVariantFieldSchema` and MUST keep their existing server-pass
+ * behavior (a null schema → bare-value `.data`). Only the constructor call site
+ * in emit-expr opts into this fallback, so those paths remain byte-identical.
+ */
+export function getVariantFieldSchemaFromRewriter(variantName: string): string[] | null {
+  if (!_rewriterVariantFields) return null;
+  if (_rewriterVariantFieldCollisions && _rewriterVariantFieldCollisions.has(variantName)) return null;
+  return _rewriterVariantFields.get(variantName) ?? null;
+}
+
 // §14.8.9 — module-level protect context, set per-file by generateServerJs (and
 // cleared at the end) so the SERVER SQL-lowering pass (`rewriteSqlRefs`) can tag
 // protected-origin `?{}` SELECT results with the `_scrml_protect_tag(...)`
