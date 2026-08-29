@@ -44,6 +44,15 @@ import {
   tokenizePassthrough as _defaultTokenizePassthrough,
 } from "./tokenizer.ts";
 
+// S378 — NOTE FOR THE NEXT READER: `maskCommentRegions`
+// (`lint-e-state-block-statement-form.js`) is deliberately NOT imported here.
+// It was, for two scanners in this file, and both were reverted — see the
+// banners on `scanStateBlockBareWriteDecls` and `scanMarkupBodyConstAtDecls`.
+// The helper is only safe over text that cannot contain a STRING LITERAL, and
+// neither of those scanners' domains satisfies that. A source-level tripwire in
+// `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
+// this file does not import it.
+
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
@@ -1912,9 +1921,40 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
  * text swap); the lint names the manual rewrite.
  *
  * Detection mirrors Unit CC's `TOPLEVEL_AT_WRITE_RE`: a LINE whose leading
- * non-whitespace token is `@IDENT = ...` (the `=` not part of `==`). Comment
- * lines (`//`-led) and nested deeper markup are not scanned — only the state
- * block's DIRECT text children (the markup-body level).
+ * non-whitespace token is `@IDENT = ...` (the `=` not part of `==`). Only the
+ * state block's DIRECT text children are scanned (the markup-body level);
+ * nested deeper markup is not.
+ *
+ * ── ⚑ S378 — THIS SCAN DELIBERATELY HAS NO COMMENT MODEL ───────────────────
+ *
+ * Its `^(\s*)@` anchor makes the `//` form ACCIDENTALLY safe (such a line
+ * starts with `/`, not `@`). The BLOCK-comment form is not safe: a continuation
+ * line reading `@count = 0` inside a comment still fires. That false-fire is a
+ * KNOWN, FILED gap — not an oversight — and the obvious fix has been tried and
+ * reverted, twice, in one session.
+ *
+ * ⚑ MASKING COMMENT REGIONS HERE MAKES IT WORSE, MEASURED. Landing the shared
+ * `maskCommentRegions` machine on this scan was defended on the ground that a
+ * `<db>` body is "structured" while a markup body is "prose". **That domain
+ * distinction does not exist.** A `<db>` body holds STRING VALUES, and a string
+ * value holds globs, paths, URLs and regexes — every phantom-comment opener
+ * there is. A/B MEASURED: a body of `@pattern = "src/*.js"` / `@count = 0` /
+ * `@other = 1` emitted **3** warnings before the masking and **1** after; the
+ * glob's `/*`, inside a quoted string, opened a block comment that never closed
+ * and silenced the rest of the body.
+ *
+ * ⚑ THE GENERAL RULE, since this was got wrong twice: `maskCommentRegions` is
+ * only safe over text that CANNOT contain a string literal. Neither this scan
+ * nor its markup-body mirror satisfies that. Closing the block-comment
+ * false-fire needs a STRING-AWARE comment scanner, which is a different and
+ * larger thing than that helper. Trading a VISIBLE wrong warning for an
+ * INVISIBLE missing one is the wrong direction for a lint: silence is the worse
+ * failure. Filed as `g-state-block-bare-write-scan-has-no-comment-state` —
+ * ⚑ S379: that is the REGISTERED id in `docs/known-gaps.md`. An earlier draft
+ * cited `g-markup-body-const-at-scan-false-fires-inside-a-block-comment`, a
+ * WIDER id proposed alongside this work to cover both scanners at once; it was
+ * never registered, because the known-gaps delta that would have created it is
+ * PA-owned and did not land with this change. Cite what resolves.
  *
  * @param {object[]} children — the state block's child Block[] (BS shape)
  * @param {object[]} errors   — diagnostic sink (W- prefix → result.warnings)
@@ -1927,21 +1967,38 @@ function scanStateBlockBareWriteDecls(children, errors, filePath) {
     const raw = child.raw;
     const baseStart = child.span && typeof child.span.start === "number" ? child.span.start : 0;
     const baseLine = child.span && typeof child.span.line === "number" ? child.span.line : 1;
+    const baseCol = child.span && typeof child.span.col === "number" ? child.span.col : 1;
     // Walk lines; track the running offset so each fire carries an accurate span.
     let offset = 0;
     const lines = raw.split("\n");
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
+      // No comment masking — see the banner above.
       const m = line.match(/^(\s*)@([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/);
       if (m) {
         const name = m[2];
         const colStart = (m[1] ? m[1].length : 0);
+        // ⚑ S378 (F5) — `colStart` is an offset into `line`, NOT a source
+        // column, and the two coincide only from the SECOND line of the child
+        // onward. A text child can begin MID-LINE — `<db src=… tables=…>@count
+        // = 0</db>` puts the whole child on the opener's line — and for that
+        // line 0 the child starts at source column `baseCol`, not column 1.
+        // Emitting `colStart + 1` unconditionally reported col 1 for a write at
+        // col 33, so `col` disagreed with the byte-exact `start` beside it and
+        // any consumer that navigates by line/col (LSP, editor, formatter)
+        // jumped to the wrong place. Ruling 1's sibling scanner already computes
+        // it this way; this is the mirror catching up.
+        //
+        // The LINE needs no such correction and must not be given one:
+        // `baseLine` is the line of `raw[0]`, which IS line 0 of the child, and
+        // each split consumes exactly one `\n`.
+        const col = li === 0 ? baseCol + colStart : colStart + 1;
         const span = {
           file: filePath,
           start: baseStart + offset + colStart,
           end: baseStart + offset + line.length,
           line: baseLine + li,
-          col: colStart + 1,
+          col,
         };
         errors.push(new TABError(
           "W-STATE-BLOCK-BARE-WRITE-DECL",
@@ -1979,6 +2036,44 @@ function scanStateBlockBareWriteDecls(children, errors, filePath) {
 // Caller restricts it to non-declaration-site markup bodies (NOT
 // `<program>`/`<page>`/`<channel>` direct bodies, where `const @x` lifts and
 // the AST-path lint already fires) so there is no double-fire.
+//
+// ⚑ S378 — THIS SCAN DELIBERATELY HAS NO COMMENT MASKING, AND NEITHER DOES ITS
+// TWIN. The reason is DOMAIN, not oversight, and the helper was applied to each
+// of them once and REVERTED both times in a single session.
+//
+// A first cut applied `maskCommentRegions` (`lint-e-state-block-statement-form.js`)
+// here on a "one machine, not two" argument. That was reasoning from CODE SHAPE
+// while ignoring the DOMAIN, and it shipped a regression: the helper carries
+// block-comment state across every text child, so ONE unclosed phantom `/*`
+// silences the lint for the REST OF THE BODY. A/B REPRODUCED: a `<div>` body
+// reading `Files under src/*.js are ignored.` followed by `const @total = 1` —
+// the glob's `/*` opens a comment that never closes, and the real `const @x`
+// declaration below it STOPPED warning.
+//
+// ⚑ THE SECOND CUT DEFENDED IT FOR THE TWIN ON A DOMAIN DISTINCTION THAT DOES
+// NOT EXIST, and that is the durable lesson. The argument was that a `<db>` /
+// `<state>` body is "structured" while a markup body is "prose". A `<db>` body
+// holds STRING VALUES, and a string value holds globs, paths, URLs and regexes
+// — every phantom-comment opener there is. A/B MEASURED on the twin: a body of
+// `@pattern = "src/*.js"` / `@count = 0` / `@other = 1` emitted 3 warnings
+// before the masking and 1 after. So `scanStateBlockBareWriteDecls` does NOT
+// mask either; see its own banner.
+//
+// ⚑ THE GENERAL RULE: `maskCommentRegions` is only safe over text that CANNOT
+// contain a string literal, and NEITHER scanner's domain satisfies that. The
+// trade is bad in the direction that matters: masking swaps a VISIBLE wrong
+// warning for an INVISIBLE missing one, and for a lint, silence is the worse
+// failure. The residual false-fire (a `const @x` / `@x = 0` inside a REAL block
+// comment) is filed as a known gap covering BOTH scanners, and closing it needs
+// a STRING-AWARE comment scanner — a different and larger thing than that
+// helper. A source-level tripwire in
+// `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts the
+// helper is not EXPORTED and that this file does not reference it.
+// ⛑ S383: an earlier draft said re-applying it makes findings "DISAPPEAR
+// (silence) rather than fail loudly" — MEASURED, that is overstated: re-applying
+// it turns four tests in that file RED. The true, narrower reason for a tripwire
+// is that those tests cover only the shapes someone thought to write; the same
+// helper over a domain with no glob fixture regresses silently.
 // ---------------------------------------------------------------------------
 function scanMarkupBodyConstAtDecls(children, errors, filePath) {
   if (!Array.isArray(children)) return;
@@ -1987,22 +2082,29 @@ function scanMarkupBodyConstAtDecls(children, errors, filePath) {
     const raw = child.raw;
     const baseStart = child.span && typeof child.span.start === "number" ? child.span.start : 0;
     const baseLine = child.span && typeof child.span.line === "number" ? child.span.line : 1;
+    const baseCol = child.span && typeof child.span.col === "number" ? child.span.col : 1;
     let offset = 0;
     const lines = raw.split("\n");
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
       // Legacy derived-cell form `const @name = ...` at line start (allowing
       // leading indentation). `(?!=)` rejects the `==` comparison shape.
+      // No comment masking here — see the banner above; a markup body is prose
+      // by construction and carried block-comment state silences the lint.
       const m = line.match(/^(\s*)const\s+@([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/);
       if (m) {
         const name = m[2];
         const colStart = (m[1] ? m[1].length : 0);
+        // S378 (F5, applied to the mirror too): line 0 of a text child can start
+        // mid-line, so its source column is `baseCol + colStart`, not
+        // `colStart + 1`. See the twin for the full note.
+        const col = li === 0 ? baseCol + colStart : colStart + 1;
         const span = {
           file: filePath,
           start: baseStart + offset + colStart,
           end: baseStart + offset + line.length,
           line: baseLine + li,
-          col: colStart + 1,
+          col,
         };
         errors.push(new TABError(
           "W-CONST-AT-DEPRECATED",

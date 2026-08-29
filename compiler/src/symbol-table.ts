@@ -197,47 +197,26 @@ import {
 // "samples/contact-directory.scrml").
 //
 // Loaded once at module init via synchronous readFileSync. JSON file lives
-// in compiler/src/ so it ships with the compiler. Path normalization in
-// isUnitCCExempt() strips the absolute repo prefix, fall-through to a
-// best-effort suffix match (covers worktree/checkout-location variance).
-import { readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+// in compiler/src/ so it ships with the compiler. Matching is strict membership
+// first, then a `/`-boundary suffix match, which covers the fact that spans
+// carry ABSOLUTE paths while the list is repo-relative and the checkout location
+// varies (a worktree harness inserts a `.claude/worktrees/agent-XXX/` segment).
+// ⚑ S379: that description used to name `isUnitCCExempt()` as the place the
+// normalization happens. It was inlined here and is not any more — the logic
+// moved to `default-logic-exemption.ts` and `isUnitCCExempt` is now only a local
+// alias for the import below. Describing a function's internals from the outside
+// is how that reference went stale; point at the module instead.
+// S368 — the loader + predicate moved to a leaf module (`default-logic-exemption.ts`)
+// so a TAB-stage gate at this SAME §40.8 body-top locus can consult the SAME
+// list. TAB runs BEFORE SYM, so `ast-builder.js` cannot import from this file;
+// the leaf module is what both sides are allowed to depend on. ⚑ S379: the TAB
+// consumer that motivated the extraction (`E-CALL-NOT-IN-LOGIC-CONTEXT`) is HELD
+// and is NOT in the compiler — this is currently the list's only live consumer.
+// Read the leaf module's header before folding it back in here.
+import { isDefaultLogicBodyTopExempt } from "./default-logic-exemption.ts";
 
-const __filename_unitcc = fileURLToPath(import.meta.url);
-const __dirname_unitcc = dirname(__filename_unitcc);
-const UNIT_CC_EXEMPTION_LIST: string[] = (() => {
-  try {
-    const raw = readFileSync(join(__dirname_unitcc, "unit-cc-exemption-list.json"), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
-      return parsed as string[];
-    }
-    return [];
-  } catch {
-    return [];
-  }
-})();
-const UNIT_CC_EXEMPT_SET = new Set<string>(UNIT_CC_EXEMPTION_LIST);
-
-function isUnitCCExempt(filePath: string): boolean {
-  if (!filePath) return false;
-  // Strict: try direct membership (caller passed a repo-relative path).
-  if (UNIT_CC_EXEMPT_SET.has(filePath)) return true;
-  // Lenient: peel any known repo prefixes. The list is repo-relative; spans
-  // typically carry absolute paths. The worktree harness adds the
-  // `.claude/worktrees/agent-XXX/` segment; strip that and the repo root.
-  for (const entry of UNIT_CC_EXEMPT_SET) {
-    if (filePath.endsWith(entry)) {
-      // Guard against accidental short-suffix collisions (e.g., "a.scrml"
-      // matching "/foo/bar/a.scrml"): require a `/` boundary just before
-      // the entry, OR the entry to BE the full path.
-      const idx = filePath.length - entry.length;
-      if (idx === 0 || filePath[idx - 1] === "/") return true;
-    }
-  }
-  return false;
-}
+/** Back-compat alias for the Unit CC call sites below. */
+const isUnitCCExempt = isDefaultLogicBodyTopExempt;
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
@@ -2512,9 +2491,18 @@ function walkResolveAtNames(
       // `unit-cc-exemption-list.json`). Sunset is intentionally manual
       // (vs V-kill's auto-sunset on file deletion) because these files are
       // not scheduled for deletion — they are adopter source that needs
-      // migration. The exemption set is loaded once at module init time
-      // (UNIT_CC_EXEMPT_SET); `isUnitCCExempt(filePath)` checks repo-
-      // relative paths.
+      // migration. The list, the loader and the matching rule all live in
+      // `default-logic-exemption.ts`; `isUnitCCExempt` here is a local alias
+      // for its `isDefaultLogicBodyTopExempt` export. Read that module for
+      // the behaviour — including what happens when the JSON is malformed.
+      //
+      // ⛑ S383: this comment used to describe the loader's internals from out
+      // here — it named the module-init Set binding directly — and that binding
+      // no longer exists in this file, because the S379 extraction moved it.
+      // That is exactly the failure the banner above this file's import names:
+      // describing a function's internals from the outside is how a reference
+      // goes stale. Point at the module. (The dead symbol is deliberately not
+      // repeated here, so a grep for it stays a reliable staleness check.)
       if ((anyN as any)._isUnitCCWrite === true && typeof anyN.name === "string") {
         const filePath = (anyN.span && typeof anyN.span.file === "string") ? anyN.span.file : "";
         if (isUnitCCExempt(filePath)) {

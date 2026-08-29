@@ -214,4 +214,51 @@ function increment() {
     const vKill = errors.filter(e => e.code === "E-STATE-UNDECLARED");
     expect(vKill.length).toBe(0);
   });
+
+  // ── S379 — THE EXEMPTION MACHINERY ITSELF, which had NO test on this side ──
+  //
+  // Ported here when the S368 bare-call gate was excised (S379 split). Those two
+  // checks were the ONLY coverage of the per-file exemption surface, and they
+  // lived in the excised file — but the surface they check is THIS code's, and
+  // it is live. Dropping them with the gate would have left the extracted
+  // `default-logic-exemption.ts` module with no test at all.
+  //
+  // ⚑ WHY THE SHAPE OF A JSON FILE IS WORTH AN ASSERTION. The loader's
+  // `catch { return [] }` swallows a parse error, and one non-string entry makes
+  // the WHOLE list fall back to empty. Fail-closed (nothing exempt) is the safe
+  // direction, but the failure is SILENT and it un-exempts every file an
+  // operator deliberately listed — a migration surface quietly re-arming.
+  test("S379 — the exemption list is a well-formed array of strings", async () => {
+    const { readFileSync } = await import("fs");
+    const raw = readFileSync(
+      join(import.meta.dir, "../../src/unit-cc-exemption-list.json"),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw);
+    expect(Array.isArray(parsed)).toBe(true);
+    for (const entry of parsed) expect(typeof entry).toBe("string");
+  });
+
+  // The predicate lives in a LEAF module (`default-logic-exemption.ts`) rather
+  // than in symbol-table.ts, because TAB runs BEFORE SYM and a TAB-stage gate at
+  // this same §40.8 body-top locus must be able to consult the SAME list without
+  // importing from SYM. Read that module's header before folding it back in.
+  //
+  // ⚑ WHAT THIS TEST DOES *NOT* CHECK, STATED RATHER THAN IMPLIED. The predicate
+  // is strict-membership-then-`/`-boundary-suffix-match, and **the suffix-boundary
+  // rule is UNEXERCISED** — the shipped list is currently `[]`, so the predicate
+  // is vacuously false for every input, and the module loads its list ONCE at
+  // module init from a tracked JSON file, so a test cannot inject entries without
+  // writing to compiler source mid-run. A first cut of this test guarded the
+  // boundary assertions behind `if (list.length > 0)`, which is a check that can
+  // never fail — worse than no check, because it reads as coverage. It was
+  // removed rather than left in. Exercising the boundary rule needs the loader to
+  // be injectable; filed as a deferred item at S379, not silently skipped.
+  test("S379 — the exemption predicate is importable from the leaf module and fails closed", async () => {
+    const { isDefaultLogicBodyTopExempt } = await import("../../src/default-logic-exemption.ts");
+    expect(typeof isDefaultLogicBodyTopExempt).toBe("function");
+    // Empty input must not throw and must not exempt.
+    expect(isDefaultLogicBodyTopExempt("")).toBe(false);
+    expect(isDefaultLogicBodyTopExempt("/tmp/definitely-not-listed.scrml")).toBe(false);
+  });
 });

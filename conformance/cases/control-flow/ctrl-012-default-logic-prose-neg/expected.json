@@ -1,0 +1,17 @@
+{
+  "id": "ctrl-012-default-logic-prose-neg",
+  "description": "PROSE at a §40.8 default-logic body-top — including two deliberate keyword near-misses, `if you want the archive` and `Items for sale (all of them)` — does NOT fire E-CONTROL-FLOW-IN-MARKUP, and still RENDERS. A COUNTER-gate: it fails an implementation for OVER-reaching, not for under-reaching.",
+  "language-version": "1.0",
+  "spec": "§40.8, §17.4, §7",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "⚑ THIS IS A COUNTER-GATE AND THAT IS ITS WHOLE VALUE. Prose at this position renders and is a WORKING SHAPE — S368 refused the 'diagnose every non-declaration run' limb precisely to protect it. Any future recognizer at this locus (the §40.8 arm of E-CONTROL-FLOW-IN-MARKUP is HELD at S383 pending a grammar-derived implementation — see `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`) must leave every line here alone. The two near-misses are chosen against the S203 recognizer's actual structure — it requires the keyword PLUS a `( ... )` head PLUS an opening `{`, so `if you want` fails on the missing paren head and `for sale (all of them) ship` fails on the missing `{`. MEASURED at this revision: zero errors, and all three prose lines appear in the emitted `<body>`. ⚠ THE FALSE-POSITIVE RISK, recorded rather than hidden: prose that genuinely spells a keyword, a parenthesis group and an opening brace — `if (you ask) { we deliver }` — WOULD match a recognizer of that shape. A corpus measurement over 2,408 sources found zero instances. ⚑ AND CORPUS-ZERO WAS NEVER SAFETY HERE. That figure was measured against a SINGLE-LINE shape only, and the recognizer's head was unbounded (`\\([^]*?\\)`) and crossed newlines — so at this locus, where a text run is EVERY contiguous non-markup line, the head could join a prose line to a LATER statement's brace. PA-REPRODUCED: `if (you get stuck) contact support.` followed by `function greet() { return 1 }` matched across both lines, failed the compile, and DELETED `greet` from the emitted HTML while the prior compiler emitted it clean. The multi-line axis therefore has its OWN case, `ctrl-012-default-logic-multiline-prose-neg`; a corpus that varies one axis certifies one axis.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CONTROL-FLOW-IN-MARKUP"
+    ],
+    "codeCounts": {
+      "E-CONTROL-FLOW-IN-MARKUP": 0
+    }
+  }
+}

@@ -133,12 +133,85 @@ describe("E-CONTROL-FLOW-IN-MARKUP — does NOT false-fire on the canonical / le
     expect(cfimErrors(compile(src)).length).toBe(0);
   });
 
-  test("a bare `for` at a default-logic root (<program> direct child) does NOT fire here", () => {
-    // The §40.8 default-logic auto-lift owns control flow at default-logic roots;
-    // E-CONTROL-FLOW-IN-MARKUP is gated to markup parents and must not steal it.
+  test("a WRAPPED `for` at a default-logic root (<program> direct child) does NOT fire here", () => {
+    // E-CONTROL-FLOW-IN-MARKUP is gated to markup parents, and this fixture's
+    // `for` is inside a `${ ... }` block — a `logic` block, never a markup
+    // `text` child — so no text recognizer sees it at all.
+    //
+    // ⚑ S383 — THIS COMMENT USED TO SAY "the §40.8 default-logic auto-lift owns
+    // control flow at default-logic roots", AND THAT IS FALSE. §40.8's own S123
+    // amendment says the auto-lift covers DECLARATIONS ONLY. A BARE (unwrapped)
+    // `for (…) { … }` at a `<program>` body-top is therefore owned by NEITHER
+    // the lift nor this error: it compiles at exit 0 and ships into `<body>` as
+    // page text. This test's fixture is the WRAPPED form, so the assertion is
+    // right — only the stated reason was wrong, and the same conflation is what
+    // SPEC §34's row still carries. Pinned as an open defect at
+    // `conformance/cases/control-flow/ctrl-012-default-logic-non-leading-residual-neg`;
+    // see `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`.
     const src =
       `<program>\n\${\n  <items> = [1, 2, 3]\n  for (x of @items) {\n    log(x)\n  }\n}\n` +
       `<p>ok</>\n</program>\n`;
     expect(cfimErrors(compile(src)).length).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S383 — THE MULTI-LINE AND ALLMAN SHAPES AT THIS LOCUS, WHICH HAD NO PIN
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚑ WHY THIS GROUP EXISTS, AND IT IS NOT HYPOTHETICAL. Every fixture above puts
+// the whole construct on ONE LINE, so this suite was blind to the shapes below —
+// and the blindness was MEASURED, not theorised. `BARE_CONTROL_FLOW_IN_MARKUP_RE`'s
+// head is UNBOUNDED (`\([^]*?\)`) and crosses newlines, which is CORRECT HERE: a
+// markup text run is delimited by the surrounding ELEMENTS, so a run genuinely
+// holds one construct and multi-line / Allman formatting is ordinary code that
+// S203 has refused since S203.
+//
+// An S379 round-3 change narrowed that recognizer to a single line — correct for
+// the §40.8 default-logic body-top, where a run is every contiguous non-markup
+// line — and SILENTLY RE-OPENED THIS GATE. Multi-line and Allman control flow
+// compiled clean and shipped `if (` into `<body>`, at a locus that change never
+// intended to touch, and NOTHING IN THIS FILE CAUGHT IT. This group is the pin
+// that makes a third attempt fail loudly instead.
+//
+// ⚑ THE RULE THE GROUP ENCODES: converge-don't-enumerate is about a shared
+// DOMAIN, not a shared code SHAPE. The two loci share a shape and not a domain.
+// Merging their recognizers has now been tried twice, once in each direction,
+// and shipped a defect both times. See
+// `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md` §3.
+describe("E-CONTROL-FLOW-IN-MARKUP — the markup locus keeps its UNBOUNDED head", () => {
+  const markupCases = [
+    ["multi-line head",        "if (@a &&\n    @b) {\n  <span>x</span>\n}"],
+    ["Allman brace",           "if (@x)\n{\n  <span>y</span>\n}"],
+    ["Allman for",             "for (const x of @items)\n{\n  <span>z</span>\n}"],
+    ["multi-line while head",  "while (@a ||\n       @b) {\n  <span>w</span>\n}"],
+    ["one-line if (control)",  "if (@a) { <span>x</span> }"],
+    ["one-line for (control)", "for (const x of @items) { <span>x</span> }"],
+  ];
+  for (const [label, stmt] of markupCases) {
+    test(`REAL control flow in a MARKUP body still FIRES — ${label}`, () => {
+      const r = compile(`<program>\n<div>\n${stmt}\n</div>\n<p>ok</>\n</program>\n`);
+      expect(cfimErrors(r).length).toBe(1);
+      // …and the recovery still drops it, so nothing reaches the page.
+      for (const [, v] of Object.entries(r)) {
+        if (typeof v !== "string") continue;
+        expect(v.includes("if (")).toBe(false);
+        expect(v.includes("for (")).toBe(false);
+        expect(v.includes("while (")).toBe(false);
+      }
+    });
+  }
+
+  test("⚑ the Allman case must not leak its `${...}` interpolation as literal text", () => {
+    // The sharpest limb of the regression: an un-refused construct ships its
+    // inner interpolation VERBATIM, so a `${@secret}` renders as source text.
+    const r = compile(
+      `<program>\n<div>\nif (@x)\n{\n  <span>\${@secret}</span>\n}\n</div>\n<p>ok</>\n</program>\n`,
+    );
+    expect(cfimErrors(r).length).toBe(1);
+    for (const [, v] of Object.entries(r)) {
+      if (typeof v !== "string") continue;
+      expect(v.includes("@secret")).toBe(false);
+    }
   });
 });

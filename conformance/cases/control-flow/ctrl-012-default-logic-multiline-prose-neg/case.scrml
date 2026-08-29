@@ -1,0 +1,7 @@
+<program>
+if (you get stuck) contact support.
+function greet() { return 1 }
+<page>
+  <h1>Hi</h1>
+</page>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "ctrl-012-bare-control-flow-default-logic-root-neg",
+  "description": "A control-flow statement WRAPPED in an explicit `${ ... }` logic block at a `<program>` default-logic body-top compiles silently — no E-CONTROL-FLOW-IN-MARKUP, no other diagnostic. The `${ }` wrapper is the canonical form the language asks for at this position, and this case pins that it costs nothing.",
+  "language-version": "1.0",
+  "spec": "§40.8, §17.4, §7",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "Structurally this is not a near-miss but a DIFFERENT NODE KIND: a `${ ... }` run is a `logic` block, not a `text` child, and `liftBareDeclarations` does not recurse into logic children, so no text recognizer ever sees it. That is why the property is stable regardless of what any recognizer at this locus does or does not diagnose — which is exactly what makes it worth pinning across the change. ⚑ S383 — THIS CASE PREVIOUSLY EXISTED AS THE NEGATIVE HALF OF A PAIR whose positive half (`ctrl-012-bare-control-flow-default-logic-root-pos`) asserted that the UNWRAPPED form fires. That positive case is REMOVED: ruling 3's §40.8 arm of E-CONTROL-FLOW-IN-MARKUP is HELD (see `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`), so at this locus the unwrapped form is currently NOT diagnosed and ships as page text — pinned by `ctrl-012-default-logic-non-leading-residual-neg`. Do not read this case as one half of a bracket; read it as the standing guarantee that the canonical form is silent. MEASURED at this revision: zero errors and zero warnings.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTROL-FLOW-IN-MARKUP"],
+    "codeCounts": {
+      "E-CONTROL-FLOW-IN-MARKUP": 0
+    }
+  }
+}
