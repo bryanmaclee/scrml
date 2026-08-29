@@ -1870,7 +1870,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // live claim does not hit this file.) The gate does not reach a
     // `<program>`/`<page>`/`<channel>` body-top because `parentType === "markup"`
     // is the COMPLEMENT of that locus — but nothing else covers it either:
-    // §40.8's S123 amendment (`SPEC.md:394`) says the auto-lift covers
+    // §40.8's S123 amendment (SPEC §40.8, "auto-lift covers DECLARATIONS only,
+    // NOT writes" — cited by SECTION, never by line: an earlier revision of THIS
+    // comment said `SPEC.md:394`, which is a bare code-fence line, and the real
+    // text sits ~22,600 lines further down) says the auto-lift covers
     // DECLARATIONS ONLY. So bare control flow there is handled by NEITHER the
     // lift nor this diagnostic; it compiles at exit 0 and ships into `<body>` as
     // page text. THE HOLE IS OPEN. Ruling 3 directed the fix and it is HELD —
