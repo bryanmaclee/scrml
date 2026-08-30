@@ -198,3 +198,106 @@ SUFFICIENT, and this round is the proof — round 3's differential was clean, at
 positive, because no corpus file happens to put a template literal inside an
 `<each in=>` lambda. The safety claim for a rejecting change is two-part:
 differential clean AND an enumerated adversarial shape set.
+
+---
+
+## Gate results — every number executed this round, none carried
+
+Rebased onto `origin/main` = `4d60e71b` (which advanced from `d02adb68` by ONE
+docs-only commit — `git diff --stat d02adb68..4d60e71b` is two `docs/` files, so
+the corpus base measured against `d02adb68`'s compiler still holds byte-for-byte).
+
+### Gate 1 — test suites
+
+Pre-commit subset (`unit + integration + conformance + compiler/tests/*.test.js`,
+`--bail`): GREEN. Ran as the hook on both r4 commits; a red tree cannot commit,
+and neither commit used `--no-verify`.
+
+Full suite (`bun test compiler/tests/`, browser tier included), executed at the
+rebased tip:
+
+```
+30779 pass · 216 skip · 5 todo · 55 fail · 136915 expect() calls
+Ran 31055 tests across 1426 files. [289.52s]
+```
+
+The `+49` against round 3's 30730 is exactly this round's new cases
+(30 §10 + 14 §11 + 4 §9 + 1 §9 positive control).
+
+**Failure NAME-SET comparison, which is the assertion that actually matters:**
+`fullsuite-r4-failnames.txt` (54 unique names, no duplicates) is **byte-identical
+to round 3's captured `origin/main` baseline** `fullsuite-base-failnames.txt` —
+`diff` returns EMPTY. Zero new failures and zero incidentally-fixed ones.
+
+Against round 3's own build set, r4 has one FEWER: `M1 — an if= mount/unmount
+controller in a swapped region RE-EVALUATES > a swapped-in if= mounts on true and
+unmounts on false (not frozen)`. That is a happy-dom browser test and it is
+absent from the `origin/main` baseline too, i.e. it flips run to run rather than
+having been fixed here.
+
+### Gate 2 — corpus differential, 1005 files
+
+```
+base       PASS=754 FAIL=251      (origin/main type-system, file-copied in)
+build-r4   PASS=754 FAIL=251
+NEWLY-FAILING (PASS->FAIL): 0
+NEWLY-PASSING (FAIL->PASS): 0
+files with a changed diagnostic code set: 0
+paths identical: YES
+```
+
+Positive control on the measurement chain: `in` slot **flipped=25 stayed=0
+skipped=9**; `key` slot **flipped=20 stayed=0 skipped=14**. Zero false-zero
+suspects in either slot.
+
+### Gate 3 — browser baseline
+
+```
+bun scripts/browser-baseline.ts --check
+  PASS — browser failure name set matches the baseline
+  (48 asserted, 0 of 2 env-excluded observed)
+```
+
+### Gate 4 — bite proof, BOTH directions
+
+The original bug still fires: `<each in=@undeclaredName as r>` →
+`E-STATE-UNDECLARED` naming `undeclaredName`, FAILED. Clean on `origin/main`.
+
+Whole test file, three type-systems installed by FILE COPY (never `git stash` —
+`refs/stash` is shared across every worktree on this checkout):
+
+| type-system.ts | pass | fail | todo |
+| --- | --- | --- | --- |
+| `origin/main` | 46 | **29** | 3 |
+| round 3 tip | 55 | **5** | — |
+| round 4 | **75** | **0** | 3 |
+
+The 29 on main are the arc's own pins plus all 14 §11 positive controls — which
+is what proves §11 measures THIS check and not something else that happened to be
+red. The 5 on round 3 are §9's `keyMulti` plus the four §10 template-literal
+shapes, i.e. the F1 class. The gate has failed, so it can fail.
+
+### Gate 5 — F1 and F2 flip
+
+| fixture | `origin/main` | round 3 | round 4 |
+| --- | --- | --- | --- |
+| F1 `in=@rows.map(r => \`id-${r}\`)` | clean | `E-SCOPE-001` on `r` | **clean** |
+| F2 `in=@undeclaredHidden.map(x => \`${1}\`)` | clean | clean | **`E-STATE-UNDECLARED`** |
+
+---
+
+## The safety claim, stated plainly
+
+**A clean corpus differential is NECESSARY AND NOT SUFFICIENT for a change that
+newly REJECTS source, and round 3 is the proof rather than a hypothetical.** Its
+differential was clean — 0 newly-failing of 1005, positive-controlled, correctly
+executed — and it still carried a HIGH false positive, because a differential
+measures blast radius over artifacts that ALREADY EXIST and the inputs that would
+trip a new rejection are precisely the ones nobody has written yet. Our corpus is
+additionally ~100% LLM-authored, so its ergonomic diversity is narrower than a
+person's.
+
+Round 4's claim is two-part and both parts are executed above: the differential
+(gate 2, with its own positive control) AND an enumerated adversarial shape set
+(§10, 30 shapes) whose liveness is itself controlled (§11, 14 twins that must
+fire). Neither half is offered alone.

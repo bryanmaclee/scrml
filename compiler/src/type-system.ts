@@ -12806,13 +12806,31 @@ function annotateNodes(
           //
           // AND IT BOUGHT NO COVERAGE, WHICH IS WHY EXCISING IT COSTS NOTHING:
           // `${ … }` IS NOT A WORKING OPENER FORM. Measured on `main` by
-          // compiling, three spellings, all three FAIL LOUD with
+          // compiling THROUGH THE CLI, three spellings, all three FAIL LOUD with
           // E-CODEGEN-INVALID-LOGIC and write no output — `in=${@rows}`,
-          // `key=${r}`, and the multi-interpolation `key=${@a}-${r}`. A scope
-          // diagnostic over an interpolation body therefore describes a
-          // construct that cannot reach codegen intact under any spelling. If a
-          // diagnostic for `${ … }` in an opener is wanted, the honest one says
-          // "not a valid opener form" — a separate arc, not this check's to invent.
+          // `key=${r}`, and the multi-interpolation `key=${@a}-${r}`.
+          //
+          // ⚠ NAME THE HARNESS WHEN YOU RE-MEASURE THIS, OR YOU WILL GET THE
+          // OPPOSITE ANSWER AND BELIEVE IT. That E-CODEGEN-INVALID-LOGIC comes
+          // from the emitted-JS parse gate in `api.js`, which sits inside
+          // `if (write && outputDir)`. `compileScrml({write:false})` therefore
+          // never runs it, and all three spellings come back CLEAN on `main`
+          // through that path. An S385 reviewer and the PA reached opposite
+          // verdicts on the same source for exactly this reason. Filed as
+          // GAP-S385-VALIDATE-EMIT-SKIPPED-WHEN-WRITE-FALSE.
+          //
+          // It also means the accept/reject DIRECTION of this check is right
+          // even on that shape: rejecting at the type-system stage closes a
+          // silent-accept in every `write:false` consumer, the LSP included. The
+          // MESSAGE it produces there is still wrong (E-SCOPE-001 naming `$`) —
+          // GAP-S385-EACH-OPENER-INTERPOLATION, and NOT a reason to re-add the
+          // scan.
+          //
+          // SO: a scope diagnostic over an interpolation BODY describes a
+          // construct that cannot reach codegen intact under any spelling, which
+          // is why removing it loses nothing. If a diagnostic for `${ … }` in an
+          // opener is wanted, the honest one says "not a valid opener form" — a
+          // separate arc with its own SPEC home, not this check's to invent.
           const sp = (n.span as Span | undefined)
             ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           let exprN: unknown = null;
