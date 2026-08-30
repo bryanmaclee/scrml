@@ -1,4 +1,4 @@
-positive control — slot 'key' vs sweep 'build-r2' — 34 <each>-carrying files
+positive control — slot 'key' vs sweep 'build-r3' — 34 <each>-carrying files
 
 FLIPPED  examples/03-contact-book.scrml                                         (key)
 FLIPPED  examples/04-live-search.scrml                                          (key)
@@ -21,4 +21,4 @@ FLIPPED  examples/23-trucking-dispatch/pages/driver/load-log.scrml              
 FLIPPED  examples/23-trucking-dispatch/pages/driver/messages.scrml              (key)
 FLIPPED  examples/29-engine-vs-flags.scrml                                      (key)
 
-positive control [key vs build-r2]: flipped=20 stayed=0 skipped=14
+positive control [key vs build-r3]: flipped=20 stayed=0 skipped=14

@@ -1,4 +1,4 @@
-positive control — slot 'in' vs sweep 'build-r2' — 34 <each>-carrying files
+positive control — slot 'in' vs sweep 'build-r3' — 34 <each>-carrying files
 
 FLIPPED  examples/03-contact-book.scrml                                         (@contacts)
 FLIPPED  examples/04-live-search.scrml                                          (@filtered)
@@ -26,4 +26,4 @@ FLIPPED  samples/compilation-tests/gauntlet-s20-channels/channel-basic-001.scrml
 FLIPPED  samples/compilation-tests/gauntlet-s20-channels/channel-multiple-001.scrml (@chatMessages)
 FLIPPED  samples/compilation-tests/gauntlet-s20-validation/reactive-encoded-001.scrml (@items)
 
-positive control [in vs build-r2]: flipped=25 stayed=0 skipped=9
+positive control [in vs build-r3]: flipped=25 stayed=0 skipped=9
