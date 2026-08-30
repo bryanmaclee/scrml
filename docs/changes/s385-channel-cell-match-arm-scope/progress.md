@@ -298,3 +298,109 @@ It is not a surgical fix and I did not invent semantics for it.
 of the arm to `<program>` level. Variant M — top-level mount, each-bearing arm containing both the
 `${@stamp}` read and the `<each in=@items>` — **compiles clean and emits the channel wiring.**
 That is a one-line source move that unblocks the gate today.
+
+---
+
+# FIX ROUND (S239 adversarial pass) — the approach was WRONG, and is now reversed
+
+## What the review caught, reproduced by me before touching anything
+
+**F2 — CONFIRMED VERBATIM.** A mount nested ONE level inside the arm:
+
+```
+<Ready>
+    <div><probeChan/></div>
+    <p>${@stamp}</p>
+</>
+```
+
+compiled **CLEAN** and emitted, literally:
+
+```js
+return "<div><probeChan /></div>\n            <p><span data-scrml-logic=\"_scrml_logic_1\"></span></p>";
+```
+
+`_armWrapperHasCEInlinedNode` inspected only TOP-LEVEL wrapper children, so `_p3aInlinedFrom` was
+not a direct child, the gate fell through to the `armsRaw` re-parse, and the raw alias tag shipped.
+**That is precisely the defect my own commit message and code comment claimed to have eliminated.**
+
+**F1 parity gap — CONFIRMED by execution.** Arm mount vs top-level mount: the channel's exported
+`beat` reaches `.server.js` **0 times vs 1** (calling it is a ReferenceError), and the client carries
+**1 `stamp` init/set vs 4**. I did NOT try to fix the reviewer's claimed "TypeError on first render" —
+the coordinator could not demonstrate it and neither could I; the parity gap is what is real.
+
+**F4 — CONFIRMED.** `visitArmBodies(node, visit)` at `emit-channel.ts:85` sat inside the
+`node.kind === "markup"` branch while the helper returns unless `kind === "match-block"`. Dead.
+
+**F5 — CONFIRMED.** `… See SPEC §40.8. (line 2, col 5)` immediately followed by `--> …:2:5`.
+
+## The judgement call: (b) refuse, not (a) full parity
+
+I checked whether (a) was reachable before choosing. It is not, and not for one reason:
+
+1. **Every** collector feeding channel emission descends `node.children` only, and a `<match>` is
+   `kind:"match-block"` with **no `children`**. Missing it: `collectChannelNodes`,
+   `collectChannelFunctionMap`, `collectChannelCellMap` (`emit-channel.ts`) and `collectFunctions`
+   (`codegen/collect.ts` — read at `:170`, `children`-only). The set is open-ended.
+2. An each-bearing arm is blanked by ast-builder (S316) and stashed as raw TEXT, so the mount is not
+   a node at CE time at all.
+3. **The decisive one.** Even with every collector taught to descend, the type-system binds the
+   inlined cells in the **arm's lexical scope** while the runtime mirror is **file-scoped** — which
+   is why variant I (mount in arm, read outside) still failed even after I had it fully WIRED.
+   Reconciling that means hoisting the inlined decl, and hoisting contradicts §38.12.2's normative
+   in-place `Replace M with deepClone(decl)`. **That is a SPEC amendment, not a bug fix.**
+
+So the fix now **fails CLOSED**: `E-CHANNEL-MOUNT-IN-CONDITIONAL`, naming the alias, the container,
+and the one-line move to `<program>` level. Reversible; a half-done (a) is what the previous commit
+shipped. The acceptance machinery (CE `armBodyChildren` walk, the `emit-match` gate, the
+`emit-channel` collectors — and with them the F4 dead call) is **reverted to base**.
+
+Detection covers both forms the mount can take: a **deep subtree search** of `armBodyChildren` (so
+the F2 nested shape is caught, not just direct children) and a **scan of the S316
+`_reparseEachArmBodyRaw` text** (so the adopter's each-bearing arm is caught, where no node exists).
+
+## Post-fix matrix, by execution
+
+| shape | verdict |
+|---|---|
+| mount direct child of a `<match>` arm | **REFUSED** |
+| mount NESTED in the arm (`<div><probeChan/></div>`) — F2 | **REFUSED** |
+| mount in an **each-bearing** arm (adopter's `a.scrml`) | **REFUSED** |
+| mount in an arm with **no read** (used to compile clean + ship dead markup) | **REFUSED** |
+| mount inside an `<if>` body | **CLEAN + WIRED** (unchanged — `<if>` is a markup node) |
+| top-level mount, read outside | **CLEAN + WIRED** |
+| top-level mount, read **inside** the arm | **CLEAN + WIRED** |
+| the documented workaround (`m-workaround`) | **CLEAN + WIRED** |
+| `<each in=@undeclaredName>` | **CLEAN** (out-of-scope guard holds) |
+
+## Direction of change, re-measured for the newly-rejecting arm
+
+1005 files (`gauntlet-r25/dev-*` + `examples/**` + `samples/**` + `stdlib/**`), diagnostic code set
++ verdict per file, run on base `56473410` and on the fix:
+
+```
+$ diff sw-PRE.txt sw-POST.txt
+$ echo $?
+0
+```
+
+**Empty.** The refusal has **measured-zero** blast radius on the corpus — base §8's migration
+obligation for a newly-rejecting change is satisfied at zero cost.
+
+Pre-commit gate: **29348 pass / 0 fail / 86 skip / 2 todo**.
+
+## Test strengthening (F3)
+
+Acceptance tests now assert **cell decls + the exported server fn**, not just the WebSocket
+transport — the transport alone is satisfied by a half-wired channel and would have let the suite go
+green while the feature was broken. The unfixed *support* case is recorded as an explicit
+`test.todo` so CI carries the debt instead of a doc.
+
+## Noted, not fixed
+
+`compileScrml` populates `outputs` even when the compile has HARD ERRORS, and the CLI writes those
+artifacts to disk on a failed compile. That is pre-existing and out of scope here, but it is the
+reason the refusal has to be a hard error rather than a lint.
+
+**⚑ `E-CHANNEL-MOUNT-IN-CONDITIONAL` needs a §34 catalog row.** SPEC is PA-owned; deliberately
+untouched.
