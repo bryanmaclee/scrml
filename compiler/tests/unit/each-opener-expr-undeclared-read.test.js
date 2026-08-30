@@ -863,3 +863,79 @@ describe("§10 — adversarial opener shapes that must not false-fire", () => {
     });
   }
 });
+
+// =============================================================================
+// §11 — POSITIVE CONTROLS. §10 IS ONLY EVIDENCE IF THE CHECK IS LIVE ON IT.
+// =============================================================================
+//
+// §10 asserts thirty shapes produce no error. That assertion is WORTHLESS on any
+// shape the check never reaches — a `<each>` whose opener is silently skipped
+// (wrong node kind, an `iterShape` that gates it out, a raw field that is
+// `undefined` on that spelling) also produces no error, and would pass §10 while
+// covering nothing.
+//
+// So each §10 SHAPE FAMILY gets a twin here with the iterable swapped for an
+// UNDECLARED cell. If the twin does not fire E-STATE-UNDECLARED naming that
+// cell, the sibling §10 case was vacuous and this file says so.
+//
+// This is the same reasoning as the whole-arc bite proof, applied per shape
+// rather than per build: a gate that has never failed on a given input class is
+// indistinguishable from one that cannot fire on it.
+describe("§11 — the check is LIVE on every adversarial shape family", () => {
+  const CONTROLS = [
+    ["lambda-expression-body",
+      "typoLambdaExpr",
+      `<each in=@typoLambdaExpr.filter(n => n > 1) as x><li>\${x}</li></each>`],
+    ["lambda-block-body",
+      "typoLambdaBlock",
+      `<each in=@typoLambdaBlock.filter(n => { return n > 1 }) as x><li>\${x}</li></each>`],
+    ["template-literal-inside-lambda",
+      "typoTemplateLambda",
+      `<each in=@typoTemplateLambda.map(r => \`id-\${r}\`) as x><li>\${x}</li></each>`],
+    ["lambda-array-destructure-param",
+      "typoPairs",
+      `<each in=@typoPairs.map(([k, v]) => k + v) as x><li>\${x}</li></each>`],
+    ["lambda-object-destructure-param",
+      "typoObjDestructure",
+      `<each in=@typoObjDestructure.map(({ id }) => id) as x><li>\${x}</li></each>`],
+    ["lambda-rest-param",
+      "typoRest",
+      `<each in=@typoRest.map((...args) => args[0]) as x><li>\${x}</li></each>`],
+    ["long-method-chain",
+      "typoChain",
+      `<each in=@typoChain.filter(a => a > 0).map(b => b * 2).slice(0, 3) as x><li>\${x}</li></each>`],
+    ["ternary-iterable",
+      "typoTernary",
+      `<each in=true ? @typoTernary : [] as x><li>\${x}</li></each>`],
+    ["optional-chain-iterable",
+      "typoOptional",
+      `<each in=@typoOptional?.rows as x><li>\${x}</li></each>`],
+    ["of-count-arithmetic",
+      "typoOfCount",
+      `<each of=@typoOfCount + 1 as i><li>\${i}</li></each>`],
+    ["of-count-length",
+      "typoOfLength",
+      `<each of=@typoOfLength.length as i><li>\${i}</li></each>`],
+    ["key-call-chain",
+      "typoKeyChain",
+      `<each in=[1, 2] as r key=@typoKeyChain.join("-")><li>\${r}</li></each>`],
+    ["nested-each-inner-in",
+      "typoInnerIterable",
+      `<each in=[1, 2] as g><ul><each in=@typoInnerIterable as it><li>\${it}</li></each></ul></each>`],
+    ["nested-each-inner-lambda",
+      "typoInnerLambda",
+      `<each in=[1, 2] as g><ul><each in=@typoInnerLambda.filter(i => i.gid) as it><li>\${it}</li></each></ul></each>`],
+  ];
+
+  for (const [label, cellName, opener] of CONTROLS) {
+    test(`\`${label}\` — an undeclared iterable in this shape still fires`, () => {
+      const r = compileSource(
+        `<program>\n  ${opener}\n</program>\n`,
+        `control-${label}.scrml`,
+      );
+      const hits = diagsByCode(r, "E-STATE-UNDECLARED")
+        .filter((d) => String(d.message).includes(cellName));
+      expect({ label, fired: hits.length > 0 }).toEqual({ label, fired: true });
+    });
+  }
+});
