@@ -585,3 +585,71 @@ on a mention.
 |---|---|
 | pre-commit | **29364 pass / 0 fail** / 86 skip / 3 todo |
 | corpus, `origin/main` vs fix | **0 of 1005 newly-failing**, diff byte-empty |
+
+
+---
+
+# ROUND 5 — two code nits and one doc correction
+
+## 1. The diagnostic said "arm" when the container was an `<each>`
+
+The opening container label was computed; the trailing back-reference was hardcoded. Reproduced from
+`scrml compile`:
+
+> "is mounted inside an **`<each>` body** … Its cells stay readable everywhere in the file, including
+> inside this **arm**"
+
+There is no arm. Added `CHANNEL_MOUNT_CONTAINER_NOUN` beside the existing `..._LABEL` map and wired
+the trailing clause to it. Verified both directions by execution — the `<each>` mount now reads
+"including inside this `<each>` body"; the `<match>` mount still reads "including inside this arm".
+
+## 2. `resolveDiagLocation` dropped a flat `col` even when the files MATCHED
+
+Reproduced:
+
+```
+{filePath:"a.scrml", column:7, span:{file:"a.scrml", line:3}}
+  ->  {file:"a.scrml", line:3}        // col 7 discarded
+```
+
+That contradicted the `#756` "top-level coordinates win" contract stated eight lines above it, and
+regressed the pre-change chain (`--> a.scrml:3:7` became `--> a.scrml:3`). **The atomicity rule was
+right but over-applied** — dropping the flat col is correct only when the files DIFFER, because only
+then does it index into something other than the file being reported. Now consults the already
+computed `sameFile`.
+
+Both directions pinned by new tests; the differing-file drop still holds, and #756's own suite is
+untouched and green.
+
+## 3. The SCOPE note was wrong, and under-enumerated
+
+**Wrong:** it claimed the each-bearing shape "compiles clean and ships dead markup". Only half true.
+Measured by compiling both:
+
+| shape | outcome |
+|---|---|
+| each-bearing arm + mount + a `${@cell}` **READ** | **fails CLOSED** with the misleading `E-STATE-UNDECLARED` — the adopter's exact shape; `repro/a.scrml` fails at **L11:18**, it does NOT compile clean |
+| each-bearing arm + mount + **no read** | **compiles clean at exit 0, ships the raw tag as dead markup** — the silent fail-open |
+
+The note now states both and marks which one is silent.
+
+**Under-enumerated:** the note claimed to enumerate the holes while missing one. The arm walk is
+guarded on `Array.isArray(rec.armBodyChildren)`, and ast-builder's wrapper builder returns
+`undefined` on **four** paths, not two — a missing/non-string `armsRaw`, a `parseMatchArms` THROW, a
+parse yielding zero arms, and a build yielding zero wrappers. On any of them the ENTIRE match block
+is skipped and no mount inside it is detected. Not a regression (base was equally blind), now
+enumerated, with an instruction to add a third hole rather than let the claim stand while false.
+
+⚑ The same over-claim is in the **PA-owned SPEC §34 row**. `compiler/SPEC.md` NOT touched.
+
+## Final gates
+
+| gate | result |
+|---|---|
+| pre-commit | **29366 pass / 0 fail** / 86 skip / 3 todo |
+| corpus, `origin/main` vs fix, 1005 files | **diff byte-empty — 0 newly-failing** |
+| `browser-baseline --check` | **PASS** — 48 asserted, name set identical |
+| `types:check` | 4 diagnostics, all pre-existing on `origin/main` in `emit-each.ts` / `route-inference.ts`, neither touched |
+| matrix | refusals + clean set unchanged from round 4 |
+
+Merged current `origin/main` (ledger-only `#771`); 0 behind at the final tip.
