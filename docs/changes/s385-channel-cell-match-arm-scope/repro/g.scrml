@@ -1,0 +1,8 @@
+<program>
+    ${
+        <phase> = 1
+    }
+    <each in=@totallyUndeclaredName as x>
+        <li>${x}</li>
+    </each>
+</program>
