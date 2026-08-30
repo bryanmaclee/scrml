@@ -1,0 +1,12 @@
+<db src="./items.db" tables="items">
+${
+    function loadItems() {
+        ?{`CREATE TABLE IF NOT EXISTS items (id integer primary key, label text)`}.run()
+        return ?{`SELECT id, label FROM items`}.all()
+    }
+    server @items = loadItems()
+}
+<ul>
+    <each in=@items key=@.id><li>${@.label}</li></each>
+</ul>
+</>
