@@ -7,7 +7,7 @@
  * self-prefix at display time only; the diagnostic DATA is untouched.
  */
 import { describe, test, expect } from "bun:test";
-import { stripRedundantCode, resolveDiagLocation } from "../../src/commands/diagnostic-format.js";
+import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "../../src/commands/diagnostic-format.js";
 
 describe("stripRedundantCode — print-time self-prefix removal", () => {
   test("strips an exact `${code}: ` self-prefix", () => {
@@ -127,5 +127,55 @@ describe("S385 — resolveDiagLocation reads the `span` carrier", () => {
     expect(resolveDiagLocation({})).toEqual({ filePath: null, line: null, column: null });
     expect(resolveDiagLocation({ span: null })).toEqual({ filePath: null, line: null, column: null });
     expect(resolveDiagLocation({ span: "nope" })).toEqual({ filePath: null, line: null, column: null });
+  });
+});
+
+/**
+ * S385 — `stripRedundantLocation`: drop a message's baked-in `(line N, col N)`
+ * when the formatter is about to print the same coordinates on its `-->` line.
+ *
+ * Before the span-carrier fallback landed, `-->` printed a bare path with no
+ * coordinates, so the message's own text was the only location an author got.
+ * Now the two render back-to-back and the duplication is exact:
+ *
+ *     warning [W-PROGRAM-REDUNDANT-LOGIC]: … (line 2, col 5)
+ *       --> app.scrml:2:5
+ */
+describe("S385 — stripRedundantLocation", () => {
+  test("strips a trailing `(line N, col N)` matching what will be printed", () => {
+    expect(stripRedundantLocation("Remove the redundant block. (line 2, col 5)", 2, 5))
+      .toBe("Remove the redundant block.");
+  });
+
+  test("KEEPS a location citing a DIFFERENT line (a cross-reference)", () => {
+    const m = "conflicts with the declaration (line 40, col 3)";
+    expect(stripRedundantLocation(m, 2, 5)).toBe(m);
+  });
+
+  test("KEEPS it when the line matches but the column does not", () => {
+    const m = "something (line 2, col 9)";
+    expect(stripRedundantLocation(m, 2, 5)).toBe(m);
+  });
+
+  test("accepts the `column` spelling as well as `col`", () => {
+    expect(stripRedundantLocation("msg (line 7, column 1)", 7, 1)).toBe("msg");
+  });
+
+  test("only strips at the END — a mid-message citation survives", () => {
+    const m = "at (line 2, col 5) something failed";
+    expect(stripRedundantLocation(m, 2, 5)).toBe(m);
+  });
+
+  test("no-ops when there is no line to print, or on a non-string", () => {
+    expect(stripRedundantLocation("msg (line 2, col 5)", null, null))
+      .toBe("msg (line 2, col 5)");
+    expect(stripRedundantLocation("msg (line 2, col 5)", 0, 0))
+      .toBe("msg (line 2, col 5)");
+    expect(stripRedundantLocation(undefined, 2, 5)).toBe(undefined);
+    expect(stripRedundantLocation(null, 2, 5)).toBe(null);
+  });
+
+  test("leaves a message with no trailing location untouched", () => {
+    expect(stripRedundantLocation("plain message", 2, 5)).toBe("plain message");
   });
 });

@@ -576,33 +576,6 @@ function resolveVariantFields(forType: string, fileAST: any): Map<string, string
 // ---------------------------------------------------------------------------
 
 /**
- * S385 — did CE actually expand something into this arm's `armBodyChildren`
- * wrapper?
- *
- * CE stamps `_p3aInlinedFrom: sourceKey` on every cross-file channel clone it
- * inlines (SPEC §38.12.2). Its presence is a direct, non-heuristic answer to
- * the question the surrounding gate is really asking — "did expansion land
- * here?" — where the raw-text probes can only guess. Top-level children only:
- * CE inlines the clone in the mount's own position, so a mount written as a
- * direct child of the arm produces a direct child of the wrapper.
- */
-function _armWrapperHasCEInlinedNode(matchBlock: unknown, variantName: string): boolean {
-  const wrappers = (matchBlock as { armBodyChildren?: unknown }).armBodyChildren;
-  if (!Array.isArray(wrappers)) return false;
-  const wrapper = wrappers.find(
-    (w) =>
-      w &&
-      typeof w === "object" &&
-      (w as { kind?: unknown }).kind === "markup" &&
-      (w as { tag?: unknown }).tag === variantName,
-  ) as { children?: unknown } | undefined;
-  if (!wrapper || !Array.isArray(wrapper.children)) return false;
-  return wrapper.children.some(
-    (c) => c && typeof c === "object" && (c as { _p3aInlinedFrom?: unknown })._p3aInlinedFrom !== undefined,
-  );
-}
-
-/**
  * Map a match-block AST node + Phase 2 arm structural entries to
  * `VariantArm[]` consumed by `emitVariantGuardedRender`.
  *
@@ -870,36 +843,13 @@ function buildMatchArms(
     // re-parse path even when they also carry a formFor/component (rare) so the
     // each id-restamping is not lost; such a combination is not in the v1
     // adopter surface and degrades to the prior (each-correct) behavior.
-    //
-    // g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm
-    // (S385) — a CROSS-FILE CHANNEL mount (`<probeChan/>`, §38.12) inside a
-    // bare-body arm is expanded by CE into exactly the same `armBodyChildren`
-    // wrapper this path consumes, but the raw-text gate above could never see
-    // it: a channel alias is the import's local name, which is conventionally
-    // camelCase, so the `/<\s*[A-Z][A-Za-z0-9_]*[\s/>]/` PascalCase-opener probe
-    // does not match. The arm therefore fell through to the `armsRaw` re-parse,
-    // which re-introduced the RAW `<probeChan/>` tag and emitted it VERBATIM
-    // into the HTML string — observed directly as
-    //     return "<probeChan />\n            <p>...</p>";
-    // so the channel was never wired (no `/_scrml_ws/<name>` route, no IIFE, no
-    // cell mirror) while a sibling `${@stamp}` still lowered to
-    // `_scrml_cs_reactive_get("stamp")` against a cell that never existed.
-    //
-    // Detect the expansion DIRECTLY rather than guessing at it from raw text:
-    // CE stamps every inlined channel clone with `_p3aInlinedFrom` (SPEC
-    // §38.12.2, "Mark cloned node `_p3aInlinedFrom: sourceKey`"). That is the
-    // gate's actual intent — "only consume the wrapper when expansion really
-    // landed" — expressed as a fact about the expanded tree instead of a
-    // heuristic over the unexpanded source.
     let consumedExpandedArmBody = false;
     if (
       entry.bodyForm === "bare-body" &&
       entry.bodyRaw &&
       Array.isArray((matchBlock as any).armBodyChildren) &&
       !/<\s*each\b/.test(entry.bodyRaw) &&
-      (/<\s*(?:formFor|tableFor)\b/i.test(entry.bodyRaw) ||
-        /<\s*[A-Z][A-Za-z0-9_]*[\s/>]/.test(entry.bodyRaw) ||
-        _armWrapperHasCEInlinedNode(matchBlock, entry.variantName))
+      (/<\s*(?:formFor|tableFor)\b/i.test(entry.bodyRaw) || /<\s*[A-Z][A-Za-z0-9_]*[\s/>]/.test(entry.bodyRaw))
     ) {
       const wrapper = ((matchBlock as any).armBodyChildren as any[]).find(
         (w) => w && w.kind === "markup" && w.tag === entry.variantName,

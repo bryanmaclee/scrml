@@ -1,31 +1,37 @@
 /**
  * S385 — `g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`
  *
- * A cross-file channel (SPEC §38.12) mounted via `<alias/>` INSIDE a `<match>`
- * arm was invisible to three separate AST walks, all of which descended only
- * into `node.children`:
+ * ## What this pins
  *
- *   1. `component-expander.ts` `_expandChannelNode` — the CHX inliner. A
- *      `<match>` is `kind: "match-block"` with NO `children`; its arm bodies
- *      hang off `armBodyChildren`. The mount was therefore never inlined, so
- *      the channel's cells never entered the type-system's scopeChain and any
- *      `@cell` read fired a false `E-STATE-UNDECLARED` — contradicting SPEC
- *      §6.1.2, which names "a CE-inlined cross-file channel cell (§38.12)" in
- *      the set that SHALL be in scope.
+ * A cross-file channel (SPEC §38.12) mounted via `<alias/>` inside a `<match>`
+ * arm or an `<each>` body is REFUSED with `E-CHANNEL-MOUNT-IN-CONDITIONAL`,
+ * naming the shape and the one-line fix.
  *
- *   2. `emit-match.ts` — the S177 "consume the CE-expanded arm body" gate
- *      probed the RAW arm text for a PascalCase opener. A channel alias is the
- *      import's local name (camelCase), so it never matched and the arm fell
- *      back to the `armsRaw` re-parse, emitting the raw `<probeChan/>` tag
- *      VERBATIM into the HTML string.
+ * ## Why refusal rather than support
  *
- *   3. `emit-channel.ts` `collectChannelNodes` / `collectChannelFunctionMap` /
- *      `collectChannelCellMap` — so even once inlined, the channel's WebSocket
- *      layer (route + IIFE + cell mirror) was never emitted at all.
+ * CHX inlines a channel by replacing the mount IN PLACE (§38.12.2). At
+ * `<program>` level that lands the channel's cells, its exported functions and
+ * its WebSocket layer at FILE scope — what §38.12.3's per-importer mirror needs.
+ * Inside a conditional container it cannot:
  *
- * Net pre-fix behaviour: a hard `E-STATE-UNDECLARED` with the mount+read in the
- * same arm; and — where no read made it fail — a SILENT emission of a literal
- * `<probeChan />` tag with no channel wiring whatsoever.
+ *   - every collector feeding channel emission descends `node.children` only,
+ *     and a `<match>` is `kind:"match-block"` with NO `children`;
+ *   - an each-bearing arm is BLANKED by ast-builder (S316) and its body stashed
+ *     as raw TEXT, so the mount is not even a node at CE time;
+ *   - even with every collector taught to descend, the type-system binds the
+ *     inlined cells in the ARM's lexical scope while the runtime mirror is
+ *     file-scoped.
+ *
+ * Measured parity gap for an arm mount vs a top-level mount: the channel's
+ * exported `beat` reaches `.server.js` 0 times vs 1, and the client carries 1
+ * `stamp` init/set vs 4. Accepting the shape half-wired would take a loud
+ * compile error and turn it into an app that ships dead `<probeChan />` markup
+ * at exit 0 — a fail-closed → fail-open move, which base §8 does not admit as a
+ * bug fix. So it fails CLOSED.
+ *
+ * The assertions below deliberately check CELL DECLS and the EXPORTED FUNCTION,
+ * not just the WebSocket transport: the transport alone is satisfied by a
+ * half-wired channel and would let this suite pass while the feature is broken.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -68,10 +74,29 @@ function hardErrors(result) {
   return (result.errors ?? []).filter((e) => !(e.code || "").startsWith("W-"));
 }
 
-describe("S385 — cross-file channel mounted inside a <match> arm", () => {
-  test("mount + `@cell` read in the same arm compiles clean (no E-STATE-UNDECLARED)", () => {
-    fx("a/chan.scrml", CHANNEL_SRC);
-    const consumer = fx("a/app.scrml", `<program>
+function codes(result) {
+  return (result.errors ?? []).map((e) => e.code || "");
+}
+
+function compileIn(dir, body) {
+  fx(`${dir}/chan.scrml`, CHANNEL_SRC);
+  const consumer = fx(`${dir}/app.scrml`, body);
+  const result = compileScrml({
+    inputFiles: [consumer],
+    outputDir: join(TMP, `${dir}-out`),
+    write: false,
+    log: () => {},
+  });
+  return { result, consumer, out: result.outputs?.get(consumer) };
+}
+
+// ---------------------------------------------------------------------------
+// REFUSED — every shape CHX cannot wire
+// ---------------------------------------------------------------------------
+
+describe("S385 — a channel mounted in a conditional container is REFUSED", () => {
+  test("direct child of a `<match>` arm", () => {
+    const { result } = compileIn("r1", `<program>
     ${D}{
         import { "probe" as probeChan } from './chan.scrml'
         type Phase:enum = { Loading, Ready }
@@ -86,65 +111,114 @@ describe("S385 — cross-file channel mounted inside a <match> arm", () => {
     </>
 </program>
 `);
+    expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+  });
 
-    const result = compileScrml({
-      inputFiles: [consumer],
-      outputDir: join(TMP, "a-out"),
-      write: false,
-      log: () => {},
-    });
+  test("NESTED one level inside the arm — `<div><probeChan/></div>`", () => {
+    // The mount need not be a direct child of the arm wrapper. An earlier
+    // iteration of this fix inspected only top-level wrapper children, accepted
+    // this shape, and shipped `<div><probeChan /></div>` into the DOM verbatim.
+    const { result, out } = compileIn("r2", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready>
+            <div><probeChan/></div>
+            <p>${D}{@stamp}</p>
+        </>
+    </>
+</program>
+`);
+    expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+    // The build is REJECTED, which is the whole point — the author cannot ship
+    // this. (Note: `compileScrml` still populates `outputs` on a failed compile,
+    // and that in-memory client body does still carry the raw `<div><probeChan
+    // /></div>` string. That is pre-existing behaviour of the failure path and
+    // is exactly why the refusal has to be a hard error rather than a lint.)
+    expect(hardErrors(result).length).toBeGreaterThan(0);
+  });
 
-    const undeclared = (result.errors ?? []).filter(
-      (e) => (e.code || "") === "E-STATE-UNDECLARED",
+  test("inside an EACH-BEARING arm — the adopter's shape, body stranded as raw text", () => {
+    // ast-builder S316 blanks this arm and stashes the body as a raw string, so
+    // the mount is not an AST node at all at CE time. The refusal has to scan
+    // that raw text; a node-only check misses the exact reported case.
+    const { result } = compileIn("r3", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready>
+            <probeChan/>
+            <p>${D}{@stamp}</p>
+            <each in=@items as i key=i.id><li>${D}{i.id}</li></each>
+        </>
+    </>
+</program>
+`);
+    expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+  });
+
+  test("arm mount with NO cell read — the shape that used to compile CLEAN and ship dead markup", () => {
+    // Pre-S385 this exited 0 and emitted `return "<probeChan />…"` into the
+    // client bundle: a bogus tag in the DOM, no route, no IIFE, no cell mirror.
+    // Nothing failed, so nothing told the author. This is the fail-open case the
+    // refusal exists to close.
+    const { result } = compileIn("r4", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready>
+            <probeChan/>
+            <p>plain</p>
+        </>
+    </>
+</program>
+`);
+    expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+  });
+
+  test("the message names the alias AND the top-level-mount fix", () => {
+    const { result } = compileIn("r5", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready><probeChan/></>
+    </>
+</program>
+`);
+    const diag = (result.errors ?? []).find(
+      (e) => e.code === "E-CHANNEL-MOUNT-IN-CONDITIONAL",
     );
-    expect(undeclared).toEqual([]);
-    expect(hardErrors(result)).toEqual([]);
+    expect(diag).toBeTruthy();
+    expect(diag.message).toMatch(/probeChan/);
+    expect(diag.message).toMatch(/<program>/);
+    // It must carry a source location, not just prose.
+    expect(diag.span?.line).toBeGreaterThan(0);
   });
+});
 
-  test("the arm-mounted channel actually emits its WebSocket layer", () => {
-    fx("b/chan.scrml", CHANNEL_SRC);
-    const consumer = fx("b/app.scrml", `<program>
-    ${D}{
-        import { "probe" as probeChan } from './chan.scrml'
-        type Phase:enum = { Loading, Ready }
-        <phase>: Phase = .Ready
-    }
-    <match for=Phase on=@phase>
-        <Loading><p>loading</p></>
-        <Ready>
-            <probeChan/>
-            <p>${D}{@stamp}</p>
-        </>
-    </>
-</program>
-`);
+// ---------------------------------------------------------------------------
+// ACCEPTED — and FULLY wired. These are the negative controls.
+// ---------------------------------------------------------------------------
 
-    const result = compileScrml({
-      inputFiles: [consumer],
-      outputDir: join(TMP, "b-out"),
-      write: false,
-      log: () => {},
-    });
-    expect(hardErrors(result)).toEqual([]);
-
-    const out = result.outputs?.get(consumer);
-    expect(out).toBeTruthy();
-
-    // The channel's client-side WebSocket layer is emitted at FILE level, the
-    // same shape a top-level mount produces.
-    expect(out.clientJs).toMatch(/_scrml_ws[\w/-]*probe/);
-    // ...and its cells are mirrored, so `${@stamp}` reads a cell that exists.
-    expect(out.clientJs).toMatch(/syncShared\("stamp"/);
-
-    // The raw alias tag must NOT survive into the emitted markup. Pre-fix this
-    // shipped literally as `return "<probeChan />..."`.
-    expect(out.clientJs).not.toMatch(/<probeChan/);
-    expect(out.html ?? "").not.toMatch(/<probeChan/);
-  });
-
-  test("REGRESSION GUARD — a top-level mount is unchanged (read outside the match)", () => {
-    fx("c/chan.scrml", CHANNEL_SRC);
-    const consumer = fx("c/app.scrml", `<program>
+describe("S385 — supported mount positions stay accepted AND fully wired", () => {
+  test("top-level mount: transport + cell decls + exported server fn", () => {
+    const { result, out } = compileIn("k1", `<program>
     ${D}{
         import { "probe" as probeChan } from './chan.scrml'
         type Phase:enum = { Loading, Ready }
@@ -158,60 +232,88 @@ describe("S385 — cross-file channel mounted inside a <match> arm", () => {
     </>
 </program>
 `);
-
-    const result = compileScrml({
-      inputFiles: [consumer],
-      outputDir: join(TMP, "c-out"),
-      write: false,
-      log: () => {},
-    });
     expect(hardErrors(result)).toEqual([]);
 
-    const out = result.outputs?.get(consumer);
+    // Transport.
     expect(out.clientJs).toMatch(/_scrml_ws[\w/-]*probe/);
-    // Exactly one channel IIFE — the arm-body walk must not double-inline.
-    const iifeCount = (out.clientJs.match(/const _scrml_ws_probe = /g) ?? []).length;
-    expect(iifeCount).toBe(1);
+    // Cell mirror — NOT implied by the transport alone.
+    expect(out.clientJs).toMatch(/syncShared\("stamp"/);
+    // Cell decls actually emitted. A half-wired channel emits far fewer.
+    const stampWrites = (out.clientJs.match(/_scrml_cs_(?:init_set|reactive_set)\("stamp"/g) ?? []).length;
+    expect(stampWrites).toBeGreaterThanOrEqual(2);
+    // The channel's exported function reaches the server bundle — calling
+    // `beat(...)` is a ReferenceError without this.
+    expect(out.serverJs ?? "").toMatch(/\bbeat\b/);
+    // Exactly one channel IIFE.
+    expect((out.clientJs.match(/const _scrml_ws_probe = /g) ?? []).length).toBe(1);
   });
 
-  test("REGRESSION GUARD — the arm-mounted channel is wired exactly once", () => {
-    fx("d/chan.scrml", CHANNEL_SRC);
-    const consumer = fx("d/app.scrml", `<program>
+  test("the documented workaround compiles and is fully wired", () => {
+    // This is the fix the diagnostic tells the adopter to make: move the mount
+    // out of the arm. The arm keeps BOTH the `${@stamp}` read and the `<each>`.
+    const { result, out } = compileIn("k2", `<program>
     ${D}{
         import { "probe" as probeChan } from './chan.scrml'
         type Phase:enum = { Loading, Ready }
         <phase>: Phase = .Ready
     }
+    <probeChan/>
     <match for=Phase on=@phase>
         <Loading><p>loading</p></>
         <Ready>
-            <probeChan/>
             <p>${D}{@stamp}</p>
+            <each in=@items as i key=i.id><li>${D}{i.id}</li></each>
         </>
     </>
 </program>
 `);
-
-    const result = compileScrml({
-      inputFiles: [consumer],
-      outputDir: join(TMP, "d-out"),
-      write: false,
-      log: () => {},
-    });
     expect(hardErrors(result)).toEqual([]);
+    expect(out.clientJs).toMatch(/_scrml_ws[\w/-]*probe/);
+    expect(out.serverJs ?? "").toMatch(/\bbeat\b/);
+  });
 
-    const out = result.outputs?.get(consumer);
-    const iifeCount = (out.clientJs.match(/const _scrml_ws_probe = /g) ?? []).length;
-    expect(iifeCount).toBe(1);
+  test("REGRESSION GUARD — an `<if>` body mount is NOT refused (it is a markup node and works today)", () => {
+    const { result, out } = compileIn("k3", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        <flag> = true
+    }
+    <if test=@flag>
+        <probeChan/>
+    </if>
+    <p>${D}{@stamp}</p>
+</program>
+`);
+    expect(codes(result)).not.toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+    expect(hardErrors(result)).toEqual([]);
+    expect(out.clientJs).toMatch(/_scrml_ws[\w/-]*probe/);
+  });
+
+  test("REGRESSION GUARD — a read inside a match arm with a top-level mount stays clean", () => {
+    const { result } = compileIn("k4", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <probeChan/>
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready><p>${D}{@stamp}</p></>
+    </>
+</program>
+`);
+    // Mount position does not scope a channel — the arm read resolves fine.
+    expect(codes(result)).not.toContain("E-STATE-UNDECLARED");
+    expect(hardErrors(result)).toEqual([]);
   });
 
   test("OUT-OF-SCOPE GUARD — `<each in=@undeclared>` is still not checked", () => {
-    // S385 brief, Observation 3 / variant G: `<each in=...>` reads are never
+    // S385 brief, Observation 3 / variant G: `<each in=…>` reads are never
     // routed through the E-STATE-UNDECLARED predicate. Closing that is
-    // newly-REJECTING and owes a measured corpus migration, so it is
-    // explicitly NOT part of this fix. This test pins the status quo so the
-    // arm-body walk above cannot silently start rejecting it.
-    const consumer = fx("e/app.scrml", `<program>
+    // newly-REJECTING and owes its own measured migration, so it stays open.
+    // Pinned so the conditional-mount refusal cannot start rejecting it.
+    const consumer = fx("k5/app.scrml", `<program>
     ${D}{
         <phase> = 1
     }
@@ -220,13 +322,26 @@ describe("S385 — cross-file channel mounted inside a <match> arm", () => {
     </each>
 </program>
 `);
-
     const result = compileScrml({
       inputFiles: [consumer],
-      outputDir: join(TMP, "e-out"),
+      outputDir: join(TMP, "k5-out"),
       write: false,
       log: () => {},
     });
     expect(hardErrors(result)).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Known-unfixed — recorded so CI carries the debt rather than a doc
+// ---------------------------------------------------------------------------
+
+describe("S385 — deferred", () => {
+  test.todo(
+    "SUPPORT (not merely refuse) a channel mounted inside a <match> arm — " +
+    "needs full parity: every channel collector descending armBodyChildren, the " +
+    "S316 raw-arm stranding addressed, and the TS arm-lexical-scope vs runtime " +
+    "file-scope mismatch reconciled. The last item contradicts §38.12.2's " +
+    "in-place inline algorithm, so it is a SPEC question, not a bug fix.",
+  );
 });

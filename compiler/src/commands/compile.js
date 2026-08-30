@@ -12,7 +12,7 @@ import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
-import { stripRedundantCode, resolveDiagLocation } from "./diagnostic-format.js";
+import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
 // ---------------------------------------------------------------------------
@@ -371,13 +371,18 @@ function getSourceContext(filePath, line, contextLines = 2) {
 function formatError(err, cwd) {
   const parts = [];
 
+  // Source location — resolved FIRST so the header can drop a `(line N, col N)`
+  // that the `-->` line below is about to repeat verbatim (S385).
+  const loc0 = resolveDiagLocation(err);
+
   // Header: error code + message
   const label = c.bold(c.red("error"));
   const code = err.code ? c.dim(`[${err.code}]`) : "";
-  parts.push(`${label}${code ? " " + code : ""}: ${stripRedundantCode(err.code, err.message)}`);
+  const headMsg = stripRedundantLocation(
+    stripRedundantCode(err.code, err.message), loc0.line, loc0.column,
+  );
+  parts.push(`${label}${code ? " " + code : ""}: ${headMsg}`);
 
-  // Source location
-  const loc0 = resolveDiagLocation(err);
   if (loc0.filePath) {
     const filePath = loc0.filePath;
     const relPath = relative(cwd, filePath);
@@ -416,10 +421,14 @@ function formatWarning(warn, cwd) {
     (warn.code && warn.code.startsWith("I-"));
   const label = isInfo ? c.bold(c.cyan("info")) : c.bold(c.yellow("warning"));
   const code = warn.code ? c.dim(`[${warn.code}]`) : "";
-  let msg = `${label}${code ? " " + code : ""}: ${stripRedundantCode(warn.code, warn.message)}`;
-
-  // S385 — read the `span` carrier too; see resolveDiagLocation.
+  // S385 — read the `span` carrier too; see resolveDiagLocation. Resolved before
+  // the header so a baked-in `(line N, col N)` the `-->` repeats can be dropped.
   const wloc = resolveDiagLocation(warn);
+  const warnMsg = stripRedundantLocation(
+    stripRedundantCode(warn.code, warn.message), wloc.line, wloc.column,
+  );
+  let msg = `${label}${code ? " " + code : ""}: ${warnMsg}`;
+
   if (wloc.filePath) {
     const relPath = relative(cwd, wloc.filePath);
     const loc = wloc.line ? `:${wloc.line}${wloc.column ? ":" + wloc.column : ""}` : "";

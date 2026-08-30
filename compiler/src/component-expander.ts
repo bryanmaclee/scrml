@@ -4680,6 +4680,11 @@ export function runCEFile(
       ceErrors
     );
     if (importedChannelAliases.size > 0) {
+      // S385 — fail CLOSED on a mount inside a conditional/iterative container
+      // BEFORE expanding. CHX cannot wire such a mount (see
+      // reportChannelMountsInConditionals), and accepting it half-wired would
+      // ship dead markup at exit 0.
+      reportChannelMountsInConditionals(expandedNodes, importedChannelAliases, ceErrors);
       phase2Nodes = expandChannels(
         expandedNodes,
         importedChannelAliases,
@@ -4802,6 +4807,152 @@ function buildImportedChannelAliases(
 }
 
 /**
+ * S385 — refuse a cross-file channel MOUNT placed inside a conditional or
+ * iterative container, loudly and by name.
+ *
+ * `g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`.
+ *
+ * ## Why this is a REFUSAL and not a widening
+ *
+ * CHX (§38.12.2) inlines a channel by replacing the mount node IN PLACE:
+ * "Replace M with deepClone(decl)". For a mount at `<program>` level that lands
+ * the channel's cells, its `export function`s and its WebSocket layer at FILE
+ * scope, which is exactly what §38.12.3's per-IMPORTER cell mirror requires.
+ *
+ * A mount inside a `<match>` arm or an `<each>` body cannot satisfy that
+ * contract, and the gap is not one missing walk — it is structural:
+ *
+ *   - EVERY collector that feeds channel emission descends `node.children`
+ *     only, and a `<match>` is `kind: "match-block"` with NO `children` (arm
+ *     bodies live in `armBodyChildren`). `collectChannelNodes`,
+ *     `collectChannelFunctionMap`, `collectChannelCellMap` (`emit-channel.ts`)
+ *     and `collectFunctions` (`codegen/collect.ts`) all miss it. Measured on an
+ *     arm mount vs a top-level mount: the channel's exported `beat` reaches
+ *     `.server.js` 0 times vs 1, and the consumer bundle carries 1 cell
+ *     init/set vs 4.
+ *   - An each-bearing bare-body arm is BLANKED by ast-builder (S316,
+ *     `:15922-15975`) to avoid the S153 `collectEachBlocks` double-emit and its
+ *     body is stashed as RAW TEXT, so at CE time the mount is not even a node.
+ *   - Even with every collector taught to descend, the type-system binds the
+ *     inlined cells in the ARM's lexical scope while the runtime mirror is
+ *     file-scoped — so a read outside the match still fails. Closing that means
+ *     hoisting, which contradicts §38.12.2's in-place algorithm and is a SPEC
+ *     amendment, not a bug fix.
+ *
+ * Accepting the shape while wiring only part of it would be a fail-closed →
+ * fail-open move: the compile goes green and the app ships dead markup (the raw
+ * `<alias/>` tag emitted verbatim into the HTML string) plus a cell that never
+ * syncs. Base §8 admits a newly-accepting change as a bug fix ONLY where it
+ * restores conformance; half-wiring restores nothing. So this fails CLOSED and
+ * names the one-line fix.
+ *
+ * ⚑ Needs a `§34` catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL` — SPEC is
+ * PA-owned and deliberately untouched here.
+ */
+const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
+  "match-block": "a `<match>` arm",
+  "each-block": "an `<each>` body",
+};
+
+function reportChannelMountsInConditionals(
+  nodes: ASTNode[],
+  aliases: Map<string, { imported: string; sourceKey: string }>,
+  errors: CEError[],
+): void {
+  if (aliases.size === 0) return;
+
+  const fire = (alias: string, containerKind: string, span: Span | undefined): void => {
+    const where = CHANNEL_MOUNT_CONTAINER_LABEL[containerKind] ?? "a conditional container";
+    errors.push(makeCEError(
+      "E-CHANNEL-MOUNT-IN-CONDITIONAL",
+      `E-CHANNEL-MOUNT-IN-CONDITIONAL: the cross-file channel \`<${alias}/>\` is mounted inside ${where}. ` +
+      `A channel is an app-scope singleton (§38.1) and CHX inlines it in place (§38.12.2), so a mount ` +
+      `inside a conditional or iterative container cannot emit the channel's cells, its exported ` +
+      `functions, or its WebSocket route — the tag would be emitted verbatim into the markup and every ` +
+      `\`@cell\` read of it would resolve to a cell that never syncs. ` +
+      `Fix: move \`<${alias}/>\` out to \`<program>\` level. Its cells stay readable everywhere in the ` +
+      `file, including inside this arm — mount position does not scope a channel.`,
+      (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Span,
+    ));
+  };
+
+  // Does this subtree contain a markup node whose tag is a channel alias? The
+  // mount need not be a DIRECT child — `<div><probeChan/></div>` inside an arm
+  // is the same defect, so the search is depth-first over the whole subtree.
+  const findAliasMount = (node: unknown, seen: Set<unknown>): string | null => {
+    if (!node || typeof node !== "object" || seen.has(node)) return null;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const hit = findAliasMount(child, seen);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    const rec = node as Record<string, unknown>;
+    if (rec.kind === "markup" && typeof rec.tag === "string" && aliases.has(rec.tag)) {
+      return rec.tag;
+    }
+    for (const key of Object.keys(rec)) {
+      if (key === "span" || key === "id" || key === "parent") continue;
+      const hit = findAliasMount(rec[key], seen);
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  // An each-bearing bare-body arm carries no nodes at all — ast-builder stashed
+  // its body as raw source text. Scan that text for an alias opener.
+  const findAliasInRaw = (raw: unknown): string | null => {
+    if (typeof raw !== "string" || raw.length === 0) return null;
+    for (const alias of aliases.keys()) {
+      // `<alias` followed by a non-identifier char — matches `<probeChan/>`,
+      // `<probeChan />` and `<probeChan attr=…>`, but not `<probeChanOther/>`.
+      if (new RegExp(`<\\s*${alias}(?![A-Za-z0-9_$])`).test(raw)) return alias;
+    }
+    return null;
+  };
+
+  const walk = (node: unknown, seen: Set<unknown>): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, seen);
+      return;
+    }
+    const rec = node as Record<string, unknown>;
+    const kind = typeof rec.kind === "string" ? rec.kind : "";
+
+    if (kind === "match-block" || kind === "each-block") {
+      // Node form — the mount survived as AST (non-each arms, each bodies).
+      const armHit = findAliasMount(rec.armBodyChildren ?? null, new Set())
+        ?? findAliasMount(rec.bodyChildren ?? null, new Set());
+      // Raw form — S316-blanked each-bearing arm bodies.
+      let rawHit: string | null = null;
+      const wrappers = rec.armBodyChildren;
+      if (Array.isArray(wrappers)) {
+        for (const w of wrappers) {
+          const wr = w as Record<string, unknown> | null;
+          if (!wr) continue;
+          rawHit = findAliasInRaw(wr._reparseEachArmBodyRaw);
+          if (rawHit) break;
+        }
+      }
+      const hit = armHit ?? rawHit;
+      if (hit) fire(hit, kind, rec.span as Span | undefined);
+      // Fall through — a nested match inside an arm is still worth reporting.
+    }
+
+    for (const key of Object.keys(rec)) {
+      if (key === "span" || key === "id" || key === "parent") continue;
+      walk(rec[key], seen);
+    }
+  };
+
+  walk(nodes, new Set());
+}
+
+/**
  * Walk the AST and replace each markup node whose tag matches a local
  * channel alias with a deep-cloned copy of the source file's channel-decl.
  *
@@ -4858,65 +5009,41 @@ function _expandChannelNode(
       const inlined = _cloneChannelDecl(sourceDecl, counter, alias.sourceKey, m.span);
       return inlined;
     }
-    // Not a cross-file channel ref — fall through to the child walk below.
-  }
-
-  // g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm
-  // (S385) — the child-bearing fields this walk descends into.
-  //
-  // Before S385 this function recursed into exactly three kinds —
-  // `markup`→`children`, `state`→`children`, `logic`→`body` — and returned every
-  // other node kind UNWALKED. That under-walks the normative CHX algorithm at
-  // SPEC §38.12.2, whose step is an unqualified "Walk F.ast.nodes: For each
-  // markup node M with M.tag in aliasMap". `<match>` fell straight into the gap:
-  // it is `kind: "match-block"`, NOT `"markup"`, so the walk never entered it at
-  // all, and its per-arm bodies live in `armBodyChildren` (S177 — one wrapper
-  // per arm), never in `children`.
-  //
-  // Consequence: a cross-file channel mounted inside a `<match>` arm was never
-  // inlined, so its cells never reached the type-system's scopeChain and a
-  // `@cell` read of that channel fired a false `E-STATE-UNDECLARED` — directly
-  // contradicting SPEC §6.1.2, which names "a CE-inlined cross-file channel cell
-  // (§38.12)" in the set that SHALL be in scope. (`<if>` was never affected: it
-  // happens to be a `markup` node with a plain `children` array.)
-  //
-  // ⚠ Why this is a CURATED field list and NOT a generic "walk every array of
-  // nodes" — measured S385, this matters. Several AST nodes expose the SAME
-  // child node identities under two different array fields:
-  //   - `each-block.bodyChildren` and `each-block.templateChildren` share their
-  //     element identities outright. A generic walk visits such a mount TWICE
-  //     and produces two independent `_cloneChannelDecl` copies — i.e. duplicate
-  //     channel wiring — which was observed directly.
-  //   - `logic.body` aliases `logic.imports` and `logic.typeDecls`; replacing a
-  //     node under one field but not the other silently DE-ALIASES the AST.
-  // So the set below is deliberately minimal and overlap-free: `armBodyChildren`
-  // shares no element identity with `bodyChildren` on a `match-block`.
-  //
-  // NOT extended to `each-block` bodies: that is the aliasing hazard above AND a
-  // channel decl inlined into an `<each>` body lands its `export function` in
-  // each-body scope, which fires E-EACH-BODY-DECL-UNSUPPORTED (§17.7.3). That
-  // shape needs a ruling, not a silent widening — see the S385 report.
-  const CHILD_FIELDS = ["children", "body", "armBodyChildren"] as const;
-
-  let changed = false;
-  const patch: Record<string, unknown> = {};
-  const rec = node as unknown as Record<string, unknown>;
-  for (const key of CHILD_FIELDS) {
-    const val = rec[key];
-    if (!Array.isArray(val)) continue;
-    const next = val.map((c) =>
-      c && typeof c === "object" && typeof (c as ASTNode).kind === "string"
-        ? _expandChannelNode(c as ASTNode, aliases, fileASTMap, filePath, counter, errors)
-        : c
-    );
-    if (next.some((nc, i) => nc !== val[i])) {
-      patch[key] = next;
-      changed = true;
+    // Not a cross-file channel ref — recurse into children
+    const newChildren = m.children
+      ? m.children.map((c) => _expandChannelNode(c, aliases, fileASTMap, filePath, counter, errors))
+      : m.children;
+    if (newChildren !== m.children) {
+      return { ...m, children: newChildren };
     }
+    return node;
   }
-  // Identity-preserving: an untouched subtree returns the very same object, so
-  // every file with no mount in a nested container sees a byte-identical AST.
-  return changed ? ({ ...rec, ...patch } as unknown as ASTNode) : node;
+
+  // State node — recurse into children
+  if (node.kind === "state") {
+    const s = node as any;
+    if (Array.isArray(s.children)) {
+      const newChildren = s.children.map((c: any) => _expandChannelNode(c, aliases, fileASTMap, filePath, counter, errors));
+      if (newChildren.some((nc: any, i: number) => nc !== s.children[i])) {
+        return { ...s, children: newChildren };
+      }
+    }
+    return node;
+  }
+
+  // Logic node — recurse into body where markup may live (BLOCK_REF inlined nodes)
+  if (node.kind === "logic") {
+    const l = node as LogicNode;
+    if (Array.isArray(l.body)) {
+      const newBody = l.body.map((stmt: any) => _expandChannelNode(stmt, aliases, fileASTMap, filePath, counter, errors));
+      if (newBody.some((nb: any, i: number) => nb !== l.body[i])) {
+        return { ...l, body: newBody as any };
+      }
+    }
+    return node;
+  }
+
+  return node;
 }
 
 /**

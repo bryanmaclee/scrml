@@ -56,6 +56,37 @@ export function stripRedundantCode(code, message) {
  * @param {object} d diagnostic object (error, warning, or lint)
  * @returns {{ filePath: string|null, line: number|null, column: number|null }}
  */
+/**
+ * stripRedundantLocation — remove a message's trailing `(line N, col N)` when the
+ * formatter is about to print the SAME coordinates on its `-->` line.
+ *
+ * S385. Several diagnostics bake their location into the message text (`… See
+ * SPEC §40.8. (line 2, col 5)`). Before the `span`-carrier fallback landed, the
+ * `-->` line printed a bare path with no coordinates, so the baked-in text was
+ * the only location an author got. Now that `-->` carries `path:2:5`, the two
+ * render back-to-back and the duplication is exact:
+ *
+ *     warning [W-PROGRAM-REDUNDANT-LOGIC]: … (line 2, col 5)
+ *       --> app.scrml:2:5
+ *
+ * Strips ONLY on an exact coordinate match, so a message that legitimately cites
+ * a DIFFERENT line (a "declared at …" cross-reference) keeps its text. Print-time
+ * only — `result.warnings[i].message` is untouched, mirroring stripRedundantCode.
+ *
+ * @param {string} message the raw diagnostic message
+ * @param {number|null} line the line the formatter will print
+ * @param {number|null} column the column the formatter will print
+ * @returns {string}
+ */
+export function stripRedundantLocation(message, line, column) {
+  if (typeof message !== "string" || !line) return message;
+  return message.replace(
+    /\s*\(line\s+(\d+),\s*col(?:umn)?\s+(\d+)\)\s*$/,
+    (whole, l, c) =>
+      Number(l) === Number(line) && Number(c) === Number(column) ? "" : whole,
+  );
+}
+
 export function resolveDiagLocation(d) {
   if (!d || typeof d !== "object") return { filePath: null, line: null, column: null };
   const span = d.span && typeof d.span === "object" ? d.span : null;
