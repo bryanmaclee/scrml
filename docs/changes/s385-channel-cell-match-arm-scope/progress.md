@@ -496,3 +496,92 @@ Files changed vs `origin/main`: `compiler/src/component-expander.ts`,
 `compiler/src/commands/compile.js`, `compiler/src/commands/diagnostic-format.js` (+ tests).
 
 **⚑ Still owed: a §34 catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL`.** SPEC is PA-owned.
+
+
+---
+
+# ROUND 4 — the raw-text path is DELETED
+
+**bryan ruled: (a) now, file the gap, (b) as its own arc.**
+
+## Reproduced before deleting
+
+A mount correctly at `<program>` level, plus an each-bearing arm containing only a COMMENT naming the
+alias:
+
+```scrml
+<probeChan/>
+<match for=Phase on=@phase>
+    <Ready>
+        <!-- do not mount <probeChan/> here -->
+        <each in=@rows as r><li>${r}</li></each>
+    </>
+</>
+```
+
+→ `E-CHANNEL-MOUNT-IN-CONDITIONAL`. **Clean on `main`, FAILS on the branch.** A comment made a valid
+file uncompilable. Same class for any `<pre>`, doc block, or string literal naming the alias.
+
+## What was deleted
+
+`findAliasInRaw` and its `_reparseEachArmBodyRaw` call site. **Zero references remain.** Detection is
+now **node-path only**.
+
+This is a **deliberate, ruled FAIL-OPEN** for the each-bearing arm — the adopter's exact shape. S316
+blanks that arm before CE runs, so there is no tree to ask, and a text scan cannot distinguish a
+mount from a mention. Don't ask the text what the tree already knows; where the tree cannot be asked,
+the answer is to stop asking, not to guess more carefully. **Masking comments and strings was NOT
+implemented** — that is the enumerate-forever shape ruled against at S371.
+
+## Matrix, re-run by execution
+
+| shape | result |
+|---|---|
+| `l` — mount direct child of arm | **REFUSED** (node path) |
+| `f2-nested` — mount one level deep | **REFUSED** |
+| `p-nested` — mount two levels deep | **REFUSED** |
+| `d-noread` — non-each arm, mount, no read | **REFUSED** |
+| `nested-match` — mount in inner match | **REFUSED ×1** (no duplicate) |
+| `c` / `m-workaround` / `k-if` / `g` / `collide` | **CLEAN** |
+| `s-comment` — comment naming the alias | **CLEAN** ← the round-4 regression guard |
+| `q-strlit` — `<pre>` naming the alias | **CLEAN** |
+| `d-each` — each-bearing arm + mount, no read | **CLEAN — ruled fail-open** |
+| `a` — adopter shape | refusal **no longer fires**; still fails on the PRE-EXISTING `E-STATE-UNDECLARED` that is present on `main` |
+
+⚑ **Note on the expected matrix.** "D" was expected to flip to fail-open. The round-2 `d-noread`
+fixture is **not** each-bearing (no `<each>` in the arm), so it is a node-path case and correctly
+stays REFUSED. The true each-bearing equivalent was added as `d-each` and does go fail-open. The
+expectation holds once the variant is correctly identified.
+
+## Corpus re-measure, `origin/main` vs fix
+
+1005 files. **Newly-failing: 0 of 1005.** 250 FAIL on both sides, and `diff` is byte-empty — so the
+identity is per-file (verdict AND diagnostic code set), not merely matching aggregate counts. Zero
+now for a *stronger* reason than in round 3: there is no longer a text-scan heuristic that could fire
+on a mention.
+
+## Tests
+
+- The comment case and a `<pre>` case are pinned **CLEAN** — the regression this round exists to
+  prevent.
+- The each-bearing refusal assertion is converted to an explicit **`test.todo`** naming the filed
+  gap, so CI carries the fail-open as known debt rather than silently asserting the wrong thing.
+
+## ⚑ Doc claims this round falsifies
+
+- **`compiler/SPEC.md` §34 row for `E-CHANNEL-MOUNT-IN-CONDITIONAL`** claims detection happens "BOTH
+  ways a mount can exist … and a scan of the S316 `_reparseEachArmBodyRaw` text stash." **That is now
+  FALSE.** SPEC is PA-owned and was NOT touched — flagged for PA correction.
+- **In-source:** the doc block on `reportChannelMountsInConditionals` made the same both-paths claim.
+  **Fixed in this commit** — it now carries an explicit SCOPE section stating the check is node-path
+  only, that the adopter shape is not detected, why the text scan was deleted, and a do-not-restore
+  note. I swept `component-expander.ts` and the integration suite for any other both-paths wording;
+  the remaining `raw text` hits in that file are pre-existing comments about unrelated subsystems
+  (prop substitution, `armsRaw` codegen re-parse) and make no claim about this check.
+
+## Gates at the round-4 tip
+
+| gate | result |
+|---|---|
+| pre-commit | **29364 pass / 0 fail** / 86 skip / 3 todo |
+| corpus, `origin/main` vs fix | **0 of 1005 newly-failing**, diff byte-empty |
