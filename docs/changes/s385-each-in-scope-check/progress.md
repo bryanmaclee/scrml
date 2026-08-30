@@ -679,3 +679,38 @@ Unchanged and still measured: `in=`/`of=`/`key=` all fire on undeclared reads;
 `in=drivers`, `@session`, nested-each `in=r.kids` all clean; the `as (k,v)`
 ordering placement (TRAP C) is correct and stays; the §7 bare-`in=<later const>`
 behaviour change is real, documented, corpus-zero.
+
+## ROUND 3 — full suite
+
+| | base `a8448ac` | round-1 | round-2 | round-3 |
+|---|---|---|---|---|
+| pass | 30703 | 30717 | 30727 | 30730 |
+| fail | 57 | 55 | 55 | 55 |
+| skip | 216 | 216 | 216 | 216 |
+| todo | 2 | 2 | 2 | 3 |
+| test files | 1425 | 1426 | 1426 | 1426 |
+
+**Zero new failures.** The `todo` count rises 2 -> 3: that is
+`GAP-S385-EACH-KEY-DESTRUCTURE`, the case that previously passed by asserting a
+crash was fine. A green test became an honest todo, which is the point.
+
+Failure NAME SETS diffed against the base set captured before any edit: the same
+single documented browser-lane entry as rounds 1 and 2
+(`M1 — … a swapped-in if= mounts on true and unmounts on false (not frozen)`,
+`FAILURE-BASELINE.json` line 13), zero names in the other direction.
+
+Authoritative gate on the round-3 build:
+`bun scripts/browser-baseline.ts --check` -> **PASS — browser failure name set
+matches the baseline (48 asserted, 0 of 2 env-excluded observed)**.
+
+Pre-commit hook (unit + integration + conformance): **29376 pass / 0 fail**.
+
+## Terminal state (round 3)
+
+- Branch `worktree-agent-a4c73958a8bad6e3b`. **NOT LANDED. No PR opened.**
+- `<each>` opener covered on all four expression slots — `if=` (S302,
+  pre-existing), `in=`, `of=`, `key=` — with `in=`/`of=` checked outside the
+  per-item scope and `key=` inside it.
+- Corpus impact: **0 of 1005** for the `@.`-guard-drop delta, **0 of 1005**
+  cumulative from base.
+- Two reproduced gaps drafted in `GAP-DRAFTS.md` for the PA to file.
