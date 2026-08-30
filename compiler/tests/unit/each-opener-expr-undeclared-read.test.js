@@ -599,30 +599,267 @@ describe("§8 — the `@.` sigil does not shield the rest of the expression", ()
 });
 
 // =============================================================================
-// §9 — EVERY interpolation in an opener value is a read site
+// §9 — `${…}` IS NOT A WORKING OPENER FORM, AND THIS CHECK DOES NOT COVER IT
 // =============================================================================
-describe("§9 — a multi-interpolation opener value checks every `${…}`, not just the first", () => {
-  test("`key=${@a}-${@typo}` reports the SECOND interpolation", () => {
-    // The `on=` precedent's `/^\$\{([\s\S]*)\}$/` is greedy and single-shot: on
-    // this value it collapses to the inner text `@a}-${@typo`, so `@typo` is
-    // never checked. Tightening the class to `[^}]` instead hands the parser the
-    // raw template, which reports "Undeclared identifier `$`" — a diagnostic that
-    // names nothing useful. The depth scan reports the actual cell.
-    const r = compileSource(
-      `<program>
+//
+// THIS SECTION REPLACES AN EARLIER ONE THAT PINNED THE OPPOSITE, AND THE REASON
+// IS THE WHOLE R4 FINDING. Round 3 scanned the opener's RAW TEXT for `${ … }`
+// interpolation bodies and scope-checked those instead of the whole value. §9
+// then pinned "a multi-interpolation opener checks every `${…}`" — a property
+// that reads like added coverage and is not, because the construct it describes
+// CANNOT COMPILE IN THE FIRST PLACE.
+//
+// MEASURED ON `origin/main` BY COMPILING THROUGH THE CLI — three spellings, all
+// three REJECTED with `E-CODEGEN-INVALID-LOGIC` and no output written:
+//     <each in=${@rows} as r>              -> FAILED, 1 error
+//     <each in=@rows as r key=${r}>        -> FAILED, 1 error
+//     <each in=@rows as r key=${@a}-${r}>  -> FAILED, 1 error
+// So the text scan bought ZERO coverage while causing a false POSITIVE on
+// `in=@rows.map(r => `id-${r}`)` (it reached inside a lambda body the shared
+// walker deliberately skips) and a false NEGATIVE on
+// `in=@undeclaredHidden.map(x => `${1}`)` (its targets list REPLACED the whole
+// value rather than adding to it). Deleting it closes both.
+//
+// ⚠ READ THE NEXT PARAGRAPH BEFORE COMPARING THIS SECTION TO `main` — THE TWO
+// HARNESSES DO NOT MEASURE THE SAME THING, AND THAT DIVERGENCE IS WHY AN EARLIER
+// REVIEW ROUND DISAGREED WITH ITSELF ABOUT WHETHER THIS SHAPE COMPILES.
+// `E-CODEGEN-INVALID-LOGIC` on these shapes comes from the emitted-JS parse gate
+// in `api.js`, and that gate lives inside `if (write && outputDir)`. This file's
+// `compileSource` passes `write: false`, so THE GATE NEVER RUNS HERE. Measured
+// on `main` through THIS harness, all four shapes below come back CLEAN — the
+// programmatic API silently accepts source whose emitted JS does not parse.
+// (Filed as a separate gap; see the report. It is not this arc's to fix.)
+//
+// THAT MAKES THE ACCEPT/REJECT DIRECTION OF THIS ARC STRICTLY CORRECT. Rejecting
+// at the TYPE-SYSTEM stage closes the silent-accept in every `write:false`
+// consumer — the LSP among them — not just in the CLI, which already caught it
+// one stage later. The MESSAGE is still wrong (see the `test.todo`); the
+// direction is not.
+//
+// WHAT IS PINNED HERE IS THE PROPERTY THAT ACTUALLY MATTERS: the form is
+// REJECTED, not silently accepted. Deliberately CODE-AGNOSTIC — which stage
+// rejects it is not this check's contract, and asserting the code would make
+// this test a tripwire on an unrelated arc. See the `test.todo` below for the
+// honest diagnostic, which is a separate piece of work.
+describe("§9 — an interpolated `${…}` opener value is rejected, not silently accepted", () => {
+  const INTERP_OPENERS = [
+    ["in", `<each in=\${@rows} as r><li>\${r}</li></each>`],
+    ["keySingle", `<each in=@rows as r key=\${r}><li>\${r}</li></each>`],
+    ["keyMulti", `<each in=@rows as r key=\${@a}-\${r}><li>\${r}</li></each>`],
+    ["keyMultiWithTypo", `<each in=@rows as r key=\${@a}-\${@hiddenSecondTypo}><li>\${r}</li></each>`],
+  ];
+
+  for (const [label, opener] of INTERP_OPENERS) {
+    test(`\`${label}\` — an interpolated opener fails the compile`, () => {
+      const r = compileSource(
+        `<program>
   <a> = 1
   <rows> = [1, 2]
-  <each in=@rows as r key=\${@a}-\${@hiddenSecondTypo}><li>\${r}</li></each>
+  ${opener}
 </program>
 `,
-      "interp-second-read.scrml",
+        `interp-opener-${label}.scrml`,
+      );
+      const errs = [...r.errors, ...r.warnings]
+        .filter((d) => String(d.code).startsWith("E-"));
+      // At least one hard error. NOT a specific code — see the header note.
+      expect({ label, errorCount: errs.length > 0 })
+        .toEqual({ label, errorCount: true });
+    });
+  }
+
+  // A BACKTICK TEMPLATE IS A DIFFERENT THING FROM A BARE `${…}`, AND THE
+  // DISTINCTION IS WHY THE ABOVE COSTS NOTHING. A real template literal is
+  // valid JS, parses, and the walker descends it — so an undeclared read inside
+  // one IS still named. Only the UNQUOTED `${…}`, which is not a JS expression
+  // under any spelling, degrades to the `$` message.
+  test("a backtick template in `key=` still names an undeclared read inside it", () => {
+    const r = compileSource(
+      `<program>
+  <rows> = [1, 2]
+  <each in=@rows as r key=\`row-\${@templateHiddenTypo}\`><li>\${r}</li></each>
+</program>
+`,
+      "template-literal-key-typo.scrml",
     );
     const hits = diagsByCode(r, "E-STATE-UNDECLARED")
-      .filter((d) => String(d.message).includes("hiddenSecondTypo"));
+      .filter((d) => String(d.message).includes("templateHiddenTypo"));
     expect(hits.length).toBeGreaterThan(0);
-    // And it must not invent a diagnostic about the template punctuation.
-    const bogus = [...r.errors, ...r.warnings]
-      .filter((d) => /Undeclared identifier `\$`/.test(String(d.message)));
-    expect(bogus).toEqual([]);
   });
+
+  // THE HONEST DIAGNOSTIC IS MISSING AND NEITHER SPELLING NAMES THE MISTAKE.
+  // Through the CLI on `origin/main` an interpolated opener reports
+  // E-CODEGEN-INVALID-LOGIC ("the compiler could not lower this construct to
+  // valid output"); with the whole-value parse this arc lands, the TS stage
+  // rejects first and reports E-SCOPE-001 "Undeclared identifier `$`". BOTH are
+  // placeholders: neither says *`${…}` is not an opener form — write the
+  // expression directly*. Recorded here rather than left to be rediscovered.
+  test.todo("GAP-S385-EACH-OPENER-INTERPOLATION — `<each in=${…}>` / `key=${…}` should say \"not a valid opener form\"; today it says E-CODEGEN-INVALID-LOGIC (CLI, main) or E-SCOPE-001 on `$` (post-r4)");
+
+  // AND THE HARNESS DIVERGENCE ITSELF IS A GAP, NOT A TEST-FILE QUIRK.
+  test.todo("GAP-S385-VALIDATE-EMIT-SKIPPED-WHEN-WRITE-FALSE — `compileScrml({write:false})` skips the emitted-JS parse gate (api.js, the gate is inside `if (write && outputDir)`), so every unit test on that harness is blind to E-CODEGEN-INVALID-LOGIC");
+});
+
+// =============================================================================
+// §10 — ADVERSARIAL SHAPE SET. A CLEAN CORPUS DIFFERENTIAL IS NOT SUFFICIENT.
+// =============================================================================
+//
+// WHY THIS SECTION EXISTS, AND IT IS NOT A STYLE PREFERENCE. Round 3 measured
+// its corpus impact at 0 newly-failing of 1005 files, positive-controlled, and
+// that measurement was CORRECT AND STILL MISSED A HIGH FALSE POSITIVE. No file
+// in the corpus happens to put a template literal inside an `<each in=>` lambda,
+// so the differential could not see it.
+//
+// That is the coverage-removal blind spot in general form: THE INPUTS THAT WOULD
+// TRIP A NEWLY-REJECTING CHANGE ARE PRECISELY THE ONES NOBODY HAS WRITTEN YET.
+// A corpus differential measures BLAST RADIUS over existing artifacts; it cannot
+// measure the shape space a new rejection now closes. Compounding it here: the
+// corpus is ~100% LLM-authored, so its ergonomic diversity is far narrower than
+// what a person writing scrml by hand produces.
+//
+// So the safety claim for a rejecting change is TWO-PART:
+//   (1) corpus differential clean — necessary, NOT sufficient; and
+//   (2) an enumerated adversarial shape set, each shape a fixture, each asserted
+//       to compile with ZERO `E-` diagnostics.
+// Every case below is code-agnostic on purpose (same rationale as §3): a future
+// edit that makes any of these fire ANY error must turn this file red.
+describe("§10 — adversarial opener shapes that must not false-fire", () => {
+  function expectNoErrors3(r, label) {
+    const errs = [...r.errors, ...r.warnings]
+      .filter((d) => String(d.code).startsWith("E-"));
+    expect({ label, errors: errs.map((d) => `${d.code}: ${d.message}`) })
+      .toEqual({ label, errors: [] });
+  }
+
+  // Each entry is [label, <program> body]. The body carries its own declarations
+  // so a shape can bring whatever cells it needs.
+  const SHAPES = [
+    // ---- lambda bodies: expression form and block form ---------------------
+    ["lambda-expression-body",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.filter(n => n > 1) as x><li>\${x}</li></each>`],
+    ["lambda-block-body",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.filter(n => { return n > 1 }) as x><li>\${x}</li></each>`],
+    ["lambda-block-body-multi-statement",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.filter(n => { const keep = n > 1; return keep }) as x><li>\${x}</li></each>`],
+
+    // ---- F1: a template literal NESTED INSIDE a lambda ---------------------
+    // The exact round-3 false positive. The raw scan reached into the lambda
+    // body and reported `r` as an outer-scope read.
+    ["template-literal-inside-lambda",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map(r => \`id-\${r}\`) as x><li>\${x}</li></each>`],
+    ["template-literal-inside-lambda-dotted",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map(r => \`row-\${r.id}-\${r.name}\`) as x><li>\${x}</li></each>`],
+
+    // ---- a template literal at the TOP of the opener, reading a real cell ---
+    ["template-literal-top-level-reading-a-cell",
+      `<rows> = [1, 2, 3]
+  <prefix> = "p"
+  <each in=@rows.map(r => \`\${@prefix}-\${r}\`) as x><li>\${x}</li></each>`],
+
+    // ---- destructured lambda params ---------------------------------------
+    ["lambda-array-destructure-param",
+      `<pairs> = [[1, 2], [3, 4]]
+  <each in=@pairs.map(([k, v]) => k + v) as x><li>\${x}</li></each>`],
+    ["lambda-object-destructure-param",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map(({ id }) => id) as x><li>\${x}</li></each>`],
+    ["lambda-object-destructure-renamed",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map(({ id: rowId }) => rowId) as x><li>\${x}</li></each>`],
+    ["lambda-rest-param",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map((...args) => args[0]) as x><li>\${x}</li></each>`],
+    ["lambda-two-params-reduce",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.reduce((acc, cur) => acc.concat(cur), []) as x><li>\${x}</li></each>`],
+
+    // ---- a lambda param that SHADOWS a declared cell name ------------------
+    ["lambda-param-shadowing-a-cell-name",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map(rows => rows + 1) as x><li>\${x}</li></each>`],
+
+    // ---- the `as`-alias referenced in `key=` -------------------------------
+    ["as-alias-in-key",
+      `<rows> = [1, 2, 3]
+  <each in=@rows as r key=r.id><li>\${r}</li></each>`],
+    ["as-alias-in-key-inside-a-template-literal",
+      `<rows> = [1, 2, 3]
+  <each in=@rows as r key=\`row-\${r.id}\`><li>\${r}</li></each>`],
+    ["as-alias-in-key-call-chain",
+      `<rows> = [1, 2, 3]
+  <each in=@rows as r key=r.tags.join("-")><li>\${r}</li></each>`],
+
+    // ---- `@.` and `@.field` ------------------------------------------------
+    ["at-dot-bare-in-key",
+      `<rows> = [1, 2, 3]
+  <each in=@rows key=@.id as r><li>\${r}</li></each>`],
+    ["at-dot-field-in-in",
+      `<outer> = [1, 2]
+  <each in=@outer as o><ul><each in=@.rows as r><li>\${r}</li></each></ul></each>`],
+
+    // ---- long method chains ------------------------------------------------
+    ["long-method-chain",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.filter(a => a > 0).map(b => b * 2).slice(0, 3) as x><li>\${x}</li></each>`],
+    ["long-method-chain-with-a-template-literal-limb",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.filter(a => a > 0).map(b => \`n-\${b}\`).slice(0, 3) as x><li>\${x}</li></each>`],
+
+    // ---- a nested each whose inner opener reads the OUTER alias ------------
+    ["nested-each-inner-in-reads-outer-alias",
+      `<groups> = [1, 2]
+  <each in=@groups as g><ul><each in=g.items as it><li>\${it}</li></each></ul></each>`],
+    ["nested-each-inner-key-reads-outer-alias",
+      `<groups> = [1, 2]
+  <each in=@groups as g><ul><each in=g.items as it key=g.id + it.id><li>\${it}</li></each></ul></each>`],
+    ["nested-each-inner-lambda-reads-outer-alias",
+      `<groups> = [1, 2]
+  <each in=@groups as g><ul><each in=g.items.filter(i => i.gid === g.id) as it><li>\${it}</li></each></ul></each>`],
+
+    // ---- `of=` count form with an expression -------------------------------
+    ["of-count-plain-cell",
+      `<n> = 3
+  <each of=@n as i><li>\${i}</li></each>`],
+    ["of-count-arithmetic",
+      `<n> = 3
+  <each of=@n + 1 as i><li>\${i}</li></each>`],
+    ["of-count-length-of-a-cell",
+      `<rows> = [1, 2, 3]
+  <each of=@rows.length as i><li>\${i}</li></each>`],
+    ["of-count-with-a-lambda",
+      `<rows> = [1, 2, 3]
+  <each of=@rows.filter(n => n > 1).length as i><li>\${i}</li></each>`],
+
+    // ---- assorted expression forms the walker must tolerate ---------------
+    ["ternary-iterable",
+      `<flag> = true
+  <a> = [1]
+  <b> = [2]
+  <each in=@flag ? @a : @b as x><li>\${x}</li></each>`],
+    ["array-literal-iterable",
+      `<each in=[1, 2, 3] as x><li>\${x}</li></each>`],
+    ["global-in-a-chain",
+      `<rows> = [1, 2, 3]
+  <each in=@rows.map(r => r.id).filter(Boolean) as x><li>\${x}</li></each>`],
+    ["optional-chain-iterable",
+      `<box> = 0
+  <each in=@box?.rows as x><li>\${x}</li></each>`],
+    ["two-name-destructure-opener",
+      `<m> = 0
+  <each in=@m.entries() as (k, v)><li>\${k}\${v}</li></each>`],
+  ];
+
+  for (const [label, body] of SHAPES) {
+    test(`\`${label}\` compiles with zero E- diagnostics`, () => {
+      expectNoErrors3(
+        compileSource(`<program>\n  ${body}\n</program>\n`, `adversarial-${label}.scrml`),
+        label,
+      );
+    });
+  }
 });

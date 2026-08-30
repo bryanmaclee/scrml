@@ -12774,51 +12774,55 @@ function annotateNodes(
           // all yield idents the walker already exempts at its own `@.` check
           // (~:7795). And the `try` below covers any parse failure regardless. So
           // the sigil is handled where it belongs — inside the one shared walker —
-          // and `key=@.id` / `${@.}` stay silent through that exemption rather
-          // than through a whole-expression bail.
+          // and `key=@.id` stays silent through that exemption rather than
+          // through a whole-expression bail.
 
-          // EVERY interpolation is a separate read site. An opener value may be a
-          // bare expression (`@rows`, `@.id + @typo`) or a TEMPLATE carrying one
-          // or more `${ … }` reads (`key=${@a}-${@b}`). Collect the interpolation
-          // bodies and check each; with none, check the whole value.
+          // ONE EXPRESSION, PARSED — NEVER A TEXT SCAN OVER THE RAW.
           //
-          // Brace-depth aware on purpose. The `on=` precedent used
-          // `/^\$\{([\s\S]*)\}$/`, which is GREEDY and single-shot: on
-          // `${@a}-${@b}` it collapses to the inner text `@a}-${@b`, so `@b` is
-          // never checked at all. Tightening the class to `[^}]` instead breaks
-          // a legitimately nested body (`${ {a: 1}.a }`) and, on the
-          // multi-interpolation shape, hands the parser the raw template — which
-          // reports `Undeclared identifier \`$\`` and names nothing useful. A
-          // depth scan gets both right.
-          const readSites: string[] = [];
-          for (let i = 0; i + 1 < trimmed.length; i++) {
-            if (trimmed[i] !== "$" || trimmed[i + 1] !== "{") continue;
-            let depth = 1;
-            let j = i + 2;
-            for (; j < trimmed.length && depth > 0; j++) {
-              if (trimmed[j] === "{") depth++;
-              else if (trimmed[j] === "}") depth--;
-            }
-            if (depth !== 0) break; // unterminated — leave it to codegen
-            readSites.push(trimmed.slice(i + 2, j - 1));
-            i = j - 1;
-          }
-          const targets = readSites.length > 0 ? readSites : [trimmed];
-
+          // The opener value is handed to `parseExprToNode` WHOLE and the
+          // resulting node is walked. Nothing here reads the raw text
+          // structurally, and that restraint is the whole point of this comment.
+          //
+          // A PRIOR REVISION SCANNED THE RAW FOR `${ … }` INTERPOLATION BODIES
+          // AND CHECKED THOSE *INSTEAD OF* THE WHOLE VALUE. It was wrong in BOTH
+          // directions at once, and both failures have the same cause: a text
+          // scan carries none of the walker's structural knowledge.
+          //
+          //   FALSE POSITIVE (the reason it could not ship). The shared walker
+          //   `forEachIdentInExprNode` deliberately does NOT descend into a
+          //   `lambda` body — that guard is what keeps `in=@rows.filter(n => n > 1)`
+          //   silent about `n`. A text scan has no such guard, so a template
+          //   literal nested inside a lambda —
+          //       in=@rows.map(r => `id-${r}`)
+          //   — fed `r` to the walker as an OUTER-scope read and raised
+          //   E-SCOPE-001 on a file that compiles clean on `main`.
+          //
+          //   FALSE NEGATIVE (the same line, opposite direction). The scan
+          //   REPLACED the whole-expression target rather than adding to it, so
+          //   ANY `${ … }` anywhere in the opener suppressed the check on the
+          //   iterable itself —
+          //       in=@undeclaredHidden.map(x => `${1}`)
+          //   — went silent, reopening the exact hole this check exists to close.
+          //
+          // AND IT BOUGHT NO COVERAGE, WHICH IS WHY EXCISING IT COSTS NOTHING:
+          // `${ … }` IS NOT A WORKING OPENER FORM. Measured on `main` by
+          // compiling, three spellings, all three FAIL LOUD with
+          // E-CODEGEN-INVALID-LOGIC and write no output — `in=${@rows}`,
+          // `key=${r}`, and the multi-interpolation `key=${@a}-${r}`. A scope
+          // diagnostic over an interpolation body therefore describes a
+          // construct that cannot reach codegen intact under any spelling. If a
+          // diagnostic for `${ … }` in an opener is wanted, the honest one says
+          // "not a valid opener form" — a separate arc, not this check's to invent.
           const sp = (n.span as Span | undefined)
             ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          for (const target of targets) {
-            const inner = target.trim();
-            if (inner.length === 0) continue;
-            let exprN: unknown = null;
-            try {
-              exprN = parseExprToNode(inner, filePath, sp.start ?? 0);
-            } catch {
-              exprN = null; // unparseable opener expr — defer to codegen's handling
-            }
-            if (exprN) {
-              checkLogicExprIdents(exprN, sp, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
-            }
+          let exprN: unknown = null;
+          try {
+            exprN = parseExprToNode(trimmed, filePath, sp.start ?? 0);
+          } catch {
+            exprN = null; // unparseable opener expr — defer to codegen's handling
+          }
+          if (exprN) {
+            checkLogicExprIdents(exprN, sp, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
           }
         };
 
