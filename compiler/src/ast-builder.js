@@ -6733,7 +6733,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       typedAttrs,
       attrs,
       children: [],
-      openerHadSpaceAfterLt: true,
+      // W-WHITESPACE-001 (§15.15.5) fires off this flag in NR. Derive it from the
+      // ACTUAL source gap between `<` (startTok) and the TypeName (nameTok) rather
+      // than hardcoding true — a no-space `<Name authority=… table=…>` opener was
+      // spuriously warned as whitespace-form (the flag was unconditionally true),
+      // which fired on the exact shape a server-authority SSR app requires.
+      openerHadSpaceAfterLt: nameTok.span.start > startTok.span.end,
       span: spanOf(startTok, peek()),
     };
   }
