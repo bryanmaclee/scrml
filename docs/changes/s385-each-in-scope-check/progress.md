@@ -299,3 +299,221 @@ diverge on against the native parser.
 
 - Branch: `worktree-agent-a4c73958a8bad6e3b`. **NOT LANDED. No PR opened.**
 - The measurement says condition 3 is satisfied at **0 of 1005**.
+
+---
+
+# ROUND 2 — closing the class, not two-thirds of it
+
+Rebased onto `origin/main` `9a0ad569`. Round-1 sections above are unchanged and
+still accurate for `in=`/`of=`; this section supersedes the round-1
+"Found, not fixed" list, which was WRONG BY OMISSION — it named two other holes
+but not `key=`, so a reader would have concluded the `<each>` opener was fully
+covered when one slot was still open.
+
+## The third slot: `key=`
+
+`keyExprRaw` is captured by the same `_captureAttrValue` raw-text path
+(`ast-builder.js:16786`) as `inExprRaw`, and lowered by codegen without reaching
+the typer. Round 1 enumerated only `["inExprRaw", "ofExprRaw"]`.
+
+Reproduced on the round-1 branch:
+
+```scrml
+<each in=@rows key=undeclaredBareKey as r><li>${r}</li></each>
+```
+
+compiled **exit 0** and emitted, in TWO places:
+
+    (r, _scrml_each_idx) => undeclaredBareKey
+    const _scrml_each_key_1 = undeclaredBareKey;
+
+A bare reference to an identifier that does not exist: **ReferenceError on first
+render**. That is strictly worse than the silent-empty list `in=` produced — an
+undeclared `in=` breaks one list, an undeclared `key=` takes the page down.
+
+## The correction: `key=` is the ORDERING MIRROR of `in=`
+
+The round-2 brief said to add `keyExprRaw` to the same loop. **That would have
+been a false positive**, and the file's own premise ranks over-firing as worse
+than the false negative it closes.
+
+The key expression is evaluated PER ITEM, with the row variable bound as a
+function parameter. Verified in emitted output — `<each in=@rows as r key=r.id>`
+lowers to:
+
+    (r, _scrml_each_idx) => r.id
+
+So `r` IS in scope for `key=`. The `in=`/`of=` loop runs BEFORE
+`scopeChain.push("each:…")` — deliberately, so the loop's own `as` binding cannot
+absorb the iterable's lookup. Putting `key=` there would have rejected the
+documented `key=r.id` row-variable form.
+
+| slot | evaluated | checked |
+|---|---|---|
+| `in=` / `of=` | once, before any row exists | BEFORE the scope push |
+| `key=` | per item, row var in scope | AFTER the push AND after the `as` / `as (k, v)` bindings |
+
+The shared routine (`checkEachOpenerExpr`) is therefore extracted ONCE and called
+from BOTH scopes — still one parser, one walker, no second predicate. Pinned by
+ORDERING TRAP A/B (§3, `in=`) and ORDERING TRAP C (§5, `key=`).
+
+## `iterShape` gating (verified, then applied)
+
+- `ast-builder.js:16917`: `else if (inExprRaw && ofExprRaw) iterShape = "in";` —
+  tie-break to `in=` when both are present.
+- `emit-each.ts:3748-3760`: lowering branches on `node.iterShape`, so with both
+  present the `of=` text is **dead** — it has zero effect on output.
+
+Round 1 checked both unconditionally, so `<each in=@rows of=@typo>` raised a
+scope error about an attribute that does not affect the emitted program. Now
+gated on `iterShape`. The both-present CONFLICT is PASS's diagnostic to fire; this
+check no longer shadows it with a misleading one. Pinned by §6.
+
+## `of=` semantics — the round-1 comment was WRONG
+
+The round-1 comment called `of=` the "`of=` twin" iterable. It is not. Verified at
+`emit-each.ts:3755`: `of=` is a repeat COUNT —
+
+    Array.from({length: Number(ofExprResolved) || 0}, (_v, _i) => _i)
+
+The CHECK on it was correct either way (`<each of=@daysLeft>` is still a cell
+read), but that comment block is the designated explanation for the next reader,
+so it is corrected in place.
+
+## TWO DEFECTS IN MY OWN ROUND-1 TEST
+
+Both are mine, both found in round 2, and both are the same class as the
+control-script bug: an assertion that reads like it proves something and proves
+nothing.
+
+**1. `§1`'s emitted-JS assertion was VACUOUS.** It asserted
+
+    expect(r.clientJs).not.toContain('_scrml_reactive_get("totallyUndeclaredName")')
+
+Chunk-cell-scoping emits `_scrml_cs_reactive_get(...)`, which does not contain the
+substring `_scrml_reactive_get(`. So it passed against output that still carried
+the bad lowering **verbatim** — confirmed by probing the in-memory `clientJs`.
+
+It was also the WRONG ARTIFACT. Codegen runs regardless of TS errors, and the CLI
+writes artifacts even on a failed compile (verified: `exit 1`, and
+`key-bare.client.js` / `.html` / runtime all still written). The DIAGNOSTIC is the
+contract; emitted text is not. Both `clientJs` assertions removed, with the
+reasoning recorded at the site so it is not re-added.
+
+**2. The no-regression helper under-asserted.** It filtered on
+`E-STATE-UNDECLARED` only, while `checkLogicExprIdents` also fires `E-SCOPE-001`
+(bare undeclared ident, and the missing-`@`-sigil variant), `E-SCOPE-012`
+(`session` outside a server fn), and — via `checkRowFieldAccessInExpr` —
+`E-TYPE-004`. A future edit making `in=@rows.filter(n => n > 1)` fire on the arrow
+param would have passed every §3 case green. Now code-agnostic: asserts NO `E-`
+diagnostic at all. Re-run under the stricter assertion: still green, so nothing
+was hiding behind it.
+
+## `positive-control.sh` is now reproducible from a clean checkout
+
+It previously read an uncommitted `/tmp` scratch file for its corpus list — for
+the one artifact that makes the zero credible rather than a dead-harness result.
+It now builds the list inline like `sweep.sh`, takes the slot and sweep label as
+arguments, verifies the mutation landed on a real opener, and **exits non-zero if
+any file stays passing**.
+
+It also now handles the comment trap properly. `examples/34-value-native-set.scrml`
+documents the feature by writing the opener literally inside a `//` comment
+("`(also: <each in=@set> directly)`"). Anchoring the grep on `<[[:space:]]*each`
+does NOT help — the comment genuinely contains that text. Round 1 caught this by
+hand; round 2 first tried a stricter anchor which STILL failed, and the working
+fix is to match against a comment-blanked view of the file. Both slots now run
+clean with no manual intervention.
+
+# ROUND 2 MEASUREMENT
+
+Same harness, same 1005 files, same roots.
+
+## `key=` delta — round-1 build -> round-2 build: **0 of 1005**
+
+This is the number the `key=` slot owes on its own. It does NOT inherit the
+`in=`/`of=` zero.
+
+- Newly-failing (PASS -> FAIL): **0**
+- Newly-passing: 0
+- Files with ANY diagnostic code-set change: **0**
+
+## Cumulative — base `a8448ac` -> round-2 build: **0 of 1005**
+
+- Newly-failing (PASS -> FAIL): **0**
+- Newly-passing: 0
+- Files with ANY diagnostic code-set change: **0**
+- Verdict totals identical across all three sweeps: 754 PASS / 251 FAIL
+- Path lists byte-identical
+
+Newly-failing files to enumerate: **none**, in both directions. The lists are
+empty, not truncated. Nothing to classify genuine-vs-false-positive.
+
+## Why the `key=` zero is real
+
+The corpus uses only two `key=` forms — `key=@.id` (22 uses) and `key=__index__`
+(13 uses) — and BOTH are exempt by design:
+
+- `@.id` is the §17.7.3 contextual iteration sigil, short-circuited up front.
+- `__index__` is the documented positional-fallback sentinel. It is not declared
+  anywhere; it survives on the walker's `_`-prefix exemption
+  (`type-system.ts:7843`, `if (raw.startsWith("_")) return;`). This is a concrete
+  argument for routing through the walker rather than re-deriving a local notion
+  of what counts as a read — a hand-rolled predicate would have had to
+  rediscover that rule, and would have broken 13 corpus files if it hadn't.
+
+So the zero is explained, not merely observed. And it was positive-controlled
+anyway, because the corpus containing no `key=@cell` form is exactly the
+condition under which a dead check would also measure zero:
+
+**Positive control, `key` slot: 20 of 20 flipped PASS -> FAIL, 0 stayed.** Every
+corpus file with a real `key=` opener, rewritten to a bare undeclared key, now
+fails. (`skipped=14` are files with no `key=` opener or already failing.)
+
+**Positive control, `in` slot, re-run against the round-2 build: 25 of 25
+flipped, 0 stayed.** The `in=` path did not regress.
+
+# FOUND, NOT FIXED (round-2 revision — supersedes the round-1 list)
+
+The `<each>` opener is now covered on all three expression slots: `if=` (S302,
+pre-existing), `in=`, `of=`, `key=`. Remaining, all OUTSIDE this node:
+
+1. **Interpolated attribute values are not scope-checked.**
+   `<div class="c-${@undeclared}">` compiles clean — a second, independent false
+   negative of the same SPEC §6.1.2 sentence, in the attribute-interpolation path.
+   Different root cause. Untouched.
+
+2. **A failed compile still writes artifacts.** `bun compiler/bin/scrml.js
+   compile` exits 1 on an undeclared read but still writes `.client.js`, `.html`,
+   `.css` and the runtime to the output dir — including, in the `key=` case, JS
+   that throws a ReferenceError on load. The exit code is the gate, so a CI
+   pipeline is safe, but a dev server or a stale-artifact consumer may not be.
+   Surfaced, not diagnosed.
+
+3. **`<each in=… of=…>` (both present) fires no conflict diagnostic.** The AST
+   builder's own comment says "PASS surfaces conflict", but the both-present case
+   compiles rc=0 today. Round 1 accidentally shadowed this with a scope error on
+   the dead `of=`; round 2 correctly stops doing that, which leaves the real gap
+   visible. Pre-existing, not this dispatch's to fix.
+
+4. **The `E-SCOPE-001` attribute message mis-suggests.** It advises "use `@` for a
+   reactive variable (`@@undeclaredAttr`)" when the value already starts with `@`
+   — it blindly prefixes another `@`. Cosmetic, pre-existing.
+
+# LANDING NOTE — newly-rejecting outside the swept corpus
+
+`<each in=laterNames>` where `laterNames` is a `const` declared LATER in a `${…}`
+logic body was rc=0 on base and is now `E-SCOPE-001`. Zero corpus hits, so it does
+not appear in the measurement — recorded here because an adopter could hit it.
+
+**It is consistency, not a new rule.** Verified directly, all three on this build:
+
+| form | verdict |
+|---|---|
+| `${laterNames}` (interpolation) | `E-SCOPE-001` — already rejected before this dispatch |
+| `<tableFor in=laterNames>` | `E-SCOPE-001` — already rejected before this dispatch |
+| `<each in=laterNames>` | `E-SCOPE-001` — NEW; now matches its siblings |
+
+Reactive CELLS hoist to file scope (§6.9, and the typer pre-binds them for exactly
+this reason), so `<each in=@laterCell>` above the declaration still resolves. A
+`const` in a `${}` logic body does not hoist. Both halves pinned by §7.
