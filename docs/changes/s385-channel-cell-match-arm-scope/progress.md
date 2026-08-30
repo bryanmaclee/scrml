@@ -404,3 +404,95 @@ reason the refusal has to be a hard error rather than a lint.
 
 **⚑ `E-CHANNEL-MOUNT-IN-CONDITIONAL` needs a §34 catalog row.** SPEC is PA-owned; deliberately
 untouched.
+
+
+---
+
+# ROUND 3 — ruling absorbed, blocker fixed, rebased onto `origin/main`
+
+**bryan ruled: reject (a).** Fail-closed stands, `E-CHANNEL-MOUNT-IN-CONDITIONAL` stays, SUPPORT for
+arm-mounted channels is CLOSED — it needs a SPEC amendment and is not a bug fix. Recorded here so the
+`test.todo` in the integration suite is read as *deliberately deferred*, not *pending*.
+
+## The blocker — reproduced verbatim before touching anything
+
+A channel alias equal to any enum VARIANT NAME refused a **correctly-placed top-level** mount:
+
+```scrml
+import { "probe" as Ready } from './chan.scrml'
+type Phase:enum = { Loading, Ready }
+<Ready/>                          <!-- already at <program> level -->
+<match for=Phase on=@phase> … <Ready><p>${@stamp}</p></> </>
+```
+
+→ `E-CHANNEL-MOUNT-IN-CONDITIONAL … Fix: move <Ready/> out to <program> level.` **It is already
+there.** Unfollowable instruction, file cannot be compiled at all, compiles clean on `main` —
+newly-rejecting on valid code, the one direction we are least allowed to ship.
+
+**Root, confirmed at the reviewer's locus by reading `ast-builder.js`:** `armBodyChildren` holds
+SYNTHETIC wrappers fabricated at `:15965` and `:15990` as `{kind:"markup", tag: arm.variantName}` —
+structurally indistinguishable from author markup. `findAliasMount` started at the wrapper ARRAY, so
+`aliases.has(rec.tag)` matched the fabrication.
+
+**The suite could never have caught it**: every fixture used `probeChan`, which cannot collide with a
+variant name. Now pinned three ways — colliding alias at top level is CLEAN; colliding alias *inside*
+an arm is still REFUSED (so the guard cannot be satisfied by merely ignoring colliding names); nested
+match reports exactly once.
+
+## Detector rewritten, not patched — two findings shared one cause
+
+The old shape had **every container search its own subtree**. That produced both the wrapper collision
+AND the duplicate report. The walk now attributes each mount to its **nearest enclosing container**:
+
+- descends into each wrapper's `.children` and marks the wrapper `seen`, so a wrapper is never
+  classified as a mount;
+- reports each mount **exactly once**. Measured: a mount inside a nested `<match>` produced **2**
+  diagnostics before, **1** after.
+
+## Also fixed (relayed by the coordinator, verified by me)
+
+**Unescaped alias reaching `new RegExp`.** Confirmed reachable by reading
+`buildImportedChannelAliases`: the `else if (Array.isArray(imp.names))` fallback does
+`result.set(name, …)` where `name` is the raw channel `name=` string. A `(` or `[` would make the
+constructor **THROW** — crashing the compile rather than emitting a diagnostic — and a `.` would
+silently become a wildcard. Now escaped, matching the two sibling regex builders already in the same
+file (`:2531`, `:2678`). Defensive: a crash beats a diagnostic nobody asked for.
+
+## Rebase onto `origin/main` (was 15 behind)
+
+Conflict set was exactly the two predicted files. Both resolved to `origin/main` wholesale, then my
+remaining pieces re-applied on top.
+
+**`#756` (`67e0f614`) supersedes my `2258078e` — dropped entirely**, along with my
+`resolveDiagLocation` unit tests, which asserted my old `{filePath,line,column}` shape. Their shape
+(`{file,line,col}`, with the middle `?? diag.col` level that `build.js`/`dev.js` already use) is
+better and has its own suite at `compiler/tests/commands/diagnostic-span-fallback.test.js`.
+
+**Re-applied on top of theirs:**
+
+1. **`stripRedundantLocation` (F5).** #756 *introduced* the duplicate-location defect on `main` —
+   `(line 2, col 5)` immediately followed by `--> …:2:5`, newly exact because before #756 the arrow
+   carried no coordinates. Verified by execution before and after. **Gated on the resolved FILE, not
+   just the line**: `-->` only prints when a file resolved, so gating on line alone would delete
+   coordinates nothing replaces. Pinned by a test.
+2. **Atomic `resolveDiagLocation`.** Resolving components independently could pair a top-level
+   `filePath` with `line`/`col` from a `.span` naming a DIFFERENT file, then render that file's line
+   as the offending source — confidently wrong, worse than incomplete. The file now always comes from
+   the same carrier as the coordinates; a span's `col` is borrowed only when both carriers agree on
+   the file. **#756's own contract is preserved** — explicit top-level coordinates still win over a
+   span naming another file, and their regression test passes unmodified.
+
+## Verification on the merged tree
+
+| gate | result |
+|---|---|
+| pre-commit (unit + integration + conformance + top-level) | **29363 pass / 0 fail** / 86 skip / 2 todo |
+| corpus sweep, 1005 files, `origin/main` vs fix | **`diff` empty, exit 0** |
+| `browser-baseline.ts --check` | **PASS** — 48 asserted, name set identical |
+| `types:check` | 4 diagnostics, **all pre-existing on `origin/main`** in `emit-each.ts` / `route-inference.ts`, neither touched by me |
+| refusal/acceptance matrix | all 4 unwireable shapes REFUSED; `<if>`-body, top-level, workaround, colliding-alias-top-level all CLEAN + WIRED |
+
+Files changed vs `origin/main`: `compiler/src/component-expander.ts`,
+`compiler/src/commands/compile.js`, `compiler/src/commands/diagnostic-format.js` (+ tests).
+
+**⚑ Still owed: a §34 catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL`.** SPEC is PA-owned.
