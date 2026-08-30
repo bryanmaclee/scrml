@@ -1,0 +1,16 @@
+===== build  ->  build-r2 =====
+===== ROW-COUNT SANITY =====
+before rows: 1005
+after  rows: 1005
+paths identical: YES
+
+===== VERDICT TOTALS =====
+build      PASS=754 FAIL=251
+build-r2   PASS=754 FAIL=251
+
+===== PER-FILE VERDICT FLIPS (the deliverable) =====
+NEWLY-FAILING (PASS->FAIL): 0
+NEWLY-PASSING (FAIL->PASS): 0
+
+===== DIAGNOSTIC CODE-SET CHANGES (incl. files that stayed FAIL) =====
+files with a changed code set: 0
