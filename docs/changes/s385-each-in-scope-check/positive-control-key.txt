@@ -1,0 +1,24 @@
+positive control — slot 'key' vs sweep 'build-r3' — 34 <each>-carrying files
+
+FLIPPED  examples/03-contact-book.scrml                                         (key)
+FLIPPED  examples/04-live-search.scrml                                          (key)
+FLIPPED  examples/06-kanban-board.scrml                                         (key)
+FLIPPED  examples/08-chat.scrml                                                 (key)
+FLIPPED  examples/16-remote-data.scrml                                          (key)
+FLIPPED  examples/23-trucking-dispatch/pages/customer/home.scrml                (key)
+FLIPPED  examples/23-trucking-dispatch/pages/customer/load-detail.scrml         (key)
+FLIPPED  examples/23-trucking-dispatch/pages/customer/loads.scrml               (key)
+FLIPPED  examples/23-trucking-dispatch/pages/dispatch/billing.scrml             (key)
+FLIPPED  examples/23-trucking-dispatch/pages/dispatch/board.scrml               (key)
+FLIPPED  examples/23-trucking-dispatch/pages/dispatch/customers.scrml           (key)
+FLIPPED  examples/23-trucking-dispatch/pages/dispatch/drivers.scrml             (key)
+FLIPPED  examples/23-trucking-dispatch/pages/dispatch/load-detail.scrml         (key)
+FLIPPED  examples/23-trucking-dispatch/pages/dispatch/load-new.scrml            (key)
+FLIPPED  examples/23-trucking-dispatch/pages/driver/home.scrml                  (key)
+FLIPPED  examples/23-trucking-dispatch/pages/driver/hos.scrml                   (key)
+FLIPPED  examples/23-trucking-dispatch/pages/driver/load-detail.scrml           (key)
+FLIPPED  examples/23-trucking-dispatch/pages/driver/load-log.scrml              (key)
+FLIPPED  examples/23-trucking-dispatch/pages/driver/messages.scrml              (key)
+FLIPPED  examples/29-engine-vs-flags.scrml                                      (key)
+
+positive control [key vs build-r3]: flipped=20 stayed=0 skipped=14
