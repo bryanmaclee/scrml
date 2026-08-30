@@ -336,6 +336,85 @@ describe("S385 — supported mount positions stay accepted AND fully wired", () 
 // Known-unfixed — recorded so CI carries the debt rather than a doc
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Round-3 review regressions
+// ---------------------------------------------------------------------------
+
+describe("S385 — the refusal must not misfire on a correctly-placed mount", () => {
+  test("BLOCKER: a channel alias equal to an ENUM VARIANT NAME, mounted at top level", () => {
+    // `match-block.armBodyChildren` holds SYNTHETIC wrapper nodes fabricated by
+    // ast-builder as `{kind:"markup", tag: arm.variantName}` — indistinguishable
+    // from author markup. An earlier iteration searched the wrapper ARRAY, so an
+    // alias colliding with a variant name matched the fabrication and this file
+    // was refused for being "inside a `<match>` arm" while the mount sits
+    // correctly at `<program>` level. The instruction was unfollowable and the
+    // file could not be compiled at all — a newly-rejecting regression on code
+    // that compiles clean on `main`.
+    //
+    // The suite previously only ever used `probeChan`, which can never collide,
+    // which is exactly why this shipped.
+    const { result } = compileIn("v1", `<program>
+    ${D}{
+        import { "probe" as Ready } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <Ready/>
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready><p>${D}{@stamp}</p></>
+    </>
+</program>
+`);
+    expect(codes(result)).not.toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+    expect(hardErrors(result)).toEqual([]);
+  });
+
+  test("a colliding alias mounted INSIDE the arm is still refused (detection not merely disabled)", () => {
+    // The guard above must not be implemented by ignoring colliding names.
+    const { result } = compileIn("v2", `<program>
+    ${D}{
+        import { "probe" as Ready } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready><Ready/><p>${D}{@stamp}</p></>
+    </>
+</program>
+`);
+    expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+  });
+
+  test("a mount inside a NESTED match reports EXACTLY ONCE", () => {
+    // Previously every container searched its own subtree, so the outer and the
+    // inner match each reported the same mount, with different spans, and
+    // nothing de-duplicated. Each mount is now attributed to its NEAREST
+    // enclosing container.
+    const { result } = compileIn("v3", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+        <inner>: Phase = .Loading
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready>
+            <match for=Phase on=@inner>
+                <Loading><p>i-loading</p></>
+                <Ready><probeChan/></>
+            </>
+        </>
+    </>
+</program>
+`);
+    const hits = codes(result).filter((c) => c === "E-CHANNEL-MOUNT-IN-CONDITIONAL");
+    expect(hits.length).toBe(1);
+  });
+});
+
 describe("S385 — deferred", () => {
   test.todo(
     "SUPPORT (not merely refuse) a channel mounted inside a <match> arm — " +

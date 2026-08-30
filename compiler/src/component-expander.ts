@@ -4876,80 +4876,99 @@ function reportChannelMountsInConditionals(
     ));
   };
 
-  // Does this subtree contain a markup node whose tag is a channel alias? The
-  // mount need not be a DIRECT child — `<div><probeChan/></div>` inside an arm
-  // is the same defect, so the search is depth-first over the whole subtree.
-  const findAliasMount = (node: unknown, seen: Set<unknown>): string | null => {
-    if (!node || typeof node !== "object" || seen.has(node)) return null;
-    seen.add(node);
-    if (Array.isArray(node)) {
-      for (const child of node) {
-        const hit = findAliasMount(child, seen);
-        if (hit) return hit;
-      }
-      return null;
-    }
-    const rec = node as Record<string, unknown>;
-    if (rec.kind === "markup" && typeof rec.tag === "string" && aliases.has(rec.tag)) {
-      return rec.tag;
-    }
-    for (const key of Object.keys(rec)) {
-      if (key === "span" || key === "id" || key === "parent") continue;
-      const hit = findAliasMount(rec[key], seen);
-      if (hit) return hit;
-    }
-    return null;
-  };
-
   // An each-bearing bare-body arm carries no nodes at all — ast-builder stashed
   // its body as raw source text. Scan that text for an alias opener.
   const findAliasInRaw = (raw: unknown): string | null => {
     if (typeof raw !== "string" || raw.length === 0) return null;
     for (const alias of aliases.keys()) {
+      // The alias is ESCAPED before it reaches the RegExp constructor. In the
+      // no-specifier fallback the map key is the channel's `name=` string, which
+      // may legally contain regex metacharacters: unescaped, a `(` or `[` makes
+      // the constructor THROW — crashing the compile instead of emitting a
+      // diagnostic — and a `.` silently becomes a wildcard, matching a channel
+      // that was never mounted. The two sibling regex builders in this same file
+      // already escape identically.
+      const safeAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       // `<alias` followed by a non-identifier char — matches `<probeChan/>`,
       // `<probeChan />` and `<probeChan attr=…>`, but not `<probeChanOther/>`.
-      if (new RegExp(`<\\s*${alias}(?![A-Za-z0-9_$])`).test(raw)) return alias;
+      if (new RegExp(`<\\s*${safeAlias}(?![A-Za-z0-9_$])`).test(raw)) return alias;
     }
     return null;
   };
 
-  const walk = (node: unknown, seen: Set<unknown>): void => {
+  // ⚑ The mount is attributed to its NEAREST enclosing conditional container,
+  // and the walk NEVER classifies an arm wrapper node itself.
+  //
+  // Both points are load-bearing and each closes a defect found by review:
+  //
+  //  1. `match-block.armBodyChildren` holds SYNTHETIC wrapper nodes fabricated
+  //     by ast-builder (`:15965` and `:15990`) as
+  //     `{kind:"markup", tag: arm.variantName}` — structurally indistinguishable
+  //     from author-written markup. Searching the wrapper ARRAY meant a channel
+  //     alias that happened to equal an enum VARIANT NAME matched the
+  //     fabrication, so
+  //         import { "probe" as Ready } … ; <Ready/> at <program> level
+  //     was refused for being "inside a `<match>` arm" while sitting correctly
+  //     at top level — an unfollowable instruction, on a file that compiles
+  //     clean on `main`. The walk therefore descends into each wrapper's
+  //     `.children` and never tests the wrapper.
+  //
+  //  2. Attributing each mount to its NEAREST container reports it EXACTLY
+  //     ONCE. The previous shape had every container search its own subtree, so
+  //     a mount inside a nested `<match>` was reported twice (outer and inner)
+  //     with different spans, which nothing de-duplicated.
+  const walk = (
+    node: unknown,
+    container: { kind: string; span?: Span } | null,
+    seen: Set<unknown>,
+  ): void => {
     if (!node || typeof node !== "object" || seen.has(node)) return;
     seen.add(node);
+
     if (Array.isArray(node)) {
-      for (const child of node) walk(child, seen);
+      for (const child of node) walk(child, container, seen);
       return;
     }
+
     const rec = node as Record<string, unknown>;
     const kind = typeof rec.kind === "string" ? rec.kind : "";
 
     if (kind === "match-block" || kind === "each-block") {
-      // Node form — the mount survived as AST (non-each arms, each bodies).
-      const armHit = findAliasMount(rec.armBodyChildren ?? null, new Set())
-        ?? findAliasMount(rec.bodyChildren ?? null, new Set());
-      // Raw form — S316-blanked each-bearing arm bodies.
-      let rawHit: string | null = null;
-      const wrappers = rec.armBodyChildren;
-      if (Array.isArray(wrappers)) {
-        for (const w of wrappers) {
+      const here = { kind, span: rec.span as Span | undefined };
+
+      if (kind === "match-block" && Array.isArray(rec.armBodyChildren)) {
+        for (const w of rec.armBodyChildren) {
           const wr = w as Record<string, unknown> | null;
-          if (!wr) continue;
-          rawHit = findAliasInRaw(wr._reparseEachArmBodyRaw);
-          if (rawHit) break;
+          if (!wr || typeof wr !== "object") continue;
+          // The wrapper is synthetic — mark it seen so it is never classified
+          // as a mount, then descend into the author's actual arm body.
+          seen.add(wr);
+          const rawHit = findAliasInRaw(wr._reparseEachArmBodyRaw);
+          if (rawHit) fire(rawHit, kind, (wr.span as Span | undefined) ?? here.span);
+          walk(wr.children ?? null, here, seen);
         }
       }
-      const hit = armHit ?? rawHit;
-      if (hit) fire(hit, kind, rec.span as Span | undefined);
-      // Fall through — a nested match inside an arm is still worth reporting.
+
+      // Remaining child-bearing fields (each bodies, the match raw-text node).
+      for (const key of Object.keys(rec)) {
+        if (key === "span" || key === "id" || key === "parent" || key === "armBodyChildren") continue;
+        walk(rec[key], here, seen);
+      }
+      return;
+    }
+
+    if (kind === "markup" && typeof rec.tag === "string" && aliases.has(rec.tag) && container) {
+      fire(rec.tag, container.kind, (rec.span as Span | undefined) ?? container.span);
+      return;
     }
 
     for (const key of Object.keys(rec)) {
       if (key === "span" || key === "id" || key === "parent") continue;
-      walk(rec[key], seen);
+      walk(rec[key], container, seen);
     }
   };
 
-  walk(nodes, new Set());
+  walk(nodes, null, new Set());
 }
 
 /**
