@@ -653,3 +653,70 @@ enumerated, with an instruction to add a third hole rather than let the claim st
 | matrix | refusals + clean set unchanged from round 4 |
 
 Merged current `origin/main` (ledger-only `#771`); 0 behind at the final tip.
+
+
+---
+
+# ROUND 6 — `engine-decl` is the third container
+
+## Reproduced first
+
+A channel mounted in an `<engine>` state-child body: **exit 0, zero diagnostics, literal `probeChan`
+in `clientJs`, zero `_scrml_ws` wiring.** The identical silent dead-channel outcome as the `<match>`
+case. This is the third hole my own round-4 SCOPE note asked a future agent to add rather than let
+the enumeration stand while false.
+
+## One branch, not three — the emitter question, answered
+
+The emitter **is** shared: `emit-engine.ts` and `emit-match.ts` both call
+`emit-variant-guard.ts:emitVariantGuardedRender`. But the guard runs on the **AST**, and there the
+shapes are already parallel:
+
+```
+match-block . armBodyChildren[i] . children   <- arm body
+engine-decl . bodyChildren[i]    . children   <- state-child body
+```
+
+So `engine-decl` reuses the **same discipline** already applied to arm wrappers — never classify the
+direct wrapper entry, descend into its `.children` with the container attributed. Plus a label and a
+container noun (`"state-child body"`, so the trailing clause never says "arm").
+
+## Collision-safe by construction
+
+Direct `bodyChildren` entries are deliberately **not** classified. A state-child is author-written
+markup whose TAG is a variant name (`<Done rule=.Idle>`), and **the AST carries no marker separating
+it from a mount — measured, identical key sets.** Classifying there would false-accuse an alias
+colliding with a variant name: the round-3 blocker class.
+
+Pinned by test: an alias named `Done`, mounted at `<program>` level beside a `<Done>` state-child,
+compiles **CLEAN** and stays **wired** (4 `_scrml_ws` refs).
+
+## Residual, enumerated (hole 3)
+
+A mount that is a **direct child of the engine body** — a sibling of the state-children — is still
+not caught. It emits **nothing at all**: no tag, no wiring. Resolving it needs a variant-name oracle;
+`governedType` + `ast.typeDecls` covers same-file enums but **not imported ones**, so it buys a
+partial oracle in exchange for a real false-positive risk. Recorded as `test.todo` rather than
+guessed at. The SCOPE note now enumerates **three** holes and asks for a fourth to be added.
+
+## Two shared-helper nits
+
+- **line+col atomicity.** `{file:"a", line:5, span:{file:"a", line:9, col:11}}` yielded `col:11`
+  against `line:5` — a column belonging to another line. The docstring promised "from ONE carrier"
+  and enforced only file identity. The span's col is now borrowed only when the span agrees on the
+  file **and** the line (or carries no line).
+- **Stale docstring.** It claimed all three commands resolve location identically. They do not:
+  this helper resolves atomically while `build.js:903-905` / `dev.js:512` use flat
+  `filePath || file || span?.file`, so on a mismatched carrier `compile` reports the span's file
+  where `build`/`dev` report the top-level one. Docstring narrowed to what is actually promised and
+  the divergence named. `build.js`/`dev.js` NOT touched, per instruction.
+
+## Gates
+
+| gate | result |
+|---|---|
+| pre-commit | **29368 pass / 0 fail** / 86 skip / 4 todo |
+| corpus, `origin/main` vs fix, 1005 files | **diff byte-empty — 0 newly-failing** |
+| `browser-baseline --check` | **PASS** — 48 asserted, name set identical |
+| `types:check` | 4 diagnostics, all pre-existing on `origin/main` in files I never touched |
+| matrix | refusal/clean sets unchanged; engine mount now REFUSED; engine collision CLEAN + WIRED |
