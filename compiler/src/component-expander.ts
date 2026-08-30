@@ -4833,6 +4833,7 @@ function buildImportedChannelAliases(
  *   - An each-bearing bare-body arm is BLANKED by ast-builder (S316,
  *     `:15922-15975`) to avoid the S153 `collectEachBlocks` double-emit and its
  *     body is stashed as RAW TEXT, so at CE time the mount is not even a node.
+ *     ⚑ That case is consequently NOT DETECTED — see the scope note below.
  *   - Even with every collector taught to descend, the type-system binds the
  *     inlined cells in the ARM's lexical scope while the runtime mirror is
  *     file-scoped — so a read outside the match still fails. Closing that means
@@ -4846,8 +4847,30 @@ function buildImportedChannelAliases(
  * restores conformance; half-wiring restores nothing. So this fails CLOSED and
  * names the one-line fix.
  *
+ * ## ⚑ SCOPE — this check is NODE-PATH ONLY, and that is a ruled fail-open
+ *
+ * Detection walks the AST and nothing else. An **each-bearing bare-body match
+ * arm** is blanked by ast-builder (S316) BEFORE CE runs and its body survives
+ * only as a raw source string, so there is no tree to ask and this check does
+ * NOT fire for it — including the originally reported adopter shape. That
+ * shape compiles clean and ships dead markup. **Known, filed, and deliberate.**
+ *
+ * An earlier revision did scan that text stash. It was DELETED because a text
+ * scan cannot tell a mount from a mention: a `<!-- don't mount <probeChan/>
+ * here -->` comment inside such an arm made a VALID file uncompilable, and the
+ * same is true of any `<pre>` block, doc block or string literal naming the
+ * alias. Masking comments and strings was considered and REJECTED as the
+ * enumerate-forever shape — the rule is don't ask the text what the tree
+ * already knows, and where the tree cannot be asked the answer is to stop
+ * asking, not to guess more carefully.
+ *
+ * Do not "restore coverage" here by re-adding a text scan. Closing the gap
+ * properly means giving CE a walkable arm body (an ast-builder/S316 change),
+ * which is its own arc.
+ *
  * ⚑ Needs a `§34` catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL` — SPEC is
- * PA-owned and deliberately untouched here.
+ * PA-owned and deliberately untouched here. That row must NOT claim the
+ * `_reparseEachArmBodyRaw` text stash is scanned; it is not.
  */
 const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
   "match-block": "a `<match>` arm",
@@ -4874,26 +4897,6 @@ function reportChannelMountsInConditionals(
       `file, including inside this arm — mount position does not scope a channel.`,
       (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Span,
     ));
-  };
-
-  // An each-bearing bare-body arm carries no nodes at all — ast-builder stashed
-  // its body as raw source text. Scan that text for an alias opener.
-  const findAliasInRaw = (raw: unknown): string | null => {
-    if (typeof raw !== "string" || raw.length === 0) return null;
-    for (const alias of aliases.keys()) {
-      // The alias is ESCAPED before it reaches the RegExp constructor. In the
-      // no-specifier fallback the map key is the channel's `name=` string, which
-      // may legally contain regex metacharacters: unescaped, a `(` or `[` makes
-      // the constructor THROW — crashing the compile instead of emitting a
-      // diagnostic — and a `.` silently becomes a wildcard, matching a channel
-      // that was never mounted. The two sibling regex builders in this same file
-      // already escape identically.
-      const safeAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // `<alias` followed by a non-identifier char — matches `<probeChan/>`,
-      // `<probeChan />` and `<probeChan attr=…>`, but not `<probeChanOther/>`.
-      if (new RegExp(`<\\s*${safeAlias}(?![A-Za-z0-9_$])`).test(raw)) return alias;
-    }
-    return null;
   };
 
   // ⚑ The mount is attributed to its NEAREST enclosing conditional container,
@@ -4943,8 +4946,6 @@ function reportChannelMountsInConditionals(
           // The wrapper is synthetic — mark it seen so it is never classified
           // as a mount, then descend into the author's actual arm body.
           seen.add(wr);
-          const rawHit = findAliasInRaw(wr._reparseEachArmBodyRaw);
-          if (rawHit) fire(rawHit, kind, (wr.span as Span | undefined) ?? here.span);
           walk(wr.children ?? null, here, seen);
         }
       }

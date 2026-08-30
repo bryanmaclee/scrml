@@ -142,28 +142,25 @@ describe("S385 — a channel mounted in a conditional container is REFUSED", () 
     expect(hardErrors(result).length).toBeGreaterThan(0);
   });
 
-  test("inside an EACH-BEARING arm — the adopter's shape, body stranded as raw text", () => {
-    // ast-builder S316 blanks this arm and stashes the body as a raw string, so
-    // the mount is not an AST node at all at CE time. The refusal has to scan
-    // that raw text; a node-only check misses the exact reported case.
-    const { result } = compileIn("r3", `<program>
-    ${D}{
-        import { "probe" as probeChan } from './chan.scrml'
-        type Phase:enum = { Loading, Ready }
-        <phase>: Phase = .Ready
-    }
-    <match for=Phase on=@phase>
-        <Loading><p>loading</p></>
-        <Ready>
-            <probeChan/>
-            <p>${D}{@stamp}</p>
-            <each in=@items as i key=i.id><li>${D}{i.id}</li></each>
-        </>
-    </>
-</program>
-`);
-    expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
-  });
+  // ⚑ RULED FAIL-OPEN — the adopter's exact shape is NOT detected.
+  //
+  // An each-bearing bare-body arm is blanked by ast-builder (S316) BEFORE CE
+  // runs and its body survives only as a raw source string, so there is no tree
+  // to ask. A revision of this check DID scan that text stash; it was DELETED
+  // because a text scan cannot tell a mount from a mention — a
+  // `<!-- don't mount <probeChan/> here -->` comment inside such an arm made a
+  // VALID file uncompilable (pinned CLEAN below, "a COMMENT naming the alias").
+  // Masking comments/strings was considered and rejected as enumerate-forever.
+  //
+  // So this shape compiles CLEAN and ships dead markup. Known, filed,
+  // deliberate. Closing it means giving CE a walkable arm body — an
+  // ast-builder/S316 change — which is its own arc.
+  test.todo(
+    "REFUSE a channel mounted inside an EACH-BEARING match arm (the adopter's " +
+    "shape). Blocked on CE having a walkable arm body: S316 blanks the arm " +
+    "before CE runs, and the deleted text-scan alternative false-accused any " +
+    "comment/<pre>/string naming the alias.",
+  );
 
   test("arm mount with NO cell read — the shape that used to compile CLEAN and ship dead markup", () => {
     // Pre-S385 this exited 0 and emitted `return "<probeChan />…"` into the
@@ -305,6 +302,55 @@ describe("S385 — supported mount positions stay accepted AND fully wired", () 
 `);
     // Mount position does not scope a channel — the arm read resolves fine.
     expect(codes(result)).not.toContain("E-STATE-UNDECLARED");
+    expect(hardErrors(result)).toEqual([]);
+  });
+
+  test("a COMMENT naming the alias inside an each-bearing arm stays CLEAN", () => {
+    // THE round-4 regression. The deleted text-scan path matched the alias
+    // inside an HTML comment and refused a file whose mount is correctly at
+    // `<program>` level — a valid file made uncompilable by a comment. Compiles
+    // clean on `main`; must compile clean here.
+    const { result } = compileIn("w1", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+        <rows> = [1, 2]
+    }
+    <probeChan/>
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready>
+            <!-- do not mount <probeChan/> here -->
+            <each in=@rows as r><li>${D}{r}</li></each>
+        </>
+    </>
+</program>
+`);
+    expect(codes(result)).not.toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+    expect(hardErrors(result)).toEqual([]);
+  });
+
+  test("a `<pre>` block naming the alias inside an each-bearing arm stays CLEAN", () => {
+    // Same class as the comment case: any textual MENTION of the alias.
+    const { result } = compileIn("w2", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+        <rows> = [1, 2]
+    }
+    <probeChan/>
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready>
+            <pre>example: &lt;probeChan/&gt;</pre>
+            <each in=@rows as r><li>${D}{r}</li></each>
+        </>
+    </>
+</program>
+`);
+    expect(codes(result)).not.toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
     expect(hardErrors(result)).toEqual([]);
   });
 
