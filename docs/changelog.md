@@ -6673,6 +6673,63 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S385 — 2026-08-29/30 (bryan · ASUS) — the architecture complaint measured, and the decision queue opened
+
+**The session's spine: bryan's standing "we are chasing bugs in circles / this is still a first-draft
+prototype we never let go of" complaint was answered by measurement rather than argument — and the
+measurement inverted it.**
+
+**Fix cost per defect is NOT rising.** Median compiler-source files per closed HIGH by 50-session block:
+`1 · 2 · 4 · 2 · 2 · 1`; all-severity **p90 fan-out NARROWED from 4-6 files to 2**. Severity drift ruled
+out structurally (HIGH and MED fixes have indistinguishable diff sizes, so relabelling cannot move the
+median); the detection confound replicated independently at **2.64×** against dpa-024's 2.7% on different
+data. What IS rising is the funnel — HIGH filings/session `0.04 → 1.00` — and a **decision queue: 30 of 60
+open HIGHs blocked on an operator decision, median age 38 sessions.** Honest limit carried verbatim into
+every artifact: *"the rising-cost hypothesis is not supported and is mildly contradicted," NOT "the
+compiler is converging."* Artifact:
+`scrml-support/docs/deep-dives/fix-cost-per-defect-trend-dpa-024-s10-2026-08-30.md`.
+
+**dpa-024 RATIFIED** — bryan's own S331 question, run 2026-08-10, unratified for 20 days. §§1-3 + Q5
+ratified; §9's `emit-match.ts:900` accepted as a ranked-4th debt item with deletion-in-the-same-arc a hard
+precondition. The PA nearly fired a duplicate DD on bryan's instruction and caught it by reading
+`dpa-queue.md` first. ⚑ **Sharpening ratified with it:** the untyped inter-pass contract's cost lands in
+**defect COUNT, not per-defect COST** — so any future proposal justified by *"fixes are getting harder"*
+argues from a measured-false premise.
+
+**THE PA GAINS A BOUNDED RULING MANDATE (4b).** Written into `pa-profile-bryan.md` beside dispatch-auth
+and merge-auth: the PA may rule alone on **newly-REJECTING** changes with **MEASURED-zero** corpus impact
+where a governing SPEC sentence exists **and is quoted**. Newly-accepting is never in the class;
+SPEC-silent disqualifies; recorded `prov=pa-ruled:`, count stated at every boot, revocable without
+justification. Origin is the queue measurement above against an operator who drives a truck most days.
+
+**THE §12 EXPRESSION-POSITION POLICY** — four open items (C5 ~88 sessions, C6 ~16, C7, A9) collapsed into
+one rule: *any expression position that reaches a server-only binding is treated exactly as a function
+body reaching one; where the compiler CAN place it, it places it; where it cannot, it REFUSES; silence is
+never an option at this boundary.* A9's refusal is recorded as **pending dpa-023, with an expiry**.
+
+**Adopter:** flogence's flagship went **GREEN** on a one-edit workaround, and they verified against their
+own artifact that two channels **had never connected in production** (`_scrml_ws` count 0 → 8). They
+independently endorsed the reject ruling from the adopter seat. Their import bridge was also unblocked —
+it had been refusing our delta-log at **2,169 of 2,171 entries** over one two-word `kind`, which exposed
+that the doc named `kind` as a closed set of five tokens while the log uses **55**, with **609 of 2,189
+entries (28%) outside it**.
+
+**Landed:** #769 (dpa-024 ruled + the measurement) · #771 (ledger bookkeeping) · #772 (recovered gap
+filings — 4 filed, 1 NOT-reproduced and deliberately not filed, 1 closed as already-fixed-41-days-ago).
+
+**Not landed, in flight at wrap:** the channel-mount guard (round 6), the each-in scope check (round 3),
+and arc (b) — which completed with its **premise falsified**: un-blanking an each-bearing match arm does
+NOT double-emit, because `collectEachBlocks` never descends `armBodyChildren` at all. `0 of 1397`
+differential.
+
+⚑ **Two process findings worth more than the fixes.** `git stash` is **shared across every worktree**
+(`refs/stash` lives in the common `.git` dir) — a race put an agent's edits in the main checkout and the
+PA's stash in the agent's worktree, and the PA **mis-diagnosed it as a path-discipline leak**, telling an
+agent it wrote paths it never wrote. Banked as an overlay rule: isolated dispatches flip base-vs-build by
+file copy, never by stash. And **the ledger loses entries in both directions** — 129 marker-without-heading
+ids, plus heading-without-marker entries invisible to `state.ts`; one such hid a fixed bug for 41 days.
+
+
 ### 2026-08-29 — S383 (bryan) + S384 (peter): two ratified landings, and the reviews found more than the building did
 
 bryan ratified two items in one line — *"land the stable half. ratify the 13.7 cut."* Both landed.
