@@ -416,16 +416,34 @@ describe("§5 — every documented `key=` form still compiles clean", () => {
     ), "key=r.id over the own row binding");
   });
 
-  test("`key=k` — the §59.8 2-name destructure's bindings are in scope for `key=` too", () => {
-    expectNoErrors2(compileSource(
-      `<program>
-  <m> = { a: 1, b: 2 }
-  <each in=@m.entries() as (k, v) key=k><li>\${k}: \${v}</li></each>
-</program>
-`,
-      "ok-key-destructure-binding.scrml",
-    ), "key=k over the 2-name destructure");
-  });
+  // GAP-S385-EACH-KEY-DESTRUCTURE — do NOT restore this as a clean-compile case.
+  //
+  // An earlier revision asserted `<each in=@m.entries() as (k, v) key=k>`
+  // compiles clean. It does compile clean — and the JS it emits crashes on first
+  // render, TWICE:
+  //
+  //   (_scrml_each_item, _scrml_each_idx) => k,     // free `k` -> ReferenceError
+  //     const _scrml_each_key_1 = k;                // read here...
+  //     const k = _scrml_each_item.key;             // ...bound AFTER -> TDZ
+  //
+  // So the assertion was pinning the exact failure class this whole file exists
+  // to close, and the suite was blessing it.
+  //
+  // THE SCOPE CHECK IS CORRECT HERE; CODEGEN IS NOT. `k` genuinely IS in scope
+  // for `key=` (that is ORDERING TRAP C, above, and it is right). The defect is
+  // in `emit-each.ts`: `keyFnBody` is computed at ~:3160 and consumed at ~:3164
+  // and ~:3172, but `emitDestructureBindingLines` does not run until ~:3184 — so
+  // the standalone key arrow closes over a free name, and the item factory reads
+  // it one line before it is declared. Narrow: it needs `key=` to REFERENCE a
+  // destructure name. Without `key=`, the default key expression does not mention
+  // `k`/`v` and the same source emits fine.
+  //
+  // Left as a todo rather than fixed here: this is a type-system dispatch, and
+  // the repair is not a line move. Reordering fixes the `_scrml_each_key_1` read,
+  // but the standalone `(item, idx) => k` arrow needs a BODY carrying the
+  // bindings (or the key expression rewritten against `item.key`) — an emitted-
+  // shape change, not a reorder. Filed for its own landing.
+  test.todo("GAP-S385-EACH-KEY-DESTRUCTURE — `as (k, v) key=k` compiles clean but emits a ReferenceError + TDZ (emit-each.ts ~:3160, keyFnBody computed before emitDestructureBindingLines)");
 });
 
 // =============================================================================
@@ -515,5 +533,96 @@ describe("§7 — `in=<later const>` rejects, consistently with its siblings", (
     const errs = [...r.errors, ...r.warnings]
       .filter((d) => String(d.code).startsWith("E-"));
     expect(errs.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  });
+});
+
+// =============================================================================
+// §8 — a read sitting BESIDE a `@.` sigil is still checked
+// =============================================================================
+//
+// The `<match on=>` precedent this check was modelled on bails on the whole raw
+// when it starts with `@.`. Copying that bail here was wrong: on `<each>` a
+// leading `@.` is common, and the bail skipped the ENTIRE opener expression
+// rather than the sigil sub-read — so any cell read beside it went unchecked and
+// the mistake surfaced from codegen as E-CODEGEN-INVALID-LOGIC instead of naming
+// the cell. The sigil is exempted inside the shared walker, where it belongs.
+describe("§8 — the `@.` sigil does not shield the rest of the expression", () => {
+  test("`key=@.id + @typo` names the undeclared cell (was an E-CODEGEN-INVALID-LOGIC crash)", () => {
+    const r = compileSource(
+      `<program>
+  <rows> = [1, 2, 3]
+  <each in=@rows key=@.id + @hiddenKeyTypo as r><li>\${r}</li></each>
+</program>
+`,
+      "atdot-key-beside.scrml",
+    );
+    const hits = diagsByCode(r, "E-STATE-UNDECLARED")
+      .filter((d) => String(d.message).includes("hiddenKeyTypo"));
+    expect(hits.length).toBeGreaterThan(0);
+    expect(diagsByCode(r, "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
+  });
+
+  test("`in=@.rows.concat(@typo)` names the undeclared cell", () => {
+    const r = compileSource(
+      `<program>
+  <rows> = [1, 2, 3]
+  <each in=@.rows.concat(@hiddenTypoCell) as r><li>\${r}</li></each>
+</program>
+`,
+      "atdot-in-beside.scrml",
+    );
+    const hits = diagsByCode(r, "E-STATE-UNDECLARED")
+      .filter((d) => String(d.message).includes("hiddenTypoCell"));
+    expect(hits.length).toBeGreaterThan(0);
+  });
+
+  test("the `@.`-only forms stay clean — no over-fire from dropping the bail", () => {
+    const cases = [
+      ["keyId", `<each in=@rows key=@.id as r><li>\${r}</li></each>`],
+      ["keyEmail", `<each in=@rows key=@.email as r><li>\${r}</li></each>`],
+      ["bodySigil", `<each in=@rows><li>\${@.}</li></each>`],
+    ];
+    for (const [label, opener] of cases) {
+      const r = compileSource(
+        `<program>
+  <rows> = [1, 2, 3]
+  ${opener}
+</program>
+`,
+        `atdot-clean-${label}.scrml`,
+      );
+      const errs = [...r.errors, ...r.warnings]
+        .filter((d) => String(d.code).startsWith("E-"));
+      expect({ label, errors: errs.map((d) => d.code) }).toEqual({ label, errors: [] });
+    }
+  });
+});
+
+// =============================================================================
+// §9 — EVERY interpolation in an opener value is a read site
+// =============================================================================
+describe("§9 — a multi-interpolation opener value checks every `${…}`, not just the first", () => {
+  test("`key=${@a}-${@typo}` reports the SECOND interpolation", () => {
+    // The `on=` precedent's `/^\$\{([\s\S]*)\}$/` is greedy and single-shot: on
+    // this value it collapses to the inner text `@a}-${@typo`, so `@typo` is
+    // never checked. Tightening the class to `[^}]` instead hands the parser the
+    // raw template, which reports "Undeclared identifier `$`" — a diagnostic that
+    // names nothing useful. The depth scan reports the actual cell.
+    const r = compileSource(
+      `<program>
+  <a> = 1
+  <rows> = [1, 2]
+  <each in=@rows as r key=\${@a}-\${@hiddenSecondTypo}><li>\${r}</li></each>
+</program>
+`,
+      "interp-second-read.scrml",
+    );
+    const hits = diagsByCode(r, "E-STATE-UNDECLARED")
+      .filter((d) => String(d.message).includes("hiddenSecondTypo"));
+    expect(hits.length).toBeGreaterThan(0);
+    // And it must not invent a diagnostic about the template punctuation.
+    const bogus = [...r.errors, ...r.warnings]
+      .filter((d) => /Undeclared identifier `\$`/.test(String(d.message)));
+    expect(bogus).toEqual([]);
   });
 });
