@@ -147,3 +147,155 @@ outer binding because the inner node is visited after the outer scope push).
 - The `E-SCOPE-001` attribute message suggests using `@` for a reactive variable
   (`@@undeclaredAttr`) when the value ALREADY starts with `@` — it blindly
   prefixes another `@`. Cosmetic message bug, pre-existing, not touched.
+
+---
+
+## Phase 2 — the check, as built
+
+`compiler/src/type-system.ts`, `case "each-block"`, inserted between
+`visitStructuralIfAttr(n)` and `scopeChain.push("each:…")`. For each of
+`inExprRaw` / `ofExprRaw`: guard `@.`, strip a `${ … }` wrapper,
+`parseExprToNode` in a `try`, then `checkLogicExprIdents(...)`. 57 lines,
+~40 of them the comment explaining why the placement is load-bearing.
+
+Coupled test: `compiler/tests/unit/each-opener-iterable-undeclared-read.test.js`,
+13 cases, all passing. §3 is the load-bearing half — it pins both ordering traps
+(a nested each's `in=` resolving against the OUTER row binding; and `in=@x` NOT
+being absorbed by the each's own `as x` binding) plus arrow params, array
+literals, the `@.` sigil, and the §59.8 2-name destructure.
+
+Control matrix, base -> build:
+
+| shape | base | build |
+|---|---|---|
+| `<each in=@undeclared as x>` | rc=0 silent | **rc=1 `E-STATE-UNDECLARED`** |
+| `<each of=@undeclared as x>` | rc=0 silent | **rc=1 `E-STATE-UNDECLARED`** |
+| `<each in=@undeclaredObj.items>` | rc=0 silent | **rc=1 `E-STATE-UNDECLARED`** |
+| `<each in=${@undeclared}>` | rc=1 `E-CODEGEN-INVALID-LOGIC` | **rc=1 `E-STATE-UNDECLARED`** |
+| `<each in=@rows as x>` (declared) | rc=0 | rc=0 (unchanged) |
+| `<each in=[1,2,3] as x>` | rc=0 | rc=0 (unchanged) |
+| `<each in=@rows.filter(n => n > 1)>` | rc=0 | rc=0 (unchanged) |
+| nested `<each in=r.kids>` under `as r` | rc=0 | rc=0 (unchanged) |
+| `${@undeclared}` | rc=1 `E-STATE-UNDECLARED` | unchanged |
+| `<input value=@undeclared>` | rc=1 `E-SCOPE-001` | unchanged |
+
+The `in=${@undeclared}` row is a side improvement: a real diagnostic replaces a
+lowering crash (`E-CODEGEN-INVALID-LOGIC`, "the compiler could not lower this
+construct").
+
+## Phase 3 — THE MEASUREMENT (the deliverable)
+
+### 0 of 1005
+
+- **Newly-failing files (PASS -> FAIL): 0**
+- Newly-passing files (FAIL -> PASS): 0
+- Files whose diagnostic CODE SET changed at all (including files already
+  failing for other reasons): **0**
+- Total swept: **1005** — `examples/**` (71), `samples/**` (877),
+  `stdlib/**` (53), `scrml-support/docs/gauntlets/gauntlet-r25/dev-*.scrml` (4)
+- Base verdicts: 754 PASS / 251 FAIL. Build verdicts: 754 PASS / 251 FAIL.
+- Path lists byte-identical between the two sweeps (no silently-dropped file).
+
+Newly-failing files to enumerate: **none**. The list is empty, not truncated.
+Nothing to classify as genuine-vs-false-positive, because nothing newly failed.
+
+Harness: `sweep.sh` (per-file verdict + full sorted-unique diagnostic code set),
+`diff.sh` (verdict flips + code-set deltas). Raw data in `base.tsv` / `build.tsv`;
+`flips.txt` and `codeset-changes.txt` are both 0 bytes.
+
+### Why the zero is real and not a broken probe
+
+A zero from a measurement harness is exactly the result a silently-dead harness
+also produces, so the zero was adversarially verified rather than reported.
+
+**Positive control on the whole chain.** Every corpus file carrying a real
+`<each in=@cell>` opener that PASSES on the build was copied to scratch, its
+iterated cell renamed to a guaranteed typo, and re-run through the EXACT sweep
+command. **25 of 25 flipped PASS -> FAIL with `E-STATE-UNDECLARED`.** So the
+compiler under measurement is the built one, the sweep reaches these files, and
+the check fires on real corpus shapes. The zero means the corpus contains no
+undeclared each-iterable — not that the probe was dead.
+
+(First run of that control reported 24/25, with `examples/34-value-native-set.scrml`
+"staying". That was a bug in the CONTROL SCRIPT, not the check: its cell-name
+grep matched `<each in=@set>` inside a source COMMENT on lines 22 and 73, so the
+mutation rewrote comment text and left the three real openers — `@certified`,
+`@required.elements()`, `@gaps` — untouched. Re-running against the real opener on
+line 75 flipped it. 25/25.)
+
+**Highest-risk class checked by hand.** The bare-identifier (non-`@`) `in=` forms
+are the likeliest false-positive source, because they route through the
+`E-SCOPE-001` half of `checkLogicExprIdents` and depend on component props /
+file-scope `let` / fn decls being bound at opener-evaluation time. All 10 corpus
+occurrences hold, base verdict == build verdict, code sets unchanged:
+`in=rows`, `in=drivers` (component prop, `props={ drivers: asIs, … }`),
+`in=nextStates`, `in=columns`, `in=items` x2, `in=names`, `in=users` x2, and
+`in=buildItems(["a","bb","ccc"])` (a call).
+
+**`of=` contributes exactly 0**: there are zero `<each of=…>` openers anywhere in
+the swept corpus (verified by grep). It is wired for the same reason the check
+exists — the `of=` slot has the identical silent-failure shape — but it changes
+no corpus file.
+
+### What this means for the ruling
+
+Brief conditions 1 (governing SPEC sentence exists) and 2 (newly-rejecting
+change) were already satisfied. Condition 3 is **measured zero**. Per the brief
+that puts the ruling inside the PA's granted authority. Recorded, not acted on —
+this branch is not landed and no PR was opened.
+
+The check was NOT tuned toward zero. It was built once, from the `<match on=>`
+precedent, and measured once. The only change made after the first measurement
+was to the positive-control script, and that change made the control STRICTER.
+
+
+## Phase 4 — full suite
+
+`bun run test` (= `bun test compiler/tests/`, which includes the browser and
+dev-server lanes the pre-commit hook excludes). Base measured on `a8448ac`
+BEFORE any edit; build measured on `b4e267b6`.
+
+| | base `a8448ac` | build `b4e267b6` |
+|---|---|---|
+| pass | 30703 | 30717 |
+| fail | 57 | 55 |
+| skip | 216 | 216 |
+| todo | 2 | 2 |
+| test files | 1425 | 1426 |
+
+**Zero new failures.** `+14 pass` is the 13 new test cases plus one browser-lane
+test that happened to pass this run; `-2 fail` is browser-lane noise in the other
+direction. Counts alone are not evidence here, so the failure NAME SETS were
+captured on both sides and diffed:
+
+- Names in build but not base: **1** —
+  `M1 — an if= mount/unmount controller in a swapped region RE-EVALUATES > a
+  swapped-in if= mounts on true and unmounts on false (not frozen)`
+- Names in base but not build: 0
+
+That one name is NOT a regression, established three ways:
+1. It is a pre-existing entry in the tracked browser known-failure baseline,
+   `compiler/tests/browser/FAILURE-BASELINE.json` line 13 (48 asserted names,
+   recorded 2026-08-02) — i.e. it was already-failing before this dispatch
+   existed. The base run simply did not hit it that pass.
+2. Run in ISOLATION on the build, that test PASSES
+   (`bun test compiler/tests/browser/browser-navigate-soft-nav.test.js`) — the
+   happy-dom cross-file global-state-leak signature.
+3. The authoritative gate agrees: `bun scripts/browser-baseline.ts --check`
+   reports **PASS — browser failure name set matches the baseline (48 asserted,
+   0 of 2 env-excluded observed)** on the build.
+
+Pre-commit gate lanes (unit + integration + conformance, browser excluded) on the
+build: **22985 pass / 0 fail / 70 skip / 1 todo**, 23056 tests across 1277 files,
+exit 0. The full pre-commit hook also ran clean at commit time (it gates the
+commit; the Phase-2 commit `b4e267b6` would not exist otherwise).
+
+The within-node parser-parity canary
+(`compiler/tests/parser-conformance-within-node.test.js`, part of the suite)
+passes — the raw-text route adds no AST field, so there is nothing for it to
+diverge on against the native parser.
+
+## Terminal state
+
+- Branch: `worktree-agent-a4c73958a8bad6e3b`. **NOT LANDED. No PR opened.**
+- The measurement says condition 3 is satisfied at **0 of 1005**.
