@@ -517,3 +517,38 @@ not appear in the measurement — recorded here because an adopter could hit it.
 Reactive CELLS hoist to file scope (§6.9, and the typer pre-binds them for exactly
 this reason), so `<each in=@laterCell>` above the declaration still resolves. A
 `const` in a `${}` logic body does not hoist. Both halves pinned by §7.
+
+## ROUND 2 — full suite
+
+| | base `a8448ac` | round-1 build | round-2 build |
+|---|---|---|---|
+| pass | 30703 | 30717 | 30727 |
+| fail | 57 | 55 | 55 |
+| skip | 216 | 216 | 216 |
+| todo | 2 | 2 | 2 |
+| test files | 1425 | 1426 | 1426 |
+
+**Zero new failures.** Failure NAME SETS diffed against the base set captured
+before any edit: exactly **1** name in round-2-not-in-base, and it is the same
+documented browser-lane entry as round 1 —
+`M1 — an if= mount/unmount controller in a swapped region RE-EVALUATES > a
+swapped-in if= mounts on true and unmounts on false (not frozen)` — a pre-existing
+line in `compiler/tests/browser/FAILURE-BASELINE.json` (48 asserted names,
+recorded 2026-08-02), which the base run simply did not hit that pass. Zero names
+in base-not-in-round-2.
+
+Authoritative gate on the round-2 build:
+`bun scripts/browser-baseline.ts --check` -> **PASS — browser failure name set
+matches the baseline (48 asserted, 0 of 2 env-excluded observed)**.
+
+Pre-commit hook (unit + integration + conformance, browser excluded) on the
+round-2 build: **29373 pass / 0 fail**. It gates the commit, so `b01b5658` would
+not exist otherwise.
+
+## Terminal state (round 2)
+
+- Branch: `worktree-agent-a4c73958a8bad6e3b`, rebased onto `origin/main`
+  `9a0ad569`, 0 behind. **NOT LANDED. No PR opened.**
+- `<each>` opener now covered on all four expression slots: `if=` (S302,
+  pre-existing), `in=`, `of=`, `key=`.
+- Corpus impact: **0 of 1005** for the `key=` delta, **0 of 1005** cumulative.
