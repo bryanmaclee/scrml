@@ -12719,6 +12719,63 @@ function annotateNodes(
         // below binds `as name`, or `if=item.ok` would resolve against the row
         // variable and ship a runtime `Cannot read properties of undefined`.
         visitStructuralIfAttr(n);
+        // §6.1.2 / §17.X / §34 — route the OPENER ITERABLE (`in=` / its `of=`
+        // twin) through the read-side E-STATE-UNDECLARED walker.
+        //
+        // THE GAP. `<each>` is not a `kind:"markup"` node: the block splitter
+        // raw-captures it and the AST builder rebuilds the opener by regexing
+        // NAMED attributes out of the header, so the node has no `attrs` array
+        // and the markup walk's `for (const attr of n.attrs)` loop — the thing
+        // that feeds `visitAttr` — reaches nothing on it. The iterable survives
+        // only as RAW TEXT (`inExprRaw` / `ofExprRaw`), and codegen (emit-each.ts)
+        // lowers that straight to `_scrml_reactive_get("<name>")` without ever
+        // consulting the typer. So `<each in=@totallyUndeclared as x>` compiled
+        // CLEAN, exit 0, and rendered an empty list forever — precisely the
+        // "genuine undeclared-cell typo, NOT a silently-synthesised cell" case
+        // SPEC §6.1.2 says SHALL be E-STATE-UNDECLARED.
+        //
+        // THE FIX IS THE SIBLING'S. `<match on=@cell>` (§18.0.1 / §34, ss42
+        // item-2 — see the `match-block` case below) had this identical gap for
+        // the identical reason, and closed it by parsing its own raw
+        // (`onExprRaw`) and feeding it to `checkLogicExprIdents`. This is that,
+        // one node family over. Reusing the walker rather than writing a second
+        // predicate is what keeps `in=@typo` and `${@typo}` from ever disagreeing
+        // — and it inherits every exemption the walker already honours: `@.`
+        // (§17.7.3), `@_`-prefixed, RESERVED_AMBIENT_PROJECTION_NAMES, declared
+        // type names, known fn names, and the sigil/bare double-bind lookup.
+        //
+        // BEFORE THE SCOPE PUSH, deliberately. The iterable is evaluated OUTSIDE
+        // the per-item scope, so running this after the push below would let
+        // `in=x` resolve against the loop's own `as x` binding and stay silent —
+        // the same ordering trap `visitStructuralIfAttr` documents for `if=`.
+        for (const iterField of ["inExprRaw", "ofExprRaw"] as const) {
+          const iterRawUnknown = (n as Record<string, unknown>)[iterField];
+          if (typeof iterRawUnknown !== "string") continue;
+          const iterTrim = iterRawUnknown.trim();
+          if (iterTrim.length === 0) continue;
+          // §17.7.3 — `@.`/`@.field` is the `<each>`-only contextual iteration
+          // sigil, not a cell read. The walker early-returns on it anyway, but a
+          // raw `@.` can confuse the expression parser, so guard up front
+          // (mirrors the `on=` precedent's guard).
+          if (iterTrim.startsWith("@.")) continue;
+          // Strip a `${ … }` wrapper to the inner expression, mirroring the `on=`
+          // precedent; a bare `@cell` / `@cell.path` / complex-expr form passes
+          // through unchanged.
+          const iterDollar = iterTrim.match(/^\$\{([\s\S]*)\}$/);
+          const iterInner = iterDollar ? iterDollar[1].trim() : iterTrim;
+          if (iterInner.length === 0) continue;
+          const iterSpan = (n.span as Span | undefined)
+            ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          let iterNode: unknown = null;
+          try {
+            iterNode = parseExprToNode(iterInner, filePath, iterSpan.start ?? 0);
+          } catch {
+            iterNode = null; // unparseable iterable — defer to codegen's handling
+          }
+          if (iterNode) {
+            checkLogicExprIdents(iterNode, iterSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          }
+        }
         scopeChain.push(`each:${nodeKey(n)}`);
         const asName = (n as Record<string, unknown>).asName;
         if (typeof asName === "string" && asName.length > 0) {
