@@ -737,6 +737,24 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`// <channel name="${name}" topic="${topic}"> — WebSocket client (§38)`);
   lines.push(`const ${varName} = (() => {`);
   lines.push(`  let ${wsVar}, ${reconnVar};`);
+  if (sharedVars.length > 0) {
+    // §38.4 echo dedup: per-cell JSON of the last value synced (inbound OR
+    // outbound). The outbound effect skips a send whose value equals the last
+    // synced value, so an inbound sync never re-emits — killing the ≥2-subscriber
+    // echo storm at the value level (not via a fragile synchronous flag: no
+    // cross-cell suppression, and correct for debounced/throttled cells whose
+    // effect fires on a later timer). JSON compare dedups primitive and array
+    // cells that a reference `===` would miss (each inbound frame is a fresh
+    // parse). An object cell rebuilt in a different key order may miss the dedup
+    // and emit one redundant frame — harmless (the peer's own dedup absorbs it),
+    // never a storm.
+    lines.push(`  const _scrml_ls = {};`);
+    // Normalize any cell value to a stable string dedup KEY. A value that does not
+    // JSON-serialize to a string (undefined / function / symbol → JSON.stringify
+    // returns undefined; or a throw) maps to a sentinel, so the dedup still applies
+    // and such a cell cannot re-open the echo storm.
+    lines.push(`  const _scrml_lk = (v) => { let s; try { s = JSON.stringify(v); } catch (_e) { return "\\u0000e"; } return s === undefined ? "\\u0000u" : s; };`);
+  }
   lines.push(`  function ${connectFn}() {`);
   // Bug 3 fix: use protocol-relative WebSocket URL (ws:// on HTTP, wss:// on HTTPS).
   lines.push(`    ${wsVar} = new WebSocket(\`\${location.protocol === 'https:' ? 'wss' : 'ws'}://\${location.host}/_scrml_ws/${safeName}\`);`);
@@ -764,7 +782,10 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
     lines.push(`        if (_d.__type === "__sync") {`);
     lines.push(`          // §38.4 channel-cell sync from server (V5-strict auto-sync)`);
     for (const varN of sharedVars) {
-      lines.push(`          if (_d.__key === ${JSON.stringify(varN)}) _scrml_reactive_set(${JSON.stringify(varN)}, _d.__val);`);
+      // §38.4 echo dedup: record the inbound value as the cell's last-synced key
+      // BEFORE applying it, so the outbound effect this set fires sees key ===
+      // last-synced and does NOT re-emit (breaks the ≥2-subscriber echo loop).
+      lines.push(`          if (_d.__key === ${JSON.stringify(varN)}) { _scrml_ls[${JSON.stringify(varN)}] = _scrml_lk(_d.__val); _scrml_reactive_set(${JSON.stringify(varN)}, _d.__val); }`);
     }
     lines.push(`          return;`);
     lines.push(`        }`);
@@ -799,8 +820,12 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`    close: () => ${wsVar}?.close(),`);
 
   if (sharedVars.length > 0) {
-    lines.push(`    syncShared: (key, val) => ${wsVar}?.readyState === 1 &&`);
-    lines.push(`      ${wsVar}.send(JSON.stringify({ __type: "__sync", __key: key, __val: val })),`);
+    // Returns TRUE only when the frame was actually put on the wire (socket OPEN),
+    // so the dedup can record last-synced only on a real send (WebSocket.send itself
+    // returns undefined — the old `&&` form could not distinguish sent from dropped).
+    lines.push(`    syncShared: (key, val) => { if (${wsVar}?.readyState === 1) { ${wsVar}.send(JSON.stringify({ __type: "__sync", __key: key, __val: val })); return true; } return false; },`);
+    lines.push(`    _ls: _scrml_ls,`);
+    lines.push(`    _lk: _scrml_lk,`);
   }
 
   lines.push(`  };`);
@@ -809,7 +834,14 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   if (sharedVars.length > 0) {
     lines.push(`// §38.4 channel-cell auto-sync effects for <channel name="${name}">`);
     for (const varN of sharedVars) {
-      lines.push(`_scrml_effect(() => ${varName}.syncShared(${JSON.stringify(varN)}, _scrml_reactive_get(${JSON.stringify(varN)})));`);
+      const k = JSON.stringify(varN);
+      // Read the cell FIRST (keeps the effect subscribed), THEN echo-dedup: skip the
+      // send when the value equals the last synced value (inbound or outbound). The
+      // stringify is try-guarded so a non-JSON-serializable value never throws in the
+      // effect (a bad channel cell was already un-syncable — let syncShared surface it
+      // when actually sending). Record last-synced ONLY after a real send (socket
+      // OPEN), so a write dropped while offline is not deduped away and lost.
+      lines.push(`_scrml_effect(() => { const _scrml_sv = _scrml_reactive_get(${k}); const _scrml_sj = ${varName}._lk(_scrml_sv); if (${varName}._ls[${k}] === _scrml_sj) return; if (${varName}.syncShared(${k}, _scrml_sv)) ${varName}._ls[${k}] = _scrml_sj; });`);
     }
   }
 
