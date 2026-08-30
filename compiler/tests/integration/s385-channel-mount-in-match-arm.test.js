@@ -185,6 +185,51 @@ describe("S385 — a channel mounted in a conditional container is REFUSED", () 
     expect(codes(result)).toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
   });
 
+  test("an `<each>` BODY mount says \"body\", never \"arm\", in BOTH clauses", () => {
+    // The trailing back-reference was hardcoded to "this arm" while the opening
+    // container label was computed, so an `<each>` mount read:
+    //   "is mounted inside an `<each>` body … including inside this arm"
+    // naming a construct that is not there.
+    const { result } = compileIn("x1", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        <rows> = [1, 2]
+    }
+    <each in=@rows as r>
+        <probeChan/>
+    </each>
+    <p>${D}{@stamp}</p>
+</program>
+`);
+    const diag = (result.errors ?? []).find(
+      (e) => e.code === "E-CHANNEL-MOUNT-IN-CONDITIONAL",
+    );
+    expect(diag).toBeTruthy();
+    expect(diag.message).toMatch(/mounted inside an `<each>` body/);
+    expect(diag.message).not.toMatch(/this arm/);
+  });
+
+  test("a `<match>` ARM mount still says \"arm\" in both clauses", () => {
+    const { result } = compileIn("x2", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready><probeChan/></>
+    </>
+</program>
+`);
+    const diag = (result.errors ?? []).find(
+      (e) => e.code === "E-CHANNEL-MOUNT-IN-CONDITIONAL",
+    );
+    expect(diag).toBeTruthy();
+    expect(diag.message).toMatch(/mounted inside a `<match>` arm/);
+    expect(diag.message).toMatch(/including inside this arm/);
+  });
+
   test("the message names the alias AND the top-level-mount fix", () => {
     const { result } = compileIn("r5", `<program>
     ${D}{

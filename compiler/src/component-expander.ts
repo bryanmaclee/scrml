@@ -4849,11 +4849,24 @@ function buildImportedChannelAliases(
  *
  * ## ⚑ SCOPE — this check is NODE-PATH ONLY, and that is a ruled fail-open
  *
- * Detection walks the AST and nothing else. An **each-bearing bare-body match
- * arm** is blanked by ast-builder (S316) BEFORE CE runs and its body survives
- * only as a raw source string, so there is no tree to ask and this check does
- * NOT fire for it — including the originally reported adopter shape. That
- * shape compiles clean and ships dead markup. **Known, filed, and deliberate.**
+ * Detection walks the AST and nothing else. There are TWO places it does not
+ * reach, and this list is meant to be exhaustive — if you find a third, add it
+ * here rather than leaving the claim to enumerate standing while it is false.
+ *
+ * ### 1. An each-bearing bare-body `<match>` arm
+ *
+ * ast-builder (S316) BLANKS such an arm before CE runs and its body survives
+ * only as a raw source string, so there is no tree to ask. What the author
+ * actually experiences splits in two, and only one half is silent — measured by
+ * compiling both:
+ *
+ *   - mount + a `${@cell}` READ of the channel → **fails CLOSED**, but with the
+ *     MISLEADING `E-STATE-UNDECLARED` on the read (the originally reported
+ *     symptom, unchanged by this check). This is the adopter's exact shape.
+ *   - mount + NO read → **compiles clean at exit 0 and ships the raw
+ *     `<alias/>` tag as dead markup**. This is the silent fail-open.
+ *
+ * **Known, filed, and deliberate.**
  *
  * An earlier revision did scan that text stash. It was DELETED because a text
  * scan cannot tell a mount from a mention: a `<!-- don't mount <probeChan/>
@@ -4864,7 +4877,19 @@ function buildImportedChannelAliases(
  * already knows, and where the tree cannot be asked the answer is to stop
  * asking, not to guess more carefully.
  *
- * Do not "restore coverage" here by re-adding a text scan. Closing the gap
+ * ### 2. A `<match>` whose `armBodyChildren` never materialised
+ *
+ * The arm walk below is guarded on `Array.isArray(rec.armBodyChildren)`, and
+ * ast-builder's wrapper builder returns `undefined` on FOUR paths — a missing
+ * or non-string `armsRaw`, a `parseMatchArms` THROW, a parse yielding zero
+ * arms, and a build yielding zero wrappers. When it does, the ENTIRE match
+ * block is skipped and no mount anywhere inside it is detected, whether or not
+ * any arm is each-bearing.
+ *
+ * This is not a regression — base was equally blind — but it is a real hole and
+ * the enumeration above would be dishonest without it.
+ *
+ * Do not "restore coverage" for either by re-adding a text scan. Closing hole 1
  * properly means giving CE a walkable arm body (an ast-builder/S316 change),
  * which is its own arc.
  *
@@ -4877,6 +4902,20 @@ const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
   "each-block": "an `<each>` body",
 };
 
+/**
+ * The SHORT noun for the same container, for the message's trailing
+ * back-reference ("… including inside this <noun>").
+ *
+ * Kept in lockstep with CHANNEL_MOUNT_CONTAINER_LABEL above. That clause was
+ * previously hardcoded to "this arm", so a mount inside an `<each>` body
+ * printed "is mounted inside an `<each>` body … including inside this arm" —
+ * naming a construct that is not there.
+ */
+const CHANNEL_MOUNT_CONTAINER_NOUN: Record<string, string> = {
+  "match-block": "arm",
+  "each-block": "`<each>` body",
+};
+
 function reportChannelMountsInConditionals(
   nodes: ASTNode[],
   aliases: Map<string, { imported: string; sourceKey: string }>,
@@ -4886,6 +4925,7 @@ function reportChannelMountsInConditionals(
 
   const fire = (alias: string, containerKind: string, span: Span | undefined): void => {
     const where = CHANNEL_MOUNT_CONTAINER_LABEL[containerKind] ?? "a conditional container";
+    const noun = CHANNEL_MOUNT_CONTAINER_NOUN[containerKind] ?? "container";
     errors.push(makeCEError(
       "E-CHANNEL-MOUNT-IN-CONDITIONAL",
       `E-CHANNEL-MOUNT-IN-CONDITIONAL: the cross-file channel \`<${alias}/>\` is mounted inside ${where}. ` +
@@ -4894,7 +4934,7 @@ function reportChannelMountsInConditionals(
       `functions, or its WebSocket route — the tag would be emitted verbatim into the markup and every ` +
       `\`@cell\` read of it would resolve to a cell that never syncs. ` +
       `Fix: move \`<${alias}/>\` out to \`<program>\` level. Its cells stay readable everywhere in the ` +
-      `file, including inside this arm — mount position does not scope a channel.`,
+      `file, including inside this ${noun} — mount position does not scope a channel.`,
       (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Span,
     ));
   };

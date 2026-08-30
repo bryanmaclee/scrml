@@ -147,6 +147,28 @@ describe("S385 — resolveDiagLocation resolves location atomically", () => {
     expect(r).toEqual({ file: "/proj/b.scrml", line: 3, col: 4 });
   });
 
+  test("a flat col SURVIVES a span-sourced line when both name the SAME file", () => {
+    // Round-5 regression. The atomicity fix over-applied and discarded a
+    // top-level `column` in the span-line branch even when the files matched,
+    // contradicting the #756 "top-level coordinates win" contract:
+    // `--> a.scrml:3:7` before, `--> a.scrml:3` after.
+    expect(resolveDiagLocation({
+      filePath: "a.scrml",
+      column: 7,
+      span: { file: "a.scrml", line: 3 },
+    })).toEqual({ file: "a.scrml", line: 3, col: 7 });
+  });
+
+  test("...but a flat col is DROPPED when the span names a DIFFERENT file", () => {
+    // The atomicity rule still applies: a col indexing into another file must
+    // not be rendered against the file actually being reported.
+    expect(resolveDiagLocation({
+      filePath: "a.scrml",
+      column: 7,
+      span: { file: "z.scrml", line: 3 },
+    })).toEqual({ file: "z.scrml", line: 3, col: undefined });
+  });
+
   test("a span col is borrowed only when both carriers name the SAME file", () => {
     expect(resolveDiagLocation({
       file: "/proj/a.scrml", line: 5,

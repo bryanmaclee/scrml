@@ -82,7 +82,19 @@ export function resolveDiagLocation(diag) {
   if (span?.line !== undefined) {
     // Coordinates come from the span, so the file does too — even when a
     // top-level `filePath` names something else.
-    return { file: spanFile ?? flatFile, line: span.line, col: span.col ?? undefined };
+    //
+    // A top-level `column`/`col` still WINS here when both carriers name the
+    // SAME file (the #756 contract). Discarding it unconditionally was an
+    // over-application of the atomicity rule: `{filePath:"a.scrml", column:7,
+    // span:{file:"a.scrml", line:3}}` printed `--> a.scrml:3:7` before the
+    // atomicity change and `--> a.scrml:3` after. Dropping the flat col is only
+    // correct when the files DIFFER, because only then does it index into
+    // something other than the file being reported.
+    return {
+      file: spanFile ?? flatFile,
+      line: span.line,
+      col: (sameFile ? flatCol : undefined) ?? span.col ?? undefined,
+    };
   }
   return { file: flatFile ?? spanFile, line: undefined, col: undefined };
 }
