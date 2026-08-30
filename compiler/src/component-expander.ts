@@ -4849,9 +4849,11 @@ function buildImportedChannelAliases(
  *
  * ## ⚑ SCOPE — this check is NODE-PATH ONLY, and that is a ruled fail-open
  *
- * Detection walks the AST and nothing else. There are TWO places it does not
- * reach, and this list is meant to be exhaustive — if you find a third, add it
+ * Detection walks the AST and nothing else. There are THREE places it does not
+ * reach, and this list is meant to be exhaustive — if you find a fourth, add it
  * here rather than leaving the claim to enumerate standing while it is false.
+ * (Hole 3 arrived exactly that way: the S385 round-4 revision of this note
+ * claimed TWO and an `<engine>` state-child mount was found immediately after.)
  *
  * ### 1. An each-bearing bare-body `<match>` arm
  *
@@ -4889,9 +4891,27 @@ function buildImportedChannelAliases(
  * This is not a regression — base was equally blind — but it is a real hole and
  * the enumeration above would be dishonest without it.
  *
- * Do not "restore coverage" for either by re-adding a text scan. Closing hole 1
- * properly means giving CE a walkable arm body (an ast-builder/S316 change),
- * which is its own arc.
+ * ### 3. A mount that is a DIRECT child of an `<engine>` body
+ *
+ * A mount inside a state-child BODY (`<Done rule=.Idle><probeChan/></>`) IS
+ * caught — that is the reported shape. A mount that is a direct entry of
+ * `engine-decl.bodyChildren`, i.e. a SIBLING of the state-children, is not.
+ *
+ * Direct entries cannot be classified without a variant-name oracle: a
+ * state-child is author-written markup whose tag IS a variant name
+ * (`<Done rule=.Idle>`), and the AST carries no marker separating it from a
+ * mount — measured, the two have identical key sets. Firing there would
+ * false-accuse a channel alias colliding with a variant name, which is the
+ * round-3 blocker class and strictly worse than the miss. The engine's
+ * `governedType` plus `ast.typeDecls` WOULD resolve same-file enums, but not
+ * imported ones, so it buys a partial oracle for a real false-positive risk.
+ *
+ * The residual is narrow: such a mount emits NOTHING — no tag, no wiring — so
+ * it is silent, but it is also a shape with no plausible authoring intent.
+ *
+ * Do not "restore coverage" for any of these by re-adding a text scan. Closing
+ * hole 1 properly means giving CE a walkable arm body (an ast-builder/S316
+ * change), which is its own arc.
  *
  * ⚑ Needs a `§34` catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL` — SPEC is
  * PA-owned and deliberately untouched here. That row must NOT claim the
@@ -4900,6 +4920,7 @@ function buildImportedChannelAliases(
 const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
   "match-block": "a `<match>` arm",
   "each-block": "an `<each>` body",
+  "engine-decl": "an `<engine>` state-child body",
 };
 
 /**
@@ -4914,6 +4935,7 @@ const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
 const CHANNEL_MOUNT_CONTAINER_NOUN: Record<string, string> = {
   "match-block": "arm",
   "each-block": "`<each>` body",
+  "engine-decl": "state-child body",
 };
 
 function reportChannelMountsInConditionals(
@@ -4976,8 +4998,32 @@ function reportChannelMountsInConditionals(
     const rec = node as Record<string, unknown>;
     const kind = typeof rec.kind === "string" ? rec.kind : "";
 
-    if (kind === "match-block" || kind === "each-block") {
+    if (kind === "match-block" || kind === "each-block" || kind === "engine-decl") {
       const here = { kind, span: rec.span as Span | undefined };
+
+      // §51.0 — an `<engine>` state-child body is variant-guarded rendering,
+      // exactly like a `<match>` arm, and `_expandChannelNode` cannot reach it
+      // either (it descends `markup`/`state`/`logic` only, and an engine is
+      // `kind: "engine-decl"`). A channel mounted in one compiled at exit 0
+      // with ZERO diagnostics, shipped the raw `<alias/>` tag into clientJs and
+      // emitted no `_scrml_ws` wiring at all — the same silent dead-channel
+      // outcome as the `<match>` case.
+      //
+      // Direct entries of `bodyChildren` are NEVER classified, for the same
+      // reason arm wrappers are not: a state-child is author-written markup
+      // whose TAG is a variant name (`<Done rule=.Idle>`), so an alias
+      // colliding with a variant would be false-accused — the round-3 blocker
+      // class, and the AST carries no marker distinguishing the two (measured:
+      // a mount node and a state-child node have identical key sets). Their
+      // `.children` ARE walked, which is where a mount unambiguously lives.
+      if (kind === "engine-decl" && Array.isArray(rec.bodyChildren)) {
+        for (const w of rec.bodyChildren) {
+          const wr = w as Record<string, unknown> | null;
+          if (!wr || typeof wr !== "object") continue;
+          seen.add(wr);
+          walk(wr.children ?? null, here, seen);
+        }
+      }
 
       if (kind === "match-block" && Array.isArray(rec.armBodyChildren)) {
         for (const w of rec.armBodyChildren) {
@@ -4991,8 +5037,12 @@ function reportChannelMountsInConditionals(
       }
 
       // Remaining child-bearing fields (each bodies, the match raw-text node).
+      // `bodyChildren` is skipped for an engine ONLY — it was handled above with
+      // the state-child discipline. An `each-block` reaches its body through
+      // `bodyChildren` and must still be walked here.
       for (const key of Object.keys(rec)) {
         if (key === "span" || key === "id" || key === "parent" || key === "armBodyChildren") continue;
+        if (kind === "engine-decl" && key === "bodyChildren") continue;
         walk(rec[key], here, seen);
       }
       return;

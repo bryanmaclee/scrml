@@ -40,13 +40,23 @@ export function stripRedundantCode(code, message) {
  * `.span` (`{ file, line, col }`) — `collectErrors` never flattens it. The
  * compile formatters historically read only the top-level fields, so a
  * span-only diagnostic (every E-STATE-UNDECLARED / E-SCOPE-001 / …) printed
- * with no `--> file:line:col`. This centralizes the EXACT three-level fallback
- * chain the sibling formatters already use (build.js:903-905/916-918,
- * dev.js:512/602/628/816) — note the MIDDLE `?? diag.col` level, alongside
- * `diag.span?.col` — so all three compile formatters resolve location
- * identically. Returns `undefined` for any component that does not resolve;
- * callers append `-->` only when `file` is present, and `:line` / `:col` only
- * when each is present.
+ * with no `--> file:line:col`. This centralizes location resolution for the three
+ * COMPILE formatters (formatError / formatWarning / formatLintDiagnostic) so
+ * they agree with each other. Returns `undefined` for any component that does
+ * not resolve; callers append `-->` only when `file` is present, and `:line` /
+ * `:col` only when each is present.
+ *
+ * ⚑ It is NOT byte-identical to the sibling chains in `build.js:903-905/916-918`
+ * and `dev.js:512/602/628/816`, and that divergence is deliberate. Those use a
+ * flat `filePath || file || span?.file` precedence for the FILE while taking
+ * `line`/`col` from whichever carrier has them. This helper resolves the three
+ * components ATOMICALLY instead (see below), which means that when a top-level
+ * `filePath` and a `.span.file` name DIFFERENT files and the coordinates come
+ * from the span, this reports the SPAN's file where `build.js`/`dev.js` would
+ * report the top-level one. No in-tree producer emits that shape today, so the
+ * two agree in practice — but do not read this as "all three commands resolve
+ * identically", because on a mismatched carrier they do not. Reconciling
+ * `build.js`/`dev.js` onto this helper is deliberately out of scope here.
  *
  * @param {object} diag a diagnostic (error / warning / lint) object
  * @returns {{ file: (string|undefined), line: (number|undefined), col: (number|undefined) }}
@@ -72,10 +82,16 @@ export function resolveDiagLocation(diag) {
   const sameFile = !flatFile || !spanFile || flatFile === spanFile;
 
   if (flatLine !== undefined) {
+    // Borrow the span's col only when both carriers agree on the file AND on
+    // the LINE. Guarding file identity alone still paired a top-level `line: 5`
+    // with a `span.col` measured on line 9, rendering `--> app.scrml:5:11`
+    // where column 11 belongs to a different line — the same
+    // confidently-wrong class the file guard exists to prevent, one axis over.
+    const spanColUsable =
+      sameFile && (span?.line === undefined || span.line === flatLine);
     return {
       file: flatFile ?? spanFile,
-      // Borrow the span's col only when both carriers agree on the file.
-      col: flatCol ?? (sameFile ? span?.col ?? undefined : undefined),
+      col: flatCol ?? (spanColUsable ? span?.col ?? undefined : undefined),
       line: flatLine,
     };
   }

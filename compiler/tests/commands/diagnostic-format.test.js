@@ -147,6 +147,28 @@ describe("S385 — resolveDiagLocation resolves location atomically", () => {
     expect(r).toEqual({ file: "/proj/b.scrml", line: 3, col: 4 });
   });
 
+  test("a span col is NOT borrowed when it was measured on a DIFFERENT line", () => {
+    // Round-6. The atomicity guard checked FILE identity only, so a top-level
+    // `line: 5` was paired with a `span.col` measured on line 9 and rendered
+    // `--> app.scrml:5:11` — a column that belongs to another line. Same
+    // confidently-wrong class as the file mismatch, one axis over.
+    expect(resolveDiagLocation({
+      file: "a", line: 5, span: { file: "a", line: 9, col: 11 },
+    })).toEqual({ file: "a", line: 5, col: undefined });
+  });
+
+  test("a span col IS borrowed when the span agrees on the line", () => {
+    expect(resolveDiagLocation({
+      file: "a", line: 5, span: { file: "a", line: 5, col: 11 },
+    })).toEqual({ file: "a", line: 5, col: 11 });
+  });
+
+  test("a span col IS borrowed when the span carries no line at all", () => {
+    expect(resolveDiagLocation({
+      file: "a", line: 5, span: { file: "a", col: 11 },
+    })).toEqual({ file: "a", line: 5, col: 11 });
+  });
+
   test("a flat col SURVIVES a span-sourced line when both name the SAME file", () => {
     // Round-5 regression. The atomicity fix over-applied and discarded a
     // top-level `column` in the span-line branch even when the files matched,

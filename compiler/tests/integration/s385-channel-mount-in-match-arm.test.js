@@ -230,6 +230,56 @@ describe("S385 — a channel mounted in a conditional container is REFUSED", () 
     expect(diag.message).toMatch(/including inside this arm/);
   });
 
+  test("inside an `<engine>` STATE-CHILD body", () => {
+    // Round-6. An `<engine>` is `kind: "engine-decl"`, which `_expandChannelNode`
+    // reaches no better than a `<match>` — it descends markup/state/logic only.
+    // A channel mounted in a state-child body compiled at exit 0 with ZERO
+    // diagnostics, shipped the raw tag into clientJs and emitted no `_scrml_ws`
+    // wiring: the identical silent dead-channel outcome as the match case.
+    const { result } = compileIn("y1", `<program>
+    ${D}{
+        import { "probe" as probeChan } from './chan.scrml'
+        type LoadPhase:enum = { Idle, Done }
+    }
+    <engine for=LoadPhase initial=.Idle>
+        <Idle rule=.Done></>
+        <Done rule=.Idle><probeChan/></>
+    </>
+</program>
+`);
+    const diag = (result.errors ?? []).find(
+      (e) => e.code === "E-CHANNEL-MOUNT-IN-CONDITIONAL",
+    );
+    expect(diag).toBeTruthy();
+    expect(diag.message).toMatch(/mounted inside an `<engine>` state-child body/);
+    // Container noun must track the label — never "this arm".
+    expect(diag.message).toMatch(/including inside this state-child body/);
+    expect(diag.message).not.toMatch(/this arm/);
+  });
+
+  test("REGRESSION GUARD — an alias colliding with an ENGINE state-child variant, mounted at top level", () => {
+    // The engine analogue of the round-3 blocker. A state-child is
+    // author-written markup whose TAG is a variant name, and the AST carries no
+    // marker separating it from a mount (measured: identical key sets). Direct
+    // `bodyChildren` entries are therefore never classified, so an alias named
+    // `Done` beside a `<Done rule=…>` state-child must NOT be accused.
+    const { result } = compileIn("y2", `<program>
+    ${D}{
+        import { "probe" as Done } from './chan.scrml'
+        type LoadPhase:enum = { Idle, Done }
+    }
+    <Done/>
+    <engine for=LoadPhase initial=.Idle>
+        <Idle rule=.Done></>
+        <Done rule=.Idle></>
+    </>
+    <p>${D}{@stamp}</p>
+</program>
+`);
+    expect(codes(result)).not.toContain("E-CHANNEL-MOUNT-IN-CONDITIONAL");
+    expect(hardErrors(result)).toEqual([]);
+  });
+
   test("the message names the alias AND the top-level-mount fix", () => {
     const { result } = compileIn("r5", `<program>
     ${D}{
@@ -507,6 +557,15 @@ describe("S385 — the refusal must not misfire on a correctly-placed mount", ()
 });
 
 describe("S385 — deferred", () => {
+  test.todo(
+    "REFUSE a channel mounted as a DIRECT child of an <engine> body (sibling " +
+    "of the state-children, not inside one). It emits nothing at all — no tag, " +
+    "no wiring — so it is silent too, but direct bodyChildren entries cannot be " +
+    "classified without a variant-name oracle: a state-child and a mount have " +
+    "identical AST key sets, so firing there would false-accuse an alias " +
+    "colliding with a variant name.",
+  );
+
   test.todo(
     "SUPPORT (not merely refuse) a channel mounted inside a <match> arm — " +
     "needs full parity: every channel collector descending armBodyChildren, the " +
