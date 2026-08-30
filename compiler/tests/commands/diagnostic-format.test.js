@@ -7,7 +7,10 @@
  * self-prefix at display time only; the diagnostic DATA is untouched.
  */
 import { describe, test, expect } from "bun:test";
-import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "../../src/commands/diagnostic-format.js";
+import { stripRedundantCode, stripRedundantLocation, resolveDiagLocation } from "../../src/commands/diagnostic-format.js";
+import { formatError, formatWarning } from "../../src/commands/compile.js";
+
+const stripAnsi = (s) => s.replace(/\u001b\[[0-9;]*m/g, "");
 
 describe("stripRedundantCode — print-time self-prefix removal", () => {
   test("strips an exact `${code}: ` self-prefix", () => {
@@ -66,69 +69,6 @@ describe("stripRedundantCode — print-time self-prefix removal", () => {
  * one adopter a hand-bisection of a 3,700-line file. The span was correct at the
  * fire site all along (measured: `line 6, col 14`); only the printer was blind.
  */
-describe("S385 — resolveDiagLocation reads the `span` carrier", () => {
-  test("a span-only diagnostic yields file + line + column", () => {
-    const d = {
-      code: "E-STATE-UNDECLARED",
-      span: { file: "/p/app.scrml", start: 66, end: 75, line: 6, col: 14 },
-    };
-    expect(resolveDiagLocation(d)).toEqual({
-      filePath: "/p/app.scrml",
-      line: 6,
-      column: 14,
-    });
-  });
-
-  test("maps the span's `col` onto `column` (the key names differ)", () => {
-    const d = { span: { file: "/p/a.scrml", line: 3, col: 9 } };
-    expect(resolveDiagLocation(d).column).toBe(9);
-  });
-
-  test("flat fields WIN over the span when both are present", () => {
-    const d = {
-      filePath: "/flat.scrml",
-      line: 1,
-      column: 2,
-      span: { file: "/span.scrml", line: 99, col: 98 },
-    };
-    expect(resolveDiagLocation(d)).toEqual({
-      filePath: "/flat.scrml",
-      line: 1,
-      column: 2,
-    });
-  });
-
-  test("a flat-only diagnostic (the lint shape) is unchanged", () => {
-    const d = { filePath: "/p/a.scrml", line: 8, column: 28 };
-    expect(resolveDiagLocation(d)).toEqual({
-      filePath: "/p/a.scrml",
-      line: 8,
-      column: 28,
-    });
-  });
-
-  test("`file` is accepted as an alias for `filePath`", () => {
-    expect(resolveDiagLocation({ file: "/p/a.scrml" }).filePath).toBe("/p/a.scrml");
-  });
-
-  test("a zero line/col is reported as 0, not swallowed to null", () => {
-    // Callers gate the `:line:col` suffix on truthiness, so a 0 must arrive as
-    // 0 (suffix suppressed) rather than being coerced away here.
-    const d = { span: { file: "/p/a.scrml", line: 0, col: 0 } };
-    const r = resolveDiagLocation(d);
-    expect(r.filePath).toBe("/p/a.scrml");
-    expect(r.line).toBe(0);
-    expect(r.column).toBe(0);
-  });
-
-  test("null-safe on a missing / non-object diagnostic and a missing span", () => {
-    expect(resolveDiagLocation(null)).toEqual({ filePath: null, line: null, column: null });
-    expect(resolveDiagLocation(undefined)).toEqual({ filePath: null, line: null, column: null });
-    expect(resolveDiagLocation({})).toEqual({ filePath: null, line: null, column: null });
-    expect(resolveDiagLocation({ span: null })).toEqual({ filePath: null, line: null, column: null });
-    expect(resolveDiagLocation({ span: "nope" })).toEqual({ filePath: null, line: null, column: null });
-  });
-});
 
 /**
  * S385 — `stripRedundantLocation`: drop a message's baked-in `(line N, col N)`
@@ -177,5 +117,88 @@ describe("S385 — stripRedundantLocation", () => {
 
   test("leaves a message with no trailing location untouched", () => {
     expect(stripRedundantLocation("plain message", 2, 5)).toBe("plain message");
+  });
+});
+
+/**
+ * S385 — `resolveDiagLocation` must resolve file/line/col ATOMICALLY.
+ *
+ * Resolving each component independently could pair a top-level `filePath` with
+ * a `line`/`col` from a `.span` naming a DIFFERENT file. The formatter then
+ * prints that file with the other file's coordinates AND renders its line as the
+ * offending source — confidently wrong, which is worse than incomplete.
+ */
+describe("S385 — resolveDiagLocation resolves location atomically", () => {
+  test("span-only coordinates bring the SPAN's file, not a mismatched flat filePath", () => {
+    const r = resolveDiagLocation({
+      filePath: "/proj/flat.scrml",
+      span: { file: "/proj/span.scrml", line: 42, col: 7 },
+    });
+    expect(r).toEqual({ file: "/proj/span.scrml", line: 42, col: 7 });
+  });
+
+  test("flat coordinates still WIN over a span naming another file (#756 contract)", () => {
+    const r = resolveDiagLocation({
+      file: "/proj/b.scrml",
+      line: 3,
+      column: 4,
+      span: { file: "/proj/other.scrml", line: 99, col: 99 },
+    });
+    expect(r).toEqual({ file: "/proj/b.scrml", line: 3, col: 4 });
+  });
+
+  test("a span col is borrowed only when both carriers name the SAME file", () => {
+    expect(resolveDiagLocation({
+      file: "/proj/a.scrml", line: 5,
+      span: { file: "/proj/a.scrml", col: 11 },
+    }).col).toBe(11);
+
+    expect(resolveDiagLocation({
+      file: "/proj/a.scrml", line: 5,
+      span: { file: "/proj/z.scrml", col: 11 },
+    }).col).toBeUndefined();
+  });
+});
+
+/**
+ * S385 — the strip must be gated on the `-->` line actually being printed.
+ *
+ * `stripRedundantLocation` removes coordinates the `-->` line is about to
+ * repeat. But `-->` only prints when a FILE resolved. A diagnostic carrying a
+ * line and NO file would otherwise lose its coordinates entirely — the exact
+ * failure this change set exists to fix.
+ */
+describe("S385 — location strip is gated on a resolved FILE", () => {
+  test("a diagnostic with a line but NO file KEEPS its baked-in coordinates", () => {
+    const out = stripAnsi(formatError({
+      code: "E-X",
+      message: "something broke (line 2, col 5)",
+      line: 2,
+      column: 5,
+    }, "/proj"));
+    expect(out).toContain("(line 2, col 5)");
+    expect(out).not.toContain("-->");
+  });
+
+  test("with a file resolved, the duplicate IS stripped and `-->` carries it", () => {
+    const out = stripAnsi(formatError({
+      code: "E-X",
+      message: "something broke (line 2, col 5)",
+      file: "/proj/app.scrml",
+      line: 2,
+      column: 5,
+    }, "/proj"));
+    expect(out).not.toContain("(line 2, col 5)");
+    expect(out).toContain("--> app.scrml:2:5");
+  });
+
+  test("formatWarning behaves the same way", () => {
+    const out = stripAnsi(formatWarning({
+      code: "W-PROGRAM-REDUNDANT-LOGIC",
+      message: "Remove the redundant block. (line 2, col 5)",
+      span: { file: "/proj/app.scrml", line: 2, col: 5 },
+    }, "/proj"));
+    expect(out).not.toContain("(line 2, col 5)");
+    expect(out).toContain("--> app.scrml:2:5");
   });
 });

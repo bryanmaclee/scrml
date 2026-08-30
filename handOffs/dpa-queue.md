@@ -1367,7 +1367,7 @@ Routes to scrml PA. **RUN-not-RATIFY.**
 
 ```
 id:        dpa-024
-status:    complete   # banked → running → complete → ratified(by PA) · COMPLETE dPA 2026-08-10 (ADVISORY). Q4 ACTED ON + conformance fork 2 RESOLVED → docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md (bryan: "go, take the tier-2 retirement rule"). Q4's banked premise was WRONG (parity framing dropped S222) — recorded, not re-derived. §§1-3 + Q5 remain ADVISORY, awaiting bryan.
+status:    ratified   # banked → running → complete → RATIFIED S385-bryan 2026-08-30 (bryan: "bank it, your recs on A and B"). Q4 ACTED ON + conformance fork 2 RESOLVED S337 → docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md (bryan: "go, take the tier-2 retirement rule"). Q4's banked premise was WRONG (parity framing dropped S222) — recorded, not re-derived. §§1-3 + Q5 RATIFIED S385. §9 addition candidate (emit-match.ts:900) ACCEPTED S385 as ranked-4th debt, deletion-in-same-arc a HARD precondition. §10 item 1 ANSWERED S385 by measurement.
 rung:      R2 minimum; escalate to R3 if two or more architectures survive investigation
 requested: bryan, S331 (2026-08-09) — "bank the deep-dive, classify the gap ledger"
 routes-to: scrml PA
@@ -1436,6 +1436,64 @@ A direct answer to **Q4** (Road-B's charter) with its cost stated both ways — 
 
 ### Report-back
 §3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA. **RUN-not-RATIFY.**
+
+### ⚑ ADDENDUM S385-bryan (2026-08-30) — THE RESTATED HYPOTHESIS HAS NOW BEEN ADVERSARIALLY TESTED, BY AN ADOPTER, AND IT HELD
+
+§4.5 restated the rival hypothesis and flagged it **"NOT yet adversarially tested — the DD should test it."**
+It has now been tested, not by research but by a live adopter bug (`g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`, flogence flagship RED). **Four independent instances of the SURVIVING framing surfaced inside ONE bug's fix cycle** — three review rounds, two agent crashes, two do-not-land verdicts. All four PA-verified by execution:
+
+1. **An undeclared inter-pass field.** `<match>` stores arm bodies in `armBodyChildren`, which is **NOT declared in `types/ast.ts`** yet is read across 9 files. Four separate collectors feeding channel emission descend `node.children` only and therefore never see it (`collectChannelNodes`, `collectChannelFunctionMap`, `collectChannelCellMap`, `collectFunctions` at `codegen/collect.ts:170`). Exactly §4.5's "untyped, undocumented, order-dependent inter-pass contract."
+2. **Re-derivation where the producer never fired.** S316 BLANKS an each-bearing arm and stashes its body in the `_`-decoration `_reparseEachArmBodyRaw`. CE then runs on a path where the node no longer exists and **re-derives from raw text**. §4.5's mechanism verbatim: *"When a consumer runs on a path where the producer never fired, it re-derives the fact from what it can see. That re-derivation is the defect."*
+3. **Provenance erasure.** `ast-builder.js:15968-15978` fabricates synthetic arm wrappers `{kind:"markup", tag: variantName}` that are **indistinguishable from author-written markup**. A fix that searched them produced a HIGH false positive: a channel alias equal to any enum variant name refused a CORRECTLY top-level mount, with an unfollowable fix instruction ("move it to `<program>` level" — it was already there), making valid files uncompilable. PA-reproduced; clean on main.
+4. **Two passes disagreeing about a fact neither owns.** TS binds CE-inlined channel cells in the ARM's lexical scope while the runtime mirror is FILE-scoped. Reconciling contradicts §38.12.2's normative in-place `Replace M with deepClone(decl)` — so supporting the shape is a **SPEC AMENDMENT, not a bug fix.**
+
+⚑ **The PA independently re-derived the REFUTED framing and had to be corrected by this artifact.** Working from the bug alone it measured "64 files walk `.children`, 9 walk `armBodyChildren`" and proposed a generic traversal API — i.e. the walker-count generator §4.2 already refuted, and the unfunded convergence the banked caveat forbids. **The evidence was sound; the framing was the one already tested and rejected.** Recorded because it demonstrates the artifact is load-bearing and that the refutation is easy to re-invent from local evidence.
+
+**Cross-cut worth naming:** instance 4 is the first case where the surviving hypothesis produced a **spec-vs-implementation contradiction** rather than a defect — SPEC §38.4 says channel cells are program-scope, the implementation makes resolvability depend on mount position. That is direct support for the operator's separate claim that splitting the language from the compiler would make spec holes visible.
+
+**Still owed to bryan, and now 20 days old:** §§1-3 + Q5 remain ADVISORY, plus the three "PA action requested" items (§7.4 oracle policy · §9's `emit-match.ts:900` candidate · whether conformance fork 2 goes to debate). **§10 item 1 — "is fix-cost-per-defect rising?" — FIRED S385** as a standalone measurement dispatch; it is the unmeasured N-condition the DD itself named as closest to bryan's complaint.
+
+### ✅ RULED + ANSWERED S385-bryan (2026-08-30) — dpa-024 IS NOW FULLY DISPOSITIONED
+
+bryan, verbatim: **"bank it, your recs on A and B"** — a terse ratification adopting the FULL surfaced
+text incl. sub-clauses, per the S276/S130 durable.
+
+**RULING A — §9's addition candidate, `emit-match.ts:900` (the raw-text front-end router). ACCEPTED as
+a ranked-4th debt item, with the DELETION IN THE SAME ARC AS A HARD PRECONDITION.** The arc ends by
+deleting the `if (/<\s*each\b/.test(synthSrc))` branch (live at `:948`, sibling at `:851`), BOTH
+`require()` shims (`splitBlocks`, `buildAST`) from `emit-match.ts`, and the `restampEachBlockIds`
+re-stamping that exists only to reconcile the two paths. **If that deletion cannot be committed in the
+same arc, DO NOT START** — the banked caveat governs: *a half-finished seam convergence converts one
+copy into two, strictly worse than never starting.* Ranks BELOW §9 items (1) and (2); judged on
+debt-retirement grounds, NOT defect grounds (`emit-match.ts` carries 3 ledger mentions — low severity,
+and the ruling says so on the record so a future reader does not mistake it for a bug-reduction win).
+
+**RULING B — §§1-3 + Q5 RATIFIED AS WRITTEN.** The characterization of impl#1's load-bearing decisions
+and the honest-null condition stand. Grounds ratified with it: the restated §4.5 hypothesis had just
+survived an independent four-instance adversarial test it had never had (see the S385 addendum above).
+
+**§10 ITEM 1 — ANSWERED, and it MILDLY CONTRADICTS the premise it was probing.** Artifact:
+`scrml-support/docs/deep-dives/fix-cost-per-defect-trend-dpa-024-s10-2026-08-30.md`.
+**Fix cost per defect is NOT rising.** Median per closed HIGH by 50-session block, src files:
+`1 · 2 · 4 · 2 · 2 · 1` (S101-150 → S351-400); all-severity p90 fan-out **NARROWED 4-6 files → 2**.
+Severity drift ruled out STRUCTURALLY (HIGH and MED fixes have indistinguishable diff sizes, so
+relabelling cannot move the median). The detection confound REPLICATED independently at **2.64×**
+against dpa-024's 2.7×.
+**What IS rising:** HIGH filings/session `0.04 → 0.14 → 0.48 → 0.76 → 0.90 → 1.00`, and a decision
+queue — **30 of 60 open HIGHs blocked on an OPERATOR DECISION rather than on engineering** (PA
+bracketed this 18-50 by two independent scans; the agent's classification was not reproduced exactly).
+**Honest limit, verbatim:** *"the rising-cost hypothesis is not supported and is mildly contradicted,"
+NOT "the compiler is converging."* 42% attribution; 29 engineering HIGHs open and unmeasured.
+
+⚑ **The consequence for §4.5, and it is a sharpening not a retirement:** the untyped inter-pass
+contract is real and was confirmed 4× at S385 — but its cost lands in **DEFECT COUNT, not in per-defect
+COST**. So typing the representation reduces how many defects exist; it does not make each one cheaper.
+Any future proposal that justifies the work by "fixes are getting harder" is arguing from a measured-
+false premise.
+
+**Still genuinely open from §10:** items 2 (comprehension/velocity cost of the walkers + decoration
+fields), 3 (how much of the 76% non-class remainder is under-detection), 4 (do impl#1's ~42 unpinned
+conformance surfaces cluster in the A/B/C class). None fired.
 
 ---
 

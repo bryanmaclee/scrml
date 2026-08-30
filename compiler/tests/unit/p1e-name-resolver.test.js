@@ -222,6 +222,23 @@ describe("P1.E.B: NR — W-WHITESPACE-001 emission", () => {
     const ws = result.errors.filter(e => e.code === "W-WHITESPACE-001");
     expect(ws.length).toBe(3);
   });
+
+  // Regression: a NO-space server-authority state-constructor-def opener
+  // (`<Name authority="server" table="…">`) was spuriously flagged — the
+  // state-constructor-def builder hardcoded openerHadSpaceAfterLt:true, so the
+  // warning fired on the exact shape a server-authority SSR app requires. The
+  // flag is now derived from the real `<`→name gap.
+  test("`<Account authority=\"server\" table=\"users\">` (NO space) does NOT emit W-WHITESPACE-001", () => {
+    const src = `<Account authority="server" table="users">\n  id: number\n</>`;
+    const { result } = runNRSingle(src);
+    expect(result.errors.some(e => e.code === "W-WHITESPACE-001")).toBe(false);
+  });
+
+  test("`< Account authority=\"server\" table=\"users\">` (WITH space) still emits W-WHITESPACE-001", () => {
+    const src = `< Account authority="server" table="users">\n  id: number\n</>`;
+    const { result } = runNRSingle(src);
+    expect(result.errors.some(e => e.code === "W-WHITESPACE-001")).toBe(true);
+  });
 });
 
 describe("P1.E.B: NR — cross-file imported resolution", () => {

@@ -31,51 +31,85 @@ export function stripRedundantCode(code, message) {
 }
 
 /**
- * resolveDiagLocation — read a diagnostic's source location from EITHER the flat
- * fields or the `span` carrier.
+ * resolveDiagLocation — resolve a diagnostic's source location, preferring an
+ * explicit top-level field and falling back to the same field on `.span`.
  *
- * S385 (`g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`,
- * defect 2). The CLI formatters read only the flat `filePath` / `line` / `column`
- * fields, but most stage diagnostics carry their location in a `span` object
- * — `{ file, start, end, line, col }` — and set no flat fields at all. The key
- * name differs as well: a span says `col`, the flat form says `column`.
+ * A diagnostic reaches the CLI formatters in two shapes: some carry
+ * `line`/`column`/`file` flattened to the top level (CG-gate errors, lint
+ * diagnostics), while TS/BS/TAB-stage errors carry their location ONLY on
+ * `.span` (`{ file, line, col }`) — `collectErrors` never flattens it. The
+ * compile formatters historically read only the top-level fields, so a
+ * span-only diagnostic (every E-STATE-UNDECLARED / E-SCOPE-001 / …) printed
+ * with no `--> file:line:col`. This centralizes the EXACT three-level fallback
+ * chain the sibling formatters already use (build.js:903-905/916-918,
+ * dev.js:512/602/628/816) — note the MIDDLE `?? diag.col` level, alongside
+ * `diag.span?.col` — so all three compile formatters resolve location
+ * identically. Returns `undefined` for any component that does not resolve;
+ * callers append `-->` only when `file` is present, and `:line` / `:col` only
+ * when each is present.
  *
- * Consequence: a fully-located diagnostic printed with NO location at all.
- * `E-STATE-UNDECLARED` was the reported instance — its span is populated
- * correctly at the fire site (measured: `line 6, col 14`) and simply never
- * reached the output, so it rendered as a bare message plus `stage: TS`. For an
- * adopter that meant hand-bisecting a 3,700-line file to locate three errors.
- *
- * This is NOT specific to that code. EVERY span-only diagnostic was equally
- * location-less, and no stage diagnostic ever printed a `:line:col` at all — the
- * `--> path` line appeared bare whenever `filePath` happened to be stamped.
- *
- * Flat fields win when both are present: a formatter-specific override stays
- * authoritative, and `span` is purely a fallback.
- *
- * @param {object} d diagnostic object (error, warning, or lint)
- * @returns {{ filePath: string|null, line: number|null, column: number|null }}
+ * @param {object} diag a diagnostic (error / warning / lint) object
+ * @returns {{ file: (string|undefined), line: (number|undefined), col: (number|undefined) }}
  */
+export function resolveDiagLocation(diag) {
+  if (!diag || typeof diag !== "object") return { file: undefined, line: undefined, col: undefined };
+  const span = diag.span && typeof diag.span === "object" ? diag.span : undefined;
+  const flatFile = diag.filePath || diag.file || undefined;
+  const spanFile = span?.file || undefined;
+  const flatLine = diag.line ?? undefined;
+  const flatCol = diag.column ?? diag.col ?? undefined;
+
+  // S385 — resolve file/line/col ATOMICALLY, from ONE carrier.
+  //
+  // Resolving each component independently could pair a top-level `filePath`
+  // with a `line`/`col` taken from a `.span` that names a DIFFERENT file. The
+  // formatter then prints `thatFile:line:col` AND renders that file's line as
+  // the offending source — confidently wrong, which is worse than incomplete.
+  // So the file always comes from the same carrier as the coordinates.
+  //
+  // Top-level coordinates still WIN over the span (the #756 contract): an
+  // explicit top-level field is a deliberate override.
+  const sameFile = !flatFile || !spanFile || flatFile === spanFile;
+
+  if (flatLine !== undefined) {
+    return {
+      file: flatFile ?? spanFile,
+      // Borrow the span's col only when both carriers agree on the file.
+      col: flatCol ?? (sameFile ? span?.col ?? undefined : undefined),
+      line: flatLine,
+    };
+  }
+  if (span?.line !== undefined) {
+    // Coordinates come from the span, so the file does too — even when a
+    // top-level `filePath` names something else.
+    return { file: spanFile ?? flatFile, line: span.line, col: span.col ?? undefined };
+  }
+  return { file: flatFile ?? spanFile, line: undefined, col: undefined };
+}
+
 /**
  * stripRedundantLocation — remove a message's trailing `(line N, col N)` when the
  * formatter is about to print the SAME coordinates on its `-->` line.
  *
  * S385. Several diagnostics bake their location into the message text (`… See
- * SPEC §40.8. (line 2, col 5)`). Before the `span`-carrier fallback landed, the
- * `-->` line printed a bare path with no coordinates, so the baked-in text was
- * the only location an author got. Now that `-->` carries `path:2:5`, the two
- * render back-to-back and the duplication is exact:
+ * SPEC §40.8. (line 2, col 5)`). Before #756 the `-->` line printed a bare path
+ * with no coordinates, so the baked-in text was the only location an author got.
+ * #756 made `-->` carry `path:2:5`, so the two now render back-to-back and the
+ * duplication is exact:
  *
  *     warning [W-PROGRAM-REDUNDANT-LOGIC]: … (line 2, col 5)
  *       --> app.scrml:2:5
  *
  * Strips ONLY on an exact coordinate match, so a message that legitimately cites
- * a DIFFERENT line (a "declared at …" cross-reference) keeps its text. Print-time
- * only — `result.warnings[i].message` is untouched, mirroring stripRedundantCode.
+ * a DIFFERENT line (a "declared at …" cross-reference) keeps its text. Callers
+ * must gate on the `-->` line ACTUALLY being printed — which needs a resolved
+ * FILE, not just a line — or the message would lose coordinates that nothing
+ * replaces. Print-time only; the diagnostic DATA is untouched, mirroring
+ * stripRedundantCode.
  *
  * @param {string} message the raw diagnostic message
- * @param {number|null} line the line the formatter will print
- * @param {number|null} column the column the formatter will print
+ * @param {number|undefined} line the line the formatter will print
+ * @param {number|undefined} column the column the formatter will print
  * @returns {string}
  */
 export function stripRedundantLocation(message, line, column) {
@@ -85,14 +119,4 @@ export function stripRedundantLocation(message, line, column) {
     (whole, l, c) =>
       Number(l) === Number(line) && Number(c) === Number(column) ? "" : whole,
   );
-}
-
-export function resolveDiagLocation(d) {
-  if (!d || typeof d !== "object") return { filePath: null, line: null, column: null };
-  const span = d.span && typeof d.span === "object" ? d.span : null;
-  return {
-    filePath: d.filePath || d.file || (span && span.file) || null,
-    line: d.line ?? (span ? span.line : null) ?? null,
-    column: d.column ?? (span ? span.col : null) ?? null,
-  };
 }

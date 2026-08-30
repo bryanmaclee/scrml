@@ -415,7 +415,10 @@ describe("A5-4 §A5-4.7 — initial-arm via emitEngineInitialArm (sibling helper
       initialVariant: "Loading",
     });
     const out = emitEngineInitialArm(m).join("\n");
-    expect(out).toContain('_scrml_engine_arm_state_timers("loadPhase", "Loading", __scrml_engine_loadPhase_timers, __scrml_engine_loadPhase_transitions)');
+    // S386 §51.0.M — the initial-arm now seeds the idle/internal/history
+    // surfaces (positional args 5/6/7) so a timer-fired transition threads them
+    // through the whole chain. This engine has none, so all three are `null`.
+    expect(out).toContain('_scrml_engine_arm_state_timers("loadPhase", "Loading", __scrml_engine_loadPhase_timers, __scrml_engine_loadPhase_transitions, null, null, null)');
   });
 
   test("emitEngineInitialArm emits arm call even when initial state has no <onTimeout> (runtime helper no-ops)", () => {
@@ -437,6 +440,24 @@ describe("A5-4 §A5-4.7 — initial-arm via emitEngineInitialArm (sibling helper
       onTimeoutElements: [],
     });
     expect(emitEngineInitialArm(m)).toEqual([]);
+  });
+
+  test("emitEngineInitialArm THROWS (fails loud) for a history-bearing engine seeded without a decl", () => {
+    // S386 hardening — a history-BEARING engine whose initial-arm is derived
+    // without a `decl` would silently null the historyMap seed (dropping
+    // timer/idle-fired history capture from the initial state). Guard fails loud.
+    const { emitEngineInitialArm } = require("../../src/codegen/emit-engine.ts");
+    const m = meta({
+      stateChildren: [
+        { tag: "Idle", rule: { kind: "single", target: "Loading" }, historyAttr: true, onTimeoutElements: [] },
+        { tag: "Loading", rule: { kind: "single", target: "Idle" },
+          onTimeoutElements: [{ after: "30s", to: "Idle", rawOffset: 0 }] },
+      ],
+      initialVariant: "Loading", // has <onTimeout> → the arm block runs
+    });
+    expect(() => emitEngineInitialArm(m)).toThrow(/declares history attrs but its .* was derived without a decl/);
+    // The non-history decl-less path (existing tests above) still works — this
+    // guard only trips when history attrs are actually present.
   });
 });
 
@@ -569,7 +590,9 @@ describe("A5-4 §A5-4.11 — End-to-end client JS shape", () => {
     expect(js).toContain("__scrml_engine_phase_timers");
     expect(js).toContain('{ ms: 30000, target: "TimedOut" }');
     // Initial-arm emitted at the END (after reactive wiring) per A5-4 ordering.
-    expect(js).toContain('_scrml_engine_arm_state_timers("phase", "Idle", __scrml_engine_phase_timers, __scrml_engine_phase_transitions)');
+    // S386 §51.0.M — seeds idle/internal/history (args 5/6/7); this engine has
+    // none, so all three are `null`.
+    expect(js).toContain('_scrml_engine_arm_state_timers("phase", "Idle", __scrml_engine_phase_timers, __scrml_engine_phase_transitions, null, null, null)');
     // Confirm ordering: arm appears AFTER reactive wiring.
     const reactiveIdx = js.indexOf("_scrml_reactive_set(\"phase\"");
     const armIdx = js.indexOf("_scrml_engine_arm_state_timers(\"phase\"");

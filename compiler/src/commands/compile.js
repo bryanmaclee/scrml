@@ -368,30 +368,37 @@ function getSourceContext(filePath, line, contextLines = 2) {
  * @param {string} cwd — current working directory for relative paths
  * @returns {string}
  */
-function formatError(err, cwd) {
+export function formatError(err, cwd) {
   const parts = [];
 
-  // Source location — resolved FIRST so the header can drop a `(line N, col N)`
+  // Source location resolved FIRST so the header can drop a `(line N, col N)`
   // that the `-->` line below is about to repeat verbatim (S385).
-  const loc0 = resolveDiagLocation(err);
+  //
+  // `resolveDiagLocation` centralizes the three-level fallback
+  // (top-level field → `.span` field, with the middle `?? diag.col` level) so
+  // every compile formatter surfaces a diagnostic's location identically — incl.
+  // TS-stage TSErrors (E-STATE-UNDECLARED, E-SCOPE-001, …) that carry it ONLY on
+  // `.span`. build.js / dev.js already use this exact chain.
+  const { file: errFile, line: errLine, col: errCol } = resolveDiagLocation(err);
 
-  // Header: error code + message
+  // Header: error code + message. The location strip is gated on errFile too —
+  // the `-->` line below only prints when a FILE resolved, so stripping on line
+  // alone would delete coordinates that nothing replaces.
   const label = c.bold(c.red("error"));
   const code = err.code ? c.dim(`[${err.code}]`) : "";
-  const headMsg = stripRedundantLocation(
-    stripRedundantCode(err.code, err.message), loc0.line, loc0.column,
-  );
-  parts.push(`${label}${code ? " " + code : ""}: ${headMsg}`);
+  const errMsg = errFile
+    ? stripRedundantLocation(stripRedundantCode(err.code, err.message), errLine, errCol)
+    : stripRedundantCode(err.code, err.message);
+  parts.push(`${label}${code ? " " + code : ""}: ${errMsg}`);
 
-  if (loc0.filePath) {
-    const filePath = loc0.filePath;
-    const relPath = relative(cwd, filePath);
-    const loc = loc0.line ? `:${loc0.line}${loc0.column ? ":" + loc0.column : ""}` : "";
+  if (errFile) {
+    const relPath = relative(cwd, errFile);
+    const loc = errLine ? `:${errLine}${errCol ? ":" + errCol : ""}` : "";
     parts.push(`  ${c.cyan("-->")} ${relPath}${loc}`);
 
     // Source context
-    if (loc0.line) {
-      const ctx = getSourceContext(filePath, loc0.line);
+    if (errLine) {
+      const ctx = getSourceContext(errFile, errLine);
       if (ctx) parts.push(ctx.trimEnd());
     }
   }
@@ -411,7 +418,7 @@ function formatError(err, cwd) {
  * @param {string} cwd
  * @returns {string}
  */
-function formatWarning(warn, cwd) {
+export function formatWarning(warn, cwd) {
   // Info-level diagnostics (severity:"info" OR I-* prefix) get a cyan
   // "info" label; canonical warnings get the yellow "warning" label.
   // Both share the non-fatal partition (result.warnings) per S93 partition
@@ -421,17 +428,20 @@ function formatWarning(warn, cwd) {
     (warn.code && warn.code.startsWith("I-"));
   const label = isInfo ? c.bold(c.cyan("info")) : c.bold(c.yellow("warning"));
   const code = warn.code ? c.dim(`[${warn.code}]`) : "";
-  // S385 — read the `span` carrier too; see resolveDiagLocation. Resolved before
-  // the header so a baked-in `(line N, col N)` the `-->` repeats can be dropped.
-  const wloc = resolveDiagLocation(warn);
-  const warnMsg = stripRedundantLocation(
-    stripRedundantCode(warn.code, warn.message), wloc.line, wloc.column,
-  );
+
+  // Same shared location resolution as formatError — `:line:col` shape (col only
+  // when present), incl. the `.span` fallback. Mirrors build.js:918. Resolved
+  // before the header so a baked-in `(line N, col N)` the `-->` repeats can be
+  // dropped (S385) — gated on warnFile, since that is what gates the `-->`.
+  const { file: warnFile, line: warnLine, col: warnCol } = resolveDiagLocation(warn);
+  const warnMsg = warnFile
+    ? stripRedundantLocation(stripRedundantCode(warn.code, warn.message), warnLine, warnCol)
+    : stripRedundantCode(warn.code, warn.message);
   let msg = `${label}${code ? " " + code : ""}: ${warnMsg}`;
 
-  if (wloc.filePath) {
-    const relPath = relative(cwd, wloc.filePath);
-    const loc = wloc.line ? `:${wloc.line}${wloc.column ? ":" + wloc.column : ""}` : "";
+  if (warnFile) {
+    const relPath = relative(cwd, warnFile);
+    const loc = warnLine ? `:${warnLine}${warnCol ? ":" + warnCol : ""}` : "";
     msg += `\n  ${c.cyan("-->")} ${relPath}${loc}`;
   }
 
@@ -446,13 +456,22 @@ function formatWarning(warn, cwd) {
  * in scrml. The goal is to turn silent ghost-pattern breakage into a visible
  * nudge toward the correct scrml construct.
  */
-function formatLintDiagnostic(diag, cwd) {
+export function formatLintDiagnostic(diag, cwd) {
   const label = c.bold(c.yellow("lint"));
   const code = c.dim(`[${diag.code}]`);
-  const filePath = diag.filePath || diag.file;
-  const relPath = filePath ? relative(cwd, filePath) : "";
-  const loc = `:${diag.line}:${diag.column}`;
-  return `${label} ${code}: ${stripRedundantCode(diag.code, diag.message)}\n  ${c.cyan("-->")} ${relPath}${loc}`;
+  let msg = `${label} ${code}: ${stripRedundantCode(diag.code, diag.message)}`;
+  // Same shared location resolution as the error/warning formatters. Previously
+  // this appended an UNCONDITIONAL `:${diag.line}:${diag.column}` with no span
+  // fallback and no guard, so a lint carrying its location only on `.span`
+  // printed `--> path:undefined:undefined`. Now: emit `-->` only when a file
+  // resolves, and `:line` / `:col` only when each is present.
+  const { file: lintFile, line: lintLine, col: lintCol } = resolveDiagLocation(diag);
+  if (lintFile) {
+    const relPath = relative(cwd, lintFile);
+    const loc = lintLine ? `:${lintLine}${lintCol ? ":" + lintCol : ""}` : "";
+    msg += `\n  ${c.cyan("-->")} ${relPath}${loc}`;
+  }
+  return msg;
 }
 
 // ---------------------------------------------------------------------------
