@@ -12754,28 +12754,71 @@ function annotateNodes(
           if (typeof rawUnknown !== "string") return;
           const trimmed = rawUnknown.trim();
           if (trimmed.length === 0) return;
-          // §17.7.3 — `@.`/`@.field` is the `<each>`-only contextual iteration
-          // sigil, not a cell read. The walker early-returns on it anyway, but a
-          // raw `@.` can confuse the expression parser, so guard up front
-          // (mirrors the `on=` precedent's guard). This is also what keeps the
-          // documented `key=@.id` idiom — 22 uses in the corpus — silent.
-          if (trimmed.startsWith("@.")) return;
-          // Strip a `${ … }` wrapper to the inner expression, mirroring the `on=`
-          // precedent; a bare `@cell` / `@cell.path` / complex-expr form passes
-          // through unchanged.
-          const dollar = trimmed.match(/^\$\{([\s\S]*)\}$/);
-          const inner = dollar ? dollar[1].trim() : trimmed;
-          if (inner.length === 0) return;
+
+          // NO `@.`-PREFIX BAIL HERE, DELIBERATELY. An earlier revision copied the
+          // `on=` precedent's `if (raw.startsWith("@.")) return;` guard. That
+          // guard skips the ENTIRE opener expression, not the `@.` sub-read, so
+          // any cell read sitting BESIDE a leading sigil went unchecked:
+          //
+          //   key=@.id + @typo          -> `@typo` never scope-checked
+          //   in=@.rows.concat(@typo)   -> `@typo` never scope-checked
+          //
+          // and the mistake then surfaced from CODEGEN as E-CODEGEN-INVALID-LOGIC
+          // ("could not lower this construct") instead of naming the undeclared
+          // cell. Leading `@.` is FAR more common on `<each>` than on the
+          // `<match on=>` node the guard was copied from, so the blast radius is
+          // materially different here.
+          //
+          // The guard also bought nothing. `parseExprToNode` was run directly on
+          // `@.`, `@.id`, `@.id + @typo` and `@.rows.concat(@typo)`: none throw,
+          // all yield idents the walker already exempts at its own `@.` check
+          // (~:7795). And the `try` below covers any parse failure regardless. So
+          // the sigil is handled where it belongs — inside the one shared walker —
+          // and `key=@.id` / `${@.}` stay silent through that exemption rather
+          // than through a whole-expression bail.
+
+          // EVERY interpolation is a separate read site. An opener value may be a
+          // bare expression (`@rows`, `@.id + @typo`) or a TEMPLATE carrying one
+          // or more `${ … }` reads (`key=${@a}-${@b}`). Collect the interpolation
+          // bodies and check each; with none, check the whole value.
+          //
+          // Brace-depth aware on purpose. The `on=` precedent used
+          // `/^\$\{([\s\S]*)\}$/`, which is GREEDY and single-shot: on
+          // `${@a}-${@b}` it collapses to the inner text `@a}-${@b`, so `@b` is
+          // never checked at all. Tightening the class to `[^}]` instead breaks
+          // a legitimately nested body (`${ {a: 1}.a }`) and, on the
+          // multi-interpolation shape, hands the parser the raw template — which
+          // reports `Undeclared identifier \`$\`` and names nothing useful. A
+          // depth scan gets both right.
+          const readSites: string[] = [];
+          for (let i = 0; i + 1 < trimmed.length; i++) {
+            if (trimmed[i] !== "$" || trimmed[i + 1] !== "{") continue;
+            let depth = 1;
+            let j = i + 2;
+            for (; j < trimmed.length && depth > 0; j++) {
+              if (trimmed[j] === "{") depth++;
+              else if (trimmed[j] === "}") depth--;
+            }
+            if (depth !== 0) break; // unterminated — leave it to codegen
+            readSites.push(trimmed.slice(i + 2, j - 1));
+            i = j - 1;
+          }
+          const targets = readSites.length > 0 ? readSites : [trimmed];
+
           const sp = (n.span as Span | undefined)
             ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          let exprN: unknown = null;
-          try {
-            exprN = parseExprToNode(inner, filePath, sp.start ?? 0);
-          } catch {
-            exprN = null; // unparseable opener expr — defer to codegen's handling
-          }
-          if (exprN) {
-            checkLogicExprIdents(exprN, sp, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          for (const target of targets) {
+            const inner = target.trim();
+            if (inner.length === 0) continue;
+            let exprN: unknown = null;
+            try {
+              exprN = parseExprToNode(inner, filePath, sp.start ?? 0);
+            } catch {
+              exprN = null; // unparseable opener expr — defer to codegen's handling
+            }
+            if (exprN) {
+              checkLogicExprIdents(exprN, sp, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+            }
           }
         };
 
@@ -12793,8 +12836,19 @@ function annotateNodes(
         // When BOTH are present the AST builder tie-breaks `iterShape` to `"in"`
         // (ast-builder.js ~16917) and codegen lowers `in=` only, so the `of=`
         // text is DEAD. Checking it anyway would raise a scope error about an
-        // attribute that has no effect on the output — the both-present conflict
-        // is PASS's diagnostic to fire, not ours to shadow.
+        // attribute that has no effect on the output: the diagnostic would name a
+        // typo in text the compiler is about to discard, and point away from the
+        // real mistake (writing both attributes at all).
+        //
+        // NO BACKSTOP EXISTS FOR THE CONFLICT — do not assume one. The AST
+        // builder's own comment at that tie-break says PASS "surfaces
+        // missing-or-both as E-EACH-ITER-SHAPE", but that code is never emitted:
+        // `grep -rn E-EACH-ITER-SHAPE compiler/src compiler/native-parser` returns
+        // TWO COMMENTS and no implementation, and `<each in=@rows of=@typo>`
+        // compiles today with zero diagnostics. So gating here is deliberately
+        // UNDER-firing on a shape nothing else catches either, chosen over
+        // OVER-firing with a misleading message. The missing conflict diagnostic
+        // is a real gap, filed separately — it is not this check's to invent.
         const eachIterShape = (n as Record<string, unknown>).iterShape;
         if (eachIterShape === "in") {
           checkEachOpenerExpr((n as Record<string, unknown>).inExprRaw);
