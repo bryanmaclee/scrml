@@ -552,3 +552,130 @@ not exist otherwise.
 - `<each>` opener now covered on all four expression slots: `if=` (S302,
   pre-existing), `in=`, `of=`, `key=`.
 - Corpus impact: **0 of 1005** for the `key=` delta, **0 of 1005** cumulative.
+
+---
+
+# ROUND 3 — the suite was blessing a crash
+
+Rebased onto `origin/main` `085570ca`. Round-1/2 sections above stand except where
+this section says otherwise.
+
+## The test was pinning the exact failure class this landing closes
+
+Round 2's §5 asserted `<each in=@m.entries() as (k, v) key=k>` compiles clean.
+It does — and the JS it emits crashes on first render, twice:
+
+    (_scrml_each_item, _scrml_each_idx) => k,   // free `k` -> ReferenceError
+      const _scrml_each_key_1 = k;              // read here...
+      const k = _scrml_each_item.key;           // ...bound AFTER -> TDZ
+
+**The scope check is right; codegen is wrong.** `k` genuinely IS in scope for
+`key=` — that is ORDERING TRAP C, and it stands. The defect is `emit-each.ts`:
+`keyFnBody` is computed at ~`:3160` and consumed at ~`:3164` and ~`:3172`, but
+`emitDestructureBindingLines` does not run until ~`:3184`.
+
+- §5's case is now a **`test.todo` naming `GAP-S385-EACH-KEY-DESTRUCTURE`**, sited
+  where the bad assertion was so it cannot be silently reinstated.
+- Full write-up in `GAP-DRAFTS.md` for the PA to file (`known-gaps.md` is PA-owned).
+
+**Not fixed here, and it is NOT a line move** — reporting that explicitly because
+it was the stated condition for touching codegen. Reordering fixes fire (2) only;
+fire (1) needs the standalone arrow to gain a block body carrying the bindings, or
+the key expression rewritten against `_scrml_each_item.key`. Either is an
+emitted-shape change, so the differential is not byte-identical on every
+non-destructured `key=`.
+
+Scope is narrow, verified: it needs `key=` to REFERENCE a destructure name.
+Without `key=`, the default key expression never mentions `k`/`v` and the same
+source emits fine. Single-name `as r` + `key=r.id` is also fine — `r` IS the key
+fn's own parameter.
+
+## The `@.` bail is gone
+
+`if (trimmed.startsWith("@."))` returned on the ENTIRE opener value, not the `@.`
+sub-read, so any cell read beside a leading sigil went unchecked.
+
+| shape | before | after |
+|---|---|---|
+| `key=@.id + @hiddenKeyTypo` | `E-CODEGEN-INVALID-LOGIC` | **`E-STATE-UNDECLARED`** naming the cell |
+| `in=@.rows.concat(@hiddenTypoCell)` | `E-CODEGEN-INVALID-LOGIC` | **`E-STATE-UNDECLARED`** naming the cell |
+| `key=@.id` | clean | clean |
+| `key=@.email` | clean | clean |
+| `${@.}` in body | clean | clean |
+
+**Divergence from the round-3 brief, recorded because measurement wins.** The brief
+described both holes as "compiles clean". They did not — both exited 1 with
+`E-CODEGEN-INVALID-LOGIC`. So they were **bad-diagnostic** holes, not
+silent-failure holes: the compiler did stop, but reported "could not lower this
+construct" instead of naming the typo. The fix still matters, and the direction
+was right; the failure mode was one notch less severe than relayed.
+
+The guard bought nothing, verified directly rather than assumed:
+`parseExprToNode` was called on `@.`, `@.id`, `@.id + @typo`,
+`@.rows.concat(@typo)` — **none throw**; they yield `ident` / `binary` / `call`
+nodes whose `@.` idents the walker already exempts at its own check (~`:7795`).
+The `try` covers any parse failure regardless.
+
+## Every interpolation is a read site
+
+The `${…}` unwrap inherited from the `<match on=>` precedent was
+`/^\$\{([\s\S]*)\}$/` — greedy and single-shot. On `key=${@a}-${@b}` it collapses
+to the inner text `@a}-${@b`, so **`@b` was never checked**.
+
+My first fix was wrong in a new way. Tightening the class to `[^}]` makes the
+multi-interpolation shape simply not match, which hands the raw template to the
+parser and produces **"Undeclared identifier `$`"** — a diagnostic that names
+nothing and would have been worse than the silence it replaced.
+
+Replaced with a brace-depth scan that collects every `${…}` body and checks each,
+so `${ {a: 1}.a }` also survives. `key=${@a}-${@hiddenSecondTypo}` now reports
+`@hiddenSecondTypo` by name. Pinned by §9, which asserts both the correct fire AND
+the absence of the `` `$` `` diagnostic.
+
+## `E-EACH-ITER-SHAPE` does not exist — comment corrected
+
+Round 2 justified the `iterShape` gate with "the both-present conflict is PASS's
+diagnostic to fire". Verified: that code is **never implemented**.
+
+    $ grep -rn E-EACH-ITER-SHAPE compiler/src compiler/native-parser compiler/tests
+    compiler/src/ast-builder.js:16911:   ... as E-EACH-ITER-SHAPE ...
+    compiler/native-parser/parse-file.js:1029: ... missing-or-both as E-EACH-ITER-SHAPE.
+
+Two comments, zero fires. `<each in=@rows of=@typo>` compiles with zero
+diagnostics today.
+
+Corrected in BOTH places that cited it — the source comment and test §6. The gate
+is now described honestly: deliberate **under-fire** on a shape nothing else
+catches either, chosen over **over-fire** with a message pointing at text the
+compiler is about to discard. Filed as `GAP-S385-EACH-ITER-SHAPE-UNFIRED`.
+
+# ROUND 3 MEASUREMENT
+
+Dropping the `@.` bail can only WIDEN coverage, so it owes its own number.
+
+## `@.`-guard-drop delta — round-2 build -> round-3 build: **0 of 1005**
+
+- Newly-failing (PASS -> FAIL): **0**
+- Newly-passing: 0
+- Files with ANY diagnostic code-set change: **0**
+
+## Cumulative — base `a8448ac` -> round-3 build: **0 of 1005**
+
+- Newly-failing (PASS -> FAIL): **0**
+- Newly-passing: 0
+- Files with ANY diagnostic code-set change: **0**
+- Verdict totals identical across all four sweeps: 754 PASS / 251 FAIL
+- Path lists byte-identical
+
+Positive controls re-run against the round-3 build — the chain is still live:
+
+    positive control [in  vs build-r3]: flipped=25 stayed=0 skipped=9
+    positive control [key vs build-r3]: flipped=20 stayed=0 skipped=14
+
+# WHAT STANDS FROM EARLIER ROUNDS
+
+Unchanged and still measured: `in=`/`of=`/`key=` all fire on undeclared reads;
+`key=__index__`, `key=@.id`, `in=@rows.filter(n => n > 1)`, component-prop
+`in=drivers`, `@session`, nested-each `in=r.kids` all clean; the `as (k,v)`
+ordering placement (TRAP C) is correct and stays; the §7 bare-`in=<later const>`
+behaviour change is real, documented, corpus-zero.
