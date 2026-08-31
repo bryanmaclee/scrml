@@ -105,6 +105,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `8b74b522` — maps(S391): wrap-6c refresh 0dd659a1 -> 2ec2ce3a — four map claims were wrong from birth, and one of them was a false claim of verification (#795) — **pushed**
 - `b0457906` — wrap(s390): both S385 arcs landed, main unblocked, and three gates caught what the others could not (#790) — **pushed**
 - `d02adb68` — wrap(s385): the architecture complaint measured, a ruling mandate granted, and the decision queue opened (#773) — **pushed**
 - `9f75061c` — wrap(s383): two ratified landings, a hand-off rotated 31 sessions late, and three adopter reports mid-wrap (#753) — **pushed**
@@ -112,7 +113,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `a1c14878` — wrap(s376) tail: record the two owed reviews, and name why this gate is red at EVERY session close (#720) — **pushed**
 - `4895c004` — wrap(s375): the boot-cost trajectory measured, a rotation budget ratified, and an arc parked with its class named (#712) — **pushed**
 - `8731799d` — maps(S372): wrap 6c refresh at 8b2e4053 — three routing rows, and six map claims corrected by execution (#707) — **pushed**
-- `b0abcbc6` — wrap(s371): land the stranded wrap — hand-off, changelog, delta-log, dashboard, maps (#689) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
