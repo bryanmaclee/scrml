@@ -1,0 +1,1005 @@
+examples/01-hello.scrml	PASS	W-PROGRAM-SPA-INFERRED
+examples/02-counter.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+examples/03-contact-book.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/04-live-search.scrml	PASS	W-PROGRAM-SPA-INFERRED
+examples/05-multi-step-form.scrml	PASS	W-PROGRAM-SPA-INFERRED W-STYLE-CONFLICT-POSSIBLE
+examples/06-kanban-board.scrml	PASS	W-PROGRAM-SPA-INFERRED
+examples/07-admin-dashboard.scrml	PASS	I-AUTH-REDIRECT-UNRESOLVED W-AUTH-LOGIN-MISSING W-DEAD-FUNCTION W-PROGRAM-SPA-INFERRED W-STDLIB-SEED-FAILCLOSED
+examples/08-chat.scrml	PASS	W-PROGRAM-SPA-INFERRED W-STYLE-CONFLICT-POSSIBLE W-TYPE-031-UNPROVEN
+examples/09-error-handling.scrml	FAIL	E-ERROR-009 W-PROGRAM-SPA-INFERRED
+examples/10-inline-tests.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+examples/11-meta-programming.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/12-snippets-slots.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED
+examples/13-worker.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/14-mario-state-machine.scrml	PASS	W-ENGINE-SELF-WRITE-DETECTED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/15-channel-chat.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/16-remote-data.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/17-schema-migrations.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/18-state-authority.scrml	PASS	W-AUTH-001 W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED
+examples/19-lin-token.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/20-middleware.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/21-navigation.scrml	PASS	W-PROGRAM-SPA-INFERRED W-STYLE-CONFLICT-POSSIBLE
+examples/22-multifile/app.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/22-multifile/components.scrml	FAIL	E-CODEGEN-INVALID-LOGIC I-FN-PROMOTABLE W-TAILWIND-UNRECOGNIZED-CLASS
+examples/22-multifile/types.scrml	PASS	I-FN-PROMOTABLE
+examples/23-trucking-dispatch/app.scrml	PASS	I-AUTH-REDIRECT-UNRESOLVED I-FN-PROMOTABLE I-PROTECT-STRIP-001 W-AUTH-LOGIN-MISSING W-OUTLET-ABSENT-SOFT-NAV-DISABLED W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/channels/customer-events.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+examples/23-trucking-dispatch/channels/dispatch-board.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+examples/23-trucking-dispatch/channels/driver-events.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+examples/23-trucking-dispatch/channels/load-events.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+examples/23-trucking-dispatch/components/address-form.scrml	FAIL	E-CODEGEN-INVALID-LOGIC
+examples/23-trucking-dispatch/components/assignment-picker.scrml	FAIL	E-CODEGEN-INVALID-LOGIC
+examples/23-trucking-dispatch/components/customer-card.scrml	FAIL	E-CODEGEN-INVALID-LOGIC
+examples/23-trucking-dispatch/components/driver-card.scrml	FAIL	E-CODEGEN-INVALID-LOGIC
+examples/23-trucking-dispatch/components/invoice-card.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/components/load-card.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/components/load-status-badge.scrml	FAIL	E-CODEGEN-INVALID-LOGIC
+examples/23-trucking-dispatch/components/status-picker.scrml	FAIL	E-CODEGEN-INVALID-LOGIC
+examples/23-trucking-dispatch/models/auth.scrml	PASS	I-FN-PROMOTABLE W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/auth/login.scrml	PASS	I-FN-PROMOTABLE I-PROTECT-STRIP-001 W-ATTR-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/auth/register.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/customer/home.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-IF-IN-EACH W-PROGRAM-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/customer/invoices.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-EACH-PROMOTABLE W-PROGRAM-001 W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/customer/load-detail.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-IF-IN-EACH W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/customer/loads.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-IF-IN-EACH W-PROGRAM-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/customer/profile.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-INTERP-IN-RAW-CONTENT W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/customer/quote.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/dispatch/billing.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-IF-IN-EACH W-PROGRAM-001 W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/dispatch/board.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-PROGRAM-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/dispatch/customers.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/dispatch/drivers.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/dispatch/load-detail.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/dispatch/load-new.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-PROGRAM-001 W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/driver/home.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-IF-IN-EACH W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/driver/hos.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE W-IF-IN-EACH W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/driver/load-detail.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/driver/load-log.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-ATTR-001 W-IF-IN-EACH W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/driver/messages.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-DEAD-FUNCTION W-INTERP-IN-RAW-CONTENT W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/pages/driver/profile.scrml	PASS	I-FN-PROMOTABLE W-ATTR-001 W-INTERP-IN-RAW-CONTENT W-TYPE-031-UNPROVEN
+examples/23-trucking-dispatch/schema.scrml	PASS	
+examples/23-trucking-dispatch/seeds.scrml	PASS	W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+examples/24-tilde-pipeline.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+examples/25-triage-board.scrml	PASS	I-FN-PROMOTABLE W-EACH-KEY-001 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/26-type-derived-schema.scrml	PASS	W-PROGRAM-SPA-INFERRED W-STDLIB-SEED-FAILCLOSED
+examples/27-type-derived-table.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-SPA-INFERRED W-STDLIB-SEED-FAILCLOSED W-TAILWIND-UNRECOGNIZED-CLASS
+examples/28-flux.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/29-engine-vs-flags.scrml	PASS	W-ENGINE-SELF-WRITE-DETECTED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+examples/30-validated-form.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+examples/31-reach-discipline.scrml	PASS	W-PROGRAM-SPA-INFERRED
+examples/32-external-api.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+examples/33-endpoint.scrml	PASS	W-PROGRAM-SPA-INFERRED
+examples/34-value-native-set.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/admin-panel.scrml	FAIL	E-TYPE-025 W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-STYLE-CONFLICT-POSSIBLE W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/api-dashboard.scrml	FAIL	E-CTX-001 E-CTX-003 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/blog-cms.scrml	FAIL	E-CTX-001 E-CTX-003 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/card.scrml	PASS	
+samples/compilation-tests/basic-001-empty.scrml	PASS	
+samples/compilation-tests/basic-002-single-tag.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-003-nested-tags.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-004-self-closing.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-005-attributes.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/basic-006-deep-nesting.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/basic-007-siblings.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-008-semantic-html.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-009-lists.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-010-table.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-011-form.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/basic-012-mixed-content.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/basic-013-inferred-closers.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/basic-014-multiple-attrs.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/basic-015-heading-levels.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/channel-basic.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-001-counter.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-002-todo.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/combined-003-form-validation.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-004-data-table.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-005-dashboard.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-006-search-filter.scrml	PASS	E-DG-002 W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-007-crud.scrml	PASS	E-DG-002 W-DEAD-FUNCTION W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/compilation-tests/combined-008-wizard.scrml	PASS	E-DG-002 W-DEAD-FUNCTION W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-009-chat.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/combined-010-theme-switcher.scrml	FAIL	E-NAME-COLLIDES-RESERVED W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-011-shopping-cart.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-012-login.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-013-blog.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-014-settings.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-015-user-list.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/combined-016-notification.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-017-color-picker.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-018-timer.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/combined-019-gallery.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/combined-020-calculator.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/combined-021-component-basic.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-001-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/comp-002-card.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-003-button.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-004-modal.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-005-tabs.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-006-alert.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-007-breadcrumb.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/comp-008-avatar.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/comp-009-dropdown.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-010-progress.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-011-badge.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/comp-012-pagination.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-013-tooltip.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-014-accordion.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/comp-015-search-input.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/component-scoped-css.scrml	FAIL	E-COMPONENT-020 E-COMPONENT-021 E-COMPONENT-035 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/control-001-if-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-002-if-else.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-003-if-elseif.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-004-for-array.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/control-005-for-index.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-006-nested-if.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-007-while.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-008-for-in-markup.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/control-009-conditional-attr.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/control-010-nested-loops.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/control-011-if-reactive.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-012-for-lift-complex.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/control-013-switch.scrml	PASS	W-MATCH-ARROW-LEGACY W-PROGRAM-001
+samples/compilation-tests/control-014-break-continue.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/control-015-try-catch.scrml	PASS	I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/control-show-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/control-show-expr.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/css-001-inline.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/css-002-multiple-props.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/css-003-custom-props.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/css-004-layout.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/css-005-typography.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/css-scope-01.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/edge-001-empty-logic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/edge-002-empty-css.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/edge-003-empty-meta.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/edge-004-only-comments.scrml	PASS	
+samples/compilation-tests/edge-005-deep-logic.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/edge-006-url-in-attr.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/edge-007-special-chars.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/edge-008-mixed-closers.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/edge-009-nested-sql-in-logic.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/edge-010-css-in-markup.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-005-ontimeout-basic.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-006-ontimeout-computed.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-007-cancel-timer.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-008-onidle-watchdog.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-009-hierarchy-basic.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-010-history.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-011-internal-rule.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-012-hierarchy-cascade.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-013-payload-binding-bare.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-014-payload-binding-paren.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-modern-001-basic.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/engine-modern-002-effects.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/error-001-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/error-002-multiple-arms.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/error-003-wildcard.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/error-004-in-logic.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-MATCH-ARROW-LEGACY W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/error-005-typed.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/func-001-basic.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/func-002-params.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/func-003-onclick.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/func-004-reactive-mutation.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/func-005-multiple.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/func-006-fn-shorthand.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/func-007-fn-params.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/func-008-destructure-params.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/func-008-onsubmit.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/func-009-oninput.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/func-010-server.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/func-012-multiple-events.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/func-013-return-value.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/func-014-nested-calls.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/func-015-event-with-args.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/gauntlet-r10-bun-admin.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-DG-002 E-REACTIVE-003 E-RI-002 E-SCOPE-001 E-STATE-UNDECLARED I-FN-PROMOTABLE W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/gauntlet-r10-elixir-chat.scrml	PASS	I-FN-PROMOTABLE W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-LINT-002 W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/compilation-tests/gauntlet-r10-go-contacts.scrml	PASS	W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/gauntlet-r10-htmx-feedback.scrml	PASS	W-CPS-NEEDS-FAILABLE W-DEPRECATED-SERVER-MODIFIER W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/compilation-tests/gauntlet-r10-odin-filebrowser.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-r10-rails-blog.scrml	PASS	I-PROTECT-STRIP-001 W-AUTH-MIDDLEWARE-AUTO-INJECTED W-CG-001 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-LINT-002 W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/compilation-tests/gauntlet-r10-react-wizard.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-r10-rust-orders.scrml	PASS	I-FN-PROMOTABLE W-EACH-PROMOTABLE W-LINT-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-r10-solid-spreadsheet.scrml	FAIL	E-SCOPE-001 I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-r10-svelte-dashboard.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-r10-ts-components.scrml	FAIL	E-COMPONENT-020 E-COMPONENT-021 E-COMPONENT-035 E-DG-002 W-COMPONENT-001 W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-r10-vue-datatable.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml	FAIL	E-CG-006 W-EACH-PROMOTABLE W-INTERP-IN-RAW-CONTENT W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase1-decls/_helper-component.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase1-decls/_helper-types.scrml	PASS	I-FN-PROMOTABLE
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-adjacent-decls-014.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-after-comment-011.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-array-type-005.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-bare-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-chained-ops-013.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-export-015.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-error-arm-017.scrml	FAIL	E-ERROR-009 I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-fn-007.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-function-008.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-markup-010.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-meta-016.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-program-009.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-test-018.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-multiline-body-012.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-no-init-002.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-type-annot-003.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-type-mismatch-004.scrml	FAIL	E-TYPE-031 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-union-type-006.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-component-010.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-outside-logic-009.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-reexport-008.scrml	PASS	I-FN-PROMOTABLE
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-anonymous-010.scrml	FAIL	E-SCOPE-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-bare-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-call-non-pure-function-015.scrml	FAIL	E-FN-003 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-call-pure-function-021.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-default-params-014.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-export-009.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-inside-meta-016.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-lift-past-boundary-022.scrml	FAIL	E-FN-008 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-multiline-011.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-async-008.scrml	FAIL	E-ASYNC-NOT-IN-SCRML E-AWAIT-NOT-IN-SCRML E-FN-005 W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-dom-005.scrml	FAIL	E-FN-002 W-DEAD-FUNCTION W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-nondet-007.scrml	FAIL	E-FN-004 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-outer-mutation-006.scrml	FAIL	E-FN-003 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-sql-004.scrml	FAIL	E-FN-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-pure-prefix-012.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-return-type-003.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-server-prefix-013.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-with-params-002.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-bare-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-export-004.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-inside-test-017.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-mutates-reactive-003.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-nested-006.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-server-005.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-typed-params-007.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-with-sql-002.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-aliased-002.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-bare-npm-006.scrml	FAIL	E-IMPORT-005 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-circular-020.scrml	FAIL	E-IMPORT-002 E-IMPORT-004
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-default-003.scrml	FAIL	E-IMPORT-004 I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-inside-function-007.scrml	FAIL	E-IMPORT-003 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-named-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-not-exported-004.scrml	FAIL	E-IMPORT-004 I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-stdlib-scrml-005.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-bare-001.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-chained-ops-009.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-duplicate-binding-010.scrml	FAIL	E-SCOPE-010 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-export-007.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-error-arm-020.scrml	FAIL	E-ERROR-009 I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-fn-005.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-function-006.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-meta-019.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-multiline-008.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-no-init-002.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-type-annot-003.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-type-mismatch-004.scrml	FAIL	E-TYPE-031 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-as-variable-name-011.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-bare-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-branch-asymmetric-004.scrml	FAIL	E-LIN-003 I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-branch-symmetric-005.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-closure-double-008.scrml	FAIL	E-LIN-002 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-double-consume-003.scrml	FAIL	E-LIN-002 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-lift-014.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-loop-local-007.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-loop-outer-006.scrml	FAIL	E-LIN-002 I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-012.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-asymmetric-013.scrml	FAIL	E-LIN-003 E-TYPE-025 I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-not-consumed-002.scrml	FAIL	E-LIN-001 I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-param-009.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-param-not-consumed-010.scrml	FAIL	E-LIN-001 I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-bare-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-explicit-hard-002.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-server-003.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-bare-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-debounced-004.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-file-level-003.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-inside-component-018.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-throttled-005.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-typed-002.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-bare-006.scrml	PASS	W-AUTH-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-derived-from-local-009.scrml	FAIL	E-AUTH-002 W-AUTH-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-not-007.scrml	PASS	W-AUTH-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-optimistic-008.scrml	PASS	W-AUTH-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-typed-010.scrml	PASS	W-AUTH-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-adjacent-015.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-after-comment-014.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-bare-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-export-003.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-inside-program-013.scrml	FAIL	E-NAME-COLLIDES-RESERVED W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-multiline-005.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-payload-004.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-pipe-002.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-no-kind-alias-011.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-struct-bare-006.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-struct-export-007.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-struct-nested-enum-008.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-union-009.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-union-via-pipe-010.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-vs-const-annotation-012.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-after-markup-015.scrml	FAIL	E-USE-002 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-bad-prefix-016.scrml	FAIL	E-USE-005 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-bare-011.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-inside-logic-014.scrml	FAIL	E-USE-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-named-012.scrml	FAIL	E-COMPONENT-035 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-vendor-013.scrml	FAIL	E-COMPONENT-035 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-using-keyword-001.scrml	FAIL	E-MU-001 E-SCOPE-001 E-STMT-MISSING-SEMICOLON W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-with-keyword-001.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-in-element-091.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-non-fn-094.scrml	FAIL	E-LIFECYCLE-015 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-no-scope-092.scrml	FAIL	E-LIFECYCLE-017 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-zero-args-093.scrml	FAIL	E-LIFECYCLE-015 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-break-outside-loop-056.scrml	FAIL	E-LOOP-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-label-108.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-outside-loop-057.scrml	FAIL	E-LOOP-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-064.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-assign-expr-106.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-double-020.scrml	FAIL	E-CTRL-001 E-CTRL-003 E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-orphan-018.scrml	FAIL	E-CTRL-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-if-orphan-019.scrml	FAIL	E-CTRL-002 E-SCOPE-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-failable-unhandled-call-078.scrml	FAIL	E-ERROR-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-fail-in-failable-fn-076.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-fail-in-non-failable-077.scrml	FAIL	E-ERROR-001 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-break-054.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-continue-055.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-cstyle-047.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-else-no-lift-050.scrml	FAIL	E-CTRL-010 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-in-jsobj-053.scrml	FAIL	E-CTRL-011 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-markup-048.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-outside-logic-109.scrml	FAIL	E-CONTROL-FLOW-IN-MARKUP W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-without-key-primitive-100.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-object-iteration-052.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-bare-044.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-const-046.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-let-045.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-multi-088.scrml	PASS	I-FN-PROMOTABLE W-GIVEN-ARROW-LEGACY W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-old-syntax-089.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-property-path-090.scrml	FAIL	E-SYNTAX-044 I-FN-PROMOTABLE W-GIVEN-ARROW-LEGACY W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-single-087.scrml	PASS	I-FN-PROMOTABLE W-GIVEN-ARROW-LEGACY W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-and-else-same-elem-021.scrml	FAIL	E-CTRL-005 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-else-008.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-in-markup-interp-105.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-intermediate-014.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-multi-lift-011.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-no-else-009.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-no-else-narrow-010.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-complete-013.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-partial-012.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-union-types-015.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-bare-016.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-chain-after-unrelated-099.scrml	FAIL	E-CTRL-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-show-compose-110.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-003.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-attr-chain-017.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-chain-004.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-long-chain-005.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-nested-deep-107.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-single-line-no-braces-006.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-bare-001.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-multi-002.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-reactive-write-096.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-sql-in-body-097.scrml	FAIL	E-REACTIVE-003 E-SQL-004 W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-triple-equals-007.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-arm-after-else-extra-101.scrml	FAIL	E-SYNTAX-010 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-block-arm-034.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-colon-arrow-024.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-dash-arrow-023.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-duplicate-arm-030.scrml	FAIL	E-TYPE-023 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-default-027.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-not-last-029.scrml	FAIL	E-SYNTAX-010 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-fat-arrow-022.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-given-in-arm-104.scrml	FAIL	E-SCOPE-001 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-guard-clause-035.scrml	FAIL	E-SCOPE-001 E-SYNTAX-011 E-TYPE-020 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-for-lift-098.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-markup-direct-040.scrml	FAIL	E-TYPE-026 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-mixed-arrows-025.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-non-exhaustive-026.scrml	FAIL	E-TYPE-020 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-asIs-103.scrml	FAIL	E-TYPE-025 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-struct-037.scrml	FAIL	E-TYPE-024 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-optional-039.scrml	FAIL	E-MATCH-012 E-TYPE-006 I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-arity-033.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-named-032.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-positional-031.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-redundant-else-102.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-001 W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-return-038.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-type-mismatch-arms-036.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-underscore-default-028.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-nested-if-in-for-in-while-095.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-all-covered-042.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-LOG-SHADOWED W-MATCH-003 W-MATCH-ARROW-LEGACY W-MATCH-VALUE-UNUSED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-in-lift-043.scrml	FAIL	E-MATCH-ARM-MARKUP-IN-VALUE E-SCOPE-001 E-TYPE-020 W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-stmt-041.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-LOG-SHADOWED W-MATCH-ARROW-LEGACY W-MATCH-VALUE-UNUSED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-bare-079.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-top-level-080.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-void-081.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-fallthrough-072.scrml	FAIL	E-LOOP-001 E-SWITCH-FORBIDDEN I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-statement-071.scrml	FAIL	E-LOOP-001 E-SWITCH-FORBIDDEN I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-throw-statement-075.scrml	FAIL	E-THROW-NOT-IN-SCRML I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-try-catch-073.scrml	FAIL	E-TRY-NOT-IN-SCRML I-FN-PROMOTABLE W-DEAD-FUNCTION W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-try-finally-074.scrml	FAIL	E-TRY-NOT-IN-SCRML I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-SPA-INFERRED W-TRY-CATCH-IN-SCRML-SOURCE
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-multi-083.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-single-082.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-empty-body-084.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-nested-086.scrml	FAIL	E-CODEGEN-INVALID-LOGIC E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-self-write-085.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-as-expr-bare-063.scrml	FAIL	E-LOOP-007 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-assign-double-paren-060.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-assign-single-paren-059.scrml	PASS	I-FN-PROMOTABLE W-ASSIGN-001 W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-bare-058.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-crosses-fn-068.scrml	FAIL	E-LOOP-005 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-missing-label-066.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-duplicate-label-067.scrml	FAIL	E-LOOP-006 I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-labeled-break-outer-065.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-061.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-in-fn-062.scrml	FAIL	E-SYNTAX-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lin-consume-inside-069.scrml	FAIL	E-LIN-002 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-nested-if-070.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-decimal-046.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-div-044.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-match-arm-cond-118.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-sql-interp-048.scrml	PASS	W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-minus-042.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-mod-045.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-mul-043.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-negative-047.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-plus-041.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-bare-061.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-empty-063.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-mixed-062.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-block-body-070.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-expr-body-069.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-multi-params-072.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-no-params-071.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-chained-080.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-declaration-083.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-double-paren-078.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-in-array-literal-112.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-single-paren-079.scrml	PASS	W-ASSIGN-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-to-const-081.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-undeclared-082.scrml	FAIL	E-MU-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-while-077.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-gt-051.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-gte-052.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-lt-049.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-lte-050.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-string-053.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-deep-method-chain-113.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-asis-warn-104.scrml	PASS	W-EQ-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-cross-type-022.scrml	FAIL	E-EQ-001 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-enum-var-103.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-function-field-119.scrml	FAIL	E-EQ-003 E-STRUCT-FUNCTION-FIELD W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-in-sql-bound-024.scrml	PASS	W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-not-rewrite-019.scrml	FAIL	E-EQ-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-null-forbidden-020.scrml	FAIL	E-SYNTAX-042 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-numeric-014.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-strict-rewrite-017.scrml	FAIL	E-EQ-004 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-string-015.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-struct-deep-023.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-undefined-forbidden-021.scrml	FAIL	E-SCOPE-001 E-SYNTAX-042 W-CG-UNDEFINED-INTERPOLATION W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-fn-arg-expr-091.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-for-arith-iterable-090.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-multi-095.scrml	PASS	W-GIVEN-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-property-path-096.scrml	FAIL	E-SYNTAX-044 W-GIVEN-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-single-094.scrml	PASS	W-GIVEN-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-attribute-quoted-111.scrml	PASS	E-DG-002 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-markup-as-attr-value-108.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-when-guard-093.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-is-not-not-105.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-none-bare-008.scrml	FAIL	E-EQ-005 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-non-enum-004.scrml	FAIL	E-TYPE-062 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-bare-006.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-bare-compound-012.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-fn-return-116.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-logic-interp-013.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-sql-098.scrml	PASS	W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-method-call-paren-010.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-on-sql-get-114.scrml	PASS	W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-reactive-009.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-bare-007.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-paren-call-011.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-unknown-variant-005.scrml	FAIL	E-TYPE-063 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-bare-001.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-class-attr-003.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-reactive-002.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-054.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-with-is-057.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-with-optchain-115.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-bang-056.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-or-055.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-short-circuit-optional-099.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-arrow-variant-073.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-dash-arrow-074.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-given-arm-075.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-is-expr-117.scrml	PASS	W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-arm-101.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-no-wildcard-102.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-optional-no-arms-076.scrml	FAIL	E-CG-003 E-MATCH-012 I-FN-PROMOTABLE W-CG-UNDEFINED-INTERPOLATION W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-chain-087.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-in-attr-089.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-on-optchain-109.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-sql-088.scrml	PASS	W-CG-001 W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-numeric-016.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-strict-rewrite-018.scrml	FAIL	E-EQ-004 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-assign-025.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-assign-to-non-optional-026.scrml	FAIL	E-TYPE-041 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-in-array-literal-120.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-prefix-negation-027.scrml	FAIL	E-TYPE-045 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-reactive-028.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-basic-033.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-chained-035.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-in-interp-034.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-is-some-107.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-not-literal-036.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-object-literal-bare-064.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-object-literal-shorthand-065.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-old-presence-guard-097.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-deep-040.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-method-call-039.scrml	FAIL	E-STRUCT-FUNCTION-FIELD W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-property-037.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-reactive-038.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-paren-grouping-arith-100.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-computed-085.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-dotted-084.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-reactive-086.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-return-expr-092.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-array-066.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-as-fn-args-110.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-object-067.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-reactive-068.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-mixed-type-059.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-plus-058.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-template-literal-060.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-bare-029.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-in-interp-030.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-condition-032.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-not-106.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-nested-031.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-boolean-016.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-boolean-as-string-017.scrml	FAIL	E-ATTR-002 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-braces-ghost-020.scrml	PASS	W-LINT-007 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-component-sql-071.scrml	FAIL	E-ATTR-001 E-SCOPE-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-entities-021.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-entities-text-022.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-fn-non-event-023.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-fragmented-069.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-interpolated-019.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-reactive-018.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-special-chars-077.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-string-015.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-checked-030.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-conflict-035.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-group-031.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-non-reactive-033.scrml	FAIL	E-ATTR-010 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-path-032.scrml	PASS	E-DG-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-unsupported-attr-034.scrml	FAIL	E-ATTR-011 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-value-text-029.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-bad-rhs-038.scrml	FAIL	E-ATTR-013 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-bare-ident-039.scrml	FAIL	E-ATTR-013 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-directive-036.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-multiple-037.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-className-ghost-040.scrml	PASS	W-LINT-003 W-LINT-007 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-closer-midline-070.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-comment-inside-066.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-extra-prop-054.scrml	FAIL	E-COMPONENT-011 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-inline-def-052.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-jsx-brace-ghost-057.scrml	PASS	W-LINT-007 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-lowercase-ghost-058.scrml	FAIL	E-MARKUP-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-missing-prop-053.scrml	FAIL	E-COMPONENT-010 E-SCOPE-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-props-dup-055.scrml	FAIL	E-COMPONENT-012 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-reactive-prop-056.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-deep-nesting-075.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-dynamic-class-template-076.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-jsx-arrow-ghost-027.scrml	PASS	I-FN-PROMOTABLE W-LINT-004 W-LINT-007 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-logic-wrapper-028.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onclick-024.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-oninput-026.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onsubmit-025.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-extract-keyword-051.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-for-markup-044.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-else-043.scrml	PASS	E-DG-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-static-042.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-jsx-logical-and-ghost-073.scrml	PASS	W-LINT-008 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-conditional-048.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-duplicate-keys-050.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-inline-markup-045.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-keyed-049.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-nested-047.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-outside-accumulation-072.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-value-046.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-onclick-tilde-decl-074.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-basic-059.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-default-children-060.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-in-lift-062.scrml	FAIL	E-COMPONENT-010 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-non-snippet-063.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-no-spread-061.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-style-flat-donut-041.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-canvas-004.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-closer-in-logic-008.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-inferred-closer-002.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-leading-space-009.scrml	PASS	W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-mismatched-closer-007.scrml	FAIL	E-CTX-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-nested-003.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-simple-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-template-005.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-unknown-name-006.scrml	FAIL	E-MARKUP-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-text-after-markup-065.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-textarea-no-closer-068.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-text-interp-064.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-br-010.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-hr-011.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-img-012.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-input-013.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-with-content-014.scrml	FAIL	E-CTX-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-whitespace-only-067.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-channels/channel-basic-001.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-channels/channel-multiple-001.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-channels/channel-shared-state-001.scrml	FAIL	E-CHANNEL-SHARED-MODIFIER E-DG-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-error-test/error-effect-typed-001.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/gauntlet-s20-error-test/failable-fn-match-001.scrml	PASS	W-MATCH-ARROW-LEGACY W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/failable-inline-catch-001.scrml	PASS	W-MATCH-ARROW-LEGACY W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-error-test/failable-propagate-001.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/fail-basic-001.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/fail-in-control-flow-001.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/fail-in-non-failable-001.scrml	FAIL	E-ERROR-001 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/server-failable-001.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-error-test/test-basic-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/test-fails-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/test-fails-with-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/test-inside-function-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-test/try-catch-001.scrml	FAIL	E-TRY-NOT-IN-SCRML I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-error-ux/err-eq-004-triple-eq.scrml	FAIL	E-EQ-004 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-ux/err-error-007-try.scrml	FAIL	E-TRY-NOT-IN-SCRML I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TRY-CATCH-IN-SCRML-SOURCE
+samples/compilation-tests/gauntlet-s20-error-ux/err-fn-001-impure.scrml	FAIL	E-FN-003 W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-ux/err-import-001-not-found.scrml	FAIL	E-IMPORT-006 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-ux/err-lin-001-unused.scrml	FAIL	E-LIN-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-error-ux/err-scope-001-undeclared.scrml	FAIL	E-SCOPE-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-error-ux/err-type-026-match-in-markup.scrml	FAIL	E-TYPE-026 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-meta/meta-after-markup-001.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-bindings-capture-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-bun-eval-001.scrml	FAIL	E-META-001 E-META-005 E-META-EVAL-001 W-CG-001 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-cleanup-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-compile-time-pure-001.scrml	FAIL	E-META-EVAL-001 E-NAME-COLLIDES-RESERVED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-emit-raw-001.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-emit-raw-002.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-empty-block-001.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-in-component-001.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-in-function-001.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-lift-006.scrml	FAIL	E-META-006 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-lin-capture-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-lin-double-consume-001.scrml	FAIL	E-LIN-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-match-in-meta-001.scrml	PASS	W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-multiple-blocks-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-nested-deep-001.scrml	FAIL	E-META-009 W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-phase-sep-005.scrml	FAIL	E-META-005 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-001.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-002.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-reflect-outside-008.scrml	FAIL	E-META-008 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-reflect-unknown-003.scrml	FAIL	E-META-003 E-META-EVAL-001 E-SCOPE-001 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-meta/meta-runtime-reactive-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-scopeid-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-meta/meta-sql-runtime-007.scrml	FAIL	E-DG-002 E-META-007 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s20-meta/meta-type-registry-001.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s20-sql/protect-basic-001.scrml	PASS	W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/protect-select-star-001.scrml	PASS	I-PROTECT-STRIP-001 W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/server-func-001.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/server-var-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s20-sql/server-var-multiple-001.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/gauntlet-s20-sql/sql-all-001.scrml	PASS	W-EACH-KEY-001 W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-bound-params-001.scrml	PASS	W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-conditional-where-001.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-duplicate-param-001.scrml	PASS	W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-get-001.scrml	PASS	W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-in-for-loop-001.scrml	FAIL	E-EACH-BODY-DECL-UNSUPPORTED W-EACH-KEY-001 W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-in-handler-001.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-multiline-001.scrml	PASS	W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-nobatch-001.scrml	PASS	W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-run-001.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-transaction-001.scrml	FAIL	E-SCOPE-001 W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-sql/sql-update-delete-001.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/gauntlet-s20-styles/css-custom-props-001.scrml	PASS	W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE
+samples/compilation-tests/gauntlet-s20-styles/css-empty-block-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-styles/css-flat-and-scoped-001.scrml	FAIL	E-COMPONENT-020 E-COMPONENT-021 E-COMPONENT-035 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-styles/css-global-program-001.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/gauntlet-s20-styles/css-media-query-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-styles/css-multiple-blocks-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-styles/css-nested-selectors-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-styles/css-supports-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-styles/css-tailwind-class-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-validation/debug-original-name-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-validation/encoded-names-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-validation/predicate-email-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-validation/predicate-number-range-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-validation/predicate-url-001.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/gauntlet-s20-validation/reactive-encoded-001.scrml	PASS	W-EACH-KEY-001 W-PROGRAM-001
+samples/compilation-tests/gauntlet-s79-calculator.scrml	PASS	E-DG-002 W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE W-TYPE-031-UNPROVEN
+samples/compilation-tests/gauntlet-s79-counter-todo.scrml	PASS	I-FN-PROMOTABLE W-EACH-PROMOTABLE W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE
+samples/compilation-tests/gauntlet-s79-signup-form.scrml	FAIL	E-TYPE-025 W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-001
+samples/compilation-tests/gauntlet-s79-theme-settings.scrml	FAIL	E-NAME-COLLIDES-RESERVED E-SYNTAX-002 E-TYPE-025 W-MATCH-ARROW-LEGACY W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE
+samples/compilation-tests/helpers/dnd-setup.scrml	FAIL	E-MU-001 E-SCOPE-001 I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/input-canvas-demo.scrml	PASS	W-DEAD-FUNCTION W-INPUT-STATE-MARKUP-NONREACTIVE W-LINT-018 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/integration-001-stripe-mini.scrml	PASS	E-DG-002 W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/is-not-compound.scrml	PASS	W-TYPE-031-UNPROVEN
+samples/compilation-tests/library-mode-types.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/lift-001-basic.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-002-transformed.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-003-nested-markup.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-004-conditional.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-005-table-rows.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-006-list-items.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-007-with-index.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-008-self-closing.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-009-string-expr.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-010-complex.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/lift-5-repro.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/lin-001-basic-linear.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/lin-002-double-use.scrml	FAIL	E-LIN-002 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/logic-001-let-decl.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/logic-002-const-decl.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/logic-003-arithmetic.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-004-string-ops.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-005-boolean-expr.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-006-ternary.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-007-multiple-blocks.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-008-nested-logic.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/logic-009-expressions.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-010-array-decl.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-011-object-decl.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-012-nested-objects.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-013-method-calls.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/logic-014-template-literal.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/logic-015-multiline.scrml	PASS	W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/machine-002-traffic-light.scrml	PASS	W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE
+samples/compilation-tests/machine-basic.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/map-001-fare-by-lane.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/match-001-nested-with-call.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-001
+samples/compilation-tests/match-002-block-form-arm-swap.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/match-as-expression.scrml	PASS	
+samples/compilation-tests/match-colon-arrow.scrml	PASS	W-MATCH-ARROW-LEGACY
+samples/compilation-tests/match-pipe-alternation.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/meta-001-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/meta-001-emit-html.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-001-reflect-enum.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-002-reflect.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-002-reflect-struct.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-002-with-logic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/meta-003-function.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001
+samples/compilation-tests/meta-003-runtime-var-error.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/meta-004-clean-config.scrml	FAIL	E-SCOPE-001 W-PROGRAM-001
+samples/compilation-tests/meta-004-config.scrml	PASS	W-LINT-007 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-005-nested-meta.scrml	FAIL	E-SCOPE-001 W-PROGRAM-001
+samples/compilation-tests/meta-005-nested.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/meta-006-reflect-unknown-type.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/meta-007-reflect-enum-buttons.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/meta-008-reflect-struct-form.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/meta-009-multiple-runtime-vars-error.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/meta-010-reflect-with-config.scrml	FAIL	E-SCOPE-001 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/meta-011-for-of-loop.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-012-reflect-callback-param.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-013-runtime-meta-dg002.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/meta-component-gen.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-conditional-markup.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-data-table.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-loop-gen.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/meta-style-gen.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/modern-001-state-with-tests.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/modern-002-projection.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/modern-003-full-app.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/modern-004-canary-pattern.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/modern-005-ref-and-state.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/modern-007-dnd-with-helpers.scrml	FAIL	E-MU-001 E-SCOPE-001 I-FN-PROMOTABLE W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/multi-meta-source-order.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/payload-variants-001.scrml	PASS	I-FN-PROMOTABLE W-LOG-SHADOWED W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/compilation-tests/postgres-program-driver.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/protect-001-basic-auth.scrml	PASS	I-PROTECT-STRIP-001 W-AUTH-MIDDLEWARE-AUTO-INJECTED W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/compilation-tests/reactive-001-basic-decl.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-002-multiple.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-003-string.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-004-number.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-005-boolean.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-006-array.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-007-object.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-008-null.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-009-empty-string.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-010-empty-array.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-011-with-logic.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-012-computed.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-013-nested-markup.scrml	PASS	E-DG-002 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/reactive-014-form-state.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-015-complex-init.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/reactive-016-bind-value.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/reactive-017-arrays.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/reactive-018-class-binding.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/ref-001-basic.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/ref-002-in-logic.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/compilation-tests/ref-003-attribute-access.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/ref-004-with-state.scrml	PASS	W-PROGRAM-001 W-WHITESPACE-001
+samples/compilation-tests/ref-005-multiple-refs.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/schemaFor-basic.scrml	PASS	W-PROGRAM-SPA-INFERRED W-STDLIB-SEED-FAILCLOSED
+samples/compilation-tests/server-001-state-block.scrml	PASS	W-WHITESPACE-001
+samples/compilation-tests/server-002-protect.scrml	PASS	W-AUTH-MIDDLEWARE-AUTO-INJECTED W-WHITESPACE-001
+samples/compilation-tests/server-003-protect-multi.scrml	PASS	W-AUTH-MIDDLEWARE-AUTO-INJECTED W-WHITESPACE-001
+samples/compilation-tests/server-004-server-func.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/server-005-mixed.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/server-006-state-with-tables.scrml	PASS	W-WHITESPACE-001
+samples/compilation-tests/server-007-client-only.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/server-008-form-handler.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED
+samples/compilation-tests/server-009-server-fn.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/server-010-multiple-state.scrml	PASS	W-PROGRAM-001 W-WHITESPACE-001
+samples/compilation-tests/snippet-001-basic-slot.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/snippet-002-parametric.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/sql-001-basic-select.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-002-where.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-003-join.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-004-count.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-005-insert.scrml	PASS	W-CG-001 W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-006-update.scrml	PASS	W-CG-001 W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-007-delete.scrml	PASS	W-CG-001 W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-008-order-limit.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-009-multiple.scrml	PASS	W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/sql-010-create-table.scrml	PASS	W-CG-001 W-PROGRAM-001 W-SQL-ROW-UNTYPED
+samples/compilation-tests/state-001-basic-constructor.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-002-typed-attrs.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-003-constructor-with-logic.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-004-instantiation.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-005-const-binding.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-006-nested-state.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-007-html-attrs.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/state-008-default-values.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-009-enum-in-state.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-010-struct-state-combo.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/state-type-001-custom.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/tableFor-basic.scrml	PASS	W-PROGRAM-SPA-INFERRED W-STDLIB-SEED-FAILCLOSED
+samples/compilation-tests/tailwind-prose-coverage.scrml	PASS	W-INTERP-IN-RAW-CONTENT W-PROGRAM-001
+samples/compilation-tests/test-001-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/test-002-with-logic.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/test-003-multiple-tests.scrml	PASS	I-FN-PROMOTABLE
+samples/compilation-tests/test-004-assert-equals.scrml	PASS	
+samples/compilation-tests/test-005-test-state.scrml	PASS	W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/compilation-tests/test-006-test-sql.scrml	PASS	W-DEPRECATED-SERVER-MODIFIER W-WHITESPACE-001
+samples/compilation-tests/test-007-test-function.scrml	PASS	I-FN-PROMOTABLE
+samples/compilation-tests/test-008-test-enum.scrml	PASS	I-FN-PROMOTABLE
+samples/compilation-tests/test-009-test-reactive.scrml	PASS	W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/test-010-nested-context.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/compilation-tests/transition-001-basic.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-001-enum.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-002-struct.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-003-tuple.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-004-enum-use.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/type-005-multiple-types.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-006-struct-nested.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-007-enum-simple.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-008-type-no-kind.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-009-with-functions.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001
+samples/compilation-tests/type-010-struct-many-fields.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-011-enum-many-variants.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-012-struct-optional.scrml	PASS	W-PROGRAM-001
+samples/compilation-tests/type-013-type-with-reactive.scrml	PASS	E-DG-002 W-PROGRAM-001
+samples/compilation-tests/type-014-type-before-markup.scrml	FAIL	E-NAME-COLLIDES-RESERVED W-PROGRAM-001
+samples/compilation-tests/type-015-combined.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/compilation-tests/when-001-basic-effect.scrml	PASS	W-PROGRAM-SPA-INFERRED
+samples/compilation-tests/when-002-message-handler.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+samples/contact-directory.scrml	FAIL	E-CTX-003 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/dashboard-parallel.scrml	FAIL	E-CTX-001 E-CTX-003 E-STYLE-001 W-LINT-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/dashboard.scrml	FAIL	E-COMPONENT-021 E-CTX-003 W-LINT-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/debate-async-dashboard-react-perspective.scrml	FAIL	E-SQL-004 E-TYPE-025 W-DEPRECATED-SERVER-MODIFIER W-MATCH-ARROW-LEGACY W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-STYLE-CONFLICT-POSSIBLE W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/debate-async-dashboard-svelte.scrml	FAIL	E-CTX-003 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/debate-lin-lift-edge-cases.scrml	FAIL	E-LIN-001 I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/debate-lin-lift-pipeline.scrml	FAIL	E-LIN-001 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/expense-tracker.scrml	FAIL	E-CTX-003 E-STYLE-001 W-LINT-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/file-manager-r11.scrml	PASS	I-FN-PROMOTABLE W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r11-elixir-chat.scrml	FAIL	E-DG-002 E-STYLE-001 W-EACH-PROMOTABLE W-LINT-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/gauntlet-r11-go-url-shortener.scrml	FAIL	E-CTX-003 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r11/rust-state-machine.scrml	FAIL	E-STYLE-001 E-THROW-NOT-IN-SCRML E-TRY-NOT-IN-SCRML E-TYPE-025 E-VARIANT-AMBIGUOUS I-FN-PROMOTABLE W-EACH-PROMOTABLE W-LINT-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+samples/gauntlet-r11-task-dashboard.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r11-zig-buildconfig.scrml	FAIL	E-CTX-003 W-LINT-002 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/bun-sql-operations.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/gauntlet-r13/elixir-pipeline.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-DG-002 E-PA-002 W-CPS-NEEDS-FAILABLE W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/gauntlet-r13/go-api-service.scrml	FAIL	E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/gauntlet-r13/htmx-forms.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-REACTIVE-003 E-RI-002 E-SQL-004 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-PROGRAM-001 W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r13/odin-gamelike.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/rails-crud-admin.scrml	FAIL	E-CPS-MULTIBATCH-REORDER E-PA-002 E-REACTIVE-003 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/gauntlet-r13/react-auth-dashboard.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-SESSION-VALUE E-SQL-004 I-FN-PROMOTABLE W-CG-UNDEFINED-INTERPOLATION W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-PROGRAM-001 W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r13/rust-state-machine.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/solid-reactive-signals.scrml	FAIL	E-NAME-COLLIDES-RESERVED I-FN-PROMOTABLE W-LINT-017 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/svelte-enum-filter.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/typescript-typed-forms.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/vue-component-app.scrml	FAIL	E-CELL-NO-RENDER-SPEC I-FN-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r13/zig-minimal.scrml	FAIL	E-CELL-NO-RENDER-SPEC W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r14/bun-sql-operations.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/gauntlet-r14/elixir-pipeline.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-DG-002 E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/gauntlet-r14/go-api-service.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/gauntlet-r14/htmx-forms.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r14/odin-gamelike.scrml	PASS	E-DG-002 I-FN-PROMOTABLE W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r14/rails-crud-admin.scrml	FAIL	E-CPS-MULTIBATCH-REORDER E-PA-002 E-REACTIVE-003 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-WHITESPACE-001
+samples/gauntlet-r14/react-auth-dashboard.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE I-FN-PROMOTABLE W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r14/rust-state-machine.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r14/solid-reactive-signals.scrml	FAIL	E-NAME-COLLIDES-RESERVED I-FN-PROMOTABLE W-EACH-PROMOTABLE W-LINT-017 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r14/svelte-enum-filter.scrml	PASS	I-FN-PROMOTABLE W-DEAD-FUNCTION W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r14/typescript-typed-forms.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r14/vue-component-app.scrml	FAIL	E-CELL-NO-RENDER-SPEC I-FN-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r14/zig-minimal.scrml	FAIL	E-CELL-NO-RENDER-SPEC W-EACH-PROMOTABLE W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r15/stress-bun-eval-markup.scrml	FAIL	E-CG-006 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r15/stress-db-markup-onclick.scrml	FAIL	E-CPS-NONIDEM-NO-STORAGE E-DG-002 E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-WHITESPACE-001
+samples/gauntlet-r15/stress-meta-for-of-emit.scrml	FAIL	E-META-EVAL-002 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/gauntlet-r18/go-dev.scrml	FAIL	E-EQ-004 E-META-EVAL-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r18/rails-dev.scrml	FAIL	E-EQ-004 E-META-EVAL-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r18/react-dev.scrml	FAIL	E-EQ-004 E-META-EVAL-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r18/svelte-dev.scrml	PASS	W-EACH-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/gauntlet-r18/vue-dev.scrml	FAIL	E-EQ-004 E-META-EVAL-002 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+samples/gauntlet-r19/angular-dev.scrml	FAIL	E-DG-002 E-SCOPE-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/gauntlet-r19/go-dev.scrml	FAIL	E-DG-002 E-SCOPE-001 W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE W-TYPE-031-UNPROVEN
+samples/gauntlet-r19/react-dev.scrml	FAIL	E-DG-002 E-SCOPE-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/gauntlet-r19/rust-dev.scrml	PASS	W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r19/svelte-dev.scrml	FAIL	E-DG-002 E-SCOPE-001 W-PROGRAM-001 W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/gauntlet-r19/vue-dev.scrml	FAIL	E-SCOPE-001 W-PROGRAM-001 W-TYPE-031-UNPROVEN
+samples/gauntlet-s19-phase4/nested-comments.scrml	FAIL	
+samples/htmx-debate-dashboard.scrml	FAIL	E-PA-002 W-DEPRECATED-SERVER-MODIFIER W-EACH-PROMOTABLE W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/kanban-r11.scrml	FAIL	E-STYLE-001 E-TYPE-025 I-FN-PROMOTABLE W-DEAD-FUNCTION W-EACH-PROMOTABLE W-LINT-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/login.scrml	FAIL	E-CG-001 E-ERROR-001 E-SCOPE-001 I-PROTECT-STRIP-001 W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/multi-step-form.scrml	FAIL	E-DG-002 E-SQL-004 E-TYPE-025 W-DEPRECATED-SERVER-MODIFIER W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE
+samples/quiz-app.scrml	FAIL	E-CTRL-001 E-CTRL-002 E-STYLE-001 E-TYPE-025 I-FN-PROMOTABLE W-DEAD-FUNCTION W-EACH-PROMOTABLE W-LINT-001 W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/react-dev-lin-lift-edge-cases.scrml	FAIL	E-LIN-001 I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+samples/react-dev-lin-lift-pipeline.scrml	FAIL	E-LIN-001 I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TAILWIND-UNRECOGNIZED-CLASS
+samples/recipe-book.scrml	FAIL	E-CTX-003 E-STYLE-001 W-LIFECYCLE-CANDIDATE W-LINT-001
+samples/rust-dev-debate-dashboard.scrml	FAIL	E-TYPE-026 W-DEPRECATED-SERVER-MODIFIER W-LINT-002 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+samples/rust-dev-lin-lift-edge-cases.scrml	FAIL	E-CTX-001 E-CTX-003 E-SYNTAX-050 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/rust-dev-lin-lift-pipeline.scrml	FAIL	E-CTX-001 E-CTX-003 E-SYNTAX-050 W-TAILWIND-UNRECOGNIZED-CLASS
+samples/todo-list.scrml	FAIL	E-TYPE-025 I-FN-PROMOTABLE W-PROGRAM-001 W-STYLE-CONFLICT-POSSIBLE
+samples/user-profile.scrml	FAIL	E-SCOPE-001 W-AUTH-MIDDLEWARE-AUTO-INJECTED W-DEPRECATED-SERVER-MODIFIER W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN W-WHITESPACE-001
+stdlib/auth/flows.scrml	FAIL	E-ROUTE-001 E-SCOPE-001 I-FN-PROMOTABLE W-LINT-023 W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-SERVER-IMPORT-UNEMITTED W-TYPE-031-UNPROVEN
+stdlib/auth/index.scrml	FAIL	E-ERROR-009 E-ROUTE-001 E-SCOPE-001 I-FN-PROMOTABLE W-LINT-023 W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-SERVER-IMPORT-UNEMITTED W-TYPE-031-UNPROVEN
+stdlib/auth/jwt.scrml	FAIL	E-ERROR-009 E-ROUTE-001 E-SCOPE-001 I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/auth/password.scrml	FAIL	E-ROUTE-001 E-SCOPE-001 W-LINT-023 W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/auth/templates/login.scrml	FAIL	E-PA-002 W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+stdlib/compiler/bpp.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/bs.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/ce.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/cg.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/dg.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/expr.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/index.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/mc.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/me.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/meta-checker.scrml	PASS	E-ROUTE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+stdlib/compiler/mod.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/module-resolver.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/pa.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/ri.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/tab.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/compiler/ts.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/cron/index.scrml	FAIL	E-CODEGEN-INVALID-LOGIC I-FN-PROMOTABLE W-LINT-017 W-PROGRAM-SPA-INFERRED
+stdlib/crypto/index.scrml	FAIL	E-ERROR-009 E-SCOPE-001 I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/data/form-for.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/data/index.scrml	FAIL	E-CTX-003 E-ERROR-009 E-ROUTE-001 I-FN-PROMOTABLE W-PROGRAM-001 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+stdlib/data/messages.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/data/parse.scrml	FAIL	E-ERROR-009 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/data/schema-for.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/data/table-for.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TAILWIND-UNRECOGNIZED-CLASS
+stdlib/data/transform.scrml	FAIL	E-CTX-003 W-PROGRAM-001
+stdlib/data/validate.scrml	FAIL	E-CODEGEN-INVALID-LOGIC E-ROUTE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/format/index.scrml	FAIL	E-SCOPE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/fs/index.scrml	FAIL	E-DG-001 E-SCOPE-001 W-PROGRAM-SPA-INFERRED W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+stdlib/host/index.scrml	FAIL	E-CODEGEN-INVALID-LOGIC W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/http/index.scrml	FAIL	E-CTX-001 E-ROUTE-001 E-SCOPE-001 E-THROW-NOT-IN-SCRML E-TRY-NOT-IN-SCRML I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+stdlib/math/index.scrml	FAIL	E-SCOPE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED
+stdlib/mcp/index.scrml	PASS	W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/oauth/discord.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/oauth/github.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/oauth/google.scrml	FAIL	E-ERROR-009 I-FN-PROMOTABLE W-MATCH-ARROW-LEGACY W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/oauth/index.scrml	FAIL	E-ERROR-009 E-ROUTE-001 E-SCOPE-001 E-THROW-NOT-IN-SCRML I-FN-PROMOTABLE W-DEAD-FUNCTION W-MATCH-ARROW-LEGACY W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SERVER-IMPORT-UNEMITTED W-TYPE-031-UNPROVEN
+stdlib/oauth/microsoft.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/oauth/pkce.scrml	FAIL	E-ROUTE-001 E-SCOPE-001 E-THROW-NOT-IN-SCRML I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/path/index.scrml	FAIL	E-SCOPE-001 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/process/index.scrml	FAIL	E-DG-001 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/random/index.scrml	PASS	W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/redis/index.scrml	FAIL	E-DG-001 E-IMPORT-005 I-FN-PROMOTABLE W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED
+stdlib/regex/index.scrml	PASS	E-ROUTE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/router/index.scrml	FAIL	E-ROUTE-001 E-SCOPE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/store/index.scrml	FAIL	E-IMPORT-005 W-LINT-019 W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/store/kv.scrml	FAIL	E-IMPORT-005 W-LINT-019 W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+stdlib/test/index.scrml	PASS	I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TRY-CATCH-IN-SCRML-SOURCE W-TYPE-031-UNPROVEN
+stdlib/time/index.scrml	FAIL	E-MU-001 E-ROUTE-001 E-SCOPE-001 I-FN-PROMOTABLE W-PROGRAM-SPA-INFERRED W-TYPE-031-UNPROVEN
+docs/gauntlets/gauntlet-r25/dev-1-react.scrml	FAIL	E-CHANNEL-SERVER-CELL-READ E-FORMFOR-NOT-IMPORTED E-REACTIVE-003 E-TABLEFOR-NOT-IMPORTED I-AUTH-REDIRECT-UNRESOLVED W-ATTR-001 W-AUTH-CONTENT-NOT-GATED W-AUTH-LOGIN-MISSING W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-LIFECYCLE-CANDIDATE W-MATCH-ARROW-LEGACY W-PROGRAM-REDUNDANT-LOGIC W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-STDLIB-SEED-FAILCLOSED W-TYPE-031-UNPROVEN
+docs/gauntlets/gauntlet-r25/dev-2-elixir.scrml	FAIL	E-DG-002 E-ERROR-009 E-FORMFOR-NOT-IMPORTED E-TABLEFOR-NOT-IMPORTED I-AUTH-REDIRECT-UNRESOLVED W-AUTH-CONTENT-NOT-GATED W-AUTH-LOGIN-MISSING W-DEPRECATED-SERVER-MODIFIER W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-TYPE-031-UNPROVEN
+docs/gauntlets/gauntlet-r25/dev-3-svelte.scrml	FAIL	E-CHANNEL-SERVER-CELL-READ E-FORMFOR-NOT-IMPORTED E-REACTIVE-003 E-TABLEFOR-NOT-IMPORTED I-AUTH-REDIRECT-UNRESOLVED I-FN-PROMOTABLE W-AUTH-CONTENT-NOT-GATED W-AUTH-LOGIN-MISSING W-DEAD-FUNCTION W-DEPRECATED-SERVER-MODIFIER W-DERIVED-001 W-MATCH-ARROW-LEGACY W-PROGRAM-SPA-INFERRED W-SQL-ROW-UNTYPED W-STDLIB-SEED-FAILCLOSED W-TAILWIND-UNRECOGNIZED-CLASS W-TYPE-031-UNPROVEN
+docs/gauntlets/gauntlet-r25/dev-4-pascal.scrml	FAIL	E-DG-002 E-ERROR-009 E-REACTIVE-003 E-SCHEMA-011 I-AUTH-REDIRECT-UNRESOLVED I-FN-PROMOTABLE W-AUTH-LOGIN-MISSING W-DEPRECATED-SERVER-MODIFIER W-MATCH-ARROW-LEGACY W-PROGRAM-REDUNDANT-LOGIC W-SQL-ROW-UNTYPED W-STDLIB-SEED-FAILCLOSED

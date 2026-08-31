@@ -12719,6 +12719,290 @@ function annotateNodes(
         // below binds `as name`, or `if=item.ok` would resolve against the row
         // variable and ship a runtime `Cannot read properties of undefined`.
         visitStructuralIfAttr(n);
+        // §6.1.2 / §17.X / §34 — route the `<each>` OPENER EXPRESSIONS through
+        // the read-side E-STATE-UNDECLARED walker.
+        //
+        // THE GAP. `<each>` is not a `kind:"markup"` node: the block splitter
+        // raw-captures it and the AST builder rebuilds the opener by regexing
+        // NAMED attributes out of the header, so the node has no `attrs` array
+        // and the markup walk's `for (const attr of n.attrs)` loop — the thing
+        // that feeds `visitAttr` — reaches nothing on it. Every opener
+        // expression survives only as RAW TEXT (`inExprRaw` / `ofExprRaw` /
+        // `keyExprRaw`), and codegen (emit-each.ts) lowers that text directly
+        // without ever consulting the typer. Both failure modes were live:
+        //
+        //   `in=@typo`   -> `_scrml_reactive_get("typo")` -> undefined -> the
+        //                   list renders EMPTY, forever, on a clean exit-0 compile.
+        //   `key=typo`   -> `(r, _scrml_each_idx) => typo` -> a bare reference to
+        //                   an identifier that does not exist -> ReferenceError on
+        //                   FIRST RENDER. Strictly worse: it takes the page down.
+        //
+        // Both are the "genuine undeclared-cell typo, NOT a silently-synthesised
+        // cell" case SPEC §6.1.2 says SHALL be E-STATE-UNDECLARED.
+        //
+        // ⚠ THE `in=@typo` ROW IS CLOSED ONLY WHEN `typo` RESOLVES TO NOTHING.
+        // If the bare name happens to be bound to a NON-reactive binding, the
+        // read still goes silent and the list still renders empty forever. Do
+        // not read the two rows above as a completeness claim — read
+        // "WHAT THIS COVERS, AND WHAT IT DOES NOT", below, before relying on it.
+        //
+        // THE FIX IS THE SIBLING'S. `<match on=@cell>` (§18.0.1 / §34, ss42
+        // item-2 — see the `match-block` case below) had this identical gap for
+        // the identical reason, and closed it by parsing its own raw and feeding
+        // it to `checkLogicExprIdents`. This is that, one node family over.
+        // Reusing the walker rather than writing a second predicate is what keeps
+        // `in=@typo` and `${@typo}` from ever disagreeing — and it inherits every
+        // exemption the walker already honours: `@.` (§17.7.3), `_`-prefixed
+        // names (which is what exempts the documented `key=__index__` positional
+        // sentinel), RESERVED_AMBIENT_PROJECTION_NAMES, declared type names,
+        // known fn names, and the sigil/bare double-bind lookup.
+        //
+        // ── WHAT THIS COVERS, AND WHAT IT DOES NOT ─────────────────────────
+        //
+        // READ THE LIMIT BEFORE YOU TRUST THE PARAGRAPH ABOVE IT. Inheriting the
+        // walker's exemptions means inheriting its BLIND SPOTS too, and one of
+        // them lands squarely on the `in=@typo` failure mode this comment opens
+        // by describing. Stating the coverage without stating the limit is the
+        // same defect class as an over-claiming SPEC row; this project has
+        // shipped that twice.
+        //
+        // COVERED — an opener read that resolves to NOTHING in the post-CE scope
+        // chain, in any of the three slots:
+        //   in=@typo / of=@typo / key=@typo   -> E-STATE-UNDECLARED
+        //   key=typo (bare)                   -> E-SCOPE-001
+        // plus a read sitting BESIDE a `@.` sigil (`key=@.id + @typo`), a read
+        // nested anywhere inside a parsed opener expression, and — via
+        // `checkRowFieldAccessInExpr` — an unknown column on a SQL-projection
+        // row (see the `key=` note below).
+        //
+        // NOT COVERED — `@name` where the BARE name IS bound, but to something
+        // that is NOT a reactive cell: a plain `const`/`let`, a function param,
+        // a value import. The `@`-branch resolves the sigil form FIRST and then
+        // FALLS BACK to the bare name (:7823-7825):
+        //
+        //     const atEntry = scopeChain.lookup(<sigil form>)
+        //       ?? scopeChain.lookup(atBase);
+        //     if (atEntry) return;
+        //
+        // so the bare binding satisfies the lookup and the read goes silent.
+        // MEASURED, not reasoned:
+        //
+        //     ${ const items = [1, 2, 3] }
+        //     <each in=@items as r>…</each>
+        //
+        // compiles exit 0 with zero E- diagnostics and emits
+        // `_scrml_cs_reactive_get("items")` -> undefined -> the empty-guard
+        // fires -> the list renders EMPTY, FOREVER. That is verbatim the
+        // `in=@typo` row above, and this check does NOT close it.
+        //
+        // WHY IT IS NOT FIXED HERE, AND DO NOT "JUST" GATE THE BRANCH:
+        //
+        //   1. IT IS PRE-EXISTING AND NOT `<each>`-SPECIFIC. `@items` in a plain
+        //      `${ }` logic block is silent on `origin/main` too. Base-vs-build
+        //      flip on the `<each>` reproducer: main 0 E-codes, this build 0
+        //      E-codes — IDENTICAL. The arc neither caused it nor closes it.
+        //   2. THE BARE FALLBACK IS DELIBERATE, NOT AN OVERSIGHT. The walker's
+        //      own comment at ~:7789 says a `variable` — "the `<each>`/
+        //      `<tableFor>` `as`-name loop local" — SHALL resolve an `@` read.
+        //      Gating on `kind === "reactive" | "import"` therefore newly-rejects
+        //      a documented-intentional acceptance, not merely stray consts.
+        //   3. SO IT IS NEWLY-REJECTING ACROSS EVERY `@`-READ SITE IN THE
+        //      LANGUAGE, not just the three `<each>` opener slots, and owes its
+        //      own measured migration and its own ruling. Round 4 is the standing
+        //      lesson on what a newly-rejecting change costs when it ships on a
+        //      clean corpus differential alone.
+        //
+        // Filed as GAP-S385-AT-READ-OVER-NON-REACTIVE-BINDING. Test anchor:
+        // each-opener-expr-undeclared-read.test.js §12, a `test.todo` sited in
+        // the coverage-boundary section so a future author cannot read §3/§10 as
+        // a completeness claim.
+        //
+        // ALSO NOT COVERED — ANYTHING INSIDE A LAMBDA BODY. THIS ONE IS BIGGER,
+        // AND IT IS THE PRICE OF THE F1 FIX, PAID IN THE OTHER DIRECTION.
+        //
+        // `forEachIdentInExprNode` does not descend into a `lambda` body. That
+        // guard is LOAD-BEARING — it is precisely what keeps
+        // `in=@rows.filter(n => n > 1)` from reporting the param `n` as an
+        // outer-scope read, and its absence is what produced round 3's F1 false
+        // positive. But the guard is TOTAL: no read inside any lambda body is
+        // scope-checked, in this check or in any other consumer of the walker.
+        // Measured, both slots and the plain-logic sibling:
+        //
+        //   in=@rows.filter(n => n > @typoInside)              -> SILENT
+        //   in=@rows.filter(n => n > typoBareInside)           -> SILENT
+        //   key=r.tags.map(t => t + @typoInside).join("-")     -> SILENT
+        //   ${ const out = @rows.filter(n => n > @typoInside) } -> SILENT (same walker)
+        //   in=@rows.filter(n => n > 1).concat(@typoOutside)   -> FIRES (outside the lambda)
+        //
+        // AND IT REACHES THE SAME RUNTIME FAILURE THIS CHECK EXISTS TO CLOSE.
+        // The first row compiles exit 0 and emits, verbatim:
+        //
+        //   const _items = _scrml_cs_reactive_get("rows")
+        //     .filter(n => n > _scrml_cs_reactive_get("typoInside"));
+        //
+        // `undefined` on the right of `>` is `false` for every `n`, the filter
+        // returns `[]`, and THE LIST RENDERS EMPTY, FOREVER — the exact row at
+        // the top of this comment, one lambda deep. Strictly worse than the
+        // const-shadow case above, too: there the name at least exists somewhere
+        // in the file; here `@typoInside` is declared NOWHERE and still sails
+        // through. It is the pure §6.1.2 undeclared-cell typo, unseen.
+        //
+        // SO STATE THE COVERAGE PRECISELY, AND DO NOT LET §3/§10 BE MISREAD:
+        // lambda-containing openers are pinned against FALSE POSITIVES, which is
+        // the property round 4 landed and it is real. Their BODIES are not
+        // checked at all. Those are different claims.
+        //
+        // Not fixed here for the same reason as the sibling hole: descending
+        // would require binding the lambda params first (the whole reason the
+        // guard exists), it is a change to the SHARED walker — every `${…}`,
+        // every condition, every prop — hence newly-rejecting language-wide, and
+        // it owes its own measured migration and its own ruling.
+        // Filed as GAP-S385-LAMBDA-BODY-READS-UNCHECKED. Test anchor: §12.
+        //
+        // ── `key=` PULLS IN E-TYPE-004, WHICH IS NEW AT THIS SITE ──────────
+        //
+        // `checkLogicExprIdents` opens by calling `checkRowFieldAccessInExpr`, so
+        // routing the opener through it makes E-TYPE-004 reachable from `key=`
+        // for the first time. NEWLY-FIRING, measured by base-vs-build flip:
+        //
+        //     const rows = ?{`SELECT id, name FROM users`}.all()
+        //     <each in=rows as u key=u.email>      // main: exit 0 | here: E-TYPE-004
+        //
+        // The rejection is CORRECT — `u.email` over a projection that never
+        // selected `email` lowers to `(u, _idx) => u.email`, `undefined` for
+        // every row, which collapses the reconciler's keys into one bucket. It
+        // is bounded, too: `key=u.id` (a selected column) and `SELECT *` both
+        // stay clean. Recorded because the failure is a HARD ERROR on an
+        // attribute nobody associates with SQL typing — so a future imprecision
+        // in row-type resolution would surface here as a mystery fatal. Pinned
+        // in §13 of the test file.
+        const checkEachOpenerExpr = (rawUnknown: unknown): void => {
+          if (typeof rawUnknown !== "string") return;
+          const trimmed = rawUnknown.trim();
+          if (trimmed.length === 0) return;
+
+          // NO `@.`-PREFIX BAIL HERE, DELIBERATELY. An earlier revision copied the
+          // `on=` precedent's `if (raw.startsWith("@.")) return;` guard. That
+          // guard skips the ENTIRE opener expression, not the `@.` sub-read, so
+          // any cell read sitting BESIDE a leading sigil went unchecked:
+          //
+          //   key=@.id + @typo          -> `@typo` never scope-checked
+          //   in=@.rows.concat(@typo)   -> `@typo` never scope-checked
+          //
+          // and the mistake then surfaced from CODEGEN as E-CODEGEN-INVALID-LOGIC
+          // ("could not lower this construct") instead of naming the undeclared
+          // cell. Leading `@.` is FAR more common on `<each>` than on the
+          // `<match on=>` node the guard was copied from, so the blast radius is
+          // materially different here.
+          //
+          // The guard also bought nothing. `parseExprToNode` was run directly on
+          // `@.`, `@.id`, `@.id + @typo` and `@.rows.concat(@typo)`: none throw,
+          // all yield idents the walker already exempts at its own `@.` check
+          // (~:7795). And the `try` below covers any parse failure regardless. So
+          // the sigil is handled where it belongs — inside the one shared walker —
+          // and `key=@.id` stays silent through that exemption rather than
+          // through a whole-expression bail.
+
+          // ONE EXPRESSION, PARSED — NEVER A TEXT SCAN OVER THE RAW.
+          //
+          // The opener value is handed to `parseExprToNode` WHOLE and the
+          // resulting node is walked. Nothing here reads the raw text
+          // structurally, and that restraint is the whole point of this comment.
+          //
+          // A PRIOR REVISION SCANNED THE RAW FOR `${ … }` INTERPOLATION BODIES
+          // AND CHECKED THOSE *INSTEAD OF* THE WHOLE VALUE. It was wrong in BOTH
+          // directions at once, and both failures have the same cause: a text
+          // scan carries none of the walker's structural knowledge.
+          //
+          //   FALSE POSITIVE (the reason it could not ship). The shared walker
+          //   `forEachIdentInExprNode` deliberately does NOT descend into a
+          //   `lambda` body — that guard is what keeps `in=@rows.filter(n => n > 1)`
+          //   silent about `n`. A text scan has no such guard, so a template
+          //   literal nested inside a lambda —
+          //       in=@rows.map(r => `id-${r}`)
+          //   — fed `r` to the walker as an OUTER-scope read and raised
+          //   E-SCOPE-001 on a file that compiles clean on `main`.
+          //
+          //   FALSE NEGATIVE (the same line, opposite direction). The scan
+          //   REPLACED the whole-expression target rather than adding to it, so
+          //   ANY `${ … }` anywhere in the opener suppressed the check on the
+          //   iterable itself —
+          //       in=@undeclaredHidden.map(x => `${1}`)
+          //   — went silent, reopening the exact hole this check exists to close.
+          //
+          // AND IT BOUGHT NO COVERAGE, WHICH IS WHY EXCISING IT COSTS NOTHING:
+          // `${ … }` IS NOT A WORKING OPENER FORM. Measured on `main` by
+          // compiling THROUGH THE CLI, three spellings, all three FAIL LOUD with
+          // E-CODEGEN-INVALID-LOGIC and write no output — `in=${@rows}`,
+          // `key=${r}`, and the multi-interpolation `key=${@a}-${r}`.
+          //
+          // ⚠ NAME THE HARNESS WHEN YOU RE-MEASURE THIS, OR YOU WILL GET THE
+          // OPPOSITE ANSWER AND BELIEVE IT. That E-CODEGEN-INVALID-LOGIC comes
+          // from the emitted-JS parse gate in `api.js`, which sits inside
+          // `if (write && outputDir)`. `compileScrml({write:false})` therefore
+          // never runs it, and all three spellings come back CLEAN on `main`
+          // through that path. An S385 reviewer and the PA reached opposite
+          // verdicts on the same source for exactly this reason. Filed as
+          // GAP-S385-VALIDATE-EMIT-SKIPPED-WHEN-WRITE-FALSE.
+          //
+          // It also means the accept/reject DIRECTION of this check is right
+          // even on that shape: rejecting at the type-system stage closes a
+          // silent-accept in every `write:false` consumer, the LSP included. The
+          // MESSAGE it produces there is still wrong (E-SCOPE-001 naming `$`) —
+          // GAP-S385-EACH-OPENER-INTERPOLATION, and NOT a reason to re-add the
+          // scan.
+          //
+          // SO: a scope diagnostic over an interpolation BODY describes a
+          // construct that cannot reach codegen intact under any spelling, which
+          // is why removing it loses nothing. If a diagnostic for `${ … }` in an
+          // opener is wanted, the honest one says "not a valid opener form" — a
+          // separate arc with its own SPEC home, not this check's to invent.
+          const sp = (n.span as Span | undefined)
+            ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          let exprN: unknown = null;
+          try {
+            exprN = parseExprToNode(trimmed, filePath, sp.start ?? 0);
+          } catch {
+            exprN = null; // unparseable opener expr — defer to codegen's handling
+          }
+          if (exprN) {
+            checkLogicExprIdents(exprN, sp, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          }
+        };
+
+        // ---- `in=` / `of=`: checked OUTSIDE the per-item scope -------------
+        //
+        // The iterable/count is evaluated once, before any row exists, so this
+        // runs BEFORE the `scopeChain.push` below. Running it after would let
+        // `in=x` resolve against the loop's own `as x` binding and stay silent —
+        // the same ordering trap `visitStructuralIfAttr` documents for `if=`.
+        //
+        // GATED ON `iterShape`, not checked unconditionally. `in=` and `of=` are
+        // mutually exclusive shapes: `in=` iterates a COLLECTION, `of=` is a
+        // repeat COUNT (`<each of=@daysLeft>` lowers to
+        // `Array.from({length: Number(…) || 0}, (_v, _i) => _i)`, emit-each.ts).
+        // When BOTH are present the AST builder tie-breaks `iterShape` to `"in"`
+        // (ast-builder.js ~16917) and codegen lowers `in=` only, so the `of=`
+        // text is DEAD. Checking it anyway would raise a scope error about an
+        // attribute that has no effect on the output: the diagnostic would name a
+        // typo in text the compiler is about to discard, and point away from the
+        // real mistake (writing both attributes at all).
+        //
+        // NO BACKSTOP EXISTS FOR THE CONFLICT — do not assume one. The AST
+        // builder's own comment at that tie-break says PASS "surfaces
+        // missing-or-both as E-EACH-ITER-SHAPE", but that code is never emitted:
+        // `grep -rn E-EACH-ITER-SHAPE compiler/src compiler/native-parser` returns
+        // TWO COMMENTS and no implementation, and `<each in=@rows of=@typo>`
+        // compiles today with zero diagnostics. So gating here is deliberately
+        // UNDER-firing on a shape nothing else catches either, chosen over
+        // OVER-firing with a misleading message. The missing conflict diagnostic
+        // is a real gap, filed separately — it is not this check's to invent.
+        const eachIterShape = (n as Record<string, unknown>).iterShape;
+        if (eachIterShape === "in") {
+          checkEachOpenerExpr((n as Record<string, unknown>).inExprRaw);
+        } else if (eachIterShape === "of") {
+          checkEachOpenerExpr((n as Record<string, unknown>).ofExprRaw);
+        }
         scopeChain.push(`each:${nodeKey(n)}`);
         const asName = (n as Record<string, unknown>).asName;
         if (typeof asName === "string" && asName.length > 0) {
@@ -12742,6 +13026,20 @@ function annotateNodes(
             }
           }
         }
+        // ---- `key=`: checked INSIDE the per-item scope --------------------
+        //
+        // DELIBERATELY NOT in the `in=`/`of=` group above. The key expression is
+        // evaluated PER ITEM, with the row variable bound as a function
+        // parameter: `<each in=@rows as r key=r.id>` lowers to
+        // `(r, _scrml_each_idx) => r.id` (emit-each.ts). So `key=` is the exact
+        // ORDERING MIRROR of `in=` — it must be checked AFTER the scope push and
+        // AFTER the `as` / `as (k, v)` bindings above, or the documented
+        // row-variable key form would false-fire E-SCOPE-001 on its own loop
+        // local. Over-firing here is worse than the false negative it closes.
+        //
+        // Placed after BOTH binding blocks, not just `asName`, so the §59.8
+        // 2-name destructure (`as (k, v)`) can key on `k` / `v` too.
+        checkEachOpenerExpr((n as Record<string, unknown>).keyExprRaw);
         // Walk templateChildren (per-item body) AND emptyChild (empty-state
         // body). The empty-state body does NOT see the `as` binding (it's
         // outside the per-item scope) but for simplicity we walk both within
