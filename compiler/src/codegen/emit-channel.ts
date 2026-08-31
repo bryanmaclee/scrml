@@ -753,7 +753,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
     // JSON-serialize to a string (undefined / function / symbol → JSON.stringify
     // returns undefined; or a throw) maps to a sentinel, so the dedup still applies
     // and such a cell cannot re-open the echo storm.
-    lines.push(`  const _scrml_lk = (v) => { let s; try { s = JSON.stringify(v); } catch (_e) { return "\\u0000e"; } return s === undefined ? "\\u0000u" : s; };`);
+    lines.push(`  const _scrml_lk = (v) => { let s; try { s = JSON.stringify(v); } catch (_e) { return "\\u0000e"; } return s === void 0 ? "\\u0000u" : s; };`);
   }
   lines.push(`  function ${connectFn}() {`);
   // Bug 3 fix: use protocol-relative WebSocket URL (ws:// on HTTP, wss:// on HTTPS).
