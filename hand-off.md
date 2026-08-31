@@ -1,126 +1,140 @@
-# scrml — Session 385 (bryan · ASUS-Vivobook) — WRAP
+# scrml — Session 390 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-08-29/30. Booted `/boot` Profile A onto a clean main. Solo (S383/S384 both wrapped;
-S386–S388-peter ran and landed 13 commits **while this session was live** — see MISS 1).
+**Date:** 2026-08-30/31. Booted `/boot` Profile A onto clean main. S389-peter ran concurrently and
+wrapped mid-session (11 PRs); one live merge race on `docs/pr-reviews.md`, resolved by union.
 
-**The framing: the operator's standing architecture complaint got measured, and the measurement
-inverted it.** Cost-per-defect is flat; the loop is a DECISION QUEUE. That finding produced the
-session's most consequential ruling — a bounded PA ruling mandate — and reframed everything after it.
-
-⚑ **WRAPPED AT 87.2% CONTEXT with FOUR AGENTS STILL RUNNING.** Deliberate: their reports would have
-cost more than the remaining headroom left comfortable. All work is committed per-phase on their
-branches. **Pick them up first — SHAs below.**
+**The framing: every arc that reported green had a real defect underneath it, and each was found by a
+different instrument than the one that declared success.** Six PRs merged. Three gate blind spots
+surfaced. The most valuable output is not the landings — it is what the landings proved about the
+gates.
 
 ---
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-### 1. FOUR AGENTS IN FLIGHT — all committed, none landed
+### 1. ⚑ dpa-037 IS DRAINED AND AWAITING YOUR RATIFICATION — top of the queue
 
-| arc | branch | tip | state |
-|---|---|---|---|
-| **channel-mount guard** | `worktree-agent-a8702b6fc289f0891` | `43878d9c` | **round 6 dispatched, unreported.** Rounds 1-5 clean; round 6 adds `engine-decl` as a third container |
-| **each-in scope check** | `worktree-agent-a4c73958a8bad6e3b` | `99287427` | **round 3 dispatched, unreported.** Round 2 pinned a CRASH as clean — must not land as-is |
-| **arc (b) each-arm tree** | `worktree-agent-add7025319a51cbb9` | `564525b4` | **COMPLETE, verified, unlanded.** 0 of 1397 differential |
-| *(4th)* | — | — | the round-6/round-3 resumes above are the live two |
+bryan banked and fired it the same day. **ADVISORY, not ratified** (RUN-not-RATIFY).
+Artifact: `../scrml-support/docs/deep-dives/non-finite-float-class-dpa-037-2026-08-31.md` (53KB).
 
-**Landing order matters.** The channel guard lands first, then arc (b), then the SPEC §34 row is
-corrected — because the row currently describes a fail-open that arc (b) removes. Landing them out of
-order ships a catalog row the tree contradicts, which is the over-claiming defect ruling 3 exists to
-remove.
+**Headline, PA-unverified (relayed from the artifact — reproduce before acting):** scrml ships **TWO
+contradictory equalities** that disagree on exactly one pair. `_scrml_value_canonical`
+(`runtime-template.js:5694`) canonicalizes a number as `"n"+String(v)`, so **a NaN map key finds
+itself**, while `_scrml_structural_eq(NaN,NaN)` is `false` (`:4097`). Executed side by side they agree
+on `(+0,-0)`, `(Inf,Inf)`, `(1,1)` and disagree only on `(NaN,NaN)`.
 
-### 2. ⚑ THE §34 ROW IS OWED AND IS CURRENTLY UNCOMMITTED
+⚑ **The panel's inference from that was STRUCK by a late adversarial pole:** IEEE-754 ships two
+comparison mechanisms deliberately — clause 5.11 (arithmetic, NaN⇒unordered) and clause 5.10
+`totalOrder` (2008, for sorting/hashing/containers). **A map-key codec implements 5.10 and is SUPPOSED
+to disagree with `==`.** 6/6 back a reflexive `==`; the same voice conceded the conclusion while
+striking two of three premises and raising scope from one operator to the comparison FAMILY.
 
-`E-CHANNEL-MOUNT-IN-CONDITIONAL` needs its catalog row. I wrote it TWICE and lost it twice (once to the
-`refs/stash` race, once to a merge that dropped a commit). **It is in `stash@{0}`** together with the
-channel-fix landing work. Its corrected text states the each-bearing fail-open plainly and carries a
-do-not-restore note for the text scan. **Re-verify it against the tree before committing** — the
-fail-open caveat becomes STALE the moment arc (b) lands.
+**What is bryan's, verbatim, and what is NOT:** he ruled nothing. *"ok hold on I am not ratifying NaN!
+TBC"*. His takes — *"NaN and Infinity are NOT absence values"*, *"not a number is still something, as
+is infinity"*, *"NaN is just an error as far as I can figure. I could be wrong"* — are LEANS carried as
+leans in the queue item. Every limb is live.
 
-### 3. The MED/LOW design batch — offered, not started
+### 2. Three things ruled-or-recommended and NOT built
 
-~32 items. **I recommended verifying them against the ledger before surfacing**, because **8 of ~25
-verified today were not live decisions** (A5/A6 already fixed, A10 fixed 41 days earlier, B8's blocker
-ruled at S268, 4 never filed at all). bryan had not answered when we wrapped. The C-group HIGHs are
-surfaced and ruled; C17-C34 (MED) and C35-C48 (LOW) are untouched.
-
-### 4. OPEN / OWED
-
-| | state |
+| item | state |
 |---|---|
-| **dpa-023** | the async boundary as `(not to T)`. **A9's refusal is explicitly PENDING it** and should expire when it lands |
-| **§12.2 SPEC home** | the expression-position policy is ruled but lives only in the voice ledger |
-| **`ruling-gated` is invisible** | 6 entries now carry it; `dpa-debt.ts` reports 0 owed. Base §10 again |
-| stranded outbox | 4 notes, 3 adopters, two ~93 days old. bryan: deliver flogence's, hold the two stale |
-| review floor | drained to 0 earlier; re-check after today's merges |
+| **4(b) condition 3** | Recommendation banked, **not ruled**. Measured-zero corpus is necessary and NOT sufficient — proven twice this session. Proposal: a newly-rejecting change owes a measured-zero differential AND an adversarial shape set. Round 5 already paid that cost so the price is visible. **Any change to the class is bryan's by the class's own terms.** |
+| **Gate asymmetry** | Open. The required check runs a subset of the local hook (#782 passed it, bricked every local commit); the hook does not run the §34 census (#789 passed the hook, failed the gate). And `compiler/tests/commands/` runs in NO blocking job on any platform. Proposal: make the required check a superset. |
+| **The `@`-sigil normative line** | Two gaps filed this session + C9 (a fix built and reverted ~146 sessions ago) are ONE question: what does `@x` mean when `x` is not reactive? No code can be written until it is drawn. Fix is newly-rejecting language-wide. |
+
+### 3. Article — Q1 ANSWERED, Q2/Q3 still pinned
+
+`docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md` (working, 8 versions) +
+`…-PUBLISH.md` (generated, no hard-wrapped lines). **Untracked and uncommitted — Rule 1: he raised the
+DRAFTING, not the landing.** ~589 words from 1,025.
+
+- **Q1 ANSWERED:** *"end on the loop"* — closing meta section CUT, two-line coda offered and DECLINED.
+- **Q2 (how much code) and Q3 (voice) remain open.**
+- ⭐ **The criterion is durable and binds every future edit:** *"judging every line (except code blocks,
+  those are like the pictures) in a sing-songy way akin to the theme song of the animated series."*
+  **Concision is downstream of meter.** See user-voice S390.
+- A synthesized git history of the article conversation is at
+  `~/scrmlMaster/if-you-give-a-dev-an-enum` (15 commits, authored as the assistant). A first attempt
+  at the WRONG scope (whole session) is parked at `~/scrmlMaster/.s390-log-wrong-scope` — delete when
+  he says.
+
+### 4. ⚑ FOUR UNREAD ROUTES FROM PETER — deliberately NOT marked read
+
+`handOffs/incoming/` holds four turnkey findings routed to bryan by S389-peter, all arrived during or
+after this session's work and **none actioned here**:
+
+- `S389-peter-routes-bindvalue-each-select-under-if.md` — an adopter's Edit form is blank TODAY
+- `S389-peter-routes-tilde-string-literal-corruption.md` — HIGH, a `~` inside a string literal corrupted
+- `S389-peter-routes-channel-collision-and-latejoin.md`
+- `S389-peter-routes-tool-surface-4finds.md` — 4 findings from the §64 tool dog-food, 1 HIGH
+
+**Left in `incoming/`, not moved to `read/`.** Moving them would mark them absorbed when they are not —
+that is the exact false-green this session kept finding elsewhere. They are rulings owed by bryan.
+
+### 5. In flight / held
+
+- **Arc (b)** (`worktree-agent-add7025319a51cbb9`, `564525b4`) — un-blanks each-bearing match arms.
+  **HELD** on a PA-confirmed `W-DISPLAY-TEXT-OVERQUOTE` double-fire (1→2 on identical source). A
+  `nodeTypes` id-collision was alleged and is UNVERIFIED. Its headline finding did NOT reproduce and is
+  recorded NOT-REPRODUCED. It is the structural close for the channel-guard fail-open now named in SPEC.
+- **Windows path comparison** — real defect, Windows-only, fix written and verified, held as a patch at
+  `docs/changes/s385-channel-mount-guard-r8/r8-fix.patch.txt`. `sameFile` compares paths with raw `===`.
+  Not urgent; it was NOT the cause of any CI red.
 
 ---
 
 ## 🔭 DURABLE FINDINGS
 
-### A. ⭐⭐ The architecture complaint, measured — and it inverted
-bryan: *"we are chasing bugs in circles … this is still just a first-draft prototype … where am I wrong?"*
-**Fix cost per defect is NOT rising.** Median src files per closed HIGH by 50-session block:
-`1 · 2 · 4 · 2 · 2 · 1`; all-severity **p90 fan-out NARROWED 4-6 files → 2**. Severity drift ruled out
-structurally; the detection confound replicated independently at 2.64× (dpa-024 measured 2.7×).
-**What IS rising:** HIGH filings/session `0.04 → 1.00`, and **30 of 60 open HIGHs blocked on an operator
-decision**, median age 38 sessions. Honest limit kept verbatim: *"the rising-cost hypothesis is not
-supported and is mildly contradicted," NOT "the compiler is converging."*
-⚑ **The sharpening:** the untyped inter-pass contract's cost lands in **defect COUNT, not per-defect
-COST**. Typing the representation reduces how many defects exist, not how hard each is. **Any future
-proposal justified by "fixes are getting harder" argues from a measured-false premise.**
+### A. ⭐⭐ Measured-zero proved nothing, twice
+The 4(b) mandate's third condition was satisfied honestly — **0 of 1005, positive-controlled 25/25** —
+and still shipped a hard `E-SCOPE-001` on valid code. Arc (b) repeated it: **0 of 1397**, where only
+**5 of 1397** files contain both `<match>` and `<each>`. The inputs that trip a newly-rejecting change
+are the ones nobody has written yet, and the corpus is 100% machine-authored, so it carries almost no
+ergonomic diversity.
 
-### B. ⭐ dpa-024 was answered 20 days ago and nobody noticed
-The PA nearly fired a duplicate DD on bryan's own instruction. Caught by reading `dpa-queue.md` before
-banking. Two of its three PA-action items had been RULED at S337 and §9's first work item had LANDED
-(#624) — **the PA's "dropped on the floor" report was itself an overstatement**, corrected before it
-reached him. It is now `status: ratified`.
+### B. ⭐⭐ Two gates that disagree in BOTH directions
+Not one gap — two gates drifted apart, each honest about what it measures. Green on either is weak
+evidence about the other.
 
-### C. ⭐ An adopter on hand-written JS is a LANGUAGE-FAILURE signal
-The PA cited giti's retreat to `.js` as evidence the cost was accepted. bryan: *"If that 'workaround' is
-JS, then it's a problem."* giti was migrating FROM `.js` TO scrml and the bug was what stopped them —
-**and the census then found the bug had been FIXED 41 days earlier and giti had migrated.** The entry was
-a stale-open HIGH with a heading and NO marker. Census: **5 host-fallbacks across 4 adopters, 4 of 5 with
-no gap that counts them.** Bigger cost is invisible to it: **in-source contortion** (~19 shape workarounds
-in one adopter's `app.scrml`; flogence at 16.3% `_{}` by line).
+### C. ⭐ A branch that survives its own landing is indistinguishable from unlanded work
+Two items ruled "stamp and land" had landed 7 days earlier. The **ledger was right**
+(`status=resolved`); the sweep read branch existence. One was 149 commits stale — landing it would have
+reverted ~228 lines of newer work. "Stamp and land" reads risk-free and is not.
 
-### D. The ledger loses entries in BOTH directions
-**129 marker-without-heading ids** (invisible to heading sweeps) and **heading-without-marker** entries
-(invisible to `state.ts` and every board count). A10 was the second kind and hid for 41 days. Four S381
-findings were the same. **Every entry filed this session carries BOTH.**
+### D. ⭐ The verified enumeration is landed and durable
+`docs/changes/s385-decision-queue/` — the 84-item queue, the host-fallback census, and the S390
+re-verification (**66 live · 59 already-ruled with citations · 7 undetermined**), recovered from a temp
+dir that held the only copy. **37 of the 59 were ruled in sessions BEFORE S385** while the ledger still
+read "RULING OWED" — that is what manufactures phantom queue depth.
 
 ---
 
 ## ⚑ MISSES (mine)
 
-1. **★★ I did not re-read the concurrent-session board after boot.** Three peter sessions landed 13
-   commits while I was live, and I duplicated one of their arcs end-to-end (they'd already landed the
-   diagnostic fix and sent flogence the workaround). **The contract makes registration a BOOT step with
-   no staleness rule for a long session.** Proposed amendment: re-check the board and `gh pr list`
-   before any dispatch and before any landing.
-2. **★★ I mis-diagnosed a `refs/stash` race as a path-discipline leak** and told an agent it was writing
-   main-rooted paths it had never written. See delta-log `[1957]`.
-3. **★★ I argued a hypothesis dpa-024 had already refuted** (walker count as the defect generator),
-   from local evidence, in ~20 minutes. **An artifact that refutes something does not stop it being
-   re-invented — the refutation has to be reachable from the SYMPTOM, not only the archive.**
-4. **★ I merged a PR that dropped a commit** — committed after pushing. Every push since verifies the
-   pushed tip.
-5. **★ I shipped a false relayed premise into a brief** ("a guard for that shape now exists" — it was on
-   an unlanded branch), and **wrote an over-claiming SPEC row** saying the each-bearing locus fails
-   silently when with a read it fails CLOSED. Caught by a reviewer compiling the actual repro.
-6. **★ My instruction to add `keyExprRaw` to the same loop would have shipped a false positive** — the
-   agent corrected me: `key=` is the ordering MIRROR of `in=`, and the row variable IS in scope for it.
+1. **★★ I banked bryan's take as a RULED premise.** He said *"my take is this"*; I wrote "RULED" and
+   made it the deliberation's floor. He caught it in the same turn. A dPA run against that wording
+   would have treated the question as settled.
+2. **★★ I claimed a Windows root cause "confirmed by execution" and was wrong twice over** — the job
+   does not run the tests covering that function, AND my probe ran on a host where the behaviour I
+   called a defect is *correct*. The hold was right; the reasoning under it was not.
+3. **★★ I told bryan no test pinned the F1 regression.** It was pinned — in a table consumed by a loop,
+   which my `expectNoErrors(` call-site count could never have seen. Wrong-referent, stated as fact.
+4. **★ I nearly shipped the synthesized-history constraint broken** — grepped `synthes`, which does not
+   match `synthetic`; three leaks including a commit subject. Caught only by re-running with a pattern
+   that could fail.
+5. **★ I relayed a reviewer's "unrelated commit needs splitting"** — it was already an ancestor of main.
+   Checked before briefing, so nothing was built on it.
 
 ---
 
 ## 🧷 STATE
 
-- **main** `4008a3bc` at wrap-branch cut. 3 PRs merged this session: **#769** (dpa-024 ruled + the
-  fix-cost measurement) · **#771** (ledger bookkeeping) · **#772** (the recovered gap filings).
-- **Rulings taken:** 4(b) the ruling mandate · the §12 expression-position policy · A7 · A8 · C3 · C4 ·
-  C8 · B2 · B3 · B4 · B5 · B7 · channel-mount reject + arc (b) promoted · each-in fire-it.
-- **Board:** counts regenerated at wrap (`state.ts --write`); **6 entries now `status=ruling-gated`**.
-- **Adopter:** flogence flagship **GREEN** on the workaround; they confirmed two channels had never
-  connected in production and independently endorsed the reject ruling.
-- **Mechanical stream:** delta-log `[1949]`–`[1960]`. Do not re-derive from this hand-off what the
-  delta-log and changelog carry.
+- **main** `952cecc6` at wrap-branch cut. 6 PRs merged this session: #775 #776 #777 #788 #781 #785 #789.
+- **Review floor:** drained to 0 twice (union-rebased 4× against peter's concurrent markers, zero
+  markers lost). Re-check after this wrap's own PR.
+- **Gaps:** HIGH 71 · MED 188 · LOW 84 (5 filed this session, all PA-confirmed by execution first).
+- **`pa-ruled` count: 0.** The S385 record says the each-in ruling was *"recorded `prov=pa-ruled:`"*;
+  that marker exists nowhere. Still owed.
+- **Maps (wrap 6c): NOT refreshed — stated, not skipped silently.** The stamp predates this session and three files it changed (`component-expander.ts`, `type-system.ts`, `emit-channel.ts`) now sit behind it. A `project-mapper` run at wrap-close would land AFTER the wrap PR and strand its own commit, which is the failure that produced two stranded maps-regen PRs earlier in this project's history. **Owed at next boot, before any dispatch that names a map.**
+- **Worktrees:** 6 removed (work landed), 2 RETAINED (arc (b) + the r8 patch). **93 remain on disk** — a long-standing backlog, not this session's; a real sweep is its own arc.
+- **Mechanical stream:** delta-log — do not re-derive from this hand-off what it carries.
