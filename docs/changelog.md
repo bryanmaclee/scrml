@@ -1,6 +1,22 @@
 # scrml — Recent Fixes & Work In Flight
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
+## S390 — 2026-08-30/31 (bryan · ASUS-Vivobook) — both S385 arcs landed, main unblocked, and three gates caught what the others could not
+
+Six PRs merged. The session's spine was verification: **every arc that reported green had a real defect underneath it**, and each was found by a different instrument than the one that declared success.
+
+**Landed.** #775 review floor 6→0 (all six verified docs-only per PR, not assumed from titles; one probe caught a PR whose "nav-map regen" changed no map). #776 the 84-item decision queue + host-fallback census, recovered byte-identical from a temp directory that held the only copy. #777 five gap filings, each PA-confirmed by execution on main before filing. #788 **the unblock** — a forbidden `undefined` keyword in emitted client output had turned the local pre-commit hook red, so no local code commit could land in the repo for anyone. #781 the channel-mount guard, now four containers. #785 the `<each>` opener scope check, with its coverage claim narrowed to what it actually covers. #789 the `E-CHANNEL-MOUNT-IN-CONDITIONAL` §34 catalog row, four containers and a named fail-open.
+
+**Three gates, three different blind spots.** The required cloud check runs a subset of the local hook — #782 passed it and bricked every local commit. The local hook does not run the §34 census — #789 passed the hook and failed the cloud gate. And `compiler/tests/commands/`, which covers the CLI formatters, runs in **no blocking job on any platform**. Green on one gate is weak evidence about the others; that is now two gates that have drifted apart rather than one gap.
+
+**Measured-zero is necessary and not sufficient.** The S385 ruling mandate's third condition was satisfied honestly — 0 of 1005, positive-controlled — and still shipped a hard compile error on valid code, because no corpus file writes a template literal inside an `<each in=>` lambda. Arc (b) repeated it at 0 of 1397, where only 5 of 1397 files contain both constructs. The inputs that trip a newly-rejecting change are the ones nobody has written yet, and this corpus is machine-authored, so it carries almost no ergonomic diversity. **Recommendation banked, not ruled:** a newly-rejecting change owes a measured-zero differential AND an adversarial shape set.
+
+**Two branches ruled "stamp and land" had landed seven days earlier.** The ledger was right (`status=resolved` for both); the sweep read branch existence. One was 149 commits stale — landing it would have reverted ~228 lines of newer work as collateral. A branch that survives its own landing is indistinguishable from unlanded work.
+
+**dpa-037 banked and drained the same day** (bryan fired it): the non-finite float class. ADVISORY, awaiting ratification.
+
+Rounds run: channel-mount guard r7 (hole 4 closed, one qualifier), each-in r4 (the raw-text scan excised) and r5 (claims narrowed rather than the fix widened to rescue them), and a Windows path-comparison fix held as a patch. Three new gaps filed from the rounds, two of them walker holes the arcs could not close.
+
 ## S381 — 2026-08-28 (peter · Windows) — the #724 dev-server rewrite (Linux-verified) + a dog-food sweep
 
 **The arc:** booted as successor to S380-peter. Fixed adopter issue **#724** (`scrml dev` served stale
