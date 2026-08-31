@@ -1,7 +1,7 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-27T17:17:26-06:00  commit: 0dd659a1
-# generated-at: 0dd659a1 (S380 window, INCREMENTAL_UPDATE by the project-mapper — scoped to the
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a` (51 commits). MAP-STAMP RULE run at WRITE time: `BASE=merge-base HEAD origin/main` = `2ec2ce3a` = HEAD = `origin/main`; the source diff `BASE..HEAD` over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` is EMPTY; `merge-base --is-ancestor 2ec2ce3a origin/main` exits 0 (outbound), and `--is-ancestor 0dd659a1 2ec2ce3a` exits 0 (inbound, invariant 48). One SHA on two lines because there is no second SHA to record.
 # codegen surface S380 touched: emit-each.ts, emit-match.ts, emit-server.ts, emit-variant-guard.ts,
 # build.js, dev.js, component-expander.ts; NOT a full re-walk). `git merge-base --is-ancestor
 # 48f0aaf8 0dd659a1` exits 0; HEAD == origin/main == 0dd659a1.
@@ -114,7 +114,7 @@
 # **EXACTLY TWO NEW CODES IN SPEC THIS WINDOW. ZERO removed. And the counting METHOD earned its keep
 # AGAIN.** A token-diff of `compiler/SPEC.md` between the watermarks returns THREE
 # (`E-STDLIB-CLIENT-CHUNK-MISSING`, `W-TYPE-031-UNPROVEN`, `W-031-UNPROVEN`) and **one is FALSE**:
-# `W-031-UNPROVEN` is PROSE SHORTHAND inside the `E-TYPE-031` catalog row (`SPEC.md:19474` — *"031 is
+# `W-031-UNPROVEN` is PROSE SHORTHAND inside the `E-TYPE-031` catalog row (`SPEC.md:19480` — *"031 is
 # 'I proved it does not fit', W-031-UNPROVEN is 'I could not prove anything'"*), not a code. It has
 # **no catalog row, no fire site and no SPEC-INDEX entry.** The census total agrees with TWO:
 # 810 -> 812. **Count a code as new only when `git show <base>:compiler/SPEC.md | grep -c '<CODE>'`
@@ -124,8 +124,21 @@
 #
 # **1. `E-STDLIB-CLIENT-CHUNK-MISSING` (§41, ERROR) — #669. The most consequential diagnostic added
 # in several windows, because it closes a SILENT DOA class.**
-#   · SPEC row: `compiler/SPEC.md:19868`. SPEC-INDEX entry: `SPEC-INDEX.md:214`. Both present.
-#   · Fire site: `compiler/src/codegen/emit-client.ts:3946` — the ONLY emit site.
+#   · SPEC row: `compiler/SPEC.md:19876`. SPEC-INDEX entry: `SPEC-INDEX.md:214`. Both present.
+#     ⛑ **S391 — BOTH ANCHORS ON THIS ROW WERE WRONG *FROM BIRTH*, AND THIS IS THE INVARIANT-77
+#     CLASS CAUGHT IN THE ACT.** The SPEC anchor read `:19868`; at the `0dd659a1` watermark it was
+#     written against, `SPEC.md:19868` was the row for **`W-STDLIB-SHIM-MISSING` — a DIFFERENT
+#     CODE.** `E-STDLIB-CLIENT-CHUNK-MISSING` was at `:19869` there and is at `:19876` here. **An
+#     off-by-one that lands on a NEIGHBOURING catalog row is the worst shape this failure takes:
+#     the line resolves, the table renders, and the row you read is a plausible-looking lie.**
+#     Re-derived by `grep -n '^| E-STDLIB-CLIENT-CHUNK-MISSING' compiler/SPEC.md`.
+#   · Fire site: `compiler/src/codegen/emit-client.ts:3967` — the ONLY emit site.
+#     ⛑ **S391 — was `:3946`, and it CANNOT have drifted:** `git diff --stat 0dd659a1..2ec2ce3a --
+#     compiler/src/codegen/emit-client.ts` is **EMPTY** — the file is byte-identical across the whole
+#     window. A citation that is wrong against an UNCHANGED file was never right. **The "ONLY emit
+#     site" half of the claim IS correct and was re-verified:** `E-STDLIB-CLIENT-CHUNK-MISSING`
+#     appears at `:2096`, `:3727`, `:3838` (all COMMENTS) and `:3967`/`:3968` (the single
+#     `errors.push`). Only the line number was wrong.
 #   · **ERROR, not warning, DELIBERATELY: the compiler can PROVE the artifact is dead.** A client
 #     bundle is a classic script, so `import { x } from 'scrml:NAME'` lowers to
 #     `const { x } = _scrml_stdlib.NAME;`, and that property is defined by the `stdlib-NAME` entry in
@@ -164,7 +177,7 @@
 #     window it landed; this one did not.
 #
 # **2. `W-TYPE-031-UNPROVEN` (§7.5.2, WARNING) — #665, the `asIs`/`unknown` split.**
-#   · SPEC row: `compiler/SPEC.md:19475`; normative prose §7.5.2 at `:6302`; the behaviour table at
+#   · SPEC row: `compiler/SPEC.md:19481`; normative prose §7.5.2 at `:6302`; the behaviour table at
 #     `:6229`. Fire site: `compiler/src/type-system.ts:10600` — the ONLY emit site.
 #   · **It reports a gap in the COMPILER, not a defect in the program.** The program compiles and
 #     emits exactly as before, no previously-performed check is skipped, and the exit status is
@@ -202,7 +215,7 @@
 # What the prior text asserted (and what is no longer true): that `E-CONTROL-FLOW-IN-MARKUP`'s §34
 # row claims the §40.8 auto-lift *"fires only at `<program>`/`<page>`/`<channel>` direct-child roots"*
 # so a bare `if (1) { }` there is covered. **The documentation half of ruling 3 LANDED this window.**
-# `SPEC.md:19823` (§34 row), `SPEC.md:11765` (§17.4 prose) and a NEW `SPEC.md:23063` (§40.8 bullet)
+# `SPEC.md:19824` (§34 row), `SPEC.md:11765` (§17.4 prose) and a NEW `SPEC.md:23065` (§40.8 bullet)
 # now each state in terms that the auto-lift covers **DECLARATIONS ONLY** and that the default-logic
 # body-top is covered by **NEITHER** the lift nor this code. The row's **Does NOT fire** list still
 # names the default-logic root, but now carries the explicit rider *"NOT because that locus is safe,
@@ -211,7 +224,7 @@
 # **THE BEHAVIOUR IS UNCHANGED AND STILL WRONG, PA-RE-REPRODUCED AT `ff4b37e5` BY COMPILING:**
 # `<program>` + `if (1) { }` + markup exits **0** with zero diagnostics and the emitted `<body>`
 # contains the literal line `if (1) { }` (read from `dist/*.html`, not inferred). The mechanism is
-# structural: the emit site (`ast-builder.js:1882-1885`, `TABError` push at `:1906`; ⛑ S383, was
+# structural: the emit site (`ast-builder.js:1885-1888`, `TABError` push at `:1906`; ⛑ S383, was
 # `:1857-1860`) is gated `parentType === "markup"`, the **COMPLEMENT** of the §40.8 locus.
 #
 # ⛑ **RULING 3'S ENFORCEMENT ARM IS HELD, NOT LANDED — GREPPED AT `ff4b37e5`, NOT RELAYED.**
@@ -299,10 +312,49 @@ row now exists AND it fires; the prior "NOT implemented — do not add" note her
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
 
-**813 distinct diagnostic codes** cataloged in §34 at `fc6df72e` — **`bun scripts/s34-census.ts` is
+**814 distinct diagnostic codes** cataloged in §34 at `2ec2ce3a` — **`bun scripts/s34-census.ts` is
 the ORACLE and it was RE-EXECUTED this pass**, returning
-`813 rows (§34 19352..20236, derived) · 1963 source files · 883 conformance cases`. **+1 this window
-(`E-STATE-BLOCK-STATEMENT-FORM`, §38.4/§40.8/§4.18.1, `SPEC.md:19728` — ⛑ S383 +6), zero removed** — and the
+`814 rows (§34 19358..20243, derived) · 1944 source files · 887 conformance cases`.
+
+⛑ **S391 — +1, AND THE SET-DIFF NAMES IT: `E-CHANNEL-MOUNT-IN-CONDITIONAL` (#781/#789), ZERO
+REMOVED.** `813 -> 814` over `0dd659a1..2ec2ce3a`. Verified TWO independent ways, because a single
+oracle is a single point of failure: (1) `bun scripts/s34-census.ts` re-executed at HEAD; (2) the
+`awk`-field-split cross-check documented below, run against `git show <sha>:compiler/SPEC.md` at BOTH
+ends and `comm`-set-diffed — it reproduces **813 at `0dd659a1`** and **814 at `2ec2ce3a`** exactly,
+and the ADDED set is that one code with an EMPTY removed set. **The §34 range moved
+`19352..20236` -> `19358..20243`; re-derive it from the `## 34. Error Codes` / `## 35.` headings
+(`:19358` / `:20244` here), never from a baked number.** `compiler/SPEC.md` is now **37,549 lines**.
+
+⛑ **BUCKETS MOVED +2 IN IMPL-SITES AGAINST A +1 TOTAL, AND THAT IS NOT A CONTRADICTION.** Re-executed
+at `2ec2ce3a`: `STRUCK 34 · PINNED 343 · IMPL-SITES 304 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 ·
+FALSE-CLAIM 112`; dispositions flat at `BUILD-ARC 71 · HOME-NO-SHALL 27 · ORPHAN-INDEX 4 ·
+NOMINAL-HOME 10`. ⚠ **IMPL-SITES READS `302 -> 304` AND THE +2 IS NOT THIS WINDOW — IT SPANS TWO.**
+The bucket table below is stamped **`728bdc92`, where the catalog was 812**, and it was never
+re-derived at `fc6df72e`. Its rows sum to **812**; the rows above sum to **814**. So the +2 is
+**exactly the two catalog additions since that table was cut** — `E-STATE-BLOCK-STATEMENT-FORM`
+(landed at `fc6df72e`) and `E-CHANNEL-MOUNT-IN-CONDITIONAL` (landed here) — both of which shipped
+with a live emitter and neither of which is pinned by a conformance case, which is precisely why
+each lands in IMPL-SITES rather than PINNED. **Do not read this +2 as a one-window delta, and do
+not diff a bucket row against a table carrying a different watermark.** Every other bucket is flat
+across both legs. **`conformance cases` moved
+`883 -> 887` (+4), and those four are nameable:** the `ctrl-012-*-neg` §40.8 default-logic cases
+(`conformance/cases/control-flow/ctrl-012-{bare-control-flow-default-logic-root,default-logic-prose,default-logic-multiline-prose,default-logic-non-leading-residual}-neg`).
+
+⛑ **`E-CHANNEL-MOUNT-IN-CONDITIONAL` — the §34.0 row-provenance rule is SATISFIED, and the row is
+NARROWER than its own emitter's discriminant set.** Catalog row `SPEC.md:19629` (§38.1, §38.4,
+§38.12.2); a second, non-§34 table row at `SPEC.md:21701`. Emitter
+`component-expander.ts:4968` (`reportChannelMountsInConditionals`), sole call site
+`component-expander.ts:4687` inside `runCEFile`, gated `importedChannelAliases.size > 0` and run
+**BEFORE `expandChannels`** so the file fails CLOSED rather than half-wired; the `errors.push` is at
+`:4979`. ⚠ **THE ROW SAYS "Four containers are refused"; THE CODE'S DISCRIMINANT SET IS THREE AST
+KINDS** — `kind === "match-block" || kind === "each-block" || kind === "engine-decl"`
+(`component-expander.ts:5028`). The row's fourth entry ("an `<each>` or a `<match>` that is a DIRECT
+child of an `<engine>` body") and its fifth ("any subtree of one of those") are **positions the
+nearest-enclosing-container walk covers, not additional kinds.** Do not go looking for a fourth
+`kind` string; there is not one. Label/noun tables at `:4947` / `:4962`.
+
+The historical `fc6df72e` narrative follows. **+1 this window
+(`E-STATE-BLOCK-STATEMENT-FORM`, §38.4/§40.8/§4.18.1, `SPEC.md:19729` — ⛑ S383 +6), zero removed** — and the
 catalog row landed in the SAME commit as the emitter, so §34.0 well-formedness is satisfied at
 landing. The historical `728bdc92` narrative that followed this paragraph is retained below.
 
@@ -310,7 +362,7 @@ landing. The historical `728bdc92` narrative that followed this paragraph is ret
 (`E-STDLIB-CLIENT-CHUNK-MISSING` §41 — #669, the client stdlib registry gate; `W-TYPE-031-UNPROVEN`
 §7.5.2 — #665, the `asIs`/`unknown` split), zero removed.** ⚠ A token-diff of SPEC returns THREE;
 **one is a false positive** — `W-031-UNPROVEN` is prose shorthand INSIDE the `E-TYPE-031` row
-(`SPEC.md:19474`), with no catalog row, no fire site and no SPEC-INDEX entry. §34's range shifts
+(`SPEC.md:19480`), with no catalog row, no fire site and no SPEC-INDEX entry. §34's range shifts
 release-to-release — derive it from the `## 34. Error Codes` / `## 35.` headings, never a baked line
 number (**it moved +239 this window: 19113..19994 -> 19352..20235**).
 
@@ -401,13 +453,13 @@ part of the catalog and are included.
 | `c700c435..115e8b1b` | 795 -> 799 | +4: `E-SCHEMA-011`, `W-SCHEMA-CONSTRAINT-TIGHTENED`, `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED`, `W-NAV-CHUNK-LOAD-FAILED` |
 | `115e8b1b..d0763cff` | 799 -> 800 | +1 `W-AUTH-MIDDLEWARE-AUTO-INJECTED` (a SPLIT out of `W-AUTH-001`; the fire already existed) |
 | `d0763cff..fe14c9b2` | 800 -> 801 | +1 `E-IF-IN-DISPATCHED-ARM` (S301) |
-| **`fe14c9b2..e80b692e` (prior pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — ⛑ **THREE fire sites, not two: `ast-builder.js:8758` · `:10809` · `:13298`.** The carried `:8535` / `:12927` were ALREADY WRONG pre-window AND under-counted; `:10809` uses SINGLE quotes so the mechanical E-code index misses it too. RE-DERIVED BY GREP), rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:3388`; ⛑ **S384: `:2860` was ALREADY WRONG pre-window, re-derived by grep**); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
-| **`e80b692e..b929b9c9` (prior pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3927` `rejectFnEqualsBody`, throw at `:3930` — ⛑ **S383: `:3755` was ALREADY WRONG pre-window; re-derived by grep, not shifted**), four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
+| **`fe14c9b2..e80b692e` (prior pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — ⛑ **THREE fire sites, not two: `ast-builder.js:8789` · `:10809` · `:13298`.** The carried `:8535` / `:12927` were ALREADY WRONG pre-window AND under-counted; `:10809` uses SINGLE quotes so the mechanical E-code index misses it too. RE-DERIVED BY GREP), rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:3388`; ⛑ **S384: `:2860` was ALREADY WRONG pre-window, re-derived by grep**); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
+| **`e80b692e..b929b9c9` (prior pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3930` `rejectFnEqualsBody`, throw at `:3930` — ⛑ **S383: `:3755` was ALREADY WRONG pre-window; re-derived by grep, not shifted**), four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
 | **`97576f35..6f176c0d` (S328)** | **806 -> 806** | **ZERO in, ZERO out — and the zero is load-bearing twice over.** (1) #460 added a normative §12.5 `SHALL` with **no code** (enforced by construction). (2) #464 REVERTED #450's `show=`-false SSR-hide, which also had no code — so ~122 lines of `emit-html.ts` left the tree without moving a single census number. #463 (`_blockTailIsValueExpr` keyword fence) and #466 (RCDATA per-item body) are both silent-wrong-output fixes with no diagnostic. **#466 explicitly DEFERS one: "a markup-returning call has no valid rendering in an RCDATA content model" needs a NEW §34 row and its own ruling — it was surfaced, not smuggled in.** |
 | **`4f034e13..c93a692c` (S340-S346)** | **809 -> 809** | **ZERO in, ZERO out — SPEC byte-identical, so the zero is by construction, not by census.** The window's one catalog-adjacent move is a FIRE-SURFACE widening of an existing code (`E-EACH-BODY-DECL-UNSUPPORTED`, #515/#516 — any body position, full name-binding decl set incl. `lin`/`~`/`var`; fire site now **`emit-each.ts:1361`** (⚑ CORRECTED S376 from `:1416`)), which no catalog count can see. |
 | **`c93a692c..c96e7012` (THIS pass, S347-S366)** | **809 -> 810** | **+1 LIVE, +2 DECLARED-AHEAD, zero removed — and the BUCKETS moved 20x further than the total.** The live one is **`E-MW-007`** (§40, S365-bryan): more than one module in a build declares a request pipeline, so two applications were emitted into one compiled server. Fires from the shared `commands/select-request-onion.js:72`; surfaced by BOTH `scrml build` and `scrml dev`; SPEC rows at `:19693` + `:22715`; LSP hover at `lsp/handlers.js:1127`. **`E-PROGRAM-002`** and **`E-IMPORT-005`** entered SPEC the same window and DO NOT FIRE — §40.8 explicitly reserves `E-PROGRAM-002` for the second-`<program>` shape and states that `E-MW-007` "is the emitted-server consequence, and fires today". Bucket deltas (IMPL-SITES -20, FALSE-CLAIM +17, DECLARED-AHEAD +4) are a census RECLASSIFICATION from #646's +143-line instrument-integrity rewrite, not twenty regressions — see the catalog section above before quoting any of them. |
-| **`8b2e4053..fc6df72e` (S376, THIS pass)** | **812 -> 813** | **+1 LIVE, zero removed: `E-STATE-BLOCK-STATEMENT-FORM`** (Error; §38.4/§40.8/§4.18.1; catalog row `SPEC.md:19728` (⛑ S383 +6, was `:19722`); emitted `compiler/src/lint-e-state-block-statement-form.js` `runEStateBlockStatementForm` -> `scanStateBlockChildren`, wired `api.js` Stage 2.5c). ⚑ **THE FIRST `E-`-SEVERITY PASS IN THE COMPILER TO RUN PRE-AST** — it consumes block-splitter output (`bsResults`), not the AST, which is why its regex over source text is NOT an invariant-55 violation. **Migration MEASURED from the compiler over 2,194 `.scrml`: exactly ONE file newly rejects** (`samples/htmx-debate-dashboard.scrml`), migrated in the same landing. Enters **IMPL-SITES, not PINNED** — no conformance case asserts it. **Scope is ONE named form and the complement is refused on EVIDENCE, not omission:** bare calls stay legal (a measured typestate false-positive class — `validate() => < Validated> { }` sits in a BS `type:"state"` block and would break 4 live `conformance/cases/type-state-codes/` cases), control flow is already `E-CONTROL-FLOW-IN-MARKUP` at this locus, bare writes belong to the `W-STATE-BLOCK-BARE-WRITE-DECL` deprecation cycle, prose must keep compiling. **A FRESH code rather than the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`** — that row is shape-specific to `@name = init` and is a live deprecation ENDPOINT; firing it for a lifecycle block would make one row mean two shapes while being simultaneously reserved and live. |
-| **`8863d457..4f034e13` (S334-S340)** | **807 -> 809** | **+2, zero removed, and the two are opposite in kind.** `E-EACH-BODY-DECL-UNSUPPORTED` (Error; §17.7.3/§17.7.2; catalog row `SPEC.md:19577`; emitted **`codegen/emit-each.ts:1361`** — ⚑ **CORRECTED S376 from `:1387`; the sibling citation in the ledger row below said `:1416`, a THIRD value. Both were stale at the prior watermark (this file is `--name-only` unchanged below line 2028 this window), and one file carrying two different wrong line numbers for one emit site is the citation-rot class §34 stripped `:line`s to stop**) **REJECTS** a form that previously produced a silent-broken bundle — the decl was dropped, a later `${nm}` still emitted `String(nm)`, and the whole list rendered empty at exit 0. `I-SSR-EACH-CLIENT-RENDERED` (Info; §52.8; catalog row `SPEC.md:19429`; emitted `codegen/emit-ssr-render.ts:432`, wired `emit-server.ts:5360` — ⛑ **S384: `:5162` was ALREADY WRONG pre-window; re-derived by grep**) **REJECTS NOTHING** — it names a pre-existing conservative SSR fallback that used to be a bare `null` return. **Both PINNED in the same PR that emitted them** (`each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`; each `expected.json` READ to confirm a real `expect.codes` assertion, not a rationale-prose mention), so PINNED moved 341 -> 343 in lockstep and every other bucket is FLAT. **FOUR other fixes landed this window with NO code and each declined one for a different reason** — see the header's NEW NEGATIVES block; in particular #510's `<timeout>` fix is a **false-FIRE** repair, which moves no catalog number in either direction. |
+| **`8b2e4053..fc6df72e` (S376, THIS pass)** | **812 -> 813** | **+1 LIVE, zero removed: `E-STATE-BLOCK-STATEMENT-FORM`** (Error; §38.4/§40.8/§4.18.1; catalog row `SPEC.md:19729` (⛑ S383 +6, was `:19722`); emitted `compiler/src/lint-e-state-block-statement-form.js` `runEStateBlockStatementForm` -> `scanStateBlockChildren`, wired `api.js` Stage 2.5c). ⚑ **THE FIRST `E-`-SEVERITY PASS IN THE COMPILER TO RUN PRE-AST** — it consumes block-splitter output (`bsResults`), not the AST, which is why its regex over source text is NOT an invariant-55 violation. **Migration MEASURED from the compiler over 2,194 `.scrml`: exactly ONE file newly rejects** (`samples/htmx-debate-dashboard.scrml`), migrated in the same landing. Enters **IMPL-SITES, not PINNED** — no conformance case asserts it. **Scope is ONE named form and the complement is refused on EVIDENCE, not omission:** bare calls stay legal (a measured typestate false-positive class — `validate() => < Validated> { }` sits in a BS `type:"state"` block and would break 4 live `conformance/cases/type-state-codes/` cases), control flow is already `E-CONTROL-FLOW-IN-MARKUP` at this locus, bare writes belong to the `W-STATE-BLOCK-BARE-WRITE-DECL` deprecation cycle, prose must keep compiling. **A FRESH code rather than the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`** — that row is shape-specific to `@name = init` and is a live deprecation ENDPOINT; firing it for a lifecycle block would make one row mean two shapes while being simultaneously reserved and live. |
+| **`8863d457..4f034e13` (S334-S340)** | **807 -> 809** | **+2, zero removed, and the two are opposite in kind.** `E-EACH-BODY-DECL-UNSUPPORTED` (Error; §17.7.3/§17.7.2; catalog row `SPEC.md:19583`; emitted **`codegen/emit-each.ts:1361`** — ⚑ **CORRECTED S376 from `:1387`; the sibling citation in the ledger row below said `:1416`, a THIRD value. Both were stale at the prior watermark (this file is `--name-only` unchanged below line 2028 this window), and one file carrying two different wrong line numbers for one emit site is the citation-rot class §34 stripped `:line`s to stop**) **REJECTS** a form that previously produced a silent-broken bundle — the decl was dropped, a later `${nm}` still emitted `String(nm)`, and the whole list rendered empty at exit 0. `I-SSR-EACH-CLIENT-RENDERED` (Info; §52.8; catalog row `SPEC.md:19435`; emitted `codegen/emit-ssr-render.ts:432`, wired `emit-server.ts:5360` — ⛑ **S384: `:5162` was ALREADY WRONG pre-window; re-derived by grep**) **REJECTS NOTHING** — it names a pre-existing conservative SSR fallback that used to be a bare `null` return. **Both PINNED in the same PR that emitted them** (`each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`; each `expected.json` READ to confirm a real `expect.codes` assertion, not a rationale-prose mention), so PINNED moved 341 -> 343 in lockstep and every other bucket is FLAT. **FOUR other fixes landed this window with NO code and each declined one for a different reason** — see the header's NEW NEGATIVES block; in particular #510's `<timeout>` fix is a **false-FIRE** repair, which moves no catalog number in either direction. |
 | **`35d4d32e..616688ea` (S330-S334)** | **806 -> 807** | **+1, zero removed: `E-DERIVED-SERVER-ONLY-REACH`** (Error; §6.6.19 `SPEC.md:3694`; catalog row `:3304`; long row `:19483`; emitted `route-inference.ts:4429`, Step 3b). Landed WITH three conformance cases and a 379L unit test, so it enters **PINNED**, not IMPL-SITES — Rule 4 satisfied at landing. **Read the row's own scope sentence before asserting against it:** it fires ONLY for a `const <name>` DERIVED-cell RHS. A plain cell initialiser and a markup interpolation reach the same module from the same client position and are **NOT diagnosed** — the error text says so out loud, because deleting the `const` is the shortest edit that silences it and it restores the leak. Carve-out: NOT emitted in a `kind="tool"` program (§64). Migration measured at ZERO. **Second, timing-only movement in the same window: `E-SQL-006` (§44.3) now fires at COMPILE time on every server-fn emit path (#476) — no new code, a narrow sink (`preparedStmtErrors`) threaded and drained; +5 NEG conformance cases.** Third: #479's §18.5 fixes and #484's request-ref routing fix are silent-wrong-output classes with **no diagnostic added**, deliberately. |
 | **`b929b9c9..15e5e070` (prior pass)** | **805 -> 806** | **+1, zero removed:** `W-IF-IN-EACH` (§17.1 — `emit-each.ts`'s `renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch; warns when a NESTED, non-item-root, per-row `if=` inside `<each>` references the iteration item — the condition is a create-time-only append gate, not reactive on a same-key reconcile). GH adopter #409. |
 | **`fe14c9b2..e80b692e` — TOMBSTONES** | **18 -> 34 struck** | **+16 newly struck**, which the code TOTAL does not show (the count methodology deliberately strips `~~`): six phantom `E-ENGINE-*` (003/006/007/008/009/011/012 — seven rows, one of which was already struck), four `E-COMPONENT-*` (002-005), `E-PROTECT-002`, `W-PROTECT-001`, `E-TYPE-042`, `W-DEPRECATED-001`, `E-ENGINE-AUDIT-UNSUPPORTED-BODY`. **A struck row still counts in the 804 — read the tombstone bucket, not the total, to answer "what got withdrawn".** |
@@ -507,7 +559,7 @@ nothing), so it enters the fire-attempt backlog rather than PINNED.
    `E-LIFECYCLE-001` covers `cleanup()` outside any element scope. **Any doc or map listing these as
    catalogued-but-unwired is stale at this HEAD.**
 8. **`E-MW-006` is STRUCTURALLY DEAD (S-ss63 finding) — middleware is dropped silently.** The code
-   exists and has a fire site (`ast-builder.js:19398`; ⛑ **S383: `:18890` was ALREADY WRONG pre-window — it named a bare doc-comment `*`; re-derived by grep, not shifted**), but the shape it guards cannot reach it. Do
+   exists and has a fire site (`ast-builder.js:19429`; ⛑ **S383: `:18890` was ALREADY WRONG pre-window — it named a bare doc-comment `*`; re-derived by grep, not shifted**), but the shape it guards cannot reach it. Do
    not read the presence of the row + the presence of the `code:` string as coverage; that is the
    `E-CHANNEL-INSIDE-PAGE` lesson one file over.
 9. **RETIRED NOTE — `W-NAV-CHUNK-LOAD-FAILED`.** Prior generations of this map said "NOT implemented
@@ -517,7 +569,7 @@ nothing), so it enters the fire-attempt backlog rather than PINNED.
 10. **NEW — `E-FN-EQUALS-BODY` (§48.2, #396).** Rejects a `fn`/`function` `= <expr>` expression body
     (sibling of `E-FN-ARROW-BODY`, §48.2.1). Before the reject the shape SILENTLY MISCOMPILED a
     `match`-tail body to a degenerate function returning `undefined` with zero diagnostics. Fire site:
-    `ast-builder.js:3927` (`rejectFnEqualsBody`; the throw is `:3930`), FOUR decl-body call sites
+    `ast-builder.js:3930` (`rejectFnEqualsBody`; the throw is `:3930`), FOUR decl-body call sites
     (`:9487`/`:9769`/`:12825`/`:13126`) plus the `export` re-parse's `_eqBodyErr` surface (`:11834`)
     — ⛑ **S383: ALL SIX WERE ALREADY WRONG BEFORE THIS WINDOW, not merely shifted.** The carried
     values `:3755` / `:9310`/`:9592`/`:12645`/`:12946` / `:11625-11654` land on unrelated
@@ -547,6 +599,31 @@ nothing), so it enters the fire-attempt backlog rather than PINNED.
     `g-given-block-server-call-no-autoawait`, `g-hash87-member-read-await-misparen`,
     `g-ternary-init-server-call-await-misbind` — see `docs/known-gaps.md`). No new diagnostic code
     resulted from #405 itself; see dependencies.map.md for the mechanism.
+
+## `E-SCOPE-001` — A NEW FIRE PATH LANDED, AND IT IS A PATH, NOT AN EMIT SITE (NEW section, S391)
+
+⚑ **#785 (`4bc6bc03`) added `<each>` OPENER-EXPRESSION scope checking. It added ZERO new
+`E-SCOPE-001` emit sites.** This distinction is the whole point of the section: a grep for
+`"E-SCOPE-001"` in `type-system.ts` returns the same **two** `errors.push` sites it always did —
+`:7876` and `:7906`, both inside `checkLogicExprIdents` (`type-system.ts:7744`). Everything else the
+grep returns in that file is a COMMENT. **If you are counting emit sites, this window moved nothing.
+If you are asking "what can now fire that could not before", it moved three attribute surfaces.**
+
+- **The new checker:** `checkEachOpenerExpr(rawUnknown)` — `type-system.ts:12879`, a local arrow
+  inside `annotateNodes`, not an export.
+- **What it does:** hands the opener value WHOLE to `parseExprToNode` and routes the result through
+  `checkLogicExprIdents` (`parseExprToNode` at `type-system.ts:12964`, the walker call at `:12969`) — so the diagnostic is
+  raised by the SAME walker that already owned `E-SCOPE-001`. Nothing new pushes.
+- **Three call sites, all in the `<each>` opener:** `:13002` (`inExprRaw`), `:13004` (`ofExprRaw`),
+  `:13042` (`keyExprRaw`).
+- ⚠ **THERE IS DELIBERATELY NO `@.`-PREFIX BAIL, AND THE SOURCE COMMENT EXISTS TO STOP YOU
+  RE-ADDING ONE.** An earlier revision copied the `<match on=>` precedent's
+  `if (raw.startsWith("@.")) return;`. That guard skips the ENTIRE opener expression rather than the
+  `@.` sub-read, so a cell read sitting BESIDE a leading sigil went unchecked — `key=@.id + @typo`
+  and `in=@.rows.concat(@typo)` never scope-checked `@typo`, and the mistake surfaced from CODEGEN
+  as `E-CODEGEN-INVALID-LOGIC` ("could not lower this construct") instead of naming the undeclared
+  cell. **Leading `@.` is far more common on `<each>` than on `<match on=>`, so the blast radius is
+  materially different at this locus even though the code was copied from there.**
 
 ## Diagnostic stream partition (how severity routes)
 `W-` prefix + `severity:"info"|"warning"` -> `result.warnings` (non-fatal, CLI exit unchanged).
@@ -629,7 +706,7 @@ as the `<each>` fix). **LEDGER-SOURCED, not re-executed this pass:** arrow-callb
 ## `E-STATE-BLOCK-STATEMENT-FORM` — the state-block locus, Stage 2.5c (NEW section, S376)
 
 **Code:** `E-STATE-BLOCK-STATEMENT-FORM` · **severity** `error` (fatal, CLI exit 1) ·
-**stage line** `BS-LINT` · SPEC §34 row at `SPEC.md:19728` (⛑ S383 +6), sections §38.4 / §40.8 / §4.18.1.
+**stage line** `BS-LINT` · SPEC §34 row at `SPEC.md:19729` (⛑ S383 +6), sections §38.4 / §40.8 / §4.18.1.
 
 **Emitter:** `compiler/src/lint-e-state-block-statement-form.js` — `runEStateBlockStatementForm(bsResults)`
 -> `walk` -> `isStateBlock` -> `scanStateBlockChildren`. **Wired at `compiler/src/api.js` Stage 2.5c**,
@@ -715,7 +792,7 @@ comments:**
    `//` is a LINE comment, so it disarms only the remainder of that line.
 
 **⚠ AND A SIBLING DEFECT THAT WAS FILED RATHER THAN FIXED.** `W-STATE-BLOCK-BARE-WRITE-DECL`
-(`ast-builder.js:2020`, `scanStateBlockBareWriteDecls` at `:1979`) has **no comment handling at all** — not even the
+(`ast-builder.js:2023`, `scanStateBlockBareWriteDecls` at `:1979`) has **no comment handling at all** — not even the
 `//` carve-out this module started with — so a `@count = 0` inside a block comment in a `<db>` body
 still draws it. Same false-positive class, one severity down (warning, non-fatal), in a file that was
 out of scope for the fix. **Do not read the sibling's silence as evidence the shape is fine.**
@@ -723,7 +800,7 @@ out of scope for the fix. **Do not read the sibling's silence as evidence the sh
 ⛑ **S383 UPDATE — THE SILENCE IS NOW A RECORDED DESIGN DECISION, NOT AN OVERSIGHT, AND THE OBVIOUS
 FIX IS FORBIDDEN IN SOURCE.** The comment-masking helper (`maskCommentRegions`,
 `lint-e-state-block-statement-form.js`) was exported and wired into BOTH sibling scanners —
-`scanStateBlockBareWriteDecls` (`:1979`) and `scanMarkupBodyConstAtDecls` (`:2094`, emits
+`scanStateBlockBareWriteDecls` (`ast-builder.js:1982`; ⛑ S391 +3, was `:1979`) and `scanMarkupBodyConstAtDecls` (`ast-builder.js:2097`; ⛑ S391 +3, was `:2094`, emits
 `W-CONST-AT-DEPRECATED`) — and **REVERTED both times in one session, because both regressed a live
 lint.** The rule that came out of it, and it generalises past these two codes: **`maskCommentRegions`
 is only safe over text that CANNOT contain a STRING LITERAL.** A `<db>` body holds string values, and
@@ -759,7 +836,7 @@ WITHHOLD is shipped, and it is invisible during development whenever that predic
 
 | shape | what happens | where it is decided | tracked as |
 |---|---|---|---|
-| `show=` on `<each>` / `<match>` / `<engine>` | **discarded at AST-BUILD.** `grep -rn showCond compiler/src/` returns **ZERO hits** at this watermark — only `ifRaw`/`ifCond` is stamped onto a structural opener (`ast-builder.js:16010`, `:17009`, `:18050`, `:18200`; ⛑ S383 — all four +118, were `:15892`/`:16891`/`:17932`/`:18082`), so there is no field for a gate to read | capture, not emit — `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and nothing else | `g-structural-element-if-chain-and-show-composition-nominal` (MED, open) |
+| `show=` on `<each>` / `<match>` / `<engine>` | **discarded at AST-BUILD.** `grep -rn showCond compiler/src/` returns **ZERO hits** at this watermark — only `ifRaw`/`ifCond` is stamped onto a structural opener (`ast-builder.js:16041`, `:17009`, `:18050`, `:18200`; ⛑ S383 — all four +118, were `:15892`/`:16891`/`:17932`/`:18082`), so there is no field for a gate to read | capture, not emit — `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and nothing else | `g-structural-element-if-chain-and-show-composition-nominal` (MED, open) |
 | `else-if=` on a structural element | silently dropped; an `else` SIBLING after a gated structural element fires **`E-CTRL-001`** instead, because the chain detector recognizes only `kind:"markup"` nodes as chain members | the chain detector | same gap |
 | structural `if=` INSIDE an `<each>` row template | **never gated.** The row renderers (`emit-each.ts`, `emit-lift.js`) do not read `ifCond` at ALL; only `emit-html.ts`'s `emitGatedStructural` (`:1516`) does, and a row template does not route through it | **PA-REPRODUCED at `8b2e4053` by compiling:** `<each in=@.tags if=@shown>` inside an `<each>` row emitted the inner list with ZERO references to `shown`, `@shown = false`, exit 0 | `g-structural-if-inside-each-row-template-fails-open` (MED, open) |
 
@@ -830,9 +907,9 @@ Keyed by PREFIX. A code not named individually below is still routed by its fami
 | `<each>` per-item nested `if=` non-reactivity (§17.1, NEW #416) | W-IF-IN-EACH | 1 | codegen/emit-each.ts `renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch. Scoped to item-referencing conditions (`_eachIfCondReferencesItem`); does not fire for the reactive sole-item-root `if=` or an outer-state-only condition. |
 | Enum case | E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE | 2 | type-system.ts (§14.4) |
 | Block-form `<match>` arm validity (§18.0.1) | E-MATCH-INVALID-ARM | 1 | match-statechild-parser.ts `parseMatchArms` (Phase-2 tokenizer — STRUCTURAL, distinct from the SYM-pass SEMANTIC E-MATCH-* checks) |
-| **Deprecation lifecycle (§63)** | **E-DEPRECATED-001** · ~~W-DEPRECATED-001~~ · E-DEPRECATED-SERVER-MODIFIER · W-PURE-DEPRECATED / E-PURE-DEPRECATED | 5 | **`E-DEPRECATED-001` FIRES as of S307 — `compiler/src/ast-builder.js:17347` (⛑ **S383: `:16839` was ALREADY WRONG pre-window — re-derived by grep, not shifted; the `<machine>`/`<engine>` accept is `:17343`**), the engine-decl path** (the keyword distinction is decided at TAB time). `<machine>` no longer compiles; **`W-DEPRECATED-001` is a §34 TOMBSTONE** — the warning has no trigger. Per §63.5 the form still PARSES, so the report is exactly ONE diagnostic naming the migration rather than a cascade; `symbol-table.ts:6177` (⛑ S383 −12, was `:6189` — the file SHRANK when the Unit CC exemption loader was extracted to `default-logic-exemption.ts`) records that no second redundant diagnostic is emitted. `E-PURE-DEPRECATED` / `E-DEPRECATED-SERVER-MODIFIER` remain RESERVED (their warnings are the active stage). See domain.map.md. |
+| **Deprecation lifecycle (§63)** | **E-DEPRECATED-001** · ~~W-DEPRECATED-001~~ · E-DEPRECATED-SERVER-MODIFIER · W-PURE-DEPRECATED / E-PURE-DEPRECATED | 5 | **`E-DEPRECATED-001` FIRES as of S307 — `compiler/src/ast-builder.js:17378` (⛑ **S383: `:16839` was ALREADY WRONG pre-window — re-derived by grep, not shifted; the `<machine>`/`<engine>` accept is `:17343`**), the engine-decl path** (the keyword distinction is decided at TAB time). `<machine>` no longer compiles; **`W-DEPRECATED-001` is a §34 TOMBSTONE** — the warning has no trigger. Per §63.5 the form still PARSES, so the report is exactly ONE diagnostic naming the migration rather than a cascade; `symbol-table.ts:6177` (⛑ S383 −12, was `:6189` — the file SHRANK when the Unit CC exemption loader was extracted to `default-logic-exemption.ts`) records that no second redundant diagnostic is emitted. `E-PURE-DEPRECATED` / `E-DEPRECATED-SERVER-MODIFIER` remain RESERVED (their warnings are the active stage). See domain.map.md. |
 | **Lifecycle `cleanup()` (§6.7.2/§6.7.3)** | **E-LIFECYCLE-001 / -002 / -004** | **3 — NEWLY WIRED S310** | `compiler/src/type-system.ts` :18834 / :18843 / :18853. Conformance: `conformance/cases/lifecycle/cleanup-error-{call-expression,non-function,outside-element-scope}` + `cleanup-happy-arrow-and-reference`. |
-| **Braceless loop head (§17.4a)** | **E-FOR-UNPARENTHESIZED-HEAD** | **1 — NEW S309** | `compiler/src/ast-builder.js:8758` + `:13298` + ⛑ **a THIRD site at `:10809` no map has ever named** (it uses SINGLE quotes, so the generated E-code index misses it as well). The carried `:8535` + `:12927` were ALREADY WRONG pre-window — RE-DERIVED BY GREP, not shifted. Rejects a braceless `for … of` head, **including a DESTRUCTURING one** (`for [a,b] of xs` — the second call site, #330). |
+| **Braceless loop head (§17.4a)** | **E-FOR-UNPARENTHESIZED-HEAD** | **1 — NEW S309** | `compiler/src/ast-builder.js:8789` + `:13298` + ⛑ **a THIRD site at `:10809` no map has ever named** (it uses SINGLE quotes, so the generated E-code index misses it as well). The carried `:8535` + `:12927` were ALREADY WRONG pre-window — RE-DERIVED BY GREP, not shifted. Rejects a braceless `for … of` head, **including a DESTRUCTURING one** (`for [a,b] of xs` — the second call site, #330). |
 | **Server fn in a sync callback (§12/§19.9.9)** | **E-SERVER-FN-IN-SYNC-CALLBACK** | **1 — newly CATALOGUED S305, fire pre-existed** | `compiler/src/codegen/emit-server.ts:3388` (⛑ **S384: `:2860` was ALREADY WRONG pre-window; re-derived by grep**; the shared emitter used by both the structured and escape-hatch walks). Recorded via `syncPeerCalls`, threaded from `emit-expr.ts` / `emit-control-flow.ts`. **A catalog addition is not a behaviour change — the fire had been live.** |
 | **NAMED but deliberately ABSENT from §34 (§34.0 outcome 2)** | **W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD** (§20.8.7) · **E-ERROR-011** (§19.4.4.1) | 2 | **No §34 row, no emitter, by design** — the row lands WITH the implementation. Both are normative in their prose sections and both would return "does not exist" to a §34-only lookup. `W-ROUTE-…` is a v1 OBLIGATION, not a nice-to-have: Pole C knowingly chose redundant work over staleness as its failure mode, and a knowingly-undiagnosable-by-default failure mode obligates the diagnostic. `E-ERROR-011` was NAMED at S313 for a narrower "compound" rule and REDEFINED to the general non-enum rule before ever being emitted — safe precisely because it never shipped. |
 | **`if=` inside a dispatched arm (§17.1/§17.1.1/§18.0.1/§51.0.B)** | **E-IF-IN-DISPATCHED-ARM** | **1 — NEW S301** | **`codegen/emit-html.ts` `refuseConditionalInDispatchedArm` (:780) is the sole fire site — THREE call sites, not two: `:1508` (structural `if=` on `<engine>`/`<match>`/`<each>`, added S302), `:1737` (an `if`/`else-if`/`else` CHAIN), `:2727` (markup `if=`).** **TEMPORARY IMPLEMENTATION RESTRICTION, not a language rule** — §34 says so and says the row is expected to be REMOVED, not amended. Refusing DROPS the element; it does not emit an ungated one. Do not "fix" a report of this code by deleting one call site: the three are a unit (see domain.map.md §17.1.2, Prohibition 4). |
@@ -874,7 +951,7 @@ axis. Exposed as `scrml semdiff`.
 | Class | File | Stage |
 |---|---|---|
 | BSError | compiler/src/block-splitter.js:59 | Block-splitter |
-| TABError | compiler/src/ast-builder.js:2145 (⛑ **S383: `:2001` was ALREADY WRONG pre-window — it named a `file: filePath,` span field. `export class TABError extends Error` is `:2145`; re-derived by grep**) | AST builder — carries `tabSpan`, lifted to `.span` in api.js since S294 |
+| TABError | compiler/src/ast-builder.js:2148 (⛑ **S383: `:2001` was ALREADY WRONG pre-window — it named a `file: filePath,` span field. `export class TABError extends Error` is `:2145`; re-derived by grep**) | AST builder — carries `tabSpan`, lifted to `.span` in api.js since S294 |
 | DGError | compiler/src/dependency-graph.ts:233 | Dependency graph |
 | TSError | compiler/src/type-system.ts:702 | Type system |
 | RIError | compiler/src/route-inference.ts:398 | Route inference |

@@ -1,7 +1,7 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **Counts here are RE-DERIVED BY EXECUTION at this SHA, not shifted** — `find` per category, cross-checked against `docs/FACTS.md`.
 # `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
 # source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
@@ -181,7 +181,22 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1,398** `*.test.js` total at `fc6df72e`, +4 this window)
+## Test Categories (compiler/tests/, **1,413** `*.test.js` total at `2ec2ce3a`, +15 this window)
+
+⛑ **S391 — RE-DERIVED BY EXECUTION AT `2ec2ce3a`, NOT SHIFTED.** `1,398 -> 1,413 (+15)` over
+`0dd659a1..2ec2ce3a`. Per-category, by the same `find` the section mandates:
+
+    browser 101 · commands 17 · conformance 133 · e2e-render-map 2 · integration 216 ·
+    lsp 11 · self-host 4 · unit 915          = 1,399  (category dirs)
+    + 14 at `compiler/tests/*.test.js` root  = 1,413
+
+**The +15 is `unit +6 · browser +3 · commands +3 · integration +3`; `conformance`,
+`e2e-render-map`, `lsp`, `self-host` and the 14 root-level files are FLAT.**
+**CROSS-CHECKED AGAINST THE CITABLE AUTHORITY AND IT RECONCILES EXACTLY:** `docs/FACTS.md` reads
+`test files | 1,413` and `conformance cases | 887` at this watermark. **Two independent instruments
+(`find` here, the FACTS build there) agreeing on both figures is the strongest form this section's
+claim takes — and it is why the number below is safe to quote.** ⚠ Still do not hardcode a competing
+number: re-run the `find`, or cite `docs/FACTS.md`.
 
 ⚑ **CORRECTED S376 — this heading carried `1,387` while the header of this same file carried `1,394`.** Re-derived here: **1,384 across the eight category dirs + 14 at `compiler/tests/*.test.js` ROOT level = 1,398**, which is `docs/FACTS.md` exactly. **A per-directory walk misses the 14 root-level files and lands on 1,384 looking authoritative** — that is where the drift came from. Quote 1,398, or quote 1,384 and say "category dirs only".
 
@@ -196,8 +211,9 @@ same watermark. Both table rows are now `find`-derived:
     lsp 11 · self-host 4 · unit 909            = 1,384  (category dirs)
     + 14 at `compiler/tests/*.test.js` root    = 1,398  (= `docs/FACTS.md`, exactly)
 
-**`docs/FACTS.md` reads `test files | 1,398` at this watermark and is the citable authority — do not
-hardcode a competing number.** This window's +4: unit +1, browser +3.
+**`docs/FACTS.md` reads `test files | 1,413` at the CURRENT watermark `2ec2ce3a` (⛑ S391, was
+`1,398` at `fc6df72e`) and is the citable authority — do not hardcode a competing number.** The
+S376 window's +4 was unit +1, browser +3; the S391 window's +15 is broken out in the block above.
 
 **ZERO deletions, fifth window running.**
 
@@ -566,15 +582,39 @@ non-compliance.report.md.)
 `bun scripts/browser-baseline.ts --check` — **NEW, in BOTH gate and tracking.**
 `bun scripts/s34-census.ts --check-new --base <ref>` — **NEW in `gate`**, the SPEC §34.0
 row-provenance rule, DIFF-SCOPED so it is silent on the legacy corpus by construction.
+`bun scripts/corpus-compile-floor.ts --check` — ⛑ **NEW in `gate` this window (S391), and NO MAP
+CARRIED IT BEFORE THIS PASS.** An **ABSOLUTE** floor, not a differential: every shipped showcase
+program (`examples/` + `benchmarks/`, `.scrml` sources, `dist`/`node_modules`/`.git` skipped) must
+build on HEAD. **It exists because `corpus-emit-differential` is base-vs-head and by its HARD REQ 5
+treats a compile FAILURE as DATA — so a program broken since before the baseline is invisible to it.
+That is how `examples/09` sat uncompilable from S236 for months
+(`g-corpus-differential-gate-blind-to-standing-breakage`).**
+  · **Known-broken programs are BASELINED** in `scripts/corpus-compile-floor.baseline.json`, each
+    entry naming the gap it is tracked under — same discipline as `delta-lint`'s
+    `delta-log-dupes.baseline.json` and `browser-baseline`.
+  · ⚑ **THE BASELINE CANNOT ROT, AND THAT IS THE DESIGN POINT: the floor ALSO fails when a
+    baselined program starts compiling again, or is no longer enumerated.** A stale entry is a gate
+    FAILURE, so the baseline can only shrink toward truth. It is not an allowlist.
+  · **Exit codes: `0`** clean-or-known-baselined AND no stale entry · **`1`** floor breached (a
+    NON-baselined program failed, OR a baseline entry is stale and must be pruned) · **`2`** NOT A
+    VALID RUN — enumeration collapsed below `MIN_PROGRAMS = 25`, i.e. it **refuses to report a green
+    floor over a truncated population** rather than passing quietly.
+  · **EXECUTED at this watermark: exit 0, PASS, ONE baselined entry** —
+    `examples/09-error-handling.scrml` `[E-ERROR-009]`, gap
+    `g-fail-variant-shorthand-rejected-by-ts-context` (bare `fail .Variant` shorthand rejected since
+    S236 `760e9f83`; §19.3.1 grammar vs §14.10 bare-variant rule, awaiting a bryan ruling). Its baked
+    root citation `type-system.ts:10071` was RE-VERIFIED: that line is the
+    `if (failEnum === "" || failVariant === "")` guard directly above the three `E-ERROR-009` emits
+    at `:10074` / `:10082` / `:10089`.
 `bun scripts/state.ts --check` — the `@gap` rollup; **THROWS on an unparsed marker or an unknown
 status**, so it is a real gate. Its parser is exported + `import.meta.main`-gated specifically so
 that guard is testable (`compiler/tests/unit/gap-marker-parser-s307.test.js`).
 
 ## CI test-tier mapping (see build.map.md for the full workflow)
-`gate` (blocking, **13 steps** — `bun scripts/delta-lint.ts` added #652): unit + conformance + the root-level `*.test.js` (**where the parser-conformance canary is actually gated**) + the TodoMVC
+`gate` (blocking, **14 steps** — ⛑ **S391 +1: the compile-floor gate, `ci.yml:159`**; was 13 after `bun scripts/delta-lint.ts` #652): unit + conformance + the root-level `*.test.js` (**where the parser-conformance canary is actually gated**) + the TodoMVC
 gauntlet compile-and-parse check + **browser NAME-SET** + snippet-gate + facts `--check` +
-SPEC-INDEX totals `--check` + **§34.0 row-provenance**. Checkout is `fetch-depth: 0` (the §34.0 gate
-needs merge-base).
+SPEC-INDEX totals `--check` + **§34.0 row-provenance** + **compile-floor**. Checkout is `fetch-depth: 0`
+(the §34.0 gate needs merge-base).
 `tracking` (non-blocking): integration + lsp + commands + **browser NAME-SET (replacing the raw run)**
 + the parser-conformance-within-node M6.x backlog. The live-PG tests run here, skip-graceful.
 `windows` (non-blocking): unit + conformance on windows-latest.

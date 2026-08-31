@@ -1,7 +1,7 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
+# generated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a full doc re-scan — this pass RE-VERIFIED N8 BY EXECUTION and found it had been mis-recorded: see N8.** The remaining findings carry their prior watermarks and were not re-run.
 # `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
 # source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
@@ -233,7 +233,7 @@ and corrected in place: `captureStructuralIfAttr` `:2705` -> **`:2731`**; `struc
 `:2797` -> **`:2823`**; `emitGatedStructural` `:1498` -> **`:1516`**; `emitIfMountGate` `:1421` ->
 **`:1439`**; `isGateableIfValue` `:1472` -> **`:1490`**; the `E-IF-IN-DISPATCHED-ARM` guard `:1508` ->
 **`:1526`**; `stripSourceTextFromValue` `:1681` -> **`:1611`**. And `visitStructuralIfAttr` was cited
-at `:12688`, which is **neither** its definition (`type-system.ts:13190`) nor either call site
+at `:12688`, which is **neither** its definition (`type-system.ts:13488`) nor either call site
 (`:12721`, `:12811`). `creditFromAttrValue` `:2559` was the only one still correct.
 **Reason:** map-to-source drift across windows that did not re-walk this section.
 **Suggested disposition:** DONE — corrected in dependencies.map.md this pass. ⚑ **The transferable
@@ -421,7 +421,7 @@ ship as raw `for(){}` text into the DOM."* **It ships.** Compiled at this waterm
     </program>
 
 Two siblings of the same class reproduce identically (`log("M1");`, and a `//` comment flushing the
-run around it). The mechanism is structural: the emit site (`ast-builder.js:1882-1885`, `TABError` push at `:1906`; ⛑ S383, was `:1857-1860`) is gated
+run around it). The mechanism is structural: the emit site (`ast-builder.js:1885-1888`, `TABError` push at `:1906`; ⛑ S383, was `:1857-1860`) is gated
 `parentType === "markup"`, the **COMPLEMENT** of the §40.8 default-logic locus, so the diagnostic
 **cannot** fire there. **This is a doc describing behaviour the code does not have — pa.md Rule 4,
 and it is in the NORMATIVE document.** ⚠ **Compounding it, `W-PROGRAM-REDUNDANT-LOGIC` actively
@@ -435,8 +435,8 @@ corrected, or the gate is widened to the §40.8 locus — but the row cannot sta
 
 ⛑ **N17 — RESOLVED ON THE DOC LIMB AT S383, `ff4b37e5`; STILL OPEN ON THE BEHAVIOUR LIMB. This is a
 CITATION-ONLY UPDATE to an otherwise `fc6df72e`-stamped report — the scan was NOT re-run.** The fork
-this finding posed was answered by taking the FIRST branch. `SPEC.md:19823` (the §34 row),
-`SPEC.md:11765` (§17.4 prose) and a NEW `SPEC.md:23063` (§40.8 bullet) now all state that the
+this finding posed was answered by taking the FIRST branch. `SPEC.md:19824` (the §34 row),
+`SPEC.md:11765` (§17.4 prose) and a NEW `SPEC.md:23065` (§40.8 bullet) now all state that the
 auto-lift covers **DECLARATIONS ONLY** and that the default-logic body-top is covered by **NEITHER**
 the lift nor the code; the row's *Does NOT fire* entry for that locus now carries the explicit rider
 *"NOT because that locus is safe … Do not read this entry as coverage."* **The Rule-4 violation in the
@@ -521,7 +521,7 @@ instrument change" note.
 |---|---|---|
 | **N6** route-inference.ts stale/contradicting doc comment | read `:3643-3660` — **TWO consecutive `/** Keys the derived-cell walk … */` blocks** still sit back to back, the second contradicting the first on the same function | **STILL LIVE** |
 | **N7** census `source files` is environment-dependent | printed **1940** here vs **1864** (S346, fresh worktree) vs **1858** (S341) — **same commit class, three different numbers** | **STILL LIVE, and this is the strongest evidence yet** |
-| **N8** `source-text-regex-census.ts` prints a baked `file:line` | `:170` still prints `type-system.ts:26048` | **STILL LIVE** |
+| **N8** `source-text-regex-census.ts` prints a baked `file:line` | ⛑ **S391 — STILL LIVE, AND IT HAS NOW ACTUALLY GONE STALE, WHICH IS THE POINT THE FINDING WAS MAKING.** `scripts/source-text-regex-census.ts:170` still prints the literal string `type-system.ts:26048`. **That line number was correct when it was baked and is WRONG at this HEAD:** `type-system.ts` gained +298 lines (#785) and the defect site — `if (start < s.length) parts.push(s.slice(start));` — is now at **`:26346`**. So the probe's own output now MISDIRECTS every reader to a line holding `structInstances: Map<string, string>;`. **A baked citation in an executable is worse than a baked citation in a doc: it is reprinted, with authority, on every run, and no doc-currency gate covers it.** Fix is to derive it (grep the guard) or drop the line number and cite the symbol. | **STILL LIVE — and now DEMONSTRABLY stale, not merely fragile** |
 | **N9** `planBlockArmLift` called "the single §18.5 classifier" | phrase live at `docs/known-gaps.md:8508` and `:8515` **and now also at `emit-control-flow.ts:2078`** — the divergence gap it contradicts is marked RESOLVED, so the phrase and the ledger now disagree in the OPPOSITE direction from the original finding | **STILL LIVE, DIRECTION CHANGED — see below** |
 | **S331-N5** `route-inference.ts:3438` cites §6.6.20 | still `§6.6.20`; the section is §6.6.19 | **STILL LIVE** |
 | **C3** SPEC §52.15.5 describes `<div data-scrml-each-mount>` | still at SPEC `:32624`; code shows the div is retired for NESTED each (`runtime-template.js:2217`) but **still emitted for TOP-LEVEL each** (`emit-ssr-render.ts:411`) | **STILL LIVE, and NARROWER than recorded — see below** |
@@ -677,10 +677,24 @@ The script's runtime output includes:
 see `postRe.test(t)` — the site of the confirmed defect at type-system.ts:26048.
 ```
 
-(`scripts/source-text-regex-census.ts:167` at this HEAD — #524's `toRel`/`--selftest` additions shifted it from `:136` — and the same citation in its header at `:38`. Re-verified live this pass.)
+(**`scripts/source-text-regex-census.ts:170`** at this HEAD — ⛑ **S391: this report said `:167`, off by three; re-derived by grepping the `console.log`** — and the same baked citation in the file's header comment at `:38`, which DOES hold. Re-verified live this pass.)
 
-**It is CORRECT at this HEAD — verified: `type-system.ts:26048` is
-`const postRe = new RegExp(...)`.** That is precisely what makes it a hazard rather than a bug today.
+⛑ **S391 — THE PARAGRAPH THAT STOOD HERE CLAIMED THIS CITATION WAS *VERIFIED CORRECT*, AND IT WAS
+NEVER CORRECT. THIS IS THE SHARPEST WRONG-FROM-BIRTH INSTANCE THE MAP SET HAS PRODUCED, BECAUSE THE
+FALSE CLAIM IS AN EXPLICIT CLAIM OF VERIFICATION.** The struck sentence read: *"It is CORRECT at this
+HEAD — verified: `type-system.ts:26048` is `const postRe = new RegExp(...)`."* **Measured at
+`0dd659a1`, the watermark it was written against: line 26048 was
+`if (start < s.length) parts.push(s.slice(start));`, and `const postRe = new RegExp(` was at
+`:26563`.** At this HEAD the same content sits at `:26346` and `postRe` at `:26861` (plus `:27799`
+and `:27924` — **there are THREE `postRe` sites, not one**). So the baked number pointed at neither
+`postRe` nor anything about it, at either watermark.
+
+**THE FINDING IS THEREFORE STRONGER, NOT WEAKER, THAN RECORDED.** It was filed as *"correct today,
+will rot tomorrow — a hazard rather than a bug."* It is a BUG NOW and appears always to have been
+one: the script prints, with the authority of having just been computed, a line number that has
+never held the thing it names. **A hazard-class finding that turns out to be a live defect is the
+predictable cost of writing "verified" without executing the check** — and it is the same failure
+this report exists to catch in other people's docs.
 **A baked `:line` in a maintained artifact rots silently and nothing fails** — this repo already
 ruled on that class (S305 stripped 103 `file:line` citations from §34 down to 5, keeping file paths
 and dropping line numbers) and structure.map.md carries two line-number corrections from the same

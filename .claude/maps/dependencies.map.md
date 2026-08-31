@@ -1,7 +1,7 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **MANIFEST STILL ZERO-DIFF:** `git diff --name-only fc6df72e..2ec2ce3a -- package.json bun.lock` is EMPTY — no external dependency was added, removed or version-bumped. ONE new INTERNAL edge (see the header block).
 # `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
 # source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
@@ -17,6 +17,25 @@
 # stamp stays at `fc6df72e`. **EXTERNAL DEPS RE-MEASURED AND STILL ZERO-DIFF:**
 # `git diff --name-only fc6df72e..ff4b37e5 -- package.json bun.lock` is **EMPTY** — no runtime dep,
 # no dev dep, no version moved, across three windows now.
+#
+# ⛑ **S391 — ONE NEW INTERNAL EDGE OVER `ff4b37e5..2ec2ce3a`, AND IT IS A DE-DUPLICATION:**
+#   · **`commands/compile.js` → `commands/diagnostic-format.js` GAINED `resolveDiagLocation` (#756,
+#     `67e0f614`).** `compile.js:15` now imports `{ stripRedundantCode, resolveDiagLocation,
+#     stripRedundantLocation }`; the new export is `diagnostic-format.js:64`, consumed at
+#     `compile.js:382` / `:436` / `:468` (the error / warning / lint formatters respectively).
+#     ⚑ **THE EDGE EXISTS TO KILL A THREE-WAY DIVERGENCE, NOT TO ADD A LAYER.** `compile.js`'s three
+#     formatters read only top-level `line`/`file`, so **every TS-stage diagnostic — which carries
+#     its location ONLY on `.span` — printed `stage: TS` with no `--> file:line:col`.**
+#     `build.js` and `dev.js` already did the `.span` fallback; **`compile.js` was the lone
+#     outlier**, and the fix moves the three-level chain
+#     (`x.filePath||x.file||x.span?.file` · `x.line ?? x.span?.line` ·
+#     `x.column ?? x.col ?? x.span?.col`) into ONE shared resolver all three formatters call.
+#   · ⚠ **NO OTHER INTERNAL EDGE MOVED.** `component-expander.ts`'s new
+#     `reportChannelMountsInConditionals` (#781) is **module-PRIVATE and un-exported** — it adds a
+#     call, not an edge — and `type-system.ts`'s `checkEachOpenerExpr` (#785) is a local arrow inside
+#     `annotateNodes` reusing the already-imported `parseExprToNode` / `checkLogicExprIdents`.
+#     **A +329 / +298 line landing that adds ZERO module edges is the shape to expect from a
+#     diagnostic that fires at a locus its stage already owned.**
 #
 # ⛑ **THREE NEW INTERNAL EDGES THIS WINDOW, ONE OF THEM INTO A NEW NODE — all grepped at `ff4b37e5`:**
 #   · **`symbol-table.ts` → `default-logic-exemption.ts` (NEW NODE, S383).** `symbol-table.ts:216`

@@ -1,7 +1,7 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-27T17:17:26-06:00  commit: 0dd659a1
-# generated-at: 0dd659a1 (S380 window, INCREMENTAL_UPDATE — mapper pass, not a full re-walk).
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a clean pass: the §20.5 API-surface SPEC anchor was WRONG FROM BIRTH (pointed at §19.9.x) and is corrected in place.** `commands/dev.js` — this map's other main source — is BYTE-IDENTICAL over `ff4b37e5..2ec2ce3a`, so its citations carry forward from the S383/S384 verification unchanged.
 # Verified: `git merge-base --is-ancestor 48f0aaf8 0dd659a1` exits 0 (48f0aaf8 = wrap(s378), the prior
 # map's effective content watermark); HEAD == origin/main == 0dd659a1 at write time.
 #
@@ -123,7 +123,21 @@ Config: `<program auth="required|optional" login-redirect=... csrf="auto|on|off"
 
 The write half of the session model: a server function can now `session.set(key, value)` / `session.destroy()` in addition to the pre-existing read-only `@currentUser`/`@session` projections. `session` is a RESERVED identifier bound into scope automatically inside a server-escalated function body (`type-system.ts`'s `annotateNodes`, `scopeChain.bind("session", ...)` when `boundary === "server"`) — referencing `session` also AUTO-ESCALATES the enclosing function to server (mirrors the SSE `route` auto-injection and the §38.6 channel-builtin injection).
 
-**API surface** (§20.5, compiler/SPEC.md:14566-14571):
+**API surface** (§20.5, `compiler/SPEC.md:15738-15743` — the fenced `session` object shape under
+`### 20.5 Session Context` at `:15719`; the write half `#### 20.5.1` is at `:15792`):
+
+⛑ **S391 — THIS ANCHOR WAS WRONG *FROM BIRTH*, AND IT IS THE THIRD SUCH FINDING THIS PASS
+(invariant 77).** It read `SPEC.md:14566-14571`. That range is **§19.9.x error handling** — at
+`0dd659a1` line 14566 was *"4. The client code handles the error via match, `?`, `!{}`, or
+`<errorBoundary>`"*, and the range now resolves to `#### 19.9.2 HTTP Status Code Mapping`. **It has
+never pointed at §20.5.** A mechanical delta-refresh would have carried it forward forever: it
+shifts by the correct +6 like every other citation in the file, and lands on the wrong section just
+as accurately as before. Re-derived by `grep -n 'session\.isAuth' compiler/SPEC.md` and reading the
+enclosing heading. **The TABLE BELOW WAS SPOT-CHECKED AGAINST THE REAL FENCE AND IS CORRECT** —
+`session.userId` `string | not`, `session.isAuth` `boolean`, `session.role` `string | not`,
+`session.get(key)`, `session.set(key, v)`, `session.destroy()` all match. **Only the pointer was
+wrong, which is exactly why it survived: the content it introduced was right.**
+
 | Member | Type | Purpose |
 |---|---|---|
 | session.userId | string \| not | authenticated user ID, `not` if not logged in |

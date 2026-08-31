@@ -1,7 +1,7 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-27T17:17:26-06:00  commit: 0dd659a1
-# generated-at: 0dd659a1 (S380 window, INCREMENTAL_UPDATE by the project-mapper — scoped to the
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **A MAP-INTERNAL CONTRADICTION WAS RESOLVED HERE:** this file cited `SPEC.md:19722` and error.map.md cited `SPEC.md:19728` for the SAME `E-STATE-BLOCK-STATEMENT-FORM` §34 row — two watermark generations (`0dd659a1` vs `ff4b37e5`) that were never re-synced. Both are now `:19729`, re-derived by grepping the row.
 # codegen surface S380 touched; NOT a full re-walk). `git merge-base --is-ancestor 48f0aaf8 0dd659a1`
 # exits 0; HEAD == origin/main == 0dd659a1.
 #
@@ -46,7 +46,7 @@
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
 #
 # ⚑ **S376: `compiler/SPEC.md` MOVED BY EXACTLY ONE LINE (37,539 -> 37,540) AND THAT ONE LINE IS A
-# LANGUAGE RULING, NOT AN EDIT.** The whole diff is a single new §34 catalog row at `SPEC.md:19722`
+# LANGUAGE RULING, NOT AN EDIT.** The whole diff is a single new §34 catalog row at `SPEC.md:19729`
 # — `E-STATE-BLOCK-STATEMENT-FORM` — which makes NORMATIVE what §34's
 # `E-WRITE-NOT-IN-LOGIC-CONTEXT` and `W-STATE-BLOCK-BARE-WRITE-DECL` rows had only implied:
 # **a `<db>` / `<state>` / `<schema>` STATE-block body is MARKUP context, so the §40.8
@@ -68,7 +68,7 @@
 #     `non-compliance.report.md`.
 #   · **CORRECTION 2 (§17.2)** — `show=` on a STRUCTURAL element is never CAPTURED, not merely
 #     unwired. **RE-GREPPED at this watermark: `grep -rn showCond compiler/src/` returns ZERO hits**,
-#     and only `ifCond` is stamped (`ast-builder.js:16010`, `:17009`, `:18050`, `:18200` — ⛑ S383,
+#     and only `ifCond` is stamped (`ast-builder.js:16041`, `:17009`, `:18050`, `:18200` — ⛑ S383,
 #     all four **+118**, were `:15892`/`:16891`/`:17932`/`:18082`; each re-verified individually this
 #     pass and each still lands on the `ifRaw`/`ifCond` spread).
 #     ⚠ **DO NOT CONFUSE THAT WITH THIS WINDOW'S #710**, which wired `show=` on an ordinary element
@@ -167,20 +167,20 @@
 # statement was never compiled. **A defect that turns code into text also deletes every diagnostic
 # that code would have raised.** And `W-PROGRAM-REDUNDANT-LOGIC` actively routes authors INTO the
 # broken mode — it tells you to remove the `${…}` wrapper, and the wrapped form is the one that works.
-# ⚠ **THE BARE-CALL LIMB IS A RULING, NOT A FIX.** §40.8 (`SPEC.md:22813-22814`) enumerates what
-# auto-lifts (DECLARATIONS), carves out writes with a diagnostic, and is **SILENT on a bare call** — (⛑ S383: the anchor to its left was WRONG BEFORE THIS WINDOW TOO — the S123 amendment is `SPEC.md:23062`, and `:22813-22814` is §19.9.6 shadow-table SQL prose. The NEW ruling-3 bullet sits at `SPEC.md:23063`.)
+# ⚠ **THE BARE-CALL LIMB IS A RULING, NOT A FIX.** §40.8 (`### 40.8 v0.3 Program Shape` at `SPEC.md:23054`, the S123 amendment bullet at `:23064` — ⛑ **S391: the anchor here read `:22813-22814`, which the S383 note to the right had ALREADY flagged as wrong; an S391 delta-shift moved it to `:22821-22822`, which is SQL DDL prose (`response_body TEXT NOT NULL,`) and equally wrong. A KNOWN-WRONG ANCHOR MUST BE RE-DERIVED, NOT SHIFTED — shifting it preserves the error with a fresh-looking number.** Now derived from the section heading) enumerates what
+# auto-lifts (DECLARATIONS), carves out writes with a diagnostic, and is **SILENT on a bare call** — (⛑ S383: the anchor to its left was WRONG BEFORE THIS WINDOW TOO — the S123 amendment is `SPEC.md:23064`, and `:22813-22814` is §19.9.6 shadow-table SQL prose. The NEW ruling-3 bullet sits at `SPEC.md:23065`.)
 # so *"searched §40.8, no governing sentence found"* is a FINDING that converts it into an operator
 # decision. The fork: **(a) lift every text run** (closes it, but prose written directly in a
 # `<program>` body then parses as logic) vs **(b) diagnose non-declaration runs** (closes it, but
 # must then reject `const bias = 1.2` followed by `log(x)`, which compiles today). **Either needs
 # SPEC text. Nobody should guess.** ⚑ **The bare-`if` limb is NOT covered by that ruling.**
 # ⛑ **CORRECTED S383 — the clause that used to follow ("and it contradicts a §34 row outright") IS
-# NOW STALE AND HAS BEEN STRUCK. The §34 row was CORRECTED this window.** `SPEC.md:19823` (§34),
-# `SPEC.md:11765` (§17.4) and a NEW `SPEC.md:23063` (§40.8) all now say the auto-lift covers
+# NOW STALE AND HAS BEEN STRUCK. The §34 row was CORRECTED this window.** `SPEC.md:19824` (§34),
+# `SPEC.md:11765` (§17.4) and a NEW `SPEC.md:23065` (§40.8) all now say the auto-lift covers
 # DECLARATIONS ONLY and that this locus is covered by **NEITHER** the lift nor the diagnostic.
 # **The doc/behaviour contradiction is CLOSED; the behaviour hole is OPEN** — PA-RE-REPRODUCED at
 # `ff4b37e5`: `<program>` + `if (1) { }` exits 0 and the emitted `<body>` carries the literal line
-# `if (1) { }`. The emit site (`ast-builder.js:1882-1885`; ⛑ S383, was `:1857-1860`) is gated
+# `if (1) { }`. The emit site (`ast-builder.js:1885-1888`; ⛑ S383, was `:1857-1860`) is gated
 # `parentType === "markup"`, the COMPLEMENT of the §40.8 locus. ⛑ **Ruling 3's ENFORCEMENT arm is
 # HELD, not landed** — `BARE_CONTROL_FLOW_AT_BODY_TOP_RE`, `findControlFlowStatementEnd`,
 # `_DEFAULT_LOGIC_ROOT_NAMES` and an `isStateBlockBody` parameter are at ZERO occurrences in
@@ -779,7 +779,7 @@ durable fix is ONE diagnostic covering both positions
 **AND `show=` NEVER GETS THAT FAR.** §17.1.2.2 says `else-if=` and `show=` on a structural element
 are "silently dropped". **Measured at this watermark the mechanism is upstream of emission:
 `showCond` does not exist anywhere in `compiler/src/`.** The ast-builder stamps only
-`ifRaw`/`ifCond` onto `<match>` (`ast-builder.js:16010`, `:18200`), `<each>` (`:17009`) and
+`ifRaw`/`ifCond` onto `<match>` (`ast-builder.js:16041`, `:18200`), `<each>` (`:17009`) and
 `<engine>` (`:18050`) — ⛑ S383, all four **+118** — and `emit-html.ts`'s `isGateableIfValue` (`:1490`) reads `node.ifCond` and
 nothing else. A `show=` on a structural opener is discarded at AST-build, so the fix starts at
 capture, not at emit (`g-structural-element-if-chain-and-show-composition-nominal`, MED, open).
@@ -1665,7 +1665,7 @@ markup context (SPEC §4)"*). **What it did not say is what HAPPENS to the state
 the author's initialization silently never happened.
 
 **As of #718 it is `E-STATE-BLOCK-STATEMENT-FORM`, severity error, CLI exit 1** (§34 row at
-`SPEC.md:19722`; emitter `compiler/src/lint-e-state-block-statement-form.js` at `api.js` Stage 2.5c).
+`SPEC.md:19729`; emitter `compiler/src/lint-e-state-block-statement-form.js` at `api.js` Stage 2.5c).
 PA-VERIFIED at this watermark by compiling the landed reproducer.
 
 **⚑ THE MESSAGE HAD TO BE MADE TRUE AT ALL THREE LOCI, AND ITS FIRST CUT WAS NOT.** It asserted flatly
@@ -2100,7 +2100,7 @@ double-writing one at top level rarer still.
 ## The `<machine>` keyword is REMOVED (§63.7 / §51.0.L, ruled S305, landed S307)
 
 **`<machine>` is not a deprecated alias any more. It does not compile.** `E-DEPRECATED-001` (Error)
-fires from `ast-builder.js:17347` (⛑ **S383: `:16839` was ALREADY WRONG pre-window — re-derived by grep, not shifted**); `W-DEPRECATED-001` is a §34 tombstone. Any doc presenting it as
+fires from `ast-builder.js:17378` (⛑ **S383: `:16839` was ALREADY WRONG pre-window — re-derived by grep, not shifted**); `W-DEPRECATED-001` is a §34 tombstone. Any doc presenting it as
 "deprecated but still compiles / hard-removal at v0.3.0" is stale — `docs/PA-SCRML-PRIMER.md`,
 `compiler/PIPELINE.md` and `compiler/SPEC-INDEX.md`'s authored half all still do.
 
@@ -2204,7 +2204,7 @@ dropped, the function returning `undefined`), with **zero diagnostics**. `= if �
 hit `E-CODEGEN-INVALID-LOGIC` (a different, louder failure, which is why only the `match`-tail shape
 went undetected long enough to reach a filed gap).
 
-**Topology: `rejectFnEqualsBody` (`ast-builder.js:3927`, throw at `:3930`) fires at FOUR duplicated decl-body call
+**Topology: `rejectFnEqualsBody` (`ast-builder.js:3930`, throw at `:3930`) fires at FOUR duplicated decl-body call
 sites** (`:9487` / `:9769` / `:12825` / `:13126`) — ⛑ **S383: these six anchors were ALREADY WRONG before this window (`:3755` / `:9310`/`:9592`/`:12645`/`:12946`), not merely shifted; RE-DERIVED BY GREP.** The same four-site duplication `E-FN-ARROW-BODY`
 already lives at) **plus a FIFTH site that behaves differently on purpose: the `export` re-parse**
 (`:11625-11654`). Before this fix, that re-parse SWALLOWED every sub-error from its inner parse
@@ -2297,6 +2297,41 @@ Spans are rebased to file-absolute, and the rebase recurses so a depth-2 read st
 correctly. Pinned by `unit/g-nested-each-in-match-arm-diagnostics.test.js` (232L) +
 `conformance/cases/type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos`.
 
+
+## §38.1 / §38.12.2 — A CROSS-FILE CHANNEL MOUNT IS POSITION-SENSITIVE, BUT A CHANNEL'S *CELLS* ARE NOT (NEW section, S391, #781/#789)
+
+**The rule, and the asymmetry is the whole point:** a channel is an **app-scope singleton** (§38.1),
+and CHX **inlines a mount in place** (§38.12.2). So a mount (`<channelAlias/>`) placed inside a
+CONDITIONAL or ITERATIVE container cannot emit the channel's cells, its exported functions, or its
+WebSocket route. **But the channel's cells stay readable everywhere in the file — including inside
+the very arm the mount was wrongly placed in. Mount position does not scope a channel.** That
+asymmetry is why the failure was confusing enough to need its own diagnostic: the author's mental
+model ("I mounted it where I use it") is coherent, and wrong, and the old behaviour rewarded it with
+markup that compiled.
+
+**What the old behaviour was:** the tag was emitted VERBATIM into the markup and every `@cell` read
+of it resolved to a cell that never syncs — **at exit 0**. The originating gap is
+`g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`.
+
+**Now refused by name:** `E-CHANNEL-MOUNT-IN-CONDITIONAL` (§38.1, §38.4, §38.12.2), §34 catalog row
+`SPEC.md:19629`, second table row `SPEC.md:21701`. Emitter
+`component-expander.ts:4968`, sole call site `:4687` in `runCEFile` — **run BEFORE `expandChannels`,
+so the file fails CLOSED rather than half-wired.**
+
+⚠ **THE SPEC ROW AND THE CODE COUNT DIFFERENTLY, AND BOTH ARE RIGHT.** The row says **"Four
+containers are refused"**, enumerating LOCI: a `<match>` arm body · an `<engine>` state-child body ·
+an `<each>`/`<match>` that is a DIRECT child of an `<engine>` body · any subtree of one of those.
+The CODE's discriminant set is **THREE AST kinds** — `match-block`, `each-block`, `engine-decl`
+(`component-expander.ts:5028`) — and the remaining loci fall out of the nearest-enclosing-container
+walk rather than a fourth `kind`. **Read the row for the refused POSITIONS; read the code for the
+discriminants. Do not go looking for a fourth `kind` string.**
+
+⚑ **A DELIBERATE NON-MECHANISM, RECORDED SO IT IS NOT "FIXED" BACK IN:** the
+`_reparseEachArmBodyRaw` TEXT STASH is not scanned. That scan existed and **was deleted at S385 by
+ruling, because it refused a valid file over a comment that merely NAMED the alias.** Detection is
+node-path only, and the §34 row explicitly declines to claim otherwise. **A textual scan over a body
+that can contain comments and strings is the same class of mistake as `maskCommentRegions` over a
+`<db>` body (see error.map.md): it trades a visible wrong answer for an invisible missing one.**
 
 ## Business Invariants (language axioms, not app rules)
 - **`if=` on a scrml-defined structural element is admitted on exactly THREE (`<engine>`/`<match>`/`<each>`) and SHALL NOT be generalized to the registry (§17.1.2).**

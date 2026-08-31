@@ -1,16 +1,21 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **RE-WALKED on the CI surface** (`ci.yml` + `scripts/` both moved) — see the header note.
 # `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
 # (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
 # the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
 # **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
 # named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED.**
-# Re-measured at THIS watermark: `.github/`, `package.json`, `bun.lock`, `Makefile`, `Dockerfile`
-# and `scripts/` are ALL `--name-only` **EMPTY** over the window. `gate` stays at 13 steps, every
-# command below is unchanged, and no CI stage, secret or required check moved.
+# ⛑ **S391 — THIS MAP WAS RE-WALKED ON ITS CI SURFACE, *NOT* STAMP-ADVANCED ON ZERO-DIFF, BECAUSE
+# THE SURFACE WAS NOT ZERO.** Re-measured over `fc6df72e..2ec2ce3a`: `package.json`, `bun.lock`,
+# `Makefile` and `Dockerfile` are `--name-only` **EMPTY**, but **`.github/workflows/ci.yml` CHANGED
+# and `scripts/` gained TWO NEW FILES** (`corpus-compile-floor.ts`, `corpus-compile-floor.baseline.json`).
+# **`gate` moved 13 -> 14 steps.** No secret, runner or required-check NAME moved. The superseded
+# S376 note read: *"`.github/`, `package.json`, `bun.lock`, `Makefile`, `Dockerfile` and `scripts/`
+# are ALL `--name-only` EMPTY over the window. `gate` stays at 13 steps"* — true at `fc6df72e`,
+# false here, and it is recorded rather than deleted because **a zero-diff claim is a MEASUREMENT
+# WITH A WATERMARK, not a standing property of this map.**
 # ⚠ **`scripts/ctx.ts` IS NOT ON `main` AT THIS WATERMARK AND IS THEREFORE NOT MAPPED.** The
 # dispatching brief flagged it as landing in parallel on #708; measured here —
 # `git log --oneline origin/main -- scripts/ctx.ts` is EMPTY and the path does not exist in the
@@ -397,7 +402,7 @@ literals at the time of writing) is worthless and the script says so — never q
 
 ⚠ **IT REPORTS A FLOOR, NOT A COUNT, AND YOU MUST SAY SO WHEREVER YOU QUOTE IT.** It keys on argument
 identifier NAMES, so it cannot see `postRe.test(t)` — **which is exactly where the confirmed
-pre-existing defect at `type-system.ts:26048` lives.** The opaque-argument population (`t`, `s`, `v`,
+pre-existing defect at `type-system.ts:26346` lives.** The opaque-argument population (`t`, `s`, `v`,
 `x`, …) is reported SEPARATELY and is unclassifiable by this instrument. **The script records this
 about itself in its own header:** its author built a name-pattern-matching probe to detect the
 practice of pattern-matching instead of resolving structure, and it inherited the same blind spot.
@@ -559,10 +564,15 @@ extension: `<base>.client.js` → `<base>.client.<hash>.js`, `<base>.css` → `<
 Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/src/commands/build.js`
 (`generateServerEntry`), `compiler/src/commands/dev.js` (`devCacheHeaders`).
 
-## CI/CD Pipeline  [.github/workflows/ci.yml] — ONE NEW STEP THIS WINDOW, in `tracking` (NOT `gate`), plus a header correction (#665)
+## CI/CD Pipeline  [.github/workflows/ci.yml] — ⛑ S391: ONE NEW **BLOCKING** STEP (the compile-floor gate, in `gate`). The prior-window note below (#665, a `tracking` step) is retained as history.
+
+⛑ **S391 — `gate` MOVED `13 -> 14` STEPS. The addition is `bun scripts/corpus-compile-floor.ts --check` at `ci.yml:159`, "Compile-floor gate (every showcase program still builds on HEAD)".** Counted by
+`grep -c '^      - name:\|^      - uses:'` over the `gate` job at both ends: **13 at `0dd659a1`, 14 at `2ec2ce3a`.** It is an ABSOLUTE floor (every shipped showcase program in `examples/` + `benchmarks/` must build on HEAD), deliberately NOT a differential — `corpus-emit-differential` is base-vs-head and treats compile failure as DATA, so standing breakage is invisible to it. Known-broken programs are baselined in `scripts/corpus-compile-floor.baseline.json`; **a stale baseline entry is itself a gate failure**, and enumeration below `MIN_PROGRAMS = 25` exits **2** rather than reporting a green floor over a truncated population. Full behaviour + the executed result live in test.map.md.
+
+⚠ **AND THE WINDOW HANDED THIS MAP ITS SHARPEST EVIDENCE YET FOR THE `gate`-vs-`tracking` ASYMMETRY BELOW — a MEASURED, main-blocking instance, not a hypothetical.** #788 (`a5b361a2`): `emit-channel.ts:756` emitted a bare `undefined` KEYWORD into client output, which the repo-wide `W-CG-UNDEFINED-INTERPOLATION` regression guard forbids. **The required `gate` check runs unit + conformance only; `integration` rides in `tracking`, which is `continue-on-error: true` (`ci.yml:181`). The LOCAL pre-commit hook runs unit + integration + conformance.** So the change passed the gate that guards `main` and simultaneously **broke the gate that guards every contributor's commit — while it sat on `main`, NO local code commit could land in this repo, for anyone.** The one-token fix was `undefined` -> `void 0`, the idiom the same file already documents at `:892-895` and uses at `:687`. **The asymmetry is not resolved; it is now demonstrated.**
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment). ⚑ **The `types` layer in that model DID NOT EXIST until #665** — the header advertised it and nothing invoked it; corrected in the same landing, and the types step is `tracking`/non-blocking, NOT `gate`.
-**gate** — BLOCKING (the merge-gate), **13 steps** (**+1 this window: the delta-log sequence gate**). checkout (`fetch-depth: 0`) → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step — **this is where the parser-conformance CANARY is actually gated**) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → `bun scripts/browser-baseline.ts --check` → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/delta-lint.ts` (NEW #652 — the delta-log sequence gate)** → `bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (the SPEC §34.0 row-provenance gate).
+**gate** — BLOCKING (the merge-gate), **14 steps** (⛑ **S391 +1: the compile-floor gate**; the prior window's +1 was the delta-log sequence gate). checkout (`fetch-depth: 0`) → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step — **this is where the parser-conformance CANARY is actually gated**) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → `bun scripts/browser-baseline.ts --check` → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/delta-lint.ts` (NEW #652 — the delta-log sequence gate)** → `bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (the SPEC §34.0 row-provenance gate).
 Triggers: push `branches: [main]` (#532, S345 — an unscoped `push` ran the gate TWICE per PR under the one required check name, doubling intermittent exposure; paths-ignore: `**.md`, `handOffs/**`, `docs/**` unchanged), pull_request, and `workflow_dispatch: {}` (#454). **A branch with no open PR gets NO CI until a PR exists — the standard trade; `workflow_dispatch` re-fires any post-#454 ref on demand.** `concurrency: group ci-${{ref}}, cancel-in-progress: true`. ⚠ **Both diff-scoped/baselined gates are that way DELIBERATELY** — `s34-census --check-new` is silent on the legacy corpus by construction, and `delta-lint` carries nine pre-existing duplicates in `handOffs/delta-log-dupes.baseline.json`. The repo states the reason in its own CI comments (pa-base §8): **a gate that is instantly red for reasons no change caused gets bypassed, and then deleted.**
 
 ### `workflow_dispatch` — the manual re-fire lever (NEW #454). Read the two constraints BEFORE you need it.

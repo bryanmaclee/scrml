@@ -1,7 +1,7 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-26T13:28:37-06:00  commit: fc6df72e
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
+# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
+# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED:** `git diff --name-only fc6df72e..2ec2ce3a -- '.env*' bunfig.toml package.json` is **EMPTY**; no env key, feature flag or config file moved in the window. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
 # `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
 # (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
 # the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
