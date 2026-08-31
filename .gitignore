@@ -30,6 +30,7 @@ compiler/tests/unit/__fixtures__/
 # template, fn-implicit-return, lin-e2e, …). Ephemeral; never track (S254 — 13
 # got accidentally staged into a codemod commit mid-test-run).
 compiler/tests/integration/_tmp_*/
+compiler/tests/unit/_tmp_*/
 
 # Playwright e2e — generated test artifacts (Wave 3 Dispatch 1 + S100 docs harness)
 e2e/test-results/

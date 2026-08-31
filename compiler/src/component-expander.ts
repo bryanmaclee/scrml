@@ -4937,9 +4937,12 @@ function buildImportedChannelAliases(
  * enumeration is that it is CHECKED — a hole that vanishes without a trace
  * teaches the next round nothing.
  *
- * ⚑ Needs a `§34` catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL` — SPEC is
- * PA-owned and deliberately untouched here. That row must NOT claim the
- * `_reparseEachArmBodyRaw` text stash is scanned; it is not.
+ * The `§34` catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL` is LANDED (S390).
+ * SPEC stays PA-owned and is deliberately untouched from here. The row states
+ * node-path detection only and explicitly does NOT claim the
+ * `_reparseEachArmBodyRaw` text stash is scanned — it is not, and it must not
+ * be re-introduced: the scan was deleted at S385 by ruling because it refused a
+ * valid file over a comment that merely NAMED the alias.
  */
 const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
   "match-block": "a `<match>` arm",
