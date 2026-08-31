@@ -1,0 +1,13 @@
+<program>
+    ${
+        import { "probe" as probeChan } from './chan.scrml'
+        type Phase:enum = { Loading, Ready }
+        <phase>: Phase = .Ready
+    }
+    <probeChan/>
+    <div><p>${@stamp}</p></div>
+    <match for=Phase on=@phase>
+        <Loading><p>loading</p></>
+        <Ready><p>ready</p></>
+    </>
+</program>

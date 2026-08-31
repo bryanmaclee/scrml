@@ -12,7 +12,7 @@ import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
-import { stripRedundantCode, resolveDiagLocation } from "./diagnostic-format.js";
+import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
 // ---------------------------------------------------------------------------
@@ -371,17 +371,26 @@ function getSourceContext(filePath, line, contextLines = 2) {
 export function formatError(err, cwd) {
   const parts = [];
 
-  // Header: error code + message
-  const label = c.bold(c.red("error"));
-  const code = err.code ? c.dim(`[${err.code}]`) : "";
-  parts.push(`${label}${code ? " " + code : ""}: ${stripRedundantCode(err.code, err.message)}`);
-
-  // Source location. `resolveDiagLocation` centralizes the three-level fallback
+  // Source location resolved FIRST so the header can drop a `(line N, col N)`
+  // that the `-->` line below is about to repeat verbatim (S385).
+  //
+  // `resolveDiagLocation` centralizes the three-level fallback
   // (top-level field → `.span` field, with the middle `?? diag.col` level) so
   // every compile formatter surfaces a diagnostic's location identically — incl.
   // TS-stage TSErrors (E-STATE-UNDECLARED, E-SCOPE-001, …) that carry it ONLY on
   // `.span`. build.js / dev.js already use this exact chain.
   const { file: errFile, line: errLine, col: errCol } = resolveDiagLocation(err);
+
+  // Header: error code + message. The location strip is gated on errFile too —
+  // the `-->` line below only prints when a FILE resolved, so stripping on line
+  // alone would delete coordinates that nothing replaces.
+  const label = c.bold(c.red("error"));
+  const code = err.code ? c.dim(`[${err.code}]`) : "";
+  const errMsg = errFile
+    ? stripRedundantLocation(stripRedundantCode(err.code, err.message), errLine, errCol)
+    : stripRedundantCode(err.code, err.message);
+  parts.push(`${label}${code ? " " + code : ""}: ${errMsg}`);
+
   if (errFile) {
     const relPath = relative(cwd, errFile);
     const loc = errLine ? `:${errLine}${errCol ? ":" + errCol : ""}` : "";
@@ -419,11 +428,17 @@ export function formatWarning(warn, cwd) {
     (warn.code && warn.code.startsWith("I-"));
   const label = isInfo ? c.bold(c.cyan("info")) : c.bold(c.yellow("warning"));
   const code = warn.code ? c.dim(`[${warn.code}]`) : "";
-  let msg = `${label}${code ? " " + code : ""}: ${stripRedundantCode(warn.code, warn.message)}`;
 
   // Same shared location resolution as formatError — `:line:col` shape (col only
-  // when present), incl. the `.span` fallback. Mirrors build.js:918.
+  // when present), incl. the `.span` fallback. Mirrors build.js:918. Resolved
+  // before the header so a baked-in `(line N, col N)` the `-->` repeats can be
+  // dropped (S385) — gated on warnFile, since that is what gates the `-->`.
   const { file: warnFile, line: warnLine, col: warnCol } = resolveDiagLocation(warn);
+  const warnMsg = warnFile
+    ? stripRedundantLocation(stripRedundantCode(warn.code, warn.message), warnLine, warnCol)
+    : stripRedundantCode(warn.code, warn.message);
+  let msg = `${label}${code ? " " + code : ""}: ${warnMsg}`;
+
   if (warnFile) {
     const relPath = relative(cwd, warnFile);
     const loc = warnLine ? `:${warnLine}${warnCol ? ":" + warnCol : ""}` : "";

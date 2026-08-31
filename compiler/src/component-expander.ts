@@ -4680,6 +4680,11 @@ export function runCEFile(
       ceErrors
     );
     if (importedChannelAliases.size > 0) {
+      // S385 — fail CLOSED on a mount inside a conditional/iterative container
+      // BEFORE expanding. CHX cannot wire such a mount (see
+      // reportChannelMountsInConditionals), and accepting it half-wired would
+      // ship dead markup at exit 0.
+      reportChannelMountsInConditionals(expandedNodes, importedChannelAliases, ceErrors);
       phase2Nodes = expandChannels(
         expandedNodes,
         importedChannelAliases,
@@ -4799,6 +4804,327 @@ function buildImportedChannelAliases(
     }
   }
   return result;
+}
+
+/**
+ * S385 — refuse a cross-file channel MOUNT placed inside a conditional or
+ * iterative container, loudly and by name.
+ *
+ * `g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`.
+ *
+ * ## Why this is a REFUSAL and not a widening
+ *
+ * CHX (§38.12.2) inlines a channel by replacing the mount node IN PLACE:
+ * "Replace M with deepClone(decl)". For a mount at `<program>` level that lands
+ * the channel's cells, its `export function`s and its WebSocket layer at FILE
+ * scope, which is exactly what §38.12.3's per-IMPORTER cell mirror requires.
+ *
+ * A mount inside a `<match>` arm or an `<each>` body cannot satisfy that
+ * contract, and the gap is not one missing walk — it is structural:
+ *
+ *   - EVERY collector that feeds channel emission descends `node.children`
+ *     only, and a `<match>` is `kind: "match-block"` with NO `children` (arm
+ *     bodies live in `armBodyChildren`). `collectChannelNodes`,
+ *     `collectChannelFunctionMap`, `collectChannelCellMap` (`emit-channel.ts`)
+ *     and `collectFunctions` (`codegen/collect.ts`) all miss it. Measured on an
+ *     arm mount vs a top-level mount: the channel's exported `beat` reaches
+ *     `.server.js` 0 times vs 1, and the consumer bundle carries 1 cell
+ *     init/set vs 4.
+ *   - An each-bearing bare-body arm is BLANKED by ast-builder (S316,
+ *     `:15922-15975`) to avoid the S153 `collectEachBlocks` double-emit and its
+ *     body is stashed as RAW TEXT, so at CE time the mount is not even a node.
+ *     ⚑ That case is consequently NOT DETECTED — see the scope note below.
+ *   - Even with every collector taught to descend, the type-system binds the
+ *     inlined cells in the ARM's lexical scope while the runtime mirror is
+ *     file-scoped — so a read outside the match still fails. Closing that means
+ *     hoisting, which contradicts §38.12.2's in-place algorithm and is a SPEC
+ *     amendment, not a bug fix.
+ *
+ * Accepting the shape while wiring only part of it would be a fail-closed →
+ * fail-open move: the compile goes green and the app ships dead markup (the raw
+ * `<alias/>` tag emitted verbatim into the HTML string) plus a cell that never
+ * syncs. Base §8 admits a newly-accepting change as a bug fix ONLY where it
+ * restores conformance; half-wiring restores nothing. So this fails CLOSED and
+ * names the one-line fix.
+ *
+ * ## ⚑ SCOPE — this check is NODE-PATH ONLY, and that is a ruled fail-open
+ *
+ * Detection walks the AST and nothing else. There are THREE places it does not
+ * reach, and this list is meant to be exhaustive — if you find a fourth, add it
+ * here rather than leaving the claim to enumerate standing while it is false.
+ * (Hole 3 arrived exactly that way: the S385 round-4 revision of this note
+ * claimed TWO and an `<engine>` state-child mount was found immediately after.
+ * Then hole 4 arrived the same way against round 6's claim of THREE, and it was
+ * CLOSED rather than added — see the closed-holes section after hole 3. The
+ * count is three because one of the four is fixed, not because four were never
+ * found.)
+ *
+ * ### 1. An each-bearing bare-body `<match>` arm
+ *
+ * ast-builder (S316) BLANKS such an arm before CE runs and its body survives
+ * only as a raw source string, so there is no tree to ask. What the author
+ * actually experiences splits in two, and only one half is silent — measured by
+ * compiling both:
+ *
+ *   - mount + a `${@cell}` READ of the channel → **fails CLOSED**, but with the
+ *     MISLEADING `E-STATE-UNDECLARED` on the read (the originally reported
+ *     symptom, unchanged by this check). This is the adopter's exact shape.
+ *   - mount + NO read → **compiles clean at exit 0 and ships the raw
+ *     `<alias/>` tag as dead markup**. This is the silent fail-open.
+ *
+ * **Known, filed, and deliberate.**
+ *
+ * An earlier revision did scan that text stash. It was DELETED because a text
+ * scan cannot tell a mount from a mention: a `<!-- don't mount <probeChan/>
+ * here -->` comment inside such an arm made a VALID file uncompilable, and the
+ * same is true of any `<pre>` block, doc block or string literal naming the
+ * alias. Masking comments and strings was considered and REJECTED as the
+ * enumerate-forever shape — the rule is don't ask the text what the tree
+ * already knows, and where the tree cannot be asked the answer is to stop
+ * asking, not to guess more carefully.
+ *
+ * ### 2. A `<match>` whose `armBodyChildren` never materialised
+ *
+ * The arm walk below is guarded on `Array.isArray(rec.armBodyChildren)`, and
+ * ast-builder's wrapper builder returns `undefined` on FOUR paths — a missing
+ * or non-string `armsRaw`, a `parseMatchArms` THROW, a parse yielding zero
+ * arms, and a build yielding zero wrappers. When it does, the ENTIRE match
+ * block is skipped and no mount anywhere inside it is detected, whether or not
+ * any arm is each-bearing.
+ *
+ * This is not a regression — base was equally blind — but it is a real hole and
+ * the enumeration above would be dishonest without it.
+ *
+ * ### 3. A mount that is a DIRECT `kind: "markup"` child of an `<engine>` body
+ *
+ * A mount inside a state-child BODY (`<Done rule=.Idle><probeChan/></>`) IS
+ * caught — that is the reported shape. A mount that is a direct MARKUP entry of
+ * `engine-decl.bodyChildren`, i.e. a SIBLING of the state-children, is not.
+ *
+ * Direct markup entries cannot be classified without a variant-name oracle: a
+ * state-child is author-written markup whose tag IS a variant name
+ * (`<Done rule=.Idle>`), and the AST carries no marker separating it from a
+ * mount — measured, the two have identical key sets. Firing there would
+ * false-accuse a channel alias colliding with a variant name, which is the
+ * round-3 blocker class and strictly worse than the miss. The engine's
+ * `governedType` plus `ast.typeDecls` WOULD resolve same-file enums, but not
+ * imported ones, so it buys a partial oracle for a real false-positive risk.
+ *
+ * The residual is narrow: such a mount emits NOTHING — no tag, no wiring — so
+ * it is silent, but it is also a shape with no plausible authoring intent.
+ *
+ * ⚑ The qualifier "`kind: "markup"`" in this heading is load-bearing and was
+ * added in round 7. Round 6 wrote this hole as "a direct child" and applied the
+ * never-classify discipline to EVERY direct entry, which silently swallowed a
+ * FOURTH hole — a direct `<each>` / `<match>`, whose body lives in
+ * `bodyChildren` / `armBodyChildren` rather than `.children`. That is now
+ * CLOSED (see the walk below); the ambiguity described here is markup-specific
+ * and does not extend to structural blocks.
+ *
+ * Do not "restore coverage" for any of these by re-adding a text scan. Closing
+ * hole 1 properly means giving CE a walkable arm body (an ast-builder/S316
+ * change), which is its own arc.
+ *
+ * ## ⚑ CLOSED, and recorded so the enumeration above reads as a live list
+ *
+ * **Hole 4 (round 6, CLOSED in round 7): an `<each>` or `<match>` as a DIRECT
+ * entry of `engine-decl.bodyChildren`.** Round 6's engine loop marked every
+ * direct entry `seen` and then walked only its `.children`; a structural block
+ * has none, so its entire body was permanently unreachable and a mount inside
+ * it compiled at exit 0 with zero wiring. Pinned by
+ * `integration/s385-channel-mount-in-match-arm.test.js` ("engine body", both
+ * directions). Listed here rather than deleted because the point of the
+ * enumeration is that it is CHECKED — a hole that vanishes without a trace
+ * teaches the next round nothing.
+ *
+ * ⚑ Needs a `§34` catalog row for `E-CHANNEL-MOUNT-IN-CONDITIONAL` — SPEC is
+ * PA-owned and deliberately untouched here. That row must NOT claim the
+ * `_reparseEachArmBodyRaw` text stash is scanned; it is not.
+ */
+const CHANNEL_MOUNT_CONTAINER_LABEL: Record<string, string> = {
+  "match-block": "a `<match>` arm",
+  "each-block": "an `<each>` body",
+  "engine-decl": "an `<engine>` state-child body",
+};
+
+/**
+ * The SHORT noun for the same container, for the message's trailing
+ * back-reference ("… including inside this <noun>").
+ *
+ * Kept in lockstep with CHANNEL_MOUNT_CONTAINER_LABEL above. That clause was
+ * previously hardcoded to "this arm", so a mount inside an `<each>` body
+ * printed "is mounted inside an `<each>` body … including inside this arm" —
+ * naming a construct that is not there.
+ */
+const CHANNEL_MOUNT_CONTAINER_NOUN: Record<string, string> = {
+  "match-block": "arm",
+  "each-block": "`<each>` body",
+  "engine-decl": "state-child body",
+};
+
+function reportChannelMountsInConditionals(
+  nodes: ASTNode[],
+  aliases: Map<string, { imported: string; sourceKey: string }>,
+  errors: CEError[],
+): void {
+  if (aliases.size === 0) return;
+
+  const fire = (alias: string, containerKind: string, span: Span | undefined): void => {
+    const where = CHANNEL_MOUNT_CONTAINER_LABEL[containerKind] ?? "a conditional container";
+    const noun = CHANNEL_MOUNT_CONTAINER_NOUN[containerKind] ?? "container";
+    errors.push(makeCEError(
+      "E-CHANNEL-MOUNT-IN-CONDITIONAL",
+      `E-CHANNEL-MOUNT-IN-CONDITIONAL: the cross-file channel \`<${alias}/>\` is mounted inside ${where}. ` +
+      `A channel is an app-scope singleton (§38.1) and CHX inlines it in place (§38.12.2), so a mount ` +
+      `inside a conditional or iterative container cannot emit the channel's cells, its exported ` +
+      `functions, or its WebSocket route — the tag would be emitted verbatim into the markup and every ` +
+      `\`@cell\` read of it would resolve to a cell that never syncs. ` +
+      `Fix: move \`<${alias}/>\` out to \`<program>\` level. Its cells stay readable everywhere in the ` +
+      `file, including inside this ${noun} — mount position does not scope a channel.`,
+      (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Span,
+    ));
+  };
+
+  // ⚑ The mount is attributed to its NEAREST enclosing conditional container,
+  // and the walk NEVER classifies an arm wrapper node itself.
+  //
+  // Both points are load-bearing and each closes a defect found by review:
+  //
+  //  1. `match-block.armBodyChildren` holds SYNTHETIC wrapper nodes fabricated
+  //     by ast-builder (`:15965` and `:15990`) as
+  //     `{kind:"markup", tag: arm.variantName}` — structurally indistinguishable
+  //     from author-written markup. Searching the wrapper ARRAY meant a channel
+  //     alias that happened to equal an enum VARIANT NAME matched the
+  //     fabrication, so
+  //         import { "probe" as Ready } … ; <Ready/> at <program> level
+  //     was refused for being "inside a `<match>` arm" while sitting correctly
+  //     at top level — an unfollowable instruction, on a file that compiles
+  //     clean on `main`. The walk therefore descends into each wrapper's
+  //     `.children` and never tests the wrapper.
+  //
+  //  2. Attributing each mount to its NEAREST container reports it EXACTLY
+  //     ONCE. The previous shape had every container search its own subtree, so
+  //     a mount inside a nested `<match>` was reported twice (outer and inner)
+  //     with different spans, which nothing de-duplicated.
+  const walk = (
+    node: unknown,
+    container: { kind: string; span?: Span } | null,
+    seen: Set<unknown>,
+  ): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, container, seen);
+      return;
+    }
+
+    const rec = node as Record<string, unknown>;
+    const kind = typeof rec.kind === "string" ? rec.kind : "";
+
+    if (kind === "match-block" || kind === "each-block" || kind === "engine-decl") {
+      const here = { kind, span: rec.span as Span | undefined };
+
+      // §51.0 — an `<engine>` state-child body is variant-guarded rendering,
+      // exactly like a `<match>` arm, and `_expandChannelNode` cannot reach it
+      // either (it descends `markup`/`state`/`logic` only, and an engine is
+      // `kind: "engine-decl"`). A channel mounted in one compiled at exit 0
+      // with ZERO diagnostics, shipped the raw `<alias/>` tag into clientJs and
+      // emitted no `_scrml_ws` wiring at all — the same silent dead-channel
+      // outcome as the `<match>` case.
+      //
+      // Direct entries of `bodyChildren` THAT ARE `kind: "markup"` are NEVER
+      // classified, for the same reason arm wrappers are not: a state-child is
+      // author-written markup whose TAG is a variant name (`<Done rule=.Idle>`),
+      // so an alias colliding with a variant would be false-accused — the
+      // round-3 blocker class, and the AST carries no marker distinguishing the
+      // two (measured: a mount node and a state-child node have identical key
+      // sets). Their `.children` ARE walked, which is where a mount
+      // unambiguously lives.
+      //
+      // ⚑ S385 round 7 — THE `kind: "markup"` QUALIFIER IS THE WHOLE FIX, and
+      // its absence was hole 4. The state-child ambiguity is markup-SPECIFIC: a
+      // state-child is BY DEFINITION a direct `bodyChildren` entry of
+      // `kind: "markup"`, so a direct entry of ANY OTHER kind cannot be one and
+      // carries no oracle problem. Round 6 nonetheless applied the
+      // `seen.add(wr)` + walk-`.children`-only discipline to EVERY direct entry
+      // — and a structural block keeps its body in `bodyChildren` /
+      // `armBodyChildren`, never in `.children`. So
+      //
+      //     <engine for=LoadPhase initial=.Idle>
+      //         <each in=@rows as r><probeChan/></each>
+      //         <Idle rule=.Done></>
+      //     </>
+      //
+      // walked `undefined`, and the `seen.add` then made the whole subtree
+      // permanently unreachable. Traced on the built AST, not inferred:
+      // `engine-decl.bodyChildren[1]` is `kind: "each-block"` with keys
+      // `[…,bodyChildren,templateChildren,…]` and NO `children`. Measured
+      // before the fix: exit 0, guard 0, `_scrml_ws` 0, and
+      // `document.createElement("probeChan")` in the client bundle — the same
+      // silent dead channel the arm case ships. (Pre-existing; base is equally
+      // blind. Same hole for a direct `<match>`, whose body is in
+      // `armBodyChildren`.)
+      //
+      // Recursing normally is safe BY CONSTRUCTION, not merely by measurement:
+      // `fire()` has ONE call site, gated `kind === "markup" && aliases.has(tag)
+      // && container`, so the only new firings possible are on markup nested
+      // INSIDE a non-markup direct entry — author markup, which cannot be a
+      // state-child (state-children are direct entries). The nearest-container
+      // attribution also stays correct: re-entering `walk` on an `each-block` /
+      // `match-block` hits the container branch above, which rebinds `here` to
+      // that block, so the message names `<each>`/`<match>` rather than the
+      // engine.
+      if (kind === "engine-decl" && Array.isArray(rec.bodyChildren)) {
+        for (const w of rec.bodyChildren) {
+          const wr = w as Record<string, unknown> | null;
+          if (!wr || typeof wr !== "object") continue;
+          if (wr.kind !== "markup") {
+            // Not a state-child candidate — no oracle problem, so walk it as an
+            // ordinary node and let its own kind decide the container label.
+            walk(wr, here, seen);
+            continue;
+          }
+          seen.add(wr);
+          walk(wr.children ?? null, here, seen);
+        }
+      }
+
+      if (kind === "match-block" && Array.isArray(rec.armBodyChildren)) {
+        for (const w of rec.armBodyChildren) {
+          const wr = w as Record<string, unknown> | null;
+          if (!wr || typeof wr !== "object") continue;
+          // The wrapper is synthetic — mark it seen so it is never classified
+          // as a mount, then descend into the author's actual arm body.
+          seen.add(wr);
+          walk(wr.children ?? null, here, seen);
+        }
+      }
+
+      // Remaining child-bearing fields (each bodies, the match raw-text node).
+      // `bodyChildren` is skipped for an engine ONLY — it was handled above with
+      // the state-child discipline. An `each-block` reaches its body through
+      // `bodyChildren` and must still be walked here.
+      for (const key of Object.keys(rec)) {
+        if (key === "span" || key === "id" || key === "parent" || key === "armBodyChildren") continue;
+        if (kind === "engine-decl" && key === "bodyChildren") continue;
+        walk(rec[key], here, seen);
+      }
+      return;
+    }
+
+    if (kind === "markup" && typeof rec.tag === "string" && aliases.has(rec.tag) && container) {
+      fire(rec.tag, container.kind, (rec.span as Span | undefined) ?? container.span);
+      return;
+    }
+
+    for (const key of Object.keys(rec)) {
+      if (key === "span" || key === "id" || key === "parent") continue;
+      walk(rec[key], container, seen);
+    }
+  };
+
+  walk(nodes, null, new Set());
 }
 
 /**

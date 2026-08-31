@@ -1,0 +1,9 @@
+export <channel name="probe">
+    ${
+        <items> = []
+        <stamp> = ""
+        export function beat(n) {
+            @stamp = `tick ${n}`
+        }
+    }
+</>
