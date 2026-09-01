@@ -18,6 +18,10 @@
 import { getNodes } from "./collect.ts";
 import { extractReactiveDepsFromAST, forEachIdentInExprNode, emitStringFromTree } from "../expression-parser.ts";
 import { findMapEntryColon } from "../type-system.ts";
+// §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
+// `if=`/`else-if=`/`else` chain keeps its branch bodies. Every collector below
+// asks it rather than hand-rolling a 14th copy of the fact.
+import { ifChainChildNodes } from "../ast-if-chain.js";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -217,6 +221,14 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -279,6 +291,14 @@ export function collectDerivedVarNames(fileAST: Record<string, unknown>): Set<st
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -341,6 +361,14 @@ export function collectStructuralDeclNames(fileAST: Record<string, unknown>): Se
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -486,6 +514,14 @@ export function collectMapVarNames(fileAST: Record<string, unknown>): Set<string
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -551,6 +587,14 @@ export function collectSetVarNames(fileAST: Record<string, unknown>): Set<string
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -630,6 +674,14 @@ export function buildFnReturnMapKinds(
         if (Array.isArray(n.consequent)) visit(n.consequent);
         if (Array.isArray(n.alternate)) visit(n.alternate);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n));
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) visit(n.body);
     }
   }
@@ -778,6 +830,14 @@ export function collectLocalMapSetNames(
         if (Array.isArray(n.consequent)) scanStatements(n.consequent);
         if (Array.isArray(n.alternate)) scanStatements(n.alternate);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") scanStatements(ifChainChildNodes(n));
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) {
         scanStatements(n.body);
       }
@@ -838,6 +898,14 @@ export function collectAllLocalMapSetNames(
         if (Array.isArray(n.consequent)) visit(n.consequent);
         if (Array.isArray(n.alternate)) visit(n.alternate);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n));
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) visit(n.body);
       if (n.kind === "try-stmt") {
         if (Array.isArray(n.body)) visit(n.body);
@@ -906,6 +974,14 @@ export function collectRequestIds(fileAST: Record<string, unknown>): Set<string>
         if (Array.isArray(n.consequent)) visit(n.consequent as unknown[]);
         if (Array.isArray(n.alternate)) visit(n.alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) {
         visit(n.body as unknown[]);
       }
@@ -1027,6 +1103,14 @@ export function collectRequestBodyCells(
         if (Array.isArray(n.consequent)) visit(n.consequent as unknown[]);
         if (Array.isArray(n.alternate)) visit(n.alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) {
         visit(n.body as unknown[]);
       }
@@ -1103,6 +1187,14 @@ export function collectOrderedMapVarNames(
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -1362,6 +1454,14 @@ export function collectSynthCellKeys(fileAST: Record<string, unknown>): Set<stri
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
@@ -1469,6 +1569,14 @@ export function collectCompoundLeafTargets(
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
       }
+      // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`. NONE of
+      // the container edges above reach those bodies: `branches` holds RECORDS,
+      // not nodes, and `elseBranch` is a single object rather than an array.
+      // A lone `if=` is never collapsed, which is why adding a `<div else>`
+      // sibling was the ONLY variable between a wired cell and a dead one.
+      if (n.kind === "if-chain") visit(ifChainChildNodes(n) as unknown[]);
       if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }

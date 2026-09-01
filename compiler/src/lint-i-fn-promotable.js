@@ -49,6 +49,7 @@
  */
 
 import { checkFnBodyProhibitions } from "./type-system.ts";
+import { ifChainChildNodes } from "./ast-if-chain.js";
 
 /**
  * Lint diagnostic shape returned to api.js. Mirrors I-MATCH-PROMOTABLE.
@@ -181,6 +182,13 @@ function collectFunctionDecls(node, out) {
       collectFunctionDecls(v, out);
     }
   }
+  // §17.1.1 if-chain — the branch bodies live under `branches[].element` +
+  // `elseBranch`, neither of which is in the key list above, and `branches`
+  // holds RECORDS so listing it would not help. A `function` declared inside
+  // an `if=`/`else` branch was never harvested, so I-FN-PROMOTABLE went
+  // silent on it — MEASURED 1 / 1 / 0 across plain / lone-`if=` /
+  // `if=`+`else`. Child SHAPE via `ifChainChildNodes` (ast-if-chain.js).
+  for (const branchBody of ifChainChildNodes(node)) collectFunctionDecls(branchBody, out);
 }
 
 /**
@@ -226,6 +234,11 @@ function collectNonPureFnNames(file) {
         visitForNonPure(v);
       }
     }
+    // §17.1.1 if-chain — MUST stay in lockstep with `collectFunctionDecls`
+    // above. This set is what makes the E-FN-003 "fn calls a non-pure fn"
+    // probe faithful; if the harvest reaches a branch-declared `function`
+    // and this set does not, a `fn` calling it is wrongly tagged promotable.
+    for (const branchBody of ifChainChildNodes(node)) visitForNonPure(branchBody);
   }
 }
 

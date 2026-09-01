@@ -9,6 +9,9 @@ import { isMetaKind } from "../types/ast.ts";
 // on load, and the whole client bundle — including the §65.6 theme-switch
 // reflection — never runs → the theme is DOA).
 import { collectThemeContext, collectThemeTokenNames } from "./emit-theme-reset.ts";
+// §17.1.1 if-chain child SHAPE — one module owns where a collapsed
+// `if=`/`else-if=`/`else` chain keeps its branch bodies. See ast-if-chain.js.
+import { ifChainChildNodes } from "../ast-if-chain.js";
 
 // ---------------------------------------------------------------------------
 // Local AST type — loosely typed to match the plain-object AST produced by
@@ -272,6 +275,25 @@ export function collectTopLevelLogicStatements(fileAST: FileAST): Node[] {
       if (Array.isArray(node.children) && !DEFERRED_LIFECYCLE_BODY_TAGS.has(node.tag)) {
         visit(node.children);
       }
+      // §17.1.1 if-chain — THE MODULE-INIT LIMB, and the one that decides whether
+      // a cell declared inside a branch EXISTS at runtime.
+      //
+      // `collapseIfChains` (ast-builder.js) rewrites an `if=`/`else-if=`/`else`
+      // chain WITH an else arm into `{kind:"if-chain", branches:[{condition,
+      // element}], elseBranch}`. The `node.children` descent above reaches
+      // neither: `branches` holds `{condition, element}` RECORDS, and
+      // `elseBranch` is a single object. So a `${ <n>: number = 7 }` inside a
+      // branch was never collected as a top-level statement and NO
+      // `_scrml_cs_reactive_set` / `_scrml_cs_init_set` was ever emitted for it.
+      // The page rendered blank at exit 0 with zero diagnostics; the lone-`if=`
+      // twin of the same source emitted both and subscribed its reads.
+      //
+      // Descending through the SAME `visit` is deliberate: the branch bodies are
+      // ordinary markup nodes, so the DEFERRED_LIFECYCLE_BODY_TAGS guard above
+      // applies to a `<timer>`/`<poll>`/`<timeout>` nested inside a branch
+      // exactly as it does at top level. Hoisting the guard here instead would
+      // have re-opened g-timer-poll-body-runs-once-at-module-init for chains.
+      for (const branchBody of ifChainChildNodes(node)) visit([branchBody]);
     }
   }
   visit(nodes);

@@ -85,6 +85,9 @@ import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, col
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
+// §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
+// `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
+import { ifChainChildNodes } from "./ast-if-chain.js";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
 import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes, programHasServeAttr, getToolServeConfig, resolveServePort, collectToolProgramChannels } from "./tool-program.ts";
 // §38.13 (realtime feed over external DB writes) — synthesize the per-feed
@@ -13390,6 +13393,68 @@ function annotateNodes(
               }
             }
           }
+        }
+        resolvedType = tAsIs();
+        break;
+      }
+
+      // ------------------------------------------------------------------
+      // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain that HAS an else
+      // arm, collapsed by `collapseIfChains` (ast-builder.js) into
+      // `{kind:"if-chain", branches:[{condition, element}], elseBranch}`.
+      // ------------------------------------------------------------------
+      //
+      // WHY THIS CASE EXISTS. Without it the node fell to `default`, which
+      // recurses only into ARRAY fields whose entries carry a `.kind`. Neither
+      // field qualifies: `branches` is an array of `{condition, element}`
+      // RECORDS (no `kind`, so the entries are skipped) and `elseBranch` is a
+      // single object, not an array. **The entire chain subtree was therefore
+      // invisible to TS** — not merely untyped, UNVISITED — and that is a
+      // two-sided defect measured on this reproducer:
+      //
+      //   FALSE POSITIVE (the one that rejects a legal program): a `<m>`
+      //   declared inside a branch body was never bound into `scopeChain`, so
+      //   a later `${@m.size}` OUTSIDE the chain fired E-STATE-UNDECLARED.
+      //   SPEC §6.1.1 + the §6.1.2 Read bullet say that declaration IS in
+      //   scope, so the program is legal and the compiler was wrong.
+      //
+      //   FALSE NEGATIVE: `${@undeclaredCell}` INSIDE a branch body fired
+      //   nothing at all, then emitted a live `_scrml_cs_reactive_get` for it.
+      //
+      // A lone `if=` is never collapsed and stays plain markup, which is why
+      // "add a `<div else>` sibling" is the one-variable discriminator, and why
+      // the lone-`if=` shape is the parity oracle for this case: markup
+      // children introduce no scope, so descending the branch bodies at the
+      // CURRENT scope reproduces the lone-`if=` binding placement exactly.
+      //
+      // Child SHAPE comes from `ifChainChildNodes` (ast-if-chain.js) — the one
+      // module that knows where an if-chain keeps its children — so the next
+      // §17.1.1 branch-carrying field is added in ONE place, not a seventh.
+      //
+      // ⚠ SCOPE — AND THE PREDICATES ARE IN IT, WHICH IS NOT OBVIOUS FROM THE
+      // ONE LINE OF CODE BELOW. An earlier version of this comment claimed the
+      // opposite ("branch BODIES only; `else-if=@typo` still accepted
+      // unchecked"). That was wrong, and wrong in the direction that matters:
+      // it disclaimed a migration this commit had already paid.
+      //
+      // The `if=` / `else-if=` / `show=` predicate is an ATTRIBUTE ON THE BRANCH
+      // ELEMENT, and `branches[].element` is exactly what `ifChainChildNodes`
+      // returns. So visiting a branch body routes its element through the
+      // `case "markup"` arm, whose `for (const attr of n.attrs)` loop reaches
+      // the predicate and scope-checks it like any other attribute value.
+      // `branches[].condition` is a REDUNDANT second copy of the same
+      // predicate, not the only path to it — which is why not visiting it
+      // costs nothing.
+      //
+      // MEASURED: `<div else-if=@typocell>` in a chain exits 0 with zero
+      // diagnostics on `8a677477` and exits 1 with `E-SCOPE-001` here. And the
+      // whole corpus migration of this commit — 8 new `E-SCOPE-001` across 6
+      // files — is attribute-position on chain members (5x `if=`, 1x `show=`,
+      // 2x `if=`), with ZERO coming from a branch body. The predicate surface
+      // is not a future gap; it is the entire delta.
+      case "if-chain": {
+        for (const branchBody of ifChainChildNodes(n)) {
+          visitNode(branchBody);
         }
         resolvedType = tAsIs();
         break;
