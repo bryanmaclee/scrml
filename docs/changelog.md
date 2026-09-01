@@ -1,6 +1,30 @@
 # scrml — Recent Fixes & Work In Flight
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
+
+## S392 — 2026-08-31 (peter · P-Tech1 Windows) — two `<each>`-interp codegen fixes, and a ledger that was inflated with already-closed gaps
+
+Two silent-wrong `<each>`-interp bugs fixed (PR #805, gate-green), plus the recurring lesson that
+the gap ledger's open-count carries fixes that already landed — the actual "cluster" work this
+session was as much correcting stale markers as writing code.
+
+- **`<each>`/`<match>` inside an `if`/`else` chain rendered NOTHING** (HIGH, `g-each-in-if-else-chain-emits-zero-renderers`).
+  An `else` limb turns the `<div if=>` into an `if-chain` AST node whose bodies live under
+  `branches[].element`/`elseBranch` — a blind spot **six** hand-rolled walks (the each/match block
+  collectors, stamp walks, engine lookup, and the dependency-graph E-DG-002 reader sweep) never
+  descended, so renderers were never emitted (blank list at exit 0) and two FALSE "unused variable"
+  warnings fired. Fixed all six; also closes the sibling `<match>`-under-if/else drop.
+- **Value-form `if` calling a markup-returning fn stringified to `[object HTMLSpanElement]`** (MED,
+  `g-each-value-form-if-markup-fn-call-branch-stringifies`). The value-form `if` already lowered to
+  the same ternary as the working `${cond ? a : b}` form, but the markup-capability discriminant
+  never saw the `if-stmt`; taught it to, so it now mounts the node like the ternary.
+- **Delta-lint trio (3 HIGH) confirmed already fixed (S365, #646/#652)** — the anti-drift gate's
+  emoji-kind blindness, zero-population vacuity, and `--fix` corruption were all closed months ago
+  with passing regression tests; the `status=open` markers were stale. Flipped to resolved on
+  evidence (currency drain). Honest HIGH-open **65 → 61**.
+- Bite-proven regression tests for both code fixes; full unit+integration suite shows no new fails
+  vs. the pre-existing Windows baseline. FACTS + gap-counts regenerated.
+
 ## S391 — 2026-08-31 (bryan · ASUS-Vivobook) — six instruments were wrong, and every one read as fine
 
 **12 PRs merged.** The landings matter less than what they proved about the things we measure with:
