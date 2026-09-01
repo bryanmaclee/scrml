@@ -61,6 +61,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { nsId } from "./chunk-namespace.ts";
+import { ifChainChildNodes } from "../ast-if-chain.js";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
@@ -157,10 +158,10 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
     // `<match>` inside a guarded branch is still collected — otherwise the whole
     // match controller is silently dropped (blank at exit 0). Branch bodies are
     // NOT a new iteration scope, so the enclosing each iter var carries through.
-    // (g-each-in-if-else-chain-emits-zero-renderers, sibling <match> drop.)
+    // Child shape via `ifChainChildNodes` (ast-if-chain.js), shared with the six
+    // sibling walks. (g-each-in-if-else-chain-emits-zero-renderers, <match> drop.)
     if (node.kind === "if-chain") {
-      for (const br of node.branches ?? []) walk(br.element, eachIterVar);
-      if (node.elseBranch) walk(node.elseBranch, eachIterVar);
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, eachIterVar);
       return;
     }
     // Recurse into known container fields. Mirror engine-decl + match-block
@@ -223,8 +224,10 @@ function findEngineVarForType(forType: string, fileAST: any): string | null {
     // `elseBranch`) so an `<engine>` declared inside a guarded branch is still
     // found for an auto-implied match `on=`. (Same if-chain blind-spot class.)
     if (node.kind === "if-chain") {
-      for (const br of node.branches ?? []) { walk(br.element); if (result !== null) return; }
-      if (node.elseBranch) walk(node.elseBranch);
+      for (const branchBody of ifChainChildNodes(node)) {
+        walk(branchBody);
+        if (result !== null) return;
+      }
       return;
     }
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms"]) {
@@ -1093,10 +1096,11 @@ function restampEachBlockIds(nodes: any[], matchId: number, armTag: string): any
     // §17.1.1 if-chain — branch bodies (`branches[].element` + `elseBranch`) are
     // not among the generic keys below; descend so an each nested in a guarded
     // branch inside a match arm still receives its per-arm id stamp.
+    // Child shape via `ifChainChildNodes` (ast-if-chain.js), shared with the six
+    // sibling walks.
     // (g-each-in-if-else-chain-emits-zero-renderers, sibling id-stamp walk.)
     if (node.kind === "if-chain") {
-      for (const br of node.branches ?? []) walk(br.element);
-      if (node.elseBranch) walk(node.elseBranch);
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
       return;
     }
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "emptyChild"]) {

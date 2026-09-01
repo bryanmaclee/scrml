@@ -30,6 +30,8 @@
  * @module lint-w-each-key
  */
 
+import { ifChainChildNodes } from "./ast-if-chain.js";
+
 /**
  * Walk every each-block in the file AST.
  * @param {object} fileAST
@@ -51,6 +53,21 @@ function walkEachBlocks(fileAST, visit) {
       if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren);
       if (Array.isArray(node.templateChildren)) walk(node.templateChildren);
       if (node.emptyChild) walk(node.emptyChild);
+      return;
+    }
+    // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain that HAS an else arm is
+    // collapsed by the TAB into an `if-chain` node whose branch bodies live under
+    // `branches[].element` + `elseBranch`, NONE of the generic keys below. Without
+    // this descent an `<each>` under a guarded branch was invisible to the lint and
+    // W-EACH-KEY-001 never fired — and since the sibling collector fix
+    // (g-each-in-if-else-chain-emits-zero-renderers) that `<each>` now compiles to a
+    // REAL `_scrml_reconcile_list` with index identity, so the adopter gets wrong
+    // DOM reuse on reorder/delete with no diagnostic at all. Pre-fix the missing
+    // lint was inert only because the whole subtree emitted zero renderers.
+    // Same shared child-shape enumerator as the six emit/DG walks.
+    // (g-each-in-if-else-chain-key-lint-blind.)
+    if (node.kind === "if-chain") {
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
       return;
     }
     for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren"]) {

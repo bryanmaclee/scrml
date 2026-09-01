@@ -48,6 +48,7 @@ import type {
 } from "./types/ast.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
+import { ifChainChildNodes } from "./ast-if-chain.js";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
 import { forEachIdentInValidators, forEachQualifiedCellRefInValidators } from "./validator-arg-parser.ts";
 // SB3 (`g-dg-class-attr-interp-not-consumed`) — the SINGLE source of truth for
@@ -3251,15 +3252,14 @@ export function runDG(input: DGInput): DGOutput {
       // the branch children. Same false-positive class as the each-block (SB1) /
       // match-block (SB2) raw-capture fixes above.
       // (g-each-in-if-else-chain-emits-zero-renderers, DG reader-credit half.)
+      // Child shape via `ifChainChildNodes` (ast-if-chain.js), shared with the
+      // six sibling walks. NOTE: unlike those, this site deliberately does NOT
+      // `return` — it falls through to the generic recursion below, which is
+      // what credits the rest of the node.
       if ((node as Record<string, unknown>).kind === "if-chain") {
-        const chain = node as unknown as {
-          branches?: Array<{ element?: ASTNode }>;
-          elseBranch?: ASTNode | null;
-        };
-        for (const br of chain.branches ?? []) {
-          if (br.element) sweepNodeForAtRefs(br.element);
+        for (const branchBody of ifChainChildNodes(node)) {
+          sweepNodeForAtRefs(branchBody as ASTNode);
         }
-        if (chain.elseBranch) sweepNodeForAtRefs(chain.elseBranch);
       }
 
       // Recurse into children/body/consequent/alternate.
