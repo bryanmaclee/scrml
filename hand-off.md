@@ -78,6 +78,21 @@ extracted `ast-if-chain.js`; #811 closed ten more.** Still open, all filed:
 - Maps are **STALE at `2ec2ce3a`** against HEAD `0f398b95` and wrap-6c was **NOT run** (context).
   Ten source files changed since the stamp. A dev dispatch must treat map claims as hypotheses.
 
+### 4. S394-peter — aM pin READY TO BUMP (adopter-ops, no compiler work owed)
+
+- **The `854a6a9b` scrml pin on `../assetManagement` can bump to HEAD.** S394 dog-fooded the real
+  aM app on HEAD (`adc61f15`): compiles clean (`scrml build --validate-emit`, 200 routes, 0 errors),
+  `_scrml_region_track` is defined + wired into `_scrml_nav_rewire` in emitted client JS, all routes
+  SSR 200, client bootstraps clean, Home→Fleet→Home SPA soft-nav swaps cleanly (NO stacked-views
+  regression), and Peter confirmed all 10 portal views. The functional pass the S382 note called the
+  last de-risk is DONE. No scrml defect found. See [[assetmanagement-pin-blocked-off-head-by-region-track]].
+- **Concrete action (peter-lane, whenever):** repoint `scrml-pinned` → HEAD (or a chosen SHA) and
+  update `assetManagement/app/run.cmd` + `serve.cmd` `SCRML_BIN` from `...\scrml-pinned\...` to
+  `...\scrml\...`. Peter's own S104 per-diem-mask WIP is uncommitted in the aM tree — leave it.
+- Two ENV-only footnotes (pre-existing, NOT HEAD regressions, moot in prod HTTPS): native `?{}` bakes
+  cwd-relative `sqlite:app.db` ignoring `SCRML_DB_PATH`; the `__Host-scrml_sid` cookie is flaky in a
+  browser-extension tab on `http://localhost`. Neither is a scrml gap.
+
 ---
 
 ## 🔭 DURABLE FINDINGS

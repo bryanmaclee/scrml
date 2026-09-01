@@ -2,6 +2,26 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S394 — 2026-09-01 (peter · P-Tech1 Windows) — assetManagement dog-food on scrml HEAD: the pin blocker is gone, pin ready to bump
+
+A dog-food/verification session, no compiler source touched. Compiled and ran Peter's real
+`assetManagement` field app against current scrml HEAD (`adc61f15`) end-to-end — the `_scrml_region_track`
+SPA regression that pinned aM to `854a6a9b` is resolved, and the full live functional pass (the last
+remaining de-risk) is complete. No scrml defect surfaced (honest clean result).
+
+- **aM compiles clean on HEAD** — `scrml build --validate-emit`, 5 files / 200 routes / 0 errors
+  (advisory warnings only; the `E-DG-002` "unused variable" ones are true positives — real write-only
+  reactive vars in the 2655-line god-file, not compiler false positives).
+- **The pin blocker is verifiably gone** — `_scrml_region_track` is a defined `function` referenced in
+  `_scrml_nav_rewire` in emitted client JS; all routes SSR 200; client bootstraps with zero console
+  errors; Home→Fleet→Home SPA soft-nav swaps cleanly with **no stacked-views regression**; all 10
+  portal views confirmed working. **The `854a6a9b` pin can bump to HEAD.**
+- **Two environment-only footnotes** (pre-existing, not HEAD regressions, moot in production HTTPS):
+  the native `?{}` SQL bakes a cwd-relative `sqlite:app.db` that ignores `SCRML_DB_PATH`; and the
+  `__Host-scrml_sid` session cookie is flaky in a browser-extension tab on `http://localhost`.
+- Ran concurrently with S393-bryan (whose floor-drain #807 + #805 fix-round merged mid-wrap); stayed
+  fully off that surface — zero collision.
+
 ## S393 — 2026-09-01 (bryan · ASUS-Vivobook) — the session where verification kept changing the answer
 
 **Seven PRs merged** (#805 #807 #808 #809 #810 #811, +#806 pre-boot). Boot 32.3%.
