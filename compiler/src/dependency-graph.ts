@@ -48,6 +48,7 @@ import type {
 } from "./types/ast.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
+import { ifChainChildNodes } from "./ast-if-chain.js";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
 import { forEachIdentInValidators, forEachQualifiedCellRefInValidators } from "./validator-arg-parser.ts";
 // SB3 (`g-dg-class-attr-interp-not-consumed`) — the SINGLE source of truth for
@@ -3238,6 +3239,29 @@ export function runDG(input: DGInput): DGOutput {
           }
         }
       }
+      // §17.1.1 if-chain — an `if=`/`else` chain (else/else-if present) is
+      // collapsed by the TAB into an `if-chain` node whose branch bodies live
+      // under `branches[].element` + `elseBranch`, none of the generic list keys
+      // below. Without descending them the whole guarded subtree is invisible to
+      // the E-DG-002 reader sweep, so it false-fires "declared but never
+      // consumed" on both the branch predicate cell (`if=@open`) AND every cell
+      // read inside the branch body (`<each in=@items>`), telling the adopter to
+      // delete cells that ARE in use. Each `branch.element` is the original
+      // markup node still carrying its `if=`/`else-if=` attr, so re-sweeping it
+      // credits the predicate via the normal markup attr path AND recurses into
+      // the branch children. Same false-positive class as the each-block (SB1) /
+      // match-block (SB2) raw-capture fixes above.
+      // (g-each-in-if-else-chain-emits-zero-renderers, DG reader-credit half.)
+      // Child shape via `ifChainChildNodes` (ast-if-chain.js), shared with the
+      // six sibling walks. NOTE: unlike those, this site deliberately does NOT
+      // `return` — it falls through to the generic recursion below, which is
+      // what credits the rest of the node.
+      if ((node as Record<string, unknown>).kind === "if-chain") {
+        for (const branchBody of ifChainChildNodes(node)) {
+          sweepNodeForAtRefs(branchBody as ASTNode);
+        }
+      }
+
       // Recurse into children/body/consequent/alternate.
       // When recursing into a markup node's children, increment markupChildDepth
       // so that bare-expr nodes encountered within emit markup-read edges (Shape 1).

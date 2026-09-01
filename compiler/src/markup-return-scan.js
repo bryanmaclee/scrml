@@ -136,6 +136,32 @@ export function interpMayYieldNode(node, markupFns) {
   if (k === "ternary") {
     return interpMayYieldNode(node.consequent, markupFns) || interpMayYieldNode(node.alternate, markupFns);
   }
+  // g-each-value-form-if-markup-fn-call-branch-stringifies — a §17.6 value-form
+  // `if cond { badge(x) } else { badge(y) }` interp lowers (emit-each
+  // `_eachValueFormIfRaw`) to the SAME ternary the twin ternary form produces,
+  // but the if-stmt carries no `exprNode` at the interp site so this discriminant
+  // never saw it → the each-interp emitter picked the String() text path and the
+  // returned DOM node stringified to `[object HTMLSpanElement]`. Recurse the
+  // branch bodies (a bare-expr's `exprNode` is the branch value; `alternate` may
+  // be a nested if-stmt for an else-if cascade), so a value-form-if whose branch
+  // CALLS a markup-returning fn is recognized as markup-capable — exactly like
+  // the ternary. A non-markup branch set still returns false (text path, unchanged).
+  if (k === "if-stmt") {
+    const branches = [];
+    const c = node.consequent ?? node.body;
+    if (c != null) branches.push(c);
+    if (node.alternate != null) branches.push(node.alternate);
+    for (const br of branches) {
+      const arr = Array.isArray(br) ? br : [br];
+      for (const s of arr) {
+        if (!s || typeof s !== "object") continue;
+        if (s.kind === "if-stmt") { if (interpMayYieldNode(s, markupFns)) return true; continue; }
+        const en = s.exprNode ?? s;
+        if (interpMayYieldNode(en, markupFns)) return true;
+      }
+    }
+    return false;
+  }
   if (k === "match-expr") {
     const arms = Array.isArray(node.body) ? node.body : Array.isArray(node.arms) ? node.arms : [];
     for (const arm of arms) {

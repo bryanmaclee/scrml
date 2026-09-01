@@ -41,6 +41,7 @@ import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
+import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
@@ -404,6 +405,22 @@ export function collectEachBlocks(fileAST: any): EachBlockAstNode[] {
       if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, enclosingEachIterVar);
       return;
     }
+    // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain (else present) is
+    // collapsed by the TAB into an `if-chain` node whose branch bodies live
+    // under `branches[].element` (each a markup node with `.children`) +
+    // `elseBranch`, NONE of the generic container keys below. Descend
+    // explicitly so an `<each>` inside a guarded branch is still collected —
+    // otherwise the whole subtree is silently dropped (0 render fns, empty
+    // list at exit 0). Branch bodies are NOT a new iteration scope, so the
+    // enclosing each iter var carries through unchanged. Mirrors the same
+    // descent in component-expander.ts + emit-client.ts walkNodes. The child
+    // SHAPE is owned by `ifChainChildNodes` (ast-if-chain.js) so this walk and
+    // its six siblings cannot drift; the recursion CONTEXT stays here.
+    // (g-each-in-if-else-chain-emits-zero-renderers.)
+    if (node.kind === "if-chain") {
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, enclosingEachIterVar);
+      return;
+    }
     // Recurse into known container fields. Mirror engine-decl + match-block
     // descent shape. Arm bodies / if-bodies / engine bodies are NOT a new
     // iteration scope, so the enclosing each iter var carries through unchanged.
@@ -501,6 +518,16 @@ export function stampArmPayloadEaches(
       // iteration site; descend under the current scope for completeness.
       if (eb.emptyChild) walk(eb.emptyChild, insideNestedScope);
       if (Array.isArray(eb.bodyChildren)) walk(eb.bodyChildren, true);
+      return;
+    }
+    // §17.1.1 if-chain — branch bodies live under `branches[].element` +
+    // `elseBranch`, not the generic keys below; descend so an each nested in a
+    // guarded branch inside a match arm still receives its arm-payload stamp.
+    // Not a new iteration scope → `insideNestedScope` carries through. Child
+    // shape via `ifChainChildNodes` (ast-if-chain.js), shared with the six
+    // sibling walks. (g-each-in-if-else-chain-emits-zero-renderers, stamp walk.)
+    if (node.kind === "if-chain") {
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, insideNestedScope);
       return;
     }
     // Recurse into known container fields. Arm bodies / nested markup are NOT a
@@ -997,6 +1024,22 @@ function renderTemplateChildToJs(
   indent: string,
   engineCtx: EachEngineCtx | null = null,
   parentIsRawContent: boolean = false,
+  // g-each-value-form-if-in-rcdata-body-injects-element-child — true when the
+  // IMMEDIATELY enclosing per-item element is RCDATA (`isRcdataElement`, i.e.
+  // `<textarea>` — the sole `rcdata: true` row in the html-elements registry).
+  // Inside RCDATA a child element is not content: HTML defines the value as the
+  // element's child TEXT, so an element child makes `textarea.value` read `""`
+  // and the adopter's string is GONE (measured in real Chromium — see the header
+  // of tests/browser/g-each-shorthand-rcdata-parent.browser.test.js). This is the
+  // bare-body counterpart of the `:`-shorthand's `shMarkupCapable && !_isRcdataBody`
+  // mount refusal below, reading the SAME `_isRcdataBody` local (s328) so the two
+  // branches cannot drift apart — NOT a second content-model mechanism.
+  // ⚠ Scope is RCDATA and nothing else, deliberately: `<option>` does NOT lose
+  // data and is left on the mounting path (s328 — routing it to a stringified
+  // text write replaced a correct label with "[object HTMLElement]"). Read the
+  // `isRcdataElement` block comment above, and domain.map.md's RESTRICTED CONTENT
+  // MODELS table, before widening this.
+  parentIsRcdata: boolean = false,
   // g-each-component-and-fn-markup-not-mounted (B) — true only for a DIRECT child
   // of the each body (a top-level per-item root, rendered into `_itemFrag`). A
   // standalone `${expr}` there IS the returned reconcile node, so a markup value
@@ -1251,7 +1294,7 @@ function renderTemplateChildToJs(
       const innerFragVar = `_scrml_frag_${nextLocalId()}`;
       lines.push(`${indent}const ${innerFragVar} = document.createDocumentFragment();`);
       for (const grand of (child as any).children) {
-        renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent, engineCtx, childIsRawContent);
+        renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent, engineCtx, childIsRawContent, _isRcdataBody);
       }
       lines.push(`${indent}${elVar}.appendChild(${innerFragVar});`);
     }
@@ -1440,6 +1483,16 @@ function renderTemplateChildToJs(
         // fix direction (b) is the real `W-EACH-VALUE-FORM-CONTROL-FLOW-DROPPED`
         // warning + its §34 catalog row. Do not read this path as loud.
         inner = _eachValueFormIfRaw(stmt) ?? "";
+        // g-each-value-form-if-markup-fn-call-branch-stringifies — feed the
+        // if-stmt to the markupCapable discriminant below. `_eachValueFormIfRaw`
+        // lowers this to the SAME ternary the twin `${cond ? a : b}` form emits,
+        // but the if-stmt carries no `exprNode`, so `interpExprNode` stayed null
+        // and the interp went down the String() text path → a markup-returning
+        // branch call stringified to `[object HTMLSpanElement]`. Setting it here
+        // lets `interpMayYieldNode` (now if-stmt-aware) route a markup-yielding
+        // value-form-if to the mount path, exactly like the ternary. A non-markup
+        // value-form-if returns false there → text path, byte-identical to before.
+        interpExprNode = stmt;
       } else if (typeof stmt.raw === "string") {
         inner = stmt.raw;
       } else {
@@ -1481,7 +1534,24 @@ function renderTemplateChildToJs(
     //   above via exprNodeHasMarkupValue → emitEachPerItemMarkupValue; this hole
     //   is specifically a call whose markup-ness lives in the callee's RETURN,
     //   invisible at the interp site.)
-    const markupCapable = isItemRoot || interpMayYieldNode(interpExprNode, _eachMarkupFnNames);
+    //
+    // g-each-value-form-if-in-rcdata-body-injects-element-child — and the mount
+    // is REFUSED inside an RCDATA parent, exactly as the `:`-shorthand branch
+    // refuses it (`shMarkupCapable && !_isRcdataBody`, same `_isRcdataBody`
+    // local). The population this newly skips is precisely `<textarea>` bodies
+    // (the sole `rcdata: true` registry row) whose interp reaches this recursion
+    // — every member of which loses the adopter's string outright, because a
+    // `<textarea>` holding an element child reports `value === ""`. Such an
+    // interp falls back to the bare text node, which IS legal RCDATA content and
+    // is what this path emitted before `interpExprNode` learned the if-stmt
+    // shape. `isItemRoot` is deliberately OUTSIDE the refusal: `parentIsRcdata`
+    // is only ever set by the enclosing-element recursion, and an item root has
+    // no enclosing per-item element, so the two are mutually exclusive by
+    // construction — the reconcile list's one-node-per-item requirement stands.
+    // `<option>` is NOT covered here (s328: it does not lose data, and lowering
+    // it broke the label instead); read the `isRcdataElement` block comment.
+    const markupCapable =
+      isItemRoot || (interpMayYieldNode(interpExprNode, _eachMarkupFnNames) && !parentIsRcdata);
     emitEachInterpExprToJs(inner, iterVarName, fragmentVar, lines, indent, markupCapable);
     return;
   }
@@ -3213,7 +3283,12 @@ function emitEachReconcileLines(
   });
   const _isSoleItemRoot = _structuralRoots.length === 1;
   for (const child of node.templateChildren) {
-    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, true, _isSoleItemRoot);
+    // parentIsRcdata=false — an each-body TOP-LEVEL root has no enclosing
+    // per-item element, so there is no RCDATA parent to refuse a mount for. The
+    // `isItemRoot=true` mount below is a STRUCTURAL requirement of the reconcile
+    // list (exactly one tracked node per item; a bare text node cannot hold a DOM
+    // child) and is deliberately NOT gated by the RCDATA refusal.
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, false, true, _isSoleItemRoot);
   }
   for (const l of templateLines) lines.push(l);
   popEachReconcileCtx();
