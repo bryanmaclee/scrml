@@ -1,0 +1,8 @@
+<shown> = true
+<hidden> = false
+<n>: int = 5
+
+<div id="out-shown">${ if @shown { "YES" } }</div>
+<div id="out-hidden">${ if @hidden { "YES" } }</div>
+<div id="out-cascade-hit">${ if @n > 8 { "hi" } else if @n > 3 { "mid" } }</div>
+<div id="out-cascade-miss">${ if @n > 99 { "hi" } else if @n > 50 { "mid" } }</div>

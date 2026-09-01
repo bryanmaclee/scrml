@@ -1,0 +1,243 @@
+diff --git a/compiler/src/codegen/emit-control-flow.ts b/compiler/src/codegen/emit-control-flow.ts
+index f8398377..c883a087 100644
+--- a/compiler/src/codegen/emit-control-flow.ts
++++ b/compiler/src/codegen/emit-control-flow.ts
+@@ -2649,8 +2649,8 @@ function _stripStringLiteralsForAwaitScan(line: string): string {
+  * SHAPE CONTRACT (mirrors `isValueFormControlFlowStmt` in emit-html.ts so the
+  * HTML-pass slot allocation and this client-JS-pass value emit always agree):
+  *   - each branch is EXACTLY one value-producing `bare-expr`;
+- *   - an `else` branch is required (a value-form `if` must yield a value on
+- *     every path — an else-less `if` has no false-case value);
++ *   - a trailing `else` branch is OPTIONAL (§17.6.10): when absent the false
++ *     path contributes `not` (§17.6.4) and is emitted as `""`;
+  *   - the only nesting allowed is an `else if` (an if-stmt sole alternate).
+  *
+  * Returns null when the node is not such a pure value-cascade; the caller then
+@@ -2676,13 +2676,19 @@ function _emitIfValueExprInner(node: any, ctx: EmitExprContext): string | null {
+   const thenVal = _soleBareExprValue(node.consequent ?? node.body ?? null, ctx);
+   if (thenVal == null) return null;
+   const alt = node.alternate;
+-  if (!alt) return null; // value-form requires an else
+-  const altArr: any[] = Array.isArray(alt) ? alt : [alt];
+   let elseVal: string | null;
+-  if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
+-    elseVal = _emitIfValueExprInner(altArr[0], ctx); // else-if → nested ternary
++  if (!alt) {
++    // §17.6.10 — no `else`. The false path contributes `not` (§17.6.4), which
++    // renders as nothing; emit `""` so the ternary stays total. This mirrors the
++    // runtime's own absence coercion (`_scrml_render_value`: `v == null ? "" : String(v)`).
++    elseVal = `""`;
+   } else {
+-    elseVal = _soleBareExprValue(altArr, ctx);
++    const altArr: any[] = Array.isArray(alt) ? alt : [alt];
++    if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
++      elseVal = _emitIfValueExprInner(altArr[0], ctx); // else-if → nested ternary
++    } else {
++      elseVal = _soleBareExprValue(altArr, ctx);
++    }
+   }
+   if (elseVal == null) return null;
+   const cond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", ctx);
+diff --git a/compiler/src/codegen/emit-each.ts b/compiler/src/codegen/emit-each.ts
+index a6dfe7d0..f979ec99 100644
+--- a/compiler/src/codegen/emit-each.ts
++++ b/compiler/src/codegen/emit-each.ts
+@@ -849,8 +849,9 @@ function eachRcdataValueExpr(children: any[], iterVarName: string): string | nul
+ // g-each-inline-value-form-if-interp-dropped — build the RAW ternary string for a
+ // §17.6 value-form `if … { a } else { b }` (with else-if cascade) whose branches
+ // are each EXACTLY one NON-markup value `bare-expr`. Returns null when the node is
+-// not a value-form `if` (no `else`, a multi-statement branch, or a markup-valued
+-// branch — the last left to the GITI-032 markup-value path). Mirrors
++// not a value-form `if` (a multi-statement branch, or a markup-valued branch —
++// the last left to the GITI-032 markup-value path). A missing `else` is ADMITTED
++// (§17.6.10) and contributes `""`. Mirrors
+ // emit-control-flow.ts `_emitIfValueExprInner` in SHAPE, but emits the RAW
+ // sub-expression text via `emitStringFromTree` (NOT `emitExprField`), so the
+ // downstream `lowerEachExpr` performs the `@.`/`@cell`/iter-var lowering UNIFORMLY
+@@ -870,13 +871,19 @@ function _eachValueFormIfRaw(node: any): string | null {
+   const thenStr = _eachSoleBareExprRaw(node.consequent ?? node.body ?? null);
+   if (thenStr == null) return null;
+   const alt = node.alternate;
+-  if (!alt) return null; // §17.6 value-form requires an else on every path
+-  const altArr: any[] = Array.isArray(alt) ? alt : [alt];
+   let elseStr: string | null;
+-  if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
+-    elseStr = _eachValueFormIfRaw(altArr[0]); // else-if → nested ternary
++  if (!alt) {
++    // §17.6.10 — no `else`: false path contributes `not` (§17.6.4) → renders as
++    // nothing. Kept in lock-step with emit-control-flow `_emitIfValueExprInner`
++    // and emit-html `isValueFormIfStmt`, both of which admit the else-less form.
++    elseStr = `""`;
+   } else {
+-    elseStr = _eachSoleBareExprRaw(altArr);
++    const altArr: any[] = Array.isArray(alt) ? alt : [alt];
++    if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
++      elseStr = _eachValueFormIfRaw(altArr[0]); // else-if → nested ternary
++    } else {
++      elseStr = _eachSoleBareExprRaw(altArr);
++    }
+   }
+   if (elseStr == null) return null;
+   const condNode = node.condExpr ?? null;
+diff --git a/compiler/src/codegen/emit-html.ts b/compiler/src/codegen/emit-html.ts
+index d89fb1f8..fef944f9 100644
+--- a/compiler/src/codegen/emit-html.ts
++++ b/compiler/src/codegen/emit-html.ts
+@@ -633,8 +633,9 @@ function stmtContainsLiftExpr(node: any): boolean {
+  *     arm (`match-arm-inline`). Block-bodied arms (`.V => { … }`) don't reliably
+  *     produce a value through the value-IIFE and are left to the prior path.
+  *   - an `if cond { a } else { b }` cascade whose every branch is exactly one
+- *     value-producing `bare-expr` (`else if` chains allowed; an `else` is
+- *     required — a value-form `if` must yield a value on every path).
++ *     value-producing `bare-expr` (`else if` chains allowed). A trailing `else`
++ *     is OPTIONAL: when absent, the false path contributes `not` (§17.6.4),
++ *     which the value emitter renders as `""` — so the cascade is still total.
+  *
+  * This is a PURE shape check (no codegen): it is the HTML-pass gate that decides
+  * whether to allocate the render slot, and it is kept in lock-step with the
+@@ -657,7 +658,12 @@ function isValueFormIfStmt(node: any): boolean {
+   if (!node || node.kind !== "if-stmt") return false;
+   if (!isSoleBareExprBranch(node.consequent ?? node.body ?? null)) return false;
+   const alt = node.alternate;
+-  if (!alt) return false; // value-form requires an else
++  // §17.6.10 — an ABSENT `else` is a value-form: the false path contributes `not`
++  // (§17.6.4), which renders as nothing. Before the S391 amendment this returned
++  // false, so `${ if @shown { "YES" } }` allocated NO slot and the branch value was
++  // dropped on the floor as a dangling no-op statement — silent-wrong, zero
++  // diagnostics. The value emitter supplies `""` for the missing arm.
++  if (!alt) return true;
+   const altArr: any[] = Array.isArray(alt) ? alt : [alt];
+   if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
+     return isValueFormIfStmt(altArr[0]); // else-if chain
+diff --git a/compiler/tests/unit/inline-value-form-interp-codegen.test.js b/compiler/tests/unit/inline-value-form-interp-codegen.test.js
+index d09651a4..716505d8 100644
+--- a/compiler/tests/unit/inline-value-form-interp-codegen.test.js
++++ b/compiler/tests/unit/inline-value-form-interp-codegen.test.js
+@@ -119,15 +119,37 @@ describe("inline-value-form-interp — codegen shape", () => {
+     expect(errors.some(e => e.code === "E-MATCH-ARM-MARKUP-IN-VALUE")).toBe(true);
+   });
+ 
+-  test("(ADVERSARIAL — else-less if) an else-less `${ if c { x() } }` is NOT a value-form (no spurious render slot)", () => {
++  // S391 §17.6.10 amendment (ruling: user-voice-scrml.md S371 "value-form b").
++  // This test PREVIOUSLY asserted the inverse — that an else-less `${ if c { x } }`
++  // is NOT a value-form. That assertion was INERT: it matched
++  //   /_scrml_render_value\(el, \(_scrml_reactive_get\("n"\) > 3 \?/
++  // which is unsatisfiable for the value-form shape, because (a) the value always
++  // routes through a `_scrml_cf__scrml_logic_N()` thunk so `_scrml_render_value(el, (`
++  // never occurs, and (b) the emit uses the chunk-scoped `_scrml_cs_reactive_get`.
++  // It therefore pinned nothing. Replaced with the amendment's rule + a BITING
++  // assertion on the actual emitted ternary.
++  test("(§17.6.10 no-else) an else-less `${ if c { v } }` IS a value-form; false path renders as nothing", () => {
++    const src = `<shown> = true
++<p>\${ if @shown { "YES" } }</p>`;
++    const { clientJs, html } = compileToOutputs(src, "ivf-noelse");
++    // The false path contributes `not` (§17.6.4) → emitted as `""`, keeping the
++    // ternary total. Pre-amendment this emitted a DANGLING `"YES";` no-op statement
++    // and the slot rendered EMPTY on both paths — silent-wrong, zero diagnostics.
++    expect(clientJs).toContain('(_scrml_cs_reactive_get("shown") ? "YES" : "")');
++    // A render slot IS allocated, and the value is wired through it reactively.
++    expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
++    expect(clientJs).toMatch(/_scrml_render_value\(el, _scrml_cf__scrml_logic_\d+\(\)\)/);
++    // The value must NOT survive as a bare dangling expression statement.
++    expect(clientJs).not.toMatch(/^\s*"YES";\s*$/m);
++  });
++
++  test("(§17.6.10 no-else cascade) an `else if` chain with NO trailing else terminates in `\"\"`", () => {
+     const src = `<n>: int = 5
+-fn ping() { log("ping") }
+-<p>\${ if @n > 3 { ping() } }</p>`;
+-    const { clientJs } = compileToOutputs(src, "ivf-noelse");
+-    // No else → not a value-form-if → no value-control-flow render wiring.
+-    // The side-effecting body keeps its prior (statement) emit path; it must NOT
+-    // be wrapped in a _scrml_render_value of an if-value.
+-    expect(clientJs).not.toMatch(/_scrml_render_value\(el, \(_scrml_reactive_get\("n"\) > 3 \?/);
++<p>\${ if @n > 8 { "hi" } else if @n > 3 { "mid" } }</p>`;
++    const { clientJs } = compileToOutputs(src, "ivf-noelse-cascade");
++    expect(clientJs).toContain(
++      '(_scrml_cs_reactive_get("n") > 8 ? "hi" : (_scrml_cs_reactive_get("n") > 3 ? "mid" : ""))',
++    );
+   });
+ 
+   test("(ADVERSARIAL — plain `${@cell}` unchanged) primitive interp keeps the textContent path, no value-control-flow", () => {
+diff --git a/conformance/cases/control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos/case.scrml b/conformance/cases/control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos/case.scrml
+new file mode 100644
+index 00000000..8c051b37
+--- /dev/null
++++ b/conformance/cases/control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos/case.scrml
+@@ -0,0 +1,6 @@
++<isAdmin> = true
++<isGuest> = false
++
++<div id="out-admin">${ if @isAdmin { "Admin" } else { "User" } }</div>
++<div id="out-guest">${ if @isGuest { "Admin" } else { "User" } }</div>
++<div id="out-lift">${ if @isAdmin { lift "Admin" } else { lift "User" } }</div>
+diff --git a/conformance/cases/control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos/expected.json b/conformance/cases/control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos/expected.json
+new file mode 100644
+index 00000000..31070cfa
+--- /dev/null
++++ b/conformance/cases/control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos/expected.json
+@@ -0,0 +1,21 @@
++{
++  "id": "ctrl-021-value-form-sugar-lift-less-branch-pos",
++  "description": "§17.6.10 — the VALUE-FORM: an `if` that is the sole content of a markup `${…}` interpolation, every branch exactly one expression, renders the selected branch's value. `#out-admin` takes the true branch ('Admin'), `#out-guest` the false branch ('User'). `#out-lift` writes the SAME shape with an explicit `lift` in each branch and renders identically — pinning the §17.6.10 sugar equivalence (a single-expression branch is equivalent to `{ lift <expression> }`) at the level of OBSERVABLE RESULT. The two forms are NOT required to emit the same JavaScript (§17.6.8 grants IIFE/assign/ternary latitude) and in impl#1 they do not: the value-form lowers to a conditional expression, the explicit-lift form to a lift-target accumulation. This case pins the RESULT equivalence, which is what §17.6.10 asserts.",
++  "language-version": "1.0",
++  "spec": "§17.6.10, §17.6.2, §10.1",
++  "source-test": "compiler/src/codegen/emit-html.ts",
++  "rationale": "§17.6.10 (S391, ruling:user-voice-scrml.md S371 \"value-form b\"): a control-flow statement that is the sole content of a markup `${…}` interpolation and whose every branch is exactly one expression SHALL be a value-form and SHALL render the selected branch's value into the interpolation's position; a branch body that is exactly one expression SHALL be equivalent to `{ lift <expression> }`. Before the S391 amendment the compiler implemented this but SPEC contradicted it in four places — §17.6.1's `arm-body ::= '{' statement* lift-stmt statement* '}'` (a `lift` was REQUIRED), §17.6.2's \"arm body SHALL produce its result value via a `lift` statement\", §17.6.2's \"an arm body that does not contain a `lift` ... contributes `not`\", and §10.1's \"Each arm ... SHALL contain exactly one `lift` statement\". This case pins the amended surface so the sugar cannot silently regress. No diagnostic is expected: the form is valid.",
++  "expect": {
++    "codes": [],
++    "notCodes": [],
++    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-"],
++    "domAnchored": [
++      { "selector": "#out-admin", "count": 1 },
++      { "selector": "#out-admin", "text": "Admin" },
++      { "selector": "#out-guest", "count": 1 },
++      { "selector": "#out-guest", "text": "User" },
++      { "selector": "#out-lift", "count": 1 },
++      { "selector": "#out-lift", "text": "Admin" }
++    ]
++  }
++}
+diff --git a/conformance/cases/control-flow/ctrl-022-value-form-no-else-renders-nothing-pos/case.scrml b/conformance/cases/control-flow/ctrl-022-value-form-no-else-renders-nothing-pos/case.scrml
+new file mode 100644
+index 00000000..7ea4c3af
+--- /dev/null
++++ b/conformance/cases/control-flow/ctrl-022-value-form-no-else-renders-nothing-pos/case.scrml
+@@ -0,0 +1,8 @@
++<shown> = true
++<hidden> = false
++<n>: int = 5
++
++<div id="out-shown">${ if @shown { "YES" } }</div>
++<div id="out-hidden">${ if @hidden { "YES" } }</div>
++<div id="out-cascade-hit">${ if @n > 8 { "hi" } else if @n > 3 { "mid" } }</div>
++<div id="out-cascade-miss">${ if @n > 99 { "hi" } else if @n > 50 { "mid" } }</div>
+diff --git a/conformance/cases/control-flow/ctrl-022-value-form-no-else-renders-nothing-pos/expected.json b/conformance/cases/control-flow/ctrl-022-value-form-no-else-renders-nothing-pos/expected.json
+new file mode 100644
+index 00000000..1b94896e
+--- /dev/null
++++ b/conformance/cases/control-flow/ctrl-022-value-form-no-else-renders-nothing-pos/expected.json
+@@ -0,0 +1,23 @@
++{
++  "id": "ctrl-022-value-form-no-else-renders-nothing-pos",
++  "description": "§17.6.10 / §17.6.4 — a value-form `if` with NO `else`. The trailing `else` is OPTIONAL; when no branch is selected the result is `not`, which renders as NOTHING. `#out-shown` takes the true branch ('YES'); `#out-hidden` selects no branch and renders empty. `#out-cascade-hit` pins that an `else if` cascade with no trailing `else` still selects a matching arm ('mid'); `#out-cascade-miss` pins that falling off the end of such a cascade renders empty. This is a SILENT-WRONG regression guard: before S391 all four of these compiled exit 0 with ZERO diagnostics, emitted the branch value as a dangling no-op expression statement (`\"YES\";`), and rendered EMPTY on every path — the value was dropped on the floor.",
++  "language-version": "1.0",
++  "spec": "§17.6.10, §17.6.4",
++  "source-test": "compiler/src/codegen/emit-html.ts",
++  "rationale": "§17.6.4 had ALREADY ruled the false path: \"An if-as-expression without an `else` arm SHALL have an implicit false-path type of `not`\" and \"The compiler SHALL NOT emit an error or warning for a missing `else` arm.\" §17.6.10 (S391) makes the rendering consequence explicit: the value-form `if` SHALL NOT require a trailing `else`, and the unselected path SHALL render as nothing. The pre-S391 compiler honoured NEITHER half — it did not render the form AND did not refuse it, because the value-form gate rejected a missing alternate (an artifact of the ternary lowering wanting two arms). Fixed at all three lock-step copies (emit-html `isValueFormIfStmt`, emit-control-flow `_emitIfValueExprInner`, emit-each `_eachValueFormIfRaw`), which emit `\"\"` for the absent arm. No diagnostic is expected on any of the four: §17.6.4 forbids one.",
++  "expect": {
++    "codes": [],
++    "notCodes": [],
++    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-"],
++    "domAnchored": [
++      { "selector": "#out-shown", "count": 1 },
++      { "selector": "#out-shown", "text": "YES" },
++      { "selector": "#out-hidden", "count": 1 },
++      { "selector": "#out-hidden", "text": "" },
++      { "selector": "#out-cascade-hit", "count": 1 },
++      { "selector": "#out-cascade-hit", "text": "mid" },
++      { "selector": "#out-cascade-miss", "count": 1 },
++      { "selector": "#out-cascade-miss", "text": "" }
++    ]
++  }
++}

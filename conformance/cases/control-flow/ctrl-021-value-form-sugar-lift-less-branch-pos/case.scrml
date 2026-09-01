@@ -1,0 +1,6 @@
+<isAdmin> = true
+<isGuest> = false
+
+<div id="out-admin">${ if @isAdmin { "Admin" } else { "User" } }</div>
+<div id="out-guest">${ if @isGuest { "Admin" } else { "User" } }</div>
+<div id="out-lift">${ if @isAdmin { lift "Admin" } else { lift "User" } }</div>

@@ -633,8 +633,9 @@ function stmtContainsLiftExpr(node: any): boolean {
  *     arm (`match-arm-inline`). Block-bodied arms (`.V => { … }`) don't reliably
  *     produce a value through the value-IIFE and are left to the prior path.
  *   - an `if cond { a } else { b }` cascade whose every branch is exactly one
- *     value-producing `bare-expr` (`else if` chains allowed; an `else` is
- *     required — a value-form `if` must yield a value on every path).
+ *     value-producing `bare-expr` (`else if` chains allowed). A trailing `else`
+ *     is OPTIONAL: when absent, the false path contributes `not` (§17.6.4),
+ *     which the value emitter renders as `""` — so the cascade is still total.
  *
  * This is a PURE shape check (no codegen): it is the HTML-pass gate that decides
  * whether to allocate the render slot, and it is kept in lock-step with the
@@ -657,7 +658,12 @@ function isValueFormIfStmt(node: any): boolean {
   if (!node || node.kind !== "if-stmt") return false;
   if (!isSoleBareExprBranch(node.consequent ?? node.body ?? null)) return false;
   const alt = node.alternate;
-  if (!alt) return false; // value-form requires an else
+  // §17.6.10 — an ABSENT `else` is a value-form: the false path contributes `not`
+  // (§17.6.4), which renders as nothing. Before the S391 amendment this returned
+  // false, so `${ if @shown { "YES" } }` allocated NO slot and the branch value was
+  // dropped on the floor as a dangling no-op statement — silent-wrong, zero
+  // diagnostics. The value emitter supplies `""` for the missing arm.
+  if (!alt) return true;
   const altArr: any[] = Array.isArray(alt) ? alt : [alt];
   if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
     return isValueFormIfStmt(altArr[0]); // else-if chain

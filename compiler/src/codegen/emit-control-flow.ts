@@ -2649,8 +2649,8 @@ function _stripStringLiteralsForAwaitScan(line: string): string {
  * SHAPE CONTRACT (mirrors `isValueFormControlFlowStmt` in emit-html.ts so the
  * HTML-pass slot allocation and this client-JS-pass value emit always agree):
  *   - each branch is EXACTLY one value-producing `bare-expr`;
- *   - an `else` branch is required (a value-form `if` must yield a value on
- *     every path — an else-less `if` has no false-case value);
+ *   - a trailing `else` branch is OPTIONAL (§17.6.10): when absent the false
+ *     path contributes `not` (§17.6.4) and is emitted as `""`;
  *   - the only nesting allowed is an `else if` (an if-stmt sole alternate).
  *
  * Returns null when the node is not such a pure value-cascade; the caller then
@@ -2676,13 +2676,19 @@ function _emitIfValueExprInner(node: any, ctx: EmitExprContext): string | null {
   const thenVal = _soleBareExprValue(node.consequent ?? node.body ?? null, ctx);
   if (thenVal == null) return null;
   const alt = node.alternate;
-  if (!alt) return null; // value-form requires an else
-  const altArr: any[] = Array.isArray(alt) ? alt : [alt];
   let elseVal: string | null;
-  if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
-    elseVal = _emitIfValueExprInner(altArr[0], ctx); // else-if → nested ternary
+  if (!alt) {
+    // §17.6.10 — no `else`. The false path contributes `not` (§17.6.4), which
+    // renders as nothing; emit `""` so the ternary stays total. This mirrors the
+    // runtime's own absence coercion (`_scrml_render_value`: `v == null ? "" : String(v)`).
+    elseVal = `""`;
   } else {
-    elseVal = _soleBareExprValue(altArr, ctx);
+    const altArr: any[] = Array.isArray(alt) ? alt : [alt];
+    if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
+      elseVal = _emitIfValueExprInner(altArr[0], ctx); // else-if → nested ternary
+    } else {
+      elseVal = _soleBareExprValue(altArr, ctx);
+    }
   }
   if (elseVal == null) return null;
   const cond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", ctx);

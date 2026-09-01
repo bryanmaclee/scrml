@@ -7031,7 +7031,9 @@ Plain `.css` files placed alongside `.scrml` source files are valid CSS. scrml's
 
 1. **Accumulation mode** (original behavior). When `lift` appears in an anonymous `${}` block whose parent is a markup or style context, `lift` appends the value to the block's accumulator array. The accumulated array is coerced when the logic block exits, according to the parent context type (§10.2). This is the original lift behavior and is unchanged.
 
-2. **Value-lift mode**. When `lift` appears inside an if-as-expression context (§17.6), `lift` designates the expression's result value. Each arm of an if-as-expression that wishes to produce a value SHALL contain exactly one `lift` statement. The lifted value becomes the result of the if-as-expression at the binding site.
+2. **Value-lift mode**. When `lift` appears inside an if-as-expression context (§17.6), `lift` designates the expression's result value. Each arm of an if-as-expression that wishes to produce a value SHALL designate that value in exactly one of two ways: an explicit `lift` statement, **or** the §17.6.10 value-form sugar, in which an arm body that is exactly one expression carries an *implied* `lift` of that expression. The designated value becomes the result of the if-as-expression at the binding site.
+
+   > **S391 amendment.** The prior wording — "SHALL contain exactly one `lift` statement" — admitted only the explicit form and therefore contradicted both §17.6.10 and the shipping compiler, which accepts (and has accepted since the value-form landed) a lift-less single-expression arm. The sugar is defined in §17.6.10; this bullet is corrected here so §10 does not assert the opposite of §17.6. The multiplicity rule below ("at most once on any execution path") is unchanged and applies to the implied `lift` exactly as to an explicit one. Ratified S371, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`.
 
 In both modes, a `lift` call initializes `~` to the lifted value (§32.2).
 
@@ -7091,7 +7093,7 @@ A `fn name(...) { ... }` body, by contrast, **does** permit `lift`: it accumulat
 - `lift` SHALL be valid inside an anonymous `${ }` logic context (including the arm bodies of an if-as-expression, which are anonymous `${}` contexts).
 - `lift` SHALL also be valid inside a `fn` body, where it accumulates into the `fn` body's local `~` (§48.5); the `fn` returns the accumulated value with `return ~`. A `lift` inside a `fn` that targets a `~` initialized outside the `fn` boundary SHALL be E-FN-008 (§48.5.2).
 - `lift` inside a bare `function name() { ... }` body SHALL be a compile error (E-SYNTAX-002). E-SYNTAX-002 is scoped to bare `function` bodies and SHALL NOT fire on a `fn` body (§48.5, §48.6).
-- In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002.
+- In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002. This rule bounds MULTIPLICITY, not PRESENCE: it is satisfied by an arm body with no `lift` at all, and the §17.6.10 implied `lift` of a single-expression arm counts as that arm's one `lift` for the purpose of this rule. A single-expression arm body can therefore never trigger E-LIFT-002 (it has exactly one implied `lift` and, by the §17.6.10 grammar, no room for a second).
 - In accumulation mode, `lift` MAY appear multiple times in a single logic block; each call appends one item. In value-lift mode, `lift` is a single-result designator, not an accumulator.
 - The compiler SHALL track all `lift` calls within a logic block and accumulate them into a typed array (accumulation mode only).
 - The compiler SHALL validate that all lifted values are of a compatible type. Lifting heterogeneous types that are not mutually coercible SHALL be a compile error (E-TYPE-012).
@@ -11854,6 +11856,7 @@ if-as-expr    ::= 'if' '(' condition ')' arm-body
                   ('else' arm-body)?
 
 arm-body      ::= '{' statement* lift-stmt statement* '}'
+               |  '{' expression '}'       -- value-form sugar for `{ lift expression }`; §17.6.10
 
 lift-stmt     ::= 'lift' expression ';'
                |  'lift' expression        -- semicolon optional per §3 ASI rules
@@ -11874,7 +11877,7 @@ When an `if`-as-expression executes:
 
 1. The condition is evaluated.
 2. The matching arm body executes.
-3. The arm body SHOULD contain a `lift` statement designating the result value.
+3. The arm body SHOULD contain a `lift` statement designating the result value. An arm body that is exactly one expression designates that expression as the result value without a `lift` — the value-form sugar of §17.6.10.
 4. If no arm body executes (condition false, no `else` arm), the expression result is `not`.
 5. The result value (from the `lift` or `not`) is bound to the LHS variable or used as the expression value.
 
@@ -11882,12 +11885,12 @@ Execution within an arm body is unrestricted: the arm body MAY contain variable 
 
 **Normative statements:**
 
-- An if-as-expression arm body SHALL produce its result value via a `lift` statement.
+- An if-as-expression arm body SHALL produce its result value via a `lift` statement, **or** by being exactly one expression, which is sugar for `lift` of that expression (§17.6.10). These are the only two ways an arm body produces a value.
 - The result of an if-as-expression when no arm body executes SHALL be `not`.
 - The type of an if-as-expression with no `else` arm SHALL be `T | not`, where `T` is the type of the lifted value in the `if` arm (and any `else if` arms).
 - The type of an if-as-expression with a complete if/else chain (all branches covered) SHALL be the union of all lifted value types across all arms. If all arms lift the same type `T`, the result type is `T` (not `T | not`).
 - The compiler SHALL NOT require all arms to lift the same concrete type. If arms lift different types, the result type is their union.
-- An arm body that does not contain a `lift` statement MAY exist; its contribution to the result type is `not`. The compiler SHALL emit W-LIFT-001 (warning, not error) for an arm body that executes no `lift` on any reachable path, unless the arm is intentionally side-effect-only and the full if-as-expression type already includes `not`.
+- An arm body that contains neither a `lift` statement **nor** the §17.6.10 single-expression sugar MAY exist; its contribution to the result type is `not`. The compiler SHALL emit W-LIFT-001 (warning, not error) for an arm body that executes no `lift` on any reachable path, unless the arm is intentionally side-effect-only and the full if-as-expression type already includes `not`. An arm body that IS exactly one expression is NOT such an arm: it carries an implied `lift` (§17.6.10), contributes that expression's type `T`, and SHALL NOT surface W-LIFT-001.
 
 **W-LIFT-001:**
 > W-LIFT-001: Arm body in if-as-expression has no `lift` on any reachable path. This arm contributes `not` to the expression type. If this is intentional (side-effect-only arm), annotate the binding with `: T | not` to suppress this warning.
@@ -12136,6 +12139,99 @@ ${
 ```
 
 The if-as-expression produces `label`. The subsequent `lift <p>` is a separate accumulation lift targeting `<div>`. The two `lift` calls are in different modes: the if-as-expression `lift` is value-lift mode (produces `label`); the `lift <p>` is accumulation mode (appends to `<div>`). The compiler distinguishes by context (§10.7).
+
+#### 17.6.10 Value-Form Control Flow in a Markup Interpolation
+
+**Date added:** 2026-08-31 (S391).
+`provenance: ruling:user-voice-scrml.md S371 "value-form b"`
+
+A control-flow statement written as the **sole content** of a markup `${…}` interpolation, every
+branch of which is exactly one expression, is a **value-form control-flow interpolation** — the
+**value-form** for short. This is the normative name for the shape; it is the surface the adopter
+reaches for when a fragment of rendered content depends on a condition or on an enum variant.
+
+```scrml
+<p>${ if @isAdmin { "Admin" } else { "User" } }</p>
+<p>${ match @view { .List :> "list view"  .Grid :> "grid view" } }</p>
+```
+
+The value-form is **sugar for `lift`**. A branch body that is exactly one expression is equivalent
+to a branch body whose sole statement is `lift` of that expression:
+
+```scrml
+${ if @isAdmin { "Admin" } else { "User" } }          // value-form
+${ if @isAdmin { lift "Admin" } else { lift "User" } } // the form it desugars to
+```
+
+Both produce the same rendered result. They are NOT required to lower to the same JavaScript —
+§17.6.8 already grants the compiler latitude over IIFE / assign-in-branches / ternary — and in the
+current implementation they do not: the value-form lowers to a conditional expression, the explicit
+`lift` form to an accumulation into a lift target. The equivalence asserted here is of **observable
+result**, not of emitted code.
+
+**Syntax:**
+
+```
+value-form-interp ::= '${' value-form-stmt '}'
+
+value-form-stmt   ::= value-form-if | value-form-match
+
+value-form-if     ::= 'if' condition '{' expression '}'
+                      ('else' 'if' condition '{' expression '}')*
+                      ('else' '{' expression '}')?
+
+value-form-match  ::= 'match' expression '{' inline-arm+ '}'
+inline-arm        ::= arm-pattern ':>' expression        -- §18.1 `arm-body ::= expression`
+```
+
+The trailing `else` is OPTIONAL. The `match` limb requires every arm to be an **inline-value arm**
+(an arm whose body is an expression, per the §18.1 grammar `arm-body ::= expression | block-body`);
+a `match` with any block-bodied arm is not a value-form.
+
+**Semantics.** The interpolation renders the selected branch's value, and re-renders reactively when
+any reactive cell read by the condition/scrutinee or by the selected branch changes. When no branch
+is selected — an `if` whose condition is false with no `else`, including the final `else if` of a
+cascade — the result is `not` (§17.6.4), which renders as **nothing**.
+
+**Normative statements:**
+
+- A control-flow statement that is the sole content of a markup `${…}` interpolation and whose every
+  branch is exactly one expression SHALL be a value-form, and SHALL render the selected branch's
+  value into the interpolation's position.
+- A branch body that is exactly one expression SHALL be equivalent to `{ lift <expression> }`. The
+  implied `lift` counts as that branch's single `lift` for the §10 multiplicity rule (E-LIFT-002).
+- A value-form `if` SHALL NOT require a trailing `else`. When the `else` is absent, the false path
+  SHALL contribute `not` per §17.6.4 and SHALL render as nothing. The compiler SHALL NOT emit an
+  error or warning for the missing `else` (§17.6.4 already forbids it).
+- A value-form SHALL re-evaluate reactively on change of any reactive cell it reads.
+- A value-form `match` SHALL require every arm to be an inline-value arm. This is a restriction on
+  the value-form only; it does not narrow the §18.1 `match` grammar generally.
+- The value-form SHALL be available in every markup `${…}` interpolation position, including inside
+  an `<each>` body, where the branch expressions may read the iteration variable.
+
+**Why the sugar, rather than requiring `lift`.** In a markup interpolation the surrounding context
+already establishes that a value is wanted — `${@name}` renders `@name` with no ceremony. Requiring
+`lift` only when a conditional intervenes would bill the adopter for a distinction the position
+already makes. The explicit `lift` form remains valid and is the form to reach for when a branch
+needs statements before producing its value.
+
+**Note — side-effect-only branches.** Because the branch shape is `expression`, a branch that is a
+bare call (`${ if @ready { ping() } }`) is a value-form like any other: the call's return value is
+rendered (a `not`/`undefined` return renders as nothing) and the call re-runs reactively rather than
+once. A markup interpolation is a render position; code run for effect belongs in an event handler
+or an effect context, not in `${…}`.
+
+**Worked example — no `else` (the form this amendment settles):**
+
+```scrml
+<shown> = true
+<p>${ if @shown { "YES" } }</p>
+```
+
+Renders `YES` when `@shown`, and nothing when not. Before this amendment the compiler accepted this
+form, emitted the branch value as a dangling no-op statement, and rendered an empty slot on both
+paths with zero diagnostics — silent-wrong against §17.6.4, which had already ruled the false path
+to be `not`.
 
 ### 17.7 Iteration (`<each>`)
 
@@ -12565,6 +12661,8 @@ initial=.X>`) by changing only the opener (§51).
 - §18.0.1 — block-form syntax + exhaustiveness
 - §18.0.2 — attribute legality inside `<match>` (`rule=` inert; `effect=` / `<onTransition>` forbidden)
 - §18.0.3 — bare-variant inference in arm patterns
+- §17.6.10 — the **value-form**: a JS-style `match` (all arms inline-value) as the sole content of a
+  markup `${…}` interpolation, rendering the selected arm's value into that position
 - §51 — Tier 2 (`<engine>`) where rules become active
 
 #### 18.0.1 Block-form `<match for=Type [on=expr]>`

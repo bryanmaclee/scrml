@@ -849,8 +849,9 @@ function eachRcdataValueExpr(children: any[], iterVarName: string): string | nul
 // g-each-inline-value-form-if-interp-dropped — build the RAW ternary string for a
 // §17.6 value-form `if … { a } else { b }` (with else-if cascade) whose branches
 // are each EXACTLY one NON-markup value `bare-expr`. Returns null when the node is
-// not a value-form `if` (no `else`, a multi-statement branch, or a markup-valued
-// branch — the last left to the GITI-032 markup-value path). Mirrors
+// not a value-form `if` (a multi-statement branch, or a markup-valued branch —
+// the last left to the GITI-032 markup-value path). A missing `else` is ADMITTED
+// (§17.6.10) and contributes `""`. Mirrors
 // emit-control-flow.ts `_emitIfValueExprInner` in SHAPE, but emits the RAW
 // sub-expression text via `emitStringFromTree` (NOT `emitExprField`), so the
 // downstream `lowerEachExpr` performs the `@.`/`@cell`/iter-var lowering UNIFORMLY
@@ -870,13 +871,19 @@ function _eachValueFormIfRaw(node: any): string | null {
   const thenStr = _eachSoleBareExprRaw(node.consequent ?? node.body ?? null);
   if (thenStr == null) return null;
   const alt = node.alternate;
-  if (!alt) return null; // §17.6 value-form requires an else on every path
-  const altArr: any[] = Array.isArray(alt) ? alt : [alt];
   let elseStr: string | null;
-  if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
-    elseStr = _eachValueFormIfRaw(altArr[0]); // else-if → nested ternary
+  if (!alt) {
+    // §17.6.10 — no `else`: false path contributes `not` (§17.6.4) → renders as
+    // nothing. Kept in lock-step with emit-control-flow `_emitIfValueExprInner`
+    // and emit-html `isValueFormIfStmt`, both of which admit the else-less form.
+    elseStr = `""`;
   } else {
-    elseStr = _eachSoleBareExprRaw(altArr);
+    const altArr: any[] = Array.isArray(alt) ? alt : [alt];
+    if (altArr.length === 1 && altArr[0] && altArr[0].kind === "if-stmt") {
+      elseStr = _eachValueFormIfRaw(altArr[0]); // else-if → nested ternary
+    } else {
+      elseStr = _eachSoleBareExprRaw(altArr);
+    }
   }
   if (elseStr == null) return null;
   const condNode = node.condExpr ?? null;
