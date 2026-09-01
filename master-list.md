@@ -105,7 +105,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `8b74b522` — maps(S391): wrap-6c refresh 0dd659a1 -> 2ec2ce3a — four map claims were wrong from birth, and one of them was a false claim of verification (#795) — **pushed**
+- `76f97a59` — wrap(s391): six instruments were wrong and every one read as fine — twelve PRs, six rulings owed, and a concurrent sibling the board could not see (#804) — **pushed**
 - `b0457906` — wrap(s390): both S385 arcs landed, main unblocked, and three gates caught what the others could not (#790) — **pushed**
 - `d02adb68` — wrap(s385): the architecture complaint measured, a ruling mandate granted, and the decision queue opened (#773) — **pushed**
 - `9f75061c` — wrap(s383): two ratified landings, a hand-off rotated 31 sessions late, and three adopter reports mid-wrap (#753) — **pushed**
