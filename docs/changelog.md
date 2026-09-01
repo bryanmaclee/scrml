@@ -2,6 +2,63 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S393 — 2026-09-01 (bryan · ASUS-Vivobook) — the session where verification kept changing the answer
+
+**Seven PRs merged** (#805 #807 #808 #809 #810 #811, +#806 pre-boot). Boot 32.3%.
+
+**The result that matters is not a landing.** Nine adversarial reviews and two fix rounds ran; what
+they produced was **four premises dying on contact with execution, two of them mine**, and three of
+my own instruments returning confident wrong answers.
+
+### Landings
+- **#807** — review floor drained **9 OWED → 0**, verified by re-running the probe. Six carve-out,
+  three finding; code-bearing carve-out rate **0/3**.
+- **#808** — ten verified gap entries + **three corrections to existing entries**, each striking a
+  statement that read as accurate and was not.
+- **#805** — peter's two `<each>`-interp codegen drops, landed only after an S239 pass found a
+  **silent-data-loss regression** (a value-form `if` in a `<textarea>` gained an injected element
+  child; RCDATA + element child reads `value === ""`), a fix round, and a re-review against the new
+  SHA. Landed with ONE known narrow regression (`<title>`), stated in the commit and filed.
+- **#809** — peter's routes answered by execution; return leg written, committed AND pushed.
+- **#810** — the two adopter `Direction:` issues banked as `dpa-038` / `dpa-039`, 21 and 24 days after
+  first being named.
+- **#811** — the **if-chain descent class** closed across ten walks on `ast-if-chain.js`.
+
+### The if-chain class
+`collapseIfChains` rewrites a chain into `{kind:"if-chain", branches:[{condition,element}],
+elseBranch}` — keys no hand-rolled walk recursed into, and `branches` holds RECORDS with no `.kind`.
+#805 fixed six walks; #811 closed ten more. **The dispatch brief's traced root was wrong**: the real
+hole was `type-system.ts`, whose `visitNode` had no case, so the entire chain subtree was unvisited.
+A second brief premise was wrong in the dangerous direction — a comment above a deliberately-TOTAL
+walk that routing would have NARROWED.
+
+**Both halves landed together by design.** Removing the false `E-STATE-UNDECLARED` was correct and
+could not ship alone — it was the last diagnostic in front of the uninitialised-cell hole, so alone it
+converted a loud failure into a silent blank render. `reactive-deps.ts` (13 collectors) + `collect.ts`
+joined the arc; `reactive-deps.ts` alone did NOT clear the bar, producing subscribed reads of a cell
+that is never created.
+
+⚑ **An agent walked into a server leak and backed out.** Closing `collect.ts`'s `collectFunctions`
+emitted a `server fn` BODY into `client.js` with no `server.js`. It ran a control confirming it had
+introduced the leak, reverted, filed HIGH, and shipped a LEAK GUARD proven to red on exactly that
+mistake. Trading a loud `ReferenceError` for a silent server-code-in-client leak is strictly worse.
+
+Evidence: double-emission probed over 2,198 files (40 descents, **0 duplicates**, positive control 16);
+oracle parity on 7 shapes; security scanned **absolute not differential** (2,269 bundles per tip, same
+56 files, byte-identical marker sets); conformance 889/889.
+
+### Owed to bryan
+⚑⚑ **A ratified limb of the S371 value-form ruling was INVERTED** — *"else required on every path"*
+became `SHALL NOT require a trailing else`, on a dispatch brief's authority. Surfaced, not adjudicated.
+Plus `g-if-chain-all-arms-run-at-module-init` (landed knowingly — the property never held; a lone `if=`
+with a FALSE condition fires its body on untouched main) and the bound-sugar HIGH.
+
+### Misses
+A gate poll reported `GATE PASS` off the **previous SHA's** run — merging on it would have claimed a
+green gate that never ran. My first channel-mount reproducer was wrong (a pure-channel file needs
+`export <channel …>`). I nearly reported a cross-repo delivery failure that does not exist (checked:
+9 of 9 delivered). **Three instruments, three wrong answers, none caught by remembering.**
+
 ## S392 — 2026-08-31 (peter · P-Tech1 Windows) — two `<each>`-interp codegen fixes, and a ledger that was inflated with already-closed gaps
 
 Two silent-wrong `<each>`-interp bugs fixed (PR #805, gate-green), plus the recurring lesson that
