@@ -1,0 +1,21 @@
+{
+  "id": "ctrl-021-value-form-sugar-lift-less-branch-pos",
+  "description": "§17.6.10 — the VALUE-FORM: an `if` that is the sole content of a markup `${…}` interpolation, every branch exactly one expression, renders the selected branch's value. `#out-admin` takes the true branch ('Admin'), `#out-guest` the false branch ('User'). `#out-lift` writes the SAME shape with an explicit `lift` in each branch and renders identically — pinning the §17.6.10 sugar equivalence (a single-expression branch is equivalent to `{ lift <expression> }`) at the level of OBSERVABLE RESULT. The two forms are NOT required to emit the same JavaScript (§17.6.8 grants IIFE/assign/ternary latitude) and in impl#1 they do not: the value-form lowers to a conditional expression, the explicit-lift form to a lift-target accumulation. This case pins the RESULT equivalence, which is what §17.6.10 asserts.",
+  "language-version": "1.0",
+  "spec": "§17.6.10, §17.6.2, §10.1",
+  "source-test": "compiler/src/codegen/emit-html.ts",
+  "rationale": "§17.6.10 (S391, ruling:user-voice-scrml.md S371 \"value-form b\"): a control-flow statement that is the sole content of a markup `${…}` interpolation and whose every branch is exactly one expression SHALL be a value-form and SHALL render the selected branch's value into the interpolation's position; a branch body that is exactly one expression SHALL be equivalent to `{ lift <expression> }`. Before the S391 amendment the compiler implemented this but SPEC contradicted it in four places — §17.6.1's `arm-body ::= '{' statement* lift-stmt statement* '}'` (a `lift` was REQUIRED), §17.6.2's \"arm body SHALL produce its result value via a `lift` statement\", §17.6.2's \"an arm body that does not contain a `lift` ... contributes `not`\", and §10.1's \"Each arm ... SHALL contain exactly one `lift` statement\". This case pins the amended surface so the sugar cannot silently regress. No diagnostic is expected: the form is valid.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-"],
+    "domAnchored": [
+      { "selector": "#out-admin", "count": 1 },
+      { "selector": "#out-admin", "text": "Admin" },
+      { "selector": "#out-guest", "count": 1 },
+      { "selector": "#out-guest", "text": "User" },
+      { "selector": "#out-lift", "count": 1 },
+      { "selector": "#out-lift", "text": "Admin" }
+    ]
+  }
+}

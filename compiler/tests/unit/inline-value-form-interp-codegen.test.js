@@ -119,15 +119,37 @@ describe("inline-value-form-interp — codegen shape", () => {
     expect(errors.some(e => e.code === "E-MATCH-ARM-MARKUP-IN-VALUE")).toBe(true);
   });
 
-  test("(ADVERSARIAL — else-less if) an else-less `${ if c { x() } }` is NOT a value-form (no spurious render slot)", () => {
+  // S391 §17.6.10 amendment (ruling: user-voice-scrml.md S371 "value-form b").
+  // This test PREVIOUSLY asserted the inverse — that an else-less `${ if c { x } }`
+  // is NOT a value-form. That assertion was INERT: it matched
+  //   /_scrml_render_value\(el, \(_scrml_reactive_get\("n"\) > 3 \?/
+  // which is unsatisfiable for the value-form shape, because (a) the value always
+  // routes through a `_scrml_cf__scrml_logic_N()` thunk so `_scrml_render_value(el, (`
+  // never occurs, and (b) the emit uses the chunk-scoped `_scrml_cs_reactive_get`.
+  // It therefore pinned nothing. Replaced with the amendment's rule + a BITING
+  // assertion on the actual emitted ternary.
+  test("(§17.6.10 no-else) an else-less `${ if c { v } }` IS a value-form; false path renders as nothing", () => {
+    const src = `<shown> = true
+<p>\${ if @shown { "YES" } }</p>`;
+    const { clientJs, html } = compileToOutputs(src, "ivf-noelse");
+    // The false path contributes `not` (§17.6.4) → emitted as `""`, keeping the
+    // ternary total. Pre-amendment this emitted a DANGLING `"YES";` no-op statement
+    // and the slot rendered EMPTY on both paths — silent-wrong, zero diagnostics.
+    expect(clientJs).toContain('(_scrml_cs_reactive_get("shown") ? "YES" : "")');
+    // A render slot IS allocated, and the value is wired through it reactively.
+    expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
+    expect(clientJs).toMatch(/_scrml_render_value\(el, _scrml_cf__scrml_logic_\d+\(\)\)/);
+    // The value must NOT survive as a bare dangling expression statement.
+    expect(clientJs).not.toMatch(/^\s*"YES";\s*$/m);
+  });
+
+  test("(§17.6.10 no-else cascade) an `else if` chain with NO trailing else terminates in `\"\"`", () => {
     const src = `<n>: int = 5
-fn ping() { log("ping") }
-<p>\${ if @n > 3 { ping() } }</p>`;
-    const { clientJs } = compileToOutputs(src, "ivf-noelse");
-    // No else → not a value-form-if → no value-control-flow render wiring.
-    // The side-effecting body keeps its prior (statement) emit path; it must NOT
-    // be wrapped in a _scrml_render_value of an if-value.
-    expect(clientJs).not.toMatch(/_scrml_render_value\(el, \(_scrml_reactive_get\("n"\) > 3 \?/);
+<p>\${ if @n > 8 { "hi" } else if @n > 3 { "mid" } }</p>`;
+    const { clientJs } = compileToOutputs(src, "ivf-noelse-cascade");
+    expect(clientJs).toContain(
+      '(_scrml_cs_reactive_get("n") > 8 ? "hi" : (_scrml_cs_reactive_get("n") > 3 ? "mid" : ""))',
+    );
   });
 
   test("(ADVERSARIAL — plain `${@cell}` unchanged) primitive interp keeps the textContent path, no value-control-flow", () => {

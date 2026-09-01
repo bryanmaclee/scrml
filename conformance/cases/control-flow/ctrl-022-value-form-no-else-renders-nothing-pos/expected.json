@@ -1,0 +1,23 @@
+{
+  "id": "ctrl-022-value-form-no-else-renders-nothing-pos",
+  "description": "§17.6.10 / §17.6.4 — a value-form `if` with NO `else`. The trailing `else` is OPTIONAL; when no branch is selected the result is `not`, which renders as NOTHING. `#out-shown` takes the true branch ('YES'); `#out-hidden` selects no branch and renders empty. `#out-cascade-hit` pins that an `else if` cascade with no trailing `else` still selects a matching arm ('mid'); `#out-cascade-miss` pins that falling off the end of such a cascade renders empty. This is a SILENT-WRONG regression guard: before S391 all four of these compiled exit 0 with ZERO diagnostics, emitted the branch value as a dangling no-op expression statement (`\"YES\";`), and rendered EMPTY on every path — the value was dropped on the floor.",
+  "language-version": "1.0",
+  "spec": "§17.6.10, §17.6.4",
+  "source-test": "compiler/src/codegen/emit-html.ts",
+  "rationale": "§17.6.4 had ALREADY ruled the false path: \"An if-as-expression without an `else` arm SHALL have an implicit false-path type of `not`\" and \"The compiler SHALL NOT emit an error or warning for a missing `else` arm.\" §17.6.10 (S391) makes the rendering consequence explicit: the value-form `if` SHALL NOT require a trailing `else`, and the unselected path SHALL render as nothing. The pre-S391 compiler honoured NEITHER half — it did not render the form AND did not refuse it, because the value-form gate rejected a missing alternate (an artifact of the ternary lowering wanting two arms). Fixed at all three lock-step copies (emit-html `isValueFormIfStmt`, emit-control-flow `_emitIfValueExprInner`, emit-each `_eachValueFormIfRaw`), which emit `\"\"` for the absent arm. No diagnostic is expected on any of the four: §17.6.4 forbids one.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-"],
+    "domAnchored": [
+      { "selector": "#out-shown", "count": 1 },
+      { "selector": "#out-shown", "text": "YES" },
+      { "selector": "#out-hidden", "count": 1 },
+      { "selector": "#out-hidden", "text": "" },
+      { "selector": "#out-cascade-hit", "count": 1 },
+      { "selector": "#out-cascade-hit", "text": "mid" },
+      { "selector": "#out-cascade-miss", "count": 1 },
+      { "selector": "#out-cascade-miss", "text": "" }
+    ]
+  }
+}
