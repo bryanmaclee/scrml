@@ -404,6 +404,21 @@ export function collectEachBlocks(fileAST: any): EachBlockAstNode[] {
       if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, enclosingEachIterVar);
       return;
     }
+    // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain (else present) is
+    // collapsed by the TAB into an `if-chain` node whose branch bodies live
+    // under `branches[].element` (each a markup node with `.children`) +
+    // `elseBranch`, NONE of the generic container keys below. Descend
+    // explicitly so an `<each>` inside a guarded branch is still collected —
+    // otherwise the whole subtree is silently dropped (0 render fns, empty
+    // list at exit 0). Branch bodies are NOT a new iteration scope, so the
+    // enclosing each iter var carries through unchanged. Mirrors the same
+    // descent in component-expander.ts + emit-client.ts walkNodes.
+    // (g-each-in-if-else-chain-emits-zero-renderers.)
+    if (node.kind === "if-chain") {
+      for (const br of (node as any).branches ?? []) walk(br.element, enclosingEachIterVar);
+      if ((node as any).elseBranch) walk((node as any).elseBranch, enclosingEachIterVar);
+      return;
+    }
     // Recurse into known container fields. Mirror engine-decl + match-block
     // descent shape. Arm bodies / if-bodies / engine bodies are NOT a new
     // iteration scope, so the enclosing each iter var carries through unchanged.
@@ -501,6 +516,16 @@ export function stampArmPayloadEaches(
       // iteration site; descend under the current scope for completeness.
       if (eb.emptyChild) walk(eb.emptyChild, insideNestedScope);
       if (Array.isArray(eb.bodyChildren)) walk(eb.bodyChildren, true);
+      return;
+    }
+    // §17.1.1 if-chain — branch bodies live under `branches[].element` +
+    // `elseBranch`, not the generic keys below; descend so an each nested in a
+    // guarded branch inside a match arm still receives its arm-payload stamp.
+    // Not a new iteration scope → `insideNestedScope` carries through.
+    // (g-each-in-if-else-chain-emits-zero-renderers, sibling stamp walk.)
+    if (node.kind === "if-chain") {
+      for (const br of (node as any).branches ?? []) walk(br.element, insideNestedScope);
+      if ((node as any).elseBranch) walk((node as any).elseBranch, insideNestedScope);
       return;
     }
     // Recurse into known container fields. Arm bodies / nested markup are NOT a

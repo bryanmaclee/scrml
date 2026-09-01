@@ -151,6 +151,18 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
       // (bodyChildren is now seen-guarded; descend with the OUTER iter var so
       // a match-block reachable only via a non-template field still resolves).
     }
+    // §17.1.1 if-chain — an `if=`/`else` chain (else present) is collapsed into
+    // an `if-chain` node whose branch bodies live under `branches[].element` +
+    // `elseBranch`, none of the generic keys below. Descend explicitly so a
+    // `<match>` inside a guarded branch is still collected — otherwise the whole
+    // match controller is silently dropped (blank at exit 0). Branch bodies are
+    // NOT a new iteration scope, so the enclosing each iter var carries through.
+    // (g-each-in-if-else-chain-emits-zero-renderers, sibling <match> drop.)
+    if (node.kind === "if-chain") {
+      for (const br of node.branches ?? []) walk(br.element, eachIterVar);
+      if (node.elseBranch) walk(node.elseBranch, eachIterVar);
+      return;
+    }
     // Recurse into known container fields. Mirror engine-decl + match-block
     // descent shape — children / body / bodyChildren / nodes / arms.
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms"]) {
@@ -206,6 +218,14 @@ function findEngineVarForType(forType: string, fileAST: any): string | null {
         result = meta.varName;
         return;
       }
+    }
+    // §17.1.1 if-chain — descend branch bodies (`branches[].element` +
+    // `elseBranch`) so an `<engine>` declared inside a guarded branch is still
+    // found for an auto-implied match `on=`. (Same if-chain blind-spot class.)
+    if (node.kind === "if-chain") {
+      for (const br of node.branches ?? []) { walk(br.element); if (result !== null) return; }
+      if (node.elseBranch) walk(node.elseBranch);
+      return;
     }
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms"]) {
       if (Array.isArray(node[key])) {
@@ -1069,6 +1089,15 @@ function restampEachBlockIds(nodes: any[], matchId: number, armTag: string): any
       node.id = matchId * 1_000_000 + armHash * 1000 + local;
       local += 1;
       found.push(node);
+    }
+    // §17.1.1 if-chain — branch bodies (`branches[].element` + `elseBranch`) are
+    // not among the generic keys below; descend so an each nested in a guarded
+    // branch inside a match arm still receives its per-arm id stamp.
+    // (g-each-in-if-else-chain-emits-zero-renderers, sibling id-stamp walk.)
+    if (node.kind === "if-chain") {
+      for (const br of node.branches ?? []) walk(br.element);
+      if (node.elseBranch) walk(node.elseBranch);
+      return;
     }
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "emptyChild"]) {
       const v = node[key];

@@ -3238,6 +3238,30 @@ export function runDG(input: DGInput): DGOutput {
           }
         }
       }
+      // §17.1.1 if-chain — an `if=`/`else` chain (else/else-if present) is
+      // collapsed by the TAB into an `if-chain` node whose branch bodies live
+      // under `branches[].element` + `elseBranch`, none of the generic list keys
+      // below. Without descending them the whole guarded subtree is invisible to
+      // the E-DG-002 reader sweep, so it false-fires "declared but never
+      // consumed" on both the branch predicate cell (`if=@open`) AND every cell
+      // read inside the branch body (`<each in=@items>`), telling the adopter to
+      // delete cells that ARE in use. Each `branch.element` is the original
+      // markup node still carrying its `if=`/`else-if=` attr, so re-sweeping it
+      // credits the predicate via the normal markup attr path AND recurses into
+      // the branch children. Same false-positive class as the each-block (SB1) /
+      // match-block (SB2) raw-capture fixes above.
+      // (g-each-in-if-else-chain-emits-zero-renderers, DG reader-credit half.)
+      if ((node as Record<string, unknown>).kind === "if-chain") {
+        const chain = node as unknown as {
+          branches?: Array<{ element?: ASTNode }>;
+          elseBranch?: ASTNode | null;
+        };
+        for (const br of chain.branches ?? []) {
+          if (br.element) sweepNodeForAtRefs(br.element);
+        }
+        if (chain.elseBranch) sweepNodeForAtRefs(chain.elseBranch);
+      }
+
       // Recurse into children/body/consequent/alternate.
       // When recursing into a markup node's children, increment markupChildDepth
       // so that bare-expr nodes encountered within emit markup-read edges (Shape 1).
