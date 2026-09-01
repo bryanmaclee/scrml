@@ -1,6 +1,70 @@
 # scrml — Recent Fixes & Work In Flight
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
+## S391 — 2026-08-31 (bryan · ASUS-Vivobook) — six instruments were wrong, and every one read as fine
+
+**12 PRs merged.** The landings matter less than what they proved about the things we measure with:
+almost every finding was about an INSTRUMENT, not about code.
+
+### The six
+
+1. **The 4(b) mandate's count could never have fired.** It records a PA ruling as `prov=pa-ruled:` on
+   the gap's `@gap` marker; its FIRST exercise ruled *"S386 observation 3"* — a route observation with
+   no marker — so the boot count read 0 while the class had been exercised once. Base §10 recurring
+   inside the mandate written to close a different instance of it. Retroactive entry filed (#793);
+   count now 1. Whether the class should bind non-gap rulings is bryan's.
+2. **The contract promised a guard nobody built.** `{{provenance_fills}}` claimed `state.ts` *"fails
+   LOUD on an unclassified `prov=`"*. It mentions `prov` once, in a comment about a stray `>`. No
+   classifier, no vocabulary, no validation — and 15 kinds already in use, six outside the base table.
+   Struck (scrml-support `710a2c4`).
+3. **The session index fails in BOTH directions.** `isSessionClose` drops every `wrap(sNNN-name)` —
+   12 matched, 5 dropped, all contributor-suffixed — AND admits any subject putting "wrap" after a
+   parenthesised tag: this session's own `maps(S391): wrap-6c …` was indexed as a session anchor and
+   evicted a real one. Filed with NO recommended limb (#796).
+4. **The wrap-6b sweep had been reporting "nothing prunable" since S268.** Ancestry is the wrong
+   predicate under file-delta + squash-merge: 77 of 81 read "UNLANDED", 0 read "landed and clean".
+   Already filed at S326 and unbuilt. Now built (#801) on a CONTENT predicate, bite-proved on two
+   controls, dry-run only, 104 of 104 classified.
+5. **The conformance harness silently drops assertions.** `runAnchored` `continue`s unconditionally
+   after a `count` check, so `text`/`attr`/`value` on the same assertion never execute — **18 inert
+   assertions across 15 case files**, in the corpus §62.2 makes the versioned language contract (#803).
+6. **`tracking` was red on main across four merges and nobody reads it.** Audited 5/1: five
+   dev-watcher cases pass locally in 3.96s (flakes), one (§52.13) is real, one was a stale guard.
+
+### Landed
+
+- **Review floor drained twice** — S390's three (#792), then my own five (#797). Both verified by the
+  COMPLETE file set, not a sampled one.
+- **Maps refreshed** `0dd659a1` → `2ec2ce3a` (#795) after 51 commits behind. **Four claims wrong from
+  birth**, including one asserting `verified:` on a line that is a type declaration — the bad pointer
+  had propagated into a second artifact and picked up a verification stamp in transit. The same wrong
+  line was in the CONTRACT (Rule 7's baseline); struck.
+- **The four routed S389-peter findings VERIFIED before surfacing — four of four needed correction**
+  (#794): two mis-scoped, one severity-inverted, one causal story that does not reproduce. Two HIGH
+  defects surfaced that were in no route at all.
+- **§17.6 value-form amendment** (#802) — ratified S371 *"go. value-form b"*, scoped the same day,
+  **never dispatched in 20 days**. Five contradicting loci reconciled where the ruling named one.
+- **The stale each-scope guard inverted** (#800), and the HIGH it was sitting in front of filed.
+
+### The HIGH worth naming
+
+**`scrml dev` serves an `auth="required"` document unauthenticated at `GET /`** whenever the protected
+doc is not named `index.html`. PA-confirmed two-sided (the index-named control gates correctly, so it
+is the root FALLBACK that is ungated, not the gate). Dev only — prod folds `/` into `/index.html`
+inside the gated loop. ⚑ The S380 fix for this exact class is real and has a regression test — which
+probes `/secure.html` and a case variant and **never probes `/`**.
+
+### Process
+
+S391-peter ran **concurrently and the board could not see him** — no `S391-peter.md` registered, so
+boot step 0.5 read a stale board. Discovered only because an agent's branch diff showed his route
+files as phantom deletions. Nothing collided; that is luck. Return leg sent answering the
+flake-vs-regression question he stated he could not resolve.
+
+Three gates fired and all three were right: pre-commit on a red main (an agent correctly refused to
+`--no-verify` past it), pre-push on a stale `docs/FACTS.md` (*"a stale figure is a false public
+claim"*), and the state gate on drift. Worth holding against `tracking`.
+
 ## S390 — 2026-08-30/31 (bryan · ASUS-Vivobook) — both S385 arcs landed, main unblocked, and three gates caught what the others could not
 
 Six PRs merged. The session's spine was verification: **every arc that reported green had a real defect underneath it**, and each was found by a different instrument than the one that declared success.
