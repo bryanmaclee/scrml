@@ -1465,6 +1465,16 @@ function renderTemplateChildToJs(
         // fix direction (b) is the real `W-EACH-VALUE-FORM-CONTROL-FLOW-DROPPED`
         // warning + its §34 catalog row. Do not read this path as loud.
         inner = _eachValueFormIfRaw(stmt) ?? "";
+        // g-each-value-form-if-markup-fn-call-branch-stringifies — feed the
+        // if-stmt to the markupCapable discriminant below. `_eachValueFormIfRaw`
+        // lowers this to the SAME ternary the twin `${cond ? a : b}` form emits,
+        // but the if-stmt carries no `exprNode`, so `interpExprNode` stayed null
+        // and the interp went down the String() text path → a markup-returning
+        // branch call stringified to `[object HTMLSpanElement]`. Setting it here
+        // lets `interpMayYieldNode` (now if-stmt-aware) route a markup-yielding
+        // value-form-if to the mount path, exactly like the ternary. A non-markup
+        // value-form-if returns false there → text path, byte-identical to before.
+        interpExprNode = stmt;
       } else if (typeof stmt.raw === "string") {
         inner = stmt.raw;
       } else {
