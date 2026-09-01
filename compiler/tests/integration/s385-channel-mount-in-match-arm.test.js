@@ -548,11 +548,23 @@ describe("S385 — supported mount positions stay accepted AND fully wired", () 
     expect(hardErrors(result)).toEqual([]);
   });
 
-  test("OUT-OF-SCOPE GUARD — `<each in=@undeclared>` is still not checked", () => {
-    // S385 brief, Observation 3 / variant G: `<each in=…>` reads are never
-    // routed through the E-STATE-UNDECLARED predicate. Closing that is
-    // newly-REJECTING and owes its own measured migration, so it stays open.
-    // Pinned so the conditional-mount refusal cannot start rejecting it.
+  // #781 landed this case as an OUT-OF-SCOPE GUARD asserting NO hard error:
+  // S385 brief Observation 3 / variant G recorded that `<each in=…>` opener
+  // reads were never routed through the E-STATE-UNDECLARED predicate, so an
+  // undeclared iterable compiled at exit 0. That was an honest scope boundary
+  // when it was written. #785 (`4bc6bc03`) then CLOSED the gap under the S385
+  // 4(b) mandate — the opener expression is now scope-checked through the
+  // shared walker — so the guard's premise is dead and its assertion is
+  // INVERTED here to pin the check that now exists.
+  //
+  // Inverted rather than DELETED, because only ONE half of what the original
+  // `toEqual([])` bought was about the each-opener gap. The other half — and
+  // the reason this case lives in THIS file and THIS describe block — is that
+  // the conditional-mount refusal must not start firing on a shape that mounts
+  // no channel at all. The exact-array assertion below keeps that half at full
+  // strength: it still fails if E-CHANNEL-MOUNT-IN-CONDITIONAL, or any other
+  // hard error, appears alongside the expected one.
+  test("`<each in=@undeclared>` IS scope-checked (#785) — and the mount refusal still does not misfire", () => {
     const consumer = fx("k5/app.scrml", `<program>
     ${D}{
         <phase> = 1
@@ -568,7 +580,20 @@ describe("S385 — supported mount positions stay accepted AND fully wired", () 
       write: false,
       log: () => {},
     });
-    expect(hardErrors(result)).toEqual([]);
+
+    // EXACTLY one hard error, and exactly this code. Deliberately an exact
+    // array and not `toContain`: `toContain` would let the conditional-mount
+    // refusal begin misfiring here undetected, and not-misfiring is precisely
+    // the coverage the original guard carried.
+    const hard = hardErrors(result);
+    expect(hard.map((e) => e.code)).toEqual(["E-STATE-UNDECLARED"]);
+
+    // Sited on the `<each>` OPENER — line 5 of the fixture above, the
+    // `<each in=@totallyUndeclaredName as x>` line — and naming the undeclared
+    // identifier. Without this, the case would pass on any E-STATE-UNDECLARED
+    // raised anywhere in the file rather than pinning the opener check itself.
+    expect(hard[0].message).toContain("totallyUndeclaredName");
+    expect(hard[0].span?.line).toBe(5);
   });
 });
 
