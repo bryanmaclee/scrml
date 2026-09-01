@@ -1,77 +1,146 @@
-# scrml — Session 392 (peter · P-Tech1 Windows) — WRAP
+# scrml — Session 393 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-08-31. Booted `/boot` Profile A onto clean main `76f97a59`. SOLO (S391-bryan +
-S391-peter both WRAPPED at boot). Registered the board FIRST this session. Two code fixes shipped
-on PR #805 (gate-green), a stale-ledger currency drain, and the finding that the peter-lane HIGH
-pool is now largely bryan-owned + inflated with already-closed gaps.
+**Date:** 2026-09-01. Booted `/boot` Profile A onto `adc61f15`. Boot cost **32.3%** (vs the S375
+baseline of 43.0% — the tier-1 rotation and the §13.7 cut are holding). **SOLO**; S392-peter had
+wrapped, his work sitting on then-open PR #805.
+
+**The framing: this session was mostly VERIFICATION, and verification kept changing the answer.**
+Nine reviews and two fix rounds produced findings — but the durable result is that **four separate
+premises died on contact with execution**, two of them mine, and three of my own instruments
+returned confident wrong answers. The landings matter less than that.
 
 ---
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
-### A. S392-peter — in flight (mine)
+### 1. ⚑ RULINGS OWED — six carried, THREE NEW, and three carried ones had their premises move
 
-- **PR #805** (`fix/each-match-in-if-else-chain-collector-descent`) is OPEN, **gate ✅ + windows ✅**,
-  awaiting bryan's merge. Two commits: (1) HIGH — `<each>`/`<match>` under `if`/`else` silently
-  dropped, the `if-chain` blind-spot class across six walks; (2) MED — value-form `if` markup-fn
-  branch mounts. Both gaps marked resolved in `docs/known-gaps.md`. `tracking` red on the PR is the
-  pre-existing advisory dev-watcher+§52.13 set (see B); a §59-HAMT timing flake was re-run green.
-  **Next action: nothing owed unless bryan requests changes — it is clean and needs only a merge.**
-- **RECOMMENDED NEXT SESSION — a reconciliation sweep, not another cluster hunt.** Five stale/
-  mis-scoped ledger findings this session (Cluster 1 drained · markup-fn 2/5 drained · delta-lint
-  3/3 already fixed) say the open-count is inflated with already-closed gaps. Verify-and-flip
-  stale-open markers across the HIGH pool, conservatively (code + resolution commit + passing test
-  before flipping). The reliable open-set source is the `<!-- @gap … status=Z -->` MARKER, not the
-  prose header: `grep -oE '<!-- @gap[^>]*-->' docs/known-gaps.md | grep -oE 'sev=[A-Z]+ status=[a-z-]+' | sort | uniq -c`.
-  See [[scrml-med-shortlist-gaps-stale-verify-first]].
-- **Re-priced, left OPEN honestly:** `g-each-nested-in-fn-body-markup-fn-stringifies` (MED) — the
-  obvious "descend fn bodies" fix is explicitly WRONG (name-collision); needs scope-aware resolution
-  + pass-window rewire, a bigger arc. Its ledger entry documents both roots.
+**Carried from S391, unchanged:** dpa-037 (NaN — *"ok hold on I am not ratifying NaN! TBC"* still
+stands) · the `@`-sigil normative line · 4(b) condition 3.
 
-### B. bryan's SIX owed rulings — CARRIED FORWARD (untouched this session; still his)
+⚑ **THREE carried rulings now rest on CORRECTED premises — re-read before ruling:**
+- **`g-dev-root-path-fallback…`** — the entry said *"dev has a separate root branch instead"*. FALSE.
+  `dev.js:1027` does the SAME `/`→`/index.html` fold INTO the gated loop (that is why the
+  `index.scrml` control 302s). The defect is an **ADDITIONAL ungated branch AFTER the loop**, so
+  limb (b) is "delete the extra branch", not "teach dev to route `/`". Its stated multi-input caveat
+  needs re-deriving on that basis.
+- **`g-conformance-runanchored…`** — its prediction that limb (a) *"will turn some of the 18 RED"*
+  is **FALSIFIED**. Running the real harness with `count` stripped: **RED 0 · ok 15**, bite-proven
+  both directions. Limb (a) is a one-line fix with zero fallout; limb (c) is now the cheap answer.
+- **`g-tracking-job-red-on-main…`** — said the guard repair was *"explicitly NOT fixed here"*. #800
+  fixed it and the named test case no longer exists in `compiler/`. Corrected; gap stays open
+  because the not-a-required-check mechanism is unchanged.
 
-These are S391-bryan's and remain open — I did not touch them. Full context: commit #804 +
-delta-log [1992]-[1995].
+**NEW, all three yours:**
+- ⚑⚑ **A RATIFIED LIMB OF YOUR S371 RULING WAS INVERTED.** You ratified *"else required on every
+  path"*; #802 shipped `SHALL NOT require a trailing else` and flipped the predicate to match, on a
+  dispatch BRIEF's authority. PA-verified on both trees: pre-802 `if (!alt) return false`, post-802
+  `return true`, and `SPEC.md:12203`. The change fixes a real silent-wrong so it may be right on the
+  merits — but it reversed your text without returning to you.
+- **`g-if-chain-all-arms-run-at-module-init`** (MED, landed knowingly). Every arm's `${}` body now
+  runs at module init, last writer wins; §17.1.1 forbids it. Landed because the property NEVER held —
+  a LONE `if=` with a **false** condition still fires its body on untouched main. Closing it means
+  ruling **whether a markup `${}` body is a FILE-SCOPE statement or a BRANCH-SCOPED one**, and the
+  answer changes lone `if=` too. That is the ruling.
+- **`g-value-form-sugar-in-bound-position-emits-null`** (HIGH). #802 put the §17.6.10 sugar on
+  arm-body GENERALLY but the emitters implement it only in the interpolation-sole-content path, so a
+  bound `const label = if (…) { "pos" } else { "neg" }` compiles exit 0 and `label` is ALWAYS null.
 
-| item | why it's bryan's |
-|---|---|
-| **dpa-037** (from S390) | ADVISORY, unratified. *"ok hold on I am not ratifying NaN! TBC"* stands. |
-| **`g-dev-root-path-fallback-serves-a-protected-document-unauthenticated`** (HIGH) | Fix fork: (a) gate the root fallback, or (b) delete it and route `/` through the gated loop as prod does. |
-| **`g-conformance-runanchored-silently-drops-…`** (HIGH) | 18 dropped assertions, each adjudicated ONE AT A TIME. |
-| **`g-recent-sessions-index-drops-named-session-wraps`** (MED) | Filed with no limb — a session anchor is a fact the wrap could record as a trailer/tag. |
-| **4(b) condition 3** | Measured-zero necessary-not-sufficient; changing the class is bryan's by its own terms. |
-| **The `@`-sigil normative line** | No code until it is drawn. |
+**Banked and ready to fire:** `dpa-038` (#509 offline/PWA) · `dpa-039` (#471 enterprise document
+workflows). Both were named in this session's own boot report and had sat 21 and 24 days. Naming is
+not banking.
 
-Plus the four corrected S389-peter route forks (see [1992]-[1995] / commit #804 verification blocks).
+### 2. ⚑ THE if-CHAIN CLASS IS THE SPINE OF THE SESSION AND IT IS NOT CLOSED
 
-### C. `tracking` gate (advisory, pre-existing — not a merge blocker)
+`collapseIfChains` rewrites an `if=`/`else` chain into `{kind:"if-chain", branches:[{condition,
+element}], elseBranch}` — keys no hand-rolled walk recursed into, and `branches` holds RECORDS with
+no `.kind`, so even a generic walk that lists it never reaches `element`. **#805 fixed six walks and
+extracted `ast-if-chain.js`; #811 closed ten more.** Still open, all filed:
 
-Red across recent merges: 5 dev-watcher cases (flakes — pass locally in ~4s; shared deadline-
-sensitive mechanism) + §52.13 (REAL, but a TEST defect — the 404-vs-302 is FS-dependent; the
-security property holds; one-line test fix wants its own dispatch). Both families live in
-`compiler/tests/commands/` which runs in NO blocking job — `tracking` is its only coverage and it
-is advisory. Promotion is a SEQUENCE (fix §52.13, quarantine the watcher family, THEN promote).
+- **`g-collect-functions-branch-decl-vs-server-boundary-routing` (HIGH)** — the next one, and it is
+  SECURITY-GATED. A branch-declared `function` is never defined while its call sites emit unmangled
+  (`ReferenceError` at exit 0) — but closing that walk ALONE puts a `server fn` BODY into
+  `client.js` with no `server.js`, because it feeds the client emitter while the server-boundary
+  ROUTING walk is separately blind. **Close the routing walk FIRST, in the same arc.** A LEAK GUARD
+  test ships and was proven to red on exactly that mistake.
+- `g-timer-in-if-chain-branch-never-starts` (MED, lifecycle emitter, relayed-not-reproduced).
+- ~25 further `symbol-table.ts` walks and 4 further `collect.ts` walks, unmeasured.
+  `collectMarkupNodes` carries a double-emit risk. `reactive-deps.ts` still has 2 of 15 blind
+  (`buildFunctionBodyRegistry`, `stampCompoundDeepSetTargets`) while its new header says
+  "every collector".
+- **The native-parser mirror was never inspected for this class.** Known drift hazard.
+
+### 3. In flight / held
+
+- **Nothing is in flight.** All dispatches landed; both agent worktrees swept clean.
+- `handOffs/incoming/` holds ONE unread item: the **FSP `Initialize`** deliberation (peter → bryan).
+  Deliberately not archived — it is yours.
+- Maps are **STALE at `2ec2ce3a`** against HEAD `0f398b95` and wrap-6c was **NOT run** (context).
+  Ten source files changed since the stamp. A dev dispatch must treat map claims as hypotheses.
 
 ---
 
-## What landed (S392-peter)
+## 🔭 DURABLE FINDINGS
 
-- **PR #805** — two `<each>`-interp codegen fixes (HIGH if-chain class + MED value-form-if markup-fn),
-  6 walks + a DG reader sweep, 2 bite-proven regression tests, FACTS regenerated. Gate-green.
-- **Ledger currency** — delta-lint trio (3 HIGH) confirmed ALREADY FIXED (S365, #646/#652) with
-  passing regression tests; flipped 3 stale-open markers + heading tails to resolved; regenerated
-  `@generated:gap-counts`. Honest HIGH-open **65 → 61** this session.
-- **Continuity** — board registered (S392-peter), delta-log [1996]-[2002], this hand-off, changelog,
-  master-list recent-sessions regen. 3 memories written/updated.
+### A. ⭐⭐ Four premises died on contact with execution — two were mine
+The dispatch brief's traced root (`symbol-table.ts`) was **secondary**; the real hole was
+`type-system.ts`, whose `visitNode` had no case, so the ENTIRE chain subtree was unvisited. My second
+locus (`symbol-table.ts:10642`) was a **comment** above a deliberately-TOTAL walk — routing it
+through the helper would have NARROWED a correct site. Both caught only because the brief carried its
+own verify-instruction. Peter's *"the mount is irrelevant"* was falsified by his own successor's
+matrix; #803's *"it will turn some of the 18 RED"* turned zero.
 
-## In flight / held (unchanged from S391)
+### B. ⭐⭐ An agent walked into a server leak and backed out — that is the behaviour to keep
+Closing `collectFunctions` emitted a `server fn` body into `client.js`. It ran a control to confirm
+it had introduced the leak, reverted, filed it, and left a guard that reds if anyone repeats the
+mistake. **Trading a loud `ReferenceError` for a silent server-code-in-client leak is strictly
+worse** — the fail-loud/fail-silent axis, decided correctly without being asked.
 
-- **Arc (b)** (`worktree-agent-add7025319a51cbb9`) + the **r8 Windows patch** — pre-existing holds,
-  untouched.
-- Two S391 worktrees retained dirty (`agent-a96528615f5c41280`, `agent-adf40fe5528687920`) — content
-  landed via #801/#802; DIRTY is never swept. Not mine to clear.
+### C. ⭐ The same axis decided a landing-ORDER question
+Removing the false `E-STATE-UNDECLARED` was correct AND could not ship alone: it was the last
+diagnostic in front of the uninitialised-cell hole, so alone it converted a loud failure into a
+silent blank render. `reactive-deps.ts` (13 collectors) + `collect.ts` came into the same arc.
+**`reactive-deps.ts` alone did NOT clear the bar** — it produced *subscribed reads of a cell that is
+never created*, which looks like progress and ships the same blank.
 
-## Gaps
+### D. ⭐ A carve-out label can hide the most valuable content
+Three PRs this session were `carve-out` by file surface and carried verification work as their
+CONTENT. The label is right and the note is what matters.
 
-HIGH 61 · MED 195 · LOW 84 (open, per `@gap` markers after this session's flips). Counts in the
-`@generated:gap-counts` block of `docs/known-gaps.md` are authoritative.
+---
+
+## ⚑ MISSES (mine)
+
+1. **★★ A gate poll reported `GATE PASS` off the PREVIOUS SHA's run.** `gh pr checks 805` returned a
+   run whose `headSha` was the pre-push commit, minutes after I pushed. Merging on it would have
+   claimed a green gate that never ran on the fix round. Discriminator: compare the run's `headSha`
+   to what you pushed. Every later poll pins the SHA.
+2. **★★ My first channel-mount reproducer was wrong** — a pure-channel file needs
+   `export <channel …>`; without it the import never resolved and BOTH variants failed identically,
+   which would have read as *"peter's matrix does not reproduce."* Fixed by reading a working corpus
+   pair, not by reasoning harder.
+3. **★ I nearly reported a live cross-repo delivery failure that does not exist.** The wrong-cased
+   `6NZ/` stray still holds 9 message files; I checked each against the real `6nz/handOffs/` before
+   claiming — **9 of 9 delivered.** S140 was recovered; the stray is dead duplicate weight.
+4. **★ `tail -3` on a sorted `git ls-files` is not "the newest."** Caught mid-report while verifying
+   the return leg had landed.
+5. **★ I named the two adopter Direction issues in my own boot report and then did not act on them
+   for most of the session** — the exact S346 failure, on issues already 21 and 24 days old.
+
+**The pattern, and it is the session's real output:** three of my own instruments returned confident
+wrong answers, and none was caught by remembering — each was caught by re-running with the referent
+pinned. Recall is not the control; construction is.
+
+---
+
+## 🧷 STATE
+
+- **main `0f398b95`**, 0/0 clean. **Seven PRs merged**: #805 #807 #808 #809 #810 #811 (+#806 pre-boot).
+- **Gaps:** HIGH 77 · MED 200 · LOW 86 · Nominal 7. **13 new entries filed this session**, every one
+  labelled PA-reproduced-by-execution or RELAYED-UNVERIFIED / INSPECTION-ONLY. **`pa-ruled` count: 1**
+  (unchanged — the 4(b) class has not drifted).
+- **Review floor:** drained 9→0, then 3→0. **Owed again for #809/#810/#811** — the #541 recursion.
+- **Worktrees:** 102. Both this session's agents swept. ⚑ The S393-filed sweep HIGH means
+  `worktree-sweep.ts` still mis-classifies: 2 of 2 SWEEPABLE rows are exclusion artifacts, one on a
+  clean tree holding unlanded work. **Do not act on its rows.**
+- **Mechanical stream:** delta-log `[2003]`–`[2016]` + this wrap's. Do not re-derive from here.
