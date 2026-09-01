@@ -45,6 +45,7 @@ import { resolve, join, relative, sep } from "path";
 import { compileScrml } from "../api.js";
 import { findPromotableChains } from "../lint-i-match-promotable.js";
 import { parseMatchArms } from "../match-statechild-parser.ts";
+import { ifChainChildNodes } from "../ast-if-chain.js";
 
 const isTTY = process.stderr.isTTY && process.stdout.isTTY;
 
@@ -828,6 +829,16 @@ function findIterationSites(file) {
     for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "consequent", "alternate", "components"]) {
       if (Array.isArray(node[k])) walk(node[k]);
     }
+    // §17.1.1 if-chain — the ADOPTER-FACING limb of this blind spot and the
+    // worst of the three lint sites: `scrml promote --each` reported
+    // "1 unchanged (no promotable sites)" on source that plainly carries a
+    // promotable `${for…lift}`, purely because it sat under an `if=`/`else`
+    // chain. A lone `if=` promoted fine. The tool said nothing was there and
+    // was wrong. Child SHAPE via `ifChainChildNodes` (ast-if-chain.js), the
+    // same enumerator the W-EACH-PROMOTABLE lint that ADVERTISES this command
+    // uses, so the lint and the tool can no longer disagree about what a
+    // promotable site is.
+    for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
   }
   walk(file.ast?.nodes ?? file.nodes ?? file);
   if (file.ast?.components) walk(file.ast.components);
@@ -1572,6 +1583,15 @@ function findMatchBlockSites(file) {
     for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "consequent", "alternate", "components", "defChildren"]) {
       if (Array.isArray(node[k])) walk(node[k]);
     }
+    // §17.1.1 if-chain — same blind spot, same shared enumerator, same
+    // adopter-facing symptom as `findIterationSites` above: `scrml promote
+    // --engine` reported "1 unchanged (no promotable sites)" on a `<match>`
+    // carrying inert `rule=` arms purely because it sat under an `if=`/`else`
+    // chain; a lone `if=` promoted fine. MEASURED 1 / 1 / 0 across plain /
+    // lone-`if=` / `if=`+`else`. An earlier probe of this site read as
+    // "cannot discriminate" only because its PLAIN case did not fire either —
+    // that was a defect in the probe, not a property of this walk.
+    for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
   }
   walk(file.ast?.nodes ?? file.nodes ?? file);
   if (file.ast?.components) walk(file.ast.components);

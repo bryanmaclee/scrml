@@ -156,6 +156,13 @@ import {
 // B18 — multi-statement event-handler validation helper.
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
 import { isAuthorMainTag } from "./landmark-tag.ts";
+// §17.1.1 if-chain child SHAPE. `collapseIfChains` (ast-builder.js) rewrites an
+// `if=`/`else-if=`/`else` chain WITH an else arm into `{kind:"if-chain",
+// branches:[{condition,element}], elseBranch}` — none of the container keys the
+// walks below list, and `branches` holds RECORDS, so even listing `branches`
+// among generic keys never reaches `element`. One shared enumerator, so the next
+// branch-carrying field is added in ONE place. See ast-if-chain.js.
+import { ifChainChildNodes } from "./ast-if-chain.js";
 // B14 fix — `resolveModulePath` is the path-shape normalizer used by MOD when
 // it builds `exportRegistry` (keys are absolute, post-`resolveModulePath`).
 // Import-binding `sourcePath` is the LITERAL `imp.source` string — typically
@@ -1663,6 +1670,20 @@ function walk(
     if (Array.isArray(anyN.arms)) {
       for (const arm of anyN.arms) {
         if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats, visited, inEngineBody);
+      }
+    }
+    // §17.1.1 if-chain — the branch bodies live under `branches[].element` +
+    // `elseBranch`, which are NONE of the container keys above. Without this,
+    // a `<m>` declared inside an `if=`/`else` branch was never registered and
+    // every later `@m` read fired a FALSE `E-STATE-UNDECLARED` — SPEC §6.1.2's
+    // Read bullet says the declaration IS in scope, so the program is legal
+    // and the compiler was wrongly rejecting it. A lone `if=` (never collapsed)
+    // is why "add an `<div else>` sibling" is the one-variable discriminator.
+    // Child SHAPE via `ifChainChildNodes` (ast-if-chain.js), shared with the
+    // six walks PR #805 rewired; the scope threading stays here.
+    if (kind === "if-chain") {
+      for (const branchBody of ifChainChildNodes(anyN)) {
+        walk([branchBody], currentScope, stats, visited, inEngineBody);
       }
     }
     // Phase A10 (S78) — descend into engine-decl.bodyChildren so any state-

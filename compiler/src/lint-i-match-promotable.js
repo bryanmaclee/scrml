@@ -34,6 +34,8 @@
  * @module lint-i-match-promotable
  */
 
+import { ifChainChildNodes } from "./ast-if-chain.js";
+
 /**
  * Lint diagnostic shape returned to api.js.
  *
@@ -216,6 +218,29 @@ function collectCellTypeAnnotations(file) {
         for (const child of v) visit(child);
       }
     }
+    // §17.1.1 if-chain — same blind spot as `walkFileForIfChains` below: a cell
+    // declared inside a chain branch was absent from this type map.
+    //
+    // ⚠ THIS HUNK IS UNOBSERVABLE TODAY AND HAS NO TEST, DELIBERATELY. Adding
+    // one would be decorative — it would pass with this line deleted. Measured:
+    // an enum-typed cell declared inside an `if=`/`else` branch, with a
+    // 4-arm promotable chain over it, emits an IDENTICAL diagnostic set with
+    // and without this descent.
+    //
+    // The reason is not mystery, it is precedence. This map is only
+    // `resolveEnumTypeForCell`'s **Path 2**, a fallback behind **Path 1**, the
+    // B3 `_resolvedStateCell` stamp the symbol table attaches to the ident.
+    // PASS 1 of `symbol-table.ts` learned to descend an if-chain in this same
+    // branch, so the stamp now resolves for a branch-declared cell and Path 1
+    // wins every time. Path 2 is shadowed, not wrong.
+    //
+    // It is kept rather than dropped because the shadowing is an accident of
+    // which walk happens to be fixed, not a guarantee: the stamp is absent on
+    // any path that reaches this lint without a full SYM pass (synthetic
+    // harness ASTs already do), and a fallback that is blind in the shape its
+    // primary just learned to see is the exact hollow-coverage pattern this
+    // class is about. If a discriminating case is ever found, test it then.
+    for (const branchBody of ifChainChildNodes(node)) visit(branchBody);
   }
 
   const root = file.ast ?? file;
@@ -274,6 +299,16 @@ function walkFileForIfChains(file, visitor) {
         for (const child of v) visitNode(child);
       }
     }
+    // §17.1.1 if-chain — a MARKUP `if=`/`else-if=`/`else` chain WITH an else
+    // arm is collapsed by `collapseIfChains` into `{kind:"if-chain",
+    // branches:[{condition, element}], elseBranch}`, and neither field is in
+    // the key list above (`branches` holds RECORDS, not nodes). A LOGIC
+    // `if`/`else if` chain nested inside such a branch was therefore never
+    // reached: I-MATCH-PROMOTABLE went silent AND `scrml promote --match`
+    // reported "no promotable sites" on source that plainly carries one.
+    // MEASURED 1 / 1 / 0 across plain / lone-`if=` / `if=`+`else`. Child SHAPE
+    // via `ifChainChildNodes` (ast-if-chain.js) — one module owns the fact.
+    for (const branchBody of ifChainChildNodes(node)) visitNode(branchBody);
     // Components / function-decls have body arrays inside parameters etc; recurse
     if (Array.isArray(node.components)) {
       for (const c of node.components) visitNode(c);

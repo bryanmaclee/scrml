@@ -46,6 +46,8 @@
  * @module lint-w-each-promotable
  */
 
+import { ifChainChildNodes } from "./ast-if-chain.js";
+
 /**
  * Walk every for-stmt in the file AST and visit it.
  * @param {object} file
@@ -64,6 +66,15 @@ function walkForStmts(file, visit) {
     for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "consequent", "alternate", "components"]) {
       if (Array.isArray(node[k])) walk(node[k]);
     }
+    // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain WITH an else arm is
+    // collapsed by `collapseIfChains` into `{kind:"if-chain", branches:[{condition,
+    // element}], elseBranch}`. Neither field is in the container list above, and
+    // `branches` holds RECORDS rather than nodes, so listing it there would not
+    // help either. Child SHAPE via `ifChainChildNodes` (ast-if-chain.js) — the one
+    // module that owns this fact — so the next branch-carrying field is added in
+    // ONE place. A lone `if=` is never collapsed, which is why adding a `<div
+    // else>` sibling was the only variable between firing and silence.
+    for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
   }
   walk(file.ast?.nodes ?? file.nodes ?? file);
   if (file.ast?.components) walk(file.ast.components);

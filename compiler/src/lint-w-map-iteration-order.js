@@ -24,6 +24,8 @@
  * @module lint-w-map-iteration-order
  */
 
+import { ifChainChildNodes } from "./ast-if-chain.js";
+
 import { collectMapVarNames } from "./codegen/reactive-deps.ts";
 
 /**
@@ -48,6 +50,15 @@ function walkEachBlocks(fileAST, visit) {
     for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren"]) {
       if (Array.isArray(node[k])) walk(node[k]);
     }
+    // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain WITH an else arm is
+    // collapsed by `collapseIfChains` into `{kind:"if-chain", branches:[{condition,
+    // element}], elseBranch}`. Neither field is in the container list above, and
+    // `branches` holds RECORDS rather than nodes, so listing it there would not
+    // help either. Child SHAPE via `ifChainChildNodes` (ast-if-chain.js) — the one
+    // module that owns this fact — so the next branch-carrying field is added in
+    // ONE place. A lone `if=` is never collapsed, which is why adding a `<div
+    // else>` sibling was the only variable between firing and silence.
+    for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
   }
   walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST);
 }
@@ -78,6 +89,24 @@ function collectOrderedMapNames(file) {
     for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren"]) {
       if (Array.isArray(node[k])) walk(node[k]);
     }
+    // §17.1.1 if-chain — SAME blind spot as `walkEachBlocks` above, SAME shared
+    // enumerator, but this one is a latent FALSE POSITIVE rather than a lost
+    // diagnostic, and it is worth stating why it was invisible.
+    //
+    // `runWMapIterationOrder` returns early on `!mapNames.has(name)`, and
+    // `mapNames` comes from `collectMapVarNames` (codegen/reactive-deps.ts),
+    // which carries the IDENTICAL blind spot. So a map declared inside an
+    // `if=`/`else` branch never reaches the `orderedNames` consult at all, and
+    // this walk's blindness is MASKED by a third instance of the same class.
+    //
+    // MEASURED, not reasoned: arming that mask (teaching `collectMapVarNames`
+    // to descend an if-chain, temporarily) makes an `@ordered` map declared in
+    // a branch lose its §59.8 exemption and FALSE-fire W-MAP-ITERATION-ORDER —
+    // 0 on the lone-`if=` shape, 1 on the `if=`/`else` shape. **Closing the
+    // codegen collector alone would have ARMED a cry-wolf here.** Both halves
+    // of a masked pair get closed together or neither does; the codegen half
+    // is filed separately (it changes EMIT and owes its own migration).
+    for (const branchBody of ifChainChildNodes(node)) walk(branchBody);
   }
   walk(file.ast?.nodes ?? file.nodes ?? file);
   return names;
