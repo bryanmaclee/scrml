@@ -225,12 +225,36 @@ export function runAnchored(
 ): { pass: boolean; failures: string[] } {
   const failures: string[] = [];
   for (const a of assertions) {
+    // Does this assertion say anything about the FIRST match, as opposed to the
+    // match SET? `count` addresses the set; text/attr/value address one element.
+    // The two are independent, and an assertion may carry both.
+    const assertsFirstMatch =
+      typeof a.text === "string" || Boolean(a.attr) || typeof a.value === "string";
+
     if (typeof a.count === "number") {
       const n = root.querySelectorAll(a.selector).length;
       if (n !== a.count) {
         failures.push("selector " + a.selector + ": expected count " + a.count + ", got " + n);
       }
-      continue;
+      // A count-ONLY assertion is complete here. Historically this `continue`
+      // was UNCONDITIONAL, so any text/attr/value on the same assertion was
+      // silently never evaluated — the corpus is the versioned language
+      // contract (§62.2), so those checks read as binding while asserting
+      // nothing (S395 ruling 2a, limb (a)). The short-circuit is still REQUIRED
+      // for count-only assertions: `count: 0` asserts ABSENCE, and falling
+      // through would then report the absent element as "no match".
+      //
+      // ⛑ `count: 0` short-circuits REGARDLESS of a first-match check. An
+      // assertion like `{count: 0, text: "…"}` is self-contradictory — it
+      // asserts the selector matches nothing AND that the first match has
+      // given text — and without the `a.count === 0` limb it would skip the
+      // short-circuit, hit `querySelector`, get null, and push a spurious
+      // "no match" on top of a count check that PASSED. Corpus-zero today (all
+      // 62 `count: 0` assertions are count-only, and all 18 mixed ones are
+      // `count: 1`), but limb (b) — the authoring gate that would forbid the
+      // shape outright — is deferred, so nothing prevents it being written.
+      // Guarding here rather than letting the comment above over-claim.
+      if (!assertsFirstMatch || a.count === 0) continue;
     }
     const el = root.querySelector(a.selector);
     if (!el) {
