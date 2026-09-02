@@ -956,6 +956,84 @@ export function resolveRootEntryCandidate(opts, serveDir) {
 }
 
 /**
+ * §52.13 — the ONE place `scrml dev` consults the protected-document registry.
+ *
+ * Every path that can return a document must run this; a serving path that does
+ * not is fail-open by construction. Keeping it in a single function is what makes
+ * "did this path gate?" answerable by grep instead of by reading each branch
+ * (g-dev-root-path-fallback-serves-a-protected-document-unauthenticated: a second,
+ * ungated root branch served an `auth="required"` document to `GET /`).
+ *
+ * Protection is decided HERE and only here, against a candidate the loop has already
+ * resolved to a real file. An earlier revision also gated on the raw REQUEST path
+ * before resolution; that made this a second decider, and it disagreed with the loop
+ * three separate ways (answering for documents that no longer exist, overriding a
+ * resolution that would have served a different public document, and ignoring
+ * candidate priority). Deciding once, on the file actually about to be served, is the
+ * same reasoning that deleted the ungated root branch.
+ *
+ * @param {Request} req
+ * @param {string} rel   serve-dir-relative path of the RESOLVED file, e.g. "secure.html"
+ * @returns {Response|null} the guard's redirect when the request is unauthenticated
+ */
+function gateProtectedDoc(req, rel) {
+  if (registeredProtectedDocs.size === 0) return null;
+  const guard = registeredProtectedDocs.get(rel.split(/[\\/]/).join("/").toLowerCase());
+  if (!guard) return null;
+  return guard(req) || null;
+}
+
+/**
+ * The extra files `/` may resolve to, in preference order, as CANDIDATES for the
+ * one gated static loop — never served directly.
+ *
+ * 1. the compiled single-input entry (`<entryBase>.html`) — BUG-2
+ *    (scrml-dev-watcher-and-stale-entry-2026-06-01): `scrml dev` does not clean its
+ *    output dir, so a leftover `test.html` can sit beside a fresh `req.html`, and a
+ *    bare "first .html" scan would serve the STALE app.
+ * 2. the first `.html` in the serve dir, sorted — multi-input dev mode, where there
+ *    is no single unambiguous entry. Sorted so two machines pick the SAME file
+ *    rather than whatever readdir order the filesystem returns
+ *    (g-residual-order-bearing-readdir).
+ *
+ * @param {object} opts       dev options (entry-candidate resolution)
+ * @param {string} serveDir
+ * @returns {Generator<string>} absolute candidate paths, most-preferred first
+ */
+function* rootFallbackCandidates(opts, serveDir) {
+  const entryCandidate = resolveRootEntryCandidate(opts, serveDir);
+  // Yielded BEFORE the directory is read, so single-input dev — the case the
+  // docstring below cites — never pays for the scan when the entry resolves.
+  if (entryCandidate) yield entryCandidate;
+  try {
+    const htmlFile = readdirSync(serveDir).sort().find((e) => e.endsWith(".html"));
+    if (htmlFile) yield join(serveDir, htmlFile);
+  } catch { /* no serve dir yet */ }
+}
+
+/**
+ * Every file a request may resolve to, in resolution order, yielded LAZILY.
+ *
+ * Laziness is load-bearing at the tail: `rootFallbackCandidates` does a synchronous
+ * `readdirSync`, and `/` is the one URL `scrml dev` prints. Building this list
+ * eagerly would pay a blocking directory read on every reload of that URL, even in
+ * the common case where `index.html` hits on the FIRST candidate and the fallbacks
+ * are never needed.
+ *
+ * @param {string} pathname        the request path, for the root-only fallbacks
+ * @param {string} staticPathname  pathname with `/` folded to `/index.html`
+ * @param {string} serveDir
+ * @param {object} opts            dev options (entry-candidate resolution)
+ * @returns {Generator<string>} absolute candidate paths, most-preferred first
+ */
+function* staticCandidates(pathname, staticPathname, serveDir, opts) {
+  yield join(serveDir, staticPathname);               // exact file
+  yield join(serveDir, `${staticPathname}.html`);     // clean URL
+  yield join(serveDir, staticPathname, "index.html"); // directory index
+  if (pathname === "/") yield* rootFallbackCandidates(opts, serveDir);
+}
+
+/**
  * §40.3 — the remainder of the `scrml dev` request pipeline: registered-route
  * match → static file → 404. This is exactly what `resolve(request)` runs
  * inside an author's `handle()`.
@@ -1026,100 +1104,78 @@ export async function devDispatch(req, server, serveDir, opts) {
     : pathname;
   let staticPathname = trimmedPathname === "/" ? "/index.html" : trimmedPathname;
 
-  // Try, in order: exact file, with .html, as dir/index.html.
-  const candidates = [
-    join(serveDir, staticPathname),
-    join(serveDir, `${staticPathname}.html`),
-    join(serveDir, staticPathname, "index.html"),
-  ];
-
-  for (const candidate of candidates) {
-    const file = Bun.file(candidate);
-    // Bun.file() is lazy — check existence via statSync
-    try {
-      const st = statSync(candidate);
-      if (st.isFile()) {
-        // §52.13 — gate an auth-required document BEFORE serving it, so `scrml dev`
-        // matches the production `_server.js`: an unauthenticated request redirects
-        // to loginRedirect instead of leaking the rendered markup
-        // (g-auth-required-does-not-protect-the-served-html-document).
-        if (registeredProtectedDocs.size > 0) {
-          const _rel = relative(serveDir, candidate).split(/[\\/]/).join("/").toLowerCase();
-          const _guard = registeredProtectedDocs.get(_rel);
-          if (_guard) {
-            const _gate = _guard(req);
-            if (_gate) return _gate;
-          }
-        }
-        // Inject hot-reload script into HTML responses
-        if (candidate.endsWith(".html")) {
-          const html = await file.text();
-          return new Response(injectHotReloadScript(html), {
-            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-          });
-        }
-        // adopter-#82 — attach cache headers to static assets + honor
-        // conditional requests. FIX 3 (RFC 7232 §6): If-None-Match, when
-        // present, is authoritative — a mismatch means CHANGED, so we do NOT
-        // fall through to If-Modified-Since (which could 304 a same-second
-        // stale edit). Evaluate IMS only when INM is absent.
-        const headers = devCacheHeaders(candidate, st);
-        const inm = req.headers.get("if-none-match");
-        if (headers.ETag && inm) {
-          if (inm === headers.ETag) return new Response(null, { status: 304, headers });
-        } else if (headers.ETag) {
-          const ims = req.headers.get("if-modified-since");
-          const since = ims ? Date.parse(ims) : NaN;
-          if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
-            return new Response(null, { status: 304, headers });
-          }
-        }
-        return new Response(file, { headers });
-      }
-    } catch { /* not found */ }
-  }
-
-  // Root-only HTML resolution.
+  // Try, in order: exact file, with .html, as dir/index.html — plus, for `/`, the
+  // compiled entry and the first .html in the serve dir.
   //
-  // BUG-2 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): PREFER the
-  // compiled entry `<entryBase>.html` for the single-input case BEFORE the
-  // "first .html in dist root" fallback. `scrml dev` does not clean its
-  // output dir, so a leftover `test.html` from a prior session can sit
-  // beside a fresh `req.html`; the old "first .html" scan would serve the
-  // STALE app. When dev compiles a single input file, that file's `.html`
-  // is the canonical index.
-  if (pathname === "/") {
-    const entryCandidate = resolveRootEntryCandidate(opts, serveDir);
-    if (entryCandidate) {
-      try {
-        if (statSync(entryCandidate).isFile()) {
-          const file = Bun.file(entryCandidate);
-          const html = await file.text();
-          return new Response(injectHotReloadScript(html), {
-            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-          });
-        }
-      } catch { /* entry not emitted yet — fall through to scan */ }
-    }
-
-    // Fallback: serve the first .html file found — handles directory /
-    // multi-input dev mode where there is no single unambiguous entry,
-    // and the common single-file case when the entry candidate is absent.
+  // Root resolution used to live in its OWN branch AFTER this loop, returning HTML
+  // from two paths that never consulted the protected-document registry
+  // (g-dev-root-path-fallback-serves-a-protected-document-unauthenticated): an
+  // `auth="required"` document that was not named `index.html` was served in full to
+  // an unauthenticated `GET /`. The fix is not a second gate — it is deleting the
+  // second serving path, so `/`'s candidates go through the ONE gated loop.
+  for (const candidate of staticCandidates(pathname, staticPathname, serveDir, opts)) {
+    // Existence probe. A candidate that is not there is the normal case — that is what
+    // enumerating candidates means — so this failure is swallowed and we move on.
+    let st;
     try {
-      // Sort so the "first .html" is deterministic across OS / filesystem
-      // readdir order (g-residual-order-bearing-readdir): two machines must
-      // pick the SAME fallback entry, not whatever the FS returns first.
-      const entries = readdirSync(serveDir).sort();
-      const htmlFile = entries.find(e => e.endsWith(".html"));
-      if (htmlFile) {
-        const fallbackPath = join(serveDir, htmlFile);
-        const file = Bun.file(fallbackPath);
+      st = statSync(candidate); // Bun.file() is lazy, so probe existence directly
+    } catch {
+      continue; // candidate not present — try the next one
+    }
+    if (!st.isFile()) continue;
+
+    // §52.13 — gate the RESOLVED document before serving it, so `scrml dev` matches
+    // the production `_server.js`: an unauthenticated request redirects to
+    // loginRedirect instead of leaking the rendered markup
+    // (g-auth-required-does-not-protect-the-served-html-document). Dev and prod decide
+    // on the SAME key — `relative(<serveDir>, candidate)` lowercased — see `build.js`
+    // `_SCRML_PROTECTED_DOCS.get(rel.toLowerCase())`.
+    //
+    // This is the ONLY place dev decides protection. An earlier revision of this arc
+    // also gated the raw request path before resolution; that second decider was
+    // removed, so do NOT assume any gating has happened before this line.
+    //
+    // Deliberately OUTSIDE both try blocks: a gate that throws must be LOUD. While it
+    // sat inside a wide try, a throwing auth guard produced a silent 404 with no log
+    // and, with mixed candidates, fell through to serve a DIFFERENT file.
+    const resolvedDocGate = gateProtectedDoc(req, relative(serveDir, candidate));
+    if (resolvedDocGate) return resolvedDocGate;
+
+    // Serving IO, and it must stay tolerant. `scrml dev` rewrites `dist/` on every
+    // recompile while requests are in flight, so a candidate can be unlinked or
+    // replaced between the `statSync` above and the read below. That race has to fall
+    // through to the next candidate (ultimately a 404) rather than reject out of
+    // `devDispatch`: callers are entitled to a Response, including an author's
+    // `handle()` onion calling `resolve(request)`.
+    try {
+      const file = Bun.file(candidate);
+      // Inject hot-reload script into HTML responses
+      if (candidate.endsWith(".html")) {
         const html = await file.text();
         return new Response(injectHotReloadScript(html), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
         });
       }
-    } catch { /* no serve dir yet */ }
+      // adopter-#82 — attach cache headers to static assets + honor
+      // conditional requests. FIX 3 (RFC 7232 §6): If-None-Match, when
+      // present, is authoritative — a mismatch means CHANGED, so we do NOT
+      // fall through to If-Modified-Since (which could 304 a same-second
+      // stale edit). Evaluate IMS only when INM is absent.
+      const headers = devCacheHeaders(candidate, st);
+      const inm = req.headers.get("if-none-match");
+      if (headers.ETag && inm) {
+        if (inm === headers.ETag) return new Response(null, { status: 304, headers });
+      } else if (headers.ETag) {
+        const ims = req.headers.get("if-modified-since");
+        const since = ims ? Date.parse(ims) : NaN;
+        if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
+          return new Response(null, { status: 304, headers });
+        }
+      }
+      return new Response(file, { headers });
+    } catch {
+      continue; // file vanished or changed under us mid-serve — try the next candidate
+    }
   }
 
   return new Response("Not found", { status: 404 });
