@@ -1,7 +1,31 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED:** `git diff --name-only fc6df72e..2ec2ce3a -- '.env*' bunfig.toml package.json` is **EMPTY**; no env key, feature flag or config file moved in the window. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `git diff --name-only 2ec2ce3a..ad7b65dc -- '.env*'
+# 'bunfig.toml' 'package.json' 'tsconfig.json'` is **EMPTY** across 25 commits. No environment key,
+# feature flag, runtime config or manifest field was added, removed or renamed. `package.json`
+# remains the SOLE manifest at v0.7.1.
+#
+# ⚠ **ONE THING DID CHANGE IN THIS FILE'S NEIGHBOURHOOD AND IT IS *NOT* CONFIG: `scripts/` gained
+# `worktree-sweep.ts`.** It reads no environment variable and no config file — it is a pure git-query
+# tool — so it correctly produces no row here. Named only so the next pass does not re-discover it as
+# an unexplained `scripts/` delta.#
+# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
+# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
+# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
+# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED:** `git diff --name-only fc6df72e..2ec2ce3a -- '.env*' bunfig.toml package.json` is **EMPTY**; no env key, feature flag or config file moved in the window. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
 # `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
 # (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
 # the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.

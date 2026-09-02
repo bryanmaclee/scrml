@@ -1,7 +1,37 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED, AND THE MEASUREMENT IS THE EVIDENCE:** `git diff --name-only fc6df72e..2ec2ce3a -- compiler/src/types stdlib '*.d.ts' '*.proto' '*.graphql'` is **EMPTY**. ⚠ `compiler/src/type-system.ts` DID move (+298, #785) — but this map projects TYPE DECLARATIONS, not the TS pass; the `<each>` opener scope-check it gained is a DIAGNOSTIC path and lives in error.map.md. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF, AND THE COMMAND IS RECORDED SO THE NEXT PASS CAN
+# RE-RUN IT RATHER THAN TRUST IT:** `git diff --name-only 2ec2ce3a..ad7b65dc -- 'compiler/src/types/'
+# 'stdlib/' '*.d.ts' '*.proto' '*.graphql'` is **EMPTY**. `compiler/src/types/` is now empty for the
+# FIFTEENTH consecutive window.
+#
+# ⚠ **AND THAT ZERO IS ITSELF THE FINDING THIS PASS RECORDS.** A new FileAST node kind was central to
+# this window's biggest defect class — **`kind: "if-chain"`**, minted by `collapseIfChains`
+# (`ast-builder.js:18871`, construction `:19024`) with the shape `{kind:"if-chain",
+# branches:[{condition, element}], elseBranch}` — and it is **NOT declared anywhere in
+# `compiler/src/types/ast.ts`.** It is minted structurally and consumed structurally, so the TS type
+# surface never saw it, which is a large part of why `type-system.ts` had **zero** occurrences of
+# both `if-chain` and `elseBranch` until #811. **The schema surface measuring zero across a window
+# that introduced a defect family rooted in an AST SHAPE is exactly the blind spot to name:** this
+# repo's node kinds are not all type-declared, so "`types/` did not change" does not mean "no node
+# shape changed." See domain.map.md §17.1.1 and primary.map.md invariant 82.#
+# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
+# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
+# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
+# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED, AND THE MEASUREMENT IS THE EVIDENCE:** `git diff --name-only fc6df72e..2ec2ce3a -- compiler/src/types stdlib '*.d.ts' '*.proto' '*.graphql'` is **EMPTY**. ⚠ `compiler/src/type-system.ts` DID move (+298, #785) — but this map projects TYPE DECLARATIONS, not the TS pass; the `<each>` opener scope-check it gained is a DIAGNOSTIC path and lives in error.map.md. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
 # `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
 # (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
 # the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.

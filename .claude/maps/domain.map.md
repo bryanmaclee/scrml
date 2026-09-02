@@ -1,7 +1,29 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **A MAP-INTERNAL CONTRADICTION WAS RESOLVED HERE:** this file cited `SPEC.md:19722` and error.map.md cited `SPEC.md:19728` for the SAME `E-STATE-BLOCK-STATEMENT-FORM` §34 row — two watermark generations (`0dd659a1` vs `ff4b37e5`) that were never re-synced. Both are now `:19729`, re-derived by grepping the row.
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **TWO NEW SECTIONS, both added because the window's defects were CLASSES rather than instances:**
+# **§17.1.1** — the `if-chain` node shape as a defect-family ROOT (the shape rule, the lone-`if=`
+# discriminator, and the two walks that are DELIBERATELY not converted); and **§17.6.1 / §17.6.2 /
+# §17.6.10** — the value-form sugar, where a SPEC amendment made a shipping emit non-conforming
+# without touching one line of compiler code, and where two constructs correctly share a leaf
+# predicate while correctly NOT sharing a shape rule.
+#
+# ⚠ **THE REST OF THIS FILE (~2,400 lines) WAS NOT RE-WALKED.** `SPEC.md` moved +108 in exactly ONE
+# commit (#802, the §17.6 amendment) and `SPEC-INDEX.md` by 124 lines; **no §-anchor, line range or
+# normative rule outside §17.6 changed**, so every §-anchored claim below still anchors. Claims this
+# window's diff does not touch carry their PRIOR verification, not a fresh one.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **A MAP-INTERNAL CONTRADICTION WAS RESOLVED HERE:** this file cited `SPEC.md:19722` and error.map.md cited `SPEC.md:19728` for the SAME `E-STATE-BLOCK-STATEMENT-FORM` §34 row — two watermark generations (`0dd659a1` vs `ff4b37e5`) that were never re-synced. Both are now `:19729`, re-derived by grepping the row.
 # codegen surface S380 touched; NOT a full re-walk). `git merge-base --is-ancestor 48f0aaf8 0dd659a1`
 # exits 0; HEAD == origin/main == 0dd659a1.
 #
@@ -2333,7 +2355,156 @@ node-path only, and the §34 row explicitly declines to claim otherwise. **A tex
 that can contain comments and strings is the same class of mistake as `maskCommentRegions` over a
 `<db>` body (see error.map.md): it trades a visible wrong answer for an invisible missing one.**
 
+
+## §17.1.1 — THE `if-chain` NODE SHAPE IS A DEFECT-FAMILY ROOT, NOT A DEFECT (NEW section, S395, #805/#811)
+
+**THE ONE FACT.** `collapseIfChains` (`ast-builder.js:18871`; node construction `:19024`) rewrites an
+`if=` / `else-if=` / `else` chain **that has an else arm** into a NEW node:
+
+    { kind: "if-chain", branches: [{ condition, element }, …], elseBranch }
+
+The branch bodies live under **`branches[].element`** and **`elseBranch`** — and under **none** of
+the container keys the compiler's many hand-rolled walks recurse into (`children` / `body` /
+`bodyChildren` / `nodes` / `arms` / `templateChildren`). ⚑ **`branches` is an array of
+`{condition, element}` RECORDS, not of nodes**, so even a generic walk that happens to list
+`branches` among its keys silently fails to reach `element`: the entries carry no `.kind`, and the
+standard `default` recursion in this repo descends only array fields whose entries do.
+
+⚑ **THE DISCRIMINATOR IS THE `else` SIBLING, AND THIS IS THE REPRODUCTION RECIPE FOR THE WHOLE
+FAMILY.** A **lone `if=` with no else** is passed through as plain markup and never becomes an
+`if-chain`. So the SAME source works with one element and breaks the moment an `<div else>` sibling
+is added — which is why *"add an `else`"* turned a working `<each>` into **zero renderers at exit 0**
+(`g-each-in-if-else-chain-emits-zero-renderers`, HIGH). Any bug report of the shape *"it worked until
+I added an else"* starts here.
+
+**THE FAMILY, as measured (each was ONE fact copied into a different walk):**
+
+| symptom | walk that was blind | severity |
+|---|---|---|
+| `<each>` in a branch emits **zero renderers**, exit 0, zero diagnostics | `codegen/collect.ts` `collectTopLevelLogicStatements` | HIGH |
+| a branch-declared state cell reads as a false **`E-STATE-UNDECLARED`** | `symbol-table.ts` PASS-1 container list | HIGH |
+| the entire chain subtree **invisible to the type system** — `type-system.ts` had ZERO occurrences of both `if-chain` and `elseBranch` | `type-system.ts` `visitNode` (no case; `default` recurses only `.kind`-bearing array entries) | HIGH |
+| a branch cell is **subscribed but never created** (13 collectors) | `codegen/reactive-deps.ts` | HIGH |
+| **`W-EACH-KEY` stops firing** for every `<each>` under a chain | `lint-w-each-key.js` | adopter-facing |
+| four **promotable lints** + `scrml promote` go silent | `lint-i-fn-promotable.js` · `lint-i-match-promotable.js` · `lint-w-each-promotable.js` · `commands/promote.js` | MED |
+| the **ordered-map iteration-order exemption** goes blind | `lint-w-map-iteration-order.js` | MED |
+| a `<timer>` in a branch **never starts** (`_scrml_timer_start` count 0 vs 1 on the lone-`if=` oracle) | the lifecycle emitter — **not traced**, same class | MED, open |
+| a cell read ONLY as a chain condition or ONLY in a branch interp **false-fires `E-DG-002`** | `dependency-graph.ts` usage analysis | open |
+
+**THE FIX IS A SHARED ENUMERATOR, NOT A SEVENTEENTH COPY.** `compiler/src/ast-if-chain.js`
+(⚠ `src/` ROOT — `compiler/src/codegen/ast-if-chain.js` **does not exist**) exports
+**`ifChainChildNodes(node)`**: every `branches[].element` in source order, then `elseBranch`; an
+EMPTY array for any non-`if-chain`, so a caller may invoke it unconditionally. **#805 created it
+with six consumers; #811 closed ten more.** At `ad7b65dc`: **13 importing modules, 32 call sites.**
+
+⚠ **TWO WALKS ARE DELIBERATELY NOT ROUTED THROUGH IT, AND BOTH READ AS OVERSIGHTS. THIS IS THE MOST
+LIKELY WAY A FUTURE AGENT BREAKS THIS AREA.**
+
+1. **`codegen/collect.ts:173` `collectFunctions` — BACKED OUT ON PURPOSE; closing it is a SECURITY
+   REGRESSION.** That walk feeds the CLIENT function emitter while the server-boundary routing walk
+   is **separately** blind, so adding the descent emits a `server fn` **BODY into `client.js`** with
+   no `server.js` at all. **Trading a loud `ReferenceError` for a silent server-code-in-client leak
+   is strictly worse**, so #811 reverted it, filed the pair HIGH
+   (`g-collect-functions-branch-decl-vs-server-boundary-routing`) and shipped a **LEAK GUARD** test
+   that reds if anyone closes it without closing the routing walk first
+   (`compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124`).
+2. **`symbol-table.ts:10642` — must stay a TOTAL `Object.keys` walk.** It already reaches
+   `branches[].element` because it descends **everything**. `ifChainChildNodes` is an ENUMERATOR of
+   KNOWN fields, so substituting it there **removes coverage**. #811's own dispatching brief named
+   this site as a gap; the brief was wrong in the dangerous direction, and the agent's verify
+   instruction is what caught it.
+
+⚠ **ONE KNOWN SPEC DIVERGENCE SHIPPED WITH #811, DELIBERATELY AND ON THE RECORD:**
+`g-if-chain-all-arms-run-at-module-init` (MED). Every arm's `${}` body now runs at module init, in
+source order, **last writer wins** — so a cell declared or written in the DEAD arm overwrites the
+live one. §17.1.1 forbids it. It landed because **the property never held**: PA-verified on untouched
+main, a LONE `if=` with a FALSE condition still fires its body, so this brings the chain into parity
+with the existing non-conformance rather than inventing a class, no currently-correct program
+regresses, and corpus impact measured zero. **Closing it means ruling whether a markup `${}` body is
+file-scope or branch-scoped — which changes lone `if=` too, and is the operator's call.**
+
+⚠ **OPEN, LOW — the module over-claims its own authority.** `g-ast-if-chain-one-place-claim-overstated`:
+`ast-if-chain.js:2` calls itself *"the ONE place that knows where a §17.1.1 `if-chain` node keeps its
+child markup"* and instructs *"add it HERE and every consumer inherits it."* Given the two deliberate
+non-consumers above, a new branch-carrying field would reach neither `collectFunctions` nor the total
+walk. **The `⚠` is worth keeping; the word "ONE" is not load-bearing truth.**
+
+
+## §17.6.1 / §17.6.2 / §17.6.10 — THE VALUE-FORM SUGAR: ONE PREDICATE, TWO SHAPE RULES, AND AN AMENDMENT THAT BROKE A SHIPPING EMIT WITHOUT TOUCHING CODE (NEW section, S395, #802/#815)
+
+**THE SURFACE.** §17.6 makes an `if` an EXPRESSION when it is the RHS of a `const`/`let` (§17.6.1's
+`if-binding ::= ('const'|'let') identifier '=' if-as-expr`) or a self-contained operand. An arm body
+produces its value in exactly **two** ways, and `SPEC.md:11888` says so normatively:
+
+> *"An if-as-expression arm body SHALL produce its result value via a `lift` statement, **or** by
+> being exactly one expression, which is sugar for `lift` of that expression (§17.6.10). These are
+> the only two ways an arm body produces a value."*
+
+**#802 (`79bd992b`) IS THE ONLY COMMIT THAT TOUCHED `SPEC.md` IN THIS 25-COMMIT WINDOW** (+108
+lines, ZERO new §34 rows). It added the `arm-body ::= '{' expression '}'` alternative to the §17.6.1
+grammar (`SPEC.md:11851`), rewrote §17.6.2 item 3 (`:11874`), and added a whole new subsection
+**§17.6.10 "Value-Form Control Flow in a Markup Interpolation" (`SPEC.md:12143`)** naming the shape
+normatively for both the `if` and `match` limbs, with the trailing `else` OPTIONAL and a missing
+`else` contributing `not` (§17.6.4) — the compiler SHALL NOT warn about it.
+
+⚑ **THE AMENDMENT MADE A SHIPPING EMIT NON-CONFORMING WITHOUT TOUCHING ONE LINE OF COMPILER CODE,
+AND THAT IS THE INSTRUCTIVE PART.** Under the PRE-amendment §17.6.2 a lift-less arm contributed
+`not`, and `null` **is** `not` (§42) — so the bound-position `null` was **CONFORMING** until the SPEC
+edit landed. **This is the over-claiming-row shape in mirror image:** normally a §34 row promises
+behaviour the code does not have; here an amendment retroactively converted correct output into a
+HIGH defect. ⚠ **And the only diagnostic that could have surfaced it was normatively RETIRED in the
+same edit** — `SPEC.md:11893` states an exactly-one-expression arm SHALL NOT surface `W-LIFT-001`, a
+code with **zero** fire sites in `compiler/src/` against a live §34 catalog row.
+
+**WHAT #815 (`908a631c`) ACTUALLY DID — `emit-logic.ts` ONLY, +116/-17, and it is a REDIRECT.**
+`_emitValueFormSugarArm(body, tildeVar, bodyOpts)` (`emit-logic.ts:4438`) returns a single
+`  <tildeVar> = <rhs>;` line for a sugar arm and `null` otherwise, so explicit-`lift`, statement and
+multi-statement arms are byte-unchanged. `tildeVar` threads through `emitIfExprAltChain` (`:4462`),
+called on BOTH limbs — nested `else if` consequent (`:4477`) and terminal `else` (`:4502`) — and
+`emitIfExprDecl` (`:4525`) calls it on the `then` arm (`:4546`). Before it, a sugar arm fell through
+to the shared `bare-expr` handler, which under an active `tildeContext` mints a FRESH
+`let _scrml_tilde_N = <expr>;` **and rebinds `tildeContext.var` to it** — so the arm wrote a
+block-scoped temp, the result var stayed at its `let … = null` seed, and **the binding was always
+`null`, at exit 0, with zero diagnostics.**
+
+⚑ **ONE LEAF PREDICATE, TWO SHAPE RULES — AND CONFLATING THEM WOULD BE A WIDENING (invariant 83).**
+Two redirects now sit on the same leaf and that is correct:
+
+| | §18.5 match block-arm bare tail | §17.6.2 value-form sugar arm |
+|---|---|---|
+| **shared** | `_blockTailIsValueExpr` (`emit-logic.ts:4871`, exported) — *"is this bare-expr a value at all?"* | same function, same call |
+| **consumed at** | `emit-control-flow.ts:2479` (structuredBody path) · `emit-logic.ts:4938`/`:5100` (raw-string twin) | `emit-logic.ts:4449` |
+| **SHAPE rule — NOT shared** | result is the **LAST** expression: a tail after N statements. *Positional.* | the arm is **EXACTLY ONE** expression (`arm-body ::= '{' expression '}'`, `SPEC.md:11851`): `body.length !== 1 -> decline`. *Local.* |
+
+Routing the sugar arm through §18.5's tail rule would silently admit `{ doWork()  "pos" }` as a
+value-form — **a shape the grammar does not define.** The markup-interpolation twin
+`_soleBareExprValue` (`emit-control-flow.ts:2699`) uses the SAME `length !== 1` test, so all three
+positions agree. **The general rule: when two constructs converge, converge on the LEAF QUESTION,
+never on the ENCLOSING SHAPE** (invariant 75, second measured instance).
+
+⚠ **A DERIVED CELL IS AN UNSPECIFIED SHAPE THAT FAILS LOUD, AND THAT IS THE SAFE DIRECTION
+(invariant 85).** §17.6.3 (`SPEC.md:11898`) names the binding site as a `const`/`let` **declaration**
+and nothing else. `const <label> = if (…) { … }` — a derived STATE cell — fails with
+`E-CODEGEN-INVALID-LOGIC` in **both** the sugar form and the explicit-`lift` form. ⚑ **The #815 gap
+entry as originally filed said "the explicit-`lift` twin is the control and is correct"; that holds
+for a LOCAL binding ONLY**, and anyone building against that sentence in a derived cell would have
+been working from a false control. **The asymmetry is real: `const <label> = match @level { … }` in a
+derived cell DOES work and ships as a conformance case.** Making the `if` form work is a WIDENING of
+§17.6.3 and is the operator's, not a defect fix.
+
+⛑ **VERIFIED BY EXECUTION AT THIS WATERMARK, TWO-SIDED, NOT RELAYED.** Compiled on merged `main`: `<label> = if (@x > 0) { "pos" } else { "neg" }` (sugar form) -> **`E-CODEGEN-INVALID-LOGIC`**; the explicit-`lift` twin `<label> = if (@x > 0) { lift "pos" } else { lift "neg" }` -> **`E-CODEGEN-INVALID-LOGIC` as well**, so BOTH forms fail and the gap entry's "the explicit-`lift` twin is the control and is correct" is confirmed false at this position. The LOCAL binding is the control and it is clean: `${ const label = if (@x > 0) { "pos" } else { "neg" } … }` compiles at exit 0 and emits `let _scrml_tilde_2 = null;` then `_scrml_tilde_2 = "pos"` / `_scrml_tilde_2 = "neg"` — **arm-local `let _scrml_tilde_N = "…"` shadow count is 0**, which is #815 working. ⚠ **THE `match` HALF IS RELAYED, NOT VERIFIED HERE.** The claim that `<label> = match @level { … }` DOES work in a derived cell comes from the gap entry; this pass's reproducer used an `asIs`-typed subject and was refused by `E-TYPE-025` before reaching codegen, so it answered a different question. **Treat the `match` asymmetry as RELAYED-UNVERIFIED until someone compiles it with a properly typed subject.** The `if` half above is executed.
+
+⚑ **BLAST RADIUS, MEASURED — and the zero is EXPLAINED rather than assumed.** #815's corpus emit
+differential was **2 of 7,408**, both of them the new conformance cases, **zero** pre-existing corpus
+files. A census found exactly **5** bound-position sites in the whole corpus, all in
+`samples/compilation-tests/gauntlet-s19-phase2-control-flow/`, and **all 5 write the explicit `lift`
+form** — so nothing could have moved. `ctrl-023` / `ctrl-024` FAIL on base and PASS on head.
+⚠ **Corpus-zero here is blast radius, NOT demand evidence** (the standing reverse-ouroboros caution):
+the corpus is 100% LLM-authored, so its avoidance of the sugar form is an artefact of who wrote it.
+
+
 ## Business Invariants (language axioms, not app rules)
+
 - **`if=` on a scrml-defined structural element is admitted on exactly THREE (`<engine>`/`<match>`/`<each>`) and SHALL NOT be generalized to the registry (§17.1.2).**
 - **`if=` gates RENDER, never LIFECYCLE (§17.1.2.1)** — a gated `<engine>`'s cell, `rule=`, `effect=` and timers stay live; only the rendering is withheld. The alternative reading is state-destroying and breaks the §51.0.A singleton invariant.
 - **A structural `if=` inside an `<each>` row template fails OPEN (§17.1.2.3)** — carved out explicitly because markup fails CLOSED in the same position and the two are therefore inconsistent in the dangerous direction.

@@ -1,7 +1,41 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a clean pass: the §20.5 API-surface SPEC anchor was WRONG FROM BIRTH (pointed at §19.9.x) and is corrected in place.** `commands/dev.js` — this map's other main source — is BYTE-IDENTICAL over `ff4b37e5..2ec2ce3a`, so its citations carry forward from the S383/S384 verification unchanged.
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF, EVERY FILE NAMED:** `git diff --name-only
+# 2ec2ce3a..ad7b65dc --` `compiler/src/codegen/emit-server.ts` `compiler/src/codegen/emit-client.ts`
+# `compiler/src/commands/build.js` `compiler/src/commands/dev.js`
+# `compiler/src/commands/select-request-onion.js` `stdlib/auth/` `stdlib/oauth/` is **EMPTY**. The
+# §20.5 session surface, the request-pipeline onion, the CSRF/`Response`-contract handler and both
+# auth stdlib modules are byte-identical across 25 commits.
+#
+# ⛑ **ONE SECURITY-ADJACENT FACT DID LAND THIS WINDOW AND IT IS NOT IN THIS FILE'S SURFACE — READ IT
+# ANYWAY.** #811 **BACKED OUT** an if-chain descent in `codegen/collect.ts:173` (`collectFunctions`)
+# because closing it emits a **`server fn` BODY into `client.js`** with no `server.js` at all: the
+# walk feeds the CLIENT function emitter while the server-boundary ROUTING walk is separately blind.
+# **That is a server-code-in-client leak reachable from ordinary authored source — an `if=`/`else`
+# chain containing a `server fn` — and it is OPEN, filed HIGH as
+# `g-collect-functions-branch-decl-vs-server-boundary-routing`.** A **LEAK GUARD** test
+# (`compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124`) reds anyone who closes the
+# descent without closing the routing walk first. ⚠ *A codegen agent is working this pair
+# concurrently as this map is written.* The security PROPERTY that holds today is negative — the
+# descent is absent, so the leak does not occur — which means **the guard test, not the code, is what
+# currently enforces it.** See primary.map.md invariant 82.#
+# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
+# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
+# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
+# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a clean pass: the §20.5 API-surface SPEC anchor was WRONG FROM BIRTH (pointed at §19.9.x) and is corrected in place.** `commands/dev.js` — this map's other main source — is BYTE-IDENTICAL over `ff4b37e5..2ec2ce3a`, so its citations carry forward from the S383/S384 verification unchanged.
 # Verified: `git merge-base --is-ancestor 48f0aaf8 0dd659a1` exits 0 (48f0aaf8 = wrap(s378), the prior
 # map's effective content watermark); HEAD == origin/main == 0dd659a1 at write time.
 #

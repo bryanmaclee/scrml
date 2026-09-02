@@ -1,7 +1,56 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **Counts here are RE-DERIVED BY EXECUTION at this SHA, not shifted** — `find` per category, cross-checked against `docs/FACTS.md`.
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **+11 test files, ZERO deleted — `1,413 -> 1,424`, RE-DERIVED BY EXECUTION per category, not
+# shifted.** `find compiler/tests -name '*.test.js' | wc -l` -> **1,424**, which is `docs/FACTS.md`'s
+# `test files | 1,424` exactly. Two independent instruments agreeing is what makes this quotable.
+#
+#     browser 102 · commands 17 · conformance 133 · e2e-render-map 2 · integration 216 ·
+#     lsp 11 · self-host 4 · unit 925          = 1,410  (category dirs)
+#     + 14 at `compiler/tests/*.test.js` root  = 1,424
+#
+# **The +11 is `unit +10 · browser +1`.** `commands`, `conformance`, `e2e-render-map`,
+# `integration`, `lsp`, `self-host` and the 14 root-level files are ALL FLAT. The **15** `*.test.ts`
+# files in the same tree are still EXCLUDED from this walk, as is all of `conformance/`.
+# **Conformance cases: `887 -> 891` (+4)** — `ctrl-021`..`ctrl-024`, all §17.6 value-form.
+#
+# ⛑ **A TEST CLASS WORTH NAMING BECAUSE ITS PURPOSE IS THE OPPOSITE OF THE USUAL ONE: THE LEAK
+# GUARD.** `compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124` —
+# *"LEAK GUARD: a server fn in a branch never ships its body to the client"* — exists to **RED when
+# someone CLOSES a deliberately-open hole.** `collect.ts:173`'s `collectFunctions` is intentionally
+# blind to if-chain branches because closing it alone emits a `server fn` BODY into `client.js`; the
+# guard is the enforcement of that "backed out, not forgotten" decision. ⚠ **A test that fails when
+# a bug is FIXED looks like a stale test to every instrument we have** — `bun test` cannot tell it
+# from a regression, and neither can a review that reads only the failure name. **Read the test's
+# own header before "repairing" it.** Same class as invariant 57 (`skipPastRanges`, an exported
+# function with zero callers on purpose): the tree carries deliberate-looking-wrong artifacts, and
+# deleting them is the recurring failure mode.
+#
+# ⛑ **THE 11 NEW FILES, by what they pin** — 5 if-chain descent-class regressions
+# (`g-if-chain-branch-cell-never-wired` · `-branch-decl-invisible-to-ts` ·
+# `-iteration-lints-and-promote-blind` · `-ordered-map-exemption-blind` · `-promotable-lints-blind`),
+# 4 `<each>`-interp codegen drops (`g-each-in-if-else-chain-emits-zero-renderers` ·
+# `-key-lint-blind` · `g-each-value-form-if-in-rcdata-body-injects-element-child` ·
+# `-markup-fn-call-branch-stringifies`), 1 browser tier
+# (`g-each-value-form-if-in-rcdata-body.browser.test.js`), 1 script unit
+# (`worktree-sweep-classify.test.js`). **Every one is named for the GAP it pins, which is why the
+# category delta is legible at all.**
+#
+# ⚠ **THE REST OF THIS FILE WAS NOT RE-WALKED.** The runner, tiers, fixtures, browser-gate mechanism
+# and CI tier-mapping claims carry their PRIOR verification; `.github/` is `--name-only` EMPTY over
+# this window, so nothing in the CI half could have moved.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **Counts here are RE-DERIVED BY EXECUTION at this SHA, not shifted** — `find` per category, cross-checked against `docs/FACTS.md`.
 # `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
 # source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
@@ -181,7 +230,27 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1,413** `*.test.js` total at `2ec2ce3a`, +15 this window)
+## Test Categories (compiler/tests/, ⛑ **S395: 1,424** `*.test.js` total at `ad7b65dc`, +11 this window)
+
+⛑ **S395 — RE-DERIVED BY EXECUTION AT `ad7b65dc`, NOT SHIFTED.** `1,413 -> 1,424 (+11)` over
+`2ec2ce3a..ad7b65dc`. Per-category, by the same `find` this section mandates:
+
+    browser 102 · commands 17 · conformance 133 · e2e-render-map 2 · integration 216 ·
+    lsp 11 · self-host 4 · unit 925          = 1,410  (category dirs)
+    + 14 at `compiler/tests/*.test.js` root  = 1,424
+
+**The +11 is `unit +10 · browser +1`; `commands`, `conformance`, `e2e-render-map`, `integration`,
+`lsp`, `self-host` and the 14 root-level files are FLAT.** Cross-checked against the citable
+authority and it reconciles exactly: `docs/FACTS.md` reads `test files | 1,424` and
+`conformance cases | 891` at this watermark. ⚠ Still do not hardcode a competing number — re-run the
+`find`, or cite `docs/FACTS.md`. **ZERO deletions, seventh window running.**
+
+⚠ **THE `1,410` / `1,424` SPLIT IS NOT A DISCREPANCY AND NEVER WAS — it is the 14 root-level
+`compiler/tests/*.test.js` files that belong to no category directory.** `mapgen` walks category
+dirs and misses them, which is why `test.generated.md` will always read low. Name the population AND
+the walk before quoting a test count.
+
+⛑ **S391 figures below, superseded, kept for the method note:**
 
 ⛑ **S391 — RE-DERIVED BY EXECUTION AT `2ec2ce3a`, NOT SHIFTED.** `1,398 -> 1,413 (+15)` over
 `0dd659a1..2ec2ce3a`. Per-category, by the same `find` the section mandates:

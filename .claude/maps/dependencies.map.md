@@ -1,7 +1,35 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **MANIFEST STILL ZERO-DIFF:** `git diff --name-only fc6df72e..2ec2ce3a -- package.json bun.lock` is EMPTY — no external dependency was added, removed or version-bumped. ONE new INTERNAL edge (see the header block).
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **THE EXTERNAL MANIFEST IS ZERO-DIFF FOR THE SECOND CONSECUTIVE WINDOW.** `git diff --name-only
+# 2ec2ce3a..ad7b65dc -- package.json bun.lock` is **EMPTY** — no runtime or dev dependency was
+# added, removed or version-bumped across 25 commits. Every external-dependency row below therefore
+# carries forward **by measurement**, not by assumption. `package.json` is still the SOLE manifest
+# (v0.7.1, `files`-allowlisted, not a workspace monorepo).
+#
+# ⛑ **THE INTERNAL GRAPH GAINED A LEAF, AND ITS *NON*-EDGES ARE THE LOAD-BEARING PART.**
+# `compiler/src/ast-if-chain.js` (NEW #805; ⚠ `src/` ROOT, **not** `codegen/` — the dispatching
+# brief's path `compiler/src/codegen/ast-if-chain.js` does not exist) is imported by **13 modules
+# across 32 call sites**, which makes it one of the most-consumed leaves in the tree after a single
+# window. **But an import census is NOT a coverage claim here:** two walks are deliberately absent
+# from that edge list and both look like gaps. See the new row in the Internal Module Graph and
+# primary.map.md invariant 82.
+#
+# ⚠ **NOTHING ELSE IN THIS FILE WAS RE-WALKED.** The pipeline-spine rows, the `ifRaw`/`ifCond`
+# five-consumer table, the §55 synth-key copies, the colorless-async destinations and the stdlib
+# pairing all carry their PRIOR verification.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **MANIFEST STILL ZERO-DIFF:** `git diff --name-only fc6df72e..2ec2ce3a -- package.json bun.lock` is EMPTY — no external dependency was added, removed or version-bumped. ONE new INTERNAL edge (see the header block).
 # `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
 # source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
@@ -188,6 +216,7 @@ parsing, cell-accessor-rename), so this widens the internal consumer set, not th
 
 | Stage | Module(s) | Feeds |
 |---|---|---|
+| **⛑ §17.1.1 `if-chain` CHILD SHAPE — ONE LEAF, 13 IMPORTERS, 32 CALL SITES, AND TWO DELIBERATE NON-EDGES (NEW #805, WIDENED #811)** | **`compiler/src/ast-if-chain.js`** — ⚠ `src/` ROOT, **not** `codegen/`; `codegen/` consumers import `"../ast-if-chain.js"`, `src/` consumers `"./ast-if-chain.js"`. Single export `ifChainChildNodes(node)`: `branches[].element` in source order, then `elseBranch`; `[]` for any non-`if-chain`, so it is safe to call unconditionally. **IMPORTERS (13):** `codegen/collect.ts` · `codegen/emit-each.ts` · `codegen/emit-match.ts` · `codegen/reactive-deps.ts` (**13 of the 32 sites**) · `commands/promote.js` · `dependency-graph.ts` · `lint-i-fn-promotable.js` · `lint-i-match-promotable.js` · `lint-w-each-key.js` · `lint-w-each-promotable.js` · `lint-w-map-iteration-order.js` · `symbol-table.ts` · `type-system.ts`. **NO module imports it that does not also call it**, and it imports nothing itself — a true leaf. ⚠ **TWO NON-EDGES ARE INTENTIONAL AND READING THIS TABLE AS A COVERAGE MAP IS THE TRAP:** (a) `collect.ts:173` `collectFunctions` is **backed out** — closing it emits a `server fn` BODY into `client.js` because the server-boundary routing walk is separately blind; a LEAK GUARD test (`compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124`) reds anyone who closes it alone. (b) `symbol-table.ts:10642` is a **total `Object.keys` walk** that already reaches `branches[].element`; the helper enumerates KNOWN fields, so adding that edge NARROWS a correct site. **An edge count answers "who asks the shared question"; it does not answer "who needs to."** |
 | CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
 | **BS-LINT (Stage 2.5 / 2.5b / 2.5c) — three passes that read BLOCK-SPLITTER output, before the AST exists** | `lint-w-interp-in-raw-content.js` (2.5) · `lint-w-input-state-markup-nonreactive.js` (2.5b) · **`lint-e-state-block-statement-form.js` (2.5c, NEW #718)** | `collectErrors("BS-LINT", …)` → `result.warnings` for 2.5/2.5b, **`result.errors` for 2.5c** (`E-` prefix + `severity:"error"`; CLI exit 1). ⚑ **THE NEW NODE IMPORTS NOTHING — it is a leaf by necessity, since anything it pulled from a later stage would invert pipeline order.** Cost: its `STATE_BLOCK_NAMES` / `STATE_BLOCK_ON_LIFECYCLE_RE` are COPIES of `ast-builder.js:1169` (⛑ S383 +9) / `:756-757`, unenforced. ⚠ **2.5 and 2.5b wrap their call in `try`/`catch`; 2.5c deliberately does NOT** — a swallowed throw in an error gate is fail-OPEN. error.map.md. |

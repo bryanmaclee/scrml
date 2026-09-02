@@ -1,7 +1,57 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a` (51 commits). MAP-STAMP RULE run at WRITE time: `BASE=merge-base HEAD origin/main` = `2ec2ce3a` = HEAD = `origin/main`; the source diff `BASE..HEAD` over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` is EMPTY; `merge-base --is-ancestor 2ec2ce3a origin/main` exits 0 (outbound), and `--is-ancestor 0dd659a1 2ec2ce3a` exits 0 (inbound, invariant 48). One SHA on two lines because there is no second SHA to record.
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **§34 CATALOG IS FLAT AT 814 — ZERO codes in, ZERO out — WHILE ITS RANGE MOVED 98 LINES.** That
+# pairing is the whole reason this file refuses to bake the range: `bun scripts/s34-census.ts`
+# re-executed at `ad7b65dc` returns **`814 rows (§34 19456..20341, derived) · 1994 source files ·
+# 891 conformance cases`**, against `814 rows (§34 19358..20243)` at `2ec2ce3a`. **A baked range
+# would have been wrong by 98 lines against a total that did not move at all**, and a reader
+# checking "did the catalog change?" by comparing ranges would have manufactured a delta.
+#
+# **BUCKETS RE-EXECUTED AND ALL SEVEN ARE FLAT:** `STRUCK 34 · PINNED 343 · IMPL-SITES 304 ·
+# DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`; dispositions `BUILD-ARC 71 ·
+# HOME-NO-SHALL 27 · ORPHAN-INDEX 4 · NOMINAL-HOME 10`. Prefix greps also FLAT: `^| E-` **918** ·
+# `^| W-` **179** · `^| I-` **10** · `^| H-` **2**.
+#
+# **WHY EVERYTHING IS FLAT WHEN `SPEC.md` MOVED +108: the +108 is one commit (#802) of PROSE and
+# GRAMMAR, not rows.** It added §17.6.10, an `arm-body` grammar alternative and a governing
+# sentence. ⚑ **And it is the sharpest instance yet of a SPEC edit changing a diagnostic's meaning
+# with zero catalog movement: `SPEC.md:11893` normatively RETIRES `W-LIFT-001` for an
+# exactly-one-expression arm** — a code that already has **zero fire sites in `compiler/src/`**
+# against a live §34 catalog row (a FALSE-CLAIM member whose row is now narrower than the code's
+# absence already implied). Nothing in the census can see that.
+#
+# ⛑ **`E-CODEGEN-INVALID-LOGIC` GAINS A DOCUMENTED *NON-DEFECT* LOCUS — read this before filing a
+# bug against it.** `const <label> = if (…) { … }` in a DERIVED STATE CELL raises it in **both** the
+# §17.6.2 sugar form and the explicit-`lift` form. §17.6.3 (`SPEC.md:11898`) names only `const`/`let`
+# binding sites, so a derived cell is an **UNSPECIFIED shape failing LOUD — the safe direction.**
+# `const <label> = match @level { … }` DOES work and ships as a conformance case, so the asymmetry is
+# real; closing it is a WIDENING, not a fix. See primary.map.md invariant 85. ⛑ **The `if` half was
+# VERIFIED BY EXECUTION at this watermark, two-sided — sugar AND explicit-`lift` both raise
+# `E-CODEGEN-INVALID-LOGIC` in a derived cell, while the LOCAL binding compiles at exit 0 with a
+# shadow count of 0. The `match` half is RELAYED-UNVERIFIED: this pass's reproducer used an `asIs`
+# subject and was refused by `E-TYPE-025` before codegen, so it answered a different question.**
+#
+# ⚠ **A NON-COMPLIANCE FINDING LANDED IN THIS FILE'S SUBJECT AREA AND IS *NOT* A DIAGNOSTIC:**
+# `docs/known-gaps.md:9389` still calls `planBlockArmLift` *"the single §18.5 tail classifier"*.
+# Invariant 49 recorded FOUR emission routes in S331, and #815 confirms the shared leaf is
+# **`_blockTailIsValueExpr`** (`emit-logic.ts:4871`), not `planBlockArmLift`. **The phrase is now
+# wrong on both axes and is still propagating.** non-compliance.report.md N9.
+#
+# ⚠ **THE REST OF THIS FILE (~1,050 lines) WAS NOT RE-WALKED.** Only the catalog/census block, the
+# `E-CODEGEN-INVALID-LOGIC` note above and the two figures below were re-derived at this watermark.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a` (51 commits). MAP-STAMP RULE run at WRITE time: `BASE=merge-base HEAD origin/main` = `2ec2ce3a` = HEAD = `origin/main`; the source diff `BASE..HEAD` over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` is EMPTY; `merge-base --is-ancestor 2ec2ce3a origin/main` exits 0 (outbound), and `--is-ancestor 0dd659a1 2ec2ce3a` exits 0 (inbound, invariant 48). One SHA on two lines because there is no second SHA to record.
 # codegen surface S380 touched: emit-each.ts, emit-match.ts, emit-server.ts, emit-variant-guard.ts,
 # build.js, dev.js, component-expander.ts; NOT a full re-walk). `git merge-base --is-ancestor
 # 48f0aaf8 0dd659a1` exits 0; HEAD == origin/main == 0dd659a1.
@@ -312,7 +362,7 @@ row now exists AND it fires; the prior "NOT implemented — do not add" note her
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
 
-**814 distinct diagnostic codes** cataloged in §34 at `2ec2ce3a` — **`bun scripts/s34-census.ts` is
+⛑ **S395: 814 distinct diagnostic codes** cataloged in §34 at `ad7b65dc` — **FLAT over `2ec2ce3a..ad7b65dc`, zero in and zero out, while the RANGE moved +98 to `19456..20341`. Re-derive the range from the `## 34.` / `## 35.` headings EVERY time; never bake it.** Census at `ad7b65dc`: `814 rows (§34 19456..20341, derived) · 1994 source files · 891 conformance cases`; buckets `STRUCK 34 · PINNED 343 · IMPL-SITES 304 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`, all seven FLAT. `compiler/SPEC.md` is now **37,647 lines** (+108, ONE commit — #802, prose+grammar, ZERO rows). The S391 figures follow for provenance: **814 distinct diagnostic codes** cataloged in §34 at `2ec2ce3a` — **`bun scripts/s34-census.ts` is
 the ORACLE and it was RE-EXECUTED this pass**, returning
 `814 rows (§34 19358..20243, derived) · 1944 source files · 887 conformance cases`.
 
