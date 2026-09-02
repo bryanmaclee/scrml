@@ -2,6 +2,25 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S396 — 2026-09-02 (peter · P-Tech1 Windows) — aM pin bumped to HEAD; a flogenceP dog-food surfaced an E-ROUTE-004 gate hole
+
+A dog-food + adopter-ops session; no compiler source touched. The assetManagement pin was bumped to
+current HEAD after a green re-verify, and dog-fooding the real flogenceP app on HEAD root-caused one
+scrml gate hole (filed + routed to bryan).
+
+- **aM pin bumped `f4ec0400` (#746) → HEAD `8f3c5b74`** — `scrml-pinned`'s `app-pinned` branch
+  fast-forwarded; no `run.cmd`/`serve.cmd` edits. Re-verify green: aM compiles clean on HEAD (203
+  routes, `--validate-emit`), emit semantically identical to the old pin, deterministic. A first-compile
+  "dropped portal section" was a read-during-write of `portal.scrml`, not a codegen bug — dissolved by
+  re-run, not filed.
+- **Filed `g-route-004-untyped-fn-param-escapes-serializability-gate` (MED)** — E-ROUTE-004
+  (`type-system.ts:4734`) skips un-annotated params, so a server-boundary fn with an untyped-but-called
+  function parameter is routed as a silent dead-500 endpoint. PA-reproduced on flogenceP `runGatedAgentic`
+  + a two-sided runtime-confirmed minimal repro. Routed to bryan (normative fork on the fix).
+- **flogenceP dog-fooded on HEAD** — compiles clean (21 files, 94 routes, 1 WS channel), boots clean
+  (server + MCP); all 92 server-fns swept, every 500 triaged to app-level (args / schema-init-order),
+  zero codegen-signature errors. HEAD codegen is faithful to the real program.
+
 ## S394 — 2026-09-01 (peter · P-Tech1 Windows) — assetManagement dog-food on scrml HEAD: the pin blocker is gone, pin ready to bump
 
 A dog-food/verification session, no compiler source touched. Compiled and ran Peter's real
