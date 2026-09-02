@@ -1,0 +1,29 @@
+${
+    <n>: int = 5
+
+    function sugar() {
+        const label = if (@n > 0) { "pos" } else { "neg" }
+        return label
+    }
+
+    function lifted() {
+        const label = if (@n > 0) { lift "pos" } else { lift "neg" }
+        return label
+    }
+
+    function cascade() {
+        const label = if (@n > 8) { "hi" } else if (@n > 3) { "mid" } else { "lo" }
+        return label
+    }
+
+    function letSite() {
+        let label = if (@n > 0) { "pos" } else { "neg" }
+        return label
+    }
+}
+
+<div id="out-n">${@n}</>
+<div id="out-sugar">${sugar()}</>
+<div id="out-lifted">${lifted()}</>
+<div id="out-cascade">${cascade()}</>
+<div id="out-let">${letSite()}</>

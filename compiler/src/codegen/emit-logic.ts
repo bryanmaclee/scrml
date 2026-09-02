@@ -4388,10 +4388,78 @@ function countTopLevelLifts(body: any[]): number {
 }
 
 /**
+ * §17.6 VALUE-FORM SUGAR at a BINDING SITE — `const a = if (c) { "x" } else { "y" }`.
+ *
+ * §17.6.1 grammar:  `arm-body ::= '{' expression '}'  -- value-form sugar for
+ * `{ lift expression }`, and §17.6.2 normative: *"An if-as-expression arm body SHALL
+ * produce its result value via a `lift` statement, **or** by being exactly one
+ * expression, which is sugar for `lift` of that expression."* Those two ways are
+ * declared to be *"the only two ways an arm body produces a value."*
+ *
+ * Only the `lift` way was implemented at this position. A sugar arm fell through to
+ * the shared `bare-expr` handler, which — under an active `tildeContext` — mints a
+ * FRESH `let _scrml_tilde_N = <expr>;` (the §32 pipeline-accumulator lowering) *and*
+ * rebinds `tildeContext.var` to it. So the arm wrote a block-scoped temp instead of
+ * the enclosing result var, the result var stayed at its `let … = null` seed, and the
+ * binding was ALWAYS `null` — at exit 0, with zero diagnostics
+ * (`g-value-form-sugar-in-bound-position-emits-null`).
+ *
+ * This is the SECOND position of one defect: §18.5's match block-arm carried the
+ * identical fall-through and its fix (the `${tildeVar} = ${rhs};` redirect below the
+ * `_blockTailIsValueExpr` gate) is the pattern mirrored here. ⚑ **The two constructs
+ * share the VALUE-NESS predicate but NOT the SHAPE rule, and conflating them would be
+ * a widening.** §18.5 says a block arm's result is its LAST expression (a tail after
+ * N statements); §17.6.1's grammar says the sugar arm is EXACTLY ONE expression
+ * (`'{' expression '}'`). So the `length === 1` shape test is local and deliberate,
+ * while `_blockTailIsValueExpr` — "is this bare-expr a value at all?", the identical
+ * question — is shared. This also keeps the binding position in lockstep with the
+ * markup-interpolation position, where the SAME §17.6 sugar is already correct via
+ * `_soleBareExprValue` (`emit-control-flow.ts`) and uses the same `length !== 1 →
+ * decline` shape test.
+ *
+ * ⚑ THE TWO GUARDS BELOW ARE LOAD-BEARING, NOT DEFENSIVE PADDING — a bare
+ * `length === 1 && kind === "bare-expr"` redirect is a bug generator:
+ *   · `_onMountEffect` marks a DESUGARED `on mount {}` / `on dismount {}`, which the
+ *     ast-builder surfaces as a `bare-expr` whose `expr` is the mount BODY (so the
+ *     `on` keyword is not in the text and the keyword fence cannot see it). A
+ *     lifecycle effect is not a value.
+ *   · `_blockTailIsValueExpr` rejects assignment-shaped tails, which §18.5 already
+ *     ruled void. Measured, not assumed: `{ @acc += 1 }` reaches here as a
+ *     `bare-expr` with an `assign` node (`@acc = 1` and `t = "p"` do not — they parse
+ *     as `state-decl` / `tilde-decl`). Without the gate this arm would lower to
+ *     `<result> = _scrml_reactive_set("acc", …)`, hijacking a statement as the arm's
+ *     value AND bypassing the machine/engine write interception further down the
+ *     shared `bare-expr` handler (the §51.11 transition guard + audit clause).
+ *
+ * Returns the single emitted line, or null when the body is not the sugar shape — in
+ * which case the caller keeps its ordinary `emitLogicNode` loop, so explicit-`lift`
+ * arms, statement arms and multi-statement arms are all byte-unchanged.
+ */
+function _emitValueFormSugarArm(body: any[] | null | undefined, tildeVar: string, bodyOpts: EmitLogicOpts): string | null {
+  if (!Array.isArray(body) || body.length !== 1) return null;
+  const only = body[0];
+  if (!only || only.kind !== "bare-expr" || only._onMountEffect) return null;
+  // Mirror `_soleBareExprValue`'s derivation (the working interpolation-position
+  // twin): prefer the AST, fall back to the retained raw text.
+  let text = "";
+  if (only.exprNode) {
+    try { text = emitStringFromTree(only.exprNode); } catch { text = ""; }
+  }
+  if (!text.trim()) text = typeof only.expr === "string" ? only.expr : "";
+  if (!text.trim() || !_blockTailIsValueExpr(text)) return null;
+  // `emitExprField` lowers from `exprNode` when present (the raw string is only a
+  // fallback), so the RHS is byte-identical to what the bare-expr handler produced
+  // before this redirect. The ONLY delta is the assignment TARGET: the enclosing
+  // result var instead of a fresh block-scoped `let`.
+  const rhs = emitExprField(only.exprNode ?? null, text, _makeExprCtx(bodyOpts));
+  return `  ${tildeVar} = ${rhs};`;
+}
+
+/**
  * Emit the alternate (else/else-if) chain of an if-as-expression inline,
  * handling else-if chains without extra braces per §17.6.8.
  */
-function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: string[]): void {
+function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: string[], tildeVar: string): void {
   if (alternate.length === 1 && alternate[0]?.kind === "if-stmt") {
     // else if — emit without extra braces (§17.6.8)
     const nestedIf = alternate[0];
@@ -4405,17 +4473,23 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
       lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
     }
     lines.push(`else if (${nestedCond}) {`);
-    for (const stmt of nestedConsequent) {
-      const code = emitLogicNode(stmt, bodyOpts);
-      if (code) {
-        for (const line of code.split("\n")) lines.push(`  ${line}`);
+    // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
+    const nestedSugar = _emitValueFormSugarArm(nestedConsequent, tildeVar, bodyOpts);
+    if (nestedSugar !== null) {
+      lines.push(nestedSugar);
+    } else {
+      for (const stmt of nestedConsequent) {
+        const code = emitLogicNode(stmt, bodyOpts);
+        if (code) {
+          for (const line of code.split("\n")) lines.push(`  ${line}`);
+        }
       }
     }
     lines.push(`}`);
     // Continue chaining for further else-if / else
     if (nestedIf.alternate) {
       const nextAlternate: any[] = Array.isArray(nestedIf.alternate) ? nestedIf.alternate : [nestedIf.alternate];
-      emitIfExprAltChain(nextAlternate, bodyOpts, lines);
+      emitIfExprAltChain(nextAlternate, bodyOpts, lines, tildeVar);
     }
   } else {
     // plain else
@@ -4424,10 +4498,16 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
       lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
     }
     lines.push(`else {`);
-    for (const stmt of alternate) {
-      const code = emitLogicNode(stmt, bodyOpts);
-      if (code) {
-        for (const line of code.split("\n")) lines.push(`  ${line}`);
+    // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
+    const elseSugar = _emitValueFormSugarArm(alternate, tildeVar, bodyOpts);
+    if (elseSugar !== null) {
+      lines.push(elseSugar);
+    } else {
+      for (const stmt of alternate) {
+        const code = emitLogicNode(stmt, bodyOpts);
+        if (code) {
+          for (const line of code.split("\n")) lines.push(`  ${line}`);
+        }
       }
     }
     lines.push(`}`);
@@ -4462,10 +4542,16 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
   }
   lines.push(`if (${condition}) {`);
 
-  for (const stmt of consequent) {
-    const code = emitLogicNode(stmt, bodyOpts);
-    if (code) {
-      for (const line of code.split("\n")) lines.push(`  ${line}`);
+  // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
+  const thenSugar = _emitValueFormSugarArm(consequent, tildeVar, bodyOpts);
+  if (thenSugar !== null) {
+    lines.push(thenSugar);
+  } else {
+    for (const stmt of consequent) {
+      const code = emitLogicNode(stmt, bodyOpts);
+      if (code) {
+        for (const line of code.split("\n")) lines.push(`  ${line}`);
+      }
     }
   }
   lines.push(`}`);
@@ -4473,7 +4559,7 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
   // Emit alternate body if present (§17.6.8 — else-if chain optimization)
   if (ifExpr.alternate) {
     const alternate: any[] = Array.isArray(ifExpr.alternate) ? ifExpr.alternate : [ifExpr.alternate];
-    emitIfExprAltChain(alternate, bodyOpts, lines);
+    emitIfExprAltChain(alternate, bodyOpts, lines, tildeVar);
   }
 
   lines.push(`${keyword} ${name} = ${tildeVar};`);
