@@ -1,0 +1,25 @@
+{
+  "id": "ctrl-023-value-form-sugar-bound-position-pos",
+  "description": "§17.6.2 / §17.6.1 — the value-form sugar at a BOUND (binding-site) position. `const label = if (@n > 0) { \"pos\" } else { \"neg\" }` binds the selected branch's expression WITHOUT a `lift`. `#out-sugar` renders 'pos'; `#out-lifted` writes the identical shape with an explicit `lift` in each branch and renders identically, pinning the §17.6.2 sugar equivalence at the binding site the way ctrl-021 pins it in a markup interpolation. `#out-cascade` pins an `else if` chain (@n is 5, so the 'mid' arm is selected — NOT the 'hi' arm and NOT the trailing 'lo' else). `#out-let` pins that a `let` binding site behaves identically to `const`, both being what §17.6.3 sanctions.",
+  "language-version": "1.0",
+  "spec": "§17.6.2, §17.6.1, §17.6.3, §17.6.8",
+  "source-test": "compiler/src/codegen/emit-logic.ts",
+  "rationale": "§17.6.1's grammar admits `arm-body ::= '{' expression '}'` as \"value-form sugar for `{ lift expression }`\", and §17.6.2 states it normatively: \"An if-as-expression arm body SHALL produce its result value via a `lift` statement, **or** by being exactly one expression, which is sugar for `lift` of that expression (§17.6.10). These are the only two ways an arm body produces a value.\" Only the `lift` way was implemented at this position. A sugar arm fell through to the shared `bare-expr` handler, which under an active tilde context mints a FRESH `let _scrml_tilde_N = <expr>;` (the §32 pipeline-accumulator lowering) instead of writing the enclosing result var — so the result var stayed at its `= null` seed and the binding was ALWAYS `not`/null, at exit 0, with ZERO diagnostics (g-value-form-sugar-in-bound-position-emits-null, HIGH silent-wrong). This is a SILENT-WRONG regression guard: every `#out-*` selector below except `#out-lifted` and `#out-n` rendered EMPTY before the fix. The `#out-sugar` / `#out-lifted` pair is the load-bearing assertion — it pins the two forms to the same OBSERVABLE RESULT, which is what §17.6.2 asserts (§17.6.8 grants the compiler latitude over the emitted JavaScript, so this case does NOT assert emitted-code identity). `notCodes` carries W-LIFT-001 as a FORWARD guard: §17.6.2 says an arm body that IS exactly one expression \"SHALL NOT surface W-LIFT-001\"; that code has no emit site in compiler/src at the time this case was written, so the assertion is vacuous today and becomes load-bearing the moment W-LIFT-001 is implemented.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-LIFT-001", "E-TYPE-031"],
+    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-"],
+    "domAnchored": [
+      { "selector": "#out-n", "count": 1 },
+      { "selector": "#out-n", "text": "5" },
+      { "selector": "#out-sugar", "count": 1 },
+      { "selector": "#out-sugar", "text": "pos" },
+      { "selector": "#out-lifted", "count": 1 },
+      { "selector": "#out-lifted", "text": "pos" },
+      { "selector": "#out-cascade", "count": 1 },
+      { "selector": "#out-cascade", "text": "mid" },
+      { "selector": "#out-let", "count": 1 },
+      { "selector": "#out-let", "text": "pos" }
+    ]
+  }
+}

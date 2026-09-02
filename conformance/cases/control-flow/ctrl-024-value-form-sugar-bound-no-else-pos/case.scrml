@@ -1,0 +1,29 @@
+${
+    <n>: int = 5
+
+    function hit() {
+        const label = if (@n > 0) { "YES" }
+        return label
+    }
+
+    function miss() {
+        const label = if (@n > 99) { "YES" }
+        return label
+    }
+
+    function cascadeHit() {
+        const label = if (@n > 8) { "hi" } else if (@n > 3) { "mid" }
+        return label
+    }
+
+    function cascadeMiss() {
+        const label = if (@n > 99) { "hi" } else if (@n > 50) { "mid" }
+        return label
+    }
+}
+
+<div id="out-n">${@n}</>
+<div id="out-hit">${hit()}</>
+<div id="out-miss">${miss()}</>
+<div id="out-cascade-hit">${cascadeHit()}</>
+<div id="out-cascade-miss">${cascadeMiss()}</>

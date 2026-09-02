@@ -1,0 +1,25 @@
+{
+  "id": "ctrl-024-value-form-sugar-bound-no-else-pos",
+  "description": "§17.6.4 / §17.6.2 — the value-form sugar at a BOUND (binding-site) position with NO trailing `else`. The `else` is OPTIONAL; when no arm executes the binding receives `not`, which renders as NOTHING. `#out-hit` selects the true arm ('YES'); `#out-miss` selects no arm and renders empty. `#out-cascade-hit` pins that an `else if` cascade with no trailing `else` still selects a matching arm (@n is 5, so 'mid'); `#out-cascade-miss` pins that falling off the end of such a cascade binds `not` and renders empty. This is the bound-position twin of ctrl-022, which pins the same two halves in a markup interpolation.",
+  "language-version": "1.0",
+  "spec": "§17.6.4, §17.6.2, §17.6.1, §17.6.3",
+  "source-test": "compiler/src/codegen/emit-logic.ts",
+  "rationale": "§17.6.4 is unambiguous on BOTH halves: \"An if-as-expression without an `else` arm SHALL have an implicit false-path type of `not`\" and \"The compiler SHALL NOT emit an error or warning for a missing `else` arm. Missing `else` is valid; the consequence is a `T | not` result type.\" §17.6.2 supplies the value for the TRUE path without a `lift`: \"An if-as-expression arm body SHALL produce its result value via a `lift` statement, **or** by being exactly one expression, which is sugar for `lift` of that expression.\" Before the fix the true path was the broken one, not the false path: the sugar arm minted a fresh `let _scrml_tilde_N = \"YES\";` instead of writing the enclosing result var, so the binding was `null` on BOTH paths — `#out-hit` rendered empty exactly like `#out-miss`, at exit 0 with zero diagnostics (g-value-form-sugar-in-bound-position-emits-null). The false path was already correct and is pinned here so the fix cannot over-reach: `not` is the seed the result var is initialised to, and it must SURVIVE an unselected cascade. The absence assertions are the other half of §17.6.4's ruling — no diagnostic of ANY severity may be raised for the missing `else`, so E-CTRL-/E-LIFT- are excluded by prefix and W-LIFT-001 (which has no emit site in compiler/src at the time this case was written) is excluded by name as a forward guard.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-LIFT-001", "E-TYPE-031"],
+    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-"],
+    "domAnchored": [
+      { "selector": "#out-n", "count": 1 },
+      { "selector": "#out-n", "text": "5" },
+      { "selector": "#out-hit", "count": 1 },
+      { "selector": "#out-hit", "text": "YES" },
+      { "selector": "#out-miss", "count": 1 },
+      { "selector": "#out-miss", "text": "" },
+      { "selector": "#out-cascade-hit", "count": 1 },
+      { "selector": "#out-cascade-hit", "text": "mid" },
+      { "selector": "#out-cascade-miss", "count": 1 },
+      { "selector": "#out-cascade-miss", "text": "" }
+    ]
+  }
+}
