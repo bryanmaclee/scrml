@@ -1,7 +1,25 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a full doc re-scan — this pass RE-VERIFIED N8 BY EXECUTION and found it had been mis-recorded: see N8.** The remaining findings carry their prior watermarks and were not re-run.
+# generated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 — SCAN RE-EXECUTED. STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc`. ━━━━━━━
+#
+# **THE HEADLINE IS NOT A DOCUMENT. IT IS THE SCAN *POPULATION*.** Thirteen prior passes reported
+# against a population that never contained `docs/audits/` — **20 documents, 2.0 MB, dated
+# 2026-04-25 to 2026-07-28.** `grep -c docs/audits` across all thirteen maps returns **1** hit in
+# `structure.map.md` (a bare list item in the `docs/` row, no characterization) and **1** in this
+# report — which is a *`scrml-support`* path, not this repo's directory. **A finding that is absent
+# from the scan cannot be reported as absent from the repo, and nothing distinguished those two
+# outcomes.** See N12. Five more doc directories have the same status (N13).
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a full doc re-scan — this pass RE-VERIFIED N8 BY EXECUTION and found it had been mis-recorded: see N8.** The remaining findings carry their prior watermarks and were not re-run.
 # `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
 # source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
 # `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
@@ -15,7 +33,262 @@
 # scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, with
 # every LIVE finding REPRODUCED BY COMPILING or by grepping source at this watermark — not relayed.
 
-## Summary — S376 pass (this pass)
+
+## Summary — S395 pass (this pass)
+
+**Scan mode:** FULL re-execution of the doc-compliance scan, not the S391 pattern (which re-executed
+only finding N8).
+
+| | |
+|---|---|
+| Watermark | `ad7b65dc` (`merge-base HEAD origin/main`; source diff against it EMPTY; `--is-ancestor` exit 0) |
+| Prior watermark | `2ec2ce3a` — inbound check `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` exit 0 |
+| Window | 25 commits |
+| **In-scope docs scanned** | **88** |
+| Compliant | 68 |
+| **Non-compliant** | **13** (N8 · N9 · N12 ×2 named · N13 ×2 named · N14 · C4 · C6 · PIPELINE.md · plus 4 unnamed members of the N12/N13 sets) |
+| Uncertain — needs human review | 7 (all carried; existence re-verified, content unchanged) |
+| **Closed this pass** | **1** (S331-N5) |
+
+**Population definition, stated because the headline finding is that it was wrong before.** `*.md`
+under the repo root, EXCLUDING: `node_modules/`, `.git/`, `archive/`, `handOffs/` (historical
+hand-offs), `.claude/`, `docs/changes/` (per-dispatch BRIEF archive — 713 dirs, historical by the
+S133/S135 convention), `spa-lists/` (134 files, PA bookkeeping, excluded per structure.map.md's own
+`handOffs/ · spa-lists/ · scratch/` row), `samples/`, `examples/`, `e2e/`, `benchmarks/`,
+`dashboard/`, `docs/website/` (site-copy corpus), `compiler/self-host*/`, `editors/`. **That leaves
+88, and `docs/audits/` (20) + `docs/heads-up/` (4) + `docs/adopter/` (2) + `docs/curation/` (1) +
+`docs/pinned-discussions/` (1) = 28 of the 88 have never been characterized by any map.**
+
+### New docs this window — SCANNED, and all compliant
+
+| doc | verdict |
+|---|---|
+| `docs/changes/{s391-guard-and-52-13, s391-maps-refresh, s391-worktree-sweep-probe, s393-if-chain-class, s393-pr805-fix-round, s395-value-form-sugar-bound}/BRIEF.md` + 2 `progress.md` | **COMPLIANT** — the S133/S135 dispatch-archive convention (archive the prompt verbatim at dispatch time). Historical by design; correctly out of the mapped population. |
+| `docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md` (1,074L, UNTRACKED) | **COMPLIANT.** Self-declares *"Working file. Newest draft at the top… Untracked and uncommitted"* with a v1→v7 version table. A live authoring artifact, bryan-owned. The date in the filename is **2 days old**, not the 30-day staleness the name heuristic targets. |
+| `docs/articles/if-you-give-a-dev-an-enum-PUBLISH.md` (148L, UNTRACKED) | **COMPLIANT — grep-cross-checked, not eyeballed.** Every backticked identifier (3: `E-MATCH-NOT-EXHAUSTIVE`, `.Empty`, `.Success`) resolves in `compiler/src/` / `SPEC.md` / `stdlib/`. **0 of 3 missing.** |
+
+---
+
+## NEW FINDINGS — S395
+
+### N12. `docs/audits/` — 20 documents, 2.0 MB, NEVER IN ANY SCAN POPULATION
+
+**Reason:** location + name-heuristic + content, compounded by a **thirteen-pass population hole**.
+
+**Detail.** Twenty `*.md` under `docs/audits/`, file dates **2026-04-25 → 2026-07-28**. Per the
+mapper's own location heuristic, audits / deep-dives / research belong in `scrml-support`, not in a
+project repo. **They have never been scanned:** `grep -c 'docs/audits' .claude/maps/*.md` returns
+`structure.map.md:1` (a bare list item inside the `docs/` ownership row, with no characterization)
+and `non-compliance.report.md:1` — and that one hit is
+`scrml-support/docs/audits/sliding-doors-corpus-zero-2026-08-16/CHARTER.md`, **a different repo**.
+Every other map: **0**.
+
+**Two are SUPERSEDED BY THEIR OWN TEXT and still sit in the live tree:**
+- `null-audit-compiler-src-2026-05-13.md` (465L) — carries an *"⚑ S90 CLOSURE BANNER (2026-05-13) —
+  Option ε ratified"* stating its framing of *"~860 sites across 18 M-class follow-on items"* has
+  been **superseded**.
+- `undefined-audit-compiler-src-2026-05-13.md` (541L) — identical banner, *"~140 M-class sites across
+  16 M-8C-D-N items"*, **superseded**.
+
+**One is measurably unanchored:** `scrml-dev-content-spec-fidelity-2026-05-19.md:5` declares
+*"**Authoritative source:** compiler/SPEC.md (**27,945 lines**…)"*. `SPEC.md` is **37,647** lines at
+this watermark — **a 9,702-line divergence, +34.7%** — so every §-anchored claim it makes is anchored
+to a document that no longer exists in that shape.
+
+**Six self-declare `status: current` with a `last-reviewed` that is 36–119 days old**
+(`bug-51-class-corpus-coverage-audit-2026-05-28`, `s34-meaning-axis-2026-07-28`,
+`split-key-pair-sweep-2026-07-23`, `stdlib-completeness-2026-07-08`,
+`tutorial-staleness-audit-2026-06-12`, `windows-canary-2026-07-14`). ⚠ **`status: current` in
+frontmatter is an ASSERTION, not a measurement, and nothing in the toolchain checks it** — the same
+shape as the `@generated` half of `SPEC-INDEX.md` being gated while its authored half rots.
+
+**Suggested disposition:** deref the superseded two and the pre-June set to
+`scrml-support/archive/`; keep the four post-July sweeps (`s34-meaning-axis`, `split-key-pair-sweep`,
+`stdlib-completeness`, `windows-canary`) **only if** a `last-reviewed` refresh is owned. **Whatever
+the disposition, the population fix is the durable half: this directory must be in the scan from now
+on.**
+
+### N13. Five more doc directories with ZERO coverage in ANY map — and one is an unexecuted cleanup plan
+
+**Reason:** location + population hole.
+
+**Detail.** `grep -l 'docs/<dir>' .claude/maps/*.map.md` returns **0 files** for every one of:
+
+| directory | files | note |
+|---|---|---|
+| `docs/heads-up/` | 4 (152 KB) | design-extension "heads-up" docs, S129/S130/S134 |
+| `docs/adopter/` | 2 (32 KB) | `byob-external-api.md`, `mcp-setup.md` — **adopter-facing**, which makes zero coverage the worst case here |
+| `docs/curation/` | 1 (24 KB) | see below |
+| `docs/pinned-discussions/` | 1 (12 KB) | `w-program-001-warning-scope.md` — a parked decision |
+| `docs/graph/` | 0 `.md` (68 KB non-md) | no doc surface; listed for completeness |
+
+**(a) `docs/heads-up/spec-consolidation-2026-05-25.md` — 1,003 lines, frontmatter `status:
+in-progress`, `started: 2026-05-25` (S129), NO `last-reviewed`, 9 aspirational markers
+(`planned` / `TBD` / `not yet` / `proposal`).** Last git touch **2026-06-25**. **An "in-progress"
+design doc that has not moved in 69 days and has never been in a compliance scan is the exact
+aspirational-content class this report exists to catch.** Its three siblings are lower risk and
+self-labelled: two carry `status: historical` with `last-reviewed: 2026-05-29`, one carries
+`status: ratified / phase: closed`.
+
+**(b) `docs/curation/2026-05-05-changes-dir-disposition.md` — a PRIOR maps-refresh agent's own
+non-compliance follow-up, and it was never executed.** Its text: *"flagged by **S61 maps-refresh
+agent's non-compliance scan** as a wholesale curation candidate (103 dirs total)"*, with
+**"Proposed dispositions"** for **103** dirs under `docs/changes/`. **`docs/changes/` now holds 713
+directories.** Last git touch of `docs/curation/`: **2026-05-10**. ⚑ **This is the sharpest available
+evidence that this report's own output has not been closing the loop: a prior pass produced a
+disposition matrix, the matrix was never run, the population it dispositioned grew **6.9×**, and no
+subsequent pass noticed because `docs/curation/` was never in the scan either.** **Suggested
+disposition:** either execute-or-retire the matrix; do not leave a 103-row plan against a 713-row
+population.
+
+### N14. `docs/known-gaps.md` cites `collapseIfChains` at `ast-builder.js:18885` — that line is `  let i = 0;`
+
+**Reason:** grep-mismatch — **and it is provably wrong-at-its-own-watermark, not drifted.**
+
+**Detail.** The `g-each-in-if-else-chain-emits-zero-renderers` entry records *"Root cause (PA-traced +
+PA-confirmed by execution on HEAD `76f97a59`): … `collapseIfChains` (`ast-builder.js:18885`)"*.
+Measured at `ad7b65dc`:
+
+    $ sed -n '18885p' compiler/src/ast-builder.js
+      let i = 0;
+    $ grep -n 'function collapseIfChains' compiler/src/ast-builder.js
+    18871:function collapseIfChains(nodes, errors, filePath) {
+    $ grep -n 'kind: "if-chain"'          compiler/src/ast-builder.js
+    19024:      kind: "if-chain",
+
+⚑ **The proof that it was wrong when written, rather than shifted since:**
+`git diff --stat 76f97a59..ad7b65dc -- compiler/src/ast-builder.js` is **EMPTY** — the file has not
+moved one byte since the watermark the entry names. **So `:18885` never pointed at
+`collapseIfChains`.** It lands 14 lines below the function decl, on a loop counter, inside the right
+function — **the invariant-78 sub-class: a neighbouring, plausible target that a reader will accept
+because it resolves to something structurally sensible.** Third measured instance of invariant 77's
+class, and the first where a zero-diff file makes the "from birth" verdict a measurement rather than
+an inference.
+
+**Suggested disposition:** correct to `:18871` (declaration) and `:19024` (the node construction —
+the line a reader actually wants). Both anchors are now carried in `structure.map.md`,
+`domain.map.md` §17.1.1 and `primary.map.md` invariant 82, derived by symbol grep.
+
+---
+
+## CARRIED FINDINGS — RE-EXECUTED AT `ad7b65dc` (not relayed)
+
+### N8 — STILL LIVE, and this pass can finally quantify how wrong it is
+
+`scripts/source-text-regex-census.ts` bakes `type-system.ts:26048` in **two** places — `:38` (a doc
+comment: *"the confirmed pre-existing defect at `type-system.ts:26048` lives"*) and `:170` (a
+**runtime `console.log`**: *"see `postRe.test(t)` — the site of the confirmed defect at
+type-system.ts:26048."*). Measured here:
+
+- `sed -n '26048p' compiler/src/type-system.ts` → `* (Landing 2 may extend if cross-fn lifecycle tracking proves desirable.)` — **a doc-comment line.**
+- `grep -n 'postRe' compiler/src/type-system.ts` → `:26926`, `:27864`, `:27989`.
+
+**Wrong on two axes at once.** (1) The nearest real `postRe` is **878 lines away**. (2) The singular
+*"the site"* is wrong regardless of the number — there are **three**. ⚠ **And a gate that PRINTS a
+baked citation is worse than a doc that carries one: the doc is read once, the gate re-asserts it on
+every run.** This is the exact rot class the repo stripped out of §34 at S305.
+**Disposition:** derive at runtime by grepping the symbol, or delete the citation from the printed
+output.
+
+### N9 — STILL LIVE, and #815 makes it wrong on a second axis
+
+`docs/known-gaps.md:9389` still reads *"the shared `planBlockArmLift` (**the single §18.5 tail
+classifier**)"*. `planBlockArmLift` appears **4×** in that file.
+- **Axis 1 (S331, unresolved):** invariant 49 recorded that §18.5 has **FOUR** emission routes, so
+  "the single classifier" was already false.
+- **Axis 2 (NEW, S395):** #815 establishes that the genuinely shared leaf across §18.5 **and**
+  §17.6.2 is **`_blockTailIsValueExpr`** (`emit-logic.ts:4871`, exported; consumed at
+  `emit-control-flow.ts:2479` and `emit-logic.ts:4449` / `:4938` / `:5100`) — **not**
+  `planBlockArmLift`. **The phrase now names the wrong symbol for the wrong claim, and it is still
+  propagating into briefs.**
+**Disposition:** replace with *"`_blockTailIsValueExpr`, the shared value-ness leaf; the SHAPE rule
+is per-construct (invariant 83)."*
+
+### C6 — STILL LIVE, unchanged
+
+`docs/tutorial.md` hardcodes `0.7.0` at **4** sites; `package.json` reads `"version": "0.7.1"`.
+⚠ `docs/FACTS.md` publishes `compiler version | 0.7.1` and is CI-gated — **so the repo has a gated
+authority for this exact number and a tutorial that ignores it.** The standing rule (FACTS.md's own
+preamble) is that public documents SHALL cite FACTS.md rather than hardcode.
+
+### C4 — STILL LIVE, and REFINED: the count is 8, not 9
+
+`W-LINT-*` tokens present in `compiler/src/` but absent from `compiler/SPEC.md`:
+`W-LINT-016` · `-017` · `-019` · `-020` · `-021` · `-022` · `-023` · `-024` · **`W-LINT-NNN`**.
+⛑ **Nine tokens, but `W-LINT-NNN` is a PLACEHOLDER, not a code — the live count is 8.** Prior passes
+reported "NINE" from the same set-difference without screening the template token. **Same class as
+invariant 63 (count by ABSENCE AT THE BASE, and screen what the extraction actually matched).**
+
+### PIPELINE.md — `<machine>`: INTERNALLY CONTRADICTORY, which is a sharper statement than "stale"
+
+`compiler/PIPELINE.md` carries **14** `machine` mentions and **records its own contradiction**:
+- `:712-713` — *"`<machine>`-vs-`<engine>` keyword distinction is decided at TAB time. (`W-DEPRECATED-001` was RETIRED at S307 when `<machine>` was REMOVED…)"* ✅ current
+- `:773` — *"The `< machine>` opener and `<machine>` no-space opener both resolve to…"* ❌ describes a live resolution
+- `:762` — `'machine'` listed in the `resolvedCategory` union ❌
+- `:1269` — `<machine>` listed among structural openers ❌
+- `:1663-1675` — `<machine>` `.advance()` transitions, `machine-intrinsic` monotonicity ❌
+
+**Compiler truth, grepped:** `ast-builder.js:17378-17379` emits `E-DEPRECATED-001: the \`<machine>\`
+keyword has been removed; use \`<engine>\` instead.` (invariant 5, anchor RE-VERIFIED at this
+watermark — `ast-builder.js` is zero-diff over the window). **A doc that states the removal in one
+place and the live behaviour in four is worse than one that is uniformly stale, because a reader who
+finds the correct paragraph reasonably stops looking.**
+
+### N6 — STILL LIVE, but RECLASSIFIED: superseded-in-place, not orphaned
+
+`route-inference.ts:3643-3657` still carries the `/** … */` block describing a **SIX-entry**
+deny-list (`span`, `loc`, `spans`, `parent`, `_scope`, `_record`). `:3658+` carries a second block
+that **corrects it in place**: *"S337 REVIEW: this was a six-entry hardcoded list including `parent`,
+`loc` and `spans`. … only three exists as a node field at RI time."* ⚑ **The correction is present
+and the stale block above it is not marked as superseded** — so the file reads top-down as
+authoritative-then-contradicted. **Lower severity than filed (the fix is a deletion, not a
+re-derivation), but it stays open**: a reader who stops at the first block gets the wrong list.
+
+---
+
+## CLOSED THIS PASS
+
+### S331-N5 — **CLOSED.** The dangling `§6.6.20` reference is gone from `SPEC.md`
+
+Filed S331, re-verified live at S371. Measured at `ad7b65dc`:
+
+    $ grep -c '§6.6.20' compiler/SPEC.md   ->  0
+    $ grep -c  '6.6.20' compiler/SPEC.md   ->  0
+
+**Checked in both forms deliberately** — a `§`-prefixed grep alone cannot distinguish "the reference
+was removed" from "the `§` was dropped and the dangling text remains." Zero on both. ⚠ **The prior
+report cited it as `SPEC.md:3438`; that line now reads *"(The identical error fires for a raw `@var`
+read, e.g. `${@price}` in the query.)"*** — so the citation ALSO drifted. **Closure verdict rests on
+the whole-file count, not on the line**, which is the only way to close a "reference exists
+somewhere" finding.
+
+---
+
+## Map currency at this stamp — S395
+
+`bun scripts/state.ts --check` at the START of this pass reported the maps **25 commits behind
+HEAD** and **exited 0**. ⚠ **Fifteenth consecutive pass to record that nothing in the toolchain fails
+on stale maps.** The instrument works; it is WARN-only.
+
+⛑ **AND THIS WINDOW SUPPLIES THE COST, MEASURED RATHER THAN ASSERTED.** The S393 wrap skipped step
+6c for context reasons; scheduled regeneration was removed from `cloud-maps.yml` at S310 (a ruled
+cost decision — the comment block at `cloud-maps.yml:57-65` states it plainly, including *"nav-maps
+are NO LONGER refreshed on a schedule"*). **Consequence: multiple dispatch briefs this session had to
+carry a "maps are STALE, treat every claim as a hypothesis" caveat** — the map set's currency
+becoming a per-dispatch tax on every brief that cites it.
+
+⚠ **AND THE WORKFLOW STILL COMMITS UNDER A MESSAGE THAT NAMES WHAT IT NO LONGER DOES.** Both
+`adc61f15` (#806) and `0b5392d1` (#814) landed in this very window titled
+`chore(maps): scheduled nav-map + @generated regen`. `git show --stat 0b5392d1` →
+**`master-list.md | 2 +-`, one file, one line.** ⚑ **A commit message is read as a coverage claim
+exactly the way a CI step name is (invariant 60) — and this one says "nav-map regen" while touching
+no map.** Anyone auditing "when were the maps last refreshed?" from `git log` gets **2026-09-02**
+(#814) instead of the true answer, **2026-08-31** (#795). **Suggested disposition: rename the
+workflow's commit message to what it does.**
+
+---
+
+## Summary — S376 pass (PRIOR pass — carried for provenance)
 
 **SIX new findings (N32-N37). FIVE were CORRECTED IN PLACE this pass; ONE is LIVE and operator-owned.
 TWO carried findings CLOSED (N26, C8).** Docs scanned: the 13 curated maps, the four untracked

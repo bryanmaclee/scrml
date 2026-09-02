@@ -1,7 +1,36 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-31T12:34:07-06:00  commit: 2ec2ce3a
-# generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **RE-WALKED on the CI surface** (`ci.yml` + `scripts/` both moved) — see the header note.
+# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
+# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
+# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
+# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
+# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+#
+# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+#
+# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF IN THE CI HALF, AND THE `gate` STEP COUNT WAS
+# RE-COUNTED RATHER THAN CARRIED.** `git diff --name-only 2ec2ce3a..ad7b65dc -- .github/` is
+# **EMPTY** — all three workflows (`ci.yml`, `advisory-review.yml`, `cloud-maps.yml`) are
+# byte-identical across 25 commits. `gate` is **FLAT at 14 steps** (2 `uses:` + 12 `name:`),
+# re-counted at this watermark; the `Compile-floor gate` step S391 recorded as the 14th is still
+# there and still BLOCKING. `package.json > scripts` is unchanged (manifest zero-diff).
+#
+# ⚠ **AND THE ONE THING THAT WAS *NOT* ZERO IN THIS FILE'S SURFACE IS THE INVARIANT-81 SHAPE AGAIN:
+# `scripts/` GAINED `worktree-sweep.ts` (#801) AND NO WORKFLOW INVOKES IT.** A new gate-adjacent
+# script that nothing imports and no CI step runs is structurally harder to notice than a new module
+# — which is exactly how `corpus-compile-floor.ts` + its BLOCKING `gate` step went unmapped across
+# thirteen passes. It is mapped in structure.map.md this time rather than advanced past. It is a
+# DRY-RUN-ONLY report (no `worktree remove`, no `branch -D`, no write of any kind) with a unit test
+# at `compiler/tests/unit/worktree-sweep-classify.test.js`.#
+# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
+# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
+# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
+# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+#
+# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **RE-WALKED on the CI surface** (`ci.yml` + `scripts/` both moved) — see the header note.
 # `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
 # (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
 # the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
