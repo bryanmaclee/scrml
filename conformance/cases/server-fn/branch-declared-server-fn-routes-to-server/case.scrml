@@ -1,0 +1,19 @@
+${
+    <open> = true
+    <label> : string = "pending"
+}
+<div id="wrap" if=@open>
+    ${
+        server fn branchLoad() : string {
+            return "COMPUTED-IN-THE-BODY"
+        }
+        function pull() {
+            @label = branchLoad()
+        }
+    }
+    <button id="go" onclick=pull()>Go</>
+</>
+<div else>
+    <p id="alt">alt</>
+</>
+<p id="out">${@label}</>

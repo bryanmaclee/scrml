@@ -187,6 +187,32 @@ export function collectFunctions(fileAST: FileAST): Node[] {
         result.push(node);
       }
       if (Array.isArray(node.children)) visit(node.children);
+      // §17.1.1 if-chain — THE FUNCTION-DEFINITION LIMB, and the one that
+      // decides whether a function declared inside a branch EXISTS at all.
+      //
+      // `collapseIfChains` (ast-builder.js) rewrites an `if=`/`else-if=`/`else`
+      // chain WITH an else arm into `{kind:"if-chain", branches:[{condition,
+      // element}], elseBranch}`. The `node.children` descent above reaches
+      // neither: `branches` holds `{condition, element}` RECORDS, and
+      // `elseBranch` is a single object. So a `${ function helper() {…} }`
+      // inside a branch was never collected, emit-functions.ts emitted ZERO
+      // definitions, and every call site shipped as a BARE `helper()` —
+      // `ReferenceError` at exit 0 with zero diagnostics. The lone-`if=` twin of
+      // the same source emitted one `_scrml_helper_N` definition and four
+      // mangled calls.
+      //
+      // ⛑ THIS WALK IS DOWNSTREAM OF ROUTE INFERENCE, AND THAT ORDER IS LOAD-
+      // BEARING. `analyze.ts` hands this result to BOTH emit-functions.ts (the
+      // client emitter) and emit-server.ts. The client emitter omits a
+      // `server fn` body only because RI claimed the function as an endpoint —
+      // and RI's own walk (`route-inference.ts` `collectFileFunctions`) was
+      // blind to this same shape. Closing THIS walk while that one stayed blind
+      // shipped the `server fn` BODY into `client.js` with no `server.js` at
+      // all: measured body-in-client 1 with this hunk alone, 0 without it, 0 on
+      // base. Both walks are closed together and
+      // `g-if-chain-branch-cell-never-wired.test.js`'s LEAK GUARD is what keeps
+      // them that way. Child SHAPE via `ifChainChildNodes` (ast-if-chain.js).
+      for (const branchBody of ifChainChildNodes(node)) visit([branchBody]);
     }
   }
   visit(nodes);

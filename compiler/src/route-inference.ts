@@ -89,6 +89,7 @@ import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
+import { ifChainChildNodes } from "./ast-if-chain.js";
 
 // ---------------------------------------------------------------------------
 // RI-internal types
@@ -1107,6 +1108,33 @@ export function collectFileFunctions(fileAST: FileAST): FunctionDeclNode[] {
       if ("children" in node && Array.isArray((node as any).children)) {
         visitNodes((node as any).children);
       }
+      // §17.1.1 if-chain — THE SERVER-BOUNDARY LIMB, and the one that decides
+      // whether a `server fn` declared inside a branch ever becomes a ROUTE.
+      //
+      // `collapseIfChains` (ast-builder.js) rewrites an `if=`/`else-if=`/`else`
+      // chain WITH an else arm into `{kind:"if-chain", branches:[{condition,
+      // element}], elseBranch}`. The `children` descent above reaches neither:
+      // `branches` holds `{condition, element}` RECORDS, and `elseBranch` is a
+      // single object. So RI never saw the declaration and never built a route
+      // for it — which is what leaves `route.boundary` unset, and it is
+      // `route.boundary === "server"` (checked in `codegen/emit-functions.ts`)
+      // that keeps a `server fn` body out of `client.js`. NOTE: this is NOT
+      // `endpointClientSkipIds` — that set is built solely from `<endpoint>`
+      // private-arm reachability and carries no `server fn` placement path.
+      // (An earlier draft of this comment named it; a reader who follows that
+      // pointer finds no `server fn` path there and wrongly concludes this walk
+      // is not the cause.)
+      //
+      // ⛑ THIS WALK MUST STAY AHEAD OF `codegen/collect.ts`'s
+      // `collectFunctions`. The client function emitter skips a `server fn`
+      // body ONLY because RI claimed it here. Teaching the CLIENT collector to
+      // see branch-declared functions while THIS walk stays blind emits the
+      // `server fn` BODY into `client.js` and produces no `server.js` at all —
+      // measured, and the reason the two halves land together
+      // (g-collect-functions-branch-decl-vs-server-boundary-routing, HIGH,
+      // security-gated). Child SHAPE via `ifChainChildNodes`
+      // (ast-if-chain.js), the one module that owns the fact.
+      for (const branchBody of ifChainChildNodes(node)) visitNodes([branchBody as ASTNode]);
     }
   }
 
@@ -1158,6 +1186,18 @@ function collectWorkerBodyFunctionIds(fileAST: FileAST): Set<number> {
       // Recurse into children.
       if ("children" in node && Array.isArray((node as any).children)) {
         visitNodes((node as any).children, enteringWorker);
+      }
+      // §17.1.1 if-chain — this SUPPRESSION set must stay in lockstep with
+      // `collectFileFunctions` above. That walk now descends branch bodies, so a
+      // `server fn` declared inside an `if=`/`else` branch of a
+      // `<program name="…">` worker body is now COLLECTED; if this set stayed
+      // blind, the same function would be missing from the worker-body
+      // suppression and E-ROUTE-001 would false-fire on it. Closing one descent
+      // without the other converts a silent miss into a spurious error.
+      // `enteringWorker` threads through unchanged — the branch body is
+      // lexically inside whatever `<program>` encloses the chain.
+      for (const branchBody of ifChainChildNodes(node)) {
+        visitNodes([branchBody as ASTNode], enteringWorker);
       }
     }
   }
