@@ -1,0 +1,18 @@
+{
+  "id": "server-fn-branch-declared-server-fn-routes-to-server",
+  "description": "§12 / §17.1.1 — a `server fn` DECLARED INSIDE an if-chain branch is routed to the SERVER, and the client calls it over the wire. The stub returns a sentinel the fn body cannot produce (`STUBBED-OVER-THE-WIRE` vs the body's `COMPUTED-IN-THE-BODY`), so the observed value says WHICH SIDE ran: a client that observes the sentinel went over the route; a client that observes the body string is executing a server fn body it should never have received.",
+  "language-version": "1.0",
+  "spec": "§12",
+  "rationale": "This is the SECURITY half of the §17.1.1 branch-declaration class, and the reason its two halves land together. Route inference's own function collector (`collectFileFunctions`) descended only `node.children`, so a branch-declared `server fn` was never claimed as an endpoint. Teaching the CODEGEN collector to see branch declarations while RI stayed blind emitted the fn's BODY into `client.js` and produced no `server.js` at all — measured body-in-client 1 with the codegen half alone, 0 with both, 0 on base. A stubbed sentinel is the impl-neutral way to assert placement: an artifact-text assertion would be impl#1-specific, while `serverStub` is keyed by the scrml SOURCE fn name and is only ever consulted when the call actually crosses the boundary.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "serverStub": { "branchLoad": "STUBBED-OVER-THE-WIRE" },
+    "state": { "label": "STUBBED-OVER-THE-WIRE" },
+    "domAnchored": [
+      { "selector": "#out", "text": "STUBBED-OVER-THE-WIRE" },
+      { "selector": "#alt", "count": 0 }
+    ]
+  }
+}

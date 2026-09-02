@@ -1,0 +1,16 @@
+${
+    <open> = true
+    <seen> : string = "none"
+}
+<div id="wrap" if=@open>
+    ${
+        function branchHelper() {
+            return "from-branch"
+        }
+    }
+    <p id="out">${branchHelper()}</>
+    <button id="go" onclick=@seen = branchHelper()>Go</>
+</>
+<div else>
+    <p id="alt">alt</>
+</>

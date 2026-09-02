@@ -1,0 +1,17 @@
+{
+  "id": "control-flow-if-chain-branch-declared-function-pos",
+  "description": "§17.1.1 if-chain — a `function` DECLARED INSIDE a branch is emitted, and a call site bound to it resolves. `collapseIfChains` moves branch bodies under `branches[].element` / `elseBranch`, which no `children`-only walk reaches; codegen's function collector was one of those walks, so this exact source emitted ZERO definitions of `branchHelper` and shipped BARE `branchHelper()` call sites. The `<div else>` sibling is the whole variable: drop it and the chain is never collapsed and the same source always worked. Pre-fix this case does not merely fail — the emitted bundle throws `ReferenceError: branchHelper is not defined` on load, which is exactly the runtime cost the compiler reported nothing about (exit 0, zero diagnostics).",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1 defines a chain's branch bodies as ordinary markup, so a declaration inside one is a declaration in the program — not a declaration the compiler may lose. The assertion is driven through the HANDLER position (`onclick` → a state write) rather than the `${branchHelper()}` interpolation on #out, and that choice is deliberate: a call-expression interpolation inside a collapsed branch renders EMPTY on `main` today, for a top-level function just as much as for a branch-declared one, so asserting it here would pin an unrelated open defect instead of this one. #out's mere PRESENCE is asserted (the active branch mounted) and #alt's absence pins §17.1.1's own only-one-branch-exists sentence.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001", "E-STATE-UNDECLARED"],
+    "input": [{ "click": "#go" }],
+    "state": { "seen": "from-branch" },
+    "domAnchored": [
+      { "selector": "#out", "count": 1 },
+      { "selector": "#alt", "count": 0 }
+    ]
+  }
+}
