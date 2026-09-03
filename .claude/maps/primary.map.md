@@ -1,15 +1,26 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
-# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
-# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
+# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
+# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
+# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
+# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
+# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
 #
-# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
+#
+# ⚠ **TWO SHAs, AND THE DISTINCTION IS LOAD-BEARING — DO NOT COLLAPSE THEM.** The **SOURCE DELTA**
+# this pass walked is `ad7b65dc..2d8dd8cb` (7 commits, 4 changed source files). The **WATERMARK** is
+# `8e278c73`, which is further along: `2d8dd8cb..8e278c73` is the wrap commit (#824) and is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`.
+# Every measurement below therefore holds at the watermark unchanged — the stamp is advanced to the
+# CURRENT `origin/main` rather than left on the last source-bearing commit, because the MAP-STAMP
+# RULE takes the merge-base, not the last interesting commit.
 #
 # **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
 # `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
@@ -150,7 +161,7 @@ Language:   TypeScript / JavaScript (mixed) + scrml itself (self-hosting stdlib 
 Framework:  Custom compiler pipeline (no web framework) — Bun-native
 Runtime:    Bun >=1.3.13 (no Node support; Bun-specific APIs throughout — `Bun.serve`, `bun:sqlite`, `Bun.$`, `Bun.SQL`, `Bun.hash`)
 Type:       CLI compiler + language toolchain (single-file full-stack web-language compiler, with LSP + editor-tooling + MCP surfaces)
-Size:       ⛑ **S396 — ALL FIGURES RE-EXECUTED AT `2d8dd8cb`.** `compiler/src/` **194 files** (FLAT this window — #818/#823 changed existing files, added none). Tests: **1,424** `*.test.js` (FLAT — 3 CHANGED, 0 added). Conformance: **893 cases across 54 category dirs** (+2: `control-flow/if-chain-branch-declared-function-pos` and `server-fn/branch-declared-server-fn-routes-to-server`, both #818). `docs/changes/` is **716** dirs. ⚠ Counts are re-executed each pass, never carried — a flat count still needs the command run, because "flat" and "unmeasured" are indistinguishable in a map.
+Size:       ⛑ **S396 — ALL FIGURES RE-EXECUTED AT `8e278c73`.** `compiler/src/` **194 files** (FLAT this window — #818/#823 changed existing files, added none). Tests: **1,424** `*.test.js` (FLAT — 3 CHANGED, 0 added). Conformance: **893 cases across 54 category dirs** (+2: `control-flow/if-chain-branch-declared-function-pos` and `server-fn/branch-declared-server-fn-routes-to-server`, both #818). `docs/changes/` is **716** dirs. ⚠ Counts are re-executed each pass, never carried — a flat count still needs the command run, because "flat" and "unmeasured" are indistinguishable in a map.
 Version:    v0.7.1 (root package.json — the SOLE manifest; not a workspace monorepo, `files`-allowlisted, publishable). **`package.json` / `bun.lock` are `--name-only` EMPTY over `ad7b65dc..2d8dd8cb`** — no runtime or dev dependency added, removed or version-bumped; third consecutive window.
 CI:         GitHub Actions — three workflows on `main` (`ci.yml`, `advisory-review.yml`, `cloud-maps.yml`), count unchanged; `.github/` is `--name-only` EMPTY over this window so all three are byte-identical. ⛑ **`gate` is the ONLY blocking job: 14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways because a bare "14" invited an ambiguity this pass had to re-derive. `tracking` (8 steps) and `windows` (4) are BOTH `continue-on-error: true`. ⚠ **`gate` runs `unit` + `conformance` + root-level `*.test.js` — NOT `integration`, NOT `lsp`, NOT `commands`** (invariant 87). ⛑ **The top-level `conformance/` corpus IS gated even though no workflow names it** — via `compiler/tests/conformance/corpus-bridge.test.js` (invariant 88).
 
@@ -163,7 +174,20 @@ RE-RUN AFTER THIS PASS'S WRITE — THAT RE-RUN, NOT THE FILE CONTENT, IS THE CHE
 because this step has crashed post-write before and left the stamp stale.**
 `bun scripts/state.ts --check` printed, BEFORE this pass:
 `maps: 7 commits behind HEAD (watermark ad7b65dc, HEAD 2d8dd8cb)  [WARN-only — not gated;
-project-mapper seam]`, and AFTER: `MAPS_AFTER_PLACEHOLDER`.
+project-mapper seam]`, and AFTER: maps: 1 commits behind HEAD (watermark 8e278c73, HEAD a97766fc)  [WARN-only — not gated;
+project-mapper seam]` — and **that reading is the CORRECT terminal state, not a failed advance.**
+⛑ **THE WATERMARK IS `8e278c73`, WHICH IS EXACTLY `origin/main` AND EXACTLY `merge-base HEAD
+origin/main`.** The single commit "behind" is `a97766fc`, a LOCAL, UNPUSHED commit on branch
+`maps/s395-tail` carrying this pass's own map tail. ⚠ **`maps: current` is NOT achievable here
+without violating the MAP-STAMP RULE**, because `mapsStaleness()` compares the watermark to local
+`HEAD` (`scripts/state.ts:620`), and reaching it would mean stamping an unpushed BRANCH TIP — the
+precise S326/S328/S331 hazard the rule exists to close, since a branch tip is squash-merged onto
+`main` under a DIFFERENT SHA and the stamp is then orphaned. **Three of five stamps a prior pass
+inherited were exactly that.** The stamp was therefore advanced to the furthest commit that
+satisfies all three checks (`is-ancestor 8e278c73 origin/main` -> exit 0) and no further.
+⚠ **HEAD MOVED THREE TIMES DURING THIS PASS** — `2d8dd8cb` -> `add3a479` -> `8e278c73`/`a97766fc`,
+because the session wrap committed while the mapper was still writing. Every advance was re-verified
+against `origin/main` rather than chased.
 ⚠ **It exits 0 either way. Verified again this pass, not assumed:** the command was executed and its
 exit status read. Nothing in the toolchain fails on stale maps.
 #
@@ -266,7 +290,7 @@ Language:   TypeScript / JavaScript (mixed) + scrml itself (self-hosting stdlib 
 Framework:  Custom compiler pipeline (no web framework) — Bun-native
 Runtime:    Bun >=1.3.13 (no Node support; Bun-specific APIs throughout — `Bun.serve`, `bun:sqlite`, `Bun.$`, `Bun.SQL`, `Bun.hash`)
 Type:       CLI compiler + language toolchain (single-file full-stack web-language compiler, with LSP + editor-tooling + MCP surfaces)
-Size:       ⛑ **S396 — ALL FIGURES RE-EXECUTED AT `2d8dd8cb`.** `compiler/src/` **194 files** (FLAT this window — #818/#823 changed existing files, added none). Tests: **1,424** `*.test.js` (FLAT — 3 CHANGED, 0 added). Conformance: **893 cases across 54 category dirs** (+2: `control-flow/if-chain-branch-declared-function-pos` and `server-fn/branch-declared-server-fn-routes-to-server`, both #818). `docs/changes/` is **716** dirs. ⚠ Counts are re-executed each pass, never carried — a flat count still needs the command run, because "flat" and "unmeasured" are indistinguishable in a map.
+Size:       ⛑ **S396 — ALL FIGURES RE-EXECUTED AT `8e278c73`.** `compiler/src/` **194 files** (FLAT this window — #818/#823 changed existing files, added none). Tests: **1,424** `*.test.js` (FLAT — 3 CHANGED, 0 added). Conformance: **893 cases across 54 category dirs** (+2: `control-flow/if-chain-branch-declared-function-pos` and `server-fn/branch-declared-server-fn-routes-to-server`, both #818). `docs/changes/` is **716** dirs. ⚠ Counts are re-executed each pass, never carried — a flat count still needs the command run, because "flat" and "unmeasured" are indistinguishable in a map.
 Version:    v0.7.1 (root package.json — the SOLE manifest; not a workspace monorepo, `files`-allowlisted, publishable). **`package.json` / `bun.lock` are `--name-only` EMPTY over `ad7b65dc..2d8dd8cb`** — no runtime or dev dependency added, removed or version-bumped; third consecutive window.
 CI:         GitHub Actions — three workflows on `main` (`ci.yml`, `advisory-review.yml`, `cloud-maps.yml`), count unchanged; `.github/` is `--name-only` EMPTY over this window so all three are byte-identical. ⛑ **`gate` is the ONLY blocking job: 14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways because a bare "14" invited an ambiguity this pass had to re-derive. `tracking` (8 steps) and `windows` (4) are BOTH `continue-on-error: true`. ⚠ **`gate` runs `unit` + `conformance` + root-level `*.test.js` — NOT `integration`, NOT `lsp`, NOT `commands`** (invariant 87). ⛑ **The top-level `conformance/` corpus IS gated even though no workflow names it** — via `compiler/tests/conformance/corpus-bridge.test.js` (invariant 88).
 
@@ -480,7 +504,7 @@ reader who checks only the `^| E-` grep will read a different delta than the cat
 
 ## Map Index
 
-**EVERY STAMP BELOW IS `2d8dd8cb` — the `merge-base HEAD origin/main` at WRITE time, with the source
+**EVERY STAMP BELOW IS `8e278c73` — the `merge-base HEAD origin/main` at WRITE time, with the source
 diff against it EMPTY and `merge-base --is-ancestor 2d8dd8cb origin/main` exit 0.** At this
 watermark the merge-base IS `origin/main` AND IS `HEAD` — all three are the same commit, so there is
 no working tip to record separately. Line 3 is the CURRENCY ANCHOR `scripts/state.ts` parses (and it
@@ -551,19 +575,19 @@ ZERO occurrences across all thirteen maps.** A newly-added *gate* is easier to m
 
 | Map | Stamp | Ancestor of `origin/main`? | Contents |
 |---|---|---|---|
-| **primary.map.md** | **`2d8dd8cb`** | yes (merge-base; == `origin/main` here) | **⛑ S396 wrap-6c FULL-DELTA INCREMENTAL — STAMP ADVANCED `ad7b65dc` -> `2d8dd8cb` (7 commits).** All FOUR changed source files walked. **Invariant 82 CHANGED STATUS** (its `collect.ts` prohibition retired by #818, which closed both halves together) and **rows 86-88 are NEW**: the RI-before-collector ORDER, `commands/` as advisory-only, and the corpus-bridge gate. One briefed premise corrected by execution — see the header. |
-| **structure.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: `commands/dev.js` GAINED THREE FUNCTIONS AND LOST A SERVING BRANCH** — `gateProtectedDoc` `:979`, `rootFallbackCandidates` `:1003`, `staticCandidates` `:1029` are new; the ungated root-only `pathname === "/"` branch is DELETED (#823). `compiler/src` re-counted at **194 files**; `conformance/` at **893 cases / 54 category dirs** (+2). |
-| **dependencies.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: ONE NEW INTERNAL EDGE, AND IT IS SECURITY-BEARING** — `route-inference.ts:92` now imports `ifChainChildNodes` from `./ast-if-chain.js` (#818), taking the helper to **14 importing modules / 35 call sites** (was 13/32). **MANIFEST STILL ZERO-DIFF**: `package.json`/`bun.lock` `--name-only` EMPTY over `ad7b65dc..2d8dd8cb` — third consecutive window with no dependency added, removed or bumped. |
-| **schema.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `compiler/src/types/`, `stdlib/`, `*.d.ts`/`*.proto`/`*.graphql` are all `--name-only` EMPTY over `ad7b65dc..2d8dd8cb`. The 2 new conformance cases reuse the existing `expect` shape, so the corpus SCHEMA is unchanged. A zero-diff surface is an UNCHANGED map, not a verified-correct one. |
-| **domain.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: THREE SECTIONS TOUCHED** — §17.1.1 gains its SERVER-BOUNDARY limb (the first member of the if-chain class that is a security boundary, #818); §52.13 gains a ONE-DECIDER rule for `scrml dev` (#823); §62.2 gains the corpus-honesty limb (an assertion carrying both a count and a first-match check now evaluates BOTH, #822). |
-| **error.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: NO NEW E-CODE.** The window's error-surface fact is a NEAR-MISS worth carrying: closing `collectFileFunctions`'s descent without the matching `collectWorkerBodyFunctionIds` suppression descent would have made **`E-ROUTE-001` false-fire** on a `server fn` inside a `<program>` worker-body branch. Both landed in #818 for that reason. |
-| **test.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: `1,424` .test.js, FLAT** (3 files CHANGED, none added). **The gating rows are what moved:** `commands/` (17 files) restated as advisory-only WITH its mechanism (invariant 87), and the top-level corpus documented as gated VIA `corpus-bridge.test.js` (invariant 88). Corpus assertions RE-PARSED, not grepped: **455 `domAnchored` across 193 cases · 62 `count: 0`, all count-only · 18 MIXED, all `count: 1`**. |
-| **build.map.md** | **`2d8dd8cb`** | yes | **⛑ S396 — STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF:** `.github/` and `package.json` are both `--name-only` EMPTY over the window, so every command and CI stage is carried VERIFIED-UNCHANGED. **NEW CONTENT ANYWAY:** the corpus-bridge gating fact (invariant 88), which the map had never stated and which a workflow grep actively contradicts. |
-| **infra.map.md** | **`2d8dd8cb`** | yes | **⛑ S396 — STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `.github/workflows/` `--name-only` EMPTY; all three workflows byte-identical. Job shapes RE-COUNTED BY PARSE: `gate` **14 total steps (12 `- name:` + 2 `- uses:`)**, `tracking` 8 (6+2, `continue-on-error`), `windows` 4 (2+2, `continue-on-error`). |
-| **config.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `.env*`, `bunfig.toml`, `package.json`, `tsconfig.json` all `--name-only` EMPTY over `ad7b65dc..2d8dd8cb`. No key added, renamed or removed. |
-| **auth.map.md** | **`2d8dd8cb`** | yes | **⛑ S396 — NOT ZERO-DIFF THIS TIME, AND THE OLD ANCHOR WAS DEAD.** #823 rewrote the §52.13 DEV mirror: the inline gate the map cited as "`devDispatch`'s static-file branch `:1046-1048`" no longer exists. Dev now decides protection at **exactly one site** — `gateProtectedDoc` (`dev.js:979`), called at `:1141` on the RESOLVED file. Closed `g-dev-root-path-fallback-serves-a-protected-document-unauthenticated`. |
-| **migrations.map.md** | **`2d8dd8cb`** | yes | **⛑ S396: STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `commands/db-migrate.js`, `commands/migrate.js` and `schema-differ` are all `--name-only` EMPTY over the window. |
-| **non-compliance.report.md** | **`2d8dd8cb`** | yes | **⛑ S396 — BOTH STANDING ITEMS RE-VERIFIED BY EXECUTION, NOT RESTATED.** `docs/audits/` (20 entries, 2.0 MB) is STILL outside every scan population — 14 passes now; **exactly two** docs self-declare superseded in a top-of-file `**Status:**` line (re-checked individually, not by a bare `superseded` grep, which over-counts to 9). **N14 STILL WRONG at this SHA** and `ast-builder.js` is byte-identical since the watermark, so it was wrong at its own. |
+| **primary.map.md** | **`8e278c73`** | yes (merge-base; == `origin/main` here) | **⛑ S396 wrap-6c FULL-DELTA INCREMENTAL — STAMP ADVANCED `ad7b65dc` -> `2d8dd8cb` (7 commits).** All FOUR changed source files walked. **Invariant 82 CHANGED STATUS** (its `collect.ts` prohibition retired by #818, which closed both halves together) and **rows 86-88 are NEW**: the RI-before-collector ORDER, `commands/` as advisory-only, and the corpus-bridge gate. One briefed premise corrected by execution — see the header. |
+| **structure.map.md** | **`8e278c73`** | yes | **⛑ S396: `commands/dev.js` GAINED THREE FUNCTIONS AND LOST A SERVING BRANCH** — `gateProtectedDoc` `:979`, `rootFallbackCandidates` `:1003`, `staticCandidates` `:1029` are new; the ungated root-only `pathname === "/"` branch is DELETED (#823). `compiler/src` re-counted at **194 files**; `conformance/` at **893 cases / 54 category dirs** (+2). |
+| **dependencies.map.md** | **`8e278c73`** | yes | **⛑ S396: ONE NEW INTERNAL EDGE, AND IT IS SECURITY-BEARING** — `route-inference.ts:92` now imports `ifChainChildNodes` from `./ast-if-chain.js` (#818), taking the helper to **14 importing modules / 35 call sites** (was 13/32). **MANIFEST STILL ZERO-DIFF**: `package.json`/`bun.lock` `--name-only` EMPTY over `ad7b65dc..2d8dd8cb` — third consecutive window with no dependency added, removed or bumped. |
+| **schema.map.md** | **`8e278c73`** | yes | **⛑ S396: STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `compiler/src/types/`, `stdlib/`, `*.d.ts`/`*.proto`/`*.graphql` are all `--name-only` EMPTY over `ad7b65dc..2d8dd8cb`. The 2 new conformance cases reuse the existing `expect` shape, so the corpus SCHEMA is unchanged. A zero-diff surface is an UNCHANGED map, not a verified-correct one. |
+| **domain.map.md** | **`8e278c73`** | yes | **⛑ S396: THREE SECTIONS TOUCHED** — §17.1.1 gains its SERVER-BOUNDARY limb (the first member of the if-chain class that is a security boundary, #818); §52.13 gains a ONE-DECIDER rule for `scrml dev` (#823); §62.2 gains the corpus-honesty limb (an assertion carrying both a count and a first-match check now evaluates BOTH, #822). |
+| **error.map.md** | **`8e278c73`** | yes | **⛑ S396: NO NEW E-CODE.** The window's error-surface fact is a NEAR-MISS worth carrying: closing `collectFileFunctions`'s descent without the matching `collectWorkerBodyFunctionIds` suppression descent would have made **`E-ROUTE-001` false-fire** on a `server fn` inside a `<program>` worker-body branch. Both landed in #818 for that reason. |
+| **test.map.md** | **`8e278c73`** | yes | **⛑ S396: `1,424` .test.js, FLAT** (3 files CHANGED, none added). **The gating rows are what moved:** `commands/` (17 files) restated as advisory-only WITH its mechanism (invariant 87), and the top-level corpus documented as gated VIA `corpus-bridge.test.js` (invariant 88). Corpus assertions RE-PARSED, not grepped: **455 `domAnchored` across 193 cases · 62 `count: 0`, all count-only · 18 MIXED, all `count: 1`**. |
+| **build.map.md** | **`8e278c73`** | yes | **⛑ S396 — STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF:** `.github/` and `package.json` are both `--name-only` EMPTY over the window, so every command and CI stage is carried VERIFIED-UNCHANGED. **NEW CONTENT ANYWAY:** the corpus-bridge gating fact (invariant 88), which the map had never stated and which a workflow grep actively contradicts. |
+| **infra.map.md** | **`8e278c73`** | yes | **⛑ S396 — STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `.github/workflows/` `--name-only` EMPTY; all three workflows byte-identical. Job shapes RE-COUNTED BY PARSE: `gate` **14 total steps (12 `- name:` + 2 `- uses:`)**, `tracking` 8 (6+2, `continue-on-error`), `windows` 4 (2+2, `continue-on-error`). |
+| **config.map.md** | **`8e278c73`** | yes | **⛑ S396: STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `.env*`, `bunfig.toml`, `package.json`, `tsconfig.json` all `--name-only` EMPTY over `ad7b65dc..2d8dd8cb`. No key added, renamed or removed. |
+| **auth.map.md** | **`8e278c73`** | yes | **⛑ S396 — NOT ZERO-DIFF THIS TIME, AND THE OLD ANCHOR WAS DEAD.** #823 rewrote the §52.13 DEV mirror: the inline gate the map cited as "`devDispatch`'s static-file branch `:1046-1048`" no longer exists. Dev now decides protection at **exactly one site** — `gateProtectedDoc` (`dev.js:979`), called at `:1141` on the RESOLVED file. Closed `g-dev-root-path-fallback-serves-a-protected-document-unauthenticated`. |
+| **migrations.map.md** | **`8e278c73`** | yes | **⛑ S396: STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `commands/db-migrate.js`, `commands/migrate.js` and `schema-differ` are all `--name-only` EMPTY over the window. |
+| **non-compliance.report.md** | **`8e278c73`** | yes | **⛑ S396 — BOTH STANDING ITEMS RE-VERIFIED BY EXECUTION, NOT RESTATED.** `docs/audits/` (20 entries, 2.0 MB) is STILL outside every scan population — 14 passes now; **exactly two** docs self-declare superseded in a top-of-file `**Status:**` line (re-checked individually, not by a bare `superseded` grep, which over-counts to 9). **N14 STILL WRONG at this SHA** and `ast-builder.js` is byte-identical since the watermark, so it was wrong at its own. |
 
 ⚠ **`.claude/maps/*.generated.md` (`structure`, `dependencies`, `error`, `test`) ARE NOT PART OF THIS
 MAP SET AND ARE NOT IN GIT.** `git ls-files .claude/` returns exactly 16 paths — the **13** maps

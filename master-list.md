@@ -105,7 +105,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `5e1d40ff` — maps(S395): wrap-6c refresh 2ec2ce3a -> ad7b65dc — and three premises in my own brief were wrong (#817) — **pushed**
+- `8e278c73` — wrap(s395): five rulings, four arcs, and nine instruments that read green while wrong (#824) — **pushed**
 - `0dc4d014` — wrap(s393): verification kept changing the answer — four premises died on contact with execution, two of them mine (#812) — **pushed**
 - `76f97a59` — wrap(s391): six instruments were wrong and every one read as fine — twelve PRs, six rulings owed, and a concurrent sibling the board could not see (#804) — **pushed**
 - `b0457906` — wrap(s390): both S385 arcs landed, main unblocked, and three gates caught what the others could not (#790) — **pushed**

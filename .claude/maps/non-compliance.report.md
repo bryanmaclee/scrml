@@ -1,15 +1,17 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
 # scan mode: FULL_COLD_START (doc-population scan) — run as part of the S396 wrap-6c map refresh
 #
-# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`;
-# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 2d8dd8cb origin/main` -> exit 0.
-# Inbound: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
+# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`;
+# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 8e278c73 origin/main` -> exit 0.
+# Inbound: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
+# ⚠ `HEAD` is `a97766fc` (local, unpushed, `maps/s395-tail`) and is deliberately NOT the watermark.
 #
 # ⛑ **THE TWO STANDING ITEMS WERE RE-EXECUTED, NOT RESTATED — and one of them came back SHARPER
-# rather than merely "still true".** Both verdicts below were produced by running commands at
-# `2d8dd8cb`, and where the prior wording would have over-claimed, it is corrected here.
+# rather than merely "still true".** Both verdicts below were produced by running commands against
+# the working tree at this watermark (source is byte-identical from `2d8dd8cb` through `8e278c73`),
+# and where the prior wording would have over-claimed, it is corrected here.
 
 ## Summary — S396 pass (this pass)
 
@@ -25,7 +27,7 @@
 ⚑ **THE HEADLINE THIS PASS IS THAT THREE OF THE FOUR FACTUAL ERRORS FOUND WERE IN THE MAPS, NOT IN
 THE DOCS.** A non-compliance scan that only ever points outward is not measuring itself. See M1-M3.
 
-## STANDING ITEMS — RE-EXECUTED AT `2d8dd8cb` (verdicts below are commands, not carry-forward)
+## STANDING ITEMS — RE-EXECUTED AT `8e278c73` (verdicts below are commands, not carry-forward)
 
 ### N12. `docs/audits/` — 20 documents, 2.0 MB — **STILL OUTSIDE THE SCAN POPULATION. 14th consecutive pass.**
 
@@ -94,7 +96,7 @@ available evidence that this report's own output does not close the loop.**
 
 **Verdict: STILL LIVE, and the "wrong at its own watermark" half is now airtight.**
 
-Re-executed at `2d8dd8cb`:
+Re-executed at `8e278c73`:
 
 | check | result |
 |---|---|
@@ -123,7 +125,7 @@ worse than two wrong ones, because it buys the reader's confidence.
 total of **1,424** `.test.js` — which is **correct** — but four category cells did not sum to it and
 were stale independently of this window:
 
-| cell | map read | actual at `2d8dd8cb` | actual at `ad7b65dc` |
+| cell | map read | actual at `8e278c73` | actual at `ad7b65dc` |
 |---|---|---|---|
 | Unit | 909 | **925** | **925** |
 | Integration | 213 | **216** | **216** |
@@ -197,7 +199,20 @@ located, and each describes work that LANDED (verified against `c4c55c50`, `ae27
 
 `bun scripts/state.ts --check` **BEFORE** this pass:
 `maps: 7 commits behind HEAD (watermark ad7b65dc, HEAD 2d8dd8cb)  [WARN-only — not gated;
-project-mapper seam]`. **AFTER:** `MAPS_AFTER_PLACEHOLDER`.
+project-mapper seam]`. **AFTER:** maps: 1 commits behind HEAD (watermark 8e278c73, HEAD a97766fc)  [WARN-only — not gated;
+project-mapper seam]` — and **that reading is the CORRECT terminal state, not a failed advance.**
+⛑ **THE WATERMARK IS `8e278c73`, WHICH IS EXACTLY `origin/main` AND EXACTLY `merge-base HEAD
+origin/main`.** The single commit "behind" is `a97766fc`, a LOCAL, UNPUSHED commit on branch
+`maps/s395-tail` carrying this pass's own map tail. ⚠ **`maps: current` is NOT achievable here
+without violating the MAP-STAMP RULE**, because `mapsStaleness()` compares the watermark to local
+`HEAD` (`scripts/state.ts:620`), and reaching it would mean stamping an unpushed BRANCH TIP — the
+precise S326/S328/S331 hazard the rule exists to close, since a branch tip is squash-merged onto
+`main` under a DIFFERENT SHA and the stamp is then orphaned. **Three of five stamps a prior pass
+inherited were exactly that.** The stamp was therefore advanced to the furthest commit that
+satisfies all three checks (`is-ancestor 8e278c73 origin/main` -> exit 0) and no further.
+⚠ **HEAD MOVED THREE TIMES DURING THIS PASS** — `2d8dd8cb` -> `add3a479` -> `8e278c73`/`a97766fc`,
+because the session wrap committed while the mapper was still writing. Every advance was re-verified
+against `origin/main` rather than chased.
 ⚠ **The instrument exits 0 either way — nothing in the toolchain fails on stale maps.** It parses
 **line 3 only** (`scripts/state.ts:615`), which is why every map in this set carries the same SHA on
 line 3 and line 4.

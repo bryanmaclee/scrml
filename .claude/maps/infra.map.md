@@ -1,15 +1,26 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
-# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
-# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
+# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
+# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
+# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
+# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
+# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
 #
-# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
+#
+# ⚠ **TWO SHAs, AND THE DISTINCTION IS LOAD-BEARING — DO NOT COLLAPSE THEM.** The **SOURCE DELTA**
+# this pass walked is `ad7b65dc..2d8dd8cb` (7 commits, 4 changed source files). The **WATERMARK** is
+# `8e278c73`, which is further along: `2d8dd8cb..8e278c73` is the wrap commit (#824) and is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`.
+# Every measurement below therefore holds at the watermark unchanged — the stamp is advanced to the
+# CURRENT `origin/main` rather than left on the last source-bearing commit, because the MAP-STAMP
+# RULE takes the merge-base, not the last interesting commit.
 #
 # **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
 # `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
@@ -44,13 +55,13 @@ None. No Dockerfile / docker-compose.yml anywhere in the repo.
 ## CI/CD
 Provider: GitHub Actions.
 Workflows — **THREE, all on `main`; only `ci.yml` changed this window** (⛑ **S391: #781-era — ONE NEW BLOCKING `gate` step, the compile-floor gate at `ci.yml:159`. No job, secret, runner or required-check NAME moved.** The prior window's change was #665 — a `tracking` step + a header correction):
-- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**14 TOTAL steps = 12 `- name:` + 2 `- uses:`; re-counted by parse at `2d8dd8cb`, and stated both ways because a bare "14" invited an ambiguity this pass had to re-derive — ⛑ S391 `13 -> 14`, the added step is `bun scripts/corpus-compile-floor.ts --check`; the prior window's +1 was `bun scripts/delta-lint.ts` (#652)**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **Triggers NOW: push `branches: [main]` (NEW #532 — see header), `pull_request`, and `workflow_dispatch: {}` (#454)** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
+- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**14 TOTAL steps = 12 `- name:` + 2 `- uses:`; re-counted by parse at `8e278c73`, and stated both ways because a bare "14" invited an ambiguity this pass had to re-derive — ⛑ S391 `13 -> 14`, the added step is `bun scripts/corpus-compile-floor.ts --check`; the prior window's +1 was `bun scripts/delta-lint.ts` (#652)**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **Triggers NOW: push `branches: [main]` (NEW #532 — see header), `pull_request`, and `workflow_dispatch: {}` (#454)** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
 - `.github/workflows/advisory-review.yml` — 1 job: `ai-review`. **DISABLED — `workflow_dispatch` only**, with a required `pr` input. The `pull_request:` trigger is gone.
 - `.github/workflows/cloud-maps.yml` — 1 job: `regen`, still scheduled daily 09:17 UTC + `workflow_dispatch`. **Stage 2 (the project-mapper agent) was DELETED**; Stages 1 / 1b / 3 (deterministic, free) remain. `id-token: write` was dropped with it.
 
 **Both removals are a COST decision by bryan, not a broken credential.** A permanently-red check is the `pa-base` §8 cry-wolf shape — it gets ignored, and then a real failure gets ignored with it. The prior generation of this map (and build.map.md) diagnosed the red as a probable credential/entitlement condition on `ANTHROPIC_API_KEY`; **that analysis is MOOT and has been deleted rather than carried.**
 
-⛑ **WHAT EACH JOB ACTUALLY RUNS — RE-READ AT `2d8dd8cb`, BECAUSE TWO CONCLUSIONS WERE DRAWN WRONG
+⛑ **WHAT EACH JOB ACTUALLY RUNS — RE-READ AT `8e278c73`, BECAUSE TWO CONCLUSIONS WERE DRAWN WRONG
 FROM GREPS THIS SESSION AND THEY POINT IN OPPOSITE DIRECTIONS.**
 
 | job | blocking? | test tiers it runs |
