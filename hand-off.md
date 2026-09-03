@@ -12,6 +12,22 @@ them were caught by gates I did not write. Three were my own claims.
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST)
 
+### 0. ⚑ peter S398 (concurrent, docs-only) — TWO dog-food finds ROUTED to bryan, both in the INBOX
+Ran alongside S397-bryan (LIVE). Two new verified adopter finds, filed in `docs/known-gaps.md`
+(counts regenerated HIGH 77→78 · MED 204→205) and routed as inbox items awaiting bryan (left
+UNARCHIVED per the S393 precedent):
+- **HIGH `g-prod-server-404s-non-index-spa-entry-at-root`** — the built prod `_server.js` 404s a
+  single-file SPA at `/` when the entry isn't `index.scrml` (dev serves it, prod doesn't — silent
+  dev/prod divergence; the FUNCTIONAL half the auth gap called "structurally safe"). Root
+  `build.js:523`. Fork, no rec. → `handOffs/incoming/2026-09-03-from-peter-to-bryan-prod-server-404s-non-index-spa-at-root.md`
+- **MED `g-engine-state-child-apostrophe-breaks-parse`** — a `'` in an `<engine>` state-child body
+  breaks the parse (`E-ENGINE-STATE-CHILD-MISSING` naming a PRESENT child); it's the S196
+  `g-match-arm-apostrophe-bs` fix never generalized to `engine-statechild-parser.ts`. Even-count
+  compiles (string-lexing). → `handOffs/incoming/2026-09-03-from-peter-to-bryan-engine-state-child-apostrophe-breaks-parse.md`
+
+No compiler `src` touched (docs-only); FACTS/SPEC-INDEX not owed, maps unchanged. bryan's owed queue
+below is UNTOUCHED. Full stream: delta-log `[2051]`–[this wrap] + `docs/changelog.md`.
+
 ### 1. ⚑⚑ THE ONE THING IN FLIGHT — the `~` arc is BUILT, REVIEWED, and HELD on a bryan decision
 
 **Worktree RETAINED: `.claude/worktrees/agent-ac264a1015c0da19d` @ `c2ad6f49`** (branch
