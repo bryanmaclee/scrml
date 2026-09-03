@@ -1,60 +1,30 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `git diff --name-only 2ec2ce3a..ad7b65dc --
-# 'compiler/src/commands/db-migrate.js' 'compiler/src/commands/migrate.js'
-# 'compiler/src/schema-differ.*'` is **EMPTY**. The §14.8.11 DB-authoritative tier, the `scrml
-# migrate` source codemod and the schema differ are byte-identical across 25 commits.#
-# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
-# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
-# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
-# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED:** `git diff --name-only fc6df72e..2ec2ce3a -- compiler/src/commands/db-migrate.js compiler/src/commands/migrate.js compiler/src/schema-differ.js` is **EMPTY**. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
-# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
-# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
-# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
-# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
-# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED —
-# FIFTEENTH consecutive window with no DB/migration surface movement.** Re-measured at THIS
-# watermark: `git diff --name-only 8b2e4053..fc6df72e -- '*migrat*' '*schema*'` returns only the two
-# `.claude/maps/` files (this map and `schema.map.md` — i.e. the maps themselves, not source).
-# No `migrations/` path, no schema file and no DB command changed.
-# ⚠ **ONE ADJACENCY WORTH KNOWING AND IT IS NOT A MIGRATION CHANGE.** The window's new diagnostic
-# `E-STATE-BLOCK-STATEMENT-FORM` names `<schema>` in its locus set (`STATE_BLOCK_NAMES = {db, state,
-# schema}`, `lint-e-state-block-statement-form.js`), so a lifecycle statement written directly in a
-# `<schema>` body is now REFUSED. It touches no DDL, no differ and no migration command — a
-# `<schema>` body is consumed as DDL, so such a statement was silently DISCARDED before. See
-# error.map.md.
+# **NO MIGRATION SURFACE CHANGE THIS WINDOW.** Carried forward VERIFIED-UNCHANGED at `2d8dd8cb`.
 #
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
-# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
-# **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED. TWELVE windows with no DB/migration surface
-# movement.** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at
-# WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of
-# `origin/main`.
-#
-# Zero-diff re-run at this HEAD over the `c96e7012` -> `728bdc92` window (21 commits, PRs #657-#676):
-# `git diff --name-only c96e7012..728bdc92 -- compiler/src/schema-differ.js
-# compiler/src/commands/db-migrate.js compiler/src/codegen/db-authoritative.ts
-# compiler/src/sql-table-refs.js` is **EMPTY**. No SQL-adjacent change this window.
-#
-# ⚠ **ONE ADJACENT ITEM WORTH KNOWING, filed NOT fixed (S370-peter, `674f890b`): a boolean-column
-# ROUND-TRIP defect** — `g-...boolean-column-round-trip` (MED, open, `docs/known-gaps.md`). It is a
-# dog-food find against the DB tier, so it will surface in this map's territory when it is worked,
-# but **no code in the migration surface has moved for it**.
 
 The conditional check (a real DB-migration-apply tool exists) fires because `scrml db-migrate`
 (§14.8.11.1) exists — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB

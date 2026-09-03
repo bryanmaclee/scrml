@@ -1,256 +1,34 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **TWO NEW SECTIONS, both added because the window's defects were CLASSES rather than instances:**
-# **§17.1.1** — the `if-chain` node shape as a defect-family ROOT (the shape rule, the lone-`if=`
-# discriminator, and the two walks that are DELIBERATELY not converted); and **§17.6.1 / §17.6.2 /
-# §17.6.10** — the value-form sugar, where a SPEC amendment made a shipping emit non-conforming
-# without touching one line of compiler code, and where two constructs correctly share a leaf
-# predicate while correctly NOT sharing a shape rule.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⚠ **THE REST OF THIS FILE (~2,400 lines) WAS NOT RE-WALKED.** `SPEC.md` moved +108 in exactly ONE
-# commit (#802, the §17.6 amendment) and `SPEC-INDEX.md` by 124 lines; **no §-anchor, line range or
-# normative rule outside §17.6 changed**, so every §-anchored claim below still anchors. Claims this
-# window's diff does not touch carry their PRIOR verification, not a fresh one.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **A MAP-INTERNAL CONTRADICTION WAS RESOLVED HERE:** this file cited `SPEC.md:19722` and error.map.md cited `SPEC.md:19728` for the SAME `E-STATE-BLOCK-STATEMENT-FORM` §34 row — two watermark generations (`0dd659a1` vs `ff4b37e5`) that were never re-synced. Both are now `:19729`, re-derived by grepping the row.
-# codegen surface S380 touched; NOT a full re-walk). `git merge-base --is-ancestor 48f0aaf8 0dd659a1`
-# exits 0; HEAD == origin/main == 0dd659a1.
-#
-# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
-# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
-# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
-# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
-# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — THE WHOLE-SET STAMP ON LINES 3–4 IS **DELIBERATELY NOT MOVED** ━━━
-#
-# Nine compiler-source files re-verified against `origin/main` == HEAD == **`ff4b37e5`**
-# (`git merge-base --is-ancestor 0dd659a1 ff4b37e5` exits 0). NOT a re-walk of this map; lines 3–4
-# stay at `0dd659a1` (the S382 pattern — bumping a whole-set stamp on a partial pass falsely claims
-# the whole file was re-verified). Corrections below carry a `⛑ S383` / `⛑ S384` marker.
-#
-# **TWO NEW SECTIONS THIS PASS, both read from the actual diff, not from commit messages:**
-#   · **§59.7 (NEW)** — #749's value-native map/set SERVER runtime and #748's server-pass
-#     variant-field fallback. The shared shape is *a lowering that was silently client-only*.
-#   · **§40.8 (AMENDED)** — ruling 3's arms are **HELD, not landed**; the §34 row that used to
-#     contradict behaviour has been CORRECTED, so the doc/behaviour contradiction this map recorded
-#     is CLOSED while the behaviour hole stays OPEN — and the class gained a FOURTH HIGH member.
-#
-# **TWO NEW SECTIONS ADDED THIS PASS, BOTH VERIFIED AGAINST THE ACTUAL S380 DIFF, NOT INFERRED FROM
-# COMMIT MESSAGES:**
-#   · **§16.6.1** — #726/#731/#733, three `component-expander.ts` fixes sharing one root shape
-#     (a substitution site operating on TEXT instead of the parsed AST). #731 SUPERSEDES the
-#     substitution MECHANISM §16.6 point (2) (S376) describes — that section is carried for its
-#     still-current DECL-routing table, with a forward-pointer added at its head.
-#   · **§51.3** — #732 (a `<match on=@derivedCell>` scrutinee wires via effect+`_scrml_derived_get`
-#     instead of a subscribe that never fires on a derived recompute) and #735 (a per-item `<match>`
-#     inside `<each>` now re-dispatches on a same-key reconcile field change, via the same per-item
-#     effect wrapper the interpolations use), plus the same-value short-circuit both fixes needed to
-#     avoid tearing down an unchanged arm on every reconcile pass.
-#
-# **Not otherwise re-walked this pass** — every other section (§4.18.1, §17.2 show=, for-lift
-# reconcile, the DB-authoritative tier, etc.) carries from the prior watermark unverified beyond
-# spot-checks where the S380 diff touched an adjacent citation (none did, outside the two sections
-# above).
-#
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
-# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
-# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
-# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
-#
-# ⚑ **S376: `compiler/SPEC.md` MOVED BY EXACTLY ONE LINE (37,539 -> 37,540) AND THAT ONE LINE IS A
-# LANGUAGE RULING, NOT AN EDIT.** The whole diff is a single new §34 catalog row at `SPEC.md:19729`
-# — `E-STATE-BLOCK-STATEMENT-FORM` — which makes NORMATIVE what §34's
-# `E-WRITE-NOT-IN-LOGIC-CONTEXT` and `W-STATE-BLOCK-BARE-WRITE-DECL` rows had only implied:
-# **a `<db>` / `<state>` / `<schema>` STATE-block body is MARKUP context, so the §40.8
-# `default-logic` auto-lift does not reach it, and logic written there is now REFUSED rather than
-# silently shipped as page text.** Its own section below. (`SPEC-INDEX.md` also moved 110 lines —
-# that is #709's boot-trim ROTATION of amendment narrative out of the index preamble; no §-anchor,
-# line range or rule changed, so every §-anchored claim in this map still anchors.)
-#
-# **THE RULING BEHIND IT, because the code is downstream of it and a reader will ask:** S375
-# ruling 1, limb (b) — *logic at a state-block locus is REFUSED, not linted* — with the S376 decision
-# to allocate a FRESH code rather than fire the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`. Per S368
-# (logic at a markup locus is REFUSED, not linted) this is conformance restoration against a ruling
-# already made, not new policy.
-#
-# **CARRIED FROM S372 AND RE-VERIFIED BY EXECUTION AT THIS WATERMARK — both still hold:**
-#   · **CORRECTION 1 (§17.1.2.3)** — a markup `if=` on a NON-ROOT element inside a row template does
-#     NOT "emit nothing and fail closed"; it emits a real create-time append gate plus `W-IF-IN-EACH`.
-#     **`compiler/SPEC.md:11686` STILL carries the stale row** — re-checked here, still flagged in
-#     `non-compliance.report.md`.
-#   · **CORRECTION 2 (§17.2)** — `show=` on a STRUCTURAL element is never CAPTURED, not merely
-#     unwired. **RE-GREPPED at this watermark: `grep -rn showCond compiler/src/` returns ZERO hits**,
-#     and only `ifCond` is stamped (`ast-builder.js:16041`, `:17009`, `:18050`, `:18200` — ⛑ S383,
-#     all four **+118**, were `:15892`/`:16891`/`:17932`/`:18082`; each re-verified individually this
-#     pass and each still lands on the `ifRaw`/`ifCond` spread).
-#     ⚠ **DO NOT CONFUSE THAT WITH THIS WINDOW'S #710**, which wired `show=` on an ordinary element
-#     INSIDE an `<each>` row template. Those are different loci: #710 did not give a STRUCTURAL
-#     `<each show=…>` a field to read, and `showCond` still does not exist.
-#
-# **THREE CLIENT-CODEGEN LOWERINGS ALSO LANDED AND EACH CLOSES A SILENT-WRONG-OUTPUT CLASS** —
-# `show=` inside `<each>` (#710), parametric/arity-tolerant snippet fills (#713/#714), and a
-# word-char-glued `${…}` in a for-lift reconcile child (#716). Sections below.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED for the un-touched §-surfaces. The
-# line-3 stamp advanced `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376);
-# the §-surfaces this window's diff touched are RE-WALKED and marked as such.)
-# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
-# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
-# ancestor of `origin/main` (it IS `origin/main`).
-#
-# **SPEC.md +241 lines (37,298 -> 37,539), TWO new codes (`E-STDLIB-CLIENT-CHUNK-MISSING`,
-# `W-TYPE-031-UNPROVEN`). THE FRAMING THAT REORDERS EVERYTHING ELSE: bryan hand-wrote scrml for the
-# first time this session, and it went badly. Every compiler defect in the bryan lane came out of
-# that; peter's came out of dog-fooding an order dashboard and a signup form.** ⚠ A token-diff of
-# SPEC for added codes returns THREE; `W-031-UNPROVEN` is FALSE — prose shorthand inside the
-# `E-TYPE-031` row. See error.map.md.
-#
-# **THE FOUR THINGS THAT WILL BITE A DEV AGENT:**
-#
-# **1. §7.5/§14.7 — `asIs` AND `unknown` ARE NOW DIFFERENT VALUES, AND THE DISTINCTION IS NORMATIVE
-# (#665, dpa-036 call 1).** `asIs` means **a developer signed for it** — §14.7's named escape hatch,
-# what `E-TYPE-ANY-FORBIDDEN` steers to. `unknown` means **the compiler did not look, or looked and
-# could not tell**; it is NOT an escape hatch and nobody signed for it. **Before S365 they were ONE
-# value:** inference gave up by returning `tAsIs()`, so a gap in the type checker was spelled exactly
-# like a deliberate opt-out, and *absence of a diagnostic* and *success* were the same observation.
-# `UnknownType.reason` is REQUIRED and `tUnknown()` has no zero-arg overload — **an `unknown` that
-# cannot say what defeated it has decayed back into an `asIs`.** New warning `W-TYPE-031-UNPROVEN`
-# (SPEC §7.5.2) reports it, and it and `E-TYPE-031` are **COMPLEMENTS, not alternatives**: 031 is "I
-# proved it does not fit", UNPROVEN is "I could not prove anything". ⚑ **This retires the prior map's
-# "NOT ON MAIN, NOT MAPPED" note verbatim — the split LANDED.** schema.map.md · error.map.md.
-#
-# **2. §41 — A CLIENT-SIDE `scrml:NAME` IMPORT IS ONLY REAL IF THE MODULE HAS A RUNTIME CHUNK, AND
-# 17 OF 21 DID NOT (#669).** A client bundle is a CLASSIC SCRIPT: it cannot resolve a bare
-# specifier, so `import { slug } from 'scrml:format'` lowers UNCONDITIONALLY to
-# `const { slug } = _scrml_stdlib.format;`, and `_scrml_stdlib.NAME` is defined by the `stdlib-NAME`
-# entry in `RUNTIME_CHUNK_ORDER` **and by nothing else**. Four were registered. **Compile exit 0,
-# `TypeError` at bundle load, dead page, zero diagnostics.** Registry 4 -> 13; the other 8 now refuse
-# LOUDLY with `E-STDLIB-CLIENT-CHUNK-MISSING`. **Membership is DERIVED from the §12.2 Trigger 3
-# two-limb criterion, not curated** — (a) host reach into `Bun.*`/`process.*`/`bun`/`bun:*`/`node:*`,
-# or (b) credential handling. ⚑ **Two normative consequences worth carrying:** (i) **a submodule
-# specifier is NOT a thing the registry can express** — `scrml:auth/jwt` lowers to
-# `_scrml_stdlib.auth/jwt`, which JS parses as the DIVISION `_scrml_stdlib.auth / jwt`; refusing it
-# is correct and teaching the registry about submodules is its own arc; (ii) **the gate that should
-# have caught this watched the WRONG PROPERTY** — `W-STDLIB-SHIM-MISSING` probes whether a shim FILE
-# exists (all 21 do), while the deciding property is chunk registration. **Obligation and probe
-# resolving to different artifacts is the recurring shape here, not a one-off.**
-#
-# **3. §17.6 — THE VALUE-FORM `if` HAD THREE SEPARATE SILENT-WRONG HOLES, ALL FOUND BY DOG-FOODING,
-# ALL FIXED THIS WINDOW (#670/#672/#673).** They are worth reading TOGETHER because the class is one
-# thing: **a construct that is correct at TOP LEVEL and silently degrades in a NESTED or INDIRECT
-# position.**
-#   · **#670 — inside an `<each>` body.** `${ if c { a } else { b } }` as the SOLE content of an
-#     interp inside an `<each>` was neither a `bare-expr` nor carried `stmt.raw`, so emit-each fell
-#     to `inner = ""` and emitted an empty text node. The IDENTICAL form at top level lowered to a
-#     reactive ternary correctly. **Filed residual: a value-form `match` in an each interp is STILL
-#     dropped** (`g-each-inline-value-form-match-or-markup-branch-interp-dropped`).
-#   · **#672 — an empty-string branch.** `{ "" }` collapsed to an empty BLOCK, because the parser's
-#     blank-token skip tested `tok.text.trim() === ""` and an empty-string STRING literal has blank
-#     `.text` while being a MEANINGFUL expression statement. The branch then failed value-form
-#     recognition and rendered nothing.
-#   · **#673 — a fn-call CONDITION.** `${ if isOn() { … } else { … } }` never re-rendered when a cell
-#     `isOn()` reads changed, while `${ if @c … }` did. Root: the effect-vs-static decision
-#     string-scanned the LOWERED value for `_scrml_reactive_get(...)`, which sees a DIRECT cell read
-#     but **not a read hidden inside a called fn**. Now ANY call in the lowered value counts as
-#     potentially-reactive. ⚑ **The fail-safe DIRECTION is the reusable part: a false positive is a
-#     needless effect that never re-fires; a false negative is a stale display. Bias toward the
-#     effect.** The static optimisation survives only for a genuinely-const value-form `if`.
-#
-# **4. §18 — A `match` OBJECT-LITERAL ARM IS A RETURNED VALUE, NOT A STATEMENT BLOCK (#664).** In
-# library-mode `fn`, `1 :> { x: 1 }` emitted BARE; JS reads `{ x: 1 }` as a labeled-statement block,
-# the IIFE falls off its end, and the fn silently returns `undefined`. It now emits in RETURN
-# position, through `emitExprField` + `_awaitMatchArmServerCalls` so a server call inside the object
-# (`{ rows: queryUsers() }`) is auto-awaited (§13.2/§19.9.3) exactly as the decl path does.
-# ⚠ **RESIDUAL, OPEN, HIGH: the `else`/wildcard arm was NOT covered** —
-# `g-library-fn-match-else-arm-object-literal-returns-the-bare-identifier`.
-#
-# ⚑ **THE OPEN ITEM THAT NOW HAS ITS OWN ROUTING ROW IN primary.map.md — §40.8 DEFAULT-LOGIC MODE
-# SILENTLY EMITS NON-DECLARATION CODE AS PAGE TEXT.** THREE defects of ONE class landed on this
-# surface this session and none of them is fixed on `main`. **All three PA-REPRODUCED at this
-# watermark by compiling and reading the emitted `<body>`, not by reading the ledger:**
-#   · `<program>` + `log("M1");` → exit 0, literal `log("M1");` in `<body>`.
-#   · `<program>` + `if (1) { }` → exit 0, literal `if (1) { }` in `<body>`.
-#   · `<program>` + `// c` + `log("M1");` → exit 0, literal `log("M1");` in `<body>` (the comment
-#     FLUSHES the surrounding contiguous run, before AND after).
-#   · Control: `<program>` + `<count> = 0` lifts correctly and emits NO page text.
-# **The masking limb is why these are HIGH: a swallowed statement's diagnostics are swallowed too.**
-# The original reproducer read an UNDECLARED cell and `E-STATE-UNDECLARED` did not fire, because the
-# statement was never compiled. **A defect that turns code into text also deletes every diagnostic
-# that code would have raised.** And `W-PROGRAM-REDUNDANT-LOGIC` actively routes authors INTO the
-# broken mode — it tells you to remove the `${…}` wrapper, and the wrapped form is the one that works.
-# ⚠ **THE BARE-CALL LIMB IS A RULING, NOT A FIX.** §40.8 (`### 40.8 v0.3 Program Shape` at `SPEC.md:23054`, the S123 amendment bullet at `:23064` — ⛑ **S391: the anchor here read `:22813-22814`, which the S383 note to the right had ALREADY flagged as wrong; an S391 delta-shift moved it to `:22821-22822`, which is SQL DDL prose (`response_body TEXT NOT NULL,`) and equally wrong. A KNOWN-WRONG ANCHOR MUST BE RE-DERIVED, NOT SHIFTED — shifting it preserves the error with a fresh-looking number.** Now derived from the section heading) enumerates what
-# auto-lifts (DECLARATIONS), carves out writes with a diagnostic, and is **SILENT on a bare call** — (⛑ S383: the anchor to its left was WRONG BEFORE THIS WINDOW TOO — the S123 amendment is `SPEC.md:23064`, and `:22813-22814` is §19.9.6 shadow-table SQL prose. The NEW ruling-3 bullet sits at `SPEC.md:23065`.)
-# so *"searched §40.8, no governing sentence found"* is a FINDING that converts it into an operator
-# decision. The fork: **(a) lift every text run** (closes it, but prose written directly in a
-# `<program>` body then parses as logic) vs **(b) diagnose non-declaration runs** (closes it, but
-# must then reject `const bias = 1.2` followed by `log(x)`, which compiles today). **Either needs
-# SPEC text. Nobody should guess.** ⚑ **The bare-`if` limb is NOT covered by that ruling.**
-# ⛑ **CORRECTED S383 — the clause that used to follow ("and it contradicts a §34 row outright") IS
-# NOW STALE AND HAS BEEN STRUCK. The §34 row was CORRECTED this window.** `SPEC.md:19824` (§34),
-# `SPEC.md:11765` (§17.4) and a NEW `SPEC.md:23065` (§40.8) all now say the auto-lift covers
-# DECLARATIONS ONLY and that this locus is covered by **NEITHER** the lift nor the diagnostic.
-# **The doc/behaviour contradiction is CLOSED; the behaviour hole is OPEN** — PA-RE-REPRODUCED at
-# `ff4b37e5`: `<program>` + `if (1) { }` exits 0 and the emitted `<body>` carries the literal line
-# `if (1) { }`. The emit site (`ast-builder.js:1885-1888`; ⛑ S383, was `:1857-1860`) is gated
-# `parentType === "markup"`, the COMPLEMENT of the §40.8 locus. ⛑ **Ruling 3's ENFORCEMENT arm is
-# HELD, not landed** — `BARE_CONTROL_FLOW_AT_BODY_TOP_RE`, `findControlFlowStatementEnd`,
-# `_DEFAULT_LOGIC_ROOT_NAMES` and an `isStateBlockBody` parameter are at ZERO occurrences in
-# `compiler/src/` + `compiler/tests/` (grepped this pass). ⛑ **And the class gained a FOURTH HIGH:**
-# `g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line` — one prose line at this
-# body-top silently disables the lift for every declaration below it, with zero diagnostics.
-# ⚑ **AND THE CLASS IS WIDER THAN §40.8.** A corpus sweep read from source found at least four live
-# members OUTSIDE it — most sharply **`on mount { loadDashboard() }` inside a `<db>` state-block body
-# ships as page text and the mount hook NEVER RUNS** (`samples/htmx-debate-dashboard.scrml:143`,
-# clean compile). SPEC says `<db>`/`<state>` bodies are NOT default-logic loci — a state-block body
-# is markup context — and the sibling `W-STATE-BLOCK-BARE-WRITE-DECL` covers a bare *write* there at
-# **Info**, deliberately, *"because a hard error there is a bigger call."* **That locus is an OPEN
-# OPERATOR RULING, not a bug with a known fix.** Plus ~25 bare `@name = expr` writes emitted as text
-# in `gauntlet-r10-bun-admin` / `samples/dashboard`, and `stdlib/http/index.scrml` leaking 8 lines of
-# its own body. primary.map.md Task-Shape Routing · structure.map.md `ast-builder.js`.
-#
-# **§13.2 — A NEW HIGH, ROUTED NOT FIXED (S370-peter, filed at `674f890b`).** A server-fn call
-# **nested inside a larger expression** (`call().length`, `f(call())`, `call() > 0`) is **not awaited
-# at the inner call site** in markup interps and inline event handlers — renders `""`/`undefined`,
-# exit 0, no diagnostic. **The asymmetry was executed, not inferred: fn bodies and direct
-# cell-assign are correct, so the class is POSITION-SCOPED.** Deliberately routed rather than patched
-# in-lane because it is the §13.2-SHALL-by-RETROFIT axis. Entry:
-# `g-server-call-nested-in-expression-not-awaited-outside-fn-body`.
-#
-# **§6.8 — `reset(@cell)` NO LONGER HANDS BACK A PROMISE (#662).** `_scrml_reset` re-invoked the init
-# thunk with no `await`, so a cell whose init calls a server fn was correct at mount and became a raw
-# Promise on reset. Both re-invocation paths now route through `_scrml_reset_apply`
-# (`runtime-template.js:1179`). ⚠ **The thenable correction is the durable part:** a bare
-# `r.then(...).catch(...)` assumes `.then` returns a promise — true of a real Promise, NOT of an
-# arbitrary thenable (`{ then: (res) => res(99) }` returns `undefined`, so `.catch` throws a
-# `TypeError` SYNCHRONOUSLY out of the adopter's event handler and aborts the rest of it).
-# `Promise.resolve(r)` FIRST is what makes the declaration-path parity claim true rather than
-# plausible.
-#
-# **§1.4/§7.4 — a cross-file IMPORTED markup fn now MOUNTS in an `<each>` interp (#658)**, matching
-# the same-file case. The predicate moved into `compiler/src/markup-return-scan.js`, a shared leaf
-# both `emit-each.ts` and `module-resolver.js` import, with an import-graph FIXPOINT so a re-exported
-# wrapper at any depth is classified. **Residual OPEN:** `g-each-nested-markup-interp-stringifies`.
-#
-# **CARRIED FROM THE PRIOR WINDOW, all still true and amended in place below:** §40.3/§40.8 the
-# ONE-ONION rule and precedence-off-SOURCE-not-FILENAME · §40.3.3 the enforced pipeline order
-# (CORS preflight is stage 1; a preflight carries no credentials) · `ratelimit=` is PER-ROUTE (§4.15)
-# · §38 transitions moved runtime -> stylesheet because `headers="strict"` binds the COMPILER's own
-# emissions (§39.2.5), and the §20.8.2 soft-nav stylesheet hole that forces the app-wide union in the
-# `<program>` shell · §21.5 strip a delimiter pair as a MATCHED PAIR.
-#
-# Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
-# `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
+# **§17.1.1 GAINED ITS SERVER-BOUNDARY LIMB THIS WINDOW (#818)** — the if-chain blind-spot class now
+# has a member that is a *security* boundary rather than a rendering defect, and it is the one whose
+# two halves must be closed together. **§52.13 gained a one-decider rule (#823):** `scrml dev` consults
+# the protected-document registry at exactly one site, on the RESOLVED file, matching `build.js`'s
+# model. **§62.2 gained a corpus-honesty limb (#822):** an assertion that carries both a count and a
+# first-match check now evaluates BOTH.
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
@@ -2356,7 +2134,7 @@ that can contain comments and strings is the same class of mistake as `maskComme
 `<db>` body (see error.map.md): it trades a visible wrong answer for an invisible missing one.**
 
 
-## §17.1.1 — THE `if-chain` NODE SHAPE IS A DEFECT-FAMILY ROOT, NOT A DEFECT (NEW section, S395, #805/#811)
+## §17.1.1 — THE `if-chain` NODE SHAPE IS A DEFECT-FAMILY ROOT, NOT A DEFECT (S395, #805/#811; **SERVER-BOUNDARY LIMB ADDED S396, #818**)
 
 **THE ONE FACT.** `collapseIfChains` (`ast-builder.js:18871`; node construction `:19024`) rewrites an
 `if=` / `else-if=` / `else` chain **that has an else arm** into a NEW node:
@@ -2391,10 +2169,41 @@ I added an else"* starts here.
 | a `<timer>` in a branch **never starts** (`_scrml_timer_start` count 0 vs 1 on the lone-`if=` oracle) | the lifecycle emitter — **not traced**, same class | MED, open |
 | a cell read ONLY as a chain condition or ONLY in a branch interp **false-fires `E-DG-002`** | `dependency-graph.ts` usage analysis | open |
 
+| a **branch-declared function never EXISTS** — `emit-functions.ts` emits ZERO definitions and every call site ships as a bare `helper()`, `ReferenceError` at exit 0 with zero diagnostics | `codegen/collect.ts` `collectFunctions` (`:173`) | HIGH — **CLOSED #818** (`:215`) |
+| a **branch-declared `server fn` never becomes a ROUTE**, so `route.boundary` is never set — and it is `route.boundary === "server"` that keeps a `server fn` body OUT of `client.js` | `route-inference.ts` `collectFileFunctions` (`:1087`) | ⛑ **SECURITY — CLOSED #818** (`:1137`) |
+| a branch-declared `server fn` in a `<program>` worker body **false-fires `E-ROUTE-001`** once the walk above can see it | `route-inference.ts` `collectWorkerBodyFunctionIds` (`:1156`) | MED — **CLOSED #818** (`:1199`), same commit by necessity |
+
 **THE FIX IS A SHARED ENUMERATOR, NOT A SEVENTEENTH COPY.** `compiler/src/ast-if-chain.js`
 (⚠ `src/` ROOT — `compiler/src/codegen/ast-if-chain.js` **does not exist**) exports
 **`ifChainChildNodes(node)`**: every `branches[].element` in source order, then `elseBranch`; an
-EMPTY array for any non-`if-chain`, so a caller may invoke it unconditionally. **#805 created it
+EMPTY array for any non-`if-chain`, so a caller may invoke it unconditionally.
+
+⛑ **THE SERVER-BOUNDARY LIMB (S396, #818) — THIS IS THE MEMBER OF THE FAMILY THAT IS A SECURITY
+BOUNDARY, AND ITS TWO HALVES MUST BE CLOSED IN ONE COMMIT.** `analyze.ts` hands `collectFunctions`'s
+result to BOTH `codegen/emit-functions.ts` (the CLIENT emitter) and `emit-server.ts`. The client
+emitter omits a `server fn` body **only because route inference already claimed it as an endpoint**.
+So the two blind walks fail asymmetrically:
+
+| what you close | what ships | how loud |
+|---|---|---|
+| `collect.ts` ALONE (client half) | the `server fn` **BODY into `client.js`**, and **no `server.js` at all** — measured body-in-client `1` with that hunk alone, `0` with both, `0` on base | **SILENT** |
+| `route-inference.ts` ALONE | a bare `helper()` at every call site | loud `ReferenceError` |
+| BOTH, plus the worker-body suppression set | correct routing | — |
+
+**A silent server-code leak is strictly worse than a loud `ReferenceError`, so the client half must
+never land first.** This is why the previous map stamp recorded `collect.ts` as *deliberately backed
+out* rather than as an unclosed gap — that prohibition is now retired, but the ORDER it protected is
+permanent (invariant 86 in primary.map.md). The **LEAK GUARD** that keeps the halves together is
+`compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:156` — *"LEAK GUARD: a server fn in a
+branch never ships its body to the client"*. ⚠ Its anchor moved from `:124`; **re-grep the test NAME,
+not the line.** Two conformance cases pin the behaviour:
+`control-flow/if-chain-branch-declared-function-pos` and
+`server-fn/branch-declared-server-fn-routes-to-server`.
+
+⚠ **`endpointClientSkipIds` IS NOT THE MECHANISM, AND AN EARLIER DRAFT OF THE SOURCE COMMENT SAID IT
+WAS.** That set is built solely from `<endpoint>` private-arm reachability and carries no `server fn`
+placement path. A reader who follows that pointer finds nothing and wrongly concludes the
+route-inference walk is not the cause. **#805 created it
 with six consumers; #811 closed ten more.** At `ad7b65dc`: **13 importing modules, 32 call sites.**
 
 ⚠ **TWO WALKS ARE DELIBERATELY NOT ROUTED THROUGH IT, AND BOTH READ AS OVERSIGHTS. THIS IS THE MOST

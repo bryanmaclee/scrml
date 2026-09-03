@@ -1,301 +1,33 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **§34 CATALOG IS FLAT AT 814 — ZERO codes in, ZERO out — WHILE ITS RANGE MOVED 98 LINES.** That
-# pairing is the whole reason this file refuses to bake the range: `bun scripts/s34-census.ts`
-# re-executed at `ad7b65dc` returns **`814 rows (§34 19456..20341, derived) · 1994 source files ·
-# 891 conformance cases`**, against `814 rows (§34 19358..20243)` at `2ec2ce3a`. **A baked range
-# would have been wrong by 98 lines against a total that did not move at all**, and a reader
-# checking "did the catalog change?" by comparing ranges would have manufactured a delta.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# **BUCKETS RE-EXECUTED AND ALL SEVEN ARE FLAT:** `STRUCK 34 · PINNED 343 · IMPL-SITES 304 ·
-# DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`; dispositions `BUILD-ARC 71 ·
-# HOME-NO-SHALL 27 · ORPHAN-INDEX 4 · NOMINAL-HOME 10`. Prefix greps also FLAT: `^| E-` **918** ·
-# `^| W-` **179** · `^| I-` **10** · `^| H-` **2**.
-#
-# **WHY EVERYTHING IS FLAT WHEN `SPEC.md` MOVED +108: the +108 is one commit (#802) of PROSE and
-# GRAMMAR, not rows.** It added §17.6.10, an `arm-body` grammar alternative and a governing
-# sentence. ⚑ **And it is the sharpest instance yet of a SPEC edit changing a diagnostic's meaning
-# with zero catalog movement: `SPEC.md:11893` normatively RETIRES `W-LIFT-001` for an
-# exactly-one-expression arm** — a code that already has **zero fire sites in `compiler/src/`**
-# against a live §34 catalog row (a FALSE-CLAIM member whose row is now narrower than the code's
-# absence already implied). Nothing in the census can see that.
-#
-# ⛑ **`E-CODEGEN-INVALID-LOGIC` GAINS A DOCUMENTED *NON-DEFECT* LOCUS — read this before filing a
-# bug against it.** `const <label> = if (…) { … }` in a DERIVED STATE CELL raises it in **both** the
-# §17.6.2 sugar form and the explicit-`lift` form. §17.6.3 (`SPEC.md:11898`) names only `const`/`let`
-# binding sites, so a derived cell is an **UNSPECIFIED shape failing LOUD — the safe direction.**
-# `const <label> = match @level { … }` DOES work and ships as a conformance case, so the asymmetry is
-# real; closing it is a WIDENING, not a fix. See primary.map.md invariant 85. ⛑ **The `if` half was
-# VERIFIED BY EXECUTION at this watermark, two-sided — sugar AND explicit-`lift` both raise
-# `E-CODEGEN-INVALID-LOGIC` in a derived cell, while the LOCAL binding compiles at exit 0 with a
-# shadow count of 0. The `match` half is RELAYED-UNVERIFIED: this pass's reproducer used an `asIs`
-# subject and was refused by `E-TYPE-025` before codegen, so it answered a different question.**
-#
-# ⚠ **A NON-COMPLIANCE FINDING LANDED IN THIS FILE'S SUBJECT AREA AND IS *NOT* A DIAGNOSTIC:**
-# `docs/known-gaps.md:9389` still calls `planBlockArmLift` *"the single §18.5 tail classifier"*.
-# Invariant 49 recorded FOUR emission routes in S331, and #815 confirms the shared leaf is
-# **`_blockTailIsValueExpr`** (`emit-logic.ts:4871`), not `planBlockArmLift`. **The phrase is now
-# wrong on both axes and is still propagating.** non-compliance.report.md N9.
-#
-# ⚠ **THE REST OF THIS FILE (~1,050 lines) WAS NOT RE-WALKED.** Only the catalog/census block, the
-# `E-CODEGEN-INVALID-LOGIC` note above and the two figures below were re-derived at this watermark.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a` (51 commits). MAP-STAMP RULE run at WRITE time: `BASE=merge-base HEAD origin/main` = `2ec2ce3a` = HEAD = `origin/main`; the source diff `BASE..HEAD` over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` is EMPTY; `merge-base --is-ancestor 2ec2ce3a origin/main` exits 0 (outbound), and `--is-ancestor 0dd659a1 2ec2ce3a` exits 0 (inbound, invariant 48). One SHA on two lines because there is no second SHA to record.
-# codegen surface S380 touched: emit-each.ts, emit-match.ts, emit-server.ts, emit-variant-guard.ts,
-# build.js, dev.js, component-expander.ts; NOT a full re-walk). `git merge-base --is-ancestor
-# 48f0aaf8 0dd659a1` exits 0; HEAD == origin/main == 0dd659a1.
-#
-# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
-# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
-# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
-# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
-# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — THE WHOLE-SET STAMP ON LINES 3–4 IS **DELIBERATELY NOT MOVED** ━━━
-#
-# Nine compiler-source files were re-verified against `origin/main` == HEAD == **`ff4b37e5`**
-# (`git merge-base --is-ancestor 0dd659a1 ff4b37e5` exits 0). The rest of this map was NOT re-walked,
-# so lines 3–4 stay at `0dd659a1` — the S382 pattern. Bumping a whole-set stamp on a partial pass
-# falsely claims the whole file was re-verified. Corrections below carry a `⛑ S383` / `⛑ S384` marker.
-#
-# **§34 CATALOG IS FLAT AT 813 — ZERO codes in, ZERO out.** `compiler/SPEC.md` DID move this window
-# (+9/-2) but every insertion is PROSE: the §34 `E-CONTROL-FLOW-IN-MARKUP` row (`:19823`), the §17.4
-# paragraph (`:11765`) and a NEW §40.8 bullet (`:23063`). `grep -c '^| E-' compiler/SPEC.md` returns
-# **916**, unchanged. S383/S384's five landed source fixes are a span `col` correction, a comment-only
-# banner, a module extraction and two SILENT-WRONG-OUTPUT codegen fixes — none allocates a code.
-#
-# ⛑ **THE ONE CLAIM IN THIS FILE THAT WENT STALE THIS WINDOW IS THE `E-CONTROL-FLOW-IN-MARKUP`
-# DOC-CONTRADICTION FINDING — see the corrected block below. The §34 row no longer contradicts
-# behaviour; the BEHAVIOUR hole it exposed is still open, PA-RE-REPRODUCED at `ff4b37e5` by
-# compiling** (`<program>` + `if (1) { }` → exit 0, and the emitted `<body>` literally contains
-# `if (1) { }` on its own line, read from `dist/*.html` this pass).
-#
-# **§34 catalog is UNCHANGED at 813 — `compiler/SPEC.md` has ZERO diff over this window**
-# (`git diff --stat 48f0aaf8..0dd659a1 -- compiler/SPEC.md` is empty). S380's six landed fixes
-# (#726, #728, #731, #732, #733, #735) are all SILENT-WRONG-OUTPUT corrections (a `<match>` arm
-# frozen on a derived-cell scrutinee or a same-key reconcile field change, a snippet param
-# substituted textually instead of structurally, a string-literal prop mis-lowered, an unprotected
-# auth-required document) — NONE allocates a new diagnostic code or changes an emit-site COUNT.
-#
-# **TWO pre-existing (NOT S380-caused) stale `file:line` citations found and corrected while
-# verifying this window's `emit-each.ts`/`emit-lift.js` diffs did not touch them:**
-# `W-EACH-PERITEM-IF-MULTIROOT-DEFERRED` was cited `emit-each.ts:1143`, actually `:1286`;
-# `emit-lift.js`'s two `W-LIFT-TIER0-*` deferred-lowering tokens were cited `:1448`/`:1450`, actually
-# `:1484`/`:1486`. Both sit BEFORE S380's insertion points in their files, so the drift predates this
-# window — undetected by whichever pass last touched these lines. See non-compliance findings.
-#
-# **Not otherwise re-walked this pass** — the §34 census, catalog-vs-impl facts, and every other
-# section carry from the prior (fc6df72e) watermark unchanged and unverified beyond the two spot-
-# checks above.
-#
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
-# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
-# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
-# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
-# **INCREMENTAL over `8b2e4053` -> `fc6df72e` (S376, 8 commits, PRs #709-#718).** Ancestry CHECKED
-# (invariant 48); outbound MAP-STAMP check run at WRITE time.
-#
-# ═══ ONE NEW DIAGNOSTIC CODE, AND IT IS THE FIRST `E-` PASS TO RUN PRE-AST ═══
-#
-# **`E-STATE-BLOCK-STATEMENT-FORM` (Error, #718, S375 ruling 1 / S376 code-name decision).** Catalog
-# **812 -> 813**. Census RE-EXECUTED at this watermark, not carried:
-#
-#     813 rows (§34 19352..20236, derived) · 1963 source files · 883 conformance cases
-#     STRUCK 34 · PINNED 343 · IMPL-SITES 303 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112
-#     dispositions: BUILD-ARC 71 · HOME-NO-SHALL 27 · NOMINAL-HOME 10 · ORPHAN-INDEX 4
-#
-# **The +1 lands in IMPL-SITES (302 -> 303), not PINNED, and that is a FACT not an inference:**
-# `grep -rl E-STATE-BLOCK-STATEMENT-FORM conformance/` returns NOTHING at this watermark — the code
-# has a live emitter and a 476-line unit suite (`compiler/tests/unit/state-block-statement-form.test.js`)
-# but **no conformance case asserts it in `expect.codes`**, which is what PINNED measures. Every
-# other bucket is flat. ⚠ `filesScanned` moved 1958 -> 1963 and is STILL not a repo fact — it walks
-# ten roots on disk and counts gitignored build output. Do not publish it.
-#
-# **PA-VERIFIED BY EXECUTION, not by reading the module:** compiling
-# `docs/changes/db-state-block-locus-2026-08-25/repro.scrml` at this watermark prints
-# `error [E-STATE-BLOCK-STATEMENT-FORM]` at `repro.scrml:6:3` with `stage: BS-LINT` and
-# `FAILED — 1 error`. Its own section below.
-#
-# ⚑ ═══ AND A CENSUS TABLE INSIDE THIS FILE WAS WRONG — AGAINST ITS OWN WATERMARK, AND AGAINST
-# ANOTHER TABLE IN THIS SAME FILE ═══
-#
-# The section "**Census buckets at this HEAD**" carried `PINNED 338 · IMPL-SITES 320 ·
-# DECLARED-AHEAD 14 · FALSE-CLAIM 95`. Those are **S346 figures**, three windows stale, and the
-# catalog section ~35 lines ABOVE it in the same file printed `PINNED 343 · IMPL-SITES 302 ·
-# FALSE-CLAIM 112` for the same HEAD. **One file, two bucket tables, both labelled current,
-# disagreeing by 17 on FALSE-CLAIM.** A reader who scrolled to the section whose heading says "at
-# this HEAD" got the wrong one. Corrected below to the re-executed run. **The lesson is the heading:
-# "at this HEAD" is a claim that decays silently — a bucket table needs the SHA it was run at
-# printed beside it, which the corrected table now carries.**
-#
-# **CARRIED, still true and STRENGTHENED this window: `W-DEAD-FUNCTION`'s locus is
-# `route-inference.ts:5614-5616`, NOT `codegen/usage-analyzer.ts`** (search `W-DEAD-FUNCTION — THE
-# LOCUS`). #700 upgraded that from "wrong locus" to **"dead surface"** by reproduce-first: the
-# `FeatureUsage` bitmap `analyzeUsage` computes is never read to gate emission. RE-MEASURED here —
-# `grep -n featureUsage compiler/src/codegen/index.ts` returns **ZERO hits**. **Fixing anything there
-# changes zero emitted bytes.**
-#
-# **Carried from S368 — CATALOG 810 -> 812 (+2). BUCKETS ESSENTIALLY FLAT.** The S368 -> S371 run
-# for comparison (superseded by the re-execution above, which returns identical buckets):
-#
-#     812 rows (§34 19352..20235) · 1950 source files · 883 conformance cases
-#     STRUCK 34 · PINNED 343 · IMPL-SITES 302 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112
-#
-# vs the S368 run (`810 · STRUCK 34 · PINNED 343 · IMPL-SITES 300 · DECLARED-AHEAD 18 ·
-# RUNTIME-SURFACED 3 · FALSE-CLAIM 112`). **IMPL-SITES +2, everything else flat — the +2 is exactly
-# the two new codes, both of which shipped WITH a live emitter and neither of which is pinned by a
-# conformance case yet.** FALSE-CLAIM dispositions unchanged: `BUILD-ARC 71 · HOME-NO-SHALL 27 ·
-# ORPHAN-INDEX 4 · NOMINAL-HOME 10`. **The §34 range MOVED (19113..19994 -> 19352..20235) — derive
-# it from headings, never from a baked line number.**
-#
-# ⚠ **The prior window's warning still stands and is now testable: DO NOT read "FALSE-CLAIM 112" as
-# 112 broken diagnostics.** The census's classifier gained a disposition axis at #646; a bucket
-# figure from before that is not comparable. Re-run the census on BOTH sides or do not make the claim.
-#
-# **EXACTLY TWO NEW CODES IN SPEC THIS WINDOW. ZERO removed. And the counting METHOD earned its keep
-# AGAIN.** A token-diff of `compiler/SPEC.md` between the watermarks returns THREE
-# (`E-STDLIB-CLIENT-CHUNK-MISSING`, `W-TYPE-031-UNPROVEN`, `W-031-UNPROVEN`) and **one is FALSE**:
-# `W-031-UNPROVEN` is PROSE SHORTHAND inside the `E-TYPE-031` catalog row (`SPEC.md:19480` — *"031 is
-# 'I proved it does not fit', W-031-UNPROVEN is 'I could not prove anything'"*), not a code. It has
-# **no catalog row, no fire site and no SPEC-INDEX entry.** The census total agrees with TWO:
-# 810 -> 812. **Count a code as new only when `git show <base>:compiler/SPEC.md | grep -c '<CODE>'`
-# is 0 AND it owns a §34 row.** `compiler/SPEC.md` **37,298 -> 37,539 lines** (+241).
-#
-# ─── THE TWO NEW CODES, BOTH GROUNDED, BOTH WITH A GAP WORTH KNOWING ───
-#
-# **1. `E-STDLIB-CLIENT-CHUNK-MISSING` (§41, ERROR) — #669. The most consequential diagnostic added
-# in several windows, because it closes a SILENT DOA class.**
-#   · SPEC row: `compiler/SPEC.md:19876`. SPEC-INDEX entry: `SPEC-INDEX.md:214`. Both present.
-#     ⛑ **S391 — BOTH ANCHORS ON THIS ROW WERE WRONG *FROM BIRTH*, AND THIS IS THE INVARIANT-77
-#     CLASS CAUGHT IN THE ACT.** The SPEC anchor read `:19868`; at the `0dd659a1` watermark it was
-#     written against, `SPEC.md:19868` was the row for **`W-STDLIB-SHIM-MISSING` — a DIFFERENT
-#     CODE.** `E-STDLIB-CLIENT-CHUNK-MISSING` was at `:19869` there and is at `:19876` here. **An
-#     off-by-one that lands on a NEIGHBOURING catalog row is the worst shape this failure takes:
-#     the line resolves, the table renders, and the row you read is a plausible-looking lie.**
-#     Re-derived by `grep -n '^| E-STDLIB-CLIENT-CHUNK-MISSING' compiler/SPEC.md`.
-#   · Fire site: `compiler/src/codegen/emit-client.ts:3967` — the ONLY emit site.
-#     ⛑ **S391 — was `:3946`, and it CANNOT have drifted:** `git diff --stat 0dd659a1..2ec2ce3a --
-#     compiler/src/codegen/emit-client.ts` is **EMPTY** — the file is byte-identical across the whole
-#     window. A citation that is wrong against an UNCHANGED file was never right. **The "ONLY emit
-#     site" half of the claim IS correct and was re-verified:** `E-STDLIB-CLIENT-CHUNK-MISSING`
-#     appears at `:2096`, `:3727`, `:3838` (all COMMENTS) and `:3967`/`:3968` (the single
-#     `errors.push`). Only the line number was wrong.
-#   · **ERROR, not warning, DELIBERATELY: the compiler can PROVE the artifact is dead.** A client
-#     bundle is a classic script, so `import { x } from 'scrml:NAME'` lowers to
-#     `const { x } = _scrml_stdlib.NAME;`, and that property is defined by the `stdlib-NAME` entry in
-#     `RUNTIME_CHUNK_ORDER` and by NOTHING else. Absent, the destructure reads `undefined` and throws
-#     AT LOAD — the whole page dies, not one call. There is no runtime configuration under which it
-#     succeeds. Emitting a guaranteed-dead bundle and exiting 0 is the pathology being removed.
-#   · ⚠ **IT FIRES AGAINST THE FINAL EMITTED CLIENT TEXT, AFTER `pruneUnusedClientImports`, AND THAT
-#     PLACEMENT IS THE LESSON.** Gating at the emit-site `lines.push` — which LOOKS co-located —
-#     rejected **21 correct corpus files, MEASURED**, because the prune drops a lowered read no client
-#     code references (`examples/23-trucking-dispatch` imports `scrml:store` and uses it only inside a
-#     `?{}`-escalated server fn: the read is emitted, then pruned, and the shipped bundle is CORRECT).
-#     **The emit site is not the final word when a later stage can delete its output.**
-#   · ⚠ **TWO FALSE-POSITIVE ROUNDS, BOTH FIXED BY CHANGING THE SCAN'S *INPUT*, NOT ITS PATTERN
-#     (invariant 43).** (a) it matched the runtime's own comment `// const { x } = _scrml_stdlib.NAME;`
-#     and invented a module named `NAME` → fixed by excising the runtime span; (b) a plain string
-#     literal — `<tip> = "the slot is _scrml_stdlib.wombat"` in valid scrml with ZERO stdlib imports —
-#     produced a HARD ERROR naming `scrml:wombat`, a module that has never existed → fixed with
-#     `maskStringLiteralSpans` (`emit-client.ts:3907`), the helper both sibling stdlib scans already
-#     used and this one was the only of the three to omit. **Measured FP matrix after: string literal
-#     (1 name / 2 names / single-quoted) all clean; adopter `//` comment and regex literal were never
-#     affected.** So string literals were the ENTIRE live FP surface.
-#   · **A SUBMODULE SPECIFIER ALWAYS FIRES, and that is correct:** `scrml:auth/jwt` lowers to
-#     `_scrml_stdlib.auth/jwt`, which JS parses as the DIVISION `_scrml_stdlib.auth / jwt` and dies
-#     with `ReferenceError: jwt is not defined` even though `_scrml_stdlib.auth` IS defined.
-#   · **DISTINCT FROM `W-STDLIB-SHIM-MISSING`, and the distinction is the whole point.** That warning
-#     probes `existsSync(compiler/runtime/stdlib/<name>.js)` — "does a shim FILE exist" — which is
-#     TRUE for all 21 modules, so **it never fired for this condition while 17 of 21 client stdlib
-#     imports were DOA.** The obligation and the probe resolved to different artifacts. The new gate
-#     reads `RUNTIME_CHUNK_ORDER` itself via `hasStdlibClientChunk`, i.e. the artifact that DECIDES
-#     the outcome, so gate and outcome cannot drift.
-#   · **DIRECTION OF CHANGE: NEWLY-REJECTING.** (The dispatch's first wording said "inert at the
-#     language level"; a reviewer corrected it and the correction is right — a branch that adds an
-#     error can refuse source that previously compiled, and the string-literal FP is proof it could.)
-#     Measured migration = **0 files**, which is a BLAST-RADIUS fact, not a classification.
-#   · ⚠ **CARRIED GAP — no `lsp/handlers.js` `ERROR_DESCRIPTIONS` entry.** `E-MW-007` got one the
-#     window it landed; this one did not.
-#
-# **2. `W-TYPE-031-UNPROVEN` (§7.5.2, WARNING) — #665, the `asIs`/`unknown` split.**
-#   · SPEC row: `compiler/SPEC.md:19481`; normative prose §7.5.2 at `:6302`; the behaviour table at
-#     `:6229`. Fire site: `compiler/src/type-system.ts:10600` — the ONLY emit site.
-#   · **It reports a gap in the COMPILER, not a defect in the program.** The program compiles and
-#     emits exactly as before, no previously-performed check is skipped, and the exit status is
-#     unchanged. It fires when a `let`/`const` carries NO annotation and inference could not type the
-#     initializer; the message names the AST expression node kind at which inference stopped.
-#   · **It and `E-TYPE-031` are COMPLEMENTS, not alternatives** — 031 is "I proved it does not fit",
-#     UNPROVEN is "I could not prove anything". Do not treat one as a weaker form of the other.
-#   · **Two resolutions, both one edit:** PROVE it (`x: T = …`) or SIGN for it (`x: asIs = …`, silent
-#     by design per §14.7). **Does NOT fire** when an annotation is present, for a `?{ … }` SQL
-#     initializer (`W-SQL-ROW-UNTYPED` owns that path), or for an admitted `_={ … }=` foreign
-#     initializer.
-#   · ⚠ **TWO CARRIED GAPS: no `SPEC-INDEX.md` entry, and no `lsp/handlers.js` hover.** `E-TYPE-031`
-#     has no SPEC-INDEX entry either, so the index gap is a family-level omission rather than a
-#     regression; `ERROR_DESCRIPTIONS` carries 42 `W-*` codes but **zero `W-TYPE-*`**, so the hover
-#     gap is likewise family-level. Recorded so nobody re-derives it as new.
-#
-# **CARRIED: `E-MW-007` (§40.3/§40.8) remains fully grounded** — SPEC `§34` catalog + `§40` family
-# table, sole fire site `compiler/src/commands/select-request-onion.js:72`, LSP hover
-# `lsp/handlers.js:1127`. Its neighbours carry unchanged: **`E-PROGRAM-002` is DECLARED-AHEAD and
-# does NOT fire** (no emit site in `compiler/src/`; the only hit is a COMMENT at
-# `select-request-onion.js:41`) — do not write a test asserting it fires; **`E-IMPORT-005` is
-# pre-existing and FULLY LIVE** (`module-resolver.js:206`) — do not record it as new.
-#
-# **CARRIED FINDING C4 — still NINE.** Live `W-LINT-*` codes with no §34 TABLE ROW:
-# `W-LINT-016 017 018 019 020 021 022 023 024`, all firing from
-# `compiler/src/lint-ghost-patterns.js`. ⚠ **A naive `comm` of "codes in source" vs "codes anywhere
-# in SPEC.md" returns TEN and is WRONG in both directions:** it adds `W-LINT-009`, which is not a
-# fire site (`lint-ghost-patterns.js:929` is the comment "No separate entry for W-LINT-009 —
-# W-LINT-004 subsumes it"), and drops `W-LINT-018`, which appears in SPEC PROSE but has no row.
-# **Grep the fire site before counting; a code's presence in a comment is not a fire.**
-#
-# ⛑ **CORRECTED S383 — THIS BLOCK USED TO READ "A §34 ROW THAT CONTRADICTS MEASURED BEHAVIOUR".
-# THE CONTRADICTION IS NOW CLOSED. THE BEHAVIOUR HOLE IS NOT.**
-#
-# What the prior text asserted (and what is no longer true): that `E-CONTROL-FLOW-IN-MARKUP`'s §34
-# row claims the §40.8 auto-lift *"fires only at `<program>`/`<page>`/`<channel>` direct-child roots"*
-# so a bare `if (1) { }` there is covered. **The documentation half of ruling 3 LANDED this window.**
-# `SPEC.md:19824` (§34 row), `SPEC.md:11765` (§17.4 prose) and a NEW `SPEC.md:23065` (§40.8 bullet)
-# now each state in terms that the auto-lift covers **DECLARATIONS ONLY** and that the default-logic
-# body-top is covered by **NEITHER** the lift nor this code. The row's **Does NOT fire** list still
-# names the default-logic root, but now carries the explicit rider *"NOT because that locus is safe,
-# but because this diagnostic does not reach it … Do not read this entry as coverage."*
-#
-# **THE BEHAVIOUR IS UNCHANGED AND STILL WRONG, PA-RE-REPRODUCED AT `ff4b37e5` BY COMPILING:**
-# `<program>` + `if (1) { }` + markup exits **0** with zero diagnostics and the emitted `<body>`
-# contains the literal line `if (1) { }` (read from `dist/*.html`, not inferred). The mechanism is
-# structural: the emit site (`ast-builder.js:1885-1888`, `TABError` push at `:1906`; ⛑ S383, was
-# `:1857-1860`) is gated `parentType === "markup"`, the **COMPLEMENT** of the §40.8 locus.
-#
-# ⛑ **RULING 3'S ENFORCEMENT ARM IS HELD, NOT LANDED — GREPPED AT `ff4b37e5`, NOT RELAYED.**
-# `BARE_CONTROL_FLOW_AT_BODY_TOP_RE`, `findControlFlowStatementEnd`, `_DEFAULT_LOGIC_ROOT_NAMES` and
-# an `isStateBlockBody` parameter are at **ZERO occurrences** across `compiler/src/` +
-# `compiler/tests/`. `E-CONTROL-FLOW-IN-MARKUP` fires at **exactly one locus** and has exactly one
-# emit site. **Any map/doc text implying the §40.8 body-top is diagnosed is WRONG.** The hold is
-# structural, not a bug count: the recognizer needs a `{`, so `if (@a) log(1)` (braceless),
-# `switch (@a) { }`, a labelled `for` and `do { … } while (@a)` ship raw **at the markup locus too** —
-# a permanent hole inside the very class the code exists to close. Grammar-derived arc:
-# `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`.
-#
-# ⛑ **A FOURTH HIGH JOINED THIS CLASS THIS WINDOW: `g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line`.**
-# ONE prose line at a §40.8 body-top silently disables the auto-lift for every declaration below it in
-# the same text run — not lifted, not compiled, **not diagnosed**. Reproduced in three shapes; the
-# nastiest is the structural form, where the compile fails on the READ with `E-STATE-UNDECLARED`, **so
-# the only diagnostic the author gets blames the wrong line and prescribes a declaration that is
-# already two lines above.** Distinct from ruling 3 (a declaration not LIFTED vs a statement not
-# REFUSED); fixing either does not fix the other. Siblings: `g-default-logic-bare-call-is-unspecified-and-ships-as-page-text`
-# (HIGH, open — a RULING, not a fix: §40.8 is SILENT on a bare call) and
-# `g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration` (HIGH, open).
+# **NO NEW E-CODE THIS WINDOW.** The `E-ROUTE-001` false-fire risk that #818 had to avoid is worth the
+# note it gets in the body: closing `collectFileFunctions`'s descent WITHOUT closing
+# `collectWorkerBodyFunctionIds`'s matching suppression descent would have converted a silent miss into
+# a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
+# worker body. Both descents landed in the same commit for that reason.
 #
 
 ## HOW TO LOOK UP A DIAGNOSTIC CODE (read this first)

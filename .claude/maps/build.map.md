@@ -1,126 +1,33 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF IN THE CI HALF, AND THE `gate` STEP COUNT WAS
-# RE-COUNTED RATHER THAN CARRIED.** `git diff --name-only 2ec2ce3a..ad7b65dc -- .github/` is
-# **EMPTY** — all three workflows (`ci.yml`, `advisory-review.yml`, `cloud-maps.yml`) are
-# byte-identical across 25 commits. `gate` is **FLAT at 14 steps** (2 `uses:` + 12 `name:`),
-# re-counted at this watermark; the `Compile-floor gate` step S391 recorded as the 14th is still
-# there and still BLOCKING. `package.json > scripts` is unchanged (manifest zero-diff).
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⚠ **AND THE ONE THING THAT WAS *NOT* ZERO IN THIS FILE'S SURFACE IS THE INVARIANT-81 SHAPE AGAIN:
-# `scripts/` GAINED `worktree-sweep.ts` (#801) AND NO WORKFLOW INVOKES IT.** A new gate-adjacent
-# script that nothing imports and no CI step runs is structurally harder to notice than a new module
-# — which is exactly how `corpus-compile-floor.ts` + its BLOCKING `gate` step went unmapped across
-# thirteen passes. It is mapped in structure.map.md this time rather than advanced past. It is a
-# DRY-RUN-ONLY report (no `worktree remove`, no `branch -D`, no write of any kind) with a unit test
-# at `compiler/tests/unit/worktree-sweep-classify.test.js`.#
-# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
-# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
-# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
-# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **RE-WALKED on the CI surface** (`ci.yml` + `scripts/` both moved) — see the header note.
-# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
-# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
-# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
-# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
-# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⛑ **S391 — THIS MAP WAS RE-WALKED ON ITS CI SURFACE, *NOT* STAMP-ADVANCED ON ZERO-DIFF, BECAUSE
-# THE SURFACE WAS NOT ZERO.** Re-measured over `fc6df72e..2ec2ce3a`: `package.json`, `bun.lock`,
-# `Makefile` and `Dockerfile` are `--name-only` **EMPTY**, but **`.github/workflows/ci.yml` CHANGED
-# and `scripts/` gained TWO NEW FILES** (`corpus-compile-floor.ts`, `corpus-compile-floor.baseline.json`).
-# **`gate` moved 13 -> 14 steps.** No secret, runner or required-check NAME moved. The superseded
-# S376 note read: *"`.github/`, `package.json`, `bun.lock`, `Makefile`, `Dockerfile` and `scripts/`
-# are ALL `--name-only` EMPTY over the window. `gate` stays at 13 steps"* — true at `fc6df72e`,
-# false here, and it is recorded rather than deleted because **a zero-diff claim is a MEASUREMENT
-# WITH A WATERMARK, not a standing property of this map.**
-# ⚠ **`scripts/ctx.ts` IS NOT ON `main` AT THIS WATERMARK AND IS THEREFORE NOT MAPPED.** The
-# dispatching brief flagged it as landing in parallel on #708; measured here —
-# `git log --oneline origin/main -- scripts/ctx.ts` is EMPTY and the path does not exist in the
-# checkout, though five commits touching it exist on unmerged branches. It enters this map the
-# window it lands, not before.
-# ⚠ **The pre-land codegen gate still is not in CI** — see the `corpus-emit-differential` section.
-# It stayed hand-run through this window as well.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
-# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
-# **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan S368,
-# peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
-# ancestor of `origin/main` (it IS `origin/main`).
-#
-# ⚑ **THE ELEVEN-WINDOW `package.json` ZERO-DIFF STREAK IS OVER (#665): THREE NEW SCRIPT ENTRIES AND
-# THE FIRST NEW DEV DEPENDENCY IN ELEVEN WINDOWS.** `types` · `types:check` · a `"//types"`
-# comment-key carrying the reason · `typescript@^5.9.2`. Version stays `0.7.1`.
-#
-# ⚑ **AND THE PRIOR MAP'S "`scripts/types-gate.ts` IS NOT ON MAIN" NOTE IS RETIRED — IT LANDED, AND
-# IT IS WIRED INTO CI.** But read the wiring carefully, because it is deliberately weak:
-#
-#   · **`bun run types` / `types:check` / `bun scripts/types-gate.ts --write`.** Three modes,
-#     mirroring `browser-baseline.ts` / `state.ts` / `facts.ts` exactly.
-#   · **IT IS IN `ci.yml`, IN THE `tracking` JOB, AND `continue-on-error` AT *BOTH* THE JOB AND THE
-#     STEP LEVEL.** The step-level flag is NOT redundant, and the reason is worth carrying: **a failed
-#     step HALTS the job even inside a `continue-on-error` job** — verified on run 30742472551, where
-#     the within-node parity step reported `skipped` and had never run at all. Without the step flag,
-#     a types regression would silently suppress every tracking signal below it: the exact failure
-#     that job exists to avoid.
-#   · **PLACED FIRST in the job** because it needs neither `pretest` nor a populated dist, so it
-#     cannot be skipped by an earlier step's failure.
-#   · **PROMOTION INTO THE BLOCKING `gate` JOB IS AN EXPLICIT OPERATOR CALL AND WAS NOT TAKEN.** It
-#     wants a decision on the **nine live `never` failures** first (fix, or record and drain).
-#   · ⚠ **IT GATES ON A NAME->COUNT MAP, NOT ON `tsc`'s EXIT CODE.** `tsc --noEmit` still exits
-#     non-zero over this tree and will until the pre-existing population drains; an always-red gate is
-#     the cry-wolf shape that gets bypassed and then deleted (S301). `--check` goes red the moment a
-#     diagnostic JOINS **or LEAVES** the set — the identical mechanism S313 ratified for the browser
-#     tier. **Counts matter, not just names:** a bare set was a mid-build CORRECTION, because the key
-#     strips line/column and the nine `MarkupValueExpr` fallthroughs collapsed into ONE entry, so a
-#     TENTH would have joined an existing entry and the gate would have stayed GREEN.
-#   · **`.github/workflows/ci.yml`'s gate-layering header was CORRECTED in the same landing, and the
-#     correction is the script's own thesis one level up.** It had advertised a layer
-#     *"types (always-on local)"*. **That layer did not exist** — no `tsconfig.json`, `typescript` not
-#     a dependency, no `tsc` invocation in `package.json` / `scripts/` / `.github/` / either git hook,
-#     and bun runs `.ts` TRANSPILE-ONLY. **A documented gate that nothing invokes is the same defect
-#     as a gate that reports PASS while measuring nothing (invariant 59), and it had been true for
-#     the entire life of the project.**
-#
-# **`gate` IS STILL 13 STEPS — ZERO change this window.** The new types step is in `tracking`, which
-# is NOT a branch-protection required check. `.github/` moved by exactly 22 lines, all in `ci.yml`,
-# all of them the header correction plus the one tracking step.
-#
-# **CARRIED, RE-VERIFIED, STILL TRUE:** `ci.yml`'s `push` trigger stays scoped `branches: [main]`
-# (#532). `workflow_dispatch: {}` is PROSPECTIVE, not retroactive (HTTP 422 on a ref cut before
-# #454; rebase, or `--ref main`). Three workflows on `main` (`ci.yml`, `advisory-review.yml`,
-# `cloud-maps.yml`) — count unchanged. Branch protection + `enforce_admins=true` untouched. The
-# `windows` job's `PUPPETEER_SKIP_DOWNLOAD` carries.
-#
-# **CARRIED, PRIOR WINDOW: the `delta-log sequence gate` (`bun scripts/delta-lint.ts`, #652) is the
-# 13th BLOCKING `gate` step**, exit 1 = a NEW duplicate, **exit 2 = the instrument could not account
-# for the population** and is NOT reachable as a PASS. And the step-NAME correction rule stands:
-# **a CI step name is read as a coverage claim — name it after what it RUNS**
-# (`g-ci-does-not-run-root-level-test-files`).
-#
-# **CARRIED: `scripts/corpus-zero-debt.ts` (#552) is NOT a gate**, and the standing correction on it
-# still governs: **corpus-zero is blast-radius evidence ONLY, never demand evidence.**
-#
-# ⚑ **A MERGE-BLOCKER THAT WAS NOT IN THE MERGE GATE — the #669 test-tier move, and it generalises.**
-# `.git/hooks/pre-commit:39` runs unit + integration + conformance + root `*.test.js`.
-# **`compiler/tests/browser/` is NOT in that set.** So the browser test proving the stdlib client
-# registry is not DOA was itself outside the gate it existed to be. The whole file was moved
-# `browser/ -> integration/` (14 integration tests already register happy-dom the same way,
-# including this feature's own predecessor `integration/bug-18-scrml-stdlib-client-import.test.js`).
-# **Before you call a test a merge-blocker, check which TIER it is in.** test.map.md.
+# **NO BUILD-SURFACE CHANGE THIS WINDOW** — `.github/` is `--name-only` EMPTY and `package.json` is
+# untouched, so every command, job and stage below is carried forward VERIFIED-UNCHANGED rather than
+# re-asserted. What IS new is a gating fact the map had never stated explicitly: the top-level
+# `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
+# See the CI section and invariant 87 in primary.map.md.
 #
 
 ## Development Commands (root package.json scripts)

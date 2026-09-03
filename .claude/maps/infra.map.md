@@ -1,70 +1,33 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `git diff --name-only 2ec2ce3a..ad7b65dc --
-# .github/` is **EMPTY**; all three workflows present and byte-identical across 25 commits.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⚠ **AND THE REASON THIS STAMP SAT 25 COMMITS BEHIND IS RECORDED IN THIS FILE'S OWN SUBJECT:
-# `cloud-maps.yml` DOES NOT REFRESH `.claude/maps/` ON ANY SCHEDULE.** Scheduled nav-map
-# regeneration was REMOVED at S310 as a ruled cost decision (the comment block at `.github/workflows/cloud-maps.yml:57-65`, which states it in as many words: *"nav-maps are NO LONGER refreshed on a schedule. That reverts to the PA at wrap (the contract's wrap step 6c)"*),
-# so the PA at wrap step 6c is the ONLY thing that moves a map stamp. **The `chore(maps): scheduled
-# nav-map + @generated regen` commits still land — #806 and #814 are both in this window — and they
-# touch `master-list.md` and nothing else** (`git show --stat 0b5392d1` -> `master-list.md | 2 +-`).
-# ⚑ **A workflow whose commit message names an artifact it no longer regenerates is a currency
-# instrument reading green while measuring nothing** (invariant 59's class). The S393 wrap skipped
-# 6c for context reasons and nothing else caught it — multiple dispatch briefs this session had to
-# carry a "maps are STALE, treat every claim as a hypothesis" caveat as the visible cost.#
-# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
-# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
-# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
-# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+# **NO INFRA CHANGE THIS WINDOW** — `.github/workflows/` is byte-identical at this SHA (`git diff
+# --name-only ad7b65dc..2d8dd8cb -- .github/` is EMPTY). Job shapes re-counted by parse, not carried:
+# `gate` 14 total steps (12 named + 2 `uses:`), `tracking` 8 (6 + 2, `continue-on-error: true`),
+# `windows` 4 (2 + 2, `continue-on-error: true`).
 #
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff EMPTY; outbound `--is-ancestor` exit 0). **NOT a zero-diff advance: `ci.yml` moved and the `gate` step count was re-derived by counting the job's steps at BOTH ends (13 -> 14).** Workflow COUNT, job names, secrets and required checks re-measured unchanged.
-# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
-# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
-# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
-# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
-# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED.**
-# Re-measured at THIS watermark: `.github/` is `--name-only` **EMPTY** over the window — no
-# workflow, job, secret, runner or required check moved. No `Dockerfile`, no `docker-compose.*`,
-# no `*.tf` and no `k8s/` path exists in the repo at this watermark either.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
-# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
-# **CURRENCY RE-VERIFIED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676).** Ancestry
-# CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source
-# diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
-#
-# **`.github/` moved by exactly 22 lines, all in `ci.yml`, and NOTHING INFRASTRUCTURAL CHANGED —
-# no new job, no new secret, no new runner, no new required check.** The two edits are (1) a new
-# NON-BLOCKING step in the existing `tracking` job (`bun scripts/types-gate.ts --check`, #665) and
-# (2) a correction to the gate-layering header comment, which had advertised a "types (always-on
-# local)" layer that did not exist. Both belong to build.map.md; they are noted here only so a
-# reader who diffs `.github/` does not conclude the deployment surface moved.
-#
-# ⚑ **ONE CARRIED CLAIM IN THIS MAP IS NOW FALSE AND IS CORRECTED BELOW: `package.json` is NOT
-# zero-diff this window.** The eleven-window streak ended at #665 — `typescript@^5.9.2` was added as
-# a DEV dependency and three `scripts` entries landed (`types`, `types:check`, a `"//types"`
-# comment-key). **Nothing about the DEPLOYED surface moved:** `typescript` is a dev dep, it is not in
-# the `files` allowlist, no runtime code imports it, and the version stays `0.7.1`.
-#
-# **Three workflows on `main`, count unchanged: `ci.yml`, `advisory-review.yml`, `cloud-maps.yml`.**
-# Jobs, runners, secrets, branch protection and `enforce_admins=true` are ALL zero-diff. The `push`
-# trigger stays scoped `branches: [main]` (#532) and the `windows` job's `PUPPETEER_SKIP_DOWNLOAD`
-# carries. **`gate` is still 13 steps — the new types step is in `tracking`, which is NOT a
-# branch-protection required check.**
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
 

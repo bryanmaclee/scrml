@@ -6873,6 +6873,37 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-02/03 — S395 (bryan): five rulings, four arcs, and nine instruments that read green while wrong
+
+A long deliberation-plus-execution session run concurrently with S396-peter. Five rulings given, four
+code arcs landed, the review floor drained twice to zero. **The durable output is not the landings —
+it is that the INSTRUMENTS failed more often than the code did.** Nine separate checks read green or
+authoritative while being wrong; three were the PA's own claims, two were caught by CI gates the PA
+did not write, and three were agents' own instruments found by those agents.
+
+**Rulings** — the trailing-`else` question (direction stands; the reported "inverted ruling" was the
+PA's own mis-description, since §17.6.4 had always said a missing `else` is valid) · the `~` arm-body
+question, limb (a), with limb (c) banked as `dpa-040` rather than closed · rulings 2a/2b/2c · and a
+ruling to SPLIT the dev-auth arc when its §52.13 half turned out to require a second decider.
+
+**Landings**
+- **#815** — the §17.6.2 value-form sugar now binds its result at a binding site. `const label = if (…) {…} else {…}` had compiled at exit 0 and bound `null` forever. ⛑ The filed `locus=searched:` named three emitters and the answer was in **none** of them.
+- **#818** — a branch-declared function is now ROUTED before it is COLLECTED. Closing the client collector alone put a `server fn` **body into `client.js`** with no `server.js`; the arc closed the route-inference walk first, in the mandated order, and closed a second walk not in the brief that would otherwise have false-fired `E-ROUTE-001`.
+- **#822** — 18 conformance assertions read as coverage and checked nothing (`runAnchored`'s count branch short-circuited past `text`/`attr`/`value`). ⛑ The dispatch brief was **wrong** — a naive `continue` deletion would have reddened 62 `count: 0` absence assertions — and the agent deviated with a stated reason. Of the 18, **16 were entirely unguarded** by any other assertion.
+- **#823** — `scrml dev` served an `auth="required"` document unauthenticated at `/`. The fix is a deletion: two serving paths become one, and the split-out §52.13 case variant became its own arc.
+- **#816 / #819 / #820** continuity + filings; **#817** the overdue wrap-6c maps refresh, which corrected three premises in the PA's own concurrently-dispatched brief.
+
+**Findings worth carrying**
+- **Suppressing a signal suppresses whatever rode on it** — three instances: the `tracking` job's routine red concealing a real assertion failing on Linux; a knowingly-red assertion placed first in a test, turning everything after it into dead code that still read as coverage; and `test.failing`, which the PA instructed and which would have **masked a leak**.
+- **A fix that needs a second decider is the fork rule saying no.** Three rounds found three distinct divergences between the dev pre-gate and the resolution loop before the split; the split then closed a dev/prod divergence rather than opening one.
+- **`compiler/tests/commands/` runs in no blocking job on any platform** — which is how a real §52.13 assertion sat silently red there.
+- **The conformance corpus IS gated**, contrary to a review finding that was falsified rather than filed: `corpus-bridge.test.js` reaches it from inside the gated root.
+
+**Held, not landed:** the `~` arc (four rounds, four adversarial passes) is built and reviewed but blocked on a ruling — its `~`-read half deletes an unrelated DOM lift, verified two-sided. Its worktree is retained.
+
+Suite at close: 30945 pass / 54 fail / 216 skip / 11 todo — one fewer failure than base, the §52.13 assertion.
+
+
 ### S385 — 2026-08-29/30 (bryan · ASUS) — the architecture complaint measured, and the decision queue opened
 
 **The session's spine: bryan's standing "we are chasing bugs in circles / this is still a first-draft
