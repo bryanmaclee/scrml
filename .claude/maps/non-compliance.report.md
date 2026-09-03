@@ -1,40 +1,223 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# generated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# scan mode: FULL_COLD_START (doc-population scan) — run as part of the S396 wrap-6c map refresh
 #
-# ━━━━━━━ ⛑ S395 — SCAN RE-EXECUTED. STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc`. ━━━━━━━
+# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`;
+# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 2d8dd8cb origin/main` -> exit 0.
+# Inbound: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# **THE HEADLINE IS NOT A DOCUMENT. IT IS THE SCAN *POPULATION*.** Thirteen prior passes reported
-# against a population that never contained `docs/audits/` — **20 documents, 2.0 MB, dated
-# 2026-04-25 to 2026-07-28.** `grep -c docs/audits` across all thirteen maps returns **1** hit in
-# `structure.map.md` (a bare list item in the `docs/` row, no characterization) and **1** in this
-# report — which is a *`scrml-support`* path, not this repo's directory. **A finding that is absent
-# from the scan cannot be reported as absent from the repo, and nothing distinguished those two
-# outcomes.** See N12. Five more doc directories have the same status (N13).
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a full doc re-scan — this pass RE-VERIFIED N8 BY EXECUTION and found it had been mis-recorded: see N8.** The remaining findings carry their prior watermarks and were not re-run.
-# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
-# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
-# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
-# **INCREMENTAL over `8b2e4053` -> `fc6df72e` (S376). SOURCE WINDOW = FIVE FILES, ONE OF THEM NEW.**
-# Ancestry CHECKED FIRST (invariant 48); the outbound MAP-STAMP check passes.
-# ⛑ **S383/S384 CITATION-ONLY UPDATE (see N17's resolution block below). THE SCAN WAS NOT RE-RUN and
-# lines 3–4 are DELIBERATELY NOT MOVED — this pass touched only citations on the nine compiler-source
-# files that moved over `0dd659a1..ff4b37e5`. `origin/main` advanced to `9f75061c` (`wrap(s383)`)
-# mid-pass; `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY, so the source state read is
-# `ff4b37e5` and every anchor holds at `9f75061c`.**
-# scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, with
-# every LIVE finding REPRODUCED BY COMPILING or by grepping source at this watermark — not relayed.
+# ⛑ **THE TWO STANDING ITEMS WERE RE-EXECUTED, NOT RESTATED — and one of them came back SHARPER
+# rather than merely "still true".** Both verdicts below were produced by running commands at
+# `2d8dd8cb`, and where the prior wording would have over-claimed, it is corrected here.
+
+## Summary — S396 pass (this pass)
+
+| | |
+|---|---|
+| Scan population (in-scope `.md`) | **124** |
+| Excluded by scope rule | `.git/` · `node_modules/` · `archive/` · `handOffs/` (589 msgs) · `.claude/` · `docs/changes/` (**716** dirs, per-dispatch archive) · `e2e/*-docs/` (200, generated) · `benchmarks/todomvc-{react,svelte,vue}/` (162, framework comparison) · `spa-lists/` (134) |
+| New/changed docs this window | 8 tracked (3 `docs/changes/` BRIEF+progress pairs, `docs/FACTS.md`, `docs/known-gaps.md`, `docs/changelog.md`, `docs/pr-reviews.md`, 1 handoff) + **2 untracked** in `docs/articles/` |
+| Non-compliant | **2 standing** (N12, N13) — both POPULATION holes, not doc-content failures |
+| Factually wrong but in-scope | **1 standing** (N14) + **3 NEW, all in the map set itself** (M1-M3) |
+| Uncertain — needs human review | **2** (U1 NEW, U2 carried) |
+
+⚑ **THE HEADLINE THIS PASS IS THAT THREE OF THE FOUR FACTUAL ERRORS FOUND WERE IN THE MAPS, NOT IN
+THE DOCS.** A non-compliance scan that only ever points outward is not measuring itself. See M1-M3.
+
+## STANDING ITEMS — RE-EXECUTED AT `2d8dd8cb` (verdicts below are commands, not carry-forward)
+
+### N12. `docs/audits/` — 20 documents, 2.0 MB — **STILL OUTSIDE THE SCAN POPULATION. 14th consecutive pass.**
+
+**Verdict: STILL LIVE, with one wording correction the prior pass's phrasing did not support.**
+
+Re-executed: `ls docs/audits/ | wc -l` -> **20**; `du -sh docs/audits` -> **2.0M**. Newest file
+`s34-meaning-axis-2026-07-28.md` (mtime 2026-07-29); the other 19 date 2026-05-05 .. 2026-07-23.
+
+⚑ **CORRECTION TO THE STANDING WORDING — "never in ANY map" is no longer true, and the distinction
+matters.** `grep -l 'docs/audits' .claude/maps/*.map.md` now returns **2** files
+(`structure.map.md:196`, which names the directory in its `docs/` one-liner, and `primary.map.md`,
+this pass's Key Facts). **But the directory being NAMED is not the directory being SCANNED:** none of
+its 20 documents has ever been in a scan population, and no map states any claim any of them makes.
+The accurate finding is **"named, never scanned"** — a weaker claim than the prior pass made and the
+one the evidence actually supports.
+
+⚑ **THE "TWO SELF-DECLARE SUPERSEDED" FIGURE RE-VERIFIED — AND THE OBVIOUS COMMAND OVER-COUNTS BY
+4.5x.** `grep -l -i superseded docs/audits/*.md` returns **9**, which is the number a careless pass
+would publish. Reading the hits individually, only **2** self-declare in a top-of-file `**Status:**`
+line:
+
+| doc | line | self-declaration |
+|---|---|---|
+| `null-audit-compiler-src-2026-05-13.md` | `:7` | *"**Status:** This audit's framing … has been **superseded** by S90 disposition"* |
+| `undefined-audit-compiler-src-2026-05-13.md` | `:7` | *"**Status:** … has been **superseded** by S90 disposition"* |
+
+The other 7 use "superseded" as a **classification they apply to OTHER documents** (e.g.
+`articles-currency-table` defines a `RETRACT-SUPERSEDED` disposition;
+`spec-feature-canon-coverage` has an appendix titled *"Superseded Spec Text"*). **Two self-declared
+superseded documents sit live in a tracked directory.**
+
+⚑ **THE STALE-ANCHOR CLAIM RE-VERIFIED AND IT IS WORSE THAN A ROUNDING ERROR.**
+`docs/audits/scrml-dev-content-spec-fidelity-2026-05-19.md:5` reads
+*"**Authoritative source:** compiler/SPEC.md (27,945 lines; navigation via compiler/SPEC-INDEX.md)"*.
+`wc -l compiler/SPEC.md` -> **37,647**. The doc is short by **9,702 lines / 25.8%**, so every section
+anchor it derives from that figure anchors nothing.
+
+**Suggested disposition:** deref the two self-declared-superseded audits to
+`scrml-support/archive/`; add `docs/audits/` to the scan population so the remaining 18 are assessed
+once; strip or re-derive the line-count citation.
+
+### N13. Four doc directories with ZERO map coverage — **STILL LIVE; the unexecuted-plan half got worse.**
+
+**Verdict: STILL LIVE, re-executed.** `grep -l 'docs/<dir>' .claude/maps/*.map.md` returns **0** for
+every one of `docs/heads-up/` (4), `docs/adopter/` (2), `docs/curation/` (1),
+`docs/pinned-discussions/` (1). *(`docs/audits/` has left this list — see N12's correction. The
+finding was titled "Five" last pass; it is **four** now, and the reason is a map mention, not a
+cleanup.)*
+
+**(a)** `docs/heads-up/spec-consolidation-2026-05-25.md` — frontmatter `status: in-progress`, last
+git touch **2026-06-25**. That is now **70 days** without movement. An "in-progress" design doc that
+has never been in a compliance scan is exactly the aspirational-content class this report exists to
+catch.
+
+**(b)** `docs/curation/2026-05-05-changes-dir-disposition.md` — **a prior maps-refresh agent's own
+non-compliance follow-up, still unexecuted.** It proposes dispositions for **103** dirs under
+`docs/changes/`. **`docs/changes/` now holds 716** (`find docs/changes -mindepth 1 -maxdepth 1 -type
+d | wc -l`) — up from 713 last pass, and **6.95x** the population the matrix was written against.
+Last git touch of `docs/curation/`: **2026-05-10**, i.e. 116 days. ⚑ **This remains the sharpest
+available evidence that this report's own output does not close the loop.**
+
+**Suggested disposition:** execute-or-retire the matrix — do not leave a 103-row plan against a
+716-row population; add all four dirs to the scan population.
+
+### N14. `docs/known-gaps.md` cites `collapseIfChains` at `ast-builder.js:18885` — **STILL WRONG, and now provably wrong at its OWN watermark.**
+
+**Verdict: STILL LIVE, and the "wrong at its own watermark" half is now airtight.**
+
+Re-executed at `2d8dd8cb`:
+
+| check | result |
+|---|---|
+| `grep -n 'function collapseIfChains' compiler/src/ast-builder.js` | **`18871`** |
+| `sed -n '18885p' compiler/src/ast-builder.js` | **`  let i = 0;`** |
+| citation in `docs/known-gaps.md:128` | **`ast-builder.js:18885`** |
+| `git diff --name-only ad7b65dc..2d8dd8cb -- compiler/src/ast-builder.js` | **EMPTY** |
+
+**`ast-builder.js` is byte-identical across this entire window**, and was byte-identical across the
+last one, so the citation cannot have drifted — **it was wrong when it was written.** The line it
+names is the function's first statement, 14 lines below the declaration.
+
+⚑ **A SECOND CITATION IN THE SAME ENTRY IS CORRECT, WHICH IS WHY THE ENTRY READS AS TRUSTWORTHY.**
+The same paragraph cites the lone-`if=` pass-through at **`line 19015`**; `sed -n '19015p'` returns
+`if (branches.length === 1 && !elseBranch) {` — **right**. One right citation beside one wrong one is
+worse than two wrong ones, because it buys the reader's confidence.
+
+**Suggested disposition:** correct `:18885` -> `:18871` in `docs/known-gaps.md:128`. ⚠ **Do not
+"verify" by re-reading the doc** — re-derive by `grep -n 'function collapseIfChains'`.
+
+## NEW FINDINGS — S396. **All three are errors in the MAP SET, found by re-executing figures the prior pass published.**
+
+### M1. `test.map.md`'s per-category test counts were wrong at their own watermark — four cells, all under-counted
+
+**Reason:** grep-mismatch (published figure vs. `git ls-tree`). **Detail:** the prior pass recorded a
+total of **1,424** `.test.js` — which is **correct** — but four category cells did not sum to it and
+were stale independently of this window:
+
+| cell | map read | actual at `2d8dd8cb` | actual at `ad7b65dc` |
+|---|---|---|---|
+| Unit | 909 | **925** | **925** |
+| Integration | 213 | **216** | **216** |
+| Browser | 98 | **102** | **102** |
+| Commands | 14 | **17** | **17** |
+
+`git diff --name-only --diff-filter=A ad7b65dc..2d8dd8cb -- '*.test.js'` -> **0 files added**, so none
+of this is window drift. ⚑ **The failure mode is instructive: the prior pass recorded per-category
+DELTAS (`unit +10`, `browser +1`) against a base it never re-measured**, so a correct total sat on top
+of four wrong components. **CORRECTED IN THIS PASS**, each cell re-derived by `find` and cross-checked
+by `git ls-tree` at both watermarks.
+
+⚑ **A SECOND ERROR IN THE SAME TABLE, AND IT IS A ROUTING ERROR RATHER THAN A COUNT.** The
+`Integration` row's gate column read *"`tracking` (non-blocking)"* flat. Integration **is** in the
+pre-commit hook (both installed and source-controlled), so it blocks a COMMIT; it is absent from the
+blocking cloud `gate`, so it does not block a MERGE. The row now states the split.
+
+### M2. `auth.map.md` cited a line range that had been DELETED, not moved
+
+**Reason:** dead anchor. **Detail:** row 3 of the §52.13 enforcement table cited *"`devDispatch`'s
+static-file branch `:1046-1048`"*. #823 removed that inline gate entirely and replaced it with
+`gateProtectedDoc` (`dev.js:979`), called once at `:1141`. ⚑ **A line-drift heuristic would have
+"repaired" this citation to a plausible nearby range and produced a confidently wrong map** — the
+block it named does not exist in any form. **CORRECTED IN THIS PASS** by symbol grep. **The general
+rule now recorded in `primary.map.md`'s Map Index: when a map's keyed surface is non-empty for the
+window, re-derive every anchor in it — never shift an anchor by a line delta.**
+
+### M3. The `gate`-job step count was ambiguous, not wrong — and the ambiguity cost a re-derivation
+
+**Reason:** under-specified figure. **Detail:** the prior pass published *"`gate` is FLAT at 14
+steps"*. Parsing `ci.yml` at this SHA returns **12** `- name:` steps and **2** `- uses:` steps. Both
+"14" and "12" are correct under different counting bases, and `.github/` is `--name-only` EMPTY over
+this window, so nothing changed — but the bare number forced a full re-parse to establish that.
+**CORRECTED IN THIS PASS:** every occurrence now reads **"14 total (12 `- name:` + 2 `- uses:`)"**.
+A figure that cannot be reproduced without guessing the method will be re-derived every pass.
+
+## UNCERTAIN — needs human review
+
+### U1 (NEW). `docs/articles/` fenced code blocks are outside EVERY compile gate, and an article is at PUBLISH state
+
+**Reason:** uncertain — scope decision, not a defect. **What was verified:** `scripts/snippet-gate.js`
+gates `.scrml` **files** under exactly three roots — `docs/tutorial-snippets`, `docs/readme-snippets`,
+`docs/website` (`SNIPPET_CORPUS`, `:58`). **`docs/articles/` is not among them**, and the gate does
+not extract fenced blocks from `.md` at all. Two untracked working files sit there now:
+`if-you-give-a-dev-an-enum-2026-08-31.md` (28 KB, v7 draft, self-declared *"Working file … Untracked
+and uncommitted"*) and `if-you-give-a-dev-an-enum-PUBLISH.md` (3.5 KB, the clean cut, **6 `scrml`
+code blocks**).
+
+**NOT classified non-compliant:** both self-declare their status, both are deliberately untracked, and
+article voice is user-owned. **What to check:** whether the PUBLISH cut's 6 scrml blocks compile
+before it ships. Nothing in the toolchain will tell you — the article surface is ungated by
+construction, and the S292 lesson recorded in `snippet-gate.js` itself (*"this gates that a page
+COMPILES; it cannot gate whether the page's PROSE is true"*) applies twice over here.
+
+### U2 (carried). `docs/heads-up/spec-consolidation-2026-05-25.md` — `status: in-progress`, 70 days idle
+
+**Reason:** uncertain — abandoned-vs-parked cannot be determined from the artifact. **What to check:**
+whether the consolidation is still intended. If parked, set `status: parked` with a date; if
+abandoned, deref to `scrml-support/archive/`. Leaving `in-progress` on a doc idle since 2026-06-25
+makes the frontmatter actively misleading.
+
+## Docs scanned this window — all COMPLIANT
+
+`docs/changes/s395-dev-root-auth-gate/`, `docs/changes/s395-if-chain-server-boundary/` and
+`docs/changes/s395-runanchored-continue/` (BRIEF + progress each) — per-dispatch archive, correctly
+located, and each describes work that LANDED (verified against `c4c55c50`, `ae2741e7`, `2d8dd8cb`).
+`docs/FACTS.md`, `docs/changelog.md`, `docs/pr-reviews.md`, `docs/known-gaps.md` — all current-state;
+`known-gaps.md` carries N14's citation error but is otherwise accurate and in-scope.
+
+## Map currency at this stamp — S396
+
+`bun scripts/state.ts --check` **BEFORE** this pass:
+`maps: 7 commits behind HEAD (watermark ad7b65dc, HEAD 2d8dd8cb)  [WARN-only — not gated;
+project-mapper seam]`. **AFTER:** `MAPS_AFTER_PLACEHOLDER`.
+⚠ **The instrument exits 0 either way — nothing in the toolchain fails on stale maps.** It parses
+**line 3 only** (`scripts/state.ts:615`), which is why every map in this set carries the same SHA on
+line 3 and line 4.
+
+## Tags
+#scrml #map #non-compliance #cleanup #doc-currency #scan-population #map-self-audit
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [test.map.md](./test.map.md)
+- [auth.map.md](./auth.map.md)
+- [build.map.md](./build.map.md)
+- [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+
+---
 
 
-## Summary — S395 pass (this pass)
+
+## Summary — S395 pass (PRIOR pass — carried for provenance)
 
 **Scan mode:** FULL re-execution of the doc-compliance scan, not the S391 pattern (which re-executed
 only finding N8).
@@ -69,7 +252,7 @@ S133/S135 convention), `spa-lists/` (134 files, PA bookkeeping, excluded per str
 
 ---
 
-## NEW FINDINGS — S395
+## NEW FINDINGS — S395 (PRIOR pass; N12/N13/N14 superseded by the re-executed verdicts above)
 
 ### N12. `docs/audits/` — 20 documents, 2.0 MB, NEVER IN ANY SCAN POPULATION
 
