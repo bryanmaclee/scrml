@@ -118,8 +118,69 @@ export interface EmitLogicOpts {
   /**
    * §32 tilde mode: "single" (default) assigns once; "array" accumulates push calls
    * into an array declared before the enclosing loop (list comprehension pattern).
+   *
+   * ⚑ `armBodyStmts` IS THE §32.2.1 CARVE-OUT, AND IT IS A SET OF STATEMENT NODES
+   * RATHER THAN A BOOLEAN ON PURPOSE. It holds the statements that are DIRECT
+   * members of this if-as-expression's arm bodies (then limb, every `else if` limb,
+   * terminal `else`). Per the S395 ruling, §17.6.2 governs there and is SPECIFIC
+   * over §32.2's general accumulator rule: such a statement is a **side effect** —
+   * it does NOT initialize `~` and does NOT repoint the slot.
+   *
+   * ⚠ READ THIS BEFORE "SIMPLIFYING" IT BACK TO A FLAG. It was a boolean
+   * (`armBody: true`) until S397 round 3. A flag on this object propagates into
+   * every child emitter, so the carve-out was opt-OUT: correct only where somebody
+   * remembered to strip it on descent, and silently WRONG in every construct nobody
+   * had thought of. Three consecutive review rounds each found the identical defect
+   * in a different construct — a nested `if`, then a `given` guard, then `for` and
+   * `while` bodies — and each per-construct patch simply moved the next occurrence.
+   * Identity is non-propagating BY CONSTRUCTION: a nested block's children are
+   * different objects, so they fail `_isDirectArmBodyStmt` automatically, with no
+   * strip site to forget. There are ZERO such sites now, and that is the invariant.
+   *
+   * ⚠ `armBodyStmts` does NOT mean "`var` holds the arm's result". `var` is the
+   * ENCLOSING `~` slot (possibly null); `liftVar` is the arm's result. That
+   * conflation was the original defect class — see `liftVar` below.
+   *
+   * ⚠ Any construct that mints its OWN context — a nested `emitIfExprDecl` /
+   * `emitForExprDecl` / `emitMatchExprDecl`, or `emitFnShortcutBody`'s §32.4
+   * function-body scope — gets a context without this set, so ordinary §32.2
+   * semantics resume there too.
+   *
+   * ⚠ This is NOT the §32.4 arm-body `~` BOUNDARY (banked as dpa-040). `~` READ
+   * resolution inside an arm inherits the enclosing slot via `var`, so a read
+   * reaches the enclosing accumulator WHEN ONE WAS ALLOCATED and orphans when the
+   * only `~` in the enclosing sequence was the in-arm one (`nodeContainsTildeRef`
+   * does not descend into a bound value-form's arms). Conditional, not absolute —
+   * see §32.2.1's status note.
    */
-  tildeContext?: { var: string | null; mode?: "single" | "array" };
+  tildeContext?: {
+    /**
+     * The `~` READ/INIT slot. `_makeExprCtx` lowers every `~` reference to this
+     * name, and (outside an arm body) the shared `bare-expr` handler mints into it.
+     */
+    var: string | null;
+    mode?: "single" | "array";
+    armBodyStmts?: ReadonlySet<any>;
+    /**
+     * ⚑ THE ARM'S RESULT VARIABLE, AND IT IS DELIBERATELY *NOT* `var`.
+     *
+     * `emitIfExprDecl` used to put the arm's result var in `var`, which made ONE
+     * field mean two different things — "where `lift` writes" AND "what `~` reads".
+     * Every defect in this class came out of that conflation, in both directions:
+     * a bare statement minting into `var` stole the `lift` target, and an in-arm
+     * `~` read resolved to the arm's `null`-seeded result var instead of the
+     * enclosing accumulator.
+     *
+     * De-conflated: `liftVar` is written by `lift` (and by the §17.6.10 sugar) and
+     * by NOTHING else, while `var` carries the ENCLOSING `~` slot through into the
+     * arm so reads resolve there — which is exactly what §32.2.1 says. Because the
+     * arm's result is no longer reachable as a `~` slot, no enumerate-and-guard
+     * pass over repoint sites can miss one; that is a structural guarantee rather
+     * than a list, and the list was already proven incomplete (the `guarded-expr`
+     * repoint site was missed on the first pass).
+     */
+    liftVar?: string;
+  };
   /**
    * When set to "return", `continue-stmt` nodes emit `return;` instead of `continue;`.
    * Used in reactive-for createItem functions where `continue` is illegal JS.
@@ -1720,7 +1781,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ) {
           return "";
         }
-        if (opts.tildeContext) {
+        // §17.6.2 (S395 ruling, limb (a)) — see the `tildeContext` doc comment on
+        // `EmitLogicOpts`. Inside an if-as-expression ARM BODY this statement is a
+        // SIDE EFFECT: no fresh mint, no rebind, so the arm's `lift` (or the
+        // §17.6.10 sugar) still writes the result var the declaration reads.
+        if (opts.tildeContext && !_isDirectArmBodyStmt(node, opts)) {
           // §32 Gap 7: pure consume+reinit. A bare-expr that ALSO references `~`
           // in its RHS (e.g. `step2(~)` after `step1(2)` initialized `~`) must
           // emit RHS using the PREVIOUS tilde-var, then rebind `~` to the NEW
@@ -1879,7 +1944,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // Gap 7: capture prev expr ctx (with previous tildeVar) BEFORE overwriting
       // opts.tildeContext.var — otherwise `~` in the RHS would self-reference
       // the new var. Same pattern as the exprNode fast path above.
-      if (opts.tildeContext) {
+      // §17.6.2 (S395 ruling, limb (a)): NOT when THIS node is a direct statement of
+      // an if-as-expression arm body — the twin of the guard on the exprNode fast
+      // path above. Same reason, same identity test.
+      if (opts.tildeContext && !_isDirectArmBodyStmt(node, opts)) {
         const tVar = genVar("tilde");
         const prevExprCtx = _makeExprCtx(opts);
         opts.tildeContext.var = tVar;
@@ -1904,15 +1972,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
       // If-as-expression: `let a = if (cond) { lift val }`
       if (node.ifExpr) {
-        return emitIfExprDecl(_letDeclLhs, node.ifExpr, "let", opts);
+        return emitIfExprDecl(_letDeclLhs, node.ifExpr, "let", opts, node);
       }
       // For-as-expression: `let names = for (item of items) { lift item.name }`
       if (node.forExpr) {
-        return emitForExprDecl(_letDeclLhs, node.forExpr, "let", opts);
+        return emitForExprDecl(_letDeclLhs, node.forExpr, "let", opts, node);
       }
       // Match-as-expression: `let result = match expr { .A => { lift val } }`
       if (node.matchExpr) {
-        return emitMatchExprDecl(_letDeclLhs, node.matchExpr, "let", opts);
+        return emitMatchExprDecl(_letDeclLhs, node.matchExpr, "let", opts, node);
       }
       // v0.2.4 bug-1-anomaly-2: `let x = ?{...}.method()` — sqlNode-bearing
       // init. Recurse into case "sql" to produce the Bun.SQL tagged template,
@@ -2049,15 +2117,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
       // If-as-expression: `const a = if (cond) { lift val }`
       if (node.ifExpr) {
-        return emitIfExprDecl(_constDeclLhs, node.ifExpr, "const", opts);
+        return emitIfExprDecl(_constDeclLhs, node.ifExpr, "const", opts, node);
       }
       // For-as-expression: `const names = for (item of items) { lift item.name }`
       if (node.forExpr) {
-        return emitForExprDecl(_constDeclLhs, node.forExpr, "const", opts);
+        return emitForExprDecl(_constDeclLhs, node.forExpr, "const", opts, node);
       }
       // Match-as-expression: `const result = match expr { .A => { lift val } }`
       if (node.matchExpr) {
-        return emitMatchExprDecl(_constDeclLhs, node.matchExpr, "const", opts);
+        return emitMatchExprDecl(_constDeclLhs, node.matchExpr, "const", opts, node);
       }
       // v0.2.4 bug-1-anomaly-2: `const x = ?{...}.method()` — sqlNode-bearing
       // init. Mirror of the let-decl handling above. Tilde-decl shares this
@@ -3020,9 +3088,46 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // and does NOT end with `/` (closing tag form)
         if (!rawExpr.startsWith("<") && !rawExpr.endsWith("/")) {
           const liftRhs = emitExprField(liftE.exprNode, rawExpr, _makeExprCtx(opts));
-          if (opts.tildeContext.mode === "array" && opts.tildeContext.var) {
-            // Array accumulator mode — push onto existing array variable.
-            return `${opts.tildeContext.var}.push(${liftRhs});`;
+          // §17.6.2 — an if-as-expression ARM: `lift` designates the arm's RESULT,
+          // which is `liftVar`, NOT the `~` slot in `var`. Checked FIRST, because
+          // inside an arm `var` carries the ENCLOSING `~` accumulator through for
+          // reads and writing there would both lose the result and clobber `~`.
+          // `liftRhs` was already lowered against `_makeExprCtx(opts)` above, so a
+          // `lift ~` inside an arm still reads the enclosing accumulator correctly.
+          // ⚑ PRECEDENCE between `mode` and `liftVar`, decided explicitly rather
+          // than by guarding sites one at a time (an unguarded `mode === "array"`
+          // path is the same var/liftVar conflation wearing different clothes):
+          //
+          //   ARRAY MODE WINS. A loop established an accumulator, so lifts
+          //   ACCUMULATE; `liftVar` only decides WHICH variable accumulates.
+          //   Inside an arm that is the arm's result var, so a loop-in-arm emits
+          //   `<armResult>.push(x)` — which on the §17.6.4 `null` seed is the same
+          //   LOUD TypeError base produced, not a silent last-writer-wins value.
+          //
+          // ⚠ STATE THE REAL BLAST RADIUS: `mode` is set on the SHARED context
+          // object, so it LEAKS ACROSS ARMS. A loop in the THEN arm flips the
+          // whole if-as-expression to array mode, and a loop-FREE `else { lift x }`
+          // then also emits `<armResult>.push(x)`. MEASURED byte-identical at base
+          // (`if (@n>0) { for (i of xs) { lift i } } else { lift "neg" }` emits
+          // `.push("neg")` in the else on BOTH sides), so this is pre-existing and
+          // NOT a regression of this arc — and it is still LOUD, because the seed
+          // is `null` in both arms. Recorded because the earlier wording described
+          // the loop arm only and read as if the sibling arm were unaffected.
+          //
+          // ⚠ That loudness is DELIBERATE and it is the conservative choice, not
+          // the finished one. Making a loop-in-arm actually WORK means re-seeding
+          // the arm result as `[]` so the arm designates a list, which is what the
+          // sibling `const xs = for (…) { lift x }` comprehension already does.
+          // That is a SEMANTIC decision about what an arm with a loop-lift
+          // designates, no ruling covers it, and newly-working is the irreversible
+          // direction — so it is surfaced for ratification rather than taken here.
+          const liftTarget = opts.tildeContext.liftVar ?? opts.tildeContext.var;
+          if (opts.tildeContext.mode === "array" && liftTarget) {
+            // Array accumulator mode — push onto the accumulating variable.
+            return `${liftTarget}.push(${liftRhs});`;
+          }
+          if (opts.tildeContext.liftVar) {
+            return `${opts.tildeContext.liftVar} = ${liftRhs};`;
           }
           if (opts.tildeContext.var) {
             // Tilde var already pre-declared (if-as-expression) — reassign, don't redeclare.
@@ -3789,7 +3894,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `~` (e.g. `return format(~)` after `loadItem(id) !{ ... }`) must
       // resolve to `resultVar`. Without this wire, `~` falls through emitIdent's
       // tildeVar=null arm and emits literal `~` — JS SyntaxError.
-      if (opts.tildeContext && !bindingName) {
+      // §17.6.2 (S395) — NOT inside an if-as-expression arm body. A bindless
+      // `loadItem(id) !{ … }` there is a side-effect statement like any other, so it
+      // does not initialize `~` and does not repoint the slot. This is the SIXTH
+      // repoint site of this class and the one the first pass missed, which is why
+      // the arm's RESULT now lives in `liftVar` rather than being reachable here at
+      // all: an unguarded repoint can no longer corrupt the result, only `~`.
+      if (opts.tildeContext && !bindingName && !_isDirectArmBodyStmt(node, opts)) {
         opts.tildeContext.var = resultVar;
       }
       return lines.join("\n");
@@ -4246,6 +4357,7 @@ function _emitIfStmtWithOpts(node: any, opts: EmitLogicOpts): string {
   return lines.join("\n");
 }
 
+
 // ---------------------------------------------------------------------------
 // §32 loop-aware tilde helpers — for-stmt and while-stmt with array accumulation
 // ---------------------------------------------------------------------------
@@ -4313,8 +4425,18 @@ function _emitForStmtWithTilde(node: any, opts: EmitLogicOpts): string {
   const lines: string[] = [];
   const tildeCtx = opts.tildeContext!;
 
-  // Initialize tilde var as array if not yet initialized
-  if (!tildeCtx.var) {
+  // Initialize tilde var as array if not yet initialized.
+  //
+  // ⚑ PRECEDENCE, STATED ONCE HERE AND HONOURED IN THE `lift` HANDLER: when
+  // `liftVar` is set we are inside an if-as-expression ARM, and the accumulator a
+  // loop lifts into is the ARM'S RESULT — not a fresh var. Minting one here
+  // produced a DEAD ALLOCATION (`let _scrml_tilde_N = [];` that nothing ever
+  // reads) and, worse, repointed `var` so the loop's lifts stopped being pushes
+  // and became last-writer-wins assignments. That turned base's LOUD
+  // `null.push(...)` TypeError into a SILENT wrong value at exit 0, which on this
+  // project is strictly worse than the crash it replaced. Do not mint; let the
+  // array-mode path in the `lift` handler resolve the target to `liftVar`.
+  if (!tildeCtx.var && !tildeCtx.liftVar) {
     const tVar = genVar("tilde");
     tildeCtx.var = tVar;
     tildeCtx.mode = "array";
@@ -4349,8 +4471,18 @@ function _emitWhileStmtWithTilde(node: any, opts: EmitLogicOpts): string {
   const lines: string[] = [];
   const tildeCtx = opts.tildeContext!;
 
-  // Initialize tilde var as array if not yet initialized
-  if (!tildeCtx.var) {
+  // Initialize tilde var as array if not yet initialized.
+  //
+  // ⚑ PRECEDENCE, STATED ONCE HERE AND HONOURED IN THE `lift` HANDLER: when
+  // `liftVar` is set we are inside an if-as-expression ARM, and the accumulator a
+  // loop lifts into is the ARM'S RESULT — not a fresh var. Minting one here
+  // produced a DEAD ALLOCATION (`let _scrml_tilde_N = [];` that nothing ever
+  // reads) and, worse, repointed `var` so the loop's lifts stopped being pushes
+  // and became last-writer-wins assignments. That turned base's LOUD
+  // `null.push(...)` TypeError into a SILENT wrong value at exit 0, which on this
+  // project is strictly worse than the crash it replaced. Do not mint; let the
+  // array-mode path in the `lift` handler resolve the target to `liftVar`.
+  if (!tildeCtx.var && !tildeCtx.liftVar) {
     const tVar = genVar("tilde");
     tildeCtx.var = tVar;
     tildeCtx.mode = "array";
@@ -4515,21 +4647,115 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
 }
 
 /**
+ * Collect every statement that is a DIRECT member of one of this if-as-expression's
+ * arm bodies — the then limb, every `else if` limb, and the terminal `else`.
+ *
+ * ⚑ THIS ENUMERATES THE LIMBS OF ONE CONSTRUCT, NOT THE CONSTRUCTS THAT OPEN A
+ * BLOCK. That distinction is the entire point of the S397 round-3 rework. The limb
+ * set is CLOSED — §17.6.8 defines it and it cannot grow without changing the
+ * if-as-expression grammar itself. The set of things that open a nested block is
+ * OPEN, and enumerating it is what produced three consecutive rounds of the same
+ * defect in a different construct each time (nested `if`, then `given`, then the
+ * two loops). Mirrors `emitIfExprAltChain`'s chaining exactly.
+ */
+function _collectArmBodyStmts(ifExpr: any): Set<any> {
+  const out = new Set<any>();
+  const addAll = (arr: any): void => {
+    if (Array.isArray(arr)) for (const stmt of arr) out.add(stmt);
+  };
+  let cur = ifExpr;
+  while (cur) {
+    addAll(cur.consequent);
+    if (!cur.alternate) break;
+    const alt: any[] = Array.isArray(cur.alternate) ? cur.alternate : [cur.alternate];
+    if (alt.length === 1 && alt[0]?.kind === "if-stmt") {
+      cur = alt[0]; // `else if` limb — its consequent is an arm body too
+      continue;
+    }
+    addAll(alt); // terminal `else`
+    break;
+  }
+  return out;
+}
+
+/**
+ * §32.2.1 — is THIS node a statement appearing *directly inside* an if-as-expression
+ * arm body?
+ *
+ * ⚑ NON-PROPAGATING BY CONSTRUCTION, AND THAT IS THE WHOLE DESIGN. The carve-out
+ * used to ride a boolean (`armBody: true`) on the shared context object, which flows
+ * into every child emitter — so it was opt-OUT, correct only where somebody
+ * remembered to strip it, and WRONG everywhere nobody had thought of yet. Three
+ * review rounds each found the same defect in a construct the previous round had not
+ * enumerated: a nested `if`, then a `given` guard, then `for` and `while` bodies.
+ *
+ * Identity closes the class instead of patching its instances. The test is not "am I
+ * somewhere under an arm?" but "am I one of the specific statement objects that IS
+ * the arm's body?". A nested block's children are different objects, so they fail
+ * this test AUTOMATICALLY — for every block-opening construct that exists today, and
+ * for every one added later, with no strip call site to forget. There are now ZERO
+ * per-construct strip sites; `_descendOutOfArmBody` was deleted rather than extended.
+ *
+ * ⚠ If you are about to add a `_descendOutOfArmBody`-style helper back, stop: that
+ * is the shape that failed three times.
+ *
+ * ⛔ WHAT THIS DOES **NOT** GUARANTEE — stated because an earlier round shipped a
+ * doc comment claiming containment it did not deliver, and that over-claim is the
+ * same class as the defects above. This predicate decides ONLY whether the §32.2.1
+ * carve-out applies to a given statement. It does NOT scope `tildeContext.var`
+ * itself: the context object is still shared across sibling blocks, so a mint in
+ * one limb remains nameable from another. MEASURED byte-identical to base:
+ *
+ *     if (…) { if (…) { let _t6 = step1(2); } else { …step2(_t6)… } lift "ok" }
+ *
+ * `_t6` is `let`-scoped to the THEN limb and read from the ELSE limb. That is a
+ * PRE-EXISTING escape on the `~` slot, present on base, unchanged here, and out of
+ * this arc's scope — fixing it means scoping the accumulator per block, which moves
+ * the ordinary §32.2 path and needs its own ruling. Do not read the carve-out fix as
+ * having closed it.
+ */
+function _isDirectArmBodyStmt(node: any, opts: EmitLogicOpts): boolean {
+  const stmts = opts.tildeContext?.armBodyStmts;
+  return stmts !== undefined && stmts.has(node);
+}
+
+/**
  * Emit an if-as-expression declaration. Pre-declares a tilde variable,
  * emits the if/else body with lift assigning to that variable, then
  * assigns the result to the declared name.
  *
  * §17.6.4: When no arm executes, result is `not` (compiled to null in JS per §42).
  * §17.6.8: Uses variable-assign-in-branches pattern with else-if chain support.
+ * §17.6.2: Only a `lift` — or the §17.6.10 single-expression sugar — designates the
+ * arm's result. Every OTHER statement in the arm body is a side effect (S395 ruling);
+ * `armBodyStmts` on the context below is what enforces that in the shared `bare-expr`
+ * handler — see `_isDirectArmBodyStmt`, and the `tildeContext` doc comment on
+ * `EmitLogicOpts` for why it is a statement SET and not a flag.
  */
-function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opts: EmitLogicOpts): string {
+function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opts: EmitLogicOpts, declNode: any): string {
   const tildeVar = genVar("tilde");
   const lines: string[] = [];
   // §17.6.4: default is `not` (compiled to null in JS — §42: `not` => null)
   lines.push(`let ${tildeVar} = null;`);
 
-  // Create a tilde context so lift-expr inside the if body assigns to tildeVar
-  const tildeCtx = { var: tildeVar, mode: "single" as "single" | "array" };
+  // Arm-body context. TWO distinct slots, and keeping them distinct is the whole fix:
+  //   · `liftVar`  = tildeVar, the arm's RESULT. Written by `lift` / the §17.6.10
+  //                  sugar and by nothing else.
+  //   · `var`      = the ENCLOSING `~` accumulator, carried through UNCHANGED so an
+  //                  in-arm `~` READ resolves there — §32.2.1: "a `~` READ inside an
+  //                  arm body resolves in the enclosing context". Putting tildeVar
+  //                  here (the pre-fix shape) made every in-arm `~` read lower to the
+  //                  arm's own `null`-seeded result var.
+  //   · `armBodyStmts` = §32.2.1 sentence 1: the DIRECT statements of this
+  //                  if-as-expression's arm bodies. Each is a SIDE EFFECT — it
+  //                  neither initializes `~` nor repoints the slot. Identity, not a
+  //                  flag, so the carve-out cannot leak into a nested block.
+  const tildeCtx = {
+    var: opts.tildeContext?.var ?? null,
+    mode: "single" as "single" | "array",
+    armBodyStmts: _collectArmBodyStmts(ifExpr),
+    liftVar: tildeVar,
+  };
   const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: tildeCtx };
 
   // Emit the if condition
@@ -4564,8 +4790,18 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
 
   lines.push(`${keyword} ${name} = ${tildeVar};`);
 
-  // Propagate tilde var to parent context so `~` after this decl resolves correctly
-  if (opts.tildeContext) {
+  // Propagate tilde var to parent context so `~` after this decl resolves correctly.
+  // §17.6.2 (S395 ruling, limb (a)) — NOT when the parent context is an
+  // if-as-expression ARM BODY. The ruling is categorical: only a `lift` (or the
+  // §17.6.10 sugar) designates an arm's result, so a nested value-form DECLARATION
+  // inside an arm is a side effect too and must not repoint the arm's result var.
+  // Measured at base without this guard: `if (c) { const inner = if (d) { lift 1 }
+  // else { lift 2 } lift inner }` emitted the outer `lift` as
+  // `_scrml_tilde_<INNER> = inner;` and the outer `else` as
+  // `_scrml_tilde_<INNER> = "neg";` — the binding stayed at its `null` seed and the
+  // else-arm wrote a name block-scoped to the THEN branch (a silent implicit global
+  // in a classic script). Same defect class as the bare-expr handler, one nest down.
+  if (opts.tildeContext && !_isDirectArmBodyStmt(declNode, opts)) {
     opts.tildeContext.var = tildeVar;
   }
 
@@ -4581,12 +4817,25 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
  * emits the for loop body with lift pushing to that array, then assigns the array
  * to the declared name.
  */
-function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", opts: EmitLogicOpts): string {
+function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", opts: EmitLogicOpts, declNode: any): string {
   const tildeVar = genVar("tilde");
   const lines: string[] = [];
   lines.push(`let ${tildeVar} = [];`);
 
   // Create an array-mode tilde context so lift-expr inside the for body uses .push()
+  // ⛑ DELIBERATELY THE PRE-S395 CONFLATED SHAPE. `armBodyStmts` / `liftVar` are the
+  // §32.2.1 carve-out, and §32.2.1 carves out **if-as-expression arm bodies**
+  // (§17.6.2) — it does not mention COMPREHENSION bodies, and the S395 ruling was
+  // about arm bodies. Whether a bare statement in a comprehension body initializes
+  // `~` is a semantic question NO RULING COVERS, so it is not settled here.
+  //
+  // An earlier pass did apply the carve-out here. It read better and it was wrong
+  // twice over: it decided an unruled semantic by implementation, and it traded a
+  // LOUD failure for a SILENT one — `for (i of xs) { step1(i) lift step2(~) }` went
+  // from `_t8.push(...)` on a number (TypeError) to pushing
+  // `step2(null /* ~ orphaned */)`, i.e. `[0,0,0]` at exit 0. Reverted to
+  // byte-identical-with-base on purpose: base is already loud here, so this is
+  // declining an unruled widening, not accepting a regression.
   const tildeCtx = { var: tildeVar, mode: "array" as "single" | "array" };
   const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: tildeCtx };
 
@@ -4628,8 +4877,18 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
 
   lines.push(`${keyword} ${name} = ${tildeVar};`);
 
-  // Propagate tilde var to parent context so `~` after this decl resolves correctly
-  if (opts.tildeContext) {
+  // Propagate tilde var to parent context so `~` after this decl resolves correctly.
+  // §17.6.2 (S395 ruling, limb (a)) — NOT when the parent context is an
+  // if-as-expression ARM BODY. The ruling is categorical: only a `lift` (or the
+  // §17.6.10 sugar) designates an arm's result, so a nested value-form DECLARATION
+  // inside an arm is a side effect too and must not repoint the arm's result var.
+  // Measured at base without this guard: `if (c) { const inner = if (d) { lift 1 }
+  // else { lift 2 } lift inner }` emitted the outer `lift` as
+  // `_scrml_tilde_<INNER> = inner;` and the outer `else` as
+  // `_scrml_tilde_<INNER> = "neg";` — the binding stayed at its `null` seed and the
+  // else-arm wrote a name block-scoped to the THEN branch (a silent implicit global
+  // in a classic script). Same defect class as the bare-expr handler, one nest down.
+  if (opts.tildeContext && !_isDirectArmBodyStmt(declNode, opts)) {
     opts.tildeContext.var = tildeVar;
   }
 
@@ -4978,7 +5237,7 @@ function _emitBlockArmValueFromString(result: string, tildeVar: string, opts: Em
  *
  * §18.3: match is an expression — may appear on the RHS of let/const.
  */
-function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const", opts: EmitLogicOpts): string {
+function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const", opts: EmitLogicOpts, declNode: any): string {
   // §18.19 — multi-scrutinee match in decl position: delegate to the shared
   // value-return emitter (emit-control-flow.ts:emitMatchExpr), which lowers the
   // product dispatch to an IIFE that evaluates to the arm value, then bind it.
@@ -4996,6 +5255,14 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   lines.push(`const ${tmpVar} = ${header};`);
 
   // Create a tilde context so lift-expr inside match arms assigns to tildeVar
+  // ⛑ DELIBERATELY THE PRE-S395 CONFLATED SHAPE, for the same reason as
+  // `emitForExprDecl` above: §32.2.1 carves out §17.6.2 if-as-expression arm
+  // bodies. A `match`-as-expression arm is §18, not §17.6.2, so the carve-out does
+  // not reach it and applying it here would decide an unruled semantic. It was
+  // measured INERT anyway (byte-identical on the working `:>` value form; the
+  // block-arm form never reaches `emitLogicNode` at all — it is re-lowered as raw
+  // text and fails loud with E-CODEGEN-INVALID-LOGIC on base and now), so reverting
+  // costs nothing and keeps the code from asserting a scope the SPEC does not grant.
   const tildeCtx = { var: tildeVar, mode: "single" as "single" | "array" };
   const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: tildeCtx };
 
@@ -5183,8 +5450,18 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
 
   lines.push(`${keyword} ${name} = ${tildeVar};`);
 
-  // Propagate tilde var to parent context so `~` after this decl resolves correctly
-  if (opts.tildeContext) {
+  // Propagate tilde var to parent context so `~` after this decl resolves correctly.
+  // §17.6.2 (S395 ruling, limb (a)) — NOT when the parent context is an
+  // if-as-expression ARM BODY. The ruling is categorical: only a `lift` (or the
+  // §17.6.10 sugar) designates an arm's result, so a nested value-form DECLARATION
+  // inside an arm is a side effect too and must not repoint the arm's result var.
+  // Measured at base without this guard: `if (c) { const inner = if (d) { lift 1 }
+  // else { lift 2 } lift inner }` emitted the outer `lift` as
+  // `_scrml_tilde_<INNER> = inner;` and the outer `else` as
+  // `_scrml_tilde_<INNER> = "neg";` — the binding stayed at its `null` seed and the
+  // else-arm wrote a name block-scoped to the THEN branch (a silent implicit global
+  // in a classic script). Same defect class as the bare-expr handler, one nest down.
+  if (opts.tildeContext && !_isDirectArmBodyStmt(declNode, opts)) {
     opts.tildeContext.var = tildeVar;
   }
 
@@ -5295,6 +5572,44 @@ function nodeContainsTildeRef(node: any): boolean {
   // Recurse into body arrays
   if (Array.isArray(node.body) && nodeListContainsTildeRef(node.body)) return true;
   if (Array.isArray(node.children) && nodeListContainsTildeRef(node.children)) return true;
+  // ⛑ THIS WALK DELIBERATELY DOES **NOT** DESCEND INTO `ifExpr` / `forExpr` /
+  // `matchExpr` — the fields a BOUND value-form (`const x = if (…) { … }`) hangs its
+  // arms off. S395 added exactly that descent to make an in-arm `~` READ resolve to
+  // an enclosing accumulator; S397 REVERTED it, and re-adding it re-opens a measured
+  // defect. Read this before you "fix" the gap it leaves.
+  //
+  // WHY IT CANNOT SIMPLY BE WIDENED: this predicate does not merely answer a
+  // question — both consumers (`emitFnShortcutBody` `:4267`, `emitLogicBody` `:5407`)
+  // use it to decide whether to ALLOCATE a `tildeContext` over the whole enclosing
+  // statement sequence. Flipping it true therefore switches that entire sequence
+  // into §32.2 accumulator mode. Measured at the S395 tip on a `function` body whose
+  // only `~` sat inside a bound arm:
+  //
+  //   · a DEAD `let _scrml_tilde_N = [];` appeared before an unrelated `while`
+  //     (`_emitWhileStmtWithTilde` mints an accumulator nothing ever reads);
+  //   · the `while` BODY's bare call became `let _scrml_tilde_M = note(i);`, and the
+  //     rebind escaped the loop — `emitIfExprDecl` then carried `_scrml_tilde_M` in as
+  //     the arm's read slot and emitted `note(_scrml_tilde_M)` OUTSIDE the `while`
+  //     block. A `let` referenced from outside its block: `ReferenceError` at run
+  //     time, exit 0 at compile time, and syntactically valid so `--validate-emit`
+  //     cannot see it.
+  //
+  // ⚠ THE RESULTING BEHAVIOUR IS CONDITIONAL, NOT ABSOLUTE — do not restate it as
+  // "an in-arm `~` read always orphans". Because this predicate decides whether the
+  // ENCLOSING sequence gets a slot at all, the outcome depends on that sequence:
+  //   · the only `~` is inside the arm  -> no slot -> the read ORPHANS to `null`;
+  //   · some OTHER statement in the same sequence mentions `~` -> a slot exists,
+  //     `emitIfExprDecl` inherits it in `var`, and the in-arm read REACHES it —
+  //     which is what §32.2.1's read clause mandates. MEASURED:
+  //     `step1(2)  const label = if (…) { note(~) lift 7 } else { lift 0 }
+  //      return step2(~) + label` emits `note(<enclosing mint>)`.
+  // That second case is SAFE precisely because the mint sits at the same block
+  // depth as the `if`. The reverted widening is what allowed the slot to be a name
+  // minted inside a NESTED block, which is the escape.
+  // §32.2.1's read clause is Nominal / spec-ahead (partial, in the sense above) and
+  // the arm-body `~` scope boundary is banked as dpa-040.
+  // The WRITE half — `armBodyStmts` / `liftVar` on the context — is ruled and unaffected
+  // by this: it does not depend on this predicate.
   // if-expr / match-expr / for-expr alternates and consequents
   if (Array.isArray(node.consequent) && nodeListContainsTildeRef(node.consequent)) return true;
   if (node.alternate) {

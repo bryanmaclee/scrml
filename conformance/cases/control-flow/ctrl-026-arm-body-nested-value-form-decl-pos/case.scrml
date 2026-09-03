@@ -1,0 +1,51 @@
+${
+    <n>: int = 5
+
+    function nestedIfDecl() {
+        const label = if (@n > 0) {
+            const inner = if (@n > 3) { lift "deep" } else { lift "shallow" }
+            lift inner
+        } else {
+            lift "neg"
+        }
+        return label
+    }
+
+    function nestedIfDeclElseTaken() {
+        const label = if (@n > 90) {
+            const inner = if (@n > 3) { lift "deep" } else { lift "shallow" }
+            lift inner
+        } else {
+            lift "neg"
+        }
+        return label
+    }
+
+    function nestedForDecl() {
+        const names = ["ann", "bo"]
+        const label = if (@n > 0) {
+            const picked = for (nm of names) { lift nm }
+            lift picked[0]
+        } else {
+            lift "neg"
+        }
+        return label
+    }
+
+    function statementThenNestedIfDecl() {
+        const label = if (@n > 0) {
+            const first = if (@n > 3) { lift "one" } else { lift "two" }
+            const second = if (@n > 4) { lift "three" } else { lift "four" }
+            lift first + "-" + second
+        } else {
+            lift "neg"
+        }
+        return label
+    }
+
+}
+
+<div id="out-nested-if">${nestedIfDecl()}</>
+<div id="out-nested-if-else">${nestedIfDeclElseTaken()}</>
+<div id="out-nested-for">${nestedForDecl()}</>
+<div id="out-two-nested">${statementThenNestedIfDecl()}</>

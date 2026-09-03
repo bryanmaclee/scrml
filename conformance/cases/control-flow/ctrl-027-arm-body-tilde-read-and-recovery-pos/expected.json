@@ -1,0 +1,64 @@
+{
+  "id": "ctrl-027-arm-body-tilde-read-and-recovery-pos",
+  "description": "The WRITE half of the S395 §17.6.2 arm-body ruling at four positions, plus a BOUNDARY PIN on the conditionally-implemented READ half. `#out-read` / `#out-read-else` assert that a bare `record(~)` statement in a then/else arm is a SIDE EFFECT — it does not designate the arm's result, so the arm still evaluates to its `lift`. `#out-recovery` asserts the same for a bindless `!{}` recovery (the sixth repoint site of the class). `#out-lift-tilde` PINS THE CURRENT BOUNDARY for the case where the enclosing body has NO `~` of its own: the in-arm read reaches nothing and the element renders EMPTY. `#out-lift-literal` is its CONTROL — the identical shape with a literal in place of `~` renders `41`, which is what makes the empty pin discriminating rather than vacuous.",
+  "language-version": "1.0",
+  "spec": "§17.6.2, §32.2.1, §32.2, §19.6",
+  "source-test": "compiler/src/codegen/emit-logic.ts",
+  "rationale": "Companion to ctrl-025 / ctrl-026, which pin the same WRITE half at the bare-statement and nested-value-form-declaration positions. ⛑ THE READ HALF IS CONDITIONALLY IMPLEMENTED, AND THIS CASE PINS ONE SIDE OF THAT CONDITION — DO NOT READ IT AS 'THE READ HALF IS OFF'. Whether an in-arm `~` read reaches the enclosing accumulator depends on the ENCLOSING sequence, not on the arm: codegen's `~` pre-scan decides whether that sequence gets a slot at all, and since S397 it does not descend into a bound value-form's arms. If some other statement there mentions `~`, a slot exists and the in-arm read DOES reach it (measured; the unit gate `an in-arm ~ read DOES reach the enclosing slot when the enclosing body has its own ~` pins that side). Every function in THIS case has no other `~`, so it pins the orphan side. S395 shipped the UNCONDITIONAL reach and S397 reverted it: making the read always reach required the pre-scan to descend into `ifExpr`/`forExpr`/`matchExpr`, and because that predicate GATES WHETHER A `~` CONTEXT IS ALLOCATED over the whole enclosing statement sequence, flipping it true switched unrelated sibling statements into §32.2 accumulator mode — measured: a bare call inside a sibling `while` became `let _scrml_tilde_N = …` and the arm then read that name from OUTSIDE the loop block, a `ReferenceError` at run time from a clean compile. §32.2.1's read clause is therefore marked Nominal / spec-ahead and the arm-body `~` scope boundary is banked as dpa-040. ⛑ THIS CASE IS A PIN, NOT AN ENDORSEMENT: when dpa-040 is ruled, `#out-lift-tilde` is expected to CHANGE, and it is written so that the change is loud instead of silent. The empty-text assertion is paired with `#out-lift-literal` on purpose — an empty render is otherwise indistinguishable from a function that died, and an assertion that cannot tell those apart asserts nothing. §17.6.8 grants the compiler latitude over emitted JavaScript, so this case asserts OBSERVABLE RESULTS. `notCodePrefixes` carries E-TILDE- because every shape here is conforming under the ruling — including the orphaned read, which is silent today (E-TILDE-001 is itself Nominal / spec-ahead).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "W-LIFT-001",
+      "E-TYPE-031"
+    ],
+    "notCodePrefixes": [
+      "E-CTRL-",
+      "E-LIFT-",
+      "E-TILDE-",
+      "E-CODEGEN-",
+      "E-CG-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out-read",
+        "count": 1
+      },
+      {
+        "selector": "#out-read",
+        "text": "ok"
+      },
+      {
+        "selector": "#out-read-else",
+        "count": 1
+      },
+      {
+        "selector": "#out-read-else",
+        "text": "else-ok"
+      },
+      {
+        "selector": "#out-lift-tilde",
+        "count": 1
+      },
+      {
+        "selector": "#out-lift-tilde",
+        "text": ""
+      },
+      {
+        "selector": "#out-lift-literal",
+        "count": 1
+      },
+      {
+        "selector": "#out-lift-literal",
+        "text": "41"
+      },
+      {
+        "selector": "#out-recovery",
+        "count": 1
+      },
+      {
+        "selector": "#out-recovery",
+        "text": "found"
+      }
+    ]
+  }
+}

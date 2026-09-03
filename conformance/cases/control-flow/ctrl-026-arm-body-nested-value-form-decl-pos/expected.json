@@ -1,0 +1,56 @@
+{
+  "id": "ctrl-026-arm-body-nested-value-form-decl-pos",
+  "description": "§17.6.2 — a nested VALUE-FORM DECLARATION inside an if-as-expression arm body is a side effect of the arm, not a designation of its result. `#out-nested-if` puts a `const inner = if (…) { lift … }` ahead of the arm's own `lift`; `#out-nested-if-else` pins that the ELSE limb of the outer if still resolves correctly when the then-arm carrying the nested declaration is not taken; `#out-nested-for` does the same with a for-as-expression comprehension; `#out-two-nested` chains TWO nested declarations before the designating `lift` and combines both. Only the outer `lift` designates the outer result.",
+  "language-version": "1.0",
+  "spec": "§17.6.2, §17.6.3, §17.6.4, §17.6.8, §32.2",
+  "source-test": "compiler/src/codegen/emit-logic.ts",
+  "rationale": "The S395 ruling's operative sentence is categorical: only a `lift` — or the §17.6.10 single-expression sugar — designates an arm's result value. A nested value-form declaration binds its result to an IDENTIFIER (`inner` / `picked` / `first` / `second`), so it is not a designating form and §32.2 does not reach it either (that rule is scoped to \"an expression statement whose value is not bound to any identifier\"). Before the fix, the parent-context propagation tail shared by emitIfExprDecl / emitForExprDecl / emitMatchExprDecl repointed the ENCLOSING arm's tilde context at the nested construct's own result variable, so the outer `lift` wrote the INNER variable and the outer binding stayed at its §17.6.4 `null` seed — silent-wrong at exit 0 with zero diagnostics, exactly the ctrl-025 signature one nesting level down. The outer `else` limb then assigned a name block-scoped to the outer THEN branch, which in the emitted classic script is a silent implicit global; `#out-nested-if-else` is the selector that pins that limb. §17.6.8 grants the compiler latitude over the emitted JavaScript, so this case asserts OBSERVABLE RESULTS, not emitted-code shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "W-LIFT-001",
+      "E-TYPE-031"
+    ],
+    "notCodePrefixes": [
+      "E-CTRL-",
+      "E-LIFT-",
+      "E-TILDE-",
+      "E-CODEGEN-",
+      "E-CG-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out-nested-if",
+        "count": 1
+      },
+      {
+        "selector": "#out-nested-if",
+        "text": "deep"
+      },
+      {
+        "selector": "#out-nested-if-else",
+        "count": 1
+      },
+      {
+        "selector": "#out-nested-if-else",
+        "text": "neg"
+      },
+      {
+        "selector": "#out-nested-for",
+        "count": 1
+      },
+      {
+        "selector": "#out-nested-for",
+        "text": "ann"
+      },
+      {
+        "selector": "#out-two-nested",
+        "count": 1
+      },
+      {
+        "selector": "#out-two-nested",
+        "text": "one-three"
+      }
+    ]
+  }
+}
