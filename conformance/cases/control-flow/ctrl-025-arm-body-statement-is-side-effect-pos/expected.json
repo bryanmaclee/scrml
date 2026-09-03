@@ -1,0 +1,29 @@
+{
+  "id": "ctrl-025-arm-body-statement-is-side-effect-pos",
+  "description": "§17.6.2 — a bare expression statement inside an if-as-expression arm body is a SIDE EFFECT. It does not initialize `~`, does not rebind the tilde context, and does not touch the arm's result; only a `lift` (or the §17.6.10 single-expression sugar) designates the result value. Every function here puts one or more statements ahead of the designating form, in the `then` arm (`#out-then-lift`), in the `else` arm (`#out-else-lift`), against a sugar `else` (`#out-sugar-else`), across an `else if` cascade (`#out-cascade`), with three leading statements (`#out-multi`), with no `else` at all (`#out-no-else`), and at a `let` binding site (`#out-let`). Each renders the value the selected arm designates, not empty.",
+  "language-version": "1.0",
+  "spec": "§17.6.2, §17.6.3, §17.6.8, §17.6.10, §32.2",
+  "source-test": "compiler/src/codegen/emit-logic.ts",
+  "rationale": "SPEC answered this question twice and disagreed with itself. §17.6.2 says an arm body \"MAY contain … function calls\" and that \"other statements are side effects or intermediate computation\"; §32.2's general rule says \"An expression statement whose value is not bound to any identifier SHALL initialize `~`\", which with §32.3's exactly-once rule would make `{ note(\"a\") lift \"pos\" }` an E-TILDE-002. The S395 ruling settled it on specific-over-general: §17.6.2 governs INSIDE an arm body, and §32.2 now carries an explicit arm-body carve-out. Before the fix this was silent-wrong at exit 0 with ZERO diagnostics: the leading statement fell through to the shared `bare-expr` handler, which under an active tilde context minted a FRESH `let _scrml_tilde_N = <expr>;` AND rebound the context to it, so the arm's `lift` wrote the WRONG variable and the binding stayed at its `= null` seed — every `#out-*` selector below rendered EMPTY. The `else`-arm defect was worse than a wrong value: the else limb assigned a name block-scoped to the THEN branch, which in the emitted classic script (no \"use strict\", no type=\"module\") is a silent implicit global rather than a ReferenceError. This is the statement+`lift` sibling of ctrl-023/ctrl-024, which pin the same binding-site question for the §17.6.10 sugar (g-bare-expr-in-if-arm-rebinds-tilde-context-corrupting-the-result-var, HIGH). §17.6.8 grants the compiler latitude over the emitted JavaScript, so this case asserts OBSERVABLE RESULTS, not emitted-code shape. `notCodePrefixes` carries E-TILDE- as a forward guard: under the ruling this shape is conforming, so §32's enforcement must never reject it if and when that enforcement starts firing.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-LIFT-001", "E-TYPE-031"],
+    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-TILDE-", "E-CODEGEN-", "E-CG-"],
+    "domAnchored": [
+      { "selector": "#out-then-lift", "count": 1 },
+      { "selector": "#out-then-lift", "text": "pos" },
+      { "selector": "#out-else-lift", "count": 1 },
+      { "selector": "#out-else-lift", "text": "neg" },
+      { "selector": "#out-sugar-else", "count": 1 },
+      { "selector": "#out-sugar-else", "text": "pos" },
+      { "selector": "#out-cascade", "count": 1 },
+      { "selector": "#out-cascade", "text": "mid" },
+      { "selector": "#out-multi", "count": 1 },
+      { "selector": "#out-multi", "text": "pos" },
+      { "selector": "#out-no-else", "count": 1 },
+      { "selector": "#out-no-else", "text": "pos" },
+      { "selector": "#out-let", "count": 1 },
+      { "selector": "#out-let", "text": "pos" }
+    ]
+  }
+}

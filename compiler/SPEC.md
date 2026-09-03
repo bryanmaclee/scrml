@@ -11883,9 +11883,34 @@ When an `if`-as-expression executes:
 
 Execution within an arm body is unrestricted: the arm body MAY contain variable declarations, function calls, server calls, conditional logic, loops, and any other valid logic-context content. Only one `lift` statement designates the result; other statements are side effects or intermediate computation.
 
+> **§17.6.2 GOVERNS INSIDE AN ARM BODY, AND IT IS SPECIFIC OVER §32.2.** The sentence above is
+> normative against the general `~` accumulator rule. §32.2 says "an expression statement whose value
+> is not bound to any identifier SHALL initialize `~`"; read without qualification that would make a
+> bare call in an arm an initialization, and §32.3's exactly-once rule would then make
+> `{ note("a") lift "pos" }` an `E-TILDE-002` — rejecting the very shape this section permits. It does
+> not. **A bare expression statement in an arm body is a side effect: it does not initialize `~`, it
+> does not rebind the tilde context, and it does not touch the arm's result.** §32.2.1 carries the
+> reciprocal carve-out. This applies equally to a ternary at unbound statement position (§17.6.7).
+>
+> ⚑ **The arm's RESULT and the `~` SLOT are two different things.** An arm's result is designated by
+> its `lift` (or the §17.6.10 sugar) and is NOT readable as `~`; a `~` inside an arm body reads the
+> ENCLOSING context's accumulator (§32.2.1). Conflating the two is what made a bare statement in an
+> arm able to steal the `lift` target in the first place.
+>
+> ⛑ **The two halves of that sentence have DIFFERENT implementation status — do not read it as one
+> claim.** "An arm's result is not readable as `~`" is IMPLEMENTED and enforced (it is the write half
+> this section rules on). "A `~` inside an arm body reads the ENCLOSING context's accumulator" is
+> **Nominal / spec-ahead** — see the status note in §32.2.1, which is normative for it. Today that read
+> reaches the enclosing accumulator only when the enclosing body has a `~` of its own, and otherwise
+> orphans to `null`; §32.2.1 carries the table. Banked as dpa-040.
+>
+> **Provenance:** ruling:user-voice-scrml.md S395 — "your rec" ratifying limb (a), §17.6.2 governs an if-as-expression arm body
+
 **Normative statements:**
 
 - An if-as-expression arm body SHALL produce its result value via a `lift` statement, **or** by being exactly one expression, which is sugar for `lift` of that expression (§17.6.10). These are the only two ways an arm body produces a value.
+- An expression statement inside an if-as-expression arm body SHALL be a side effect. It SHALL NOT initialize `~` (§32.2.1), SHALL NOT contribute to the arm's result value, and SHALL NOT on its own produce E-TILDE-002.
+- A nested value-form declaration inside an arm body (`const inner = if (…) { lift … }`, and the `for`/`match` equivalents) binds its result to its own identifier and is likewise NOT a designating form for the ENCLOSING arm. Only the enclosing arm's own `lift` — or its §17.6.10 sugar — designates the enclosing arm's result.
 - The result of an if-as-expression when no arm body executes SHALL be `not`.
 - The type of an if-as-expression with no `else` arm SHALL be `T | not`, where `T` is the type of the lifted value in the `if` arm (and any `else if` arms).
 - The type of an if-as-expression with a complete if/else chain (all branches covered) SHALL be the union of all lifted value types across all arms. If all arms lift the same type `T`, the result type is `T` (not `T | not`).
@@ -11960,7 +11985,7 @@ Here:
 - The executed arm's `lift` initializes `~` to `a` or `b`.
 - `const dbl = ~ * 2` consumes `~`.
 
-This is the canonical pipeline pattern for if-as-expression. The `~` rules (§32) apply fully:
+This is the canonical pipeline pattern for if-as-expression. The `~` rules (§32) apply fully **to the if-as-expression as a whole, at its own statement position** — this subsection is about `~` AFTER the expression, not about statements INSIDE an arm body, where §32.2's unassigned-expression rule does not reach (§32.2.1):
 - `~` is initialized by the `lift` in the executed arm.
 - `~` must be consumed exactly once (lin rule).
 - If the if-as-expression has no `else` arm and the condition is false, no `lift` executes and `~` is NOT initialized. Referencing `~` after an if-as-expression with no `else` is potentially E-TILDE-001 (see §17.6.6 for the static analysis rule).
@@ -12016,7 +12041,7 @@ const dbl = ~ * 2;       // consumes ~
 
 **Normative statements:**
 
-- The ternary operator `(cond) ? a : b` used as an unbound expression statement SHALL initialize `~` to the evaluated result, following the standard §32.2 unassigned-expression rule.
+- The ternary operator `(cond) ? a : b` used as an unbound expression statement SHALL initialize `~` to the evaluated result, following the standard §32.2 unassigned-expression rule — **except inside an if-as-expression arm body, where the §32.2.1 carve-out applies and the ternary is a side effect that does not initialize `~`.**
 - Ternary and if-as-expression MAY be freely mixed in the same logic context.
 - The compiler SHALL NOT prefer one form over the other. Both are valid.
 
@@ -12102,6 +12127,25 @@ ${
     }
 }
 ```
+
+**Example 4a — Arm body with an UNBOUND side-effect statement (valid):**
+
+```scrml
+${
+    const label = if (@n > 0) {
+        auditTrail("checked")   // side effect. NOT a ~ initialization (§32.2.1). Not E-TILDE-002.
+        lift "pos"              // the only designating statement
+    } else {
+        lift "neg"
+    }
+    // label: string
+}
+```
+
+Example 4 above binds its intermediate (`const prefix = …`), which §32.2 already excluded from `~`
+initialization. Example 4a is the case the §32.2.1 carve-out exists for: the intermediate is
+UNBOUND, so the general rule would have made it an initialization and §32.3 would then have made the
+arm `E-TILDE-002`. §17.6.2 governs, and the statement is a side effect.
 
 **Example 5 — Invalid: `~` referenced after no-else if-as-expression (E-TILDE-001):**
 
@@ -19186,7 +19230,7 @@ The `eq(@signup.password)` predicate on `<confirm>` reads `@signup.password`. Wh
 
 `~` is initialized by exactly two source constructs:
 
-1. **Unassigned expression statement.** Any expression whose value is not captured by a `let`, `const`, variable assignment, or other explicit binding. The expression value is placed into `~`.
+1. **Unassigned expression statement.** Any expression whose value is not captured by a `let`, `const`, variable assignment, or other explicit binding. The expression value is placed into `~`. **This construct does not reach inside an if-as-expression arm body — see the arm-body carve-out below.**
 
    ```scrml
    fetchUser(id)             // fetchUser's return value initializes ~
@@ -19204,15 +19248,120 @@ The `eq(@signup.password)` predicate on `<confirm>` reads `@signup.password`. Wh
 
 **Normative statements:**
 
-- An expression statement whose value is not bound to any identifier SHALL initialize `~` to the result of that expression.
+- An expression statement whose value is not bound to any identifier SHALL initialize `~` to the result of that expression. ⚑ Subject to the §32.2.1 arm-body carve-out.
 - A `lift` statement SHALL initialize `~` to the value being lifted, in addition to accumulating it.
 - A variable declaration (`let x = expr`, `const x = expr`) SHALL NOT initialize `~`.
 - A function declaration (`function f() {}`, `fn f {}`) SHALL NOT initialize `~`.
 - `~` is initialized at runtime; its value is the actual return value of the expression at execution time. The compiler tracks whether `~` has been initialized and consumed statically; the value itself is a runtime value.
 
+#### 32.2.1 Arm-body carve-out — an if-as-expression arm body
+
+**Date added:** 2026-09-02 (S395).
+> **Provenance:** ruling:user-voice-scrml.md S395 — "your rec" ratifying limb (a), §17.6.2 governs an if-as-expression arm body
+
+**Inside an if-as-expression arm body (§17.6.2), an expression statement does NOT initialize `~`.** It is a side effect. Only a `lift` — or the §17.6.10 single-expression sugar — designates the arm's result value, and only a `lift` initializes `~` there.
+
+```scrml
+${
+    const label = if (@n > 0) {
+        note("a")          // side effect. Does NOT initialize ~. Not E-TILDE-002.
+        lift "pos"         // the ONLY designating statement; initializes ~ per item 2 above
+    } else {
+        lift "neg"
+    }
+}
+```
+
+This is **specific-over-general**, not an inconsistency: §17.6.2 is the section that governs what an arm body may contain, and it has always said that "other statements are side effects or intermediate computation". §32.2's general rule is the rule for an ordinary logic body, and it is unchanged there. Without this carve-out the two sections answer the same question differently, and §32.3's exactly-once rule would make the shape above `E-TILDE-002` — rejecting a construct §17.6.2 explicitly permits.
+
+The carve-out is about **initialization only**. It is not a `~` context boundary: an arm body is not listed in §32.4 beside `${ }` contexts and function bodies, and **a `~` READ inside an arm body resolves in the ENCLOSING context** — the arm's result value is not a `~` slot and is not readable as one.
+
+⚡ (**Nominal / spec-ahead-of-implementation — the READ clause only.** The initialization clause above it is IMPLEMENTED and enforced; see the status note after the example.)
+
+```scrml
+${
+    loadUser(id)                      // initializes ~ in the ENCLOSING context
+    const label = if (@n > 0) {
+        record(~)                     // reads the ENCLOSING ~ — loadUser's result
+        lift "ok"                     // designates the arm's result. A DIFFERENT slot.
+    } else {
+        lift "neg"
+    }
+}
+```
+
+> **⛑ IMPLEMENTATION STATUS OF THE READ CLAUSE — Nominal / spec-ahead.**
+> **Provenance:** ruling:user-voice-scrml.md S397 — "your rec" on Q1: ship the WRITE half of
+> the S395 arc, REVERT the READ half, and mark this clause Nominal / spec-ahead.
+>
+> **What ships today — and it is CONDITIONAL, which is the part that is easy to state wrongly.**
+> The clause holds exactly when the enclosing statement sequence has a `~` slot of its own, and
+> whether it has one is decided by a codegen pre-scan that does NOT look inside a bound value-form's
+> arms. So:
+>
+> | the enclosing sequence… | an in-arm `~` read… |
+> |---|---|
+> | mentions `~` somewhere OUTSIDE the arms (e.g. a later `return step2(~)`) | **reaches the enclosing accumulator** — the clause holds |
+> | mentions `~` ONLY inside the arm | **orphans to `null`**, silently — `E-TILDE-001` has zero fire sites (see the bullet below) |
+>
+> The example immediately above is the SECOND row: its only `~` is the in-arm `record(~)`, so it
+> passes `null` rather than `loadUser`'s result. Add any other `~` to that body and the same read
+> starts resolving to `loadUser`'s result. **An adopter cannot see which row they are in from the
+> arm alone** — that is the honest description of the gap, and it is why the clause is marked
+> rather than described as working.
+>
+> **Why the clause is not simply implemented.** S395 implemented it and it was reverted at S397.
+> Reaching outward requires codegen's `~`-reference pre-scan (`nodeContainsTildeRef`) to descend
+> into a bound value-form's arms, and that predicate does not merely answer a question — it GATES
+> WHETHER A `~` ACCUMULATOR CONTEXT IS ALLOCATED over the whole enclosing statement sequence.
+> Flipping it true for a statement whose only `~` sits inside an arm switched every SIBLING
+> statement in that sequence into §32.2 accumulator mode. Measured: a bare call inside an
+> unrelated sibling `while` became an accumulator mint scoped to the loop block, and the arm then
+> read that name from OUTSIDE the block — a `ReferenceError` at run time from a compile that
+> exits 0. The emitted JavaScript is syntactically valid, so the §2.2.1 emitted-JS parse gate
+> cannot see it.
+>
+> **The open question this keeps colliding with** — whether an arm body should be a §32.4 `~`
+> context boundary, which would make the read a *scope* question rather than a *reach* question —
+> is banked as **dpa-040** and is NOT settled by this section. The final bullet below states the
+> non-boundary reading NORMATIVELY; that statement stands, and is likewise not yet implemented.
+
+⚡ **The two rules compose, and the composition has a sharp edge worth stating.** Because an in-arm expression statement does not initialize `~` (sentence 1) and an in-arm read resolves in the enclosing context (sentence 2), an arm that initializes and then reads *within the same arm* is reading an `~` that was never initialized:
+
+```scrml
+const label = if (@n > 0) {
+    step1(2)                          // side effect. Does NOT initialize ~.
+    record(~)                         // E-TILDE-001 — ~ is not initialized here.
+    lift "ok"
+}
+```
+
+That is E-TILDE-001 by §32.5 — **Nominal / spec-ahead: the code is named, its fire site is not yet implemented (see the normative statements below), so today this shape silently yields `null` rather than erroring.** Capture it explicitly (`let v = step1(2)`) or initialize `~` before the if-as-expression. Whether an arm body should additionally become a §32.4 boundary is a separate question and is NOT settled here.
+
+**Normative statements:**
+
+- An expression statement whose value is not bound to any identifier SHALL initialize `~` to the result of that expression, **except** where that statement appears directly inside an if-as-expression arm body (§17.6.2), in which case it SHALL NOT initialize `~`.
+- An expression statement inside an if-as-expression arm body SHALL NOT be counted as an initialization for the purpose of §32.3's exactly-once rule, and SHALL NOT on its own produce E-TILDE-002.
+- A `lift` statement inside an if-as-expression arm body SHALL initialize `~` **for the POST-expression `~` described in §17.6.5** — that is, the if-as-expression as a whole, at its own statement position, leaves the executed arm's lifted value in the ENCLOSING `~` slot. It does NOT make the arm's result readable as `~` from INSIDE the arm body; see the next bullet, which governs in-arm reads. The carve-out narrows the unassigned-expression construct only.
+- (**Nominal / spec-ahead-of-implementation.**) A `~` reference inside an if-as-expression arm body SHALL resolve to the `~` slot of the ENCLOSING context. An arm's result value SHALL NOT be readable as `~`. ⛑ **The second sentence IS implemented** — the arm's result lives in a dedicated slot that `~` cannot name, which is the §17.6.2 write half and is enforced. **The first sentence holds only CONDITIONALLY** — the read reaches the enclosing slot when the enclosing sequence has one, and orphans to `null` when the in-arm `~` is the only `~` in that sequence. The unconditional form was implemented at S395 and reverted at S397 for the blast radius recorded in the status note above; the boundary question is banked as dpa-040. Do not read this bullet as describing present-day behaviour unconditionally.
+- (**Nominal / spec-ahead-of-implementation.**) An arm body that reads `~` without an initialization reaching that point from the enclosing context SHALL be E-TILDE-001 (§32.5). An in-arm expression statement does not supply that initialization. ⚑ **The code is NAMED here; the fire site lands with the §32 enforcement implementation.** `E-TILDE-001` has ZERO fire sites today — `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples` (HIGH) records six probes, including §32.5's and §17.6.6's own verbatim examples, all compiling at exit 0 with zero diagnostics. Until that gap closes, an adopter writing this shape gets codegen's orphan fallback (`null`), NOT the mandated error. Do not read this bullet as describing present-day behaviour.
+- (**Nominal / spec-ahead-of-implementation**, for the same reason as the read bullet above.) This carve-out SHALL NOT be read as making an arm body a `~` context boundary (§32.4). `~` reads inside an arm body resolve in the enclosing context. ⛑ Today they resolve to the enclosing context only when that context has a `~` slot of its own; otherwise they orphan, resolving to neither it nor the arm. Whether the settled answer is "reaches outward" or "is a boundary" is dpa-040.
+
+**Cross-references:**
+- §17.6.2 — the governing section for arm-body contents.
+- §17.6.5 — `~` initialized BY an arm's `lift`, which this carve-out does not touch.
+- §17.6.7 — the ternary at unbound statement position, which carries the same carve-out.
+- §17.6.10 — the single-expression sugar, the other designating form.
+- §32.4 — the context-boundary rule, which this carve-out does NOT extend.
+- §32.5 — the E-TILDE-002 trigger list, read subject to this carve-out.
+
 ### 32.3 `~` as a `lin` Variable
 
 `~` is a built-in `lin` variable (§35). The exactly-once consumption rule applies.
+
+⚑ Every rule in this subsection counts INITIALIZATIONS as §32.2 defines them, which means it is read
+subject to the §32.2.1 arm-body carve-out: an expression statement inside an if-as-expression arm
+body is not an initialization and therefore does not start an exactly-once obligation.
 
 - `~` SHALL be consumed exactly once between each initialization.
 - If `~` is initialized and then initialized again before being consumed, the second initialization is E-TILDE-002.
@@ -19280,7 +19429,7 @@ ${ process(~) }   // Error E-TILDE-001: ~ is not initialized at this point
 
 Triggers:
 - The logic context exits (closing `}`) with an unconsumed `~`.
-- A second unassigned expression appears before the first `~` was consumed.
+- A second unassigned expression appears before the first `~` was consumed. ⚑ An expression statement inside an if-as-expression arm body is NOT an initialization (§32.2.1) and therefore never supplies either half of this trigger — `{ note("a") lift "pos" }` is conforming, not E-TILDE-002.
 - A `lift` call appears when `~` is already initialized and unconsumed.
 
 ```scrml

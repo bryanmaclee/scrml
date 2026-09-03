@@ -1,0 +1,55 @@
+${
+    <n>: int = 5
+
+    function note(s: string) { let _ = s }
+
+    function thenStatementLift() {
+        const label = if (@n > 0) { note("a") lift "pos" } else { lift "neg" }
+        return label
+    }
+
+    function elseStatementLift() {
+        const label = if (@n < 0) { lift "pos" } else { note("b") lift "neg" }
+        return label
+    }
+
+    function statementLiftWithSugarElse() {
+        const label = if (@n > 0) { note("c") lift "pos" } else { "neg" }
+        return label
+    }
+
+    function cascadeStatementArms() {
+        const label = if (@n > 8) { note("hi") lift "hi" } else if (@n > 3) { note("mid") lift "mid" } else { note("lo") lift "lo" }
+        return label
+    }
+
+    function multipleLeadingStatements() {
+        const label = if (@n > 0) {
+            note("x")
+            note("y")
+            note("z")
+            lift "pos"
+        } else {
+            lift "neg"
+        }
+        return label
+    }
+
+    function noElseArm() {
+        const label = if (@n > 0) { note("d") lift "pos" }
+        return label
+    }
+
+    function letSiteStatementLift() {
+        let label = if (@n > 0) { note("e") lift "pos" } else { lift "neg" }
+        return label
+    }
+}
+
+<div id="out-then-lift">${thenStatementLift()}</>
+<div id="out-else-lift">${elseStatementLift()}</>
+<div id="out-sugar-else">${statementLiftWithSugarElse()}</>
+<div id="out-cascade">${cascadeStatementArms()}</>
+<div id="out-multi">${multipleLeadingStatements()}</>
+<div id="out-no-else">${noElseArm()}</>
+<div id="out-let">${letSiteStatementLift()}</>
