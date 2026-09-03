@@ -2,6 +2,29 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S398 — 2026-09-03 (peter · P-Tech1 Windows) — dog-food of fresh SPA / multi-page / engine apps surfaced two new adopter finds
+
+Ran concurrently with S397-bryan (LIVE). A docs-only dog-food session: wrote three fresh adopter
+programs from scratch, compiled them, and ran the emitted servers — the vein that finds integration
+bugs static analysis misses. Two new verified defects, both filed in `docs/known-gaps.md` and routed
+to bryan (his dev/build-server + engine/native-parser surfaces); no compiler `src` touched.
+
+- **HIGH `g-prod-server-404s-non-index-spa-entry-at-root`** — the production `_server.js` from
+  `scrml build` returns **404 at `/`** for a single-file SPA whose entry isn't named `index.scrml`
+  (it folds `/`→`/index.html` with no root fallback), while `scrml dev` serves it — a silent
+  dev/prod divergence, contradicting SPEC §40.8. It is the functional half the auth gap
+  `g-dev-root-path-fallback-...` explicitly called "structurally safe." Root `build.js:523`. Fork,
+  filed without a recommendation.
+- **MED `g-engine-state-child-apostrophe-breaks-parse`** — a straight apostrophe in an `<engine>`
+  state-child body (any contraction — "we'll", "don't") breaks the parse with a misleading
+  `E-ENGINE-STATE-CHILD-MISSING` naming a state-child that is present. It's the S196
+  `g-match-arm-apostrophe-bs` fix never generalized from the `<match>` parser to
+  `engine-statechild-parser.ts`. Even apostrophe count compiles (string-lexing mechanism).
+- Verify-first prevented ~4 phantom filings (non-idiomatic `${if}` false warnings; the notes-load
+  symptom traced to the already-ruled `g-onmount-multistatement-bypasses-statement-codegen`; a
+  soft-nav transition error that didn't reproduce on a clean nav).
+- Gap counts regenerated: HIGH 77→78 · MED 204→205.
+
 ## S396 — 2026-09-02 (peter · P-Tech1 Windows) — aM pin bumped to HEAD; a flogenceP dog-food surfaced an E-ROUTE-004 gate hole
 
 A dog-food + adopter-ops session; no compiler source touched. The assetManagement pin was bumped to
