@@ -1,0 +1,42 @@
+${
+    <n>: int = 5
+
+    function step1(v: int) { return v + 1 }
+    function record(v: int) { return v }
+
+    function tildeReadInArm() {
+        step1(2)
+        const label = if (@n > 0) {
+            record(~)
+            lift "ok"
+        } else {
+            lift "neg"
+        }
+        return label
+    }
+
+    function tildeReadInElseArm() {
+        step1(6)
+        const label = if (@n < 0) {
+            lift "pos"
+        } else {
+            record(~)
+            lift "else-ok"
+        }
+        return label
+    }
+
+    function liftReadsTildeInArm() {
+        step1(40)
+        const label = if (@n > 0) {
+            lift ~
+        } else {
+            lift 0
+        }
+        return label
+    }
+}
+
+<div id="out-read">${tildeReadInArm()}</>
+<div id="out-read-else">${tildeReadInElseArm()}</>
+<div id="out-lift-tilde">${liftReadsTildeInArm()}</>

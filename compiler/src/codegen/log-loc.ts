@@ -99,6 +99,38 @@ export function resolveLogLoc(span: LogLocSpan | null | undefined): string {
   return base;
 }
 
+/**
+ * Resolve a span's BYTE OFFSET to a 1-based `{ line, col }` in author coordinates.
+ *
+ * ⚑ WHY THIS EXISTS SEPARATELY FROM `resolveLogLoc`: the two callers need different
+ * shapes. `resolveLogLoc` bakes a `"basename:line"` STRING into emitted JS for the
+ * §20.6 `log()` origin tag; a DIAGNOSTIC needs numeric `line`/`col` fields on its
+ * span so the CLI's `-->` frame can point at the offending source. Same registry,
+ * same `LineIndex`, same cache — only the projection differs.
+ *
+ * ⚑ AND WHY ANY OF IT IS NEEDED: `spanFromEstree` (`expression-parser.ts`) HARD-CODES
+ * `line: 1, col: 1` on every span it builds, because the line it can see is relative
+ * to the re-parsed expression fragment rather than to the file. Only `start`/`end` are
+ * true source coordinates. A diagnostic that trusts `span.line` therefore reports 1:1
+ * for every site in the file — measured: three orphaned `~` reads in one file produced
+ * three byte-identical errors all pointing at line 1, so an author with three of them
+ * could locate none of them.
+ *
+ * Returns `null` when the offset cannot be resolved (no file, no registered source,
+ * no usable offset), so a caller can fall back rather than emit a confident wrong
+ * number. Never throws.
+ */
+export function resolveSpanLineCol(
+  span: LogLocSpan | null | undefined,
+): { line: number; col: number } | null {
+  if (!span || typeof span.file !== "string" || !span.file) return null;
+  if (typeof span.start !== "number" || span.start < 0) return null;
+  const idx = indexFor(span.file);
+  if (!idx) return null;
+  const { line, column } = idx.locate(span.start);
+  return { line: line + 1, col: column + 1 };
+}
+
 /** Path basename without requiring node:path (codegen stays dependency-light). */
 function baseName(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));

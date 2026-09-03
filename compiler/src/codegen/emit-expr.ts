@@ -46,7 +46,7 @@ import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { CGError } from "./errors.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
-import { resolveLogLoc } from "./log-loc.ts";
+import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
 // builtins (no codegen), so this is cycle-free.
@@ -149,6 +149,41 @@ export function resetSessionValueUseErrors(): void {
 export function drainSessionValueUseErrors(): CGError[] {
   const out = _sessionValueUseErrors;
   _sessionValueUseErrors = [];
+  return out;
+}
+
+// §32 / §47 (S397) — module-level sink for E-CG-TILDE-UNRESOLVED, the fail-closed
+// floor under the `~` accumulator.
+//
+// WHY A SINK AND NOT `ctx.errors`: `EmitExprContext.errors` is optional and is
+// MEASURED undefined at every site the orphan actually reaches. The S397 census
+// probed both live sites (`conformance/cases/control-flow/ctrl-027-…` and
+// `samples/…/phase2-while-lift-061.scrml`) and `ctx.errors` was `undefined` on all
+// four — the `~` orphan arises deep inside client-mode expression emission, on
+// paths that build a context without one. Threading `errors` through every one of
+// those constructors is a far larger change than this arc's fence allows, and it
+// would be the wrong shape anyway: this is the same narrow-sink pattern
+// `_sessionValueUseErrors` (above) and emit-server's `_foreignCrossingErrors`
+// already establish for exactly this situation.
+//
+// LIFECYCLE, and it is WIDER than the session sink's deliberately: reset ONCE at
+// the top of `runCG` and drained TWICE — in the per-file loop's `finally` and again
+// immediately before `runCG` returns. The session sink is bounded to the server-emit
+// window because `session` is a server builtin; a `~` orphan is mode-agnostic (every
+// measured occurrence is CLIENT-mode) and can arise in the tool, library and browser
+// emit paths, each of which leaves the per-file loop by a different `continue`. A
+// drain placed at any single one of those exits would silently lose the others.
+let _tildeUnresolvedErrors: CGError[] = [];
+
+/** Reset the E-CG-TILDE-UNRESOLVED sink (called once at the start of `runCG`). */
+export function resetTildeUnresolvedErrors(): void {
+  _tildeUnresolvedErrors = [];
+}
+
+/** Drain + clear the accumulated E-CG-TILDE-UNRESOLVED diagnostics. */
+export function drainTildeUnresolvedErrors(): CGError[] {
+  const out = _tildeUnresolvedErrors;
+  _tildeUnresolvedErrors = [];
   return out;
 }
 
@@ -1119,6 +1154,51 @@ function collapseSynthSurfaceRefsInRaw(raw: string, synthCellKeys: Set<string>):
 // Leaf nodes
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the diagnostic span for an orphaned `~` read.
+ *
+ * ⚑ TWO DEFECTS ARE BEING WORKED AROUND HERE AND BOTH ARE UPSTREAM OF THIS FILE.
+ *
+ * (a) `spanFromEstree` (`expression-parser.ts`) hard-codes `line: 1, col: 1` on every
+ *     span it builds — the line it can see belongs to the re-parsed expression
+ *     fragment, not to the file, so only `start`/`end` are true source coordinates.
+ *     Passing `node.span` through verbatim therefore reports **1:1 for every site in
+ *     the file**: three orphaned `~` reads produced three byte-identical errors, and
+ *     an author with three of them could locate none. `resolveSpanLineCol` recovers
+ *     the real position from `span.start` against the per-file source `runCG` already
+ *     registers for §20.6 — the same index, so the cost is one cached binary search.
+ *
+ * (b) The former `?? { start: 0, end: 0 }` fallback produced a span with **no `file`**,
+ *     and the CLI formatter emits no `-->` frame at all for a file-less span — the
+ *     diagnostic printed with no location whatsoever. Carrying `span.file` through
+ *     even when the offset cannot be resolved keeps the frame, which is strictly more
+ *     than the author had.
+ *
+ * Degrades honestly rather than confidently: an unresolvable offset omits `line`/`col`
+ * instead of asserting 1:1, so the formatter falls back to whatever the span does
+ * carry rather than pointing at the wrong place.
+ */
+function _tildeDiagSpan(node: IdentExpr): Record<string, unknown> {
+  const span = (node.span ?? null) as { file?: string; start?: number; end?: number } | null;
+  if (!span) return { start: 0, end: 0 };
+  const base: Record<string, unknown> = {
+    ...span,
+    start: typeof span.start === "number" ? span.start : 0,
+    end: typeof span.end === "number" ? span.end : 0,
+  };
+  const loc = resolveSpanLineCol(span);
+  if (loc) {
+    base.line = loc.line;
+    base.col = loc.col;
+  } else {
+    // Do NOT leave the hard-coded 1:1 in place — a confident wrong location is
+    // worse than none. The formatter handles an absent line/col.
+    delete base.line;
+    delete base.col;
+  }
+  return base;
+}
+
 function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
   const name = node.name;
 
@@ -1164,18 +1244,80 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     return ctx.tildeVar;
   }
 
-  // §32 — orphan `~` defensive fallback. If `name === "~"` reaches emitIdent
-  // with `ctx.tildeVar === null`, the type-system's TildeTracker should have
-  // fired E-TILDE-001 (referenced but not initialized). In practice E-TILDE-001
-  // is not yet wired for every AST shape (see compiler/tests/integration/
-  // tilde-carry-forward.test.js:193 — "no-init ~ consumption" pre-existing gap),
-  // so without this fallback the literal `~` token would leak into generated JS
-  // (invalid — unary bitwise-NOT on nothing). Emit a clear marker so the cause
-  // is visible at inspection. Per HU-5 Q-W35-1 (a) ratification (`~snapshot`
-  // codegen bug fix, 2026-05-25): defense-in-depth landing companion to the
-  // emit-logic.ts:bare-expr orphan skip.
+  // §32 / §47 (S397) — THE FAIL-CLOSED FLOOR UNDER `~`.
+  //
+  // Reaching here means `name === "~"` and `ctx.tildeVar` is null/empty: codegen
+  // has a `~` READ and no slot to resolve it to. That is not a recoverable
+  // condition, and it is not a value.
+  //
+  // ⚑ WHAT THIS REPLACED, AND WHY THE REPLACEMENT NEEDED NO NEW ANALYSIS.
+  // Until S397 this returned `null /* ~ orphaned — codegen-fallback */`. That is
+  // fail-OPEN BY CONSTRUCTION: a `~` reaching this line is, by construction, one
+  // the analysis could not resolve, and handing back a value asserts the opposite
+  // of what the compiler just discovered. The program then compiled at exit 0 with
+  // zero diagnostics and bound `null` — §32.2's accumulator quietly becoming an
+  // absent value at run time. Erroring is fail-CLOSED by construction. Choosing
+  // between the two required measuring nothing about the program, which is why this
+  // floor could land AHEAD of the §32 enforcement work (dpa-040 steps 2-4) rather
+  // than behind it.
+  //
+  // ⚑ THE SECOND REASON, AND IT IS THE LOAD-BEARING ONE: while the fallback emitted
+  // a value, NO conformance case could distinguish any candidate `~` design from any
+  // other — every candidate was extensionally identical, because nothing fired.
+  // `ctrl-027-arm-body-tilde-read-and-recovery-pos` had to pin an EMPTY render
+  // (`text: ""`) to say anything at all about this path.
+  //
+  // ⚑ WHY A NEW CODE AND NOT `E-TILDE-001`. `E-TILDE-001` is specified at §32.5 as a
+  // TYPE-SYSTEM diagnostic ("`~` referenced but not initialized in current scope") and
+  // its fire site is the §32 enforcement work that has not landed. Firing it from HERE
+  // would give one §34 row two fire stages and make "which stage owns this condition"
+  // unanswerable from the catalog. They are also not the same claim: E-TILDE-001
+  // asserts a PROVEN-uninitialized read; this code asserts only that CODEGEN had no
+  // slot — a strictly weaker, stage-local statement. The message says exactly that and
+  // claims nothing about what the type system checked, because it checked nothing.
+  //
+  // ⚑ THE PLACEHOLDER IS STILL WRITTEN TO DISK, AND SAYING OTHERWISE WOULD REPEAT THE
+  // EXACT DEFECT THIS ARC EXISTS TO CLOSE. An earlier draft of this comment claimed
+  // "the build fails on the error, so the placeholder never ships." That is FALSE, and
+  // it was REPRODUCED: `scrml compile` on a file with three orphaned reads exits **1**,
+  // prints `FAILED — 3 errors`, and still writes `case.client.js`, `case.html` and the
+  // runtime, with three placeholder sites binding `null`. `api.js` gates the write
+  // phase ONLY on `emitGateFailed` (the §2.2.1 acorn gate); a fatal CG error suppresses
+  // further diagnostics but does not stop the write.
+  //
+  // So the honest statement of the guarantee is: **fail-closed holds at the PROCESS
+  // level (non-zero exit), not at the FILESYSTEM level.** Any pipeline that keys off
+  // the exit status is protected; one that keys off "did an artifact appear" is not.
+  // Gating writes on fatal CG errors would change behaviour for every `E-CG-*` code and
+  // is deliberately NOT done here — it is filed as a gap, not smuggled in under a
+  // diagnostic fix.
+  //
+  // ⚑ The same "build fails, so it never ships" reasoning appears at three other sites
+  // in this file (the E-SESSION-VALUE placeholder and two leak-guard comments). It is
+  // wrong in all of them for this same reason. Filed; not edited here, because they are
+  // other codes' text.
+  //
+  // The placeholder is emitted as syntactically VALID JS on purpose: an unparseable one
+  // would trip the §2.2.1 acorn emit gate and bury this precise diagnostic under a
+  // generic `E-CODEGEN-INVALID-LOGIC` "compiler defect" — the wrong-altitude failure
+  // that several §34 rows exist specifically to prevent. That reason stands on its own
+  // and does not depend on the false claim above it.
   if (name === "~") {
-    return `null /* ~ orphaned \u2014 codegen-fallback */`;
+    _tildeUnresolvedErrors.push(new CGError(
+      "E-CG-TILDE-UNRESOLVED",
+      "E-CG-TILDE-UNRESOLVED: a `~` read reached code generation with no accumulator " +
+      "slot to resolve it to, so there is no value to emit. This is reported by CODEGEN, " +
+      "and it says only that no slot was in scope at this read — it is not a type-system " +
+      "proof that `~` is uninitialized. `~` (§32) names the value produced by the " +
+      "immediately preceding statement of the same logic body; a read that no preceding " +
+      "statement in that body supplies has nothing to name. Resolution: give `~` a " +
+      "producer in the SAME body immediately before the read, or capture the value in a " +
+      "named binding (`let v = <expr>`) and read that name instead. Before S397 this " +
+      "shape silently emitted `null`.",
+      _tildeDiagSpan(node),
+      "error",
+    ));
+    return `null /* E-CG-TILDE-UNRESOLVED: \`~\` had no slot at this read */`;
   }
 
   // §14.10 / §18.0.3 bare-variant inference codegen (C22, M9):

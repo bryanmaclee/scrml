@@ -47,6 +47,17 @@
 //      "null /* ~ orphaned — codegen-fallback */" so the cause is visible
 //      and the JS parses.
 //
+// ⛑ S397 SUPERSEDES PART 2 OF THAT FIX, AND THIS NOTE IS HERE SO THE NARRATIVE
+// ABOVE IS NOT READ AS CURRENT. The defensive fallback was fail-OPEN by
+// construction — a "~" reaching emitIdent unresolved is by construction one the
+// analysis could not resolve, so handing back a value asserted the opposite of
+// what the compiler had just found, and the build stayed green. It is now
+// E-CG-TILDE-UNRESOLVED (Error), a NEWLY MINTED codegen-stage §34 code — not
+// E-TILDE-001, which is a §32.5 TYPE-SYSTEM code whose fire site has not landed.
+// Part 1 of the fix (the emit-logic.ts bare-expr orphan skip) is UNCHANGED.
+// The conformance proof that the code fires is
+// conformance/cases/control-flow/ctrl-028-arm-body-tilde-read-orphan-neg.
+//
 // SPEC §32 ratifies "~" as the pipeline accumulator (READ-side atom);
 // there is no statement-position production for a lone "~". Per HU-5
 // Q-W35-1 (a) ratification, NO new SPEC §32 prose; NO new language form.
@@ -153,14 +164,29 @@ describe("~snapshot = {...} codegen fix — orphan ~ no longer leaks (HU-5 Q-W35
     expect(clientJs).toMatch(/_scrml_derived_subscribe\("snapshot", "name"\)/);
   });
 
-  test("defense-in-depth: orphan ~ in const-decl init position emits defensive marker (not raw ~)", () => {
+  test("S397 fail-closed floor: orphan ~ in const-decl init position is E-CG-TILDE-UNRESOLVED, not a silent null", () => {
     // The orphan-in-decl-init case mirrors the bare-expr fix at a different
-    // codegen path. Pre-fix: "const result = ~;" was acceptable when "~"
-    // resolved to a "_scrml_tilde_N" set up by a preceding bare-expr —
-    // but with the orphan-bare-expr skip in place, a downstream "const
-    // result = ~" that has no real prior tilde initializer would otherwise
-    // emit literal "~" (the emit-expr.ts fallthrough). The defensive
-    // marker in emit-expr.ts:emitIdent catches this.
+    // codegen path. "const result = ~" is fine when "~" resolves to a
+    // "_scrml_tilde_N" set up by a preceding bare-expr; with the orphan-bare-expr
+    // skip in place, a downstream "const result = ~" that has no real prior tilde
+    // initializer reaches emit-expr.ts:emitIdent with ctx.tildeVar === null.
+    //
+    // ⛑ S397 RE-SCOPE — THIS TEST USED TO ASSERT THE OPPOSITE, AND THE FLIP IS THE
+    // POINT. Until S397 it asserted `expect(clientJs).toMatch(/null \/\* ~ orphaned/)`
+    // — that the compiler MUST emit the defensive marker `null /* ~ orphaned —
+    // codegen-fallback */` and keep going. That marker was fail-OPEN by construction:
+    // a "~" reaching that line is by construction one the analysis could not resolve,
+    // so emitting a value asserted the opposite of what the compiler had just
+    // discovered, and the program compiled at exit 0 with zero diagnostics while
+    // binding null. S397 (bryan: "mint the code") replaced the marker with a minted
+    // codegen-stage diagnostic. The shape under test is UNCHANGED and deliberately so
+    // — only the contract it satisfies moved, from "emits a marker" to "is rejected".
+    //
+    // What this test still guards from the ORIGINAL HU-5 Q-W35-1 bug is intact and is
+    // asserted below: a raw "~" sigil must never reach a JS expression position
+    // (bitwise-NOT-on-nothing — a SyntaxError or a silent NaN). That was always the
+    // real defect; the marker was only ever one way of avoiding it, and erroring is
+    // the better one.
     const src = [
       "<program>",
       "${",
@@ -171,12 +197,30 @@ describe("~snapshot = {...} codegen fix — orphan ~ no longer leaks (HU-5 Q-W35
       "</program>",
     ].join("\n");
 
-    const { clientJs: __cjRaw } = compileSource(src, "orphan-consumer.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs: __cjRaw, errors } = compileSource(src, "orphan-consumer.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
 
+    // The floor FIRES, exactly once, at severity error.
+    const orphans = errors.filter((e) => e.code === "E-CG-TILDE-UNRESOLVED");
+    expect(orphans.length).toBe(1);
+
+    // ⚑ The message SHALL name the codegen-stage condition and SHALL NOT claim the
+    // type system checked anything — E-TILDE-001 is a §32.5 TYPE-SYSTEM code whose
+    // fire site has not landed, and a codegen diagnostic that borrowed its framing
+    // would make "which stage owns this condition" unanswerable from the §34 catalog.
+    expect(orphans[0].message).toContain("no accumulator slot");
+    expect(orphans[0].message).toContain("reported by CODEGEN");
+    expect(orphans[0].message).not.toContain("E-TILDE-001");
+
+    // The pre-S397 fail-open marker is GONE — this is the assertion that would go red
+    // if the fallback were ever restored.
+    expect(clientJs).not.toContain("~ orphaned");
+
+    // …and the ORIGINAL bug stays guarded: no raw "~" in expression position. The
+    // placeholder codegen emits in its place is syntactically valid JS on purpose, so
+    // this diagnostic is not buried under the §2.2.1 acorn gate's generic
+    // E-CODEGEN-INVALID-LOGIC "compiler defect" framing.
     expect(clientJs).toBeTruthy();
-    // No raw "~" in expression position.
     assertNoRawTildeInExpressionPosition(clientJs);
-    // The defensive marker MUST appear for the orphan consumer.
-    expect(clientJs).toMatch(/null \/\* ~ orphaned/);
+    expect(errors.some((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBe(false);
   });
 });
