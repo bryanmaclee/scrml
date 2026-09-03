@@ -1,15 +1,26 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
-# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
-# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
+# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
+# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
+# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
+# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
+# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
 #
-# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
+#
+# ⚠ **TWO SHAs, AND THE DISTINCTION IS LOAD-BEARING — DO NOT COLLAPSE THEM.** The **SOURCE DELTA**
+# this pass walked is `ad7b65dc..2d8dd8cb` (7 commits, 4 changed source files). The **WATERMARK** is
+# `8e278c73`, which is further along: `2d8dd8cb..8e278c73` is the wrap commit (#824) and is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`.
+# Every measurement below therefore holds at the watermark unchanged — the stamp is advanced to the
+# CURRENT `origin/main` rather than left on the last source-bearing commit, because the MAP-STAMP
+# RULE takes the merge-base, not the last interesting commit.
 #
 # **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
 # `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
@@ -2309,7 +2320,7 @@ limb it would skip the short-circuit and push a spurious failure. **Corpus-zero 
 the authoring gate that would forbid the shape outright — is DEFERRED, so nothing prevents it being
 written.**
 
-**CORPUS FIGURES, RE-PARSED AT `2d8dd8cb` (not grepped — a raw `"count": 0` grep returns 64 and
+**CORPUS FIGURES, RE-PARSED AT `8e278c73` (not grepped — a raw `"count": 0` grep returns 64 and
 over-counts by reaching non-assertion text):** **455** `domAnchored` assertions across **193** cases;
 **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (count + a first-match check)
 and **all 18 are `count: 1`** — those 18 are exactly what this fix un-blinded.

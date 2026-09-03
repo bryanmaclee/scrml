@@ -1,15 +1,26 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
-# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
-# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
+# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
+# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
+# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
+# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
+# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
 #
-# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
+#
+# ⚠ **TWO SHAs, AND THE DISTINCTION IS LOAD-BEARING — DO NOT COLLAPSE THEM.** The **SOURCE DELTA**
+# this pass walked is `ad7b65dc..2d8dd8cb` (7 commits, 4 changed source files). The **WATERMARK** is
+# `8e278c73`, which is further along: `2d8dd8cb..8e278c73` is the wrap commit (#824) and is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`.
+# Every measurement below therefore holds at the watermark unchanged — the stamp is advanced to the
+# CURRENT `origin/main` rather than left on the last source-bearing commit, because the MAP-STAMP
+# RULE takes the merge-base, not the last interesting commit.
 #
 # **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
 # `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
@@ -81,7 +92,7 @@ parsing, cell-accessor-rename), so this widens the internal consumer set, not th
 
 | Stage | Module(s) | Feeds |
 |---|---|---|
-| **⛑ §17.1.1 `if-chain` CHILD SHAPE — ONE LEAF, 14 IMPORTERS, 35 CALL SITES, AND *ONE* REMAINING DELIBERATE NON-EDGE (created #805, widened #811, closed onto route inference #818)** | `compiler/src/ast-if-chain.js` — ⚠ **`src/` ROOT, NOT `codegen/`**; `compiler/src/codegen/ast-if-chain.js` does not exist, and consumers import it as `"../ast-if-chain.js"` from `codegen/` and `"./ast-if-chain.js"` from `src/`. **Re-derived at `2d8dd8cb`: 14 importing modules, 35 call sites** (`grep -rl 'from "\.\{1,2\}/ast-if-chain.js"' compiler/src/` -> 14; `ifChainChildNodes(` minus the definition -> 35) — up from 13/32, the delta being **#818's NEW `route-inference.ts:92` edge** plus three call sites (`collect.ts:215`, `route-inference.ts:1137`, `route-inference.ts:1199`). ⛑ **THE NEW EDGE IS SECURITY-BEARING AND ITS DIRECTION MATTERS:** route inference must claim a branch-declared `server fn` BEFORE `codegen/collect.ts` hands the function list to the CLIENT emitter, or the `server fn` BODY ships into `client.js` with no `server.js` — see invariant 86 in primary.map.md. ⚠ **ONE DELIBERATE NON-EDGE REMAINS: `symbol-table.ts:10642`** is a TOTAL `Object.keys` walk that already reaches `branches[].element`; routing it through this enumerator of KNOWN fields would NARROW it. |
+| **⛑ §17.1.1 `if-chain` CHILD SHAPE — ONE LEAF, 14 IMPORTERS, 35 CALL SITES, AND *ONE* REMAINING DELIBERATE NON-EDGE (created #805, widened #811, closed onto route inference #818)** | `compiler/src/ast-if-chain.js` — ⚠ **`src/` ROOT, NOT `codegen/`**; `compiler/src/codegen/ast-if-chain.js` does not exist, and consumers import it as `"../ast-if-chain.js"` from `codegen/` and `"./ast-if-chain.js"` from `src/`. **Re-derived at `8e278c73`: 14 importing modules, 35 call sites** (`grep -rl 'from "\.\{1,2\}/ast-if-chain.js"' compiler/src/` -> 14; `ifChainChildNodes(` minus the definition -> 35) — up from 13/32, the delta being **#818's NEW `route-inference.ts:92` edge** plus three call sites (`collect.ts:215`, `route-inference.ts:1137`, `route-inference.ts:1199`). ⛑ **THE NEW EDGE IS SECURITY-BEARING AND ITS DIRECTION MATTERS:** route inference must claim a branch-declared `server fn` BEFORE `codegen/collect.ts` hands the function list to the CLIENT emitter, or the `server fn` BODY ships into `client.js` with no `server.js` — see invariant 86 in primary.map.md. ⚠ **ONE DELIBERATE NON-EDGE REMAINS: `symbol-table.ts:10642`** is a TOTAL `Object.keys` walk that already reaches `branches[].element`; routing it through this enumerator of KNOWN fields would NARROW it. |
 | CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
 | **BS-LINT (Stage 2.5 / 2.5b / 2.5c) — three passes that read BLOCK-SPLITTER output, before the AST exists** | `lint-w-interp-in-raw-content.js` (2.5) · `lint-w-input-state-markup-nonreactive.js` (2.5b) · **`lint-e-state-block-statement-form.js` (2.5c, NEW #718)** | `collectErrors("BS-LINT", …)` → `result.warnings` for 2.5/2.5b, **`result.errors` for 2.5c** (`E-` prefix + `severity:"error"`; CLI exit 1). ⚑ **THE NEW NODE IMPORTS NOTHING — it is a leaf by necessity, since anything it pulled from a later stage would invert pipeline order.** Cost: its `STATE_BLOCK_NAMES` / `STATE_BLOCK_ON_LIFECYCLE_RE` are COPIES of `ast-builder.js:1169` (⛑ S383 +9) / `:756-757`, unenforced. ⚠ **2.5 and 2.5b wrap their call in `try`/`catch`; 2.5c deliberately does NOT** — a swallowed throw in an error gate is fail-OPEN. error.map.md. |
