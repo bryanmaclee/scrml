@@ -1,169 +1,34 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **THE EXTERNAL MANIFEST IS ZERO-DIFF FOR THE SECOND CONSECUTIVE WINDOW.** `git diff --name-only
-# 2ec2ce3a..ad7b65dc -- package.json bun.lock` is **EMPTY** — no runtime or dev dependency was
-# added, removed or version-bumped across 25 commits. Every external-dependency row below therefore
-# carries forward **by measurement**, not by assumption. `package.json` is still the SOLE manifest
-# (v0.7.1, `files`-allowlisted, not a workspace monorepo).
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⛑ **THE INTERNAL GRAPH GAINED A LEAF, AND ITS *NON*-EDGES ARE THE LOAD-BEARING PART.**
-# `compiler/src/ast-if-chain.js` (NEW #805; ⚠ `src/` ROOT, **not** `codegen/` — the dispatching
-# brief's path `compiler/src/codegen/ast-if-chain.js` does not exist) is imported by **13 modules
-# across 32 call sites**, which makes it one of the most-consumed leaves in the tree after a single
-# window. **But an import census is NOT a coverage claim here:** two walks are deliberately absent
-# from that edge list and both look like gaps. See the new row in the Internal Module Graph and
-# primary.map.md invariant 82.
-#
-# ⚠ **NOTHING ELSE IN THIS FILE WAS RE-WALKED.** The pipeline-spine rows, the `ifRaw`/`ifCond`
-# five-consumer table, the §55 synth-key copies, the colorless-async destinations and the stdlib
-# pairing all carry their PRIOR verification.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **MANIFEST STILL ZERO-DIFF:** `git diff --name-only fc6df72e..2ec2ce3a -- package.json bun.lock` is EMPTY — no external dependency was added, removed or version-bumped. ONE new INTERNAL edge (see the header block).
-# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
-# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
-# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
-#
-# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
-# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
-# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
-# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
-# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — LINES 3–4 **DELIBERATELY NOT MOVED** ━━━
-#
-# The INTERNAL GRAPH was re-checked against `origin/main` == HEAD == **`ff4b37e5`** for the nine
-# compiler-source files that moved since `0dd659a1`; nothing else in this map was re-walked, so the
-# stamp stays at `fc6df72e`. **EXTERNAL DEPS RE-MEASURED AND STILL ZERO-DIFF:**
-# `git diff --name-only fc6df72e..ff4b37e5 -- package.json bun.lock` is **EMPTY** — no runtime dep,
-# no dev dep, no version moved, across three windows now.
-#
-# ⛑ **S391 — ONE NEW INTERNAL EDGE OVER `ff4b37e5..2ec2ce3a`, AND IT IS A DE-DUPLICATION:**
-#   · **`commands/compile.js` → `commands/diagnostic-format.js` GAINED `resolveDiagLocation` (#756,
-#     `67e0f614`).** `compile.js:15` now imports `{ stripRedundantCode, resolveDiagLocation,
-#     stripRedundantLocation }`; the new export is `diagnostic-format.js:64`, consumed at
-#     `compile.js:382` / `:436` / `:468` (the error / warning / lint formatters respectively).
-#     ⚑ **THE EDGE EXISTS TO KILL A THREE-WAY DIVERGENCE, NOT TO ADD A LAYER.** `compile.js`'s three
-#     formatters read only top-level `line`/`file`, so **every TS-stage diagnostic — which carries
-#     its location ONLY on `.span` — printed `stage: TS` with no `--> file:line:col`.**
-#     `build.js` and `dev.js` already did the `.span` fallback; **`compile.js` was the lone
-#     outlier**, and the fix moves the three-level chain
-#     (`x.filePath||x.file||x.span?.file` · `x.line ?? x.span?.line` ·
-#     `x.column ?? x.col ?? x.span?.col`) into ONE shared resolver all three formatters call.
-#   · ⚠ **NO OTHER INTERNAL EDGE MOVED.** `component-expander.ts`'s new
-#     `reportChannelMountsInConditionals` (#781) is **module-PRIVATE and un-exported** — it adds a
-#     call, not an edge — and `type-system.ts`'s `checkEachOpenerExpr` (#785) is a local arrow inside
-#     `annotateNodes` reusing the already-imported `parseExprToNode` / `checkLogicExprIdents`.
-#     **A +329 / +298 line landing that adds ZERO module edges is the shape to expect from a
-#     diagnostic that fires at a locus its stage already owned.**
-#
-# ⛑ **THREE NEW INTERNAL EDGES THIS WINDOW, ONE OF THEM INTO A NEW NODE — all grepped at `ff4b37e5`:**
-#   · **`symbol-table.ts` → `default-logic-exemption.ts` (NEW NODE, S383).** `symbol-table.ts:216`
-#     imports `isDefaultLogicBodyTopExempt`; the loader + matching rule that used to be INLINE in
-#     `symbol-table.ts` are gone from it. ⚑ **The edge exists for its DIRECTION, not its traffic:**
-#     TAB runs BEFORE SYM, so `ast-builder.js` must never import from `symbol-table.ts`, and a leaf
-#     module is what both stages may depend on. `default-logic-exemption.ts` itself has **zero local
-#     imports** (fs/path/url only) — that is the property to preserve.
-#   · **`codegen/emit-server.ts` → `runtime-template.js` (S384, #749).** `emit-server.ts:45` imports
-#     `SERVER_VALUE_NATIVE_MAP_HELPER`. ⚑ **This is codegen depending on the RUNTIME TEMPLATE, which
-#     is unusual and deliberate** — the helper is a VERBATIM SLICE of `SCRML_RUNTIME`, so the server
-#     copy cannot drift from the client one. Same pattern as the structural-eq / enum-table ports.
-#   · **`codegen/emit-expr.ts` → `codegen/rewrite.ts` (S384, #748) — and it is a `require()`, not an
-#     `import`.** Inside `emitCall`, `require("./rewrite.ts")` pulls `getVariantFieldSchemaFromRewriter`
-#     lazily to avoid a module cycle; it carries an eslint-disable in source. **A static import graph
-#     will NOT show this edge** — that is the thing to know before trusting a generated dep map here.
-#
-# ⚑ **S376: EXTERNAL DEPS STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`); THE
-# INTERNAL GRAPH GAINED ONE EDGE INTO AN ENTIRELY NEW NODE.**
-# `git diff --name-only 8b2e4053..fc6df72e -- package.json bun.lock` is **EMPTY** — no runtime dep,
-# no dev dep, no version moved. `bun` and `typescript` unchanged.
-#
-# ⚑ **ONE NEW INTERNAL EDGE, AND UNLIKE THE LAST TWO WINDOWS' EDGES IT IS NOT A DEDUPLICATION — IT
-# IS A NEW PIPELINE STAGE.** Verified by grep at this watermark:
-#   · `api.js:62` now imports **`runEStateBlockStatementForm`** from
-#     `./lint-e-state-block-statement-form.js` (NEW module, #718), alongside the eight sibling
-#     `lint-*.js` imports. One consumer: the **Stage 2.5c** block in `compileScrml`
-#     (`api.js:1203-1257`), which calls it on `bsResults` and drains the result through
-#     `collectErrors("BS-LINT", …)`.
-#   · **THE NEW NODE IS A LEAF: `lint-e-state-block-statement-form.js` imports NOTHING.** No
-#     `ast-builder`, no `type-system`, no shared helper — it is 486 lines of self-contained scanning
-#     over the block-splitter's output shape. That is deliberate and it is the reason it can run at
-#     Stage 2.5c at all: **anything it imported from a later stage would invert the pipeline order.**
-#     ⚠ The flip side is that its `STATE_BLOCK_NAMES` set and its `STATE_BLOCK_ON_LIFECYCLE_RE` are
-#     COPIES of `ast-builder.js`'s `_STATE_BLOCK_BARE_WRITE_NAMES` (`:1160`) and
-#     `TOPLEVEL_ON_LIFECYCLE_RE` (`:756-757`) — **a fourth and fifth instance of the shared-rule
-#     duplication this map already tracks in the §55 section.** Nothing enforces that they stay in
-#     step; a name added to one does not reach the other.
-#
-# ⚠ **NEITHER OF THE PRIOR WINDOW'S EXPORTS MADE ITS RULE SINGLE-SITE, AND THAT STILL HOLDS.** The
-# §55 five-copies / two-resolution-orders table below is unchanged this window and was re-checked.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED for the EXTERNAL-dep half. The line-3
-# stamp advanced `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the
-# MEASURED ZERO-DIFF above; the INTERNAL graph is re-walked every window and is current.)
-# **INCREMENTAL over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676, TWO operators — bryan
-# S368, peter S367/S369/S370).** Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run
-# (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an
-# ancestor of `origin/main` (it IS `origin/main`).
-#
-# ⚑ **THE ELEVEN-WINDOW `package.json` ZERO-DIFF STREAK IS OVER (#665).** `git diff --name-only
-# c96e7012..728bdc92 -- package.json` is NON-empty for the first time since S332. One dev dependency
-# ADDED — **`typescript@^5.9.2`** — and three `scripts` entries: `types`, `types:check`, and a
-# `"//types"` comment-key carrying the reason. **`typescript` is a DEV dependency and is NOT in the
-# `files` allowlist**, so nothing about the published surface or the runtime graph moved. Version
-# stays **v0.7.1**. `stdlib/`, `compiler/runtime/`, `compiler/native-parser/`, `editors/`, `lsp/` are
-# ALL zero-diff this window.
-#
-# **WHY A TYPE-CHECKER WAS NOT ALREADY A DEPENDENCY, because it reads like an oversight and is worse
-# than one:** bun executes `.ts` TRANSPILE-ONLY. With no `typescript` dep, no `tsconfig.json` and no
-# `tsc` invocation anywhere in `package.json` / `scripts/` / `.github/` / either git hook, **every
-# type annotation in `compiler/src` was in effect a comment** — and `ci.yml`'s gate-layering header
-# advertised a "types (always-on local)" layer that did not exist. Adding the dep armed
-# `scripts/types-gate.ts`, which immediately found NINE live exhaustive-switch `never` failures.
-#
-# **NEW INTERNAL EDGES A DEV AGENT WILL NOT FIND FROM THE PRIOR MAP:**
-#
-#     codegen/emit-each.ts       → markup-return-scan.js               (NEW node, #658; TS-imports-JS)
-#     module-resolver.js         → markup-return-scan.js               (NEW node, #658)
-#     codegen/emit-client.ts     → codegen/runtime-chunks.ts           (hasStdlibClientChunk, #669)
-#     codegen/emit-client.ts     → codegen/utils.ts                    (maskStringLiteralSpans, #669)
-#     runtime-chunks.ts          → route-inference.ts                  (DOCUMENTED criterion edge, #669 —
-#                                                                       the chunk list is DERIVED from
-#                                                                       ESCALATION_SERVER_ONLY_MODULES;
-#                                                                       prose, not an import)
-#     scripts/types-gate.ts      → typescript                          (the ONLY consumer of the new dep)
-#
-# **`markup-return-scan.js` IS A SHARED-RULE NODE, EXACTLY LIKE `select-request-onion.js` — and the
-# one-provider discipline is now the third instance of the same lesson.** "does this fn return
-# markup?" had to be answered identically by `emit-each.ts` (same-file fns) and `module-resolver.js`
-# (per-module export classification), or an IMPORTED markup fn stringifies to
-# `[object HTMLSpanElement]` while an identical same-file one mounts. **It is authored in plain JS
-# because MOD runs BEFORE codegen and is plain JS** — that is the constraint that decided the file
-# extension, not preference. Same rule as invariant 39 (ONE async-name provider) and #515
-# (`localServerImportNameUsed`): **when two consumers must agree, give them one provider, not two
-# copies of a predicate.**
-#
-# ⚑ **`RUNTIME_CHUNK_ORDER` IS NOW A DEPENDENCY EDGE, NOT JUST AN ARRAY (#669).** A client-side
-# `import … from 'scrml:NAME'` lowers to `const { … } = _scrml_stdlib.NAME;`, which the `stdlib-NAME`
-# entry in that array defines **and nothing else does**. So the array IS the client-side stdlib
-# dependency graph. It went **4 -> 13 stdlib chunks** this window; before that, client stdlib imports
-# were DOA for **17 of 21 modules** at exit 0. See the "Runtime-chunk gating" section below and
-# `stdlib module pairing`.
-#
-# ⚠ **`scripts/facts.ts` STILL CARRIES A HAND-MAINTAINED EXCLUSION LIST AND NOTHING CHECKS IT.**
-# `NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion"])`
-# (`scripts/facts.ts:83`) is how the published "CLI verbs" figure stays **11** while
-# `compiler/src/commands/` holds **14** files. Carried verbatim from the prior window — a new
-# shared-rule module dropped into `commands/` inflates the published figure until someone edits that
-# set by hand.
+# **ONE NEW INTERNAL EDGE THIS WINDOW, AND IT IS SECURITY-BEARING.** `compiler/src/route-inference.ts`
+# now imports `ifChainChildNodes` from `./ast-if-chain.js` (`:92`) — the module that was previously
+# consumed only by `codegen/` and `src/` walkers now has the ROUTE-INFERENCE walk on it too (#818).
+# `codegen/collect.ts` already imported it (`:14`) for `collectTopLevelLogicStatements`; #818 added the
+# second call site in `collectFunctions`. No external dependency changed: `package.json` is untouched
+# in this window.
 #
 
 ## MANIFEST SHAPE — one manifest, allowlisted
@@ -216,7 +81,7 @@ parsing, cell-accessor-rename), so this widens the internal consumer set, not th
 
 | Stage | Module(s) | Feeds |
 |---|---|---|
-| **⛑ §17.1.1 `if-chain` CHILD SHAPE — ONE LEAF, 13 IMPORTERS, 32 CALL SITES, AND TWO DELIBERATE NON-EDGES (NEW #805, WIDENED #811)** | **`compiler/src/ast-if-chain.js`** — ⚠ `src/` ROOT, **not** `codegen/`; `codegen/` consumers import `"../ast-if-chain.js"`, `src/` consumers `"./ast-if-chain.js"`. Single export `ifChainChildNodes(node)`: `branches[].element` in source order, then `elseBranch`; `[]` for any non-`if-chain`, so it is safe to call unconditionally. **IMPORTERS (13):** `codegen/collect.ts` · `codegen/emit-each.ts` · `codegen/emit-match.ts` · `codegen/reactive-deps.ts` (**13 of the 32 sites**) · `commands/promote.js` · `dependency-graph.ts` · `lint-i-fn-promotable.js` · `lint-i-match-promotable.js` · `lint-w-each-key.js` · `lint-w-each-promotable.js` · `lint-w-map-iteration-order.js` · `symbol-table.ts` · `type-system.ts`. **NO module imports it that does not also call it**, and it imports nothing itself — a true leaf. ⚠ **TWO NON-EDGES ARE INTENTIONAL AND READING THIS TABLE AS A COVERAGE MAP IS THE TRAP:** (a) `collect.ts:173` `collectFunctions` is **backed out** — closing it emits a `server fn` BODY into `client.js` because the server-boundary routing walk is separately blind; a LEAK GUARD test (`compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124`) reds anyone who closes it alone. (b) `symbol-table.ts:10642` is a **total `Object.keys` walk** that already reaches `branches[].element`; the helper enumerates KNOWN fields, so adding that edge NARROWS a correct site. **An edge count answers "who asks the shared question"; it does not answer "who needs to."** |
+| **⛑ §17.1.1 `if-chain` CHILD SHAPE — ONE LEAF, 14 IMPORTERS, 35 CALL SITES, AND *ONE* REMAINING DELIBERATE NON-EDGE (created #805, widened #811, closed onto route inference #818)** | `compiler/src/ast-if-chain.js` — ⚠ **`src/` ROOT, NOT `codegen/`**; `compiler/src/codegen/ast-if-chain.js` does not exist, and consumers import it as `"../ast-if-chain.js"` from `codegen/` and `"./ast-if-chain.js"` from `src/`. **Re-derived at `2d8dd8cb`: 14 importing modules, 35 call sites** (`grep -rl 'from "\.\{1,2\}/ast-if-chain.js"' compiler/src/` -> 14; `ifChainChildNodes(` minus the definition -> 35) — up from 13/32, the delta being **#818's NEW `route-inference.ts:92` edge** plus three call sites (`collect.ts:215`, `route-inference.ts:1137`, `route-inference.ts:1199`). ⛑ **THE NEW EDGE IS SECURITY-BEARING AND ITS DIRECTION MATTERS:** route inference must claim a branch-declared `server fn` BEFORE `codegen/collect.ts` hands the function list to the CLIENT emitter, or the `server fn` BODY ships into `client.js` with no `server.js` — see invariant 86 in primary.map.md. ⚠ **ONE DELIBERATE NON-EDGE REMAINS: `symbol-table.ts:10642`** is a TOTAL `Object.keys` walk that already reaches `branches[].element`; routing it through this enumerator of KNOWN fields would NARROW it. |
 | CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
 | **BS-LINT (Stage 2.5 / 2.5b / 2.5c) — three passes that read BLOCK-SPLITTER output, before the AST exists** | `lint-w-interp-in-raw-content.js` (2.5) · `lint-w-input-state-markup-nonreactive.js` (2.5b) · **`lint-e-state-block-statement-form.js` (2.5c, NEW #718)** | `collectErrors("BS-LINT", …)` → `result.warnings` for 2.5/2.5b, **`result.errors` for 2.5c** (`E-` prefix + `severity:"error"`; CLI exit 1). ⚑ **THE NEW NODE IMPORTS NOTHING — it is a leaf by necessity, since anything it pulled from a later stage would invert pipeline order.** Cost: its `STATE_BLOCK_NAMES` / `STATE_BLOCK_ON_LIFECYCLE_RE` are COPIES of `ast-builder.js:1169` (⛑ S383 +9) / `:756-757`, unenforced. ⚠ **2.5 and 2.5b wrap their call in `try`/`catch`; 2.5c deliberately does NOT** — a swallowed throw in an error gate is fail-OPEN. error.map.md. |

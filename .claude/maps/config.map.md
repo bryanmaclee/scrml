@@ -1,67 +1,31 @@
 # config.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** `git diff --name-only 2ec2ce3a..ad7b65dc -- '.env*'
-# 'bunfig.toml' 'package.json' 'tsconfig.json'` is **EMPTY** across 25 commits. No environment key,
-# feature flag, runtime config or manifest field was added, removed or renamed. `package.json`
-# remains the SOLE manifest at v0.7.1.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⚠ **ONE THING DID CHANGE IN THIS FILE'S NEIGHBOURHOOD AND IT IS *NOT* CONFIG: `scripts/` gained
-# `worktree-sweep.ts`.** It reads no environment variable and no config file — it is a pure git-query
-# tool — so it correctly produces no row here. Named only so the next pass does not re-discover it as
-# an unexplained `scripts/` delta.#
-# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
-# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
-# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
-# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+# **NO CONFIG-KEY CHANGE THIS WINDOW.** No `.env` template, no `package.json`, and no `config.*` module
+# changed between `ad7b65dc` and `2d8dd8cb`. Carried forward VERIFIED-UNCHANGED.
 #
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED:** `git diff --name-only fc6df72e..2ec2ce3a -- '.env*' bunfig.toml package.json` is **EMPTY**; no env key, feature flag or config file moved in the window. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
-# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
-# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
-# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
-# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
-# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED.**
-# Re-measured at THIS watermark: `grep -cE '^[+-].*(process\.env|Bun\.env)'` over the WHOLE
-# window's `compiler/ scripts/ .github/ package.json` diff returns **0**, and `.env*` /
-# `bunfig.toml` / `tsconfig*` / `package.json` / `bun.lock` are all `--name-only` **EMPTY**.
-# No env var, no feature flag, no config key moved. The window's one NEW module
-# (`compiler/src/lint-e-state-block-statement-form.js`) reads no environment and takes no flag —
-# its only configuration surface is the `DIAGNOSTIC_CODE` / `STATE_BLOCK_NAMES` constants, which
-# are source, not config.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
-# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
-# **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.**
-# Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run (primary.map.md) at WRITE time: the
-# source diff `merge-base..HEAD` is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
-#
-# **ZERO ENV-SURFACE DIFF ACROSS THE `c96e7012` -> `728bdc92` WINDOW (21 commits, PRs #657-#676).**
-# The evidence, re-run at this HEAD over a 2,328-line source diff:
-# `git diff c96e7012..728bdc92 -- compiler/src/ scripts/ lsp/ | grep -cE '^[+-].*(process\.env|Bun\.env)'`
-# returns **0** — no added AND no removed env-var line anywhere in the window diff. `.env*`,
-# `bunfig.toml` and `tsconfig*` are `--name-only` EMPTY. **Every key table below carries.**
-#
-# ⚑ **ONE CARRIED CLAIM IS NOW FALSE: `package.json` is NOT zero-diff.** The eleven-window streak
-# ended at #665 — `typescript@^5.9.2` (dev) plus `types` / `types:check` / a `"//types"` comment-key
-# in `scripts`. **It introduces NO environment variable and NO configuration key**, so nothing in
-# this map's tables moves; it is recorded here only so a reader who diffs `package.json` does not
-# conclude the config surface changed. build.map.md · dependencies.map.md.
-#
-# ⚠ **STILL NO `tsconfig.json` IN THE REPO, even after `typescript` became a dependency.**
-# `scripts/types-gate.ts` supplies its compiler options programmatically. **Do not add one casually**
-# — it would change what `tsc` sees and therefore what the `TYPES-BASELINE.json` name-set means.
 
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 

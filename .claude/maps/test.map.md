@@ -1,219 +1,38 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **+11 test files, ZERO deleted — `1,413 -> 1,424`, RE-DERIVED BY EXECUTION per category, not
-# shifted.** `find compiler/tests -name '*.test.js' | wc -l` -> **1,424**, which is `docs/FACTS.md`'s
-# `test files | 1,424` exactly. Two independent instruments agreeing is what makes this quotable.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-#     browser 102 · commands 17 · conformance 133 · e2e-render-map 2 · integration 216 ·
-#     lsp 11 · self-host 4 · unit 925          = 1,410  (category dirs)
-#     + 14 at `compiler/tests/*.test.js` root  = 1,424
-#
-# **The +11 is `unit +10 · browser +1`.** `commands`, `conformance`, `e2e-render-map`,
-# `integration`, `lsp`, `self-host` and the 14 root-level files are ALL FLAT. The **15** `*.test.ts`
-# files in the same tree are still EXCLUDED from this walk, as is all of `conformance/`.
-# **Conformance cases: `887 -> 891` (+4)** — `ctrl-021`..`ctrl-024`, all §17.6 value-form.
-#
-# ⛑ **A TEST CLASS WORTH NAMING BECAUSE ITS PURPOSE IS THE OPPOSITE OF THE USUAL ONE: THE LEAK
-# GUARD.** `compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124` —
-# *"LEAK GUARD: a server fn in a branch never ships its body to the client"* — exists to **RED when
-# someone CLOSES a deliberately-open hole.** `collect.ts:173`'s `collectFunctions` is intentionally
-# blind to if-chain branches because closing it alone emits a `server fn` BODY into `client.js`; the
-# guard is the enforcement of that "backed out, not forgotten" decision. ⚠ **A test that fails when
-# a bug is FIXED looks like a stale test to every instrument we have** — `bun test` cannot tell it
-# from a regression, and neither can a review that reads only the failure name. **Read the test's
-# own header before "repairing" it.** Same class as invariant 57 (`skipPastRanges`, an exported
-# function with zero callers on purpose): the tree carries deliberate-looking-wrong artifacts, and
-# deleting them is the recurring failure mode.
-#
-# ⛑ **THE 11 NEW FILES, by what they pin** — 5 if-chain descent-class regressions
-# (`g-if-chain-branch-cell-never-wired` · `-branch-decl-invisible-to-ts` ·
-# `-iteration-lints-and-promote-blind` · `-ordered-map-exemption-blind` · `-promotable-lints-blind`),
-# 4 `<each>`-interp codegen drops (`g-each-in-if-else-chain-emits-zero-renderers` ·
-# `-key-lint-blind` · `g-each-value-form-if-in-rcdata-body-injects-element-child` ·
-# `-markup-fn-call-branch-stringifies`), 1 browser tier
-# (`g-each-value-form-if-in-rcdata-body.browser.test.js`), 1 script unit
-# (`worktree-sweep-classify.test.js`). **Every one is named for the GAP it pins, which is why the
-# category delta is legible at all.**
-#
-# ⚠ **THE REST OF THIS FILE WAS NOT RE-WALKED.** The runner, tiers, fixtures, browser-gate mechanism
-# and CI tier-mapping claims carry their PRIOR verification; `.github/` is `--name-only` EMPTY over
-# this window, so nothing in the CI half could have moved.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `fc6df72e..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). **Counts here are RE-DERIVED BY EXECUTION at this SHA, not shifted** — `find` per category, cross-checked against `docs/FACTS.md`.
-# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
-# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
-# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
-# **INCREMENTAL over `8b2e4053` -> `fc6df72e` (S376).** Ancestry CHECKED (invariant 48); outbound
-# MAP-STAMP check run at WRITE time.
-#
-# **+4 test files, ZERO deleted — 1,394 -> 1,398** (`docs/FACTS.md`; `find compiler/tests -name
-# '*.test.js' | wc -l` returns **1398**, agreeing exactly). Conformance corpus **FLAT at 883 for the
-# SEVENTH window running**. §34 **812 -> 813** — one new code, `E-STATE-BLOCK-STATEMENT-FORM`.
-#
-# ⚑ **THE COUNT IN THIS MAP'S OWN "Test Categories" HEADING WAS WRONG AND CONTRADICTED THIS HEADER.**
-# It read "**1,387** `*.test.js` total, +1 this window" while the header two screens up said 1,394 —
-# **one file, two totals, seven apart.** Re-derived at this watermark and RECONCILED, because the
-# discrepancy has a cause worth recording rather than a number worth patching:
-#
-#     browser 98 · commands 14 · conformance 133 · e2e-render-map 2 · integration 213 ·
-#     lsp 11 · self-host 4 · unit 909   =  1,384 across the eight CATEGORY dirs
-#     + 14 files sitting at `compiler/tests/*.test.js` ROOT level (no category dir)
-#     =  1,398 total, which is `docs/FACTS.md`'s figure exactly
-#
-# **The 14 root-level files are the gap.** Any count derived by summing the category directories —
-# which is what a per-dir walk does, and what `flogence/scripts/mapgen.ts` reports — lands on 1,384
-# and looks authoritative. **Sum the dirs and you are 14 short; the root level is a category with no
-# directory.** Both figures are now printed side by side in the Test Categories heading.
-#
-# ⚠ **`filesScanned` reads 1963 here vs 1958 last window and is STILL NOT A REPO FACT** — the census
-# walks ten directory roots ON DISK, so it counts gitignored build output. Do not use it as a delta.
-# Full §34 buckets re-executed at this watermark: STRUCK 34 · PINNED 343 · IMPL-SITES 303 ·
-# DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112.
-#
-# ─── THE FOUR NEW FILES — AND **THREE OF THE FOUR ARE IN THE TIER THE MERGE GATE DOES NOT RUN** ───
-#
-# Category split: **1 unit, 3 browser.** That split is the finding, not a statistic:
-# `.git/hooks/pre-commit` runs unit + integration + conformance + root `*.test.js`, and
-# **`compiler/tests/browser/` is not in that set** (see "THE BROWSER TIER IS NOW GATED" below for
-# what does run it). So three of this window's four new regression pins are outside the commit gate.
-#   · **`unit/state-block-statement-form.test.js` (#718, 476L)** — the ONE gated file. Pins
-#     `E-STATE-BLOCK-STATEMENT-FORM` across seven `describe` blocks: the reported defect, the
-#     deliberately-uncovered complement (bare calls / control flow / bare writes / prose), block
-#     comments, the `type:"state"` name guard, the reported COLUMN, the message's truth at every
-#     locus, and a **`KNOWN OPEN (pinned, not endorsed)`** block that asserts the nested-`<div>`
-#     hole's CURRENT (wrong) behaviour so the fix flips a red rather than going unnoticed.
-#     **PA-EXECUTED at this watermark: 34 pass / 0 fail / 53 expect() calls in 416ms.**
-#   · `browser/g-each-peritem-show-visibility.browser.test.js` (#710) — `show=` inside `<each>`
-#     toggles `style.display` rather than emitting a literal `show` attribute.
-#   · `browser/g-render-snippet-parametric-renders.browser.test.js` (#713/#714) — a parametric
-#     snippet fill renders at its `${render foo(arg)}` site instead of empty.
-#   · `browser/browser-lift-prefixed-interp.test.js` (#716) — a word-char-glued `${…}` in a for-lift
-#     reconcile child lowers instead of shipping the literal text.
-#
-# ⚑ **AND THE REASON THAT SPLIT MATTERS HERE RATHER THAN IN build.map.md:** all three browser pins
-# guard SILENT-WRONG-OUTPUT classes — a literal `show` attribute, an empty render slot, a literal
-# `${…}` in the DOM. **Every one of them compiles green.** A regression in any of the three passes
-# the commit gate, passes `bun test compiler/tests/unit`, and is caught only by the browser tier.
-#
-# ─── PRIOR WINDOW (S372) — the seven files it added, retained ───
-#
-# Category split: **6 unit, 1 browser** — and the tier matters (see the merge-gate note below;
-# `.git/hooks/pre-commit` runs unit + integration + conformance + root `*.test.js`, and
-# `compiler/tests/browser/` **is not in that set**).
-#   · `unit/g-if-attr-synth-toggle-lowering.test.js` (#704) — the §55 `if=` collapse/decline matrix.
-#     **PA-EXECUTED at this watermark: 26 pass / 0 fail / 74 expect() calls in 373ms.** Its fixture is
-#     PARAMETERISED ON THE FIELD DECLARATION FORM, which is the whole point: the four-round review
-#     failure was a premise measured on ONE declaration form (markup-typed) and generalised.
-#   · `browser/g-if-attr-synth-cell-toggle.browser.test.js` (#704, +564 lines) — the executed half.
-#   · `unit/g-library-fn-match-else-arm-object-literal.test.js` (#697) — 8 cases, BOTH emitted-shape
-#     and executed-runtime halves.
-#   · `unit/g-when-handler-astpath-lowering.test.js` (#703) — map insert in a when-effect and a
-#     when-worker-message, set add, plus a plain-arithmetic regression guard.
-#   · `unit/g-when-handler-navigate-chunk-prune.test.js` (#700) — **BITE-PROVEN by stashing the fix:
-#     3 fail pre-fix.** Asserts `utilities` is PRUNED pre-fix / PRESENT post-fix, single-stmt +
-#     multi-stmt + `when message from <#w>` + a no-over-inclusion negative.
-#   · `unit/g-when-message-parent-multistatement.test.js` (#693/#695).
-#   · `unit/g-component-prop-worker-handler.test.js` (#699).
-#
-# ⚑ **ONE OF THEM CHANGED AN ASSERTION STYLE FOR A REASON WORTH KNOWING.** #703 made the existing
-# g-when-message §4 assertion **colon-spacing-agnostic**: the AST path emits `x: m` where the string
-# path emitted `x : m`. **The guard is FIELD PRESENCE, not byte layout** — an assertion that pins
-# incidental whitespace fails on a correct re-routing and teaches nothing.
-#
-# ⚑ **THE ONE THING TO READ IN THIS MAP THIS PASS IS THE NEW SECTION "WHICH RUNTIME EACH TIER
-# ACTUALLY EXECUTES".** The conformance (b) half runs the FULL `SCRML_RUNTIME` monolith, not the
-# pruned artifact the browser loads — so **all 883 cases are blind to chunk pruning BY
-# CONSTRUCTION**, and a shipped case (`each/ternary-markup-giti033`) passes while its page is dead.
-# Measured, PA-reproduced, and it changes what "the suite is green" is evidence of.
-#
-# **Carried from S368 — the +8 / 1,378 -> 1,386 recount narrative below is LAST window's.**
-#
-# ⚑ **A CORRECTION TO THE PRIOR GENERATION OF THIS MAP, AND IT IS THE KIND THIS MAP SET EXISTS TO
-# CATCH: ITS CATEGORY BREAKDOWN DID NOT SUM TO ITS OWN TOTAL, WHILE CLAIMING IT DID.** The prior
-# header wrote *"The category sum re-checks: 885+196+132+92+11+8+4+2 = 1330, +14 top-level = 1378."*
-# **That arithmetic gives 1,344, not 1,378** — a 34-file shortfall stated as a verification. Every
-# category below was RE-COUNTED RECURSIVELY at this watermark and the sum is now checked by
-# execution: **901+213+133+94+14+14+11+4+2 = 1,386** (S371 figures; **RE-COUNTED at `8b2e4053`:
-# 908+213+133+95+14+14+11+4+2 = 1,394**). ⚠ **The likely cause is the counting method,
-# not a typo: several categories hold `*.test.js` files in SUBDIRECTORIES, so a non-recursive count
-# undercounts.** Count recursively, then add.
-#
-# ─── WHAT THIS WINDOW ADDED, AND WHY EACH ONE IS A MERGE-BLOCKER RATHER THAN A REGRESSION TEST ───
-#
-# ⚑ **`integration/stdlib-client-registry.test.js` (37 cases, #669) — AND ITS TIER IS THE LESSON.**
-# It was authored in `compiler/tests/browser/` and **DELIBERATELY MOVED TO `integration/`**, because
-# `.git/hooks/pre-commit:39` runs unit + integration + conformance + root `*.test.js` and
-# **`compiler/tests/browser/` IS NOT IN THAT SET** — so the merge-blocker proving the feature is not
-# DOA was itself outside the merge gate. The browser tier is not load-bearing for any of it: 14
-# integration tests already register happy-dom the same way, including this feature's own predecessor
-# `integration/bug-18-scrml-stdlib-client-import.test.js`. **The WHOLE file moved, not just the new
-# regression.** ⚠ **Before you call a test a merge-blocker, check which TIER it is in.**
-#   Its four sections are worth knowing because they are a template for "the emitted artifact is
-#   DEAD" testing, a class a grep-level assertion structurally cannot see (before the fix, every
-#   text-level check anyone would write PASSED while the page was dead):
-#     §1  every client-registered module EXECUTES, and its registry entry carries REAL exports
-#         (an empty object would also "load" — asserting load is not asserting function).
-#     §1b **THE PARTITION** — every shim on disk is client-registered XOR escalation-server-only,
-#         with **no unclassified third state**. This is the assertion that stops the next module
-#         hiding the way 17 did, and the module lists are DERIVED from `RUNTIME_CHUNK_ORDER` and
-#         `ESCALATION_SERVER_ONLY_MODULES`, never hand-copied, so a chunk added tomorrow is executed
-#         automatically.
-#     §2  the gate FIRES for all 8 chunkless server-only modules + a submodule specifier.
-#     §3  the gate does NOT over-fire — a server-only stdlib reached only from a `server function`
-#         compiles clean (this pins the post-prune placement fix).
-#     §4  **INSTRUMENT INTEGRITY** — the harness is fed a deliberately-DOA bundle and MUST report it.
-#         **A harness that swallowed the throw would make §1 vacuous.** Invariant 59, applied to a
-#         test harness rather than a CI step.
-#
-#   · `unit/s365-asis-unknown-split.test.js` (#665) — the §7.5/§14.7 split + `W-TYPE-031-UNPROVEN`.
-#   · `integration/each-inline-value-form-if-interp.test.js` (#670, 5 cases, **bite-proven: 3 fail
-#     pre-fix**).
-#   · `integration/value-form-if-empty-string-branch.test.js` (#672).
-#   · `integration/value-form-if-fn-condition-reactive.test.js` (#673, 4 cases, **bite-proven: 2 fail
-#     pre-fix** — fn-condition + else-if cascade; plus direct-read and static non-regressions).
-#   · `integration/each-cross-file-imported-markup-fn-mount.test.js` +
-#     `browser/each-cross-file-imported-markup-fn-mount.browser.test.js` (#658).
-#   · `integration/library-mode-fn-match-object-arm-lowering.test.js` (#664).
-#   · `integration/trucking-dispatch-smoke-integration.test.js`.
-#
-# **`compiler/tests/TYPES-BASELINE.json` IS NEW AND IS NOT A TEST FILE.** It is
-# `scripts/types-gate.ts`'s baseline — a **name->COUNT map**, keyed
-# `<relative file> :: <TS code> :: <message head>` with line and column deliberately stripped.
-# ⚠ **The COUNT half was a mid-build correction and it is the reusable part:** because the key strips
-# line numbers, the NINE live `MarkupValueExpr` exhaustive-switch `never` failures in
-# `expression-parser.ts` collapsed into ONE entry under a bare set — so a TENTH would have joined an
-# existing entry and the gate would have stayed GREEN, on a defect class whose entire signal is *how
-# many switches did this member fall through*. Regenerate with `bun scripts/types-gate.ts --write`;
-# `--check` is red when a name JOINS **or LEAVES** the set, or when a count GROWS. build.map.md.
-#
-# **CARRIED, UNCHANGED — the conformance `expect` vocabulary is a DECLARED TABLE** (`EXPECT_SHAPES`
-# at `conformance/run.ts:179`, enforced by `validateExpectContainers` at `:218`, EXPORTED on purpose:
-# *"a validator that can only be reached by running the whole corpus is indistinguishable from one
-# that never fires."*), and **#646's "five gates reporting green while measuring nothing"** with the
-# unconditional `bracketed !== parsed` refusal in `state.ts` + `delta-lint.ts` (exit 1 = the log is
-# wrong, exit 2 = the instrument is broken; 2 is NOT reachable as a PASS).
-#
-# ⚠ **THE COUNTING CAVEAT CARRIES.** `docs/FACTS.md`'s `test files` figure counts **`*.test.js` under
-# `compiler/tests` only** — it EXCLUDES the **15** `*.test.ts` files in the same tree and excludes
-# `conformance/`. Three populations, three right answers; name the one you mean.
-#
-# ⚠ **INVARIANT 56 CARRIES AND IS STILL THE FIRST THING TO CHECK ON ANY `(fail)`.** bun does not read
-# `bunfig.toml [test] timeout`; the real per-test budget is bun's default **5000 ms** everywhere. A
-# synchronous test that overruns still runs its assertions to completion — they PASS — and bun then
-# reports `(fail) <name>`, **the same marker an assertion failure produces**. Declare `{ timeout }` at
-# the site for anything multi-second. Several old test comments still cite "the bunfig default 10s",
-# a number that was NEVER in force (non-compliance.report.md N11).
+# **THE COMMANDS-TIER GATING ROW IS THE CHANGE THAT MATTERS HERE**, and it is sharpened rather than
+# restated: `compiler/tests/commands/` (**17** files at this SHA) is run by **no blocking job on any
+# platform** in the source-controlled configuration — not `pre-commit`, not the cloud `gate`, not
+# `windows`. In cloud CI it appears **only** in `tracking`, which is `continue-on-error: true`.
+# ⚠ The one nuance a bare "not pre-push" would get wrong: this machine's INSTALLED pre-push hook DOES
+# name `compiler/tests/commands` in its blocking suite — but that suite is gated behind `RUN_SUITE`,
+# which is `0` on a normal push. See the Gating table and invariant 86 in primary.map.md.
+# Corpus figures re-parsed (not grepped) this pass: **455 `domAnchored` assertions across 193 cases**;
+# **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
+# check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
 
 ## Test Framework
@@ -292,11 +111,11 @@ harnesses — and is a DIFFERENT number from the 883 conformance CASES under `co
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **909** (+1: `state-block-statement-form.test.js`; ⚑ **the table read `901` while the prose four lines above it read `908` — corrected S376 by `find`**) | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **213** | `tracking` (non-blocking) + **pre-commit** + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | **133** | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | **98** (+3 this window; ⚑ **the table read `94` while the prose read `95` — corrected S376 by `find`**) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check. ⚠ **NOT in the pre-commit set** (`.git/hooks/pre-commit:39`) |
-| Commands | `compiler/tests/commands/**/*.test.js` | **14** | `tracking` only (non-blocking) |
+| Unit | `compiler/tests/unit/**/*.test.js` | **925** | `gate` (blocking) + pre-commit + pre-push. ⚑ **CORRECTED S396: this cell read `909` and was wrong AT ITS OWN WATERMARK.** `git ls-tree -r --name-only ad7b65dc -- compiler/tests/unit | grep -c '\.test\.js$'` returns **925**, identical to HEAD — so the `+1`/`+10` deltas the prior pass recorded were applied to an already-drifted base. **Zero `.test.js` files were ADDED in this window** (`git diff --diff-filter=A ad7b65dc..2d8dd8cb -- '*.test.js'` -> 0); 3 were CHANGED. |
+| Integration | `compiler/tests/integration/**/*.test.js` | **216** (⚑ **CORRECTED S396: read `213`**; `git ls-tree` at `ad7b65dc` also returns 216, so this was drifted at its own watermark too) | ⚠ **SPLIT — do not read this tier as simply "non-blocking".** It IS in the **pre-commit** hook (`bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail`, both installed and source-controlled) and in the source-controlled pre-push, so it blocks a COMMIT. It is **NOT** in the blocking cloud `gate` — in CI it runs only in `tracking` (`continue-on-error: true`). Local commit-time gate and cloud merge-time gate are DIFFERENT SETS. |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | **133** | `gate` (blocking) + pre-commit + pre-push. ⛑ **THIS TIER IS ALSO THE GATE FOR THE TOP-LEVEL `conformance/` CORPUS, WHICH NO WORKFLOW NAMES.** `bunfig.toml` pins `[test] root = "compiler/tests/"`, so the repo-root `conformance/` dir is outside auto-discovery; `compiler/tests/conformance/corpus-bridge.test.js` lives under the gated root and imports `loadCases` / `runCase` / `runCaseRuntime` / `hasRuntimeHalf` from `../../../conformance/run.ts`, one `test()` per case — so all **893** corpus cases ride both pre-commit and the blocking `gate`. A reviewer who greps the workflows for the corpus path finds nothing and concludes "gated nowhere"; that conclusion is wrong. See invariant 88. |
+| Browser | `compiler/tests/browser/**/*.test.js` | **102** | `gate` (blocking, via the failure NAME-SET check `bun scripts/browser-baseline.ts --check`, NOT the exit code — the tier always exits 1) + `tracking`. ⚑ **CORRECTED S396: this cell read `98`, also wrong at its own watermark** — `git ls-tree` at `ad7b65dc` returns **102**. |
+| Commands | `compiler/tests/commands/**/*.test.js` | **17** (re-counted by `find` this pass; the table read `14`) | ⛑ **ADVISORY-ONLY — NO BLOCKING JOB ON ANY PLATFORM RUNS THIS TIER, AND A REAL §52.13 SECURITY ASSERTION SAT RED HERE FOR AN EXTENDED PERIOD WITH NOTHING FAILING.** Not in `pre-commit` (installed hook, and `scripts/git-hooks/pre-commit:17`). Not in the blocking cloud `gate` (which runs `unit` + `conformance` + root `*.test.js`). Not in `windows` (`unit` + `conformance`, and `continue-on-error` anyway). In cloud CI it appears **exactly once**: `tracking` (`ci.yml:206`), `continue-on-error: true`. ⚠ **The pre-push clause is the one that gets stated wrongly — including in this pass's own dispatching brief.** The INSTALLED `.git/hooks/pre-push:96` DOES name `compiler/tests/commands` in a suite its own comment calls blocking; what makes it non-gating is that `RUN_SUITE` is `1` **only** on a release-tag push or a ref-diff failure, so a normal code push skips the whole suite. The SOURCE-CONTROLLED hook (`scripts/git-hooks/pre-push:87`) runs only `unit integration conformance` and never names `commands`. See invariant 87. |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |

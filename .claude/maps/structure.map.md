@@ -1,181 +1,36 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **THE FULL SOURCE DELTA WAS WALKED, WHICH IS WHY THE STAMP MOVED.** `git diff --name-only
-# 2ec2ce3a..ad7b65dc` over `compiler/src` · `compiler/native-parser` · `stdlib` · `scripts` · `lsp`
-# is **19 files**: 18 under `compiler/src` (**`ast-if-chain.js` NEW**) + **`scripts/worktree-sweep.ts`
-# NEW**. `compiler/native-parser/` and `stdlib/` are `--name-only` EMPTY. `.github/` is EMPTY.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⛑ **CENSUS RE-EXECUTED AT `ad7b65dc`, NOT CARRIED — and the two independent walks reconcile:**
-# `compiler/src` **194 files / 248,212 lines** by `find compiler/src -type f \( -name '*.ts' -o
-# -name '*.js' \)` (was 193 / 247,555; the +1 file IS `ast-if-chain.js`), matching `docs/FACTS.md`
-# exactly. ⚠ **The extension filter is still load-bearing: a bare `find compiler/src -type f`
-# returns 196.** `compiler/src` top level **74** files · `compiler/src/codegen/` **85** (82 `.ts` +
-# 2 `.js` + 1 `.md`) · `compiler/src/commands/` **14** (verbs still **11**) · `compiler/native-parser/`
-# **121** files (ZERO diff) · `compiler/tests/` **1,424** `*.test.js` (+11) · `conformance/cases/`
-# **891** (+4) · `compiler/SPEC.md` **37,647** lines (+108, ONE commit — #802).
+# **SURFACE CHANGES THIS WINDOW.** `compiler/src/commands/dev.js` gained three functions and LOST a
+# whole serving branch (#823): `gateProtectedDoc` (`:979`), `rootFallbackCandidates` (`:1003`) and
+# `staticCandidates` (`:1029`) are new; the ungated root-only `pathname === "/"` branch that used to
+# sit AFTER the static loop is **deleted**, and root resolution is now folded in as the tail of the
+# one gated candidate generator. `compiler/src` is **194 files** at this SHA (re-counted).
+# The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
+# server-boundary cases — see the map body).
 #
-# ⛑ **TWO NEW FILE ROWS BELOW, AND THE FIRST ONE'S PATH IS THE CORRECTION.** The dispatching brief
-# placed the if-chain descent helper at `compiler/src/codegen/ast-if-chain.js`. **That file does not
-# exist.** It is **`compiler/src/ast-if-chain.js`** — `src/` ROOT — which is why `codegen/` consumers
-# import it as `"../ast-if-chain.js"`. A map row carrying the brief's path would have sent every
-# reader one directory deep into the wrong tree with a plausible-looking name. Attribution corrected
-# too: **#805 (`aea652c7`) CREATED the file**; **#811 (`0f398b95`) closed ten more walks on it** and
-# touched neither the helper nor `emit-each.ts`/`emit-match.ts`.
-#
-# ⚠ **`compiler/src/ast-builder.js` HAS ZERO DIFF IN THIS WINDOW** (`git diff --stat
-# 2ec2ce3a..ad7b65dc -- compiler/src/ast-builder.js` is EMPTY), so **every `ast-builder.js` anchor in
-# this file carries forward BY MEASUREMENT, not by assumption.** Spot-checked and holding:
-# `E-DEPRECATED-001` at `:17378-17379`; `collapseIfChains` at `:18871`. ⚑ **And that zero-diff is
-# what makes a NEW non-compliance finding provable rather than suspected: `docs/known-gaps.md` cites
-# `collapseIfChains` at `ast-builder.js:18885`, which is `  let i = 0;`. The file has not moved a
-# byte since the entry was filed, so the citation was WRONG AT ITS OWN WATERMARK** — invariant 78's
-# class, third measured instance. See non-compliance.report.md N14.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a` (51 commits; 17 source files, of which NINE were already verified at `ff4b37e5` by the S383/S384 pass and EIGHT were unabsorbed). MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0; inbound `--is-ancestor 0dd659a1 2ec2ce3a` exit 0). Every anchor changed below was RE-DERIVED BY SYMBOL GREP at this SHA, never shifted by a line delta.
-# surface S380 touched, NOT a full re-walk). `git merge-base --is-ancestor 48f0aaf8 0dd659a1` exits 0
-# (48f0aaf8 = wrap(s378), the prior map's effective content watermark); HEAD == origin/main ==
-# 0dd659a1 at write time.
-#
-# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
-# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
-# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
-# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
-# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — THE WHOLE-SET STAMP ON LINES 3–4 IS **DELIBERATELY NOT MOVED** ━━━
-#
-# This pass re-verified NINE compiler-source files against `origin/main` == HEAD == **`ff4b37e5`**
-# (branch `wrap/s383`; `git merge-base --is-ancestor 0dd659a1 ff4b37e5` exits 0). It did **NOT**
-# re-walk the rest of this map, so lines 3–4 stay at `0dd659a1` — the S382 pattern. **Bumping a
-# whole-set stamp on a partial pass falsely claims the entire file was re-verified**, which is the
-# defect the one-SHA-on-two-lines rule exists to prevent. Every citation corrected below carries a
-# `⛑ S383` / `⛑ S384` marker; anything unmarked still carries `0dd659a1` provenance.
-#
-# `git diff --stat 0dd659a1..ff4b37e5 -- compiler/src/` is **NINE files**: `ast-builder.js`
-# (+138/-…, S383 F5 `col` fix at BOTH sibling scanners + a corrected banner), **`default-logic-exemption.ts`
-# (+98, NEW LEAF MODULE)**, `symbol-table.ts` (+76/-…, now IMPORTS that module), `lint-e-state-block-statement-form.js`
-# (+51, comment-only), `codegen/emit-expr.ts` (+78, #748/#749), `codegen/emit-server.ts` (+85, #749),
-# `codegen/rewrite.ts` (+33, #748), `runtime-template.js` (+55, #749), `commands/dev.js` (+509, #738
-# — **already reflected here; re-verified CURRENT this pass, see below**).
-#
-# ⛑ **`commands/dev.js` — VERIFIED CURRENT, NOT STALE.** `git diff --stat c1f93dfb..ff4b37e5 --
-# compiler/src/commands/dev.js` is **EMPTY** and the only commit touching it in this window is
-# `a9f03e91` (#738), which the S382 pass already absorbed. Every `dev.js` anchor in this file was
-# re-executed against `ff4b37e5` and **all hold unchanged**: `:32` (the `selectRequestOnion` import),
-# `:207` (`registeredOnions`), `:321`–`:447` (`loadServerRoutes`), `:394`–`:414` (the onion mount),
-# `:1150` (`serveDevInfra`), `:1294` (`runDevChildServer`), `:1511` (`runDev`). **No dev.js edit was
-# needed and none was made.**
-#
-# ⛑ **RULING 3'S ARMS ARE HELD, NOT LANDED — and the map text that said the §34 row contradicts
-# behaviour is now itself STALE.** `E-CONTROL-FLOW-IN-MARKUP` still fires at exactly ONE locus
-# (`ast-builder.js:1909`, gated `parentType === "markup"`). `BARE_CONTROL_FLOW_AT_BODY_TOP_RE`,
-# `findControlFlowStatementEnd`, `_DEFAULT_LOGIC_ROOT_NAMES` and an `isStateBlockBody` parameter are
-# at **ZERO occurrences** across `compiler/src/` and `compiler/tests/` — measured this pass. What DID
-# land is the documentation half: `SPEC.md:19824` (§34 row), `SPEC.md:11765` (§17.4 prose) and
-# `SPEC.md:23065` (a NEW §40.8 bullet) now all state that the §40.8 default-logic body-top is covered
-# by **NEITHER** the lift nor the diagnostic. See `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`.
-#
-# **SCOPE OF THIS PASS: `git diff --stat 48f0aaf8..0dd659a1 -- compiler/src/` is SEVEN files** —
-# `codegen/emit-each.ts` (+17/-0), `codegen/emit-match.ts` (+47/-0), `codegen/emit-server.ts`
-# (+12/-0), `codegen/emit-variant-guard.ts` (+31/-1), `commands/build.js` (+58/-3),
-# `commands/dev.js` (+32/-2, COMMITTED — see the provenance caveat below), `component-expander.ts`
-# (+122/-23). **`codegen/emit-html.ts` was NOT in this diff** — the dispatching brief named it as
-# touched; `git log 48f0aaf8..0dd659a1 -- compiler/src/codegen/emit-html.ts` is EMPTY, verified twice.
-# Every `emit-html.ts` citation in this map set was left AS-IS (unaffected, and independently still
-# correct at this watermark by spot-check).
-#
-# ⚠ **PROVENANCE CAVEAT ON `commands/dev.js` — RESOLVED (dev.js citation-only pass, current HEAD
-# `c1f93dfb`).** This caveat warned the working tree carried an UNCOMMITTED edit to `dev.js`
-# (a module-cache-bust fix) on top of committed HEAD `0dd659a1`. **It landed — as the full PR #738
-# rewrite** (adopter fix #724, merged `a9f03e91`, wrap `c1f93dfb`, now `origin/main` HEAD): the old
-# in-process serve model (Bun caches ESM by resolved path, so an in-process re-import of a
-# recompiled `*.server.js` silently served STALE routes) became a **stable parent reverse-proxy +
-# respawned CHILD app-process** model (`runDevChildServer`, `dev.js:1294`). Every `dev.js` citation
-# in this map is RE-VERIFIED against current HEAD `c1f93dfb` this pass and corrected below (Entry
-# Points paragraph, `commands/` Directory Ownership row).
-#
-# **Corrected in this pass: SIX `file:line` citations, all downstream of the SAME two insertions —
-# `emit-server.ts`'s §52.13 guard export (`:2780-2790`) and `commands/build.js`'s matching §52.13
-# registry code (`:226-245` / `:319-390`), both landing ABOVE content the prior map cited.** See the
-# ⚑ notes inline below and in the Entry Points body paragraph. `codegen/emit-each.ts`'s insertion
-# (`:1516-1533`, the #735 per-item `<match>` re-dispatch fix) shifted ONE further citation
-# (`eachBlockFromMarkupNode`) — corrected BOTH here (this file's own "Directory Ownership" row,
-# which carried the citation as `:3266` — STALE EVEN PRE-S380, since the S376 pass corrected the
-# SAME fact to `:3309` in primary.map.md but never touched this file's copy of it; both are now
-# `:3324`) and in primary.map.md (which carries it in FOUR places, all corrected). Citations sitting
-# BEFORE either insertion point were spot-checked and carry unchanged (`emit-each.ts:1271/1361`,
-# `emit-server.ts:~454-521`, `emit-lift.js:716`).
-#
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** Working tip at write time
-# `60803548` on `wrap/s376`; `git diff --name-only fc6df72e..60803548` is FOUR DOCS FILES and ZERO
-# source, so the source state read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS
-# `origin/main`. Line 3 and line 4 carry one SHA on purpose (S372 shipped a self-contradicting pair).
-#
-# **INCREMENTAL over `8b2e4053` -> `fc6df72e` (S376, 8 commits, PRs #709-#718, TWO operators —
-# bryan S375/S376, peter S375/S377). THE STREAK OF ZERO-NEW-MODULE WINDOWS IS OVER: there is ONE NEW
-# `compiler/src` MODULE, and it opens a pipeline stage that did not exist.** The `compiler/src` delta
-# is FIVE files:
-#   · **`lint-e-state-block-statement-form.js` (NEW, 486L, #718)** — Stage **2.5c**, a PRE-AST
-#     diagnostic pass. Its own row below.
-#   · `api.js` (+57) — the Stage-2.5c wiring, nothing else.
-#   · `component-expander.ts` (+153/-23, #713 + #714) — arity-tolerant snippet lambda fills and a
-#     render-bearing live-fallback guard.
-#   · `codegen/emit-each.ts` (+43, #710) — a `show=` arm in `renderTemplateAttrToJs`.
-#   · `codegen/emit-lift.js` (+29/-2, #716) — glued `${…}` in a for-lift reconcile child.
-# +4 test files, zero deleted, zero renames. `compiler/SPEC.md` moved by **ONE LINE** (a §34 row);
-# `compiler/src/types/`, `scripts/`, `.github/`, `package.json`, `conformance/` and `stdlib/` are all
-# `--name-only` **EMPTY**. FACTS.md at this watermark: **192 files / 245,517 lines** (191 -> 192,
-# +743). Ancestry CHECKED (invariant 48); outbound MAP-STAMP check run at WRITE time — source diff
-# against `merge-base HEAD origin/main` is EMPTY and `--is-ancestor fc6df72e origin/main` exits 0.
-#
-# ⚑ **FIVE `file:line` CITATIONS IN THIS MAP WERE WRONG AT THE PRIOR WATERMARK AND ARE CORRECTED
-# BELOW — FOUR OF THEM PREDATE THIS WINDOW'S DIFF, SO THEY WERE NOT CAUSED BY IT.** Every one was
-# re-derived by grep at this watermark, not adjusted by arithmetic:
-#   · `api.js:2409` (`_runCG` self-host seam) -> **`:2518`**. 52 lines stale BEFORE this window's
-#     +57; 109 stale after. Cited twice — here and in primary.map.md Task-Shape Routing.
-#   · `api.js:1082` (`splitBlocks` seam) -> **`:1134`**. Below the insertion point, so 52 lines
-#     stale at the PRIOR watermark too.
-#   · `api.js:1208-1210` (`buildAST` seam) -> **`:1316`**.
-#   · `api.js:665-677` (the `selfHostModules` `@param` block) -> **`:703-716`**. Line 665 is the
-#     GITI-018 stdlib import-specifier rewriter — a different function entirely.
-#   · ⚠ **AND THE LOAD-BEARING ONE, WHICH IS A WRONG FILE AND NOT A DRIFTED LINE.** The Entry-Points
-#     paragraph said `emit-server.ts` "splits the pipeline remainder into `_scrml_dispatch` and wraps
-#     it in `_scrml_onion_dispatch` (`emit-server.ts:521`)". **Neither symbol exists anywhere in
-#     `compiler/src/codegen/`.** Both are emitted by the HOST — `commands/build.js:514` and `:521` —
-#     and `emit-server.ts:521` was §20.5/§52 `@currentUser`-query-gate code with nothing to do with
-#     the onion (⛑ S384: that line is now **`:527`**, `astReadsCurrentUserAmbient`, +6 — the quoted
-#     `:521` above is preserved verbatim because it is a QUOTATION of the defective prior text, not a
-#     live citation). The map had the right NUMBER against the wrong FILE. Wrong since #654
-#     (`b74f7363`), i.e. through every window since. auth.map.md carried the identical error and is
-#     corrected there too.
-#
-# ⚑ **S380 INCREMENTAL — THE CORRECTED NUMBERS ABOVE (`:514`/`:521`) ARE THEMSELVES NOW STALE; SEE
-# THE "Entry Points" BODY TEXT BELOW FOR THE LIVE CITATIONS.** `commands/build.js` gained the
-# §52.13 protected-document registry (+58 lines, landing ABOVE the dispatch-split code) in the same
-# window `emit-server.ts` gained the guard export (+12, also above its own onion-contract exports).
-# `_scrml_dispatch`/`_scrml_onion_dispatch` are now `commands/build.js:570`/`:577`; the onion-contract
-# exports in `emit-server.ts` are now `:2946`/`:3105`/`:3242`/`:3259`. auth.map.md's §40.3 table has
-# the full per-row derivation.
-#
-# Prior windows' new modules (`markup-return-scan.js`, `commands/select-request-onion.js`,
-# `codegen/emit-transition-css.ts`, `commands/diagnostic-format.js`) and `scripts/types-gate.ts` /
-# `scripts/delta-lint.ts` / `scripts/corpus-zero-debt.ts` all carry unchanged.
-# ⚠ **`scripts/ctx.ts` is NOT on `main` at this watermark** (`git log origin/main -- scripts/ctx.ts`
-# is EMPTY; the path does not exist in the checkout) and is therefore NOT mapped. It exists only on
-# unmerged branches. It enters this map the window it lands.
-#
-# Prior generations' `:line` corrections stand and were spot-re-verified where this window's diff
-# touched the file. `+N`-line diff-stat framing stays retired for the BODY of this map — rows state
-# what a file OWNS and what will bite you; the header is the only place a delta figure belongs.
 
 ## Entry Points
 compiler/bin/scrml.js — CLI shim; resolves to compiler/src/cli.js.
@@ -299,6 +154,7 @@ compiler/src/codegen/emit-transition-css.ts  — **NEW THIS WINDOW. The §38 tra
 compiler/src/codegen/emit-engine.ts  — engine substrate. **NEW this window: the §51.11 `audit` port onto the modern `<engine>` (:2054+).** Emitted only when `meta.auditTarget` is set, and emitted **AFTER the cell inits** (the audit target IS a reactive cell). It registers a CLOSURE via `_scrml_engine_audit_register(varName, recorder)`, not a cell NAME — the write path is the chunk-scope wrapper, so registering a raw name made the runtime look up `<ns>$light` against a `light` entry and find nothing: **the registration emitted, the log stayed empty, and only executing a transition surfaced it.** A REGISTRY rather than a 9th positional argument to `_scrml_engine_direct_set`/`_advance` because those are called from nine emit sites across five codegen modules and one forgetful site would silently record nothing.
 compiler/src/codegen/emit-channel.ts  — the `<channel>` emitter. **⛑ NEW THIS WINDOW (#782): §38.4 ECHO DEDUP, and it is a VALUE-level dedup rather than a flag.** A per-cell JSON key of the last value synced (inbound OR outbound) lives in the emitted `_scrml_ls` (`:751`), normalized by `_scrml_lk` (`:756`); the outbound effect (`:844`) skips a send whose key equals last-synced, so an inbound sync never re-emits — **killing the ≥2-subscriber echo storm at the value level.** ⚑ **DELIBERATELY NOT a synchronous suppression flag: a flag causes cross-cell suppression and is wrong for debounced/throttled cells whose effect fires on a LATER timer.** Inbound records last-synced BEFORE applying (`:788`) so the set it triggers sees key === last-synced. `syncShared` (`:826`) is gated `readyState === 1` and RETURNS whether the frame actually reached the wire — **`WebSocket.send` itself returns `undefined`, so the old `&&` form could not distinguish SENT from DROPPED; last-synced is recorded only on a real send, so a write dropped while offline is not deduped away and lost.** Known, accepted residual: an object cell rebuilt in a different key order may miss the dedup and emit ONE redundant frame — harmless (the peer's own dedup absorbs it), never a storm. ⚠ **`:756` EMITS `void 0`, NOT THE `undefined` KEYWORD (#788), AND THE REASON IS A REPO-WIDE GATE:** `W-CG-UNDEFINED-INTERPOLATION` forbids the bare keyword in emitted output. This file already documents the idiom at `:892-895` and uses it at `:687`. **The one-token regression passed the required merge `gate` (unit + conformance) and still turned every contributor's LOCAL pre-commit red (which runs integration too) — see build.map.md's gate-vs-tracking asymmetry.**
 compiler/src/codegen/emit-machine-property-tests.ts  — §51.13 auto-generated property tests. **NEW `projectStateChildRules(stateChildren)` (:487, exported)** — projects a MODERN `<engine>`'s state-child `rule=` graph into the `TransitionRule[]` shape the existing machinery consumes (`rule=.B` → one rule; `rule=(.B|.C)` → two; `rule=*` → the `*` wildcard sentinel; no `rule=` → terminal). `legacy-arrow`/`parse-error` forms are SKIPPED — they carry their own diagnostic, and inventing transitions from an unparseable rule generates assertions about a graph nobody wrote. The generator substitutes the projection ONLY where `machine.rules` is empty, so every legacy path is byte-identical. **Also: the vacuous-artifact fix.** An empty run used to emit `test("no qualifying machines", () => expect(true).toBe(true))` — a PASSING assertion verifying nothing, landing in an adopter's suite as a green tick, and firing precisely for the canonical modern `<engine>` form. It is now `test.skip(...)` naming why.
+compiler/src/commands/dev.js  — the `scrml dev` server. ⛑ **RESHAPED THIS WINDOW (#823): THREE NEW FUNCTIONS AND ONE DELETED SERVING BRANCH.** `gateProtectedDoc(req, rel)` (`:979`) is now **the ONE place dev consults the protected-document registry** — every path that can return a document runs it, so "did this path gate?" is answerable by grep rather than by reading each branch. `staticCandidates(pathname, staticPathname, serveDir, opts)` (`:1029`) is a GENERATOR yielding, in order, the exact file, the `.html` clean URL, the directory `index.html`, and — for `/` only — `rootFallbackCandidates(opts, serveDir)` (`:1003`, the compiled single-input entry then the sorted-first `.html`). **The ungated root-only `pathname === "/"` branch that used to sit AFTER the static loop is DELETED**; `devDispatch` (`:1050`) now runs one loop over `staticCandidates` and calls the gate at `:1141`. ⚠ **Generator laziness is load-bearing, not style:** `rootFallbackCandidates` does a synchronous `readdirSync`, and `/` is the URL `scrml dev` prints — building the candidate list eagerly would pay a blocking directory read on every reload even when `index.html` hits first. ⚠ **The gate call is deliberately OUTSIDE both `try` blocks** so a throwing auth guard is LOUD; while it sat inside a wide `try` it produced a silent 404 and could fall through to a DIFFERENT file. See auth.map.md row 3.
 compiler/src/commands/migrate.js  — the `scrml migrate` source codemod. **Migration 2a (NEW, S307) runs BEFORE the keyword swap and is the load-bearing half.** A blind `machine`→`engine` swap is NOT semantics-preserving for the §51.9 PROJECTION form: `<machine … derived=@x>` + a `.A => .B` body compiles to a real MAPPING function, while `<engine … derived=@x>` is an IDENTITY projection **that silently drops the rules body**. 2a therefore lifts the body into `derived=match @x { … }` (§51.0.J), normalizes `=>` → `:>`, REPLACES `name=` with an explicit `var=` (on a derived engine `name=` marks the legacy NAMED form, which auto-declares no cell — `name=UI var=ui` leaves `@ui` undeclared, measured), and synthesizes a self-closing state-child per distinct projected-TO variant. **Fails CLOSED: any unparseable body line leaves the whole declaration untouched** to fall through to the plain keyword swap, because half-migrating a projection silently drops mappings. Migration 2 (`:317`) swaps openers; **2b (`:329`) swaps the `</machine>` CLOSER** — rewriting openers alone leaves `<engine …>` paired with `</machine>`, which parses as a mismatched tag.
 compiler/src/runtime-template.js  — the client runtime shipped into generated apps. **CORRECTION: this window's change is the §51.11 AUDIT REGISTRY, not the soft-nav/region-teardown surface** (that code is unchanged since navigate-wave1b/1c). New: `_scrml_engine_audit_targets` (:4914), `_scrml_engine_audit_register(varName, recorder)` (:4931), `_scrml_engine_audit_push(varName, from, to)` (:4936), called from `_scrml_engine_advance` (:5078) and `_scrml_engine_direct_set` (:5137). Tree-shaken by construction (codegen emits a registration only for an engine declaring `audit`). **NB the file is embedded in a template literal — no backticks may appear in it.** ⛑ **S384 (#749, +55) — THIS FILE NOW EXPORTS A SECOND ARTEFACT BESIDES `SCRML_RUNTIME`, AND IT IS A SLICE OF THE FIRST, NOT A COPY.** `SERVER_VALUE_NATIVE_MAP_HELPER` (:6355, an IIFE evaluated at module init) cuts the §59 value-native map/set runtime OUT of `SCRML_RUNTIME` verbatim, between two new marker comments — `// __SCRML_MAP_RUNTIME_START__` (**:5602**) and `// __SCRML_MAP_RUNTIME_END__` (**:6135**) — so `emit-server.ts` can inline it into a standalone `.server.js` (import `:45`; the two reachability-gated injects at `:1478` and `:5835`) that never imports the client runtime. **The slice contract is load-bearing and stated in source: everything between the markers MUST be pure hoistable `function` declarations** (no top-level executable statement), because the slice is injected after the module header. **Rename or delete a marker and the IIFE THROWS at first use, deliberately** — an empty helper would resurface the original `ReferenceError: _scrml_map_from_entries is not defined` as a silent runtime bug. Same single-source discipline as the structural-eq / enum-table server ports: there is no second copy to drift.
   Standing region-lifecycle facts (UNCHANGED code, now SPEC-ratified — see domain.map.md): `_scrml_destroy_scope` (:1390; ⛑ **S384 — `:1339` was ALREADY WRONG; re-derived by grep. `_scrml_unmount_scope` is :1519**) does the §6.7.2 four-step teardown and is reachable **ONLY** via `_scrml_unmount_scope` (:1469), the `if=` path. `_scrml_nav_apply_html` (:3060) calls `_scrml_teardown_region(liveOutlet)` (:3090), never `_scrml_destroy_scope`. `_scrml_teardown_region` (:3204) drains ONLY (⛑ **S384: `:2996`/`:3026`/`:3122` were ALREADY WRONG — re-derived by grep**) `_scrml_region_cleanups`. **Its doc-comment (:3114) claims it tears down "timers" — that is true ONLY for a `<timer>` lexically inside the shell's `<outlet>` element (`_outletResident`), and FALSE for every route-chunk timer.** `_scrml_region_track` (:4291) keys on `el.closest("[data-scrml-outlet]")`, so it cannot help a `<timer>` — `_scrml_timer_start` takes no element and `<timer>` emits no DOM node.
@@ -335,7 +191,7 @@ compiler/SPEC-INDEX.md — section-number lookup index. Its totals block is `@ge
 compiler/PIPELINE.md — the compiler pipeline stage-by-stage reference. Still describes `<machine>` as a deprecated-but-live opener — see non-compliance.report.md.
 stdlib/  — the canonical `.scrml` SOURCE of the 21 stdlib modules; **SHIPPED in the npm package** (`module-resolver.js`'s `STDLIB_ROOT` resolves `../../stdlib` at runtime).
 lsp/ + editors/  — LSP server (7 capabilities) + the VS Code extension (7 files) and Neovim set (5 files).
-conformance/  — ⛑ **S395: 891 cases** (`find conformance/cases -name expected.json | wc -l`, +4 this window — `ctrl-021`..`ctrl-024`, all §17.6 value-form: sugar lift-less branch position, no-else-renders-nothing, and the two BOUND-position cases that FAIL on base and PASS on head). The top-level D3 conformance corpus (adapters/, cases/, driver.ts) — a SEPARATE surface from compiler/tests/conformance/, bridged via corpus-bridge.test.js. **883 cases across 54 category dirs** (+15 this pass; **`derived/` is NOT a new category** — it dates to `e86a76d0`, S231, and gained 3 cases). The fifteen: 5 `sql/prepare-*-e-sql-006-neg` (the #476 emit-path matrix, all NEGATIVE), 3 `derived/e-derived-server-only-reach-{pos,neg,fn-path}` (#486 — the `-fn-path` case asserts the diagnostic's OWN prescribed fix compiles clean), 5 `match-block/*` (#469/#470/#479), 1 `lifecycle/request-data-is-some-value-bool-class-attr-rt` (#484, an `-rt` case so it EXECUTES — the defect was a runtime TypeError a compile-only case could not catch), 1 `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` (#477). `docs/FACTS.md` is the authority. A case whose id ends `-rt` EXECUTES; everything else is compile-only.
+conformance/  — ⛑ **S396: 893 cases** (+2 this window, both #818 if-chain server-boundary cases: `control-flow/if-chain-branch-declared-function-pos` and `server-fn/branch-declared-server-fn-routes-to-server`). ⛑ **THIS CORPUS IS GATED, THOUGH NO WORKFLOW NAMES IT** — via `compiler/tests/conformance/corpus-bridge.test.js`, which lives under `bunfig.toml`'s `[test] root = "compiler/tests/"` and imports `run.ts`; see invariant 88 in primary.map.md. **PRIOR TEXT (S395: 891 cases)** (`find conformance/cases -name expected.json | wc -l`, +4 this window — `ctrl-021`..`ctrl-024`, all §17.6 value-form: sugar lift-less branch position, no-else-renders-nothing, and the two BOUND-position cases that FAIL on base and PASS on head). The top-level D3 conformance corpus (adapters/, cases/, driver.ts) — a SEPARATE surface from compiler/tests/conformance/, bridged via corpus-bridge.test.js. **883 cases across 54 category dirs** (+15 this pass; **`derived/` is NOT a new category** — it dates to `e86a76d0`, S231, and gained 3 cases). The fifteen: 5 `sql/prepare-*-e-sql-006-neg` (the #476 emit-path matrix, all NEGATIVE), 3 `derived/e-derived-server-only-reach-{pos,neg,fn-path}` (#486 — the `-fn-path` case asserts the diagnostic's OWN prescribed fix compiles clean), 5 `match-block/*` (#469/#470/#479), 1 `lifecycle/request-data-is-some-value-bool-class-attr-rt` (#484, an `-rt` case so it EXECUTES — the defect was a runtime TypeError a compile-only case could not catch), 1 `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` (#477). `docs/FACTS.md` is the authority. A case whose id ends `-rt` EXECUTES; everything else is compile-only.
 samples/ · examples/ · benchmarks/ · e2e/ · dashboard/  — dogfood apps + fixtures + the Playwright suite. `examples/29-engine-vs-flags.scrml` was migrated this window to a real error ENUM (§19.4.4.1) and now TEACHES why the enum is required; it previously taught `! string`.
 docs/  — website + articles + **docs/FACTS.md (GENERATED, CI `--check`-gated — the authority for every published count)** + snippet corpora + docs/changes/ (per-dispatch archive, historical, excluded from content-mapping) + docs/audits/ + docs/changelog.md + docs/known-gaps.md + PA-SCRML-PRIMER.md.
 handOffs/ · spa-lists/ · scratch/  — PA bookkeeping, historical, excluded from content-mapping.

@@ -1,89 +1,31 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF, AND THE COMMAND IS RECORDED SO THE NEXT PASS CAN
-# RE-RUN IT RATHER THAN TRUST IT:** `git diff --name-only 2ec2ce3a..ad7b65dc -- 'compiler/src/types/'
-# 'stdlib/' '*.d.ts' '*.proto' '*.graphql'` is **EMPTY**. `compiler/src/types/` is now empty for the
-# FIFTEENTH consecutive window.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⚠ **AND THAT ZERO IS ITSELF THE FINDING THIS PASS RECORDS.** A new FileAST node kind was central to
-# this window's biggest defect class — **`kind: "if-chain"`**, minted by `collapseIfChains`
-# (`ast-builder.js:18871`, construction `:19024`) with the shape `{kind:"if-chain",
-# branches:[{condition, element}], elseBranch}` — and it is **NOT declared anywhere in
-# `compiler/src/types/ast.ts`.** It is minted structurally and consumed structurally, so the TS type
-# surface never saw it, which is a large part of why `type-system.ts` had **zero** occurrences of
-# both `if-chain` and `elseBranch` until #811. **The schema surface measuring zero across a window
-# that introduced a defect family rooted in an AST SHAPE is exactly the blind spot to name:** this
-# repo's node kinds are not all type-declared, so "`types/` did not change" does not mean "no node
-# shape changed." See domain.map.md §17.1.1 and primary.map.md invariant 82.#
-# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
-# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
-# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
-# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
-#
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** ⛑ **S391 — STAMP-ADVANCED ON MEASURED ZERO-DIFF (`fc6df72e..2ec2ce3a`), NOT RE-WALKED, AND THE MEASUREMENT IS THE EVIDENCE:** `git diff --name-only fc6df72e..2ec2ce3a -- compiler/src/types stdlib '*.d.ts' '*.proto' '*.graphql'` is **EMPTY**. ⚠ `compiler/src/type-system.ts` DID move (+298, #785) — but this map projects TYPE DECLARATIONS, not the TS pass; the `<each>` opener scope-check it gained is a DIAGNOSTIC path and lives in error.map.md. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; outbound `--is-ancestor` exit 0).
-# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
-# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
-# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
-# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
-# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED.**
-# Re-measured at THIS watermark: `compiler/src/types/`, `*.d.ts`, `schema*`, `*.proto` and
-# `*.graphql` are all `--name-only` **EMPTY** over the window —
-# **`compiler/src/types/` is now ZERO-DIFF FOR THE FOURTEENTH CONSECUTIVE WINDOW.**
-#
-# ⚑ **FIVE `compiler/src` FILES MOVED — INCLUDING ONE ENTIRELY NEW MODULE — AND THE EXPORTED-TYPE
-# SURFACE STILL DID NOT.** `git diff 8b2e4053..fc6df72e -- compiler/src/ | grep '^+' |
-# grep -E 'export (interface|type) '` is **EMPTY**, while the `export (function|const|class)` grep
-# returns exactly TWO, both from the new pre-AST diagnostic module and **neither a SHAPE**:
-#   · `DIAGNOSTIC_CODE = "E-STATE-BLOCK-STATEMENT-FORM"` (a string const, deliberately a single
-#     constant so the code allocation is a one-line flip)
-#   · `runEStateBlockStatementForm(bsResults) -> Diagnostic[]`
-#     (`lint-e-state-block-statement-form.js`) — its `bsResults` parameter and its return array are
-#     both documented in JSDoc only; **there is no named interface for either**, so this module
-#     consumes the block-splitter result shape STRUCTURALLY. See structure.map.md.
-# ⚠ `compiler/SPEC.md` moved by **exactly ONE LINE** this window (37,539 -> 37,540, `docs/FACTS.md`),
-# and that line is a §34 catalog row, not a type. No §7 / §14 / §53 type rule changed.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
-# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
-# **RE-WALKED over `c96e7012` -> `728bdc92` (21 commits, PRs #657-#676) — the streak of
-# currency-only passes is BROKEN, because a shape landed.** Ancestry CHECKED (invariant 48);
-# outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source diff `merge-base..HEAD`
-# is EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
-#
-# **`compiler/src/types` IS ZERO-DIFF FOR THE TWELFTH WINDOW** — `git diff --name-only
-# c96e7012..728bdc92 -- compiler/src/types` is EMPTY, and
-# `git diff c96e7012..728bdc92 -- compiler/src/ | grep '^+' | grep -E 'export (interface|type) '`
-# returns NOTHING. **No EXPORTED type or interface was added anywhere in the compiler.**
-#
-# ⚑ **BUT THREE MODULE-PRIVATE TYPES DID LAND IN `type-system.ts`, AND THE PRIOR MAP'S EXCLUSION
-# BLOCK FOR THEM IS NOW FALSE — DELETE IT FROM YOUR MENTAL MODEL.** The prior generation said
-# *"NOT ON MAIN, NOT MAPPED — the `asIs`/`unknown` split ... lives on the unlanded branch
-# `feat/s365-asis-split-rung0`"*. **It landed at `43eea9aa` (#665).** `git merge-base --is-ancestor
-# 43eea9aa origin/main` exits 0. `UnknownType` is no longer `{ kind: "unknown" }`. Same landing:
-# `scripts/types-gate.ts` and `compiler/tests/TYPES-BASELINE.json` are on main (structure.map.md).
-# **This is the ONLY shape change this window; everything else below carries unchanged.**
-#
-# **What else the window added is FUNCTION exports, which belong in structure/dependencies, not
-# here:** the six predicates of `markup-return-scan.js` (NEW file, #658), and
-# `STDLIB_CLIENT_CHUNK_MODULES` + `hasStdlibClientChunk` (`codegen/runtime-chunks.ts`, #669 — a
-# `ReadonlySet<string>` and a `(string) => boolean`, not a shape).
-#
-# Prior windows' function/const-export list (`selectRequestOnion`, `collectUsedTransitions`,
-# `stripRedundantCode`, `maskStringLiteralSpans`, `rewriteResetCalls`, the `commands/dev.js` test
-# surface, …) carries unchanged.
+# **NO SCHEMA CHANGE THIS WINDOW.** No type, model, `.proto` or corpus SCHEMA file changed between
+# `ad7b65dc` and `2d8dd8cb`; the two new conformance cases use the existing `expect` shape. Carried forward
+# VERIFIED-UNCHANGED.
 #
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:

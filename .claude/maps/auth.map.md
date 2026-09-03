@@ -1,150 +1,37 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-02T06:00:07-06:00  commit: ad7b65dc
-# generated-at: ad7b65dc — **THE SAME SHA AS LINE 3, BY CONSTRUCTION, AND THAT IS THE POINT.** At this
-# watermark `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `ad7b65dc`, so there is no
-# second SHA to record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `ad7b65dc`; `git diff --name-only BASE..HEAD --
+# updated: 2026-09-03T06:16:21-06:00  commit: 2d8dd8cb
+# generated-at: 2d8dd8cb — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == `2d8dd8cb`, so there is no second SHA to
+# record and none is invented. MAP-STAMP RULE run at WRITE time, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `2d8dd8cb`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor ad7b65dc origin/main` -> **exit 0**. Inbound check (invariant 48)
-# also run: `git merge-base --is-ancestor 2ec2ce3a ad7b65dc` -> exit 0.
+# `git merge-base --is-ancestor 2d8dd8cb origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor ad7b65dc 2d8dd8cb` -> exit 0.
 #
-# ━━━━━━━ ⛑ S395 wrap-6c — STAMP ADVANCED `2ec2ce3a` -> `ad7b65dc` (25 commits) ━━━━━━━
+# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `2d8dd8cb`, 7 COMMITS.** ━━━━━━━
 #
-# **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF, EVERY FILE NAMED:** `git diff --name-only
-# 2ec2ce3a..ad7b65dc --` `compiler/src/codegen/emit-server.ts` `compiler/src/codegen/emit-client.ts`
-# `compiler/src/commands/build.js` `compiler/src/commands/dev.js`
-# `compiler/src/commands/select-request-onion.js` `stdlib/auth/` `stdlib/oauth/` is **EMPTY**. The
-# §20.5 session surface, the request-pipeline onion, the CSRF/`Response`-contract handler and both
-# auth stdlib modules are byte-identical across 25 commits.
+# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
+# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
+# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
+#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
+#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
+#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
+# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
+# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
+# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
+# "14" and "12" are each correct under a different counting base and a bare number invites the
+# ambiguity. Re-counted at this SHA by parse, not carried.
 #
-# ⛑ **ONE SECURITY-ADJACENT FACT DID LAND THIS WINDOW AND IT IS NOT IN THIS FILE'S SURFACE — READ IT
-# ANYWAY.** #811 **BACKED OUT** an if-chain descent in `codegen/collect.ts:173` (`collectFunctions`)
-# because closing it emits a **`server fn` BODY into `client.js`** with no `server.js` at all: the
-# walk feeds the CLIENT function emitter while the server-boundary ROUTING walk is separately blind.
-# **That is a server-code-in-client leak reachable from ordinary authored source — an `if=`/`else`
-# chain containing a `server fn` — and it is OPEN, filed HIGH as
-# `g-collect-functions-branch-decl-vs-server-boundary-routing`.** A **LEAK GUARD** test
-# (`compiler/tests/unit/g-if-chain-branch-cell-never-wired.test.js:124`) reds anyone who closes the
-# descent without closing the routing walk first. ⚠ *A codegen agent is working this pair
-# concurrently as this map is written.* The security PROPERTY that holds today is negative — the
-# descent is absent, so the leak does not occur — which means **the guard test, not the code, is what
-# currently enforces it.** See primary.map.md invariant 82.#
-# ⚠ **A ZERO-DIFF SURFACE IS NOT A CORRECT MAP — IT IS ONLY AN UNCHANGED ONE.** The S391 pass
-# advanced `auth.map.md` on a measured zero and still found a §20.5 SPEC anchor that had been WRONG
-# FROM BIRTH (invariants 77/78). **Nothing in this file was re-walked this pass.** Treat every
-# `file:line` here as a verify-against-source hypothesis, not as re-verified currency.
+# ⛑ **THE §52.13 DEV MIRROR WAS REWRITTEN THIS WINDOW (#823) AND THE OLD ANCHOR IS DEAD.** Row 3 of
+# the enforcement table previously pointed at "`devDispatch`'s static-file branch `:1046-1048`" — an
+# inline gate. That inline block no longer exists. Dev now decides protection at **exactly one site**,
+# `gateProtectedDoc` (`compiler/src/commands/dev.js:979`), called once from the candidate loop at
+# `:1141` on the **RESOLVED** file. The bug this closed:
+# `g-dev-root-path-fallback-serves-a-protected-document-unauthenticated` — a second, ungated root
+# branch served an `auth="required"` document in full to an unauthenticated `GET /` whenever that
+# document was not named `index.html`.
 #
-# ━━━ HISTORICAL (S391 pass; line 3 has since advanced to `ad7b65dc`) ━━━ generated-at: 2ec2ce3a — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** S391 wrap-6c INCREMENTAL over `0dd659a1..2ec2ce3a`. MAP-STAMP RULE run at WRITE time (`BASE` = HEAD = `origin/main` = `2ec2ce3a`; source diff `BASE..HEAD` EMPTY; outbound `--is-ancestor` exit 0). ⛑ **NOT a clean pass: the §20.5 API-surface SPEC anchor was WRONG FROM BIRTH (pointed at §19.9.x) and is corrected in place.** `commands/dev.js` — this map's other main source — is BYTE-IDENTICAL over `ff4b37e5..2ec2ce3a`, so its citations carry forward from the S383/S384 verification unchanged.
-# Verified: `git merge-base --is-ancestor 48f0aaf8 0dd659a1` exits 0 (48f0aaf8 = wrap(s378), the prior
-# map's effective content watermark); HEAD == origin/main == 0dd659a1 at write time.
-#
-# ⛑ **POST-WRITE RE-CHECK: the wrap landed mid-pass and `origin/main` advanced `ff4b37e5` -> `9f75061c`
-# (`wrap(s383)`, #753). `git diff --stat ff4b37e5..9f75061c -- compiler/` is EMPTY — the wrap is
-# docs-only — so the SOURCE STATE READ IS `ff4b37e5` and every anchor below holds byte-identically at
-# `9f75061c`. Named here rather than re-stamping, for the same reason lines 3–4 were not moved.**
-# ━━━ ⛑ S383/S384 SCOPED INCREMENTAL — LINES 3–4 **DELIBERATELY NOT MOVED** ━━━
-#
-# Re-checked against `origin/main` == HEAD == **`ff4b37e5`**. This is a CITATION pass over the auth
-# surface, not a re-walk, so the stamp stays at `0dd659a1` (the S382 pattern).
-#
-# ⛑ **THE AUTH SURFACE IS BEHAVIOURALLY ZERO-DIFF THIS WINDOW — BUT `emit-server.ts` MOVED ANYWAY,
-# AND EVERY ANCHOR IN THIS FILE SHIFTED +52. FIFTH consecutive window where this file's citations
-# drift from a landing that has NOTHING to do with auth** (invariant 73, third occurrence in a row).
-# The mover is #749's value-native map/set server runtime: an import at `emit-server.ts:45` and a
-# ~40-line `localMapSetOptsFor` block at `:1644`, both landing ABOVE the whole auth/onion region.
-# `select-request-onion.js`, `protect-analyzer.ts`, `auth-graph.ts`, `compiler/runtime/` and `lsp/`
-# are all `--name-only` **EMPTY** over `0dd659a1..ff4b37e5`.
-#
-# ⛑ **`commands/dev.js` — RE-VERIFIED CURRENT, NOT STALE, AND NOT EDITED.**
-# `git diff --stat c1f93dfb..ff4b37e5 -- compiler/src/commands/dev.js` is **EMPTY**. Every dev.js
-# anchor in this file was re-executed against `ff4b37e5` and holds: `:32`, `:207`, `:215`, `:321`,
-# `:325`, `:379`, `:394`-`:414`, `:447`, `:1150`, `:1294`, `:1511`.
-#
-# ⚑ **SCOPED RE-CHECK OVER `48f0aaf8..0dd659a1` (S380, 12 PRs) — the auth surface is NOT zero-diff
-# this window: `emit-server.ts` (+12), `commands/build.js` (+58), `commands/dev.js` (+32, committed)
-# all moved, all for ONE feature: §52.13 below.** Everything else in this file that predates this
-# window was spot-checked against current HEAD only where the diff touched it; unrelated sections
-# carry from the prior pass unchanged.
-#
-# **Four numeric citations in the §40.3 table were STALE, caused directly by the §52.13 insertion
-# landing ABOVE every one of them in both `emit-server.ts` and `commands/build.js` — corrected
-# in place, inline, rather than re-narrated:** row 2 (`:2934/:3093/:3230/:3247` -> `:2946/:3105/
-# :3242/:3259`, +12 each), row 2b (`:511-525/:514/:521` -> `:567-581/:570/:577`, +56 each — the
-# LARGER shift here is because row 2b sits below BOTH the §52.13 `discoverServerRoutes` block AND
-# the `generateServerEntry` protectedDocs/import/registry blocks), row 3 (`284-302, 343-347` ->
-# `299-317, 365-369`), row 4's `formatOnionConflict` anchor (`:381` -> `:399`, dev.js's
-# `registeredProtectedDocs` decl adds ~8 lines above the mount block). Row 4's own `23, 179-200,
-# 311-383` range needed only the tail corrected (`311-383` -> `320-401`) — `179-200` sits entirely
-# ABOVE the dev.js insertion point and is untouched.
-#
-# ⚠ **PROVENANCE CAVEAT ON `commands/dev.js` — RESOLVED (dev.js citation-only pass, current HEAD
-# `c1f93dfb`).** This caveat warned that the working tree carried an UNCOMMITTED local edit to
-# `dev.js` on top of committed HEAD `0dd659a1`, and that the three anchors below (`:199`, `:366`,
-# `:1019`) would need re-verification if it landed. **It landed — as PR #738 (adopter fix #724,
-# merged `a9f03e91`, wrap `c1f93dfb`, now `origin/main` HEAD) — and is a full architecture rewrite,
-# not the "module-cache-bust" tweak it was described as: Bun caches ESM by resolved path, so an
-# in-process re-import of a recompiled `*.server.js` silently served STALE routes; `scrml dev` is
-# now a stable parent reverse-proxy in front of a respawned CHILD app-process (`runDevChildServer`,
-# `dev.js:1294`), never in-process.** Every `dev.js` anchor in this file is RE-VERIFIED against
-# current HEAD `c1f93dfb` this pass and corrected below (§40.3 table row 4, §52.13 table row 3). The
-# principle this caveat protects SURVIVES: dev mounts the SAME onion + SAME `registeredProtectedDocs`
-# guard the built server does — no dev/prod split — only the process topology changed.
-#
-# generated-at: fc6df72e — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** The working tip at write time was
-# `60803548` on branch `wrap/s376`; `git diff --name-only fc6df72e..60803548` returns FOUR DOCS FILES
-# (`docs/changelog.md`, `hand-off.md`, `handOffs/delta-log.md`, `master-list.md`) and ZERO source, so
-# the source state actually read IS `fc6df72e`, which is `merge-base HEAD origin/main` and IS `origin/main`.
-# **Line 3 and line 4 carry one SHA on purpose** — at S372 a refresh bumped line 3 while line 4 still
-# named an older `generated-at:`, a self-contradicting watermark the PA correctly refused to ship.
-# ⚑ **S376-bryan: STAMP-ADVANCED ON MEASURED ZERO-DIFF (`8b2e4053` -> `fc6df72e`), NOT RE-WALKED —
-# FOURTH consecutive window.** Re-measured at THIS watermark, not carried:
-# `git diff --name-only 8b2e4053..fc6df72e -- compiler/src/codegen/emit-server.ts
-# compiler/src/protect-analyzer.ts compiler/src/auth-graph.ts
-# compiler/src/commands/select-request-onion.js compiler/runtime/ lsp/` is **EMPTY**. FIVE
-# `compiler/src` files moved in the window and **not one is on the auth surface**: one NEW pre-AST
-# diagnostic module (`lint-e-state-block-statement-form.js`), its `api.js` Stage-2.5c wiring, and
-# three client-codegen lowerings (`codegen/emit-each.ts`, `codegen/emit-lift.js`,
-# `component-expander.ts`). No route, guard, session, protect-floor or token-lifecycle byte moved.
-#
-# ⚑ **BUT ONE ROW IN THIS MAP WAS WRONG AND IS CORRECTED — a zero-diff surface is not a correct map.**
-# The request-pipeline table's "HOW it wraps dispatch" row named
-# **`compiler/src/codegen/emit-server.ts:~454-521`** as the emitter of `_scrml_dispatch` /
-# `_scrml_onion_dispatch`. **Neither symbol exists anywhere under `compiler/src/codegen/`** —
-# `grep -rn '_scrml_onion_dispatch' compiler/src/codegen/` returns nothing. Both are emitted by the
-# HOST (`commands/build.js:514` and `:521`), and `emit-server.ts:~454-521` is §20.5/§52
-# `@currentUser`-query-gate code with nothing to do with the onion. The row had the right NUMBER
-# against the wrong FILE. **Wrong since #654 (`b74f7363`) — carried through every window since**,
-# and never caught because the auth surface kept measuring zero-diff and the map kept being
-# stamp-advanced rather than read. Split into rows 2 and 2b below. structure.map.md carried the
-# identical error and is corrected there.
-#
-# content generated-at: `728bdc92` (the S368 pass — CARRIED. The line-3 stamp advanced
-# `728bdc92` -> `b9e97f1b` (S371) -> `8b2e4053` (S372) -> `fc6df72e` (S376) on the MEASURED
-# ZERO-DIFF recorded in the ⚑ note above, not on a re-walk.)
-# **CURRENCY RE-VERIFIED AT `728bdc92`, NOT RE-WALKED — and verified by DIFFING, not by assuming.
-# The prior pass RE-WALKED this map after a ten-window streak and found the request pipeline had
-# moved hard; that content is one window old and carries in full.** Ancestry CHECKED (invariant 48);
-# outbound MAP-STAMP check run (primary.map.md) at WRITE time: the source diff `merge-base..HEAD` is
-# EMPTY and `728bdc92` is an ancestor of `origin/main` (it IS `origin/main`).
-#
-# **THE AUTH SURFACE IS ZERO-DIFF THIS WINDOW.**
-# `git diff --name-only c96e7012..728bdc92 -- compiler/src/codegen/emit-server.ts
-# compiler/src/commands/select-request-onion.js compiler/src/protect-analyzer.ts
-# compiler/src/auth-graph.ts stdlib/auth stdlib/oauth stdlib/crypto lsp/` is **EMPTY**. §40.3's
-# one-onion rule, the stage-1 CORS preflight, per-route `ratelimit=`, the §20.5 session surface and
-# the protect-floor all carry unchanged.
-#
-# ⚑ **ONE ADJACENCY YOU MUST NOT MISREAD AS AN AUTH CHANGE (#669, §41).** `scrml:auth`,
-# `scrml:crypto` and `scrml:oauth` appear in this window's diff, but ONLY inside
-# `codegen/runtime-chunks.ts`'s client-registry classification — **no auth CODE moved.** What
-# changed is what the compiler will now REFUSE: a CLIENT-reachable `import … from 'scrml:oauth'` is
-# a hard `E-STDLIB-CLIENT-CHUNK-MISSING`, because `oauth` puts `client_secret` in the token-exchange
-# body and its own module header reads SERVER-SIDE ONLY. ⚠ **`auth` and `crypto` are
-# escalation-server-only by the §12.2 Trigger 3 criterion YET STILL CARRY A CLIENT CHUNK** —
-# PRE-EXISTING since S95 Bug 18, left in place deliberately because removing a chunk is a behaviour
-# removal and was out of scope for that dispatch. **That is a live inconsistency in the client
-# safety story, not a mapped-and-closed decision.** dependencies.map.md · error.map.md.
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
 
@@ -354,7 +241,7 @@ rendered markup, leaking whatever the page's initial server-render put there
 |---|---|---|
 | 1. EXPORT the guard | `compiler/src/codegen/emit-server.ts:2832-2842` (⛑ S384 +52, was `:2780-2790`) | Any module whose scope is `auth="required"` now ALSO emits `export const _scrml_protected_document = { guard: (req) => _scrml_auth_check(req) };` (`:2841`; ⛑ S384 +52, was `:2789`) — reuses the SAME check the per-route gate calls, so document and function share one verdict. |
 | 2. DISCOVER + REGISTER (build) | `compiler/src/commands/build.js` — `discoverServerRoutes` excludes the export from `routeNames` and derives `protectedDocument` (the module's served `.html` path) via regex at `:245`; `generateServerEntry` collects `protectedDocs` (`:319-324`), imports each guard under a unique alias `_scrml_pd_<n>` (the export name collides across modules, `:370-373`), and builds a LOWERCASED `rel -> guard` map `_SCRML_PROTECTED_DOCS` (`:383-390`) | Static dispatch consults the map BEFORE cache headers / ETag are computed (`:538-545`) — an unauthenticated request 302s to `loginRedirect` and never reaches the file read or a 304. |
-| 3. MIRROR (dev) | `compiler/src/commands/dev.js` (RE-VERIFIED against current HEAD `c1f93dfb`, post-#738 rewrite — see the resolved PROVENANCE CAVEAT above) — module-level `registeredProtectedDocs` Map declared `:215`, reset `:325`, set per module in `loadServerRoutes` `:379`, consulted in `devDispatch`'s static-file branch `:1046-1048` | Identical mechanism, so `scrml dev` and the built server agree — no dev/prod split, the same principle §40.3's onion work established. **`devDispatch` now runs inside the respawned CHILD process** (`runDevChildServer`, `:1294`), not the top-level dev process; `registeredProtectedDocs` is rebuilt fresh in every child via `loadServerRoutes` (`:321`), so a stale guard cannot survive a respawn. |
+| 3. MIRROR (dev) | `compiler/src/commands/dev.js` — ⛑ **REWRITTEN BY #823 (`2d8dd8cb`); the anchor this row carried until S395 (`devDispatch`'s inline static-file gate at `:1046-1048`) NO LONGER EXISTS — it was deleted, not moved.** Module-level `registeredProtectedDocs` Map declared `:215`, reset `:325`, set per module in `loadServerRoutes` `:379`. **Protection is now decided at EXACTLY ONE SITE:** `gateProtectedDoc(req, rel)` (`:979`), called once from the static candidate loop at `:1141` as `gateProtectedDoc(req, relative(serveDir, candidate))`. | Identical mechanism to prod, so `scrml dev` and the built server agree — the same principle §40.3's onion work established. ⛑ **THE FIX WAS TO DELETE A SERVING PATH, NOT TO ADD A SECOND GATE.** Root resolution used to live in its own branch AFTER the loop and returned HTML from two paths that never consulted the registry, so an `auth="required"` document **not named `index.html` was served in full to an unauthenticated `GET /`** (`g-dev-root-path-fallback-serves-a-protected-document-unauthenticated`). Root's candidates now flow through the same gated loop via `staticCandidates` -> `rootFallbackCandidates` (`:1029`/`:1003`). ⚠ **THREE PROPERTIES ARE LOAD-BEARING AND EASY TO UNDO:** (a) the gate runs on the **RESOLVED** file, not the raw request path — an earlier revision gated both and the two deciders disagreed three ways (answering for deleted documents, overriding a resolution that would have served a different PUBLIC document, and ignoring candidate priority); (b) the gate call sits **OUTSIDE both `try` blocks**, because while it sat inside a wide `try` a throwing auth guard produced a silent 404 and could fall through to serve a DIFFERENT file; (c) dev and prod key on the SAME string — `relative(serveDir, candidate)` lowercased, matching `build.js`'s `_SCRML_PROTECTED_DOCS.get(rel.toLowerCase())` (`build.js:541`). **`devDispatch` runs inside the respawned CHILD process** (`runDevChildServer`), so `registeredProtectedDocs` is rebuilt fresh per respawn and a stale guard cannot survive one. |
 
 **Case-insensitivity is deliberate and OVER-protects, never under-protects.** Both sides lowercase the
 map key AND the lookup key. On a case-insensitive filesystem the OS resolves `GET /SECURE.html` to
