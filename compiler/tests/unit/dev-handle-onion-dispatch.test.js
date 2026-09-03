@@ -25,7 +25,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync, existsSync, chmodSync, statSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -248,6 +248,45 @@ describe("§5 devDispatch always returns a Response", () => {
     );
     expect(res).toBeInstanceOf(Response);
     expect(res.status).toBe(404);
+  });
+
+  test("a candidate that stats but cannot be READ still yields a Response, not a rejection", async () => {
+    // `scrml dev` rewrites dist/ on every recompile while requests are in flight, so a
+    // candidate can be unlinked or replaced between the existence probe and the read.
+    // The serving IO must therefore stay inside a catch: if it escapes, devDispatch
+    // REJECTS instead of returning, and an author `handle()` onion calling
+    // `resolve(request)` gets a rejected promise where a Response is guaranteed.
+    //
+    // A chmod-000 file is the deterministic stand-in for that race: statSync succeeds
+    // and reports a regular file, the read then fails. (Skipped as root, where the
+    // permission bit is not enforced.)
+    await mountCompiledFixture();
+    const unreadable = join(TMP, "unreadable.html");
+    writeFileSync(unreadable, "<h1>never served</h1>");
+    chmodSync(unreadable, 0o000);
+    try {
+      if (statSync(unreadable).isFile()) {
+        let readable = true;
+        try {
+          readFileSync(unreadable);
+        } catch {
+          readable = false;
+        }
+        if (readable) return; // running privileged — the probe cannot be staged
+
+        const res = await devDispatch(
+          new Request("http://localhost/unreadable.html"),
+          undefined,
+          TMP,
+          { port: 0, inputFiles: [join(TMP, "index.scrml")] },
+        );
+        expect(res).toBeInstanceOf(Response);
+        expect(res.status).toBe(404); // fell through to the next candidate, then 404
+      }
+    } finally {
+      chmodSync(unreadable, 0o644);
+      rmSync(unreadable, { force: true });
+    }
   });
 });
 
