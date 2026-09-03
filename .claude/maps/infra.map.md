@@ -44,11 +44,31 @@ None. No Dockerfile / docker-compose.yml anywhere in the repo.
 ## CI/CD
 Provider: GitHub Actions.
 Workflows — **THREE, all on `main`; only `ci.yml` changed this window** (⛑ **S391: #781-era — ONE NEW BLOCKING `gate` step, the compile-floor gate at `ci.yml:159`. No job, secret, runner or required-check NAME moved.** The prior window's change was #665 — a `tracking` step + a header correction):
-- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**14 steps — ⛑ S391 `13 -> 14`, the added step is `bun scripts/corpus-compile-floor.ts --check`; the prior window's +1 was `bun scripts/delta-lint.ts` (#652)**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **Triggers NOW: push `branches: [main]` (NEW #532 — see header), `pull_request`, and `workflow_dispatch: {}` (#454)** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
+- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**14 TOTAL steps = 12 `- name:` + 2 `- uses:`; re-counted by parse at `2d8dd8cb`, and stated both ways because a bare "14" invited an ambiguity this pass had to re-derive — ⛑ S391 `13 -> 14`, the added step is `bun scripts/corpus-compile-floor.ts --check`; the prior window's +1 was `bun scripts/delta-lint.ts` (#652)**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **Triggers NOW: push `branches: [main]` (NEW #532 — see header), `pull_request`, and `workflow_dispatch: {}` (#454)** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
 - `.github/workflows/advisory-review.yml` — 1 job: `ai-review`. **DISABLED — `workflow_dispatch` only**, with a required `pr` input. The `pull_request:` trigger is gone.
 - `.github/workflows/cloud-maps.yml` — 1 job: `regen`, still scheduled daily 09:17 UTC + `workflow_dispatch`. **Stage 2 (the project-mapper agent) was DELETED**; Stages 1 / 1b / 3 (deterministic, free) remain. `id-token: write` was dropped with it.
 
 **Both removals are a COST decision by bryan, not a broken credential.** A permanently-red check is the `pa-base` §8 cry-wolf shape — it gets ignored, and then a real failure gets ignored with it. The prior generation of this map (and build.map.md) diagnosed the red as a probable credential/entitlement condition on `ANTHROPIC_API_KEY`; **that analysis is MOOT and has been deleted rather than carried.**
+
+⛑ **WHAT EACH JOB ACTUALLY RUNS — RE-READ AT `2d8dd8cb`, BECAUSE TWO CONCLUSIONS WERE DRAWN WRONG
+FROM GREPS THIS SESSION AND THEY POINT IN OPPOSITE DIRECTIONS.**
+
+| job | blocking? | test tiers it runs |
+|---|---|---|
+| `gate` | **YES** (the only branch-protection required check) | `compiler/tests/unit` · `compiler/tests/conformance` · root-level `compiler/tests/*.test.js` |
+| `tracking` | no (`continue-on-error: true`) | `compiler/tests/integration` · `compiler/tests/lsp` · **`compiler/tests/commands`** · `parser-conformance-within-node` |
+| `windows` | no (`continue-on-error: true`) | `compiler/tests/unit` · `compiler/tests/conformance` |
+
+⚑ **`compiler/tests/commands/` IS ADVISORY-ONLY ON EVERY PLATFORM.** It is in no blocking job here,
+and in no local hook that actually executes on a normal push — a real §52.13 security assertion sat
+RED there for an extended period with nothing failing. Full mechanism (including the pre-push nuance
+that makes the naive statement false) in invariant 87.
+
+⚑ **THE TOP-LEVEL `conformance/` CORPUS *IS* GATED, THOUGH NO WORKFLOW NAMES IT.** `bunfig.toml` pins
+`[test] root = "compiler/tests/"`, so the repo-root `conformance/` dir is outside auto-discovery and
+a workflow grep for it returns nothing. The gate is
+`compiler/tests/conformance/corpus-bridge.test.js`, which sits under the gated root and imports
+`conformance/run.ts`. All 893 corpus cases therefore ride `gate` **and** pre-commit. Invariant 88.
 
 Full stage-by-stage detail lives in build.map.md — not duplicated here.
 Deploy trigger: none — no workflow builds/publishes a deployable artifact. `cloud-maps` is the only one that WRITES to the repo, and it does so through a PR + auto-merge, never a direct push to protected `main`.

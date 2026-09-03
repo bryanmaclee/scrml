@@ -140,6 +140,43 @@ loop (compile.js, dev.js, build.js) and threaded to `compileScrml({ moduleFormat
   (`compiler/src/commands/module-format-notice.js`). Deliberately NOT a §34 catalog code and never
   enters the diagnostic stream or the compile result; classic prints nothing.
 
+## WHICH GATE RUNS WHICH TEST TIER — and the two greps that give the wrong answer (NEW section, S396)
+
+**RE-READ FROM THE RUNNERS AT `2d8dd8cb`, not carried.** A mention of a path is not evidence it is
+gated, and the absence of a mention is not evidence it is not.
+
+| runner | blocking? | tiers |
+|---|---|---|
+| `.git/hooks/pre-commit` (installed) **and** `scripts/git-hooks/pre-commit:17` | yes, at COMMIT | `unit` · `integration` · `conformance` · root `compiler/tests/*.test.js` (`--bail`) |
+| `ci.yml` `gate` | **yes** — the only branch-protection required check | `unit` · `conformance` · root `compiler/tests/*.test.js` |
+| `ci.yml` `tracking` | no (`continue-on-error: true`) | `integration` · `lsp` · **`commands`** · `parser-conformance-within-node` |
+| `ci.yml` `windows` | no (`continue-on-error: true`) | `unit` · `conformance` |
+| `scripts/git-hooks/pre-push:87` (source-controlled) | on RELEASE-TAG / forced push only | `unit` · `integration` · `conformance` |
+| `.git/hooks/pre-push:96` (installed, machine-local) | on RELEASE-TAG / forced push only | `unit` · `integration` · `conformance` · `lsp` · `self-host` · **`commands`** |
+
+⚠ **THE PRE-COMMIT AND CLOUD-GATE SETS ARE DIFFERENT, AND `integration` IS THE ONE THAT STRADDLES
+THEM.** `integration` blocks a COMMIT but not a MERGE; `commands` blocks neither in practice.
+
+⚑ **GREP TRAP 1 — `commands/` looks gated and is not.** Grepping for `compiler/tests/commands` hits
+`.git/hooks/pre-push:96`, inside a suite whose own comment calls it blocking. It nevertheless never
+runs on a normal push: `RUN_SUITE` is set to `1` **only** when `PUSHING_RELEASE_TAG=1` or
+`FORCE_RUN=1` (a ref-diff failure), and the S253 cloud-gating arc made a normal CODE push skip the
+whole block. The source-controlled hook does not name `commands` at all. **Net: advisory-only** — and
+a real §52.13 assertion sat RED there for an extended period. Invariant 87.
+
+⚑ **GREP TRAP 2 — the top-level `conformance/` corpus looks ungated and is not.** No workflow names
+it, because `bunfig.toml` pins `[test] root = "compiler/tests/"` and the corpus lives at the repo
+root, outside auto-discovery. It is gated by a BRIDGE:
+`compiler/tests/conformance/corpus-bridge.test.js` sits under the gated root and imports `loadCases`
+/ `runCase` / `runCaseRuntime` / `hasRuntimeHalf` from `../../../conformance/run.ts`, emitting one
+`test()` per case. Because `compiler/tests/conformance` is in **both** pre-commit and `gate`, all
+**893** cases ride both. **Practical consequence:** editing `conformance/run.ts`,
+`conformance/normalize.ts` or any `expected.json` **is** gated, and a red case blocks a commit —
+which is why #822 had to preserve the `count: 0` short-circuit rather than delete the `continue`.
+Invariant 88. ⚠ `conformance/driver.ts` also runs the corpus for cross-impl use; that path is NOT a
+gate.
+
+
 ## Public-claim gates (S280)
 
 Three scripts, two of them CI-required. They exist because a public claim that was true when

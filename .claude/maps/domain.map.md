@@ -2238,6 +2238,85 @@ child markup"* and instructs *"add it HERE and every consumer inherits it."* Giv
 non-consumers above, a new branch-carrying field would reach neither `collectFunctions` nor the total
 walk. **The `⚠` is worth keeping; the word "ONE" is not load-bearing truth.**
 
+## §52.13 — `scrml dev` DECIDES DOCUMENT PROTECTION AT EXACTLY ONE SITE, ON THE RESOLVED FILE (NEW section, S396, #823)
+
+**THE RULE.** Every path in `scrml dev` that can return a document must run the same gate, and there
+must be only one. A serving path that does not consult the protected-document registry is
+**fail-open by construction** — and that is not hypothetical: an `auth="required"` document that was
+not named `index.html` was served **in full, unauthenticated, to `GET /`**
+(`g-dev-root-path-fallback-serves-a-protected-document-unauthenticated`).
+
+**THE SHAPE THAT CAUSED IT.** Root resolution used to live in its own branch AFTER the static-file
+loop, and that branch returned HTML from two places that never touched the registry. Two serving
+paths, one gate.
+
+**THE FIX WAS TO DELETE THE SECOND SERVING PATH, NOT TO ADD A SECOND GATE.** `/`'s candidates are now
+yielded as the tail of the ONE gated candidate generator:
+
+    staticCandidates(pathname, staticPathname, serveDir, opts)   # dev.js:1029
+      -> exact file · `.html` clean URL · directory `index.html`
+      -> if pathname === "/": rootFallbackCandidates(opts, serveDir)   # dev.js:1003
+           -> compiled single-input entry (`<entryBase>.html`) · sorted-first `.html`
+
+    gateProtectedDoc(req, rel)                                    # dev.js:979  — THE ONE DECIDER
+      called once, at dev.js:1141, as gateProtectedDoc(req, relative(serveDir, candidate))
+
+**THREE PROPERTIES ARE LOAD-BEARING AND ALL THREE LOOK LIKE STYLE:**
+
+1. **The gate runs on the RESOLVED file, never the raw request path.** An earlier revision of this
+   arc gated both, which made it a *second decider* — and it disagreed with the loop three separate
+   ways: answering for documents that no longer exist, overriding a resolution that would have served
+   a different PUBLIC document, and ignoring candidate priority. **Decide once, on the file actually
+   about to be served.** Same reasoning that deleted the ungated branch.
+2. **The gate call sits OUTSIDE both `try` blocks.** While it sat inside a wide `try`, a throwing
+   auth guard produced a **silent 404 with no log**, and with mixed candidates fell through to serve
+   a DIFFERENT file. A gate that throws must be LOUD.
+3. **Candidate enumeration is LAZY (a generator), and that is not cosmetic.**
+   `rootFallbackCandidates` performs a synchronous `readdirSync`, and `/` is the one URL `scrml dev`
+   prints. Building the list eagerly would pay a blocking directory read on **every reload of that
+   URL**, even when `index.html` hits on the first candidate.
+
+**DEV AND PROD KEY ON THE SAME STRING.** `relative(serveDir, candidate)`, separators folded to `/`,
+lowercased — matching `commands/build.js:541`'s `_SCRML_PROTECTED_DOCS.get(rel.toLowerCase())`. That
+identity is what makes the dev mirror meaningful; if the keys drift, dev silently stops matching prod.
+⚠ The registry is rebuilt fresh in every respawned child (`loadServerRoutes`), so a stale guard cannot
+survive a recompile. See auth.map.md row 3.
+
+## §62.2 — A CONFORMANCE ASSERTION THAT CARRIES BOTH A COUNT AND A FIRST-MATCH CHECK MUST EVALUATE BOTH (NEW section, S396, #822)
+
+**WHY THIS IS A LANGUAGE-CONTRACT ISSUE AND NOT A TEST BUG.** The corpus is the versioned language
+contract. An assertion that *reads* as coverage while checking nothing is a false statement about the
+language, and 18 of them shipped.
+
+**THE DEFECT.** `runAnchored` (`conformance/normalize.ts:222`) short-circuited with an
+**unconditional** `continue` as soon as it had checked `count`. Any `text` / `attr` / `value` on the
+same assertion was therefore **never evaluated**.
+
+**WHY THE OBVIOUS FIX IS WRONG.** Deleting the `continue` outright reds **62 assertions**: a
+`count: 0` assertion asserts **ABSENCE**, so falling through to `querySelector` finds nothing and
+reports a spurious "no match" on top of a count check that already PASSED.
+
+**THE LANDED FORM** — `normalize.ts:257`, guarded on both limbs:
+
+    const assertsFirstMatch =
+      typeof a.text === "string" || Boolean(a.attr) || typeof a.value === "string";
+    …
+    if (!assertsFirstMatch || a.count === 0) continue;
+
+The `a.count === 0` limb is deliberate defensive scope, not redundancy: `{count: 0, text: "…"}` is
+self-contradictory (the selector matches nothing AND the first match has given text) and without that
+limb it would skip the short-circuit and push a spurious failure. **Corpus-zero today, but limb (b) —
+the authoring gate that would forbid the shape outright — is DEFERRED, so nothing prevents it being
+written.**
+
+**CORPUS FIGURES, RE-PARSED AT `2d8dd8cb` (not grepped — a raw `"count": 0` grep returns 64 and
+over-counts by reaching non-assertion text):** **455** `domAnchored` assertions across **193** cases;
+**62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (count + a first-match check)
+and **all 18 are `count: 1`** — those 18 are exactly what this fix un-blinded.
+
+⚠ **THIS CORPUS IS GATED**, so a red case blocks a commit — see invariant 88. That is precisely why
+the `count: 0` short-circuit had to be preserved rather than reasoned away.
+
 
 ## §17.6.1 / §17.6.2 / §17.6.10 — THE VALUE-FORM SUGAR: ONE PREDICATE, TWO SHAPE RULES, AND AN AMENDMENT THAT BROKE A SHIPPING EMIT WITHOUT TOUCHING CODE (NEW section, S395, #802/#815)
 

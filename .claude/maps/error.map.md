@@ -382,6 +382,32 @@ nothing), so it enters the fire-attempt backlog rather than PINNED.
     `g-ternary-init-server-call-await-misbind` — see `docs/known-gaps.md`). No new diagnostic code
     resulted from #405 itself; see dependencies.map.md for the mechanism.
 
+## `E-ROUTE-001` — A NEAR-MISS THAT NEVER FIRED, AND WHY IT IS WORTH A SECTION (NEW section, S396, #818)
+
+**NO NEW E-CODE LANDED THIS WINDOW.** What landed is a diagnostic that would have started
+false-firing had a fix been split across two commits, and the shape generalises.
+
+`route-inference.ts` holds **two** walks that must move in lockstep:
+
+| walk | role | if it descends `if-chain` branch bodies |
+|---|---|---|
+| `collectFileFunctions` (`:1087`) | COLLECTS declared functions and builds routes | a branch-declared `server fn` finally becomes a route |
+| `collectWorkerBodyFunctionIds` (`:1156`) | builds the E-ROUTE-001 **SUPPRESSION** set for `<program>` worker bodies | a `server fn` in a worker-body branch is correctly exempted |
+
+**Close the first without the second and `E-ROUTE-001` false-fires** on a `server fn` declared inside
+an `if=`/`else` branch of a `<program name="…">` worker body: it is now collected, but it is missing
+from the suppression set, so the checker treats it as an illegal route. **The descent converts a
+silent miss into a spurious error.** Both landed in #818 (`collect.ts:215`, `route-inference.ts:1137`
+and `:1199`), and `enteringWorker` threads through the new descent unchanged — the branch body is
+lexically inside whatever `<program>` encloses the chain.
+
+⚑ **THE GENERAL RULE:** when a compiler holds a COLLECTOR and a matching SUPPRESSION/EXEMPTION set
+over the same node shape, widening one is a two-sided change. Widening the collector alone produces a
+**new false positive**; widening the suppression alone produces a **new silent miss**. Grep for the
+exemption set before widening any walk. See invariant 86 in primary.map.md and §17.1.1 in
+domain.map.md.
+
+
 ## `E-SCOPE-001` — A NEW FIRE PATH LANDED, AND IT IS A PATH, NOT AN EMIT SITE (NEW section, S391)
 
 ⚑ **#785 (`4bc6bc03`) added `<each>` OPENER-EXPRESSION scope checking. It added ZERO new
