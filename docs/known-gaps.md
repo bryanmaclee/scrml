@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 85 |
-| MED | 204 |
+| MED | 203 |
 | LOW | 88 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -9051,7 +9051,7 @@ that would leave the markup fail-closed case signal-less and split one rule acro
 whether a gate was actually emitted, so this shape ships ~12.7 KB of dead runtime (94,267 B vs 81,598 B
 control) with zero `scrml-if-marker` in the HTML.
 
-<!-- @gap id=g-native-parser-drops-last-export-in-hoist-scan sev=MED status=open -->
+<!-- @gap id=g-native-parser-drops-last-export-in-hoist-scan sev=MED status=resolved locus=compiler/native-parser/parse-markup.js+parse-markup.scrml(dispatchInLogicEscape now skips /* */ block comments in a ${} body, like it already skipped // line comments — an unbalanced { in a doc comment was counted as a structural brace, degrading the block to Text and dropping every following decl) prov=empirical:S400-peter-bisected-to-unbalanced-brace-in-a-block-comment-jwt-now-EXACT-hoist-parity-5of5-canary-rewritten-M6.5.b.0-allowlist-rebaselined-guard-+4-parser-conformance-6333-green -->
 ### G-NATIVE-PARSER-DROPS-LAST-EXPORT-IN-HOIST-SCAN — the native hoist scanner captures 4 of `jwt.scrml`'s 5 top-level exports — `NEW S302; MED; open`
 
 Surfaced by running the 14 root-level test files by hand — **files that no workflow executes** (see
@@ -9071,6 +9071,8 @@ dropping **`verifyJwtJwks`** — the LAST one in the file. `async` is not the di
 (`decodeJwt` is also a plain `export function` and IS captured); position is the visible correlate,
 but **whether "last export" is the actual rule is UNVERIFIED** — one file is one data point, and the
 obvious next step is a synthetic sweep varying export count and trailing content.
+
+**⚑ RESOLVED S400-peter — the "last export" rule was FALSIFIED, and the real root bisected + fixed.** The synthetic export-shape sweep the entry asked for does NOT reproduce (N plain exports, the `<program>` wrapper, and the exact jwt kind-sequence all match 5/5) — position/count/kind was never the discriminant. Bisecting the real jwt.scrml isolated the trigger to an **unbalanced `{` inside verifyJwtJwks's JSDoc `@param opts { … }` BLOCK comment** (minimal repro: `${ /** x { y */ export function b(){} }` drops `b`). **Root traced:** `dispatchInLogicEscape` (`parse-markup.js`, the markup trampoline's `${…}` body-scan) skipped `//` LINE comments but had NO `/* … */` BLOCK-comment branch (`recognizeCommentForm` knows only `Line`/`Html`), so a `{` inside a doc comment was counted as a structural brace via `noteBraceOpen`, the body-extent depth never returned to 0, the whole `${…}` degraded to a Text node, and every declaration after the comment was dropped — the same failure mode the P5-13 string-skip already prevents. **Fix:** add a block-comment skip in `dispatchInLogicEscape` (mirroring `scanBlockCommentBody`), in BOTH `parse-markup.js` and its `.scrml` shadow. jwt now classifies **EXACT** (hoist parity on all axes; the dual-pipeline-canary test was rewritten from pinning the divergence to guarding the fix). The now-VISIBLE benign within-node SPAN/FIELD diffs (jwt/flows/http `${…}` bodies parse instead of degrading to Text) were re-baselined into the M6.5.b.0 allowlist. Guard: `parser-conformance-collect-hoisted.test.js` (+4). Parser-conformance suite green (6333/0).
 
 **The live half of this divergence is FIXED.** The test's original note (`baas-auth-flows-jwks`,
 2026-07-06) recorded BOTH pipelines undercounting — `live=1 AND native=4` — and flagged a follow-up.

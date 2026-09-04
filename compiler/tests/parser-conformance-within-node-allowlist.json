@@ -6417,11 +6417,12 @@
     "SPAN-COORD": 174
   },
   "stdlib/auth/flows.scrml": {
-    "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 2,
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 14,
-    "SPAN-COORD": 1
+    "KIND-NAME": 13,
+    "FIELD-SHAPE": 77,
+    "MISSING-FIELD": 172,
+    "EXTRA-FIELD": 74,
+    "COUNT-LENGTH": 6,
+    "SPAN-COORD": 249
   },
   "stdlib/auth/index.scrml": {
     "COUNT-LENGTH": 2,
@@ -6432,12 +6433,12 @@
     "SPAN-COORD": 17
   },
   "stdlib/auth/jwt.scrml": {
-    "COUNT-LENGTH": 7,
-    "EXTRA-FIELD": 36,
-    "FIELD-SHAPE": 25,
-    "KIND-NAME": 9,
-    "MISSING-FIELD": 96,
-    "SPAN-COORD": 22
+    "KIND-NAME": 32,
+    "FIELD-SHAPE": 80,
+    "MISSING-FIELD": 241,
+    "EXTRA-FIELD": 126,
+    "COUNT-LENGTH": 13,
+    "SPAN-COORD": 83
   },
   "stdlib/auth/password.scrml": {
     "COUNT-LENGTH": 4,
@@ -6687,12 +6688,12 @@
     "SPAN-COORD": 10
   },
   "stdlib/http/index.scrml": {
-    "COUNT-LENGTH": 6,
-    "EXTRA-FIELD": 120,
+    "KIND-NAME": 25,
     "FIELD-SHAPE": 82,
-    "KIND-NAME": 24,
     "MISSING-FIELD": 300,
-    "SPAN-COORD": 231
+    "EXTRA-FIELD": 76,
+    "COUNT-LENGTH": 5,
+    "SPAN-COORD": 230
   },
   "stdlib/math/index.scrml": {
     "COUNT-LENGTH": 2,
