@@ -1,7 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
-import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, _lowerTenantForQuery } from "./rewrite.js";
+import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
@@ -3457,10 +3457,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (params.length > 0) {
           const tagged = taggedFromParams();
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(`(await ${tagged})[0] ?? null`, rawQuery)) + ";";
+            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${tagged})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(`await ${tagged}`, rawQuery)) + ";";
+            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, rawQuery, false), rawQuery)) + ";";
           }
           return `await ${tagged};`;
         }
@@ -3470,10 +3470,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (call.args && call.args.trim()) {
           const argList = emitExprField(null, call.args.trim(), _makeExprCtx(opts));
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery)) + ";";
+            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery, true), rawQuery)) + ";";
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery)) + ";";
+            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery, false), rawQuery)) + ";";
           }
           return `await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]);`;
         }
@@ -3481,10 +3481,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // Branch C: no params, no call.args. Bare tagged template.
         const taggedNoParams = `${db}\`${sql.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
         if (method === "get" || method === "first") {
-          return _tenantTag(protectTagSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery)) + ";";
+          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
         }
         if (method === "all") {
-          return _tenantTag(protectTagSqlResult(`await ${taggedNoParams}`, rawQuery)) + ";";
+          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${taggedNoParams}`, rawQuery, false), rawQuery)) + ";";
         }
         return `await ${taggedNoParams};`;
       }
