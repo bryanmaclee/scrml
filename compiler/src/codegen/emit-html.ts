@@ -2937,8 +2937,29 @@ export function generateHtml(
       }
 
       // DQ-7: inject flat-declaration #{} content as inline style=""
+      // g-flat-css-block-plus-author-style-emits-two-style-attributes — if the
+      // element ALSO carries a STATIC author `style=`, MERGE it into this one
+      // attribute rather than emitting a SECOND `style=` (invalid HTML — a
+      // conformant parser keeps the first and silently DROPS the author style).
+      // Author declarations go LAST so a same-property author value wins (CSS
+      // last-declaration-wins). A dynamic (`expr`) author style is left to the
+      // attr loop: it sets `style` via `setAttribute` at runtime, which replaces
+      // the whole attribute, so there is no static duplicate to merge.
+      let _flatMergedStyleAttr: any = null;
       if (flatInlineStyle) {
-        parts.push(` style="${escapeHtmlAttr(flatInlineStyle)}"`);
+        for (const _a of attrs) {
+          if (_a && _a.name === "style" && _a.value && _a.value.kind === "string-literal") {
+            _flatMergedStyleAttr = _a;
+            break;
+          }
+        }
+        const _authorStyle = _flatMergedStyleAttr
+          ? String(_flatMergedStyleAttr.value.value ?? "").trim()
+          : "";
+        const _mergedStyle = _authorStyle
+          ? `${flatInlineStyle.replace(/\s*;?\s*$/, ";")} ${_authorStyle}`
+          : flatInlineStyle;
+        parts.push(` style="${escapeHtmlAttr(_mergedStyle)}"`);
       }
 
       // ---------------------------------------------------------------------
@@ -3044,6 +3065,11 @@ export function generateHtml(
         // §53.7.3: developer attr conflicts with shape-derived → suppress dev,
         // shape-derived is emitted in the post-loop block below.
         if (skipDeveloperAttrs.has(attr)) continue;
+
+        // g-flat-css-block-plus-author-style-emits-two-style-attributes — this
+        // static author `style=` was merged into the flat-declaration inline
+        // style pushed above; skip it so the element carries ONE `style=`.
+        if (attr === _flatMergedStyleAttr) continue;
 
         if (name.startsWith("bind:")) {
           const bindId = genVar(`bind_${name.replace(":", "_")}`);
