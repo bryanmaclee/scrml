@@ -1,4 +1,5 @@
 import { genVar } from "./var-counter.ts";
+import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
@@ -1268,6 +1269,19 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
       if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) {
         visit((node as any).bodyChildren, insideOutlet);
         continue;
+      }
+
+      // §17.1.1 if-chain — an `if=`/`else-if=`/`else` chain WITH an else arm is
+      // collapsed into `{kind:"if-chain", branches:[{condition, element}],
+      // elseBranch}`, whose branch bodies live under `branches[].element` +
+      // `elseBranch`, NOT `children` — so the generic recurse below misses them
+      // and a `<timer>`/`<poll>` (or any reactive-wiring node) declared inside a
+      // chain branch is silently dropped (`_scrml_timer_start` never emitted).
+      // Descend via the shared enumerator, the same fact every sibling walk uses.
+      // g-timer-in-if-chain-branch-never-starts. `ifChainChildNodes` returns [] for
+      // any non-if-chain node, so this is a no-op elsewhere.
+      for (const branchBody of ifChainChildNodes(node)) {
+        visit([branchBody], insideOutlet);
       }
 
       // Recurse into all other node kinds
