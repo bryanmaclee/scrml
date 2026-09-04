@@ -2989,7 +2989,18 @@ export function runCG(input: CgInput): CgOutput {
           // prefix into the depth on Windows, and mis-counting a `<page>` file
           // authored OUTSIDE a `pages/` dir. `pages` alone → depth 0; `pages/X`
           // → depth 1; a non-`pages/` `admin/x.scrml` → its true relative depth.
-          const pageRelDir = relative(dirname(entryFilePath), dirname(filePath))
+          // g-uptoroot-vs-distrel-anchor-mismatch — anchor the depth on the DIST
+          // layout (`cgOutputBaseDir`, the real write root that `pathFor` /
+          // `toDistRel` / the own-document `ownUpToRoot` at ~:2399 all use), NOT
+          // on the ENTRY file's dir. The two coincide only when the entry sits at
+          // the base or base/pages; a shell entry in some OTHER subdir (e.g.
+          // `shell/app.scrml`) makes `relative(dirname(entryFilePath), …)` count
+          // the `shell/`→`pages/` hop as depth, so a root-level route emitted the
+          // shell's assets as `../../app.css` — escaping the dist root. The
+          // dist-relative anchor gives the route's TRUE depth below dist.
+          const pageRelDir = (cgOutputBaseDir
+            ? relative(cgOutputBaseDir, dirname(filePath))
+            : relative(dirname(entryFilePath), dirname(filePath)))
             .replace(/\\/g, "/")
             .replace(/^pages(?:\/|$)/, "");
           const depth = pageRelDir
