@@ -2094,15 +2094,20 @@ function renderTemplateAttrToJs(
     // `not`) or a bare `.Variant`. Absent those it returns the bare-form result
     // unchanged, so every already-working `class:` condition stays byte-identical.
     //
-    // `call-ref` deliberately keeps `rewriteIterValueExpr`: it is symmetric with the
-    // value-attr `call-ref` arm (:~1929), which also uses the bare form. Changing
-    // both is a separate axis (`serializeCallArgs` vs `serializeCallArgsLowered`).
+    // `call-ref` routes the reconstructed call through `lowerEachExpr` (like the
+    // sibling `show=` call-ref arm below), NOT the bare `rewriteIterValueExpr`:
+    // `lowerEachExpr` does the iter-scope rewrite FIRST and only escalates to the
+    // structured emitter when the text carries a §42 operator (`is some`/`not`/…),
+    // so a scrml operator inside a call ARG — `class:on=isReady(t.status is some)`
+    // — lowers correctly instead of reaching the client JS raw as
+    // E-CODEGEN-INVALID-LOGIC (g-each-peritem-class-call-ref-operator-arg-not-lowered,
+    // S375). Byte-identical for an operator-free call, since `lowerEachExpr` calls
+    // `rewriteIterValueExpr` first and leaves operator-free text unchanged.
     let cond: string;
     if (valKind === "variable-ref") {
       cond = lowerEachExpr(String(val.name ?? ""), iterVarName);
     } else if (valKind === "call-ref") {
-      cond = `${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`;
-      cond = rewriteIterValueExpr(cond, iterVarName);
+      cond = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     } else if (valKind === "expr") {
       cond = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     } else if (valKind === "string-literal") {
@@ -2332,7 +2337,12 @@ function renderTemplateAttrToJs(
     } else if (valKind === "variable-ref") {
       _vexpr = `String(${lowerEachExpr(String(val.name ?? ""), iterVarName)})`;
     } else if (valKind === "call-ref") {
-      _vexpr = `String(${rewriteIterValueExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName)})`;
+      // Same call-ref lowering as the `class:`/`show=` arms: route through
+      // `lowerEachExpr` (not bare `rewriteIterValueExpr`) so a §42 operator in a
+      // call ARG lowers instead of reaching client JS raw. Byte-identical for an
+      // operator-free call. (g-each-peritem-class-call-ref-operator-arg-not-lowered
+      // class — the `value`-property sibling of the class: arm.)
+      _vexpr = `String(${lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName)})`;
     } else {
       const sv = String(val.value ?? "");
       const tpl = buildEachAttrTemplate(sv, iterVarName);
@@ -2366,7 +2376,12 @@ function renderTemplateAttrToJs(
     return;
   }
   if (valKind === "call-ref") {
-    const expr = rewriteIterValueExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
+    // Same call-ref lowering as the `class:`/`show=` arms: route through
+    // `lowerEachExpr` (not bare `rewriteIterValueExpr`) so a §42 operator in a
+    // call ARG lowers instead of reaching client JS raw. Byte-identical for an
+    // operator-free call. (g-each-peritem-class-call-ref-operator-arg-not-lowered
+    // class — the generic value-attribute sibling of the class: arm.)
+    const expr = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
       [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
     )) lines.push(_l);
