@@ -60,6 +60,10 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-037 | **COMPLETE (ADVISORY) dPA 2026-08-31 — awaiting bryan's ruling on FOUR calls (§7).** Call 1 BLOCKING: is NaN a defined value (#2, ~20-45h) or outside the value domain (#3, 240-490h)? ⚑ Call 2 is NEW and not in the item: ship the `==` fix as the operator alone or as the comparison FAMILY — the DD recommends the family, and recommends doing NOTHING over half a fix. ⚑ Call 3 CONTRADICTS the recorded lean (`1/0` is the least NaN-like of the four; the `-0` argument is inverted). Call 4: split `toNumber` out and take it now (0 call sites). 6-pole panel incl. a domain expert forged mid-run + polled ADVERSARIALLY, which conceded the conclusion while striking two premises. NOT RATIFIED — RUN-not-RATIFY. **THE NON-FINITE FLOAT CLASS — NaN and Infinity have no normative home, and `==` is not reflexive because of it.** ⚑ **NOTHING HERE IS RATIFIED.** bryan supplied a WORKING TAKE and then said so explicitly: *"ok hold on I am not ratifying NaN! TBC"*. His lean, recorded as a lean: *"NaN and Infinity are NOT absence values"* / *"what we have here 1/0 ***IS*** not a number"* / *"and then Inf well..."*. **Every limb stays live, including `not`-absorbs-NaN.** PA-MEASURED BY EXECUTION at `952cecc6`, do not re-derive. | banked |
 | dpa-040 | **COMPLETE (ADVISORY) dPA 2026-09-03 — awaiting bryan.** ★★ **THE QUESTION CANNOT BE ANSWERED AS BANKED — the checker has never run.** `E-TILDE-001`/`002` fire **0/6** on the SPEC's own worked examples (incl. §32.5's verbatim `${ process(~) }` and §17.6.6's partial-`if`), while `E-LIN-001/002/003` fire correctly **from the same `checkLinear`**. Root cause traced by instrumentation (70 files, **243 invocations, `tildeInit=0` in every one**): the three `tt` sites key on `tilde-init`/`tilde-ref`/`lift-stmt`, which have **ZERO producers**; `bare-expr` has no case and its `default:` is a **complete no-op** (payload is on `.expr`, not `.body`/`.children`). So every candidate boundary set is **extensionally identical today**. The in-flight carve-out ships **`-pos` cases only, and a `-neg` case is structurally impossible.** ★★ **`~` was DELIBERATELY EXCLUDED, not merely unwired** — `type-system.ts:19259` `if (name.startsWith("@") || name === "~") return;` under the comment *"Tilde accumulator is '~' — not a lin variable"*, **contradicting §32.3 AND §35.8, both of which say at HEAD that it SHALL be one.** That guard sits in a **field-driven** walk that would catch every buried `~` read for free ⇒ the repair may be near a two-line deletion. Also: the `~` half **reimplemented the branch join twice, wrongly, in opposite directions** — `if-stmt` `:18855` takes the consequent and ignores the alternate (**fail-open**); `match` `:18942` discards every arm (spuriously fail-closed) — while the generic `lin` join beside them is right once. ★★ **THE BLAST RADIUS WAS MEASURED ON THE WRONG AXIS.** §32.2's SHALL is **unconditional** (verified at HEAD — no void exemption), so **two consecutive bare calls in ANY block are already E-TILDE-002**; the arm is where the conflict was *noticed*, not where it lives. Orchestrator scan: **~828 consecutive bare-call runs across 3,407 files** vs the **17** bound-position arm sites the fork was scoped to (a prior figure said 5 — wrong by 3.4×), of which **zero** have a bare-call intermediate. *(Line-based heuristic — order of magnitude, not the integer.)* ★★ **THE SUBSTRUCTURAL POLE ARGUES THE BOUNDARY IS UNSOUND, NOT UNNECESSARY** — a §32.4-style **opacity** boundary at the arm manufactures an **un-consumable `~`** (`compute()` then `if (c) { lift f(~) } else { lift g(~) }` leaves no reachable consumption site) and forbids the canonical linear-branching program. Two things are being called "boundary": **opacity** (§32.4) vs **reconciliation** (`lin`'s branch rule). **If it holds, limb (c) closes as REJECTED-on-soundness, not deferred.** It disagrees sharply with the type-discipline pole's *anonymity* derivation (which makes the arm a boundary as a theorem) — **the fork is stated, not adjudicated.** ★★ **§32.6's LOOP ELISION IS INVERTED and makes §35.8 UNSATISFIABLE** — `lin` prohibits outer consumption in a loop (`E-LIN-002`); §32.6 blesses produce-n-times/consume-zero. One tracker cannot both prohibit and permit the same construct. **Harder than the banked conflict, and it was not on the fork.** **Rec: fail-closed codegen floor first (replace `emit-expr.ts:1178`'s `null /* ~ orphaned */` — needs zero analysis strength), then honour §35.8, then WARNING-tier for one release on the ratified S365 `W-TYPE-031-UNPROVEN` precedent, then rule.** Highest-leverage artifact: **a `-neg` gate on `scripts/s34-census.ts`** — every Error code must have a conformance case that actually produces it. | artifact `scrml-support/docs/deep-dives/tilde-arm-body-boundary-dpa-040-2026-09-03.md` · bryan rules |
 
+| dpa-041 | **BANKED — UNRUN** S399 2026-09-04 (bryan: "bank all three") — does the DECLARED TYPE at the binding site replace `~`'s accumulator role? The `lift` mode-scan + its §7392 ambiguity tie-breaker is the S322 retrofit signature; a type at the declaration is the by-construction shape. LIMIT direction. | S399 bank |
+| dpa-042 | **BANKED — UNRUN** S399 2026-09-04 — do `~` and `lin` unify, and what closes the PRODUCER GAP? They already share ONE pass (`checkLinear`); `E-LIN-*` fires, `E-TILDE-*` fires 0/6 (zero producers). ⚑ Unifying without fixing producers MOVES DEAD CODE. **The `~` arc is STOPPED by operator ruling pending this.** | bryan S399 verbatim |
+| dpa-043 | **BANKED — UNRUN** S399 2026-09-04 — **AXIOM-LEVEL, ladder row 7, bryan's alone.** Is lazy/pull a scrml capability; is `yield` more than a generator keyword? ⚑ The origin premise ("JS is now restricted to `_{}`") is FALSE — §13.6 makes `yield` FULL VOCABULARY in `${ }`. Conclusion survives via the lexical-boundary route; the obstacle is §13.6, not §10. | S399 bank |
+
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
 **Genuinely-open (PA action needed) — CORRECTED S325.** **dpa-022 · dpa-023 — DRAINED 2026-08-05, ADVISORY, awaiting ratify/reject/re-frame.** dpa-023's live item is **the `pending` rung**; dpa-022's is the **inert prose-only reconciliation** (independently shippable) plus a routed HIGH compiler defect now filed as [[g-unknown-type-atom-capitalization-proxy]]. *(dpa-019/020/021 were RATIFIED S319 — "ratify all three" — and this paragraph still listed them as awaiting ratification; two staleness layers in the one file the drain-path rule calls authoritative.)* **Three PA follow-ups the S319 drain generated, none of them the deliberations themselves, all still open:** (1) **RETRACT the false "no `srcmap-provenance.ts`" premise from the RATIFIED brief** `docs/changes/ask7-style-provenance-spec/BRIEF.md:61-76` — it is normative guidance built on a non-recursive grep; (2) **REVISE `docs/changes/markup-autoawait-all-emitters/BRIEF.md` BEFORE dispatch** — as written it cannot fix the server-fn case; (3) **BANK + severity-call the routed `@session`-unlowered defect** (client-supplied body field read as identity, in a green conformance case). · dpa-010 · dpa-011 (advisory, meta/flogence-domain — ratify-or-defer). **dpa-017 RATIFIED S230** (HYBRID B-floor; SPEC §14.8.9 + codes + insight landed) → residual is the **FLOOR BUILD** (slot to an sPA). **Everything else is ratified / routed / deferred → the residual is BUILDS, not gates.** Highest-leverage residual builds = **the protect-leak floor** (`docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md`) + **`g-tier1-ssr-prerender`** (its SSR boundary MUST apply the same §14.8.9 egress filter — they compose; survey-scoped S229, ruling-gated; the §52 write-back was RETRACTED S194, NOT the residual).
@@ -2478,3 +2482,240 @@ The ruling took (a) — §17.6.2 governs, a bare call in an arm is a side effect
 ### What a verdict has to deliver
 
 Either (i) a boundary rule for §32.4 with its migration measured and its interaction with the S395 §32.2 carve-out stated — does the carve-out get REVERTED, or does it become redundant? — or (ii) a recorded reason the two-boundary set is right and arm bodies are correctly ordinary, in which case the S395 carve-out is the permanent answer and should be marked as such rather than left looking provisional.
+
+---
+
+## [dpa-041] DD — Does the DECLARED TYPE at the binding site replace `~`'s accumulator role?
+status: banked     # banked → running → complete → ratified(by PA)  ·  BANKED S399 2026-09-04 (bryan: "bank all three")
+
+### Origin — bryan, verbatim, S399
+
+> "Sometimes I deeply hate my own hubrous and short-sightedness. ~ was meant to make flow while coding
+> more maintainable. But I think I conflated my real problem with its syntactic neighbors and siblings
+> (so to speak). my problem: some_specific_intermediate_value - What I lumped in; = . worse I ignored
+> that I was building a language with a type system. how much clearer would the code be to read, and
+> parse if we de-conflated? :[] = while(... loads lifted/returned/yielded (whatever)"
+
+⚑ **NOT A RULING.** bryan was thinking aloud and marked the wider point as unresolved work. Nothing here
+is ratified. (S390 precedent: *"ok hold on I am not ratifying NaN! TBC"* — a take is not a ratification.)
+
+### Scope-lock
+
+Does the **declared type at the binding site** (`const x: T[] = <loop>`) replace `~`'s array-accumulator
+role — moving the accumulate-vs-scalar decision from a context scan to a type checked at the declaration?
+
+IN scope: the accumulator role only. OUT of scope: `~`'s exactly-once/`lin` semantics (that is dpa-042),
+and whether `lift` is the general emit primitive (that is dpa-043).
+
+### ⚑ MEASURED BY THE PA AT `83f95592` — verify by execution before reasoning from any of it
+
+1. **`lift` is NOT markup-only, and never was.** `const n: int[] = for (const x of [1,2,3]) { lift x * 2 }`
+   COMPILES. `const items: string[] = for (const n of ["a","b"]) { lift n }` COMPILES. What narrowed to
+   markup is the DESCRIPTION — SPEC's TOC line reads *"§10 — The `lift` keyword: value-lift of markup
+   expressions"* while §10.2's body says *"In accumulation mode, `lift` MAY appear multiple times in a
+   single logic block; each call appends one item."*
+2. **The conflation is already IN the normative text, with a tie-breaker clause attached.** `lift` has
+   two modes and the mode is chosen by scanning OUTWARD:
+   - `SPEC.md:7398` — *"The compiler SHALL determine lift mode (accumulation vs value-lift) by the
+     presence or absence of an enclosing if-as-expression binding."*
+   - `SPEC.md:7392` — *"An **ambiguous context** — where both an accumulation parent and a value-lift
+     binding site exist — is resolved in favor of value-lift mode."*
+   A normative SHALL delivered by inspecting surrounding context, PLUS a tie-breaker for when it cannot
+   tell. **That is the S322 retrofit signature verbatim**, and the tie-breaker is the tell that the two
+   meanings genuinely collide.
+3. **The blocker is exactly one thing and it is not the type system.**
+   `const items: string[] = while (false) { lift "x" }` → **E-LOOP-007**. The type annotation does NOT
+   lift the rejection; the gate keys on the loop FORM, not on whether a collector type is present.
+4. **The statement-position accumulator is body-scoped, not per-statement.** Two statement-position
+   lifting loops in one `fn` share ONE slot and both push into it (emitted JS read). So under a
+   one-thing `~` the accumulator is REMOVED, not derived — see the §Consequence below.
+5. **A live silent-wrong that is a hazard OF this migration** (PA-reproduced AND RUN): a bound
+   comprehension placed between a statement-position accumulator and `return ~` HIJACKS the slot —
+   returns `[9]` where §48.5.1 requires `["a","b","c"]`, exit 0, zero diagnostics, the real accumulator
+   emitted and never read. **Any migration converting SOME sites in a body while leaving `return ~`
+   elsewhere hits this.** Argues for migrating a `fn` body wholesale or not at all.
+
+### Load-bearing constraints
+
+- **This is the S322 re-examination test applied directly.** Retrofit (outward scan + tie-breaker) vs
+  by-construction (a type checked at the declaration). The good case the test names — `<match>`
+  exhaustiveness — holds *because the arm set is checked at the declaration, and it has generated no
+  bug family.* A type at the binding site is the same shape.
+- **It moves in the LIMIT direction** (fork-rule row 1): it removes a meaning from `~` rather than adding
+  one. LIMIT-PRIMITIVES (S174) favours it.
+- **Corpus silence is blast radius ONLY** (bryan, S346). The corpus is 100% LLM-authored and carries
+  near-zero ergonomic signal. Do not close this on corpus counts.
+- **The parse half of bryan's question is answerable and is evidence FOR:** the proposal deletes a
+  context-sensitive mode scan and its ambiguity clause. That is a parser simplification, not only a
+  readability one.
+
+### What a verdict has to deliver
+
+A rule for how the binding's declared type selects lift mode; what happens at an UNTYPED binding site
+(`const x = <loop>` — infer, or refuse?); whether §10's mode-scan and its §7392 tie-breaker are DELETED
+or merely bypassed; and the direction-of-change classification with a MEASURED migration.
+
+### Report-back
+One-line verdict + artifact path + staged insight CANDIDATE + a `(dpa:)` delta-log breadcrumb. **Do NOT ratify.**
+
+---
+
+## [dpa-042] DD — Do `~` and `lin` unify, and what closes the producer gap?
+status: banked     # BANKED S399 2026-09-04 (bryan: "stop the ~ arc until we have discussed not only the effect of on \"~\" but also \"lin\"")
+
+### Origin — bryan, verbatim, S399
+
+> "stop the ~ arc until we have discussed not only the effect of on "~" but also "lin"."
+
+⚑ The STOP is an operator ruling and is in force. The unification question is banked, NOT ruled.
+
+### Scope-lock
+
+`~` and `lin` are already ONE mechanism in the implementation and are cross-referenced in the spec.
+Should they be unified as one linear-value concept — and what has to be true first for a unification to
+be more than a cosmetic diff?
+
+### ⚑ MEASURED BY THE PA AT `83f95592`
+
+1. **They share one enforcement pass.** `LinTracker` (`type-system.ts:18169`) and `TildeTracker`
+   (`:18380`) are separate classes consumed by ONE function, `checkLinear` (`:18479`), which takes both
+   as options. **SPEC §35.8 is literally titled "Interaction with `~`".** They were never independent.
+2. **One half is alive and one half has never run.** From that same pass `E-LIN-001/002/003` fire
+   correctly; `E-TILDE-001/002` fire **0 of 6** on SPEC's own worked examples — because `tilde-init` /
+   `tilde-ref` have FOUR consumers and **ZERO producers** in `compiler/src/` or `compiler/native-parser/`.
+   The only things that build those nodes are hand-written object literals in `type-system.test.js`,
+   which is exactly why the pass has passing unit tests and has never seen a parsed program.
+3. ⚑ **THE TRAP, and it is the reason this is a DD and not a cleanup ticket.** S397 measured that
+   removing the two `name === "~"` exclusions to unify them is **NOT SUFFICIENT**: `LinTracker` runs off
+   identifier references, `TildeTracker` off node kinds nothing produces. **Unify without fixing the
+   producers and you have moved dead code while the diff reads as a tidy-up.** Any approach that does not
+   close the producer gap FIRST is disqualified.
+4. Since #832 (`c11db440`) a codegen-stage floor `E-CG-TILDE-UNRESOLVED` catches the orphan READ. **That
+   is not the §32.5 type-system enforcement** — the checker SPEC names still does not run.
+
+### Load-bearing constraints
+
+- **`~`'s exactly-once semantics are NOT on the table** — dpa-040 already scopes the boundary question.
+  This item is about whether the two CONCEPTS are one, and about the producer gap.
+- **`lin` answers "how many times CONSUMED"; a collector type answers "how many times PRODUCED"** (see
+  dpa-041). If both end up expressed as types, the case for unification strengthens; if `lin` stays a
+  modifier and production becomes a type, that asymmetry itself needs a recorded reason.
+- Phase 1 MUST re-verify the zero-producers finding BY EXECUTION. It is PA-measured but a DD that
+  inherits an untraced claim is the laundering shape.
+
+### What a verdict has to deliver
+
+Either a unification design that names what closes the producer gap and in what order, or a recorded
+reason the two concepts are properly distinct — in which case §35.8 should say so normatively instead of
+reading as an unfinished merge.
+
+### Report-back
+§3 shape. **Do NOT ratify.**
+
+---
+
+## [dpa-043] debate — Is LAZY/PULL a scrml capability? Is `yield` more than a generator keyword? (AXIOM-LEVEL)
+status: banked     # BANKED S399 2026-09-04 (bryan: "bank all three")
+
+### Origin — bryan, verbatim, S399
+
+> "when I originally described lift I really meant for it to mean (return value but continue) somehow it
+> ended up only referring to markup, I went with it, because it seemed to make some sense. I don't want
+> go and change everything, but I deffinitly think that we are underutilizing the type system and have
+> syntax/symantics work still to do."
+
+and:
+
+> "I also have always had a rub with the "yield" key word. not with what it does, but that it is entirly
+> relocated to a single usecase in a rarly used tool (in JS at least). I think the value of "yield" goes
+> beyond generators."
+
+and the mechanism he proposed:
+
+> "those decissions were made when scrml still considered itself a superset of JS. JS is now restricted
+> to _{}, correct? so that means that "yield" CAN have a different semantic then when used inside a
+> foriegn context."
+
+⚑ **AXIOM-LEVEL (ladder row 7).** R2 minimum, ONE-AT-A-TIME, and the FLOOR forbids resolving it inside a
+batch. This is the only one of the three that ADDS surface.
+
+### ⚑ THE PREMISE IS FALSE AS STATED — PA-verified, and the DD must start from the corrected version
+
+**`yield` is NOT restricted to `_{}` today.** SPEC §13.6 normative claim, verbatim (`SPEC.md:7909`):
+
+> *"`function*` (generator function declarations), `yield` (single-value generator-suspension
+> expression), and `yield*` (delegating generator expression) are **FULL LANGUAGE VOCABULARY** in scrml.
+> Generators MAY be used in any function position where a regular `function` declaration is admissible —
+> file-scope declarations, `${ }` logic-context declarations, function-expression positions, and the
+> existing §37 `server function*` server-sent-events surface."*
+
+Also PA-verified: there is **no normative "scrml is not a JS superset" sentence in SPEC** (grep: zero
+hits), and **`E-PARSER-OUT-OF-SUBSET` does not exist in SPEC** — it is a native-parser design protocol,
+not a shipped code.
+
+**But the CONCLUSION survives by a different route, and the DD should take that route:**
+
+- `SPEC.md:7040` is the recorded reason `lift` is not `yield`: *"`lift` was chosen over `yield` to avoid
+  collision with JavaScript generator function semantics… Having two different `yield` behaviors **in the
+  same `${ }` block** would be a footgun. `lift` is unambiguous."* That is a **word-collision argument,
+  not a semantic one** — it concedes the concept is the same. Under Rule 4b it is the `rationale:` band:
+  an author's stated reason nobody deliberated, which is precisely the R2 signal.
+- **bryan's lexical-boundary point defeats it on its own terms.** `_{}` is a lexically marked context, so
+  a `yield` in `${}` and a `yield` in `_{}` are never in the same block and are always distinguishable by
+  the enclosing sigil. §10's footgun was written for an ambiguity a lexical boundary removes.
+- **So the obstacle is §13.6, not §10.** Giving `yield` a scrml semantic in `${}` means revisiting
+  ratified FULL VOCABULARY that §37 `server function*` SSE depends on — §13.6 explicitly rejected
+  restricting generators to SSE-only, on the ground that it would force SSE to a different mechanism with
+  no cohesion gain.
+
+### The load-bearing fork — name it before comparing approaches
+
+`lift` and `yield` BOTH mean "produce a value and keep going." That is not what separates them.
+**What separates them is WHO DRIVES:**
+
+- **eager push** — the producer runs to completion, a collector fills. That is `lift`; dpa-041 types the
+  collector.
+- **lazy pull** — the consumer drives, the producer suspends. That is what `yield` actually buys:
+  infinite sequences, streams, backpressure.
+
+If scrml wants lazy/pull as a first-class capability, `yield` is the right word and it is a large
+feature. If it only wants eager emit, `lift` + a collector type covers the ground and shipping both **is**
+a Pillar-5 violation — one that already exists rather than one being created.
+
+### Load-bearing constraints (verbatim — prevents scope_blindness)
+
+- **Pillar 5:** "All scrml should be scrml. No bespoke per-state-type mini-DSLs." Two emit primitives is
+  the tension; the DD must say which one survives, or why both must.
+- **LIMIT-PRIMITIVES (S174):** "limit primitives, don't god-ify them." A `yield` that means emit-and-
+  continue everywhere is a WIDENING and must be argued as one, not smuggled as a rename.
+- **§13.6's own rationale is strong and must be engaged, not bypassed:** `async`/`await` is VIRAL, but
+  **"generators are LOCAL — generator-ness TERMINATES at the function boundary on the consumer side."**
+  That local-not-viral property is what earned generators the full-vocabulary disposition.
+- **§19.9.8 no-async/await** is untouched by this and must stay untouched.
+- **The stated-intent-vs-corpus rule does NOT dispose of this.** bryan ruled at S368 that *"scrml is NOT a
+  JS superset"*, which normally makes a corpus contradiction migration backlog rather than deliberation.
+  It does not here: **§13.6 was not lag — it was independently ratified at S131 with its own recorded
+  reasons.** Two ratified positions in tension is a genuine fork.
+- **bryan's own boundary:** *"I don't want go and change everything."* An approach requiring a language-
+  wide rewrite is disfavoured on his stated terms.
+
+### Approaches (starting set — the panel may synthesize)
+
+- **A** — `yield` becomes the general scrml emit-and-continue primitive in `${}`; `lift` folds into it;
+  `_{}` keeps JS generator semantics behind the lexical boundary.
+- **B** — status quo: `lift` eager, `yield` JS-generator-only, §13.6 unchanged; record the reason
+  normatively so it stops reading as an accident.
+- **C** — lazy/pull becomes a first-class scrml capability with its own surface, distinct from BOTH the
+  current `lift` and JS generators.
+- **D** — `lift` stays the eager emit and `yield` is REMOVED from `${}` (kept in `_{}` and §37 only),
+  narrowing rather than widening. ⚑ This is the LIMIT-direction option and must be surfaced as a
+  first-class leading option per ladder row 6, not buried.
+
+### Expert / forge list
+Voices with real lazy/pull vs eager-collection prior art. Suggested contrast: a streams/backpressure
+authority vs an eager-collection/comprehension authority vs a language-minimalism voice arguing D. Forge
+what is missing; the panel MUST include a voice arguing D or the fork is not fairly represented.
+
+### Report-back
+§3 shape — one-liner + artifact path + staged insight CANDIDATE + a `(dpa:)` delta-log breadcrumb.
+**Do NOT ratify.** This one is bryan's alone.
