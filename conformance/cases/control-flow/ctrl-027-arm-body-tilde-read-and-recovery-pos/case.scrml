@@ -7,43 +7,10 @@ ${
     }
 
     function step1(v: int) { return v + 1 }
-    function record(v: int) { return v }
 
     function load(id: string)! LoadError {
         if (id == "missing") fail LoadError.NotFound(id)
         return id
-    }
-
-    function tildeReadInArm() {
-        step1(2)
-        const label = if (@n > 0) {
-            record(~)
-            lift "ok"
-        } else {
-            lift "neg"
-        }
-        return label
-    }
-
-    function tildeReadInElseArm() {
-        step1(6)
-        const label = if (@n < 0) {
-            lift "pos"
-        } else {
-            record(~)
-            lift "else-ok"
-        }
-        return label
-    }
-
-    function liftReadsTildeInArm() {
-        step1(40)
-        const label = if (@n > 0) {
-            lift ~
-        } else {
-            lift 0
-        }
-        return label
     }
 
     function liftLiteralInArm() {
@@ -69,8 +36,5 @@ ${
     }
 }
 
-<div id="out-read">${tildeReadInArm()}</>
-<div id="out-read-else">${tildeReadInElseArm()}</>
-<div id="out-lift-tilde">${liftReadsTildeInArm()}</>
 <div id="out-lift-literal">${liftLiteralInArm()}</>
 <div id="out-recovery">${bindlessRecoveryInArm()}</>

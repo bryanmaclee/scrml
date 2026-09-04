@@ -73,7 +73,7 @@ import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive } from "./emit-expr.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
   setChunkNamespaceState,
@@ -1181,6 +1181,15 @@ export function runCG(input: CgInput): CgOutput {
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];
+  // §32 / §47 (S397) — arm the fail-closed `~` floor's sink for THIS run.
+  // `emitIdent` cannot reach a live `errors` array (`EmitExprContext.errors` is
+  // measured undefined at every site the orphan reaches), so E-CG-TILDE-UNRESOLVED
+  // accumulates in a module-level sink in emit-expr.ts and is drained back into
+  // `errors` below. Reset here rather than per-file so that no path through the
+  // loop can skip the arm; the drains are what make it per-run-clean, and a stale
+  // sink from a PREVIOUS `runCG` in the same process (every test file does this)
+  // would otherwise attribute one compile's orphan to the next compile.
+  resetTildeUnresolvedErrors();
   // S91 A-4.1 — per-file CompileContext map, populated during the per-
   // file Plan/Emit phase. Passed to the route-splitter when
   // `emitPerRoute` is set so future A-4.2+ sub-phases can read per-file
@@ -2619,6 +2628,25 @@ export function runCG(input: CgInput): CgOutput {
     // splitting) and no emitter invoked later in this process inherits a
     // stale token.
     resetChunkNamespaceState();
+    // §32 / §47 (S397) — drain the fail-closed `~` floor. DELIBERATELY here in the
+    // `finally` and not at the loop tail: the tool (`outputs.set(filePath, toolOutput)`)
+    // and library (`libOutput`) paths each leave the iteration by their own `continue`,
+    // so a drain at the loop's last statement would collect the browser path only and
+    // silently lose the other two. Each CGError carries its own `span.file`, so the
+    // drain point decides WHEN diagnostics are collected, not WHICH FILE they blame.
+    //
+    // ⚑ THE FILE ATTRIBUTION IS SOUND; THE WITHIN-FILE POSITION IS NOT, AND AN EARLIER
+    // DRAFT OF THIS COMMENT OVERCLAIMED IT. It read "attributes every diagnostic
+    // correctly", which is false at line granularity: `spanFromEstree`
+    // (`expression-parser.ts`) hard-codes `line: 1, col: 1`, and some `~` ident nodes
+    // additionally carry an ENCLOSING node's byte offset rather than their own.
+    // `_tildeDiagSpan` (`emit-expr.ts`) recovers line/col from `span.start` via the
+    // §20.6 source registry, which fixes the hard-coded 1:1 — MEASURED on a
+    // three-orphan file: 1 of 3 now points at the exact offending statement, the other
+    // 2 at a real-but-wrong line, where previously all 3 said 1:1. The remaining 2 are
+    // a WRONG OFFSET upstream, which no amount of line/col resolution can repair.
+    // Filed; not fixed here. Do not restore the stronger claim.
+    for (const e of drainTildeUnresolvedErrors()) errors.push(e);
   }
 
   // -------------------------------------------------------------------------
@@ -3479,6 +3507,14 @@ export function runCG(input: CgInput): CgOutput {
       log(`  [CLIENT-EMIT] ${name}: ${total.toFixed(1)}ms (${pct.toFixed(1)}% of emit-client)`);
     }
   }
+
+  // §32 / §47 (S397) — SECOND drain, and it is not belt-and-braces. Emission
+  // continues AFTER the per-file loop closes — per-page shell composition and the
+  // §40.9.7 route splitter both re-enter expression emission — so an orphan `~`
+  // raised by that later work would still be sitting in the sink when `runCG`
+  // returns. Draining is idempotent (it clears), so the first drain having already
+  // run costs nothing here.
+  for (const e of drainTildeUnresolvedErrors()) errors.push(e);
 
   return {
     outputs,

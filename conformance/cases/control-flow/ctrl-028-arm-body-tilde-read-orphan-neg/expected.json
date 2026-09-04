@@ -1,0 +1,24 @@
+{
+  "id": "ctrl-028-arm-body-tilde-read-orphan-neg",
+  "description": "⛑ THE PROOF THAT `E-CG-TILDE-UNRESOLVED` FIRES. Three functions whose value-form arm body reads a bare `~` that no statement in the ENCLOSING body supplies: `record(~)` in a then-arm, `record(~)` in an else-arm, and `lift ~`. Codegen's `~` pre-scan allocates a slot only when the enclosing statement sequence mentions `~` somewhere outside the arm; none of these do, so each read reaches `emitIdent` with no slot. The code SHALL fire at severity Error. ⚠ THE COUNT OF 3 IS A PROPERTY OF THIS CASE, NOT A PER-READ LAW — see the rationale: the emitter fires once per EMISSION of the offending body, and this case is client-only, so its three reads are emitted once each.",
+  "language-version": "1.0",
+  "spec": "§32, §32.2, §32.2.1, §17.6.2, §47",
+  "source-test": "compiler/src/codegen/emit-expr.ts",
+  "rationale": "⛑ THIS CASE EXISTS BECAUSE A §34 CODE WITH ZERO `-neg` CASES HAS NEVER BEEN PROVEN TO FIRE, AND THIS SURFACE HAS ALREADY BEEN BURNED BY EXACTLY THAT. `E-TILDE-001` and `E-TILDE-002` sat in the §34 catalog with ZERO fire sites while two normative sections contradicted each other about the behaviour they were supposed to govern, and nothing in any tier could tell — because nothing fired. `E-CG-TILDE-UNRESOLVED` is minted by S397 (bryan: \"mint the code\") and lands WITH this case so the same thing cannot happen to it. ⛑ THE SOURCE HERE IS NOT NEW. All three functions are VERBATIM from `ctrl-027-arm-body-tilde-read-and-recovery-pos`, where until S397 they were POSITIVE assertions: `#out-read` -> \"ok\", `#out-read-else` -> \"else-ok\", and `#out-lift-tilde` -> `text: \"\"`. They compiled at exit 0 with zero diagnostics because `emitIdent` returned `null /* ~ orphaned — codegen-fallback */` — fail-OPEN by construction, since a `~` reaching that line is by construction one the analysis could not resolve. S397 replaced the fallback with this error, so the identical source is now REJECTED and the case flipped sides. Per §62.2 the corpus is the versioned language contract: the shapes were MOVED, never deleted, and this rationale is the record of which contract they used to satisfy. ⚠ THE CARDINALITY RULE IS ONCE PER *EMISSION*, NOT ONCE PER SOURCE READ — AND AN EARLIER DRAFT OF THIS RATIONALE STATED THE WRONG LAW. It said the code fires \"EXACTLY THREE TIMES — once per read\". That is not the emitter's invariant. `emitIdent` pushes a diagnostic each time it LOWERS an unresolved `~`, so a body that codegen emits more than once yields more than one diagnostic for the SAME source read. MEASURED: a `server fn` whose body contains ONE `record(~)` and which is also called by a sibling `server fn` produces TWO byte-identical errors at the SAME span (`start:9`), because that body is emitted twice — once as the HTTP route handler and once as the in-process peer callable. ⚠ SO WHY IS `codeCounts` 3 HERE? Because every function in THIS case is CLIENT-only — no `server fn`, no server escalation, nothing that causes a second emission — so its three reads are lowered exactly once each and 3 is what the emitter genuinely produces. The pin is kept because it is the only assertion in this harness that can see a MISSED read: `codes` and `notCodes` are set-valued and would pass on a single fire, hiding a pre-scan regression that resolved two of the three. ⛑ DO NOT GENERALISE THIS 3 INTO A PER-READ LAW, and do not copy this `codeCounts` into a case with a server-classified body — it will read 2N there, correctly. Whether the emitter SHOULD dedupe (e.g. by `span.start`, so one source read yields one diagnostic however many times its body is emitted) is a real question, and it is a BEHAVIOUR change that needs its own measured pass across every code that shares this emission path. Filed, deliberately not implemented in the arc that minted the code. ⚠ WHAT THIS CASE DOES NOT SETTLE: whether an in-arm `~` read OUGHT to reach the enclosing accumulator. That is dpa-040 and it is unruled. This case pins only the floor — that an UNRESOLVED read is rejected rather than silently valued. If dpa-040 later rules that these reads resolve, this case is EXPECTED to change, and it is written so the change is loud: it names the code, its severity and its count, none of which can drift silently. `notCodes` carries `E-CODEGEN-INVALID-LOGIC` deliberately — the placeholder codegen emits in place of the orphan is syntactically valid JS precisely so this diagnostic is not buried under the §2.2.1 acorn gate's generic \"compiler defect\" framing.",
+  "expect": {
+    "codes": [
+      "E-CG-TILDE-UNRESOLVED"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-TILDE-001",
+      "E-TILDE-002"
+    ],
+    "severity": {
+      "E-CG-TILDE-UNRESOLVED": "error"
+    },
+    "codeCounts": {
+      "E-CG-TILDE-UNRESOLVED": 3
+    }
+  }
+}

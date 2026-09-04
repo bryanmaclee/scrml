@@ -375,10 +375,36 @@ function show() {
     expect(body).toMatch(/^\s*_scrml_step1_\d+\(2\);/m);
     expect(body).not.toMatch(/let _scrml_tilde_\d+ = _scrml_step1_\d+\(2\);/);
 
-    // (2) The in-arm read therefore lowers to the ORPHAN FALLBACK. That fallback
-    // is explicit in the emitted text — a reader of the output can see that `~`
-    // resolved to nothing rather than silently reading a stale slot.
-    expect(body).toMatch(/_scrml_record_\d+\(null \/\* ~ orphaned/);
+    // (2) ⛑ S397 RE-SCOPE — THE READ IS NOW REJECTED, NOT VALUED.
+    // This clause previously asserted the ORPHAN FALLBACK positively:
+    // `expect(body).toMatch(/_scrml_record_\d+\(null \/\* ~ orphaned/)`, i.e. that
+    // the compiler emits `null /* ~ orphaned — codegen-fallback */` and keeps going
+    // at exit 0. That was fail-OPEN by construction — a `~` reaching emitIdent
+    // unresolved is by construction one the analysis could not resolve, so emitting
+    // a value asserted the opposite of what the compiler had just discovered.
+    // S397 (bryan: "mint the code") replaced it with E-CG-TILDE-UNRESOLVED, a NEWLY
+    // MINTED codegen-stage §34 code — deliberately NOT E-TILDE-001, which is a §32.5
+    // TYPE-SYSTEM code whose fire site has not landed and which asserts the stronger
+    // claim of a PROVEN-uninitialized read.
+    //
+    // ⚑ THE BOUNDARY THIS TEST PINS IS UNCHANGED BY THAT. Clauses (1) and (3) are
+    // byte-identical, and they are the dpa-040 pins: the enclosing statement is not
+    // dragged into accumulator mode, and the WRITE half stays fixed. S397 changed
+    // only what happens to the READ once it has been established that no slot exists
+    // — the floor, not the scope rule. When dpa-040 IS ruled, this test is still
+    // expected to change, and it is still written so the change is loud.
+    const orphans = errors.filter(e => e.code === "E-CG-TILDE-UNRESOLVED");
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0].severity ?? "error").toBe("error");
+    // The message names the CODEGEN condition and claims nothing about the typer.
+    expect(orphans[0].message).toContain("no accumulator slot");
+    expect(orphans[0].message).not.toContain("E-TILDE-001");
+    // The pre-S397 fail-open marker is gone from the emitted text; the placeholder
+    // that replaces it is syntactically valid JS on purpose, so this diagnostic is
+    // not buried under the §2.2.1 acorn gate's generic "compiler defect" framing
+    // (asserted by the E-CODEGEN-INVALID-LOGIC check above).
+    expect(body).not.toContain("~ orphaned");
+    expect(body).toMatch(/_scrml_record_\d+\(null \/\* E-CG-TILDE-UNRESOLVED/);
 
     // (3) THE WRITE HALF IS UNAFFECTED AND MUST STAY FIXED. Exactly one tilde
     // name, seeded before the `if`, assigned by BOTH limbs, and read by the
@@ -580,6 +606,13 @@ function show() {
     expect(body).toMatch(new RegExp(`_scrml_step2_\\d+\\(${minted[1]}\\)`));
     // The carve-out's fingerprints must NOT appear here.
     expect(body).not.toContain("~ orphaned");
+    // ⛑ S397 — the line above is now VACUOUS ON ITS OWN: the marker string it looks
+    // for no longer exists anywhere in the compiler, so it passes whether or not the
+    // read orphaned. What this clause always MEANT is "no orphan happened here", and
+    // since S397 an orphan is a DIAGNOSTIC rather than a string in the output, so that
+    // is what is asserted now. Both are kept: the code check is the live assertion, the
+    // string check catches a re-introduced fail-open fallback.
+    expect(errors.filter(e => e.code === "E-CG-TILDE-UNRESOLVED")).toHaveLength(0);
     expect(body).not.toMatch(/^\s*_scrml_step1_\d+\(i\);$/m);
   });
 
@@ -629,6 +662,13 @@ function nested2() {
     expect(innerBlock).toContain(`_scrml_step2_`);
     expect(innerBlock).toMatch(new RegExp(`_scrml_step2_\\d+\\(${mint[1]}\\)`));
     expect(body).not.toContain("~ orphaned");
+    // ⛑ S397 — the line above is now VACUOUS ON ITS OWN: the marker string it looks
+    // for no longer exists anywhere in the compiler, so it passes whether or not the
+    // read orphaned. What this clause always MEANT is "no orphan happened here", and
+    // since S397 an orphan is a DIAGNOSTIC rather than a string in the output, so that
+    // is what is asserted now. Both are kept: the code check is the live assertion, the
+    // string check catches a re-introduced fail-open fallback.
+    expect(errors.filter(e => e.code === "E-CG-TILDE-UNRESOLVED")).toHaveLength(0);
 
     // (2) The nested mint STAYS IN ITS BLOCK. The nested context is a FRESH object,
     // so a rebind cannot escape to the arm level — that would re-open the very
@@ -692,6 +732,13 @@ export function f2() {
     // to the arm's own result var.
     expect(body).toMatch(new RegExp(`_scrml_note_\\d+\\(${enclosing[1]}\\);`));
     expect(body).not.toContain("~ orphaned");
+    // ⛑ S397 — the line above is now VACUOUS ON ITS OWN: the marker string it looks
+    // for no longer exists anywhere in the compiler, so it passes whether or not the
+    // read orphaned. What this clause always MEANT is "no orphan happened here", and
+    // since S397 an orphan is a DIAGNOSTIC rather than a string in the output, so that
+    // is what is asserted now. Both are kept: the code check is the live assertion, the
+    // string check catches a re-introduced fail-open fallback.
+    expect(errors.filter(e => e.code === "E-CG-TILDE-UNRESOLVED")).toHaveLength(0);
 
     const armResult = /let (_scrml_tilde_\d+) = null;/.exec(body)[1];
     expect(armResult).not.toBe(enclosing[1]);
@@ -787,6 +834,13 @@ function probe() {
       expect(mint).not.toBeNull();
       expect(body).toMatch(new RegExp(`_scrml_step2_\\d+\\(${mint[1]}\\)`));
       expect(body).not.toContain("~ orphaned");
+      // ⛑ S397 — the line above is now VACUOUS ON ITS OWN: the marker string it looks
+      // for no longer exists anywhere in the compiler, so it passes whether or not the
+      // read orphaned. What this clause always MEANT is "no orphan happened here", and
+      // since S397 an orphan is a DIAGNOSTIC rather than a string in the output, so that
+      // is what is asserted now. Both are kept: the code check is the live assertion, the
+      // string check catches a re-introduced fail-open fallback.
+      expect(errors.filter(e => e.code === "E-CG-TILDE-UNRESOLVED")).toHaveLength(0);
 
       // (2) The arm's own result is the write half's var: seeded before the `if`,
       // read by the declaration, and a DIFFERENT name from the nested mint. True for
