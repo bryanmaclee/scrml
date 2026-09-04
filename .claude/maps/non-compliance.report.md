@@ -1,19 +1,306 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
-# scan mode: FULL_COLD_START (doc-population scan) — run as part of the S396 wrap-6c map refresh
+# generated: 2026-09-04T14:07:46Z  commit: 10a4b045
+# scan mode: FULL_COLD_START (doc-population scan) — run as part of the S397 wrap-6c map refresh
 #
-# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`;
-# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 8e278c73 origin/main` -> exit 0.
-# Inbound: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
-# ⚠ `HEAD` is `a97766fc` (local, unpushed, `maps/s395-tail`) and is deliberately NOT the watermark.
+# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`;
+# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 10a4b045 origin/main` -> exit 0.
+# Inbound: `git merge-base --is-ancestor 8e278c73 10a4b045` -> exit 0.
+# ⛑ `HEAD` == `origin/main` == the merge-base WHEN THESE FIGURES WERE MEASURED. The pass then
+# committed itself onto `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now one ahead and the
+# watermark deliberately stays on the merge-base. That commit is `--name-only` EMPTY over every
+# source path, so nothing below moves. **Saying "no divergence" after committing would be N15 again.**
 #
-# ⛑ **THE TWO STANDING ITEMS WERE RE-EXECUTED, NOT RESTATED — and one of them came back SHARPER
-# rather than merely "still true".** Both verdicts below were produced by running commands against
-# the working tree at this watermark (source is byte-identical from `2d8dd8cb` through `8e278c73`),
-# and where the prior wording would have over-claimed, it is corrected here.
+# ⛑ **THE HEADLINE IS A DOC-VS-CODE CONTRADICTION INSIDE `compiler/SPEC.md` ITSELF, CREATED BY TWO
+# COMMITS OF THE SAME SESSION, AND IT IS THE FIRST TIME THIS SCAN HAS FOUND ONE IN THE AUTHORITATIVE
+# SPEC RATHER THAN IN A SATELLITE DOC.** #830 wrote a §32.2.1 status note describing an in-arm `~`
+# orphan as *"silently yields `null`"*; #832, four commits later, made that exact shape a **fatal
+# error at exit 1**. The §34 catalog row #832 added is correct. The §32 / §17.6 prose was not
+# updated. **REPRODUCED by compiling SPEC's own worked example.** See N15.
 
-## Summary — S396 pass (this pass)
+## Summary — S397 pass (this pass)
+
+| | |
+|---|---|
+| Scan population (in-scope tracked `.md`) | **108** — `git ls-files '*.md'` minus `docs/changes/` (**1,282**), `spa-lists/`, `archive/`, `handOffs/`, `.claude/` |
+| Excluded by scope rule | `.git/` · `node_modules/` · `archive/` · `handOffs/` (incl. the 2 NEW `handOffs/incoming/` peer reports this window) · `.claude/` · `docs/changes/` · `spa-lists/` |
+| In-scope docs CHANGED this window | **8** — `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `docs/FACTS.md`, `docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `master-list.md` |
+| New in-scope docs this window | **0** (the two new documents are `handOffs/incoming/`, out of population) |
+| Non-compliant | **1 NEW (N15, doc-vs-code, HIGH)** + **2 standing** (N12, N13 — both POPULATION holes) |
+| Factually wrong / structurally broken, in-scope | **4 NEW, all in the MAP SET itself** (M4-M7) |
+| Uncertain — needs human review | **1 NEW (U3)** + 2 carried (U1, U2) |
+| Closed this pass | **1** — the S397-filed map gap `g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface` |
+
+⚑ **THE SECOND-ORDER HEADLINE: FOUR OF THE SEVEN FINDINGS ARE IN ARTIFACTS THIS SCAN IS SUPPOSED TO
+BE THE ORACLE FOR.** M4-M7 are errors in `.claude/maps/`: three found by re-executing figures the
+prior pass published as "re-executed", and one (M7) by a STRUCTURAL probe that nothing in this set
+was running. **Second consecutive pass where the map set is the biggest finding, and the mechanism
+differed both times** — which is the argument for the two cheap standing probes recommended in M5
+and M7 rather than for more diligence.
+
+---
+
+## N15. ⛔ **NEW, HIGH** — `compiler/SPEC.md` describes an orphaned in-arm `~` as SILENT and `null`-valued. It has been a FATAL ERROR since `c11db440`, four commits earlier in the same session.
+
+**Reason:** doc-vs-code — a normative-adjacent status note and a worked example contradicted by HEAD.
+**Population:** IN SCOPE, and `compiler/SPEC.md` + `compiler/SPEC-INDEX.md` are both **mandatory
+full-reads at Profile-A PA boot**, so this text is read by every session that starts.
+
+**FIVE sites, all reproducing the same stale claim:**
+
+| file:line | text |
+|---|---|
+| `compiler/SPEC.md:19305` | status-note table row — *"mentions `~` ONLY inside the arm \| **orphans to `null`**, silently"* |
+| `compiler/SPEC.md:19309` | *"it passes `null` rather than `loadUser`'s result"* |
+| `compiler/SPEC.md:19339` | *"today this shape **silently yields `null` rather than erroring**"* |
+| `compiler/SPEC.md:19347` | *"an adopter writing this shape gets **codegen's orphan fallback (`null`), NOT the mandated error**"* |
+| `compiler/SPEC.md:11905` | §17.6.2's cross-ref — *"otherwise orphans to `null`"* |
+| `compiler/SPEC-INDEX.md` (§32 row) | *"orphans to `null` when the in-arm read is the only `~` there"* |
+
+⛑ **REPRODUCED BY EXECUTION AT THIS WATERMARK — the probe is SPEC's own §32.2.1 example, not a
+constructed one.** Compiling `step1(2)  const label = if (@n > 0) { record(~) lift "ok" } else { lift
+"neg" }` gives:
+
+```
+error [E-CG-TILDE-UNRESOLVED]: a `~` read reached code generation with no accumulator slot …
+  --> …:2:7
+FAILED — 1 error, 2 warnings          (exit 1)
+```
+
+And §32.5's verbatim `${ process(~) }` gives the same code at a correct `1:11`, **exit 1**.
+
+⚠ **STATE THE FALSIFICATION PRECISELY, BECAUSE ONE WORD OF IT SURVIVES.** A `null` placeholder IS
+still written into the emitted artifact (`null /* E-CG-TILDE-UNRESOLVED: … */`), so *"yields `null`"*
+is true at the FILESYSTEM level. **What is false is "silently" and "NOT the mandated error":** a
+fatal diagnostic fires and the process exits non-zero. The residual gap is not that nothing fires —
+it is that the code which fires is the CODEGEN floor (`E-CG-TILDE-UNRESOLVED`), a strictly weaker,
+stage-local claim, rather than the §32.5 TYPE-SYSTEM code `E-TILDE-001` the section names.
+
+⚑ **WHY THIS HAPPENED IS THE REUSABLE PART, AND IT IS NOT CARELESSNESS.** #830 (`8d3c7936`) landed the
+§32.2.1 WRITE half and, correctly and honestly, wrote a status note describing what shipped **at that
+commit**. #832 (`c11db440`) then minted the fail-closed floor and wrote a **correct** §34 catalog row
+for it. Neither commit was wrong at its own moment. **What no instrument checked was the SECOND
+commit's effect on the FIRST commit's prose** — and the two are ~2,900 lines apart in the same file.
+**A "spec-ahead / Nominal" marker is a claim about the CODE, so it decays the moment the code moves,
+and nothing in the toolchain re-reads it.** The §34.0 row-well-formedness gate checks NEW rows; there
+is no reciprocal check that an OLD status note still holds.
+
+**Suggested disposition:** update to match current — rewrite the four §32.2.1 sites and the §17.6.2
+cross-ref to say *"orphans, and since S397 that orphan is a fatal `E-CG-TILDE-UNRESOLVED` at exit 1 —
+NOT the §32.5 `E-TILDE-001` the clause mandates, which still has zero fire sites"*; add
+`E-CG-TILDE-UNRESOLVED` to `SPEC-INDEX.md`'s §34 notable-codes list (it currently appears **0 times**
+in that file while being a live catalog row). ⛔ **Do NOT weaken the Nominal marker itself** — the
+READ clause is still spec-ahead; only its *description of present-day behaviour* is stale.
+
+---
+
+## STANDING ITEMS — RE-EXECUTED AT `10a4b045` (verdicts are commands, not carry-forward)
+
+### N12. `docs/audits/` — 20 documents — **STILL OUTSIDE THE SCAN POPULATION. 15th consecutive pass.**
+
+**Verdict: STILL LIVE. Re-executed: `ls docs/audits/ | wc -l` -> 20.** The two self-declared-superseded
+audits (`null-audit-compiler-src-2026-05-13.md:7`, `undefined-audit-compiler-src-2026-05-13.md:7`) are
+still present and still tracked; a bare `grep -l -i superseded` still returns **9** and still
+over-counts by 4.5x. The stale anchor is unchanged and is now **worse**:
+`scrml-dev-content-spec-fidelity-2026-05-19.md:5` cites `compiler/SPEC.md (27,945 lines)` against an
+actual **37,798** — short by **9,853 lines / 26.1%** (was 9,702 / 25.8% last pass; SPEC grew +151).
+
+⛑ **AND THE PRIOR PASS'S OWN SIZE FIGURE FOR THIS DIRECTORY DOES NOT REPRODUCE — three instruments,
+three answers, none of them 2.0 MB.** The standing wording says *"20 entries, **2.0 MB**"*. Measured
+here: `du -sh docs/audits` -> **900K**; `du -sh --apparent-size` -> **834K**; `cat docs/audits/*.md |
+wc -c` -> **651,192 bytes (≈636 KiB)**. ⚑ **Block-rounding cannot explain a 2-3x gap** (20 files at a
+4 KiB block ceiling is ≤80 KiB of slack), so this is not a `du`-vs-`du` artifact and not a MB-vs-MiB
+artifact either. **The 2.0 MB figure is unsupported by any instrument available in this worktree and
+should be re-derived, not carried a 16th time.** ⚠ The FINDING is unaffected — the population hole is
+about the 20 documents being unscanned, not about their byte count — but a figure quoted 15 times
+without reproduction is exactly the shape this report exists to catch, and it was in this report.
+
+**Suggested disposition:** unchanged (deref the two self-declared-superseded audits to
+`scrml-support/archive/`; bring the remaining 18 into the scan population once), **plus**: replace the
+`2.0 MB` figure with the measured byte count or drop it.
+
+### N13. Four doc directories with ZERO map coverage — **STILL LIVE, unchanged.**
+
+Re-executed: `grep -l 'docs/<dir>' .claude/maps/*.map.md` returns **0** for `docs/heads-up/` (4 files),
+`docs/adopter/` (2), `docs/curation/` (1), `docs/pinned-discussions/` (1). `docs/heads-up/` gained no
+file this window — ⚠ **and note the near-miss: the two peer reports that landed this window went to
+`handOffs/incoming/`, not `docs/heads-up/`**, so the two directories are accumulating similar content
+under different conventions and only one of them is in any scan population.
+
+---
+
+## NEW FINDINGS — S397. **All four are errors in the MAP SET — three from re-executing published figures, one from a structural probe.**
+
+### M4. ⛔ `primary.map.md` published a §34 census under the words "RE-EXECUTED AT THIS WATERMARK" that is FALSIFIABLE at its own stated SHA — three ways, one command each.
+
+The diagnostic-code routing row read: *"RE-EXECUTED AT THIS WATERMARK it returns **812 rows**,
+`§34 19352..20235`, 1958 source files, **883 conformance cases**"*, stamped `8e278c73`.
+
+| check | command | published | actual at `8e278c73` |
+|---|---|---|---|
+| §34 range start | `git show 8e278c73:compiler/SPEC.md \| grep -n '^## 34\.'` | 19352 | **19456** |
+| conformance cases | `git ls-tree -r 8e278c73 \| grep -c 'cases/.*case\.scrml'` | 883 | **893** |
+| catalog total | `error.map.md`'s own S395 entry, same SPEC | 812 | **814** |
+
+The published triple matches a SPEC roughly **104 lines shorter** than `8e278c73`'s — i.e. carried
+from around the S376 watermark and re-labelled. **Corrected this pass** (`815` at `10a4b045`,
+re-executed, with `--check-new --base 8e278c73` cross-checking that the delta is **one** code).
+⚑ **The rule this produces sharpens invariant 71: an internal contradiction is the cheap tell, but a
+STAMPED claim is falsifiable outright.** `git show <sha>:<file>` and `git ls-tree -r <sha>` cost one
+command each. **Treat "re-derived, not carried" exactly like a review finding — reproduce it.**
+
+### M5. ⛔ `primary.map.md` carried **TWO** byte-identical duplicated regions — **104 lines total** — and sed-maintenance had kept both copies of the first current, so no contradiction check could ever see either.
+
+A second `## Project Fingerprint` + `## ⚠️ MAP CURRENCY` pair sat ~130 lines below the live one — a
+leftover S376-era section whose Fingerprint lines had been updated in place by later passes while its
+surrounding currency prose stayed at `fc6df72e` / `60803548`. **The two Fingerprint blocks were
+BYTE-IDENTICAL**, which is precisely why the "diff a figure against itself" instrument passed over it
+for multiple windows: there was no contradiction, only redundancy.
+
+⛑ **AND THE SECOND ONE WAS FOUND ONLY BECAUSE THE FIRST FIX PROMPTED A REAL DEDUP PROBE — IT IS TEN TIMES LARGER.** The entire **91-line S376 `#`-commented narrative** (`# **INCREMENTAL over 8b2e4053 -> fc6df72e …` through `# … rules a grep cannot find.`) appeared TWICE, once in the file header and once inside the `MAP CURRENCY` body, byte-identical, plus 4 lines of `# ═══` scaffolding. **Together with the 9-line Fingerprint block that is 104 duplicated lines in a 738-line file — 14%.**
+
+**Fixed this pass:** byte-identity verified programmatically before each deletion (the script refuses to delete on any difference); both duplicates removed; the orphaned second `MAP CURRENCY` heading **demoted and re-titled** rather than dropped, because its standing off-main-stamp-hazard prose was unique to that copy, and its two redundant opening sentences replaced with a pointer.
+
+⚑ **A DEDUP CHECK AND A CONTRADICTION CHECK ARE DIFFERENT INSTRUMENTS, AND A 9,000-LINE MAP SET NEEDS BOTH.** The probe that found the second one is four lines and was then run across all 13 files: **duplicate `^#{2,3} ` headings, plus any >90-char line appearing more than once.** After the fixes it returns clean everywhere except this report's own per-pass `## Tags` / `## Links` / `## CLOSED THIS PASS` repeats, which are by design. **Cost: one script. Recommend it as a standing wrap-6c step.**
+
+### M6. ⚠ Eighteen `emit-logic.ts` / `emit-control-flow.ts` line citations across four maps had drifted, and the drift was invisible because every SYMBOL still existed.
+
+`emit-logic.ts` grew **+315 net** this window (5,374 -> 5,689), moving essentially every anchor below
+line ~1,700. Corrected by SYMBOL GREP, not by shifting: `planBlockArmLift` `:4715`->`:5192` ·
+`_blockTailIsValueExpr` `:4653`/`:4871`/`:4700`->`:5130` · `_emitValueFormSugarArm` `:4438`->`:4570` ·
+`emitIfExprDecl` `:4525`->`:4735` · `emitMatchExprDecl` `:4763`->`:5240` ·
+`_matchArmResultIsBlockBody` `:4637`->`:5060` · `_splitBlockStatements` `:4580`->`:5003` ·
+`_emitBlockArmValueFromString` `:4734`->`:5211` · `emitIifeBlockArmBody` `:2090`/`:2115`->`:2177` ·
+`emitMatchExpr` `~:2320`->`:2248`, plus the two `node.ifExpr` dispatch pairs. **43 substitutions
+across `primary`, `domain`, `structure`, `dependencies` and this report.** ⚠ **This is the benign end
+of the class the maps already warn about** (a drifted line lands near the truth; a wrong FILE does
+not) — recorded because the VOLUME is the signal: a single +315-line window invalidated 18 anchors,
+so anchor re-derivation is not an occasional chore on this file, it is per-window maintenance.
+
+---
+
+### M7. ⚠ TWO MARKDOWN TABLES IN THE MAP SET WERE STRUCTURALLY MALFORMED, AND ONE OF THEM WAS SILENTLY RENDERING ITS ANSWER IN THE WRONG COLUMN.
+
+Found by a four-line probe run across all 13 files (cell count per row vs the table's own separator,
+with `\|` escapes discounted). **Two hits, and they fail differently:**
+
+- ⛔ **`test.map.md`'s `Unit` row contained an UNESCAPED `|` inside a shell pipeline**
+  (`… -- compiler/tests/unit | grep -c …`), splitting a 5-column row into **6 cells**. Everything
+  after the pipe rendered one column to the right, so the **"which gate runs it"** answer — the
+  whole point of that column — was not where a reader looks for it. ⚑ **This is a SILENT failure:
+  markdown does not error on a long row, it re-columns.** Escaped. ⚠ **And the same cell carried a
+  STALE count (`925`) that contradicted this map's own prose four screens up** — the invariant-71
+  tell, found here as a side effect of a structural probe rather than by a figure diff. Now `926`.
+- ⚠ **`dependencies.map.md`'s §17.1.1 `if-chain` row had TWO cells in a THREE-column table.**
+  Markdown pads a short row, so this rendered without complaint and lost nothing — cosmetic, but it
+  is the same class and the same probe caught it. Closed with an explicit third cell rather than by
+  reflowing load-bearing prose.
+
+⚑ **THE POINT IS THE INSTRUMENT.** Every map in this set is prose-dense and table-heavy, and both
+failure modes are INVISIBLE to every check the set already runs: a re-columned row contradicts
+nothing, duplicates nothing, and cites nothing wrong. **Recommend the cell-count probe and the
+duplicate-block probe (M5) as a paired standing wrap-6c step — together they are ~20 lines and this
+pass they found four defects that had survived multiple passes each.**
+
+---
+
+## UNCERTAIN — needs human review (S397)
+
+### U3. `docs/known-gaps.md`'s `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples` headline is now stale for at least one of its six probes — and I could only re-run one.
+
+**Reason:** partial verification. The entry's headline is *"§32's `~` exactly-once (`lin`) enforcement
+produces **ZERO diagnostics on SPEC's own worked examples**"*, backed by **six** PA-measured probes,
+all recorded as exit 0. **Probe 1 (§32.5's verbatim `${ process(~) }`) now exits 1** with
+`E-CG-TILDE-UNRESOLVED` — re-run here. The other five were **not** re-run in this pass.
+
+**What to check:** re-run all six probes at `10a4b045` and rewrite the headline to distinguish *"no
+`E-TILDE-*` diagnostic"* (still true — those codes have zero fire sites, cause traced this pass: zero
+producers of `tilde-init`/`tilde-ref`) from *"zero diagnostics"* (now false for at least probe 1).
+⚑ **The entry's severity should probably survive** — the mandated code still cannot fire and the
+compiler is now rejecting the shape under a DIFFERENT, weaker code — but that is a filing judgment,
+not a mapper's call, and the entry is PA-owned.
+
+⚠ **U1 and U2 carried unchanged** from the S396 pass; existence re-verified, content not re-read.
+
+---
+
+## CLOSED THIS PASS
+
+### `g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface` (LOW, filed S397) — **CLOSED by this pass's write.**
+
+`docs/known-gaps.md:11363`. The gap's locus note is exact: the two pre-existing rows *"reach the same
+emitter by a different symptom; no row is keyed on the sigil or on §32"*. `primary.map.md` now carries
+a `~`/§32 Task-Shape Routing row as the FIRST row of that table, splitting the surface into three
+axes across `emit-logic.ts`, `emit-expr.ts` and `type-system.ts`. ⛑ **The gap entry itself models the
+discipline worth copying:** its provenance records that the STRONGER reported claim (*"the `~`/§32
+surface has ZERO rows across all 13 nav maps"*) was **FALSIFIED in the same grep that confirmed the
+narrow one** — `domain.map.md` carried 17 `~`/§32 hits and always did. **Grep the whole set, then file
+the version that survives.** ⚠ **Closing it is not the mapper's call to record in the ledger** —
+`docs/known-gaps.md` is PA-owned and out of this pass's write surface. Reported, not edited.
+
+---
+
+## Docs scanned this window — the 8 changed in-scope docs
+
+| doc | verdict |
+|---|---|
+| `compiler/SPEC.md` | ⛔ **NON-COMPLIANT at 5 sites — see N15.** The §34 catalog row for `E-CG-TILDE-UNRESOLVED` is itself exemplary (states its stage, its distinction from `E-TILDE-001`, its measured migration census, and the process-vs-filesystem limit of its own guarantee). The defect is in the §32/§17.6 prose an EARLIER commit wrote. |
+| `compiler/SPEC-INDEX.md` | ⚠ **Partially stale (part of N15).** Regenerated totals are correct (`bun scripts/regen-spec-index.ts --check` PASSES at 37,798 / 65 sections, re-run here). Its §32 row carries the same "orphans to `null`" claim, and `E-CG-TILDE-UNRESOLVED` appears **0 times** in the file while being a live §34 row. |
+| `docs/known-gaps.md` | **COMPLIANT, and notably self-correcting.** It explicitly records the one stale in-tree reference this arc created (the §7 Bug-15 rotation entry citing the retired `codegen-fallback` marker) and corrects it in place, naming that as the only pre-existing ledger text it edited. It also files the map routing gap and the residual code-loss gap. ⚠ One headline needs re-verification — U3. |
+| `docs/FACTS.md` | **COMPLIANT.** All four published counts re-executed and reconciled exactly (248,859 / 194 · 1,425 · 37,798 · 897). |
+| `docs/changelog.md` · `docs/pr-reviews.md` · `hand-off.md` · `master-list.md` | **COMPLIANT** — per-session ledgers, in scope, no forward-looking claim checked against code. |
+
+⚑ **A NOTE ON WHAT "COMPLIANT" MEANS FOR `known-gaps.md` HERE, because it is the interesting case.**
+That file is FULL of statements about behaviour the compiler does not have — which is its job. It is
+compliant because every such statement is marked as a gap and carries its own provenance and
+watermark. **`SPEC.md` failed the same test on the same subject matter** because its stale statements
+sit in a status note that reads as current fact. **The difference is not accuracy, it is labelling.**
+
+---
+
+## Map currency at this stamp — S397
+
+All 13 map files re-stamped to `10a4b045`. `bun scripts/state.ts --check` is WARN-only and exits 0
+either way — nothing in the toolchain fails on stale maps, which is why the stamp is a manual
+discipline and why every figure in the set now carries the command that produced it.
+
+⚑ **Nine consecutive passes have recommended a deterministic non-AI map-currency check; nothing has
+moved.** This pass adds a cheaper, narrower suggestion that would have caught **M4 and M5** and costs
+no new infrastructure: **(a)** for any map line matching `RE-EXECUTED|re-derived, not carried` that
+also names a SHA, re-run the cited command against `git show <sha>:` — falsifiable, one command;
+**(b)** a `sort | uniq -d` over `^## ` headings per map file — M5 was a byte-identical duplicated
+section that no contradiction check can see by construction.
+
+## Tags
+#scrml #map #non-compliance #cleanup #doc-currency #scan-population #map-self-audit
+#spec-vs-code-drift #n15-spec-status-note-stale #silently-yields-null-is-false
+#process-level-not-filesystem-level #e-cg-tilde-unresolved #e-tilde-001-zero-fire-sites
+#nominal-marker-decays-when-code-moves #two-commits-one-session #status-note-has-no-gate
+#stamped-claim-is-falsifiable #re-executed-is-a-claim #git-show-at-the-stated-sha
+#byte-identical-duplicate-section #dedup-is-not-contradiction-check #18-anchors-drifted
+#symbol-grep-not-line-shift #routing-hole-closed #router-vs-coverage #two-mb-does-not-reproduce
+#docs-audits-population-hole-15th-pass #handoffs-incoming-vs-docs-headsup
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [domain.map.md](./domain.map.md)
+- [error.map.md](./error.map.md)
+- [schema.map.md](./schema.map.md)
+- [structure.map.md](./structure.map.md)
+- [dependencies.map.md](./dependencies.map.md)
+- [test.map.md](./test.map.md)
+- [known-gaps.md](../../docs/known-gaps.md)
+- [changelog.md](../../docs/changelog.md)
+- [FACTS.md](../../docs/FACTS.md)
+- [SPEC-INDEX.md](../../compiler/SPEC-INDEX.md)
+- [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+
+---
+
+# ═══ PRIOR PASSES — carried for provenance. Their stamps are HISTORICAL, not current. ═══
+
+## Summary — S396 pass (PRIOR pass — carried for provenance)
 
 | | |
 |---|---|
@@ -395,8 +682,8 @@ classifier**)"*. `planBlockArmLift` appears **4×** in that file.
 - **Axis 1 (S331, unresolved):** invariant 49 recorded that §18.5 has **FOUR** emission routes, so
   "the single classifier" was already false.
 - **Axis 2 (NEW, S395):** #815 establishes that the genuinely shared leaf across §18.5 **and**
-  §17.6.2 is **`_blockTailIsValueExpr`** (`emit-logic.ts:4871`, exported; consumed at
-  `emit-control-flow.ts:2479` and `emit-logic.ts:4449` / `:4938` / `:5100`) — **not**
+  §17.6.2 is **`_blockTailIsValueExpr`** (`emit-logic.ts:5130`, exported; consumed at
+  `emit-control-flow.ts:2479` and `emit-logic.ts:4581` / `:4938` / `:5100`) — **not**
   `planBlockArmLift`. **The phrase now names the wrong symbol for the wrong claim, and it is still
   propagating into briefs.**
 **Disposition:** replace with *"`_blockTailIsValueExpr`, the shared value-ness leaf; the SHAPE rule
@@ -1022,7 +1309,7 @@ recorded the divergence (`g-match-block-iife-tail-classifier-diverges-from-share
 marked `RESOLVED S330-peter`, and the phrase has PROPAGATED INTO THE SOURCE** —
 `emit-control-flow.ts:2078` now also says "the single §18.5 classifier". Meanwhile
 `primary.map.md`'s own routing row still says the opposite: *"Grep `_blockTailIsValueExpr`
-(`emit-logic.ts:4653`), NOT `planBlockArmLift` — the latter finds only the two RAW-STRING routes."*
+(`emit-logic.ts:5130`), NOT `planBlockArmLift` — the latter finds only the two RAW-STRING routes."*
 **Three artifacts, two incompatible claims, and the source now carries one of them.**
 **Suggested disposition: needs a human to adjudicate by EXECUTION** — determine whether
 `planBlockArmLift` is genuinely the sole tail classifier at this HEAD, then make the gap ledger, the

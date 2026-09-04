@@ -113,7 +113,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > ⚑ **AND `E-TILDE-001/002` HAVE NEVER FIRED.** `tilde-init`/`tilde-ref` have four consumers and
 > **ZERO producers**; the apparent producers are hand-built object literals in `type-system.test.js`,
 > which is why the pass has passing unit tests and never fires on real source. SPEC's own verbatim
-> INVALID examples at §32.5, §32.6 and §32.7 all compile at **exit 0**. Any §32 reasoning that assumes
+> INVALID examples at §32.5, §32.6 and §32.7 compiled at exit 0 **at `8e278c73`** — but ⚑ **#832's own fail-closed floor changed that MID-SESSION**: `${ process(~) }` now exits 1 with `E-CG-TILDE-UNRESOLVED` (PA-verified). **The zero-producers finding STANDS** — `E-TILDE-001/002` still never fire; what catches that shape now is the CODEGEN floor, not §32.5's type-system code. Any §32 reasoning that assumes
 > enforcement is reasoning about a checker that does not run.
 
 ### §0.6 Recent sessions (generated index)

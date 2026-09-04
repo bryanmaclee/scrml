@@ -32,8 +32,7 @@ sample that runs on every `bun run pretest`.
 **⚑ `E-TILDE-001/002` HAVE ZERO PRODUCERS.** `tilde-init`/`tilde-ref` have four consumers and no
 producers anywhere in `compiler/src/` or `compiler/native-parser/`. The apparent producers are
 hand-built object literals in `type-system.test.js` — **which is why the pass has passing unit tests
-and never fires on real source.** SPEC's own verbatim INVALID examples at §32.5, §32.6 and §32.7 all
-compile at exit 0.
+and never fires on real source.** SPEC's own verbatim INVALID examples at §32.5, §32.6 and §32.7 compiled at exit 0 **at `8e278c73`** — but ⚑ **#832's own fail-closed floor changed that MID-SESSION**: `${ process(~) }` now exits 1 with `E-CG-TILDE-UNRESOLVED` (PA-verified). **The zero-producers finding STANDS** — `E-TILDE-001/002` still never fire; what catches that shape now is the CODEGEN floor, not §32.5's type-system code.
 
 **Q9 (`E-ROUTE-004` untyped-invoked-param) STOPPED BY RULING.** The PA set a stopping rule before
 round 3; round 4 found two HIGH false positives and it fired. bryan ruled **option 3 — build the

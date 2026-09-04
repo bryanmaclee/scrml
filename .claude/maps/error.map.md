@@ -1,16 +1,69 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
-# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
-# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
-# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
-# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
+# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
+# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
+# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
+# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
+# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
+# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
+# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
+# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
 # MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
+# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
+# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+#
+# ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
+#
+# **THE WATERMARK AND THE WALKED WINDOW END AT THE SAME COMMIT.** The source delta walked is
+# `8e278c73..10a4b045` (10 commits, PRs #825-#834, ONE operator), and `10a4b045` is the merge-base
+# AND `origin/main` — unlike S395 (stamp vs unpushed branch tip) and S396 (watermark ahead of the
+# last source-bearing commit). ⚠ **This pass's OWN commit then advances `HEAD` past the watermark,
+# exactly as every pass's does; see the note above line 14. That is the rule working, not a gap.**
+#
+# **THE COMPLETE SOURCE DELTA WAS WALKED — the partial-pass rule is SATISFIED, not waived.**
+# `git diff --name-only 8e278c73..10a4b045` over `compiler/src` · `compiler/native-parser` ·
+# `stdlib` · `scripts` · `lsp` · `conformance` is **FOUR `compiler/src` files and they are all in
+# `codegen/`**, every one read in full, plus 8 conformance files (4 NEW cases):
+#   · `compiler/src/codegen/emit-logic.ts`  (+371/-63) — **#830** (`8d3c7936`) the §32.2.1 WRITE half
+#   · `compiler/src/codegen/emit-expr.ts`   (+166/-16) — **#832** (`c11db440`) the fail-closed `~` floor
+#   · `compiler/src/codegen/index.ts`       (+38)      — **#832** the sink's reset + TWO drains
+#   · `compiler/src/codegen/log-loc.ts`     (+32)      — **#832** `resolveSpanLineCol` (NEW export)
+# `.github/` · `scripts/` · `stdlib/` · `lsp/` · `package.json` · `bun.lock` · `compiler/native-parser/`
+# are all `--name-only` **EMPTY**. `compiler/src/types/` EMPTY for the FIFTEENTH window.
+# `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; `SPEC-INDEX.md` re-generated.
+#
+# ⛑ **THE HEADLINE FINDING IS A ROUTER HOLE, AND IT WAS MEASURED BY THREE DISPATCHES FAILING THE SAME
+# WAY.** Three separate S397 dispatches working the `~` / §32 surface reported that
+# `primary.map.md` gave them **no routing**. A fourth falsified the STRONGER version of that claim:
+# `domain.map.md` carries **17** `~`/§32 hits and always did. So the real defect was narrower and
+# worse — **the material existed and the ROUTER could not reach it.** `primary.map.md` now carries a
+# `~`/§32 Task-Shape Routing row, and it splits the surface into **THREE AXES** because conflating
+# two of them cost this session a wrong-locus round. See that row before touching anything `~`.
+#
+# ⚑ **TWO STANDING TRAPS ON THIS SURFACE, BOTH RE-VERIFIED BY EXECUTION AT THIS WATERMARK:**
+#   (1) **`E-TILDE-001` / `E-TILDE-002` CANNOT FIRE.** The `tilde-init` / `tilde-ref` node kinds have
+#       **FOUR consumers** in `type-system.ts` (`:18426` comment · `:18435` · `:18744` · `:18750`) and
+#       **ZERO producers** anywhere in `compiler/src/` or `compiler/native-parser/` — measured, the
+#       grep returns exactly those four lines and nothing else. The apparent producers are hand-built
+#       object literals in `compiler/tests/unit/type-system.test.js:1751+`. Any §32 reasoning that
+#       assumes enforcement is reasoning about a checker that does not run.
+#   (2) **scrml's AST has NO UNIFORM BINDER REPRESENTATION**, and `ast-builder.js` builds most of it
+#       with ES6 SHORTHAND so a regex keyed on `field:` cannot see it. Details in schema.map.md.
+#
+# ⚑ **S397 — A BRIEFED PREMISE WAS FALSIFIED *BY THE WINDOW IT DESCRIBED*, WHICH IS A DIFFERENT
+# FAILURE FROM THE S396 ONE TWO BANNERS DOWN (that one was wrong when written; this one WENT wrong).**
+# The dispatching brief said SPEC's verbatim INVALID §32 examples "all compile at exit 0". **FALSIFIED BY EXECUTION
+# at this watermark:** §32.5's own `${ process(~) }` now compiles to **exit 1** with
+# `E-CG-TILDE-UNRESOLVED` at a CORRECT `1:11`. The premise was true at `8e278c73` and #832 changed it.
+# What survives is the sharper statement: the code that fires is the CODEGEN floor, not the §32.5
+# TYPE-SYSTEM code the SPEC names — so `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`
+# is now PARTIALLY overtaken and its "ZERO diagnostics" headline is stale for at least that probe.
+#
 #
 # ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
 #
@@ -104,6 +157,11 @@ here — the fire site was found by grep, exactly the failure mode
 row now exists AND it fires; the prior "NOT implemented — do not add" note here is RETIRED).
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
+
+⛑ **S397: 815 distinct diagnostic codes** cataloged in §34 at `10a4b045` — **+1 over `ad7b65dc`/`8e278c73`, zero removed. The one is `E-CG-TILDE-UNRESOLVED`** (see its own section below). `bun scripts/s34-census.ts` **RE-EXECUTED at this watermark**, returning `815 rows (§34 19605..20491, derived) · 1958 source files · 897 conformance cases`; buckets `STRUCK 34 · PINNED 344 · IMPL-SITES 304 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`. ⚑ **PINNED moved `343 -> 344` and every other bucket is FLAT — which is the correct signature for a code that landed WITH a `-neg` conformance case** (`ctrl-028`), rather than the IMPL-SITES bump a code landing without one produces. ⚠ **THE DISPOSITIONS UNDER `FALSE-CLAIM` DID MOVE, AND THE FLAT TOTAL HIDES IT: `BUILD-ARC 71 -> 70`, `HOME-NO-SHALL 27 -> 26`, `NOMINAL-HOME 10 -> 12`, `ORPHAN-INDEX 4` flat — sum 112 at BOTH ends.** Two rows were re-dispositioned INTO `NOMINAL-HOME` from the other two buckets. `E-CG-TILDE-UNRESOLVED` is not among them (it is PINNED, not FALSE-CLAIM), so this is a re-classification of PRE-EXISTING rows, most plausibly a consequence of the §32.2.1 Nominal markers landing upstream and being picked up by the census's banner-window heuristic (T4). **Do not read `FALSE-CLAIM 112` as "nothing moved" — diff the dispositions, not the bucket.** Cross-checked a second way per the standing single-oracle caution: `bun scripts/s34-census.ts --check-new --base 8e278c73` reports **2 new/changed rows, all well-formed (provenance resolves) — PASS**, and the SPEC diff confirms both rows are the SAME code (main catalog `SPEC.md:20310`, appendix index `:25812`). Only the main-catalog row falls inside the derived range, so **2 rows = +1 to the count**, which is why `--check-new`'s "2" and the census's "+1" are consistent rather than contradictory. `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; the §34 range moved `19456..20341 -> 19605..20491` (§32.2.1 is a NEW subsection inserted upstream of §34 — re-derive the range from the `## 34.` / `## 35.` headings EVERY time, never bake it).
+
+⛑ **AND A FIGURE IN THE SIBLING MAP WAS FALSIFIED DOING IT — THIS IS THE "DIFF A FIGURE AGAINST ITSELF" RULE EARNING ITS KEEP FOR THE FIFTH TIME.** `primary.map.md` published, under a sentence reading *"RE-EXECUTED AT THIS WATERMARK it returns 812 rows, §34 19352..20235, 1958 source files, 883 conformance cases"*, a census that **cannot have been executed at `8e278c73`**, and it is provable three independent ways without re-running anything: (1) the §34 heading in `git show 8e278c73:compiler/SPEC.md` is at line **19456**, not 19352 — both published bounds are wrong for that SHA; (2) `git ls-tree -r 8e278c73` counts **893** `conformance/cases/**/case.scrml`, not 883; (3) THIS map's own S395 entry, two paragraphs down, records **814** at the same SPEC. The published figures match a SPEC roughly 104 lines shorter — i.e. they were carried from around the S376 watermark and re-labelled. **The row is corrected in `primary.map.md` this pass.** ⚑ **The generalisable rule, and it is sharper than the existing one: a figure that CLAIMS to have been re-executed at a stated SHA is FALSIFIABLE against that SHA with `git show` / `git ls-tree` and costs one command.** "Re-derived, not carried" is a claim like any other — check it the same way you check a review finding. Do not read the 812→815 arithmetic as "+3 codes"; **exactly one code was minted.**
+
 
 ⛑ **S395: 814 distinct diagnostic codes** cataloged in §34 at `ad7b65dc` — **FLAT over `2ec2ce3a..ad7b65dc`, zero in and zero out, while the RANGE moved +98 to `19456..20341`. Re-derive the range from the `## 34.` / `## 35.` headings EVERY time; never bake it.** Census at `ad7b65dc`: `814 rows (§34 19456..20341, derived) · 1994 source files · 891 conformance cases`; buckets `STRUCK 34 · PINNED 343 · IMPL-SITES 304 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`, all seven FLAT. `compiler/SPEC.md` is now **37,647 lines** (+108, ONE commit — #802, prose+grammar, ZERO rows). The S391 figures follow for provenance: **814 distinct diagnostic codes** cataloged in §34 at `2ec2ce3a` — **`bun scripts/s34-census.ts` is
 the ORACLE and it was RE-EXECUTED this pass**, returning
@@ -238,6 +296,7 @@ part of the catalog and are included.
 
 | Window | Count | Delta |
 |---|---|---|
+| **`8e278c73..10a4b045` (S397, THIS pass)** | **814 -> 815** | **+1 LIVE, zero removed: `E-CG-TILDE-UNRESOLVED`** (Error; §32/§32.2/§47; catalog row `SPEC.md:20310`, appendix index `:25812`; emitted `compiler/src/codegen/emit-expr.ts:1305` in `emitIdent`, drained into the run's error list by `codegen/index.ts` `runCG` at `:2649` and `:3517`). ⛑ **It lands PINNED, not IMPL-SITES** — `conformance/cases/control-flow/ctrl-028-arm-body-tilde-read-orphan-neg` pins the code, its severity AND its exact cardinality, verified by flipping the emitter off and watching the case go red. That is why PINNED moved `343 -> 344` while every other bucket stayed flat. ⚠ **It is a newly-REJECTING change (base §8), and it owes a measured migration — which it got:** an output-side census over all **2,383** corpus `.scrml` files counting the old `codegen-fallback` marker in every emitted artifact returned **two source files and four sites**, both migrated with the landing. ⚑ **The `812` in `primary.map.md` was the WRONG figure, not this `814`** — see the falsification note at the top of the catalog section. |
 | `df2ac831..58c8161d` | 779 -> 785 | +7 (`E-ERROR-010`, `E-TENANT-AGG`/`-WRITE`/`-RAW-EGRESS`, `I-TENANT-STRIP`/`-ACROSS`), -1 (`W-SSR-PRERENDER-UNSCOPED` renamed to the I-code) |
 | `58c8161d..c48e59a2` | 785 -> 786 | +1 `E-OUTLET-AND-MAIN` |
 | `c48e59a2..9481bc69` | 786 -> 787 | +1 `E-SCRIPT-001` |
@@ -443,6 +502,53 @@ If you are asking "what can now fire that could not before", it moved three attr
   as `E-CODEGEN-INVALID-LOGIC` ("could not lower this construct") instead of naming the undeclared
   cell. **Leading `@.` is far more common on `<each>` than on `<match on=>`, so the blast radius is
   materially different at this locus even though the code was copied from there.**
+
+## `E-CG-TILDE-UNRESOLVED` — THE FAIL-CLOSED `~` FLOOR, ITS SINK, AND THE GUARANTEE IT DOES **NOT** GIVE (NEW section, S397, #832)
+
+**Code:** `E-CG-TILDE-UNRESOLVED` · **Severity:** Error · **Stage:** CG (codegen) · **SPEC:** §32, §32.2, §47 · **Catalog row:** `SPEC.md:20310` (appendix index `:25812`) · **Emitted:** `compiler/src/codegen/emit-expr.ts:1305` in `emitIdent` · **Pinned:** `conformance/cases/control-flow/ctrl-028-arm-body-tilde-read-orphan-neg`.
+
+⚑ **IT IS NOT A NAME CHANGE — IT REPLACED A FAIL-**OPEN** FALLBACK.** Until #832, `emitIdent` returned `null /* ~ orphaned — codegen-fallback */` when a `~` read arrived with `ctx.tildeVar` null. That is fail-open **by construction**: a `~` reaching that line is, by construction, one the analysis could not resolve, and handing back a value asserts the opposite of what the compiler just discovered. The program compiled at **exit 0 with zero diagnostics** and bound `null` — §32.2's accumulator quietly becoming an absent value at run time. ⛑ **THE OLD MARKER STRING IS GONE; ANY MAP, DOC OR TEST STILL GREPPING FOR `codegen-fallback` IS GREPPING FOR A STRING THAT NO LONGER EXISTS.**
+
+⚠ **A PLACEHOLDER IS STILL EMITTED, AND SAYING OTHERWISE REPEATS THE DEFECT THIS ARC CLOSED.** The new text is `null /* E-CG-TILDE-UNRESOLVED: \`~\` had no slot at this read */`, emitted as **syntactically valid JS on purpose** — an unparseable one would trip the §2.2.1 acorn emit gate and bury this precise diagnostic under a generic `E-CODEGEN-INVALID-LOGIC` "compiler defect", the wrong-altitude failure several §34 rows exist to prevent. `ctrl-028` carries `E-CODEGEN-INVALID-LOGIC` in `notCodes` for exactly that reason.
+
+### ⛔ THE GUARANTEE IS PROCESS-LEVEL, NOT FILESYSTEM-LEVEL — REPRODUCED AT THIS WATERMARK
+
+`scrml compile` on a file carrying this error **exits non-zero and prints `FAILED`, AND STILL WRITES THE ARTIFACTS.** Measured here on `${ process(~) }`: **exit 1**, `FAILED — 1 error`, and `p1.client.js` + `scrml-runtime.<hash>.js` on disk with the placeholder in them. `api.js` gates the write phase ONLY on `emitGateFailed` (the §2.2.1 acorn gate); a fatal CG error suppresses further diagnostics but does not stop the write. **A consumer that keys off the EXIT STATUS is protected. One that keys off "did an artifact appear" is not.** Gating writes on fatal `E-CG-*` errors is a behaviour change across that whole family and was deliberately NOT taken here — filed, not smuggled in under a diagnostic fix. ⚑ **The same false "the build fails, so it never ships" reasoning sits in three OTHER comments in `emit-expr.ts`** (the `E-SESSION-VALUE` placeholder and two leak-guard comments). Wrong in all of them, for this same reason; filed, other codes' text.
+
+### The sink, and why there are TWO drains
+
+`EmitExprContext.errors` is optional and was **MEASURED `undefined` at every site the orphan reaches** — the orphan arises deep inside client-mode expression emission, on paths that build a context without one. So the code accumulates in a module-level sink, the same narrow-sink pattern `_sessionValueUseErrors` (same file) and emit-server's `_foreignCrossingErrors` already establish.
+
+| step | site |
+|---|---|
+| sink | `emit-expr.ts:176` `_tildeUnresolvedErrors` |
+| arm (once per run) | `codegen/index.ts:1192` `resetTildeUnresolvedErrors()` |
+| drain 1 | `codegen/index.ts:2649`, in the per-file loop's `finally` |
+| drain 2 | `codegen/index.ts:3517`, immediately before `runCG` returns |
+
+⚠ **NEITHER DRAIN IS BELT-AND-BRACES, AND DELETING EITHER LOSES DIAGNOSTICS SILENTLY.** The tool (`outputs.set(filePath, toolOutput)`) and library (`libOutput`) paths each leave the per-file iteration by their own `continue`, so a drain at the loop's last statement would collect the browser path only. And emission **continues after the loop closes** — per-page shell composition and the §40.9.7 route splitter both re-enter expression emission — so an orphan raised by that later work would still be sitting in the sink when `runCG` returns. Draining clears, so it is idempotent. ⚑ **The RESET is deliberately at the top of `runCG` and not per-file:** no path through the loop can skip the arm, and a stale sink from a PREVIOUS `runCG` in the same process (**every test file does this**) would otherwise attribute one compile's orphan to the next compile.
+
+### Position is PARTIAL — do not read the `-->` frame as authoritative
+
+`spanFromEstree` (`expression-parser.ts`) **hard-codes `line: 1, col: 1`** on every span it builds, because the line it can see is relative to the re-parsed expression fragment rather than to the file; only `start`/`end` are true source coordinates. `_tildeDiagSpan` (`emit-expr.ts:1181`) therefore recovers line/col from `span.start` via **`resolveSpanLineCol` (NEW export, `codegen/log-loc.ts:123`)** against the §20.6 per-file source registry — same registry, same `LineIndex`, same cache as `resolveLogLoc`, only the projection differs (a `"basename:line"` STRING for the emitted `log()` origin tag vs numeric `line`/`col` fields for a diagnostic span).
+
+- It **degrades honestly**: an unresolvable offset omits `line`/`col` rather than asserting 1:1, and carries `span.file` through so the CLI still prints a `-->` frame (the former `?? { start: 0, end: 0 }` fallback produced a span with no `file` and the diagnostic printed with **no location at all**).
+- **MEASURED, both directions, at this watermark:** `${ process(~) }` -> **exact `1:11`**. The `ctrl-028`-shaped in-arm read -> **`2:7`, pointing at an unrelated `<n>: int = 5` seven lines above the offending `record(~)`**. The arc's own three-orphan census: **1 of 3 exact, 2 real-but-wrong-line**, where before the fix all 3 said `1:1`. The residual 2 carry an **ENCLOSING node's byte offset** — an upstream span defect that no amount of line/col resolution can repair. Filed; not fixed there.
+
+### ⚑ CARDINALITY IS ONCE PER *EMISSION*, NOT ONCE PER SOURCE READ
+
+`emitIdent` pushes a diagnostic each time it LOWERS an unresolved `~`, so a body codegen emits more than once yields more than one diagnostic **for the same source read**. MEASURED: a `server fn` whose body contains ONE `record(~)` and which is also called by a sibling `server fn` produces **TWO byte-identical errors at the SAME span** (`start:9`) — once as the HTTP route handler, once as the in-process peer callable. `ctrl-028`'s `codeCounts: 3` holds only because every function in that case is client-only. ⛔ **Do not generalise the 3 into a per-read law, and do not copy that pin into a case with a server-classified body — it will read 2N there, correctly.** Whether the emitter SHOULD dedupe (e.g. by `span.start`) is a real open question and a behaviour change across every code sharing this emission path.
+
+### Why a NEW code and not `E-TILDE-001` — the two claims are different strengths
+
+`E-TILDE-001` is specified at §32.5 as a **TYPE-SYSTEM** diagnostic ("`~` referenced but not initialized in current scope") whose fire site lands with the §32 enforcement work. Firing it from codegen would give one §34 row two fire stages and make *which stage owns this condition* unanswerable from the catalog — the §34.0 defect one level up. They are also **not the same claim**: `E-TILDE-001` asserts a PROVEN-uninitialized read; `E-CG-TILDE-UNRESOLVED` asserts only that **codegen had no slot at this read**, which is strictly weaker and stage-local. The emitted message says exactly that and claims nothing about what the type system checked, **because it checked nothing** — see the next section.
+
+### ⛔ `E-TILDE-001` / `E-TILDE-002` HAVE ZERO FIRE SITES, AND THE CAUSE IS STRUCTURAL
+
+The `tilde-init` / `tilde-ref` node kinds have **FOUR consumers** in `type-system.ts` (`:18426` comment · `:18435` · `:18744` · `:18750`) and **ZERO producers** anywhere in `compiler/src/` or `compiler/native-parser/` — re-grepped at this watermark, those four lines are the *complete* result set. The only things that construct such nodes are **hand-written object literals in `compiler/tests/unit/type-system.test.js:1751+`**. `TildeTracker` (`:18380`), `MustUseTracker` and `checkLinear` therefore run against synthetic ASTs only and **have never seen a parsed program** — which is why `checkLinear` being invoked unconditionally at file level (`:24470`, gated only on `allLinNodes.length > 0`) is not the reassurance it reads as. ⚑ **This is the missing half of the `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples` entry, which explicitly records "CAUSE NOT TRACED".** It is traced now: no producer, so no `lin` node, so nothing to check.
+
+⚑ **THE GAP IS ALSO PARTIALLY OVERTAKEN, AND ITS HEADLINE IS NOW STALE.** It says §32's enforcement produces "ZERO diagnostics on SPEC's own worked examples". At this watermark §32.5's verbatim `${ process(~) }` produces **exit 1 with `E-CG-TILDE-UNRESOLVED`**. What survives, and is the sharper statement: **the code that fires is the CODEGEN floor, at a different stage and making a weaker claim than the §32.5 code the SPEC names — and a `-neg` case pinning `E-TILDE-001` is still unwritable today.** Whoever re-verifies that gap should re-run all six probes; at least one has flipped.
+
 
 ## Diagnostic stream partition (how severity routes)
 `W-` prefix + `severity:"info"|"warning"` -> `result.warnings` (non-fatal, CLI exit unchanged).
@@ -850,6 +956,7 @@ once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for
 
 ## Tags
 #scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13
+#e-cg-tilde-unresolved #tilde-accumulator #section-32 #fail-closed-floor #narrow-sink #two-drains #reset-once-per-run #process-level-not-filesystem-level #partial-span-position #resolvespanlinecol #spanfromestree-hardcodes-1-1 #cardinality-per-emission #e-tilde-001-zero-fire-sites #zero-producers #cause-traced #815-codes #pinned-344
 
 ## Links
 - [primary.map.md](./primary.map.md)

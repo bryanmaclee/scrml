@@ -77,8 +77,7 @@ untyped-signature idiom exists to dodge. Close it and the idiom disappears.
 
 - **§32.6 narrow-vs-broad** — largely MOOTED and worth closing cheaply: the elision is **provably
   vacuous** (`tilde-init`/`tilde-ref` have four consumers and ZERO producers, so the predicate returns
-  `false` unconditionally). SPEC's own verbatim INVALID examples at §32.5, §32.6 and §32.7 **all
-  compile at exit 0 with zero diagnostics.**
+  `false` unconditionally). SPEC's own verbatim INVALID examples at §32.5, §32.6 and §32.7 compiled at exit 0 **at `8e278c73`** — but ⚑ **#832's own fail-closed floor changed that MID-SESSION**: `${ process(~) }` now exits 1 with `E-CG-TILDE-UNRESOLVED` (PA-verified). **The zero-producers finding STANDS** — `E-TILDE-001/002` still never fire; what catches that shape now is the CODEGEN floor, not §32.5's type-system code.
 - **Q2(b) and Q2(c)** — comprehension bodies and match arm bodies, deferred to the dPA's return; it
   returned. dpa-040's substructural pole argues limb (c) is **REJECTED on soundness**, not deferred.
 - **Contract vs constraint** (idea 1's surviving half) — weighed, not ruled. PA lands on **targeted

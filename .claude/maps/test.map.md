@@ -1,16 +1,69 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
-# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
-# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
-# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
-# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
+# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
+# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
+# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
+# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
+# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
+# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
+# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
+# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
 # MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
+# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
+# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+#
+# ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
+#
+# **THE WATERMARK AND THE WALKED WINDOW END AT THE SAME COMMIT.** The source delta walked is
+# `8e278c73..10a4b045` (10 commits, PRs #825-#834, ONE operator), and `10a4b045` is the merge-base
+# AND `origin/main` — unlike S395 (stamp vs unpushed branch tip) and S396 (watermark ahead of the
+# last source-bearing commit). ⚠ **This pass's OWN commit then advances `HEAD` past the watermark,
+# exactly as every pass's does; see the note above line 14. That is the rule working, not a gap.**
+#
+# **THE COMPLETE SOURCE DELTA WAS WALKED — the partial-pass rule is SATISFIED, not waived.**
+# `git diff --name-only 8e278c73..10a4b045` over `compiler/src` · `compiler/native-parser` ·
+# `stdlib` · `scripts` · `lsp` · `conformance` is **FOUR `compiler/src` files and they are all in
+# `codegen/`**, every one read in full, plus 8 conformance files (4 NEW cases):
+#   · `compiler/src/codegen/emit-logic.ts`  (+371/-63) — **#830** (`8d3c7936`) the §32.2.1 WRITE half
+#   · `compiler/src/codegen/emit-expr.ts`   (+166/-16) — **#832** (`c11db440`) the fail-closed `~` floor
+#   · `compiler/src/codegen/index.ts`       (+38)      — **#832** the sink's reset + TWO drains
+#   · `compiler/src/codegen/log-loc.ts`     (+32)      — **#832** `resolveSpanLineCol` (NEW export)
+# `.github/` · `scripts/` · `stdlib/` · `lsp/` · `package.json` · `bun.lock` · `compiler/native-parser/`
+# are all `--name-only` **EMPTY**. `compiler/src/types/` EMPTY for the FIFTEENTH window.
+# `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; `SPEC-INDEX.md` re-generated.
+#
+# ⛑ **THE HEADLINE FINDING IS A ROUTER HOLE, AND IT WAS MEASURED BY THREE DISPATCHES FAILING THE SAME
+# WAY.** Three separate S397 dispatches working the `~` / §32 surface reported that
+# `primary.map.md` gave them **no routing**. A fourth falsified the STRONGER version of that claim:
+# `domain.map.md` carries **17** `~`/§32 hits and always did. So the real defect was narrower and
+# worse — **the material existed and the ROUTER could not reach it.** `primary.map.md` now carries a
+# `~`/§32 Task-Shape Routing row, and it splits the surface into **THREE AXES** because conflating
+# two of them cost this session a wrong-locus round. See that row before touching anything `~`.
+#
+# ⚑ **TWO STANDING TRAPS ON THIS SURFACE, BOTH RE-VERIFIED BY EXECUTION AT THIS WATERMARK:**
+#   (1) **`E-TILDE-001` / `E-TILDE-002` CANNOT FIRE.** The `tilde-init` / `tilde-ref` node kinds have
+#       **FOUR consumers** in `type-system.ts` (`:18426` comment · `:18435` · `:18744` · `:18750`) and
+#       **ZERO producers** anywhere in `compiler/src/` or `compiler/native-parser/` — measured, the
+#       grep returns exactly those four lines and nothing else. The apparent producers are hand-built
+#       object literals in `compiler/tests/unit/type-system.test.js:1751+`. Any §32 reasoning that
+#       assumes enforcement is reasoning about a checker that does not run.
+#   (2) **scrml's AST has NO UNIFORM BINDER REPRESENTATION**, and `ast-builder.js` builds most of it
+#       with ES6 SHORTHAND so a regex keyed on `field:` cannot see it. Details in schema.map.md.
+#
+# ⚑ **S397 — A BRIEFED PREMISE WAS FALSIFIED *BY THE WINDOW IT DESCRIBED*, WHICH IS A DIFFERENT
+# FAILURE FROM THE S396 ONE TWO BANNERS DOWN (that one was wrong when written; this one WENT wrong).**
+# The dispatching brief said SPEC's verbatim INVALID §32 examples "all compile at exit 0". **FALSIFIED BY EXECUTION
+# at this watermark:** §32.5's own `${ process(~) }` now compiles to **exit 1** with
+# `E-CG-TILDE-UNRESOLVED` at a CORRECT `1:11`. The premise was true at `8e278c73` and #832 changed it.
+# What survives is the sharper statement: the code that fires is the CODEGEN floor, not the §32.5
+# TYPE-SYSTEM code the SPEC names — so `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`
+# is now PARTIALLY overtaken and its "ZERO diagnostics" headline is stale for at least that probe.
+#
 #
 # ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
 #
@@ -60,7 +113,46 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, ⛑ **S395: 1,424** `*.test.js` total at `ad7b65dc`, +11 this window)
+## Test Categories (compiler/tests/, ⛑ **S397: 1,425** `*.test.js` total at `10a4b045`, +1 this window)
+
+⛑ **S397 — RE-DERIVED BY EXECUTION AT `10a4b045`, NOT SHIFTED.** `1,424 -> 1,425 (+1)` over
+`8e278c73..10a4b045`, by the same `find` this section mandates:
+
+    browser 102 · commands 17 · conformance 133 · e2e-render-map 2 · integration 216 ·
+    lsp 11 · self-host 4 · unit 926          = 1,411  (category dirs)
+    + 14 at `compiler/tests/*.test.js` root  = 1,425
+
+**The +1 is `unit +1`; every other category and the 14 root-level files are FLAT. ZERO deletions,
+eighth window running.** Cross-checked against the citable authority and it reconciles exactly:
+`docs/FACTS.md` reads `test files | 1,425` and `conformance cases | 897`.
+
+⚑ **THE TWO FILES IN THE WINDOW ARE BOTH `~`/§32, AND ONE OF THEM IS A *DELETION-SHAPED* CHANGE
+WORTH SEEING BEFORE YOU TRUST A GREEN SUITE ON THIS SURFACE.**
+
+- **NEW: `compiler/tests/unit/g-bare-expr-in-if-arm-rebinds-tilde-context.test.js` (930 lines)** —
+  the largest single test file added in several windows, and it is the §32.2.1 WRITE half (#830).
+  ⚑ **It is a `unit` file, so it IS in the blocking `gate` job** (`gate` runs `unit` + `conformance`
+  + root-level, invariant 87). Its sibling below is `integration` and is **NOT**.
+- **CHANGED: `compiler/tests/integration/tilde-snapshot-codegen-fix.test.js` (+55/-11)** — #832
+  flipped its assertions from *"codegen emits `null` for an orphaned `~`"* to *"codegen ERRORS"*.
+  ⚠ **This tier is `integration`: NOT in `gate`, NOT in pre-commit's blocking set.** A regression
+  that re-opens the fail-OPEN fallback would go red HERE and green everywhere that blocks.
+
+⛑ **THE FOUR NEW CONFORMANCE CASES ARE THE INSTRUMENT THAT ACTUALLY GATES THIS SURFACE:**
+`ctrl-025-arm-body-statement-is-side-effect-pos` · `ctrl-026-arm-body-nested-value-form-decl-pos` ·
+`ctrl-027-arm-body-tilde-read-and-recovery-pos` · `ctrl-028-arm-body-tilde-read-orphan-neg`
+(`893 -> 897`, all in `control-flow/`). ⚑ **`ctrl-028` is the one to read**, for two reasons that
+generalise past this code:
+  1. **It pins a code, its SEVERITY *and* its exact CARDINALITY** (`codeCounts: 3`), verified by
+     flipping the emitter off and watching the case go red. `codes` / `notCodes` are set-valued and
+     would pass on a SINGLE fire — they cannot see a pre-scan regression that resolved two of three.
+  2. ⛔ **THE 3 IS AN EMISSION PROPERTY, NOT A SOURCE PROPERTY.** The emitter fires once per
+     EMISSION of the offending body, so a `server fn` body (emitted as both the HTTP route handler
+     and the in-process peer callable) yields 2N. The 3 holds only because every function in this
+     case is client-only. **Do not copy that pin into a server-classified case.**
+  3. ⚑ **Its three functions are VERBATIM from `ctrl-027`, where they were POSITIVE assertions
+     until S397.** Per §62.2 the shapes were MOVED, not deleted, and `ctrl-027`'s rationale records
+     which contract they used to satisfy. **A case flipping sides is the corpus working, not drift.**
 
 ⛑ **S395 — RE-DERIVED BY EXECUTION AT `ad7b65dc`, NOT SHIFTED.** `1,413 -> 1,424 (+11)` over
 `2ec2ce3a..ad7b65dc`. Per-category, by the same `find` this section mandates:
@@ -122,7 +214,7 @@ harnesses — and is a DIFFERENT number from the 883 conformance CASES under `co
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **925** | `gate` (blocking) + pre-commit + pre-push. ⚑ **CORRECTED S396: this cell read `909` and was wrong AT ITS OWN WATERMARK.** `git ls-tree -r --name-only ad7b65dc -- compiler/tests/unit | grep -c '\.test\.js$'` returns **925**, identical to HEAD — so the `+1`/`+10` deltas the prior pass recorded were applied to an already-drifted base. **Zero `.test.js` files were ADDED in this window** (`git diff --diff-filter=A ad7b65dc..2d8dd8cb -- '*.test.js'` -> 0); 3 were CHANGED. |
+| Unit | `compiler/tests/unit/**/*.test.js` | **926** | `gate` (blocking) + pre-commit + pre-push. ⛑ **CORRECTED S397 TWICE OVER, AND THE SECOND CORRECTION IS THE INSTRUMENT, NOT THE NUMBER.** (a) The count is **926** at `10a4b045` (`+1`: the NEW 930-line `g-bare-expr-in-if-arm-rebinds-tilde-context.test.js`); this cell read `925`, which was correct at `ad7b65dc` and stale here — **and it contradicted this map's own prose four screens up, which is the standing invariant-71 tell.** (b) ⚠ **THIS CELL CONTAINED AN UNESCAPED `\|` INSIDE A SHELL PIPELINE, WHICH SPLIT THE ROW INTO SIX CELLS IN A FIVE-COLUMN TABLE — so everything after it rendered in the WRONG COLUMN and the "which gate" answer was not where a reader would look for it.** Escaped now. **A markdown table cell cannot hold a raw pipe; escape it or the row silently re-columns.** The prior correction note is preserved for provenance: this cell read `909` at S396 and was wrong AT ITS OWN WATERMARK, so the `+1`/`+10` deltas recorded before that were applied to an already-drifted base — **re-derive the count, never shift it.** |
 | Integration | `compiler/tests/integration/**/*.test.js` | **216** (⚑ **CORRECTED S396: read `213`**; `git ls-tree` at `ad7b65dc` also returns 216, so this was drifted at its own watermark too) | ⚠ **SPLIT — do not read this tier as simply "non-blocking".** It IS in the **pre-commit** hook (`bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail`, both installed and source-controlled) and in the source-controlled pre-push, so it blocks a COMMIT. It is **NOT** in the blocking cloud `gate` — in CI it runs only in `tracking` (`continue-on-error: true`). Local commit-time gate and cloud merge-time gate are DIFFERENT SETS. |
 | Conformance | `compiler/tests/conformance/**/*.test.js` | **133** | `gate` (blocking) + pre-commit + pre-push. ⛑ **THIS TIER IS ALSO THE GATE FOR THE TOP-LEVEL `conformance/` CORPUS, WHICH NO WORKFLOW NAMES.** `bunfig.toml` pins `[test] root = "compiler/tests/"`, so the repo-root `conformance/` dir is outside auto-discovery; `compiler/tests/conformance/corpus-bridge.test.js` lives under the gated root and imports `loadCases` / `runCase` / `runCaseRuntime` / `hasRuntimeHalf` from `../../../conformance/run.ts`, one `test()` per case — so all **893** corpus cases ride both pre-commit and the blocking `gate`. A reviewer who greps the workflows for the corpus path finds nothing and concludes "gated nowhere"; that conclusion is wrong. See invariant 88. |
 | Browser | `compiler/tests/browser/**/*.test.js` | **102** | `gate` (blocking, via the failure NAME-SET check `bun scripts/browser-baseline.ts --check`, NOT the exit code — the tier always exits 1) + `tracking`. ⚑ **CORRECTED S396: this cell read `98`, also wrong at its own watermark** — `git ls-tree` at `ad7b65dc` returns **102**. |
@@ -629,6 +721,7 @@ tool is marked `HARD REQ n` at its site so a future editor can see what they wou
 
 ## Tags
 #scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed
+#ctrl-025-028 #tilde-accumulator #codecounts-is-an-emission-property #neg-case-pins-cardinality #case-flipped-sides #integration-tier-is-not-gated #1425-tests #897-conformance
 
 ## Links
 - [primary.map.md](./primary.map.md)

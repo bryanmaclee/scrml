@@ -1,16 +1,69 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
-# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
-# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
-# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
-# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
+# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
+# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
+# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
+# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
+# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
+# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
+# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
+# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
 # MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
+# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
+# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+#
+# ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
+#
+# **THE WATERMARK AND THE WALKED WINDOW END AT THE SAME COMMIT.** The source delta walked is
+# `8e278c73..10a4b045` (10 commits, PRs #825-#834, ONE operator), and `10a4b045` is the merge-base
+# AND `origin/main` — unlike S395 (stamp vs unpushed branch tip) and S396 (watermark ahead of the
+# last source-bearing commit). ⚠ **This pass's OWN commit then advances `HEAD` past the watermark,
+# exactly as every pass's does; see the note above line 14. That is the rule working, not a gap.**
+#
+# **THE COMPLETE SOURCE DELTA WAS WALKED — the partial-pass rule is SATISFIED, not waived.**
+# `git diff --name-only 8e278c73..10a4b045` over `compiler/src` · `compiler/native-parser` ·
+# `stdlib` · `scripts` · `lsp` · `conformance` is **FOUR `compiler/src` files and they are all in
+# `codegen/`**, every one read in full, plus 8 conformance files (4 NEW cases):
+#   · `compiler/src/codegen/emit-logic.ts`  (+371/-63) — **#830** (`8d3c7936`) the §32.2.1 WRITE half
+#   · `compiler/src/codegen/emit-expr.ts`   (+166/-16) — **#832** (`c11db440`) the fail-closed `~` floor
+#   · `compiler/src/codegen/index.ts`       (+38)      — **#832** the sink's reset + TWO drains
+#   · `compiler/src/codegen/log-loc.ts`     (+32)      — **#832** `resolveSpanLineCol` (NEW export)
+# `.github/` · `scripts/` · `stdlib/` · `lsp/` · `package.json` · `bun.lock` · `compiler/native-parser/`
+# are all `--name-only` **EMPTY**. `compiler/src/types/` EMPTY for the FIFTEENTH window.
+# `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; `SPEC-INDEX.md` re-generated.
+#
+# ⛑ **THE HEADLINE FINDING IS A ROUTER HOLE, AND IT WAS MEASURED BY THREE DISPATCHES FAILING THE SAME
+# WAY.** Three separate S397 dispatches working the `~` / §32 surface reported that
+# `primary.map.md` gave them **no routing**. A fourth falsified the STRONGER version of that claim:
+# `domain.map.md` carries **17** `~`/§32 hits and always did. So the real defect was narrower and
+# worse — **the material existed and the ROUTER could not reach it.** `primary.map.md` now carries a
+# `~`/§32 Task-Shape Routing row, and it splits the surface into **THREE AXES** because conflating
+# two of them cost this session a wrong-locus round. See that row before touching anything `~`.
+#
+# ⚑ **TWO STANDING TRAPS ON THIS SURFACE, BOTH RE-VERIFIED BY EXECUTION AT THIS WATERMARK:**
+#   (1) **`E-TILDE-001` / `E-TILDE-002` CANNOT FIRE.** The `tilde-init` / `tilde-ref` node kinds have
+#       **FOUR consumers** in `type-system.ts` (`:18426` comment · `:18435` · `:18744` · `:18750`) and
+#       **ZERO producers** anywhere in `compiler/src/` or `compiler/native-parser/` — measured, the
+#       grep returns exactly those four lines and nothing else. The apparent producers are hand-built
+#       object literals in `compiler/tests/unit/type-system.test.js:1751+`. Any §32 reasoning that
+#       assumes enforcement is reasoning about a checker that does not run.
+#   (2) **scrml's AST has NO UNIFORM BINDER REPRESENTATION**, and `ast-builder.js` builds most of it
+#       with ES6 SHORTHAND so a regex keyed on `field:` cannot see it. Details in schema.map.md.
+#
+# ⚑ **S397 — A BRIEFED PREMISE WAS FALSIFIED *BY THE WINDOW IT DESCRIBED*, WHICH IS A DIFFERENT
+# FAILURE FROM THE S396 ONE TWO BANNERS DOWN (that one was wrong when written; this one WENT wrong).**
+# The dispatching brief said SPEC's verbatim INVALID §32 examples "all compile at exit 0". **FALSIFIED BY EXECUTION
+# at this watermark:** §32.5's own `${ process(~) }` now compiles to **exit 1** with
+# `E-CG-TILDE-UNRESOLVED` at a CORRECT `1:11`. The premise was true at `8e278c73` and #832 changed it.
+# What survives is the sharper statement: the code that fires is the CODEGEN floor, not the §32.5
+# TYPE-SYSTEM code the SPEC names — so `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`
+# is now PARTIALLY overtaken and its "ZERO diagnostics" headline is stale for at least that probe.
+#
 #
 # ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
 #
@@ -1768,19 +1821,19 @@ it, two of them directly.
 
 | # | Route | Where | Segmentation | Value/void decision | Emission shape |
 |---|---|---|---|---|---|
-| **A** | local-decl, **structured AST** arm (`const x = match … { . V => { … } }`) | `emit-logic.ts:emitMatchExprDecl` (:4763), structuredBody branch (~:4840) | none needed — AST nodes ARE the statements | **`_blockTailIsValueExpr`** on the last `bare-expr` node's text (:4882) | assign tail to the tilde result var |
-| **B** | local-decl, **raw-string** arm | `emit-logic.ts:_emitBlockArmValueFromString` (:4734), gated by `_matchArmResultIsBlockBody` (:4637) | **`planBlockArmLift`** (:4715) → `_splitBlockStatements` (:4580) | `planBlockArmLift`'s call to `_blockTailIsValueExpr` | assign tail to the tilde result var |
-| **C** | value-returning **IIFE**, **structured AST** arm | `emit-control-flow.ts:emitMatchExpr` (~:2320) | none needed — AST nodes | **`_blockTailIsValueExpr`** directly (:2354) | `return <tail>;` inside the IIFE |
-| **D** | value-returning **IIFE**, **raw-string** arm (incl. §18.19 multi-scrutinee via `emitMultiArmBody`) | `emit-control-flow.ts:emitIifeBlockArmBody` (:2090) | **`planBlockArmLift`** | via `planBlockArmLift` | `return <tail>;` inside the IIFE |
+| **A** | local-decl, **structured AST** arm (`const x = match … { . V => { … } }`) | `emit-logic.ts:emitMatchExprDecl` (:5240), structuredBody branch (:5325) | none needed — AST nodes ARE the statements | **`_blockTailIsValueExpr`** on the last `bare-expr` node's text (:5367) | assign tail to the tilde result var |
+| **B** | local-decl, **raw-string** arm | `emit-logic.ts:_emitBlockArmValueFromString` (:5211), gated by `_matchArmResultIsBlockBody` (:5060) | **`planBlockArmLift`** (:5192) → `_splitBlockStatements` (:5003) | `planBlockArmLift`'s call to `_blockTailIsValueExpr` | assign tail to the tilde result var |
+| **C** | value-returning **IIFE**, **structured AST** arm | `emit-control-flow.ts:emitMatchExpr` (:2248) | none needed — AST nodes | **`_blockTailIsValueExpr`** directly (:2479) | `return <tail>;` inside the IIFE |
+| **D** | value-returning **IIFE**, **raw-string** arm (incl. §18.19 multi-scrutinee via `emitMultiArmBody`) | `emit-control-flow.ts:emitIifeBlockArmBody` (:2177) | **`planBlockArmLift`** | via `planBlockArmLift` | `return <tail>;` inside the IIFE |
 
 **The consequences for a dispatch brief, stated plainly:**
-- **`planBlockArmLift` has exactly TWO call sites** (`emit-logic.ts:4738`, `emit-control-flow.ts:2109`).
+- **`planBlockArmLift` has exactly TWO call sites** (`emit-logic.ts:5215`, `emit-control-flow.ts:2221`).
   A grep for it will NOT find routes A and C. Grep `_blockTailIsValueExpr` to enumerate all four.
 - A defect in **segmentation** (`_splitBlockStatements`) can only reach B and D. A defect in the
   **predicate** reaches all four. Scope from which layer moved.
 - Routes A and C do not segment because they do not have to — that is a design property, not an
   omission. A string has to be re-derived into statements; an AST body already is a statement list.
-- `_matchArmResultIsBlockBody` (:4637) is the **object-literal fence** for the string routes only:
+- `_matchArmResultIsBlockBody` (:5060) is the **object-literal fence** for the string routes only:
   a `{ … }` that the expression parser resolves to an `object` node is a VALUE (`1 :> { x: 1 }`) and
   stays byte-identical to the pre-#447 emission. Only a genuine `{ statement* expression? }` block
   reaches the tail lift. Routes A and C never see a string, so they never need it.
@@ -2356,11 +2409,11 @@ same edit** — `SPEC.md:11893` states an exactly-one-expression arm SHALL NOT s
 code with **zero** fire sites in `compiler/src/` against a live §34 catalog row.
 
 **WHAT #815 (`908a631c`) ACTUALLY DID — `emit-logic.ts` ONLY, +116/-17, and it is a REDIRECT.**
-`_emitValueFormSugarArm(body, tildeVar, bodyOpts)` (`emit-logic.ts:4438`) returns a single
+`_emitValueFormSugarArm(body, tildeVar, bodyOpts)` (`emit-logic.ts:4570`) returns a single
 `  <tildeVar> = <rhs>;` line for a sugar arm and `null` otherwise, so explicit-`lift`, statement and
-multi-statement arms are byte-unchanged. `tildeVar` threads through `emitIfExprAltChain` (`:4462`),
-called on BOTH limbs — nested `else if` consequent (`:4477`) and terminal `else` (`:4502`) — and
-`emitIfExprDecl` (`:4525`) calls it on the `then` arm (`:4546`). Before it, a sugar arm fell through
+multi-statement arms are byte-unchanged. `tildeVar` threads through `emitIfExprAltChain` (`:4594`),
+called on BOTH limbs — nested `else if` consequent (`:4609`) and terminal `else` (`:4634`) — and
+`emitIfExprDecl` (`:4735`) calls it on the `then` arm (`:4772`). Before it, a sugar arm fell through
 to the shared `bare-expr` handler, which under an active `tildeContext` mints a FRESH
 `let _scrml_tilde_N = <expr>;` **and rebinds `tildeContext.var` to it** — so the arm wrote a
 block-scoped temp, the result var stayed at its `let … = null` seed, and **the binding was always
@@ -2371,8 +2424,8 @@ Two redirects now sit on the same leaf and that is correct:
 
 | | §18.5 match block-arm bare tail | §17.6.2 value-form sugar arm |
 |---|---|---|
-| **shared** | `_blockTailIsValueExpr` (`emit-logic.ts:4871`, exported) — *"is this bare-expr a value at all?"* | same function, same call |
-| **consumed at** | `emit-control-flow.ts:2479` (structuredBody path) · `emit-logic.ts:4938`/`:5100` (raw-string twin) | `emit-logic.ts:4449` |
+| **shared** | `_blockTailIsValueExpr` (`emit-logic.ts:5130`, exported) — *"is this bare-expr a value at all?"* | same function, same call |
+| **consumed at** | `emit-control-flow.ts:2479` (structuredBody path) · `emit-logic.ts:4938`/`:5100` (raw-string twin) | `emit-logic.ts:4581` |
 | **SHAPE rule — NOT shared** | result is the **LAST** expression: a tail after N statements. *Positional.* | the arm is **EXACTLY ONE** expression (`arm-body ::= '{' expression '}'`, `SPEC.md:11851`): `body.length !== 1 -> decline`. *Local.* |
 
 Routing the sugar arm through §18.5's tail rule would silently admit `{ doWork()  "pos" }` as a
@@ -2400,6 +2453,162 @@ files. A census found exactly **5** bound-position sites in the whole corpus, al
 form** — so nothing could have moved. `ctrl-023` / `ctrl-024` FAIL on base and PASS on head.
 ⚠ **Corpus-zero here is blast radius, NOT demand evidence** (the standing reverse-ouroboros caution):
 the corpus is 100% LLM-authored, so its avoidance of the sugar form is an artefact of who wrote it.
+
+
+## `~` (§32) — THE ACCUMULATOR, ITS THREE AXES, AND THE CHECKER THAT DOES NOT RUN (NEW section, S397)
+
+⛑ **THIS SECTION EXISTS BECAUSE THE MATERIAL WAS HERE AND NOTHING COULD REACH IT.** Three S397
+dispatches on the `~` surface reported that `primary.map.md` gave them no routing; a fourth
+falsified the stronger claim that the map SET was silent (this file carried 17 `~`/§32 hits and
+always did). `primary.map.md` now carries a `~`/§32 Task-Shape Routing row. **This section is what
+that row routes INTO for the RESULT-VAR axis — and it names the other two axes explicitly, because
+the ones that live in `emit-expr.ts` and `type-system.ts` are NOT here and assuming they were is
+what cost a wrong-locus round.**
+
+### The three axes, one line each
+
+| Axis | Question it answers | File | Where it is mapped |
+|---|---|---|---|
+| **RESULT-VAR / WRITE** | where does `lift` write · what does a bare statement in an arm body do | `compiler/src/codegen/emit-logic.ts` | **this section** |
+| **ORPHAN-FALLBACK / DIAGNOSTIC** | a `~` reached the emitter with no slot — what happens | `compiler/src/codegen/emit-expr.ts` (+ `codegen/index.ts` · `codegen/log-loc.ts`) | **error.map.md**, `E-CG-TILDE-UNRESOLVED` section |
+| **ENFORCEMENT** | is a `~` read/consume rule statically checked | `compiler/src/type-system.ts` | **error.map.md** — and the answer is **NO**, see below |
+
+### `tildeContext` has FOUR fields, and `var` vs `liftVar` is the whole historic defect class
+
+`emitIfExprDecl` (`emit-logic.ts:4735`) mints the context an if-as-expression's arm bodies run under:
+
+| field | meaning | written by |
+|---|---|---|
+| `var` | the **ENCLOSING** `~` read/init slot, carried through UNCHANGED into the arm | the §32.2 `bare-expr` handler, **outside** an arm body |
+| `liftVar` | **the ARM'S RESULT** | `lift` and the §17.6.10 single-expression sugar, and **nothing else** |
+| `mode` | `"single"` \| `"array"` (loop accumulation) | `_emitForStmtWithTilde` / `_emitWhileStmtWithTilde` |
+| `armBodyStmts` | `ReadonlySet` of the DIRECT statement objects of this if-as-expression's arm bodies | `_collectArmBodyStmts` at mint time |
+
+⚑ **`var` AND `liftVar` WERE ONE FIELD UNTIL S397, AND EVERY DEFECT IN THIS CLASS CAME OUT OF THAT
+CONFLATION — IN BOTH DIRECTIONS.** A bare statement minting into `var` stole the `lift` target
+(binding stayed at its `null` seed); an in-arm `~` read resolved to the arm's `null`-seeded result
+var instead of the enclosing accumulator. De-conflated, the arm's result is **no longer reachable as
+a `~` slot at all**, so no enumerate-and-guard pass over repoint sites can miss one — a structural
+guarantee rather than a list, and the list was already proven incomplete (the `guarded-expr` repoint
+site was missed on the first pass). **Any doc, comment or brief that still describes one field is
+describing pre-S397 code.**
+
+### `armBodyStmts` is a SET, not a boolean — and that is the S397 round-3 rework
+
+The §32.2.1 carve-out rode an `armBody: true` flag until S397 round 3. A flag on the shared context
+object propagates into every child emitter, so the carve-out was **opt-OUT**: correct only where
+somebody remembered to strip it, silently WRONG in every construct nobody had thought of.
+**Three consecutive review rounds each found the identical defect in a different construct** — a
+nested `if`, then a `given` guard, then `for` and `while` bodies — and each per-construct patch
+simply moved the next occurrence.
+
+Identity closes the class instead of patching its instances. The test is not *"am I somewhere under
+an arm?"* but *"am I one of the specific statement objects that IS the arm's body?"*. A nested
+block's children are different objects, so they fail automatically — for every block-opening
+construct that exists today **and every one added later**. ⛔ **There are now ZERO per-construct
+strip sites, and `_descendOutOfArmBody` was DELETED rather than extended. If you are about to add a
+strip helper back, stop: that is the shape that failed three times.**
+
+- `_collectArmBodyStmts` (`emit-logic.ts:4661`) — enumerates the **CLOSED** §17.6.8 limb set (then ·
+  every `else if` · terminal `else`), mirroring `emitIfExprAltChain`'s chaining exactly. ⚑ The limb
+  set cannot grow without changing the if-as-expression grammar; the set of block-OPENING constructs
+  is open, and enumerating THAT is what produced the three rounds.
+- `_isDirectArmBodyStmt` (`emit-logic.ts:4717`) — the predicate. **Six guarded repoint sites:**
+  `bare-expr` exprNode fast path (`:1788`) · `bare-expr` rebind (`:1950`) · bindless `!{ }` recovery
+  (`:3903`, the one the first pass missed) · `emitIfExprDecl` tail (`:4804`) · `emitForExprDecl` tail
+  (`:4891`) · `emitMatchExprDecl` tail (`:5464`).
+
+⛔ **WHAT `_isDirectArmBodyStmt` DOES *NOT* GUARANTEE — stated because an earlier round shipped a doc
+comment claiming containment it did not deliver.** It decides ONLY whether the §32.2.1 carve-out
+applies to a given statement. It does **NOT** scope `tildeContext.var`: the context object is still
+shared across sibling blocks, so a mint in one limb remains nameable from another. MEASURED
+byte-identical to base — `if (…) { if (…) { let _t6 = step1(2) } else { …step2(_t6)… } lift "ok" }`
+reads a THEN-limb `let` from the ELSE limb. **Pre-existing escape, unchanged, out of that arc's
+scope; fixing it means scoping the accumulator per block and needs its own ruling.**
+
+### `for` / `match` value-forms DELIBERATELY keep the pre-S395 conflated shape
+
+`emitForExprDecl` (`:4820`) and `emitMatchExprDecl` (`:5240`) mint a plain `{ var, mode }` context
+with **no** `armBodyStmts` / `liftVar`. That is not an oversight to tidy up. §32.2.1 carves out
+**§17.6.2 if-as-expression arm bodies**; a comprehension body is §17.7 and a `match` arm is §18, and
+**no ruling covers either**. An earlier pass DID apply the carve-out there and it was wrong twice
+over: it decided an unruled semantic by implementation, and it traded a LOUD failure for a SILENT
+one — `for (i of xs) { step1(i) lift step2(~) }` went from `_t8.push(...)` on a number (TypeError) to
+pushing `step2(null)`, i.e. `[0,0,0]` at exit 0. **Reverted to byte-identical-with-base on purpose:
+declining an unruled widening, not accepting a regression.** The `match` half was measured INERT
+either way (the block-arm form never reaches `emitLogicNode` at all — re-lowered as raw text, loud
+`E-CODEGEN-INVALID-LOGIC` on base and now).
+
+### Array mode vs `liftVar` — precedence decided once, and the blast radius is CROSS-ARM
+
+**ARRAY MODE WINS.** A loop established an accumulator, so lifts ACCUMULATE; `liftVar` only decides
+WHICH variable accumulates. Inside an arm that is the arm's result var, so a loop-in-arm emits
+`<armResult>.push(x)` — on the §17.6.4 `null` seed that is the same LOUD TypeError base produced,
+not a silent last-writer-wins value. Both loop helpers (`_emitForStmtWithTilde` `:4376`,
+`_emitWhileStmtWithTilde` `:4470`) therefore skip the fresh-array mint when `liftVar` is set;
+minting there produced a DEAD allocation AND repointed `var` so the loop's lifts became assignments.
+
+⚠ **`mode` IS SET ON THE SHARED CONTEXT OBJECT, SO IT LEAKS ACROSS ARMS.** A loop in the THEN arm
+flips the whole if-as-expression to array mode, and a loop-FREE `else { lift x }` then also emits
+`<armResult>.push(x)`. MEASURED byte-identical at base, so **pre-existing, not an S397 regression** —
+and still LOUD, because the seed is `null` in both arms. Making a loop-in-arm actually WORK means
+re-seeding the arm result as `[]`, which is a SEMANTIC decision no ruling covers; surfaced for
+ratification, not taken.
+
+### The READ half is REVERTED and CONDITIONAL — and `nodeContainsTildeRef` is why
+
+§32.2.1's read clause (*"a `~` inside an arm body resolves in the ENCLOSING context"*) is marked
+**Nominal / spec-ahead** in SPEC. S395 implemented it; **S397 reverted it.**
+`nodeContainsTildeRef` (`emit-logic.ts:5547`) deliberately does **NOT** descend into
+`ifExpr` / `forExpr` / `matchExpr` — the fields a BOUND value-form hangs its arms off.
+
+⚑ **IT CANNOT SIMPLY BE WIDENED, BECAUSE IT IS NOT A QUESTION — IT IS A GATE.** Both consumers
+(`emitFnShortcutBody` `:4275`, `emitLogicBody` `:5492`) use it to decide whether to **ALLOCATE a `tildeContext` over
+the whole enclosing statement sequence**. Flipping it true switched every SIBLING statement in that
+sequence into §32.2 accumulator mode. Measured at the S395 tip: a dead `let _scrml_tilde_N = [];`
+before an unrelated `while`, and the `while` body's bare call became a mint whose rebind ESCAPED the
+loop — the arm then emitted `note(_scrml_tilde_M)` OUTSIDE the block. **A `let` referenced from
+outside its block: `ReferenceError` at run time, exit 0 at compile time, and syntactically valid so
+`--validate-emit` cannot see it.**
+
+⚠ **THE RESULTING BEHAVIOUR IS CONDITIONAL — do NOT restate it as "an in-arm `~` read always
+orphans".**
+
+| the enclosing statement sequence… | an in-arm `~` read… |
+|---|---|
+| mentions `~` somewhere **OUTSIDE** the arms (e.g. a later `return step2(~)`) | **REACHES** the enclosing accumulator — §32.2.1's clause holds |
+| mentions `~` **ONLY inside the arm** | **ORPHANS** — and since #832 that is `E-CG-TILDE-UNRESOLVED`, exit 1 |
+
+⛑ **VERIFIED BY EXECUTION AT THIS WATERMARK, NOT RELAYED.** Compiled
+`step1(2)  const label = if (@n>0) { record(~) lift 7 } else { lift 0 }  return step2(~) + label`:
+emits `let _scrml_tilde_6 = _scrml_step1_2(2);` · `let _scrml_tilde_7 = null;` ·
+`_scrml_record_4(_scrml_tilde_6);` — **the in-arm read DOES reach the enclosing mint** — and
+`_scrml_tilde_7 = 7` / `= 0` in the two arms, **a separate slot**, at exit 0. ⚑ **AND ONE THING THE
+SPEC STATUS NOTE DOES NOT SPELL OUT, WORTH KNOWING BEFORE YOU DEBUG A POST-EXPRESSION `~`:** the
+tail is `return _scrml_step2_3(_scrml_tilde_7) + label` — **`step2(~)` reads the ARM RESULT, not the
+`step1(2)` mint.** That is §17.6.5 working as specified (`emitIfExprDecl`'s tail repoints the
+enclosing slot to the arm result), but it means the SAME `~` glyph names two different values on
+either side of the expression, and only one of them is the accumulator you started with.
+
+**An adopter cannot see which table row they are in from the arm alone.** The boundary question —
+should an arm body be a §32.4 `~` context boundary — is banked as **dpa-040** and is NOT settled.
+
+### ⛔ `E-TILDE-001` / `E-TILDE-002` CANNOT FIRE — and the reason is STRUCTURAL, not a gate
+
+The `tilde-init` / `tilde-ref` node kinds have **FOUR consumers** in `type-system.ts` (`:18426`
+comment · `:18435` · `:18744` · `:18750`) and **ZERO producers** anywhere in `compiler/src/` or
+`compiler/native-parser/`. Re-grepped at this watermark: those four lines are the *complete* result
+set. The only things that build such nodes are hand-written object literals in
+`compiler/tests/unit/type-system.test.js:1751+`. So `TildeTracker` (`:18380`), `MustUseTracker` and
+`checkLinear` are exercised **exclusively by synthetic ASTs and have never seen a parsed program** —
+which is why `checkLinear` running unconditionally at file level is not the reassurance it looks
+like. **ANY §32 REASONING THAT ASSUMES ENFORCEMENT IS REASONING ABOUT A CHECKER THAT DOES NOT RUN.**
+
+Gap: `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples` (HIGH, six probes). ⚑ **PARTIALLY
+OVERTAKEN AT THIS WATERMARK and its "ZERO diagnostics" headline is now stale for at least one probe:**
+§32.5's verbatim `${ process(~) }` compiles to **exit 1** with `E-CG-TILDE-UNRESOLVED` at a correct
+`1:11` — but that is the CODEGEN floor, not the §32.5 TYPE-SYSTEM code the SPEC names.
+**A `-neg` case pinning `E-TILDE-001` is still unwritable today.**
 
 
 ## Business Invariants (language axioms, not app rules)
@@ -2472,6 +2681,7 @@ A returned function-expression closure (`return function name(){…}`, GITI-038)
 
 ## Tags
 #scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main #section-55 #synth-surface #collapse-matrix #ruling-gated #rollup-map-truthiness #declaration-form-premise #section-17-1-2-3 #fail-open #show-cond-absent #structural-if-row-template #spec-stale-table #e-state-block-statement-form #state-block-body-is-markup #§4-18-1 #§40-8-default-logic #schema-body-is-ddl #type-state-is-not-semantic #show-in-each-reactive #if-in-each-frozen #§16-6-snippet-arity #parse-snippet-body-nodes #render-bearing-live-fallback #glued-interp-lift-reconcile #s380-incremental #§16-6-1 #ast-scoped-snippet-substitution #g-string-prop-in-is-some #g-snippet-prop-in-is-some-guard #g-parametric-snippet-param-substitution #§51-3 #derived-cell-scrutinee #g-match-on-derived-cell-scrutinee-frozen #g-match-per-item-in-each-frozen #match-same-value-short-circuit #resolveonexpr #collectderivedvarnames
+#tilde-accumulator #section-32 #section-32-2-1 #section-17-6-2 #liftvar-vs-var #armbodystmts-is-a-set #identity-not-flag #zero-strip-sites #descendoutofarmbody-deleted #read-half-reverted #nodecontainstilderef-is-an-allocation-gate #conditional-reach #array-mode-cross-arm-leak #unruled-widening-declined #dpa-040
 
 ## Links
 - [primary.map.md](./primary.map.md)
