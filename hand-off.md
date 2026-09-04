@@ -1,3 +1,53 @@
+# scrml — Session 400 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-09-04. Booted `/boot` Profile A recovering a stranded S400: PR #837 had landed
+mid-session and the window closed before wrapping. Ran the recovery + a long adopter-lane sweep.
+Concurrent with S399-bryan (registered, then quiet). ⚑ **Bryan's S397/S399 owed lane is PRESERVED
+VERBATIM below (the `~` build, Q9, rulings owed, the dpa returns) — that is bryan's authority; do not
+duplicate or action it in the peter lane.**
+
+## ⏭ NEXT-SESSION PICKUP (peter lane) — read this FIRST
+
+**The clean MED/LOW compute vein is EXHAUSTED.** Ten PRs landed this session (see `docs/changelog.md`
+S400 + delta-log `[2056]`–`[2066]`); everything reproducible-and-landable in the adopter-compute lane
+has landed. The remaining ledger MED/LOWs are, by repeated finding this session: (a) already
+silently-fixed (mark, don't build — verify by execution first), (b) bryan ruling-lane (scope/grammar
+decisions — route, don't land), or (c) needing deep bisection each. **So the next peter session should
+DOG-FOOD a fresh adopter app** (the proven vein — silent-wrong render/runtime bugs the ledger misses),
+NOT keep mining the ledger. [[feedback_dogfooding_beats_mining_the_ledger]]
+
+**Durable lessons banked this session (each cost real time to learn):**
+1. ⭐ **Reproduce-first is non-negotiable, and `write:false` skips the emit-parse gate.** Three ledger
+   MEDs were silently-fixed (marked, not built); one nearly slipped as a `write:false` false-negative
+   (E-CODEGEN-INVALID-LOGIC only fires under `write:true`/`validateEmit`). [[project_compiler_diagnostic_fields]]
+2. ⭐ **"Disproportionate, recommend wrap" was PREMATURE on the native-parser bisection.** Peter pushed;
+   the bisection found a clean one-line root fast (block comments uncounted in `dispatchInLogicEscape`).
+   A shadow-impl label is not a reason to skip a reproducible bug.
+3. **Exhaust our lane before routing to bryan** — new memory this session; bryan's plate is always full,
+   and a bryan-endorsed direction (bool-column) is OURS to build no matter the file count. [[feedback_exhaust_our_lane_before_routing_to_bryan]]
+4. **Verify the CLASS** — the each call-ref fix had 2 unfiled siblings; the timer if-chain-descent was
+   the same class as the lint walks.
+
+## What landed (10 PRs — full detail in changelog S400 + delta `[2056]`–`[2066]`)
+7 real fixes (#837 static-interp-if-branch · #840 each call-ref operator +2 siblings · #841 flat-CSS
+style merge · #842 sqlite bool-column coercion · #843 timer-in-if-chain · #844 compile-floor
+vanished-root · #845 shell-subdir asset paths · #846 native-parser block-comment) · 2 staleness
+resolves (#839 W-DEAD-arrow · if-chain-descent) · 1 HIGH routed turnkey (#838 prod-404). Model default
+switched to Opus 5 (`~/.claude/settings.json`) — for a LIVE session use `/model` (a settings change
+does not hot-swap the running model).
+
+## Mechanical state — REFERENCED, not duplicated
+Gap counts (post-merge): HIGH 85 · MED 203 · LOW 88 (`@generated:gap-counts` current). Tree clean.
+Landings/counts/stream in `docs/changelog.md` + `handOffs/delta-log.md`. **Inbox: 5 items, all
+bryan-owed (4 routes + the S400 prod-404 TURNKEY package), left UNARCHIVED by design** (S393/S398
+discipline — bryan's rulings). **Worktrees: 3 PRE-EXISTING agent worktrees retained** (S397-era +
+`fix/server-map-set-runtime-inline` @ dbcaff4b, peter's own unmerged Aug-28 work) — NONE are S400's
+(S400 used no worktrees); left intact to avoid clobbering unmerged work. Maps: no adopter-facing
+source-structure change that a nav map indexes (native-parser + codegen internals) — note as
+maps-unchanged rather than a refresh.
+
+---
+
 # scrml — Session 397 (bryan · ASUS-Vivobook) — WRAP
 
 **Date:** 2026-09-03/04. Booted `/boot` Profile A onto `c91969c7`. Ran alongside S398-peter (wrapped
