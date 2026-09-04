@@ -1472,8 +1472,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             cfBody.push(`_scrml_render_value(el, ${valueExpr});`);
           }
           // Only the reactive variant needs a rehydrator rebind; the static
-          // one-shot is server-rendered in a swapped region.
-          pushRebindableDisplay(placeholderId, cfBody, _cfIsReactive);
+          // one-shot is server-rendered in a swapped region — EXCEPT when the
+          // value-control-flow sits inside a mount-deferred `<template>` (an
+          // `if=`/if-chain branch), where the content is NOT in the SSR'd body
+          // but mounted client-side during `_scrml_nav_rewire`; a boot one-shot
+          // then no-ops before mount and never re-runs, rendering empty
+          // (g-call-expression-interpolation-in-if-chain-branch-renders-empty).
+          pushRebindableDisplay(placeholderId, cfBody, _cfIsReactive || binding.insideMountTemplate === true);
         }
         continue;
       }
@@ -2300,7 +2305,18 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const oneShotRender = oneShotUsesClientAsync
           ? `(async () => { try { _scrml_render_value(el, ${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`
           : `_scrml_render_value(el, ${rewrittenExpr});`;
-        pushRebindableDisplay(placeholderId, [oneShotRender], false);
+        // g-call-expression-interpolation-in-if-chain-branch-renders-empty — a
+        // STATIC (`binding.kind == null`, no-@ref, no-server-fn) one-shot is
+        // normally document-scoped boot-only (rebind=false): a swapped region
+        // gets it server-rendered in its SSR HTML. But content inside a
+        // mount-deferred `<template>` (an `if=`/if-chain branch) is NOT in the
+        // SSR'd initial DOM — it mounts client-side during `_scrml_nav_rewire`,
+        // so a boot one-shot no-ops (`el` null) before the branch mounts and,
+        // being rebind=false, never re-runs → the slot renders empty. Flip such
+        // bindings to rebind=true so they land in `_scrml_nav_rewire` and re-run
+        // scoped to the freshly-mounted subtree. SSR-body statics keep the flag
+        // false → byte-identical rebind=false output.
+        pushRebindableDisplay(placeholderId, [oneShotRender], binding.insideMountTemplate === true);
       }
     }
   }
