@@ -83,7 +83,7 @@ const SOURCE_EXT = ".scrml";
 /**
  * HARD FLOOR on the enumerated program count. The showcase corpus only grows; a run that enumerates
  * fewer than this many programs has almost certainly truncated (a moved directory, a broken walk) and
- * MUST NOT report a green floor over the remnant. Set below the current true count (36) with headroom
+ * MUST NOT report a green floor over the remnant. Set below the current true count (37) with headroom
  * for pruning, high enough to catch a real collapse. Raise it as the corpus grows.
  */
 const MIN_PROGRAMS = 25;
@@ -114,6 +114,12 @@ function scrmlUnder(dir: string): string[] {
 function enumeratePrograms(): { programs: Program[]; notes: string[] } {
   const programs: Program[] = [];
   const notes: string[] = [];
+  // g-compile-floor-goes-green-and-silent-when-a-whole-program-root-vanishes —
+  // track program count PER ROOT so a whole root vanishing is caught even when
+  // the global MIN_PROGRAMS margin would otherwise absorb the loss.
+  const perRoot = new Map<string, number>();
+  for (const root of PROGRAM_DIR_ROOTS) perRoot.set(root, 0);
+  const bumpRoot = (root: string) => perRoot.set(root, (perRoot.get(root) ?? 0) + 1);
 
   // 1. Single-file programs: top-level examples/*.scrml
   const singleRoot = join(REPO_ROOT, SINGLE_FILE_ROOT);
@@ -122,6 +128,7 @@ function enumeratePrograms(): { programs: Program[]; notes: string[] } {
     .sort();
   for (const f of topFiles) {
     programs.push({ id: toPosix(`${SINGLE_FILE_ROOT}/${f}`), kind: "single", files: [join(singleRoot, f)] });
+    bumpRoot(SINGLE_FILE_ROOT);
   }
 
   // 2. Multi-file programs: each immediate sub-dir of a PROGRAM_DIR_ROOT that carries >=1 .scrml.
@@ -137,10 +144,11 @@ function enumeratePrograms(): { programs: Program[]; notes: string[] } {
       const files = scrmlUnder(dirAbs);
       if (files.length === 0) continue; // non-scrml dir (e.g. a *-react benchmark)
       programs.push({ id: toPosix(`${root}/${e}/`), kind: "multi", files: files.sort() });
+      bumpRoot(root);
     }
   }
 
-  // Anti-truncation floor.
+  // Anti-truncation floor — global count.
   if (programs.length < MIN_PROGRAMS) {
     throw new TruncationError(
       `enumerated only ${programs.length} showcase program(s) — below the MIN_PROGRAMS floor (${MIN_PROGRAMS}). ` +
@@ -148,10 +156,36 @@ function enumeratePrograms(): { programs: Program[]; notes: string[] } {
       `If the corpus genuinely shrank, lower MIN_PROGRAMS deliberately.`,
     );
   }
+
+  // Anti-truncation floor — PER ROOT (see assertPerRootFloor).
+  assertPerRootFloor(perRoot, PROGRAM_DIR_ROOTS);
   return { programs, notes };
 }
 
-class TruncationError extends Error {}
+export class TruncationError extends Error {}
+
+/**
+ * Anti-truncation PER-ROOT floor (g-compile-floor-goes-green-and-silent-when-a-whole-program-root-vanishes).
+ *
+ * The global `MIN_PROGRAMS` count can be satisfied while an ENTIRE program root
+ * has vanished (e.g. `benchmarks/` — which carries todomvc — disappearing takes
+ * 37→34, above the 25 floor). Each declared root must contribute >=1 program; a
+ * missing/emptied root is a truncated probe, not a note that `--check` can
+ * suppress. Exported for direct unit testing.
+ *
+ * @throws TruncationError if any root in `roots` mapped to 0 in `perRoot`.
+ */
+export function assertPerRootFloor(perRoot: Map<string, number>, roots: readonly string[]): void {
+  for (const root of roots) {
+    if ((perRoot.get(root) ?? 0) === 0) {
+      throw new TruncationError(
+        `program root '${root}' contributed ZERO programs — the entire root is missing or emptied. ` +
+        `This is a truncated-probe signal (pa-base §8): a green floor cannot be reported over a vanished root. ` +
+        `If the root was intentionally removed, drop it from PROGRAM_DIR_ROOTS deliberately.`,
+      );
+    }
+  }
+}
 
 function errorCodesOf(errors: Array<Record<string, unknown>>): string[] {
   const codes = new Set<string>();
@@ -242,8 +276,13 @@ function main(): number {
   const nMulti = results.filter((r) => r.kind === "multi").length;
   if (!check) {
     console.log(`\ncorpus-compile-floor — ${results.length} showcase program(s): ${nSingle} single-file + ${nMulti} multi-file`);
-    for (const n of notes) console.log(`  note: ${n}`);
   }
+  // g-compile-floor-goes-green-and-silent-when-a-whole-program-root-vanishes — a
+  // note (e.g. `root missing: …`) is the truncation SIGNAL, not report chrome, so
+  // it must print in `--check` mode too (the mode CI runs). The per-root floor
+  // above now HARD-FAILS a vanished root, but any surviving non-fatal note still
+  // surfaces here rather than being suppressed under `--check`.
+  for (const n of notes) console.log(`  note: ${n}`);
 
   for (const r of knownFailures) {
     const b = baselineById.get(r.id)!;
@@ -276,4 +315,6 @@ function relPath(abs: string): string {
   return toPosix(abs.startsWith(REPO_ROOT) ? abs.slice(REPO_ROOT.length) : abs);
 }
 
-process.exit(main());
+// Run as a CLI only. Guarded so the module can be imported (e.g. to unit-test
+// `assertPerRootFloor`) without executing the full corpus compile + process.exit.
+if (import.meta.main) process.exit(main());
