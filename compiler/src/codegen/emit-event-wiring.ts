@@ -161,6 +161,19 @@ interface LogicBinding {
   engineArm?: string;
 
   /**
+   * g-call-expression-interpolation-in-if-chain-branch-renders-empty — stamped
+   * by `BindingRegistry.addLogicBinding` when the binding was registered inside
+   * a mount-deferred `<template>` body (a single `if=` mount gate or an
+   * if-chain branch/else mount template). The two STATIC-display call sites in
+   * this file OR this flag into `pushRebindableDisplay`'s `rebind` argument so a
+   * non-reactive `${expr}` inside such a `<template>` lands in
+   * `_scrml_nav_rewire` (re-runs on mount) instead of a document-scoped boot
+   * one-shot that no-ops before the branch mounts. See binding-registry.ts for
+   * the full contract.
+   */
+  insideMountTemplate?: boolean;
+
+  /**
    * ss20 item-1 (g-if-guard-inner-effect-not-gated) — stamped by emit-html.ts
    * when this interpolation binding sits inside an `if=` DISPLAY-TOGGLE subtree
    * (NOT the clean-subtree mount/unmount path; NOT `show=`). Carries the
