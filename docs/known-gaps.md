@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 78 |
-| MED | 205 |
-| LOW | 87 |
+| HIGH | 85 |
+| MED | 211 |
+| LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -6377,7 +6377,7 @@ Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-e
 ## §7 Closed in S110-S131 (rotation; will rotate out next refresh)
 
 **S131:**
-- **Bug 15 (MED) — `~snapshot` raw-sigil codegen leak** — SHIPPED per HU-5 Q-W35-1 (a) ratification. Two-part defensive codegen fix: (1) `emit-logic.ts:bare-expr` skips the spurious orphan `~` bare-expr the live parser peels off `~snapshot = {...}` leads; (2) `emit-expr.ts:emitIdent` adds a defensive marker `null /* ~ orphaned — codegen-fallback */` for any nested-expression orphan that bypasses the bare-expr branch. Regression test `compiler/tests/integration/tilde-snapshot-codegen-fix.test.js` (3 tests, all pass). SPEC §32 unchanged per pa.md Rule 4 — `~snapshot` is NOT a new language form; the native parser already handles the unified `~ IDENT = expr` lead, mirroring that in the live parser surfaceable as a separate follow-up. Closes the S125 Wave 14 DD-surfaced silent-correctness class for the tilde-decl reactive-deps path.
+- **Bug 15 (MED) — `~snapshot` raw-sigil codegen leak** — SHIPPED per HU-5 Q-W35-1 (a) ratification. Two-part defensive codegen fix: (1) `emit-logic.ts:bare-expr` skips the spurious orphan `~` bare-expr the live parser peels off `~snapshot = {...}` leads; (2) `emit-expr.ts:emitIdent` adds a defensive marker `null /* ~ orphaned — codegen-fallback */` for any nested-expression orphan that bypasses the bare-expr branch. Regression test `compiler/tests/integration/tilde-snapshot-codegen-fix.test.js` (3 tests, all pass). SPEC §32 unchanged per pa.md Rule 4 — `~snapshot` is NOT a new language form; the native parser already handles the unified `~ IDENT = expr` lead, mirroring that in the live parser surfaceable as a separate follow-up. Closes the S125 Wave 14 DD-surfaced silent-correctness class for the tilde-decl reactive-deps path. ⛑ **STALE AS WRITTEN — CORRECTED S397. Half (2) NO LONGER DESCRIBES THE COMPILER.** S397 DELETED the defensive fallback: `emitIdent` now pushes a **fatal `E-CG-TILDE-UNRESOLVED`** into a module-level sink and emits `null /* E-CG-TILDE-UNRESOLVED: ~ had no slot at this read */` (`compiler/src/codegen/emit-expr.ts:1305-1320`; the source comment at `:1254` records the change — *"Until S397 this returned `null /* ~ orphaned — codegen-fallback */`"*). So the shape this bullet calls a silent defensive marker is now a build-failing diagnostic, and the marker text quoted above appears nowhere in `compiler/src/`. Every other in-tree reference was updated when the fallback was struck; this rotation entry was the one that was missed. Half (1) — the `emit-logic.ts` bare-expr skip for the spurious orphan `~` the live parser peels off a `~name = expr` lead — is UNCHANGED and still live; see [[g-tilde-typed-must-use-decl-emits-a-phantom-bare-tilde-statement-into-the-ast]] (S397, LOW) for the AST-level residue that skip compensates for. Note the fail-closed floor is PROCESS-level only: the compile now exits 1, and the artifact is still written to disk ([[g-cli-emits-artifacts-on-failed-compile]]).
 
 **S130:**
 - **Bug 8 (HIGH) — E-TYPE-001 lifecycle access-before-transition fire** — Landing 1 SHIPPED (`1feaedc9`). Per-access transition-state tracking implemented in `compiler/src/type-system.ts` (+666 LOC + design pick β symbol-table side-table mirroring `checkFunctionBodyStateCompleteness` precedent). +33 new tests (27 unit / 6 integration) / +50 expect() calls. Closes the ~6+ week SPEC §14.3 line 7106 spec-vs-impl gap that the mutability-contracts article publish-twin's status banner had been acknowledging. Diagnostic message names binding + field name + struct type + pre-state type + post-state type + resolution path + SPEC anchor. Landing 2 (extension to non-engine cell positions + `->` → `to` glyph migration + engine-cell rejection diagnostic) queued.
@@ -10929,3 +10929,542 @@ spurious one (bind-non-bindable-prop-clean) gets its fatal explicitly recorded (
 or an `allowFatal` opt-in) so the intent is HONEST rather than narrowed-around. Touches the §62.2 conformance
 contract surface → co-derive the "clean-intent" definition + the opt-in with bryan. Surfaced while scoping
 the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-peter). <!-- @gap id=g-conformance-runner-passes-a-clean-intent-case-that-emits-a-fatal-error sev=MED status=open locus=conformance/run.ts -->
+
+---
+
+## §S397 — filed S397 (the `~` / §32 defect backlog: three adversarial passes, a `~`-trigger measurement, a fail-closed-floor dispatch and an fn-accumulator dispatch)
+
+> **⚑ READ THE PROVENANCE FIELD ON EVERY ENTRY BELOW — THE TIERS ARE NOT INTERCHANGEABLE.** Three
+> tiers appear here and each `prov=` says which one it is: **PA-verified at the filing watermark**
+> (reproduced by compiling the shape and reading the emitted artifact during this filing pass, on
+> `c11db440`); **dispatch-executed** (an agent ran it, the filing pass did not re-run it); and
+> **agent-reported** (asserted, never executed by anyone since). Do not promote one tier to another
+> by citing this section.
+>
+> **⚑ AND THE THING THIS PASS ACTUALLY LEARNED: the backlog handed to it was ~15% WRONG, and every
+> error was in the direction of over-reporting.** The findings arrived labelled *"pre-existing /
+> byte-identical to base"*. They were measured against an S397 INTERMEDIATE base, and S397 round 3
+> then landed the §32.2.1 `armBodyStmts` carve-out plus the `liftVar`/`var` de-conflation in
+> `emit-logic.ts` — in exactly the region the findings live. Re-running them on `c11db440`:
+>
+> | reported | verdict at the filing watermark |
+> |---|---|
+> | a loop in an if-as-expression arm emits `.push()` on the lift, crashing both paths | **FIXED — not filed.** Emits `_scrml_tilde_4 = "done"` / `= "neg"`, a plain assignment. Closed by the round-3 carve-out. |
+> | the post-decl repoint makes a `const`/`let` initialize `~` | **DOES NOT REPRODUCE AS STATED — not filed.** `for (x of xs) { lift x }` / `const other = 5` / `return ~` emits `return _scrml_tilde_3` — the array. §32.2's *"A variable declaration SHALL NOT initialize `~`"* is honoured here. The row also names twins in `emitForExprDecl` / `emitMatchExprDecl`, which were NOT probed; if the defect is real it is in the decl-FORM contexts, not in a plain decl after a loop. |
+> | the `~`/§32 surface has ZERO rows across all 13 nav maps, "confirmed independently by three dispatches" | **FALSIFIED — filed only in its narrowed form** (see the last entry). `domain.map.md` carries an explicit §32 linear-types row at `:68`, `tilde-decl` at `:1009`, `_emitForStmtWithTilde` at `:1823-1836` and the `tildeContext.var` rebind narrative at `:2359-2394`; `structure.map.md:133-139` routes `emit-logic.ts` as the if-as-expression binding-site lowering. The content predates the S395 map pass (identical hit count at `8e278c73` and at `c11db440`), so it was present when those three dispatches ran. Three independent confirmations of a claim one grep refutes. |
+>
+> Two of those three would have entered a 900-marker ledger as open defects. **A finding whose base
+> moved under it is not a finding until it is re-run.**
+>
+> **Three of the twenty were already filed under different names and are NOT duplicated here** —
+> `g-cli-emits-artifacts-on-failed-compile`, `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`,
+> `g-fn-params-typed-string-actually-objects`. Each carries an addendum below instead.
+
+### g-server-boundary-lift-in-arm-returns-the-arm-value-and-strands-the-rest-of-the-handler — a `lift` inside an if-as-expression arm of a `server function` emits a bare `return`, so the handler returns the ARM's value and every statement after the if-as-expression is unreachable — `NEW S397; HIGH; open`
+<!-- @gap id=g-server-boundary-lift-in-arm-returns-the-arm-value-and-strands-the-rest-of-the-handler sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(the opts.boundary==="server" early return, which sits ABOVE the tildeContext arm-result path and is unaware of liftVar — located from the reported mechanism, NOT traced to a line) prov=empirical:PA-verified-at-c11db440-by-compiling-the-shape-and-reading-the-emitted-server-handler -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK.** Source:
+> ```scrml
+> server function classify(v: int) -> string {
+>   const label = if (v > 0) { lift "pos" } else { lift "neg" }
+>   return label + "!"
+> }
+> ```
+> Emitted `_server.js` handler body, verbatim:
+> ```js
+> let _scrml_tilde_2 = null;
+> if (v > 0) {
+>   return "pos";
+> }
+> else {
+>   return "neg";
+> }
+> const label = _scrml_tilde_2;
+> return label + "!";
+> ```
+> The handler returns `"pos"` / `"neg"`. It never returns `"pos!"`. **Compile exits 0 with zero
+> diagnostics**, and the last two statements are unreachable dead code that no gate names.
+>
+> **Why the server boundary makes this worse than the client twin.** The wrong value crosses an HTTP
+> response — `JSON.stringify(_scrml_result)` ships it to every caller — so the defect is observable
+> only in the response body, not in any compiler output. Any statement an author places after an
+> if-as-expression in a server handler (an audit write, a header set, a transform) is silently
+> discarded.
+>
+> **Sibling, same family, different mechanism:** [[g-bare-expr-in-if-arm-rebinds-tilde-context-corrupting-the-result-var]]
+> (a bare EXPRESSION rebinding the slot) — that one is carved out at the WRITE half by S397 round 3's
+> `armBodyStmts`; this one is not, because it is decided before the arm-result path is reached.
+
+### g-let-decl-reading-tilde-swallows-the-following-statement-which-is-never-compiled — `let x = ~` absorbs the NEXT statement into its own initializer text; that statement never becomes an AST node, is never compiled, and raises none of its own diagnostics — `NEW S397; HIGH; open`
+<!-- @gap id=g-let-decl-reading-tilde-swallows-the-following-statement-which-is-never-compiled sev=HIGH status=open locus=searched:compiler/src/ast-builder.js,compiler/src/expression-parser.ts,compiler/src/tokenizer.ts — no line located. The loss is upstream of codegen (the statement is absent from the emitted JS entirely, not mis-emitted), so it is a decl-initializer scan that does not terminate at the statement boundary after a bare `~` prov=empirical:PA-verified-at-c11db440-two-shapes-a-fn-body-and-a-dollar-brace-logic-block-the-following-statement-absent-from-the-emitted-client-js-in-both -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK, TWO CONTAINERS.** In a `${ }` logic block:
+> ```scrml
+> getThing()
+> let snapshot = ~
+> log("SHOULD BE COMPILED")
+> @out = snapshot
+> ```
+> compiles at **exit 0** and emits:
+> ```js
+> let _scrml_tilde_4 = _scrml_getThing_3();
+> let snapshot = _scrml_tilde_4;
+> _scrml_cs_reactive_set("out", snapshot);
+> ```
+> There is **no `_scrml_log(...)` anywhere in the artifact.** The statement was absorbed into the
+> declaration's initializer and never reached the AST. The same loss reproduces in a `fn` body.
+>
+> **This is the worst failure mode a compiler has**: code the author wrote, that the compiler read,
+> that is silently absent from the output, with no diagnostic naming the loss and an exit code saying
+> everything is fine. Every downstream analysis — RI, reachability, protect/egress, the auto-await
+> injectors — is equally blind to the swallowed statement, because for them it does not exist.
+>
+> **Locus NOT located, and recorded as a search** per the base §2 rule rather than guessed. What is
+> established: the statement is ABSENT rather than mis-emitted, which rules out codegen.
+
+### g-braceless-if-else-both-lifting-drops-the-else-and-leaks-a-block-scoped-name — a braceless `if`/`else` pair where both limbs `lift` emits the then-limb's slot INSIDE the if-block and the else-limb's value as an unconditional assignment after it, so the result is the else value on every path — `NEW S397; HIGH; open`
+<!-- @gap id=g-braceless-if-else-both-lifting-drops-the-else-and-leaks-a-block-scoped-name sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(the value-lift path for a braceless arm; located-not-traced — the emitted shape shows the then-limb minting its slot inside the block and no else limb being emitted at all) prov=empirical:PA-verified-at-c11db440-by-compiling-the-live-corpus-instance-and-reading-the-emitted-client-js -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK, ON A SHIPPED CORPUS FILE.**
+> `samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-complete-013.scrml`
+> — whose own comment reads *"Complete if/else → `~` is unconditionally initialized (§17.6.9 ex 3)"* —
+> is `let cond = true` / `if (cond) lift 1; else lift 2;` / `let dbl = ~ * 2`. It compiles at **exit 0,
+> zero diagnostics**, and emits:
+> ```js
+> let cond = true;
+> if (cond) {
+>   let _scrml_tilde_7 = 1;
+> }
+> _scrml_tilde_7 = 2;
+> let dbl = _scrml_tilde_7 * 2;
+> ```
+> **Three defects in five lines.** (1) There is no `else` — the else-limb's value is an UNCONDITIONAL
+> assignment after the `if`, so `dbl` is `4` for every value of `cond` when the source says it should
+> be `2`. (2) The then-limb's value `1` is written to a name and immediately discarded; the whole
+> block is dead. (3) `_scrml_tilde_7` is `let`-declared INSIDE the if-block and both assigned and read
+> OUTSIDE it — it survives only because the emitted client is a classic script in sloppy mode, where
+> the bare assignment creates an implicit global. Under strict mode or ESM it is a `ReferenceError`.
+>
+> **`node --check` PASSES on this artifact**, so the §2.2.1 emitted-JS parse gate structurally cannot
+> see any of it — the output is valid JavaScript that computes the wrong answer.
+>
+> ⚑ **This file is in `samples/compilation-tests/` and therefore runs on every `bun run pretest`.**
+> Same class as [[g-corpus-differential-gate-blind-to-standing-breakage]]: a differential gate sees no
+> delta because the file has been emitting this since before any baseline.
+
+### g-value-lift-then-loop-in-one-body-pushes-onto-a-scalar-guaranteed-typeerror — a body that value-lifts and then accumulates seeds the slot with the scalar and calls `.push()` on it, so the emitted function throws on every input including the empty one — `NEW S397; HIGH; open`
+<!-- @gap id=g-value-lift-then-loop-in-one-body-pushes-onto-a-scalar-guaranteed-typeerror sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(the tildeContext single-to-array mode flip, whose own comment calls the mixed case a rare edge case; the flip changes the accumulation OPERATION without re-seeding the slot — located from the emitted shape, not traced to a line) prov=empirical:PA-verified-at-c11db440-by-compiling-the-shape-and-reading-the-emitted-client-js -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK.** Source:
+> ```scrml
+> fn render(xs: string[]) -> string[] {
+>   lift "H"
+>   for (x of xs) { lift x }
+>   lift "F"
+>   return ~
+> }
+> ```
+> Emitted, verbatim:
+> ```js
+> function _scrml_render_6(xs) {
+>   let _scrml_tilde_7 = "H";
+>   for (const x of xs) {
+>     _scrml_tilde_7.push(x);
+>   }
+>   _scrml_tilde_7.push("F");
+>   return _scrml_tilde_7;
+> }
+> ```
+> `TypeError: _scrml_tilde_7.push is not a function`. **Compile exits 0** (the only diagnostic is an
+> unrelated `W-DEAD-FUNCTION`). The trailing `push("F")` is outside the loop, so the throw is
+> **unconditional — it fires even on an empty array**, which removes the one hope that a defect like
+> this hides until a populated input arrives.
+>
+> The header/body/footer shape this rejects is the single most obvious reason to mix a value-lift with
+> an accumulation, and §32.2 item 2 says both forms initialize `~`. The emitter picks the mode from the
+> LAST-seen form and never re-seeds the slot when it changes.
+>
+> **Two dispatches found this independently** (the `~`-trigger measurement and the fn-accumulator
+> dispatch); it is filed once because it is one mechanism and one fix.
+
+### g-fn-local-tilde-detection-is-a-text-regex-so-member-access-on-tilde-false-fires-e-fn-008 — `const n = ~.length` and `return ~.length` inside a `fn` emit CORRECT JavaScript and then fail the build on an E-FN-008 that claims the accumulator is outer-scope when it is fn-local — `NEW S397; HIGH; open`
+<!-- @gap id=g-fn-local-tilde-detection-is-a-text-regex-so-member-access-on-tilde-false-fires-e-fn-008 sev=HIGH status=open locus=compiler/src/type-system.ts:24931(textMentionsTilde — a source-TEXT regex requiring the bare sigil be followed by whitespace or one of a closing-punctuation set; a member access fails it) feeding :25397(the E-FN-008 fire condition hasLiftInBody and not hasFnLocalTilde) prov=empirical:PA-verified-at-c11db440-emitted-JS-read-and-confirmed-correct-while-the-compile-exits-1 -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK, AND THE EMITTED CODE IS THE PROOF.** Source:
+> ```scrml
+> fn countUp(xs: string[]) -> int {
+>   for (x of xs) { lift x }
+>   const n = ~.length
+>   return n
+> }
+> ```
+> **Exit 1**, with `E-FN-008: lift at line 5 inside fn countUp targets a ~ accumulator initialized
+> outside the fn boundary.` It does not. The emitted JavaScript — written to disk despite the exit 1,
+> see the addendum below — is entirely correct:
+> ```js
+> function _scrml_countUp_2(xs) {
+>   let _scrml_tilde_3 = [];
+>   for (const x of xs) { _scrml_tilde_3.push(x); }
+>   const n = _scrml_tilde_3.length;
+>   return n;
+> }
+> ```
+> The accumulator is allocated INSIDE the function. The diagnostic asserts the opposite, in a message
+> that tells the author to restructure working code.
+>
+> **Root traced.** `textMentionsTilde` (`type-system.ts:24931`) decides fn-locality by matching the
+> source text against a regex that requires the sigil be preceded by whitespace/`(`/`=`/`,`/`{`/`[`
+> and followed by whitespace, `)`, `;`, `,`, `}`, `]` or end-of-string. A member access puts a `.`
+> there, so the match fails, `hasFnLocalTilde` stays false, and `:25397` fires. **This is the Rule 7
+> shape** (overlay S338 — *don't ask the text what the tree already knows*): a text predicate standing
+> in for a structural one in a stage that already holds the parsed tree, exactly like
+> [[g-lift-attr-split-truncates-unquoted-is-operator-runs]] and the round-6 finding at
+> [[g-lift-each-opener-if-is-silently-dropped-list-renders-ungated]].
+>
+> **The reported blast radius is wider than the one shape and is NOT fully re-verified here.** The
+> fn-accumulator dispatch reported that `return ~.length`, `const acc = ~ … return acc` and an early
+> in-loop `return ~` all emit correct JS and all exit 1 on the same false code — i.e. that §32.3's own
+> list of valid `~` consumptions has close to zero members that work inside a `fn`. **This filing
+> re-ran only the `const n = ~.length` shape.** The regex predicts the member-access forms and does
+> NOT obviously predict `const acc = ~` (whose trailing whitespace should match), so **the second and
+> third shapes are dispatch-reported, not confirmed** — measure the full set before scoping a fix.
+
+### g-bare-expr-between-a-lift-loop-and-the-tilde-read-silently-replaces-the-accumulator — an expression statement after a `lift` loop and before `return ~` re-initializes `~` per §32.2, discarding the loop's accumulation; §32.3's guard against exactly this is structurally dead, so the wrong value is returned at exit 0 — `NEW S397; HIGH; open`
+<!-- @gap id=g-bare-expr-between-a-lift-loop-and-the-tilde-read-silently-replaces-the-accumulator sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(the shared bare-expr handler that mints a fresh slot under an active tildeContext — the SAME handler as the arm-body entry, in the one context S397 round 3 did not carve out) plus compiler/src/type-system.ts(checkLinear — the E-TILDE-002 that should catch it never fires) prov=empirical:PA-verified-at-c11db440-two-limb-control-the-decl-form-is-correct-and-the-bare-expr-form-is-not -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK, WITH A TWO-LIMB CONTROL.** Two `fn`s, identical except for
+> the kind of the statement between the loop and the read:
+> ```scrml
+> fn buildDecl(xs: string[]) -> string[] { for (x of xs) { lift x }  const other = 5              return ~ }
+> fn buildBare(xs: string[]) -> string[] { for (x of xs) { lift x }  log("after loop, before read") return ~ }
+> ```
+> emit:
+> ```js
+> function _scrml_buildDecl_2(xs) { let _scrml_tilde_3 = []; for (…) { _scrml_tilde_3.push(x); } const other = 5; return _scrml_tilde_3; }   // CORRECT
+> function _scrml_buildBare_4(xs) { let _scrml_tilde_5 = []; for (…) { _scrml_tilde_5.push(x); } let _scrml_tilde_6 = _scrml_log(…); return _scrml_tilde_6; }  // returns the LOG's return value
+> ```
+> `buildBare(["a","b"])` returns `undefined`, not `["a","b"]`. **Exit 0, zero diagnostics.**
+>
+> **⚑ THE EMITTER IS ARGUABLY RIGHT AND THAT IS THE POINT.** §32.2 is explicit: *"An expression
+> statement whose value is not bound to any identifier SHALL initialize `~`"*, and the decl limb above
+> confirms the emitter honours the companion bullet (*"A variable declaration SHALL NOT initialize
+> `~`"*). So the re-initialization is CONFORMING. What is supposed to stop the author losing the
+> accumulation is §32.3 — *"If `~` is initialized and then initialized again before being consumed,
+> the second initialization is E-TILDE-002"* — and §32.5 states the compiler **SHALL** emit it at
+> Stage 6. It never does, for the reason in the addendum below: `E-TILDE-002` has zero producers.
+>
+> **So this entry is the adopter-visible PRICE of
+> [[g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples]], not an independent emitter bug**, and
+> it is filed separately because that entry is about MISSING DIAGNOSTICS while this one is about a
+> WRONG VALUE reaching a `return`. If the enforcement gap closes, this shape becomes a clean
+> compile error and this entry closes with it. If a ruling instead makes the emitter carry the
+> accumulator past a side-effect statement, it closes the other way. **Both are live directions; this
+> is not a turnkey fix.**
+
+### g-while-accumulator-across-a-logic-block-boundary-deletes-the-loop-and-the-following-call-from-the-output — a `while`/`lift` accumulator in a nested `${ }` is dropped entirely: the emitted artifact contains no loop and no consumer call, only the orphaned binding — `NEW S397; HIGH; open`
+<!-- @gap id=g-while-accumulator-across-a-logic-block-boundary-deletes-the-loop-and-the-following-call-from-the-output sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-control-flow.ts,compiler/src/codegen/emit-expr.ts — no line located. §32.4 makes the nested block its own `~` slot, so the outer read correctly finds none; what is NOT explained is why the nested block's loop and the following call are absent from the output rather than merely disconnected prov=empirical:PA-verified-at-c11db440-by-compiling-the-shipped-corpus-file-and-reading-the-whole-14-line-emitted-client-js -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK, ON A SHIPPED CORPUS FILE.**
+> `samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-061.scrml` — comment
+> *"while + lift produces array (§49.6)"* — has an outer `${ }` containing `let i = 0`, a nested `${ }`
+> holding `while (i < 3) { lift i * 10; i = i + 1 }`, then `let result = ~` and
+> `log(result.length)`. The **entire** emitted client body is:
+> ```js
+> function _scrml_log_10(n) { let _ = n; }
+> _scrml_lift_target = document.querySelector('[data-scrml-logic="_scrml_logic_9"]');
+> let i = 0;
+> let result = null /* E-CG-TILDE-UNRESOLVED: `~` had no slot at this read */;
+> _scrml_lift_target = null;
+> ```
+> **No `while`. No `log(result.length)`.** Only the hoisted function and the orphaned binding survive.
+>
+> ⚑ **CORRECTION TO THE REPORT AS RECEIVED, IN THE COMPILER'S FAVOUR.** The finding described this as
+> silent, with the pre-S397 marker `null /* ~ orphaned — codegen-fallback */`. At `c11db440` it is
+> **not silent**: `E-CG-TILDE-UNRESOLVED` fires and the compile exits 1. **What remains unfixed is the
+> code loss** — the loop and the `log` call are still absent from the artifact and NO diagnostic names
+> that. The fail-closed floor covers the `~` read; it does not cover the disappearance of two
+> statements.
+>
+> ⚑⚑ **This file runs on every `bun run pretest`.**
+
+### g-const-bound-while-emits-raw-scrml-into-the-client-artifact-before-refusing — `const items = while (…) { lift … }` correctly fires `E-LOOP-007`, and codegen still writes the raw scrml source into the `.client.js` as unparseable JavaScript — `NEW S397; MED; open`
+<!-- @gap id=g-const-bound-while-emits-raw-scrml-into-the-client-artifact-before-refusing sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-control-flow.ts — no line located; the `while` reaches the decl-initializer path as unstructured text (the W-TYPE-031 on the same line reports inference stopping at AST node kind `escape-hatch`), so the initializer is passed through verbatim rather than refused prov=empirical:PA-verified-at-c11db440-artifact-inspected-and-node-check-run-on-it -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK.** `const items = while (i < @n) { i = i + 1  lift i }`
+> exits 1 with a correct, well-named `E-LOOP-007` (*"`while` is a statement, not an expression
+> (§49.4.4)"*) — and `dist/…client.js:9` is:
+> ```js
+> const items = while ( i < _scrml_reactive_get("n") ) { i = i + 1 lift i };
+> ```
+> `node --check` on the artifact: `SyntaxError: Unexpected token 'while'`. **Raw scrml source in a
+> shipped-shaped JavaScript file.**
+>
+> **Two separate things are wrong and only one of them is the refusal.** The refusal is correct and
+> loud. But codegen FELL THROUGH on a construct it had already refused, passing the initializer text
+> to the output verbatim instead of declining to emit; and the artifact was then written to disk on a
+> non-zero exit (the addendum below). The §2.2.1 emitted-JS acorn gate would catch this — it is
+> flag-gated and default-OFF, which is the same fact that
+> [[g-cli-emits-artifacts-on-failed-compile]] turns on.
+>
+> Companion evidence for that entry: this is the case where the written artifact is not merely wrong
+> but does not parse.
+
+### g-display-position-call-is-emitted-at-file-scope-and-invoked-again-by-the-render-wiring — a function call inside a markup `${ }` runs THREE times at boot from one source occurrence, and once more per reactive re-render — `NEW S397; MED; open`
+<!-- @gap id=g-display-position-call-is-emitted-at-file-scope-and-invoked-again-by-the-render-wiring sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:613(the pid-tagged bare-expr suppression, whose pure-read regex deliberately has no call alternative — the comment at :610 states the reason, and that reason does not hold in display position) prov=empirical:PA-verified-at-c11db440-emitted-JS-read-plus-the-runtime-effect-initial-run-confirmed-in-the-shipped-runtime-chunk -->
+> **⚑ VERIFIED, AND THE REPORT UNDERSTATED IT — the reporting agent flagged this as possibly
+> intended and said the call runs twice. It runs three times.** `${ getHeader() }` in markup emits:
+> ```js
+> _scrml_getHeader_3();                                                                     // 1 — file scope
+> …
+> _scrml_render_value(el, _scrml_getHeader_3());                                            // 2 — eager render
+> const _scrml_disp = _scrml_effect(function() { _scrml_render_value(el, _scrml_getHeader_3()); });  // 3 — _scrml_effect does an "Initial run"
+> ```
+> Confirmed with a `<calls>` counter cell in the callee and by reading `_scrml_effect` in the emitted
+> runtime chunk (`// Initial run` / `effectFn();` before the dispose return). Compile exits 0.
+>
+> **Why it is NOT intended, despite a deliberate-looking comment.** `emit-reactive-wiring.ts:610`
+> suppresses the file-scope emission for pure-READ shapes only, and says of the exclusion: *"a trailing
+> call … is a method invocation with side effects and MUST keep emitting at file-scope."* That
+> reasoning is sound for `_scrml_reactive_get("x").map(...)`, where suppressing would DROP a side
+> effect. It does not hold here: in a pid-tagged interpolation **the render wiring is already a
+> consumer**, so the file-scope statement does not preserve the side effect — it duplicates it. The
+> regex cannot tell the two cases apart, and the suppression was scoped before display-position calls
+> were considered.
+>
+> **What it costs.** A pure callee: dead code and wasted work. An impure callee — a counter, a logger,
+> a fetch trigger, anything that writes a cell — runs 3× at boot and again on every dependency change,
+> with no diagnostic. §32.2 makes an unassigned expression statement meaningful, so an author has every
+> reason to expect exactly one evaluation.
+>
+> ⚑ A second, more general redundancy is visible in the same emission and is NOT filed separately: the
+> eager `_scrml_render_value(el, X)` is immediately followed by an `_scrml_effect` whose initial run
+> repeats it. Harmless while `X` is a pure read (which is the idiomatic case), which is why it has gone
+> unremarked; it is the reason the count here is 3 and not 2.
+
+### g-codegen-diagnostic-sink-has-no-dedupe-so-one-source-read-can-report-once-per-emission — the `E-CG-TILDE-UNRESOLVED` sink appends unconditionally, so a body that is emitted twice reports the same error twice at the same span — `NEW S397; MED; open`
+<!-- @gap id=g-codegen-diagnostic-sink-has-no-dedupe-so-one-source-read-can-report-once-per-emission sev=MED status=open locus=compiler/src/codegen/emit-expr.ts:1306(the unconditional push into _tildeUnresolvedErrors) with the drain at :183 — the structural half is PA-confirmed by reading the sink; the double-emitted-body half is dispatch-reported and was NOT reproduced prov=empirical:PA-confirmed-structurally-the-sink-has-no-dedupe-plus-review:S397-adversarial-for-the-two-emissions-claim-which-one-probe-here-did-not-trigger -->
+> **⚑ SPLIT PROVENANCE — READ BOTH HALVES.** **Structurally PA-confirmed:** `emit-expr.ts:1306` does
+> `_tildeUnresolvedErrors.push(new CGError(…))` with no guard, so N emissions of one body yield N
+> byte-identical diagnostics at one span. **NOT reproduced here:** the reported trigger — a
+> server-classified body emitted twice (HTTP route handler + in-process peer callable). A probe on a
+> plain `server function` with an orphaned `~` read produced exactly ONE fire, because that shape emits
+> only the route handler. The peer-callable classification was not reached.
+>
+> **Why the obvious fix is wrong.** Deduping locally at the push site would hide a real signal.
+> **`codeCounts` in `conformance/run.ts` makes diagnostic CARDINALITY an observable conformance
+> contract** — a case can assert "this fires exactly twice" — so where a dedupe lives changes what
+> conformance can express. The candidate is `(code, span.file, span.start)` at DRAIN time
+> (`emit-expr.ts:183`), not at the push, and it should be decided once for the diagnostic stream rather
+> than per-code. Cross-ref [[g-conformance-runner-passes-a-clean-intent-case-that-emits-a-fatal-error]]
+> for the adjacent run.ts contract surface.
+
+### g-exprspan-hard-codes-line-1-col-1-so-only-byte-offsets-are-real — `spanFromEstree` returns `line: 1, col: 1` literally, for every expression node in the tree — `NEW S397; MED; open`
+<!-- @gap id=g-exprspan-hard-codes-line-1-col-1-so-only-byte-offsets-are-real sev=MED status=open locus=compiler/src/expression-parser.ts:984(spanFromEstree returns file/start/end computed and line/col as the literals 1 and 1) prov=empirical:PA-verified-at-c11db440-by-reading-the-function -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK — the function is four lines and says so:**
+> ```ts
+> function spanFromEstree(node: ESNode, filePath: string, baseOffset: number): ExprSpan {
+>   const start = (typeof node.start === "number" ? node.start : 0) + baseOffset;
+>   const end = (typeof node.end === "number" ? node.end : 0) + baseOffset;
+>   return { file: filePath, start, end, line: 1, col: 1 };
+> }
+> ```
+> **Two defects, one symptom, and they need different fixes.** (a) Line/col are never populated at
+> span CONSTRUCTION. S397 worked around it per-consumer (deriving line/col from the byte offset at the
+> diagnostic site); the durable fix is here, once, for every consumer. (b) **An identifier can carry
+> its ENCLOSING node's offset**, and no amount of downstream line/col resolution repairs a wrong
+> offset — that half is upstream of any formatting fix.
+>
+> **Distinct from the already-filed span entries, which is why this is a separate row.**
+> [[g-subparse-span-not-rebased]] (RESOLVED S317) was about spans measured from a sub-parse origin and
+> never rebased; [[g-emit-parse-gate-reports-artifact-position-not-source-span]] is about the acorn
+> gate reporting a coordinate inside the EMITTED artifact. This one is that the source-side line/col
+> fields were never computed at all — every diagnostic anchored to an expression node inherits the
+> literal `1:1` unless its own formatter re-derives from the offset.
+
+### g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards — the reasoning corrected at `emit-expr.ts:1281` survives verbatim at three other sites in the same file, two of them the stated safety argument for security guards — `NEW S397; LOW; open`
+<!-- @gap id=g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards sev=LOW status=open locus=compiler/src/codegen/emit-expr.ts:1382(the E-SESSION-VALUE placeholder) and :3795 and :3818(the two leak-guard comments) prov=empirical:PA-verified-at-c11db440-all-three-sites-grepped-and-read-and-the-premise-independently-disproved-twice-this-pass -->
+> **⚑ PA-VERIFIED AT THE FILING WATERMARK.** `emit-expr.ts:1281-1295` records that *"the build fails
+> on the error, so the placeholder never ships"* is FALSE, and names three other sites carrying it.
+> All three are present at `c11db440`: `:1382` (*"the build fails on the error, so it never ships"*),
+> `:3795` (*"recorded ERROR is fatal, so that output never ships"*), `:3818` (*"diagnostic is fatal so
+> the leak never ships"*).
+>
+> **The premise was disproved twice during this filing pass, incidentally**: two probes exited 1 and
+> both wrote a complete `.client.js` + `.html` + `.css` to disk, one of which does not parse. See
+> [[g-cli-emits-artifacts-on-failed-compile]].
+>
+> **LOW because the guards themselves fire correctly — but note WHERE two of them are.** `:3795` and
+> `:3818` are LEAK GUARDS: their comments are the stated safety argument for a confidentiality
+> control, and that argument is wrong. Nothing is unsafe today that would otherwise be safe, but the
+> next person reasoning about whether a guard needs to fail-closed at the FILESYSTEM level will read
+> a comment telling them it does not have to. Same class as
+> [[g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001]].
+
+### g-tilde-typed-must-use-decl-emits-a-phantom-bare-tilde-statement-into-the-ast — the live parser peels a spurious bare-`~` node off a `~name = expr` lead; codegen carries a defensive skip for it, so the AST is dirty and the emission is clean — `NEW S397; LOW; open`
+<!-- @gap id=g-tilde-typed-must-use-decl-emits-a-phantom-bare-tilde-statement-into-the-ast sev=LOW status=open locus=compiler/src/ast-builder.js(the `~ IDENT = expr` decl lead, which yields the tilde-decl AND a bare-`~` sibling) with the compensating skip in compiler/src/codegen/emit-logic.ts(bare-expr) — located from the S131 Bug-15 record, NOT traced prov=review:S397-adversarial-agent-reported-AST-level-and-NOT-re-verified-here-the-emitted-JS-at-c11db440-shows-no-leak -->
+> **⚑ AGENT-REPORTED, AND DELIBERATELY NOT UPGRADED.** The reporting dispatch observed a phantom bare
+> `~` statement emitted alongside the intended `tilde-decl` for a `~`-typed must-use declaration,
+> naming `conformance/cases/fn/lift-outer-accumulator-reject/case.scrml:3` (`~acc = []`).
+>
+> **This filing pass compiled that exact case and the EMITTED JavaScript is clean** — `~acc = []`
+> becomes `const acc = [];` with no stray statement. That is consistent with the report rather than
+> against it: the S131 Bug-15 fix added a defensive skip in `emit-logic.ts`'s bare-expr handler
+> precisely to *"skip the spurious orphan `~` bare-expr the live parser peels off `~snapshot = {...}`
+> leads."* So the phantom node is expected to exist in the AST and to be invisible in the output.
+> **Confirming it requires an AST dump, which this pass did not perform** (`buildAST` is not callable
+> standalone — it takes the block-splitter's output, not source text).
+>
+> **Why it is worth a row at LOW rather than nothing.** A phantom node is invisible to codegen only
+> because ONE consumer remembers to skip it. Every other structural walker — RI, reachability,
+> protect/egress, the `~` linearity pass itself — sees a bare-`~` initialization the author never
+> wrote. Given that [[g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples]] is about that very
+> pass, a spurious initialization node in the tree is worth knowing about before it is turned on.
+
+### g-semdiff-chunk-namespace-token-discovery-misses-every-non-engine-html-site — the emit-identity instrument neutralizes the per-chunk hash only where an engine or the JS prologue reveals it, so an each/match/meta HTML artifact keeps a path-derived token and reads false-behavioral — `NEW S397; MED; open`
+<!-- @gap id=g-semdiff-chunk-namespace-token-discovery-misses-every-non-engine-html-site sev=MED status=open locus=compiler/src/semdiff.ts:686(canonicalizeChunkNamespaceToken — three discovery regexes: the chunk-cell-scope prologue banner, the engine-derived names, the engine mount attribute) called per-ARTIFACT from :733 prov=empirical:PA-verified-structurally-at-c11db440-the-three-discovery-sites-read-and-the-namespaced-emission-sites-grepped-in-codegen-the-847-of-1026-figure-is-dispatch-reported -->
+> ⚑ **THE REPORTED PATH WAS WRONG AND IS CORRECTED HERE: it is `compiler/src/semdiff.ts`, not
+> `scripts/semdiff.ts`** — there is no such file under `scripts/`. Flagged because this instrument's
+> location is exactly what a reader would trust the ledger for.
+>
+> **Mechanism, PA-confirmed by reading both ends.** `canonicalizeChunkNamespaceToken` DISCOVERS tokens
+> from three structural sites — the `// --- chunk cell scope (<tok>) ---` banner, `_scrml_engine_<tok>_`,
+> and `data-scrml-engine-mount="<tok>_"` — then replaces each discovered token everywhere. Discovery
+> from structure rather than a blanket `0[0-9a-z]{7}` sweep is the RIGHT design (a user literal that
+> merely looks token-shaped is never touched); the set is just incomplete. Codegen namespaces at least
+> four further sites via `nsId(...)`: `<!--scrml-each:<tok>_N-->` (`emit-each.ts:581`),
+> `data-scrml-match-mount` (`emit-match.ts:1157`), `_scrml_meta_<tok>_N` (`emit-html.ts:3906`,
+> `emit-logic.ts:4157`) and the `each_<tok>_N` dispatcher names.
+>
+> **The bite is PER-ARTIFACT, which is what makes it non-obvious.** `buildComparableCorpus` (`:733`)
+> calls the canonicalizer on each artifact's content separately. A CLIENT-JS artifact always carries
+> the banner, so its token is found. An HTML artifact carries a discoverable site only if the program
+> has an ENGINE. **An HTML artifact for an each/match/meta program has no discovery site at all**, so
+> its token survives and any moved or renamed file reads as behaviorally different.
+>
+> **Cost, in the instrument's own terms:** its documentation says an un-neutralized token makes a moved
+> file read false-behavioral. The dispatch measured 847 of 1,026 diffs explained — **~17%
+> under-neutralization** (that figure is dispatch-reported, not re-measured here). Direction is the
+> conservative one (over-report behavioral, never false-cosmetic), which is why it has survived, but a
+> 17% noise floor is what a consumer weighs a real regression against. Sibling:
+> [[g-semdiff-markup-whitespace-p1]] (LOW, deferred-P1) — different cause, same false-behavioral
+> direction.
+
+### g-match-arm-result-is-not-reliably-a-structured-node-in-the-same-match — an inline arm whose result is a call can degrade to a `bare-expr` whose `exprNode` covers only the PATTERN, while a sibling arm in the same `match` becomes a proper `match-arm-inline` with `resultExpr` — `NEW S397; MED; open`
+<!-- @gap id=g-match-arm-result-is-not-reliably-a-structured-node-in-the-same-match sev=MED status=open locus=searched:compiler/src/ast-builder.js(six match-arm-inline construction sites carrying resultExpr at :9918,:10191,:10216,:10240,:10264,:10294) — which site declines for the reported shape was NOT traced, and the six-site spread is itself part of the finding prov=review:S397-adversarial-agent-reported-shape-dependence-observed-in-one-match-NOT-re-verified-here -->
+> **⚑ AGENT-REPORTED; the locus is a recorded search, not a trace.** For an arm spelled `1 => cb(id)`
+> the arm was observed to degrade to a `bare-expr` whose `exprNode` spans only the pattern, so **no
+> `call` node exists** for the arm result — while a SIBLING arm in the same `match` became a proper
+> `match-arm-inline` carrying `resultExpr`. Shape-dependent, not total.
+>
+> **Why MED and not LOW.** *"There is no call node"* is not a cosmetic AST wart — it is the same
+> silence that [[g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode]] and
+> [[g-async-closure-body-raw-no-lower]] describe from other carriers: **any pass that walks arm
+> results structurally reads "nothing here" and reports clean.** RI, reachability, protect/egress,
+> tenant isolation and the auto-await injectors all do exactly that. An unlowered arm result is a
+> blind spot with a green light on top of it.
+>
+> **What this pass DID establish**: `match-arm-inline` + `resultExpr` are constructed at six separate
+> sites in `ast-builder.js`. Six construction sites for one node kind is how a shape-dependent
+> degradation stays alive — the entry that handles the reported spelling is one of the six, or none of
+> them. Determining WHICH is the first step of any fix, and it was not taken here.
+
+### g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface — the task-shape router carries no row keyed on `~` / §32, so a dispatch whose symptom is "the accumulator did the wrong thing" is routed only if the author happens to describe it as an if-as-expression — `NEW S397; LOW; open`
+<!-- @gap id=g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface sev=LOW status=open locus=.claude/maps/primary.map.md(rows at :500 and :624 route the if-as-expression binding-site surface and reach the same emitter by a different symptom; no row is keyed on the sigil or on §32) prov=empirical:PA-verified-at-c11db440-all-13-maps-grepped-and-the-stronger-reported-claim-FALSIFIED-in-the-same-grep -->
+> ⚑ **THE CLAIM AS RECEIVED WAS FALSE AND IS RECORDED HERE SO IT STOPS PROPAGATING.** Three S397
+> dispatches independently reported *"the `~` / §32 surface has ZERO rows across all 13 nav maps."*
+> One grep refutes it: `domain.map.md` carries an explicit §32 linear-types row at `:68`, the
+> `tilde-decl` node kind at `:1009`, `_emitForStmtWithTilde` at `:1823-1836`, and the
+> `tildeContext.var` rebind narrative — verified-by-execution, at that — at `:2359-2394`;
+> `structure.map.md:133-139` routes `emit-logic.ts` as the if-as-expression binding-site lowering. The
+> hit count is IDENTICAL at `8e278c73` and `c11db440`, so this content was present when all three
+> dispatches ran. **Three independent confirmations, one shared error.**
+>
+> **What is actually true, and it is narrower.** `primary.map.md` — the map that routes a dispatch by
+> TASK SHAPE — has no row keyed on the sigil or on §32. Its two adjacent rows (`:500`, `:624`) route
+> the *if-as-expression binding-site* surface, which reaches the same emitter under a different
+> symptom name. So an author-facing report of the form *"my accumulator returned the wrong thing"*
+> or *"`lift` inside a `fn` won't compile"* has no entry to land on, while roughly a dozen of the
+> defects filed in this section live at precisely that surface.
+>
+> LOW, and it is a maps gap rather than a compiler defect. Sibling:
+> [[g-nav-maps-have-no-scheduled-refresh]] (the refresh MECHANISM); this is a coverage hole in one
+> map's routing table. Cross-ref [[g-maps-error-map-missing-diagnostics-and-emit-client]] — same class,
+> different map.
+
+### S397 addenda to three EXISTING entries — recorded here, NOT edited into the entries themselves
+
+**These are proposed corrections. Each entry's own text is left alone**; a filing pass does not
+silently rewrite another session's finding.
+
+- **[[g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples]] (HIGH, open) — S397 SUPPLIES THE
+  TRACE THAT ENTRY ASKS FOR, AND ITS OWN NAMED NEXT STEP IS NOW DONE.** That entry says *"CAUSE NOT
+  TRACED"*, and: *"whether `~` reaches the tracker as a `tilde-ref` node in these shapes was not
+  established. A fix must start by tracing that, not by assuming the pass is unimplemented."*
+  **Traced, PA-verified at `c11db440` by exhaustive grep across `compiler/src/` and
+  `compiler/native-parser/`: the node kinds `tilde-init` and `tilde-ref` have FOUR CONSUMERS AND ZERO
+  PRODUCERS.** The consumers are `type-system.ts:18426`/`:18435` (`hasNonLiftTildeConsumer`) and
+  `:18744`/`:18750` (`checkLinear`'s two arms). Nothing anywhere constructs either kind — not
+  `ast-builder.js`, not `expression-parser.ts`, not the native parser. The only `tilde-*` kind any
+  producer emits is `tilde-decl` (`ast-builder.js:9889`, `:14056`; `native-parser/translate-stmt.js:1216`),
+  which is the NAMED `~name = expr` snapshot form, a different thing. The apparent producers are
+  hand-built object literals in `compiler/tests/unit/type-system.test.js` (`{ kind: "tilde-init", span: … }`
+  at `:1751`, `:1802`, `:3130` and others) — **synthetic AST fixtures, which is why the pass has unit
+  tests that pass while the pass never fires on real source.** Consequences: `checkLinear`'s tilde arms
+  are unreachable, so both `E-TILDE-001` and `E-TILDE-002` have zero fire sites; and §32.6's elision
+  predicate `hasNonLiftTildeConsumer` returns `false` unconditionally, because it scans for a node kind
+  that does not exist. ⚑ **AND A PRIOR ATTRIBUTION IS WRONG, per the reporting dispatch:** the
+  `name === "~"` guards at `type-system.ts:18586`/`:19259` were once blamed for this; those are the LIN
+  path, not the cause. **Proposed edit:** replace that entry's "CAUSE NOT TRACED" paragraph with the
+  above. **Do not open a second gap for it** — SPEC §32.2.1 now cross-references that entry BY NAME
+  (*"`E-TILDE-001` has ZERO fire sites today — `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`
+  (HIGH) records six probes"*), so the id is load-bearing in a normative document. Note also that §32.5's
+  normative statements are unqualified SHALLs reported at Stage 6; only the §32.2.1 arm-body READ clause
+  is marked Nominal, so this is a live conformance gap and not spec-ahead.
+
+- **[[g-cli-emits-artifacts-on-failed-compile]] (MED, open, RULED S354 (b)) — INDEPENDENTLY
+  RE-CONFIRMED AT `c11db440`, TWICE, AND S397 ARGUES THE SEVERITY IS UNDERSTATED.** Two probes in this
+  filing pass exited **1** and each still wrote a complete `.client.js` + `.html` + `.css`: the false
+  `E-FN-008` case (a correct artifact behind a wrong refusal) and the `E-LOOP-007` case (**an artifact
+  that does not parse** — `node --check` → `SyntaxError: Unexpected token 'while'`). The S397
+  fail-closed-floor dispatch separately PA-verified `ctrl-028/case.scrml` exiting 1 while writing three
+  placeholder sites binding `null`. That entry's locus is already exact (`api.js:2962,2967`, *"writes
+  gated only by `!emitGateFailed` — which is set SOLELY by the flag-gated, default-OFF emitted-JS parse
+  gate"*) and needs no change. **Proposed severity note (NOT applied): S397 assessed this HIGH, not
+  MED** — the blast radius is every `E-CG-*` code, and a failed build leaves a servable artifact for any
+  pipeline that keys off "did a file appear" rather than the exit status. The honest statement of the
+  guarantee is that fail-closed holds at the PROCESS level and not at the FILESYSTEM level. Recorded
+  rather than applied because re-ranking an entry with a landed ruling is the ruler's call. Adjacent:
+  [[g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001]] (the confidentiality instance),
+  [[g-nested-program-emits-artifacts-it-never-produces]].
+
+- **[[g-fn-params-typed-string-actually-objects]] (MED, open) — the LOCUS is now known and the entry
+  carries none.** PA-verified at `c11db440`: `compiler/src/types/ast.ts:827` is `params: string[];`,
+  under the comment `/** Parameter list (raw strings). */`, on `FunctionDeclNode`. **Proposed edit (NOT
+  applied): add `locus=compiler/src/types/ast.ts:827` to that entry's marker**, which pa-base v2.9
+  requires and it predates. S397 assessed the severity LOW against that entry's MED; the existing MED
+  is the better call and should stand — a type declaration that lies makes every `params.has(name)`
+  check silently never match, which is how it was found in the first place (`known-gaps.md:6784`, the
+  first shadow-exclusion attempt).
+
+### S397 — findings that DID NOT SURVIVE re-verification and are deliberately NOT filed
+
+Recorded so they are not re-reported by the next pass reading the same dispatch outputs.
+
+- **A loop in an if-as-expression arm emitting `.push()` on the lift — FIXED at `c11db440`.** Reported
+  as *"guaranteed-crashing code on BOTH paths"* with §17.6.2 blessing a shape that cannot run.
+  Re-run this pass: `const label = if (@n > 0) { for (i of @xs) { note(i) } lift "done" } else { lift "neg" }`
+  emits `let _scrml_tilde_4 = null;` then `_scrml_tilde_4 = "done";` / `= "neg";` — plain assignments,
+  no `.push`, correct on both paths. Closed by the S397 round-3 §32.2.1 `armBodyStmts` carve-out and the
+  `liftVar`/`var` de-conflation (`emit-logic.ts:118-183` documents both, including why `armBodyStmts` is
+  a Set of statement nodes rather than a boolean).
+- **The post-decl repoint making a `const`/`let` initialize `~` — does not reproduce as stated.**
+  `fn buildDecl(xs) { for (x of xs) { lift x }  const other = 5  return ~ }` emits
+  `return _scrml_tilde_3` — the accumulated array. §32.2's *"A variable declaration SHALL NOT initialize
+  `~`"* is honoured. ⚑ **NOT fully cleared:** the finding also named twins in `emitForExprDecl` /
+  `emitMatchExprDecl` — the decl-FORM contexts — and those were NOT probed. If the defect is real it
+  lives there, not in a plain declaration following a loop. Re-probe those two before re-filing.
+- **"The `~` / §32 surface has ZERO rows across all 13 nav maps" — FALSIFIED.** Filed only in its
+  narrowed, verified form as
+  [[g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface]] above.
+
+### S397 — one stale in-tree reference corrected in this pass
+
+The §7 rotation entry for **Bug 15** (`~snapshot` raw-sigil codegen leak, S131) documented
+`emit-expr.ts:emitIdent` as *adding a defensive marker `null /* ~ orphaned — codegen-fallback */`*.
+**S397 DELETED that fallback**: `emitIdent` now pushes a fatal `E-CG-TILDE-UNRESOLVED` and emits
+`null /* E-CG-TILDE-UNRESOLVED: ~ had no slot at this read */` (`emit-expr.ts:1305-1320`; the source
+comment at `:1254` records the change explicitly). Every other in-tree reference was updated when the
+fallback was struck; the §7 entry was missed and is corrected in place. It is the only edit this filing
+pass made to pre-existing ledger text.
