@@ -7,7 +7,8 @@ import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
+import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
@@ -1954,6 +1955,12 @@ export function generateServerJs(
   // alongside the variant registry at the bottom of this function. `null` when
   // protect is inactive (no `protect=` field) — a true no-op.
   setProtectContextForRewriter(_protectActive ? _protectCtx : null);
+
+  // §39.4 — arm the SERVER SQL-lowering pass to coerce a lowered `?{}` SELECT's
+  // boolean OUTPUT columns from SQLite INTEGER 1/0 back to true/false. Released
+  // alongside the protect ctx below. Empty map (no boolean column) is a no-op —
+  // byte-identical output.
+  setBoolColumnsForRewriter(buildBoolColumnsFromFileAST(fileAST));
 
   // §14.8.10 — arm the SERVER SQL-lowering pass to (a) add `tenant_id` to a
   // tenant-scoped read's projection when absent and (b) tag its rows with the
@@ -5869,6 +5876,13 @@ export function generateServerJs(
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_PROTECT_HELPER);
   }
 
+  // §39.4 — inject the boolean-column decode-coercion helpers IFF a lowered
+  // `?{}` SELECT referenced them. Gated purely on the emitted call (an app with
+  // no boolean column emits none of these and is byte-unchanged).
+  if (finalEmitted.includes("_scrml_coerce_bool_")) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_BOOL_COERCE_HELPER);
+  }
+
   // §14.8.11 — A1/S2 DB-authoritative principal transaction wrapper (CONDITIONAL
   // ENGAGEMENT). Runs ONLY when the app declares ≥1 `db-authoritative` table; a
   // non-db-authoritative app skips this entirely and the server bundle is
@@ -6116,6 +6130,9 @@ export function generateServerJs(
   }
   // §14.8.9 — release the protect context (mirrors the variant-fields release).
   setProtectContextForRewriter(null);
+
+  // §39.4 — release the boolean-column context (mirrors the protect release).
+  setBoolColumnsForRewriter(null);
 
   // §14.8.10 — drain the tenant-scoped strip records (the rewriter-lowered reads +
   // the hand-emitted Tier-1/SSR seeds) and the `.acrossTenants()` opt-outs, and

@@ -14,6 +14,13 @@ import {
   type ProtectContext,
   type ProtectedColumns,
 } from "./protect-egress.ts";
+// §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
+// `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
+// and coerce them back to true/false at query-lowering time (server only).
+import {
+  resolveBooleanOutputColumns,
+  type BoolColumns,
+} from "./bool-coerce.ts";
 // §14.8.10 tenant-row isolation floor — resolve a lowered `?{}` read's tenant
 // scoping, add `tenant_id` to the projection when absent, and wrap its result
 // rows in the `_scrml_tenant_tag(...)` descriptor at query-lowering time (server
@@ -202,6 +209,36 @@ export function protectTagSqlResult(inner: string, sqlContent: string): string {
     });
   }
   return wrapWithProtectTag(inner, resolved);
+}
+
+// §39.4 — module-level boolean-column context, set per-file by generateServerJs
+// (and cleared at the end) so the SERVER SQL-lowering pass can coerce a lowered
+// `?{}` SELECT's boolean OUTPUT columns from SQLite INTEGER 1/0 back to
+// true/false. `null` (the default, and the only state the CLIENT pipeline ever
+// sees) means "no boolean columns" — the lowering emits byte-identical output.
+let _rewriterBoolColumns: BoolColumns | null = null;
+
+export function setBoolColumnsForRewriter(cols: BoolColumns | null): void {
+  _rewriterBoolColumns = cols && cols.size > 0 ? cols : null;
+}
+
+/**
+ * Coerce the boolean OUTPUT columns of a lowered `?{}` SELECT result. Returns
+ * the (possibly wrapped) expression. A no-op — byte-identical — when no boolean
+ * column is active or the query carries no resolvable boolean output column.
+ * `single` selects the single-row helper (`.get()`/`.first()`) over the
+ * array helper (`.all()` / bare). Shared by BOTH the text-rewrite SQL path
+ * (`rewriteSqlRefs`, below) and the structured `emit-logic.ts` `case "sql"` path
+ * so every compiler-emitted SELECT decodes booleans at the SAME choke.
+ */
+export function boolCoerceSqlResult(inner: string, sqlContent: string, single: boolean): string {
+  if (!_rewriterBoolColumns) return inner;
+  const cols = resolveBooleanOutputColumns(sqlContent, _rewriterBoolColumns);
+  if (cols.length === 0) return inner;
+  const colsLit = JSON.stringify(cols);
+  return single
+    ? `_scrml_coerce_bool_row(${inner}, ${colsLit})`
+    : `_scrml_coerce_bool_cols(${inner}, ${colsLit})`;
 }
 
 // §14.8.10 — module-level tenant context, set per-file by generateServerJs (and
@@ -546,13 +583,13 @@ export function rewriteSqlRefs(
     // inactive). `sqlContent` (the ORIGINAL) resolves protected columns; the
     // floor-added `tenant_id` is not a protected concern.
     if (method === "get" || method === "first") {
-      return tenantTag(protectTagSqlResult(`(await ${tagged})[0] ?? null`, sqlContent));
+      return tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${tagged})[0] ?? null`, sqlContent, true), sqlContent));
     }
 
     // .all() (Row[]) emits the bare await form; §14.8.9/§14.8.10 tag each row.
     // `.run()` (void / mutation) discards its result, so it is left untagged.
     if (method === "all") {
-      return tenantTag(protectTagSqlResult(`await ${tagged}`, sqlContent));
+      return tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, sqlContent, false), sqlContent));
     }
 
     // .run() and any other terminator — bare await form, no row egress to tag.
