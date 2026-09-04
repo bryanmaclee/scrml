@@ -2,6 +2,25 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S400 — 2026-09-04 (peter · Windows) — a static `${expr}` inside an `if=` branch no longer renders empty
+
+**Landed:** the fix for `g-call-expression-interpolation-in-if-chain-branch-renders-empty` (S395-bryan
+filing, MED).
+
+A STATIC (non-reactive) `${expr}` interpolation — a plain call `${fn()}`, a literal `${VERSION}`, or a
+static value-control-flow `${ if constCond {…} }` — placed inside an `if=` / if-chain branch rendered
+**empty** (exit 0, zero diagnostics), while a cell interpolation `${@cell}` in the same position worked.
+**Root** (the filing had it untraced): the static one-shot render was emitted `rebind=false` into the
+document-scoped `_scrml_boot` body, but `if=`/if-chain branch content is client-mounted DURING
+`_scrml_nav_rewire` — so the boot one-shot ran before the branch mounted (`el` null → no-op) and never
+re-ran. The reactive path worked only because its default `rebind=true` lands in `_scrml_nav_rewire`.
+**Fix:** `emit-html.ts` stamps `insideMountTemplate` on display bindings registered inside a
+mount-deferred `<template>` (depth counter on the binding registry); `emit-event-wiring.ts` ORs that
+flag into `rebind` at the two static-display call sites, so template-interior statics land in
+`_scrml_nav_rewire` and re-run on the mounted subtree. SSR-body statics keep the flag false →
+**byte-identical** output (no regression). Match arms were never affected (separate render path).
+Regression test: `compiler/tests/browser/browser-static-interp-if-branch.test.js`.
+
 ## S397 — 2026-09-03/04 (bryan · ASUS-Vivobook) — the `~` axiom ruled, and the failures were CLAIMS not code
 
 Eleven rulings, five arcs landed. **The session's real output is that almost nothing was broken by bad

@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `83f95592` — wrap(s397): the `~` axiom ruled as a conjunction, and the failures were claims not code (#835) — **pushed**
 - `8e278c73` — wrap(s395): five rulings, four arcs, and nine instruments that read green while wrong (#824) — **pushed**
 - `0dc4d014` — wrap(s393): verification kept changing the answer — four premises died on contact with execution, two of them mine (#812) — **pushed**
 - `76f97a59` — wrap(s391): six instruments were wrong and every one read as fine — twelve PRs, six rulings owed, and a concurrent sibling the board could not see (#804) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `d02adb68` — wrap(s385): the architecture complaint measured, a ruling mandate granted, and the decision queue opened (#773) — **pushed**
 - `9f75061c` — wrap(s383): two ratified landings, a hand-off rotated 31 sessions late, and three adopter reports mid-wrap (#753) — **pushed**
 - `48f0aaf8` — wrap(s378): verification itself was the subject — #721 landed, rulings 2+3 built and held (#723) — **pushed**
-- `a1c14878` — wrap(s376) tail: record the two owed reviews, and name why this gate is red at EVERY session close (#720) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
