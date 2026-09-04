@@ -16,9 +16,20 @@ const SPEC_PATH = join(ROOT, "compiler", "SPEC.md");
 const INDEX_PATH = join(ROOT, "compiler", "SPEC-INDEX.md");
 const OUTPUT_PATH = join(ROOT, "docs", "api-reference.md");
 
-const spec = readFileSync(SPEC_PATH, "utf-8");
+// ⚑ Normalize CRLF→LF at the READ, not at each split. On a Windows checkout
+// (core.autocrlf=true) every line carries a trailing \r, which silently defeats BOTH
+// end-sensitive constructs below at exit 0: the `…\|$` table-row regexes in
+// extractSectionSummaries() and extractErrorCodes() (`.` never matches \r, so `$` is
+// unreachable — 0 of 66 section rows and 0 of 408 code rows matched), and the
+// `specLines[end] === "---"` compare (0 of 247). The generator still wrote a
+// well-formed file, just missing both tables — the pa-base §8 hollow-gate shape.
+// Normalizing once here covers every consumer, including compares a per-split fix
+// would miss. PA-verified by execution against both encodings (S401). LF-identical.
+const eolNorm = (s) => s.replace(/\r\n/g, "\n");
+
+const spec = eolNorm(readFileSync(SPEC_PATH, "utf-8"));
 const specLines = spec.split("\n");
-const index = readFileSync(INDEX_PATH, "utf-8");
+const index = eolNorm(readFileSync(INDEX_PATH, "utf-8"));
 
 // ---------------------------------------------------------------------------
 // 1. Section summaries from SPEC-INDEX.md
@@ -193,7 +204,12 @@ function extractKeywords() {
 
 function extractErrorCodes() {
   const codes = [];
-  const start = specLines.findIndex((l) => l.match(/^## 33\.\s+Error Codes/));
+  // ⚑ §34, not §33 — a SECOND, independent defect found while proving the CRLF fix above
+  // (S401). Error Codes moved to §34 and §33 became `pure` (now itself deprecated), so this
+  // findIndex returned -1 and the function returned [] at exit 0 — the generator wrote a
+  // well-formed reference with its entire error-code table missing, and nothing failed.
+  // Two unrelated causes, one silent symptom; fixing only the CRLF one leaves it empty.
+  const start = specLines.findIndex((l) => l.match(/^## 34\.\s+Error Codes/));
   if (start === -1) return codes;
 
   // Find the end of the section (next ## heading or ---)
