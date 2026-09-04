@@ -141,6 +141,28 @@ export interface LogicBinding {
   reactiveRefs?: Set<string>;
 
   /**
+   * g-call-expression-interpolation-in-if-chain-branch-renders-empty — stamped
+   * by `addLogicBinding` when the registry is inside a MOUNT-DEFERRED
+   * `<template>` body (a single `if=` mount gate or an if-chain branch/else
+   * mount template — the "clean" mount/unmount path, NOT the display-toggle
+   * path). Content inside such a `<template>` is NOT server-rendered into the
+   * initial DOM: it lives inert in `<template id=…>` and is client-mounted
+   * during `_scrml_nav_rewire` (via the mount controller's
+   * `_scrml_if_rewire(root)`). So a STATIC (non-reactive) `${expr}` display —
+   * a plain call `${fn()}`, a literal `${VERSION}`, or a static value-control-
+   * flow `${ if constCond {"a"} else {"b"} }` — must NOT be emitted as a
+   * document-scoped boot ONE-SHOT (`rebind=false`): that one-shot runs before
+   * the template mounts (`el` null → no-op) and never re-runs when the branch
+   * mounts, so the slot renders empty (exit 0, zero diagnostics). Consumers
+   * (`emit-event-wiring.ts`) OR this flag into the `rebind` argument of
+   * `pushRebindableDisplay` so the block lands in `reactiveRewire` /
+   * `_scrml_nav_rewire` and re-runs scoped to the freshly-mounted subtree. A
+   * static interp in the plain SSR body has this flag false → still
+   * `rebind=false` → byte-identical output (no behavior change).
+   */
+  insideMountTemplate?: boolean;
+
+  /**
    * inline-value-form-interp (§18.0 / §17.6) — set when `kind === "value-control-flow"`.
    *
    * A markup `${...}` interpolation whose SOLE content is a value-producing
@@ -575,10 +597,24 @@ export class BindingRegistry {
    */
   private _armContextStack: string[];
 
+  /**
+   * g-call-expression-interpolation-in-if-chain-branch-renders-empty —
+   * mount-deferred `<template>` nesting depth. Incremented by
+   * `enterMountTemplate()` around the emission of every mount-toggle /
+   * if-chain-branch `<template>` body and decremented by `exitMountTemplate()`.
+   * `addLogicBinding` stamps `insideMountTemplate: depth > 0` onto each new
+   * binding, so a display placeholder allocated ANYWHERE inside (at any nesting
+   * — an `if=` inside an `each` inside a `match`) is stamped, while siblings
+   * AFTER the template are not. A COUNTER (not a boolean) so nested mount
+   * templates restore the enclosing state correctly on exit.
+   */
+  private _mountTemplateDepth: number;
+
   constructor() {
     this._eventBindings = [];
     this._logicBindings = [];
     this._armContextStack = [];
+    this._mountTemplateDepth = 0;
   }
 
   /**
@@ -606,7 +642,27 @@ export class BindingRegistry {
     if (this._armContextStack.length > 0 && entry.engineArm == null) {
       entry.engineArm = this._armContextStack[this._armContextStack.length - 1];
     }
+    if (this._mountTemplateDepth > 0 && entry.insideMountTemplate == null) {
+      entry.insideMountTemplate = true;
+    }
     this._logicBindings.push(entry);
+  }
+
+  /**
+   * g-call-expression-interpolation-in-if-chain-branch-renders-empty — enter a
+   * mount-deferred `<template>` body. Every `addLogicBinding` between this and
+   * the matching `exitMountTemplate()` is stamped `insideMountTemplate: true`.
+   * Callers MUST pair the two (a `try { … } finally { exitMountTemplate() }`
+   * or a symmetric push/pop) so a sibling emitted after the template is not
+   * falsely stamped. Nesting is supported (depth counter).
+   */
+  enterMountTemplate(): void {
+    this._mountTemplateDepth++;
+  }
+
+  /** Exit a mount-deferred `<template>` body. Symmetric with `enterMountTemplate`. */
+  exitMountTemplate(): void {
+    if (this._mountTemplateDepth > 0) this._mountTemplateDepth--;
   }
 
   /**

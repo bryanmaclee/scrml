@@ -1454,7 +1454,16 @@ export function generateHtml(
     // the `ifGuardStack` comment for why mount/unmount does NOT make this
     // redundant (the teardown race on a true→false flip).
     const ifGuardPushed = pushIfGuard(ifVal);
-    emitInner();
+    // g-call-expression-interpolation-in-if-chain-branch-renders-empty — mark
+    // every display binding registered inside this mount-deferred `<template>`
+    // so a STATIC one-shot lands in `_scrml_nav_rewire` (re-runs on mount)
+    // rather than as a document-scoped boot one-shot that no-ops before mount.
+    registry?.enterMountTemplate();
+    try {
+      emitInner();
+    } finally {
+      registry?.exitMountTemplate();
+    }
     if (ifGuardPushed) ifGuardStack.pop();
     parts.push(`</template>`);
     parts.push(`<!--scrml-if-marker:${markerId}-->`);
@@ -1785,7 +1794,15 @@ export function generateHtml(
         // visibility (all PRIOR positive conditions false AND own condition true).
         // Lockstep with the chain controller's `_next === branchId`.
         ifGuardStack.push({ chainGuard: { own: branch.condition, priors: _chainPositiveConds.slice(0, bIdx) } });
-        emitNode(stripped);
+        // g-call-expression-interpolation-in-if-chain-branch-renders-empty —
+        // this branch's subtree is mount-deferred inside the `<template>`; stamp
+        // its descendant display bindings so static one-shots re-run on mount.
+        registry?.enterMountTemplate();
+        try {
+          emitNode(stripped);
+        } finally {
+          registry?.exitMountTemplate();
+        }
         ifGuardStack.pop();
         parts.push(`</template>`);
         parts.push(`<!--scrml-if-marker:${markerId}-->`);
@@ -1815,7 +1832,15 @@ export function generateHtml(
         // its descendant interpolation effects on all positive conditions false
         // (own undefined). Lockstep with the controller's `_next === elseId`.
         ifGuardStack.push({ chainGuard: { priors: _chainPositiveConds } });
-        emitNode(stripped);
+        // g-call-expression-interpolation-in-if-chain-branch-renders-empty —
+        // the else subtree is mount-deferred inside the `<template>`; stamp its
+        // descendant display bindings so static one-shots re-run on mount.
+        registry?.enterMountTemplate();
+        try {
+          emitNode(stripped);
+        } finally {
+          registry?.exitMountTemplate();
+        }
         ifGuardStack.pop();
         parts.push(`</template>`);
         parts.push(`<!--scrml-if-marker:${markerId}-->`);
