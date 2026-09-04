@@ -2,24 +2,62 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-## S400 — 2026-09-04 (peter · Windows) — a static `${expr}` inside an `if=` branch no longer renders empty
+## S400 — 2026-09-04 (peter · Windows) — a ten-PR adopter-lane sweep: 7 real codegen/parser/script fixes, 2 silently-fixed gaps guarded, 1 HIGH routed turnkey
 
-**Landed:** the fix for `g-call-expression-interpolation-in-if-chain-branch-renders-empty` (S395-bryan
-filing, MED).
+An unusually long dog-food/ledger session. Seven genuine correctness fixes landed, two ledger gaps
+were verified silently-fixed-and-guarded (reproduce-first caught them before a wasted build), and the
+one HIGH left open was routed to bryan as a turnkey ruling package. Every fix carries a committed
+guard; every "silently fixed" claim was verified by execution, not assumed. The standout was a
+native-parser divergence bisected from a 469-line stdlib file to a one-line brace-count bug.
 
-A STATIC (non-reactive) `${expr}` interpolation — a plain call `${fn()}`, a literal `${VERSION}`, or a
-static value-control-flow `${ if constCond {…} }` — placed inside an `if=` / if-chain branch rendered
-**empty** (exit 0, zero diagnostics), while a cell interpolation `${@cell}` in the same position worked.
-**Root** (the filing had it untraced): the static one-shot render was emitted `rebind=false` into the
-document-scoped `_scrml_boot` body, but `if=`/if-chain branch content is client-mounted DURING
-`_scrml_nav_rewire` — so the boot one-shot ran before the branch mounted (`el` null → no-op) and never
-re-ran. The reactive path worked only because its default `rebind=true` lands in `_scrml_nav_rewire`.
-**Fix:** `emit-html.ts` stamps `insideMountTemplate` on display bindings registered inside a
-mount-deferred `<template>` (depth counter on the binding registry); `emit-event-wiring.ts` ORs that
-flag into `rebind` at the two static-display call sites, so template-interior statics land in
-`_scrml_nav_rewire` and re-run on the mounted subtree. SSR-body statics keep the flag false →
-**byte-identical** output (no regression). Match arms were never affected (separate render path).
-Regression test: `compiler/tests/browser/browser-static-interp-if-branch.test.js`.
+- **`g-call-expression-interpolation-in-if-chain-branch-renders-empty` (MED, #837).** A STATIC
+  `${expr}` inside an `if=`/if-chain branch rendered empty: the one-shot was emitted `rebind=false`
+  into `_scrml_boot`, but branch content mounts DURING `_scrml_nav_rewire` — so it ran before the
+  `<template>` mounted and never re-ran. Fix: stamp `insideMountTemplate` on bindings inside a
+  mount-deferred template (`emit-html.ts` depth counter) and OR it into `rebind` at the two
+  static-display sites (`emit-event-wiring.ts`); SSR-body statics stay byte-identical.
+- **`g-each-peritem-class-call-ref-operator-arg-not-lowered` (LOW, #840) + 2 unfiled siblings.** Inside
+  `<each>`, a call-ref attr value with a §42 operator arg (`class:on=isReady(t.x is some)`) reached the
+  client raw → E-CODEGEN-INVALID-LOGIC. Routed the call-ref reconstruction through `lowerEachExpr`
+  (like the `show=` arm); verifying the class found the `value`-property and generic-attribute arms had
+  the identical hole — all three converged.
+- **`g-flat-css-block-plus-author-style-emits-two-style-attributes` (LOW, #841).** A flat `#{}` on a
+  component root plus a static author `style=` emitted two `style` attributes (invalid HTML; the author
+  style silently dropped). `emit-html.ts` now merges them into one (author last → CSS last-wins).
+- **`g-sqlite-bool-column-crosses-the-sql-boundary-as-numeric` (MED, #842).** A `boolean`-declared
+  `<schema>` column crossed the `?{}` SELECT boundary as numeric `1`/`0`, so `@.active is true` was
+  silently false. Built (bryan-endorsed direction) a decode-boundary coercion mirroring the
+  protect-egress machinery: NEW `bool-coerce.ts` resolves boolean output columns of a resolvable SELECT
+  and coerces `0`/`1`→`false`/`true` (nullable NULL preserved, non-boolean untouched); wired at the
+  text-rewrite and 6 structured emit-logic sites. Migration measured 0/17 corpus files.
+- **`g-timer-in-if-chain-branch-never-starts` (MED, #843).** A `<timer>` inside an `if=`/`else` chain
+  branch never started — the `classifyMarkupNodes` lifecycle walk recursed `node.children` but an
+  if-chain keeps its branches under `branches[].element`/`elseBranch`. Routed it through the shared
+  `ifChainChildNodes` (the whole reactive-wiring class — `<poll>`/`<request>`/`<timeout>` — inherits it).
+- **`g-compile-floor-goes-green-and-silent-when-a-whole-program-root-vanishes` (MED, #844).** The
+  corpus-compile-floor gate could print PASS after a whole program root vanished (its `root missing`
+  note was suppressed under `--check`, and `MIN_PROGRAMS` absorbed the loss). Added a per-root floor
+  (hard TruncationError→exit 2) + unconditional notes + `import.meta.main` guard so the pure fn is
+  unit-testable.
+- **`g-uptoroot-vs-distrel-anchor-mismatch` (MED, #845).** A shell entry in a subdir (`shell/app.scrml`)
+  made a root-level route emit the shell's assets as `../../app.css` — escaping the dist root. The
+  composition `upToRoot` now anchors on `cgOutputBaseDir` (the dist layout) like the own-document path
+  and `toDistRel`, not the entry-file dir; byte-identical when the entry sits at the base.
+- **`g-native-parser-drops-last-export-in-hoist-scan` (MED, #846).** The native (impl#2) parser dropped
+  jwt.scrml's 5th export. Bisected the trigger to an unbalanced `{` inside a JSDoc block comment:
+  `dispatchInLogicEscape` skipped `//` line comments but had no `/* */` branch, so a comment brace was
+  counted structurally, the `${…}` degraded to Text, and every following decl was dropped. Added a
+  block-comment skip in both `parse-markup.js` and its `.scrml` shadow; jwt now classifies EXACT.
+  Handled the cascade (rewrote the divergence-pinning canary to guard the fix; re-baselined the
+  M6.5.b.0 within-node allowlist for the now-visible benign SPAN/FIELD diffs).
+- **`g-dead-function-misses-arrow-callback-bodies` (MED, #839) + `g-if-chain-descent-missing-in-residual-walks`
+  (MED, #840/#846-adjacent).** Both verified **silently fixed** on HEAD (the W-DEAD arrow false-positive
+  no longer fires; all five if-chain-descent walks route through `ifChainChildNodes`) and locked with
+  committed guards / marker flips rather than building a fix for a non-bug.
+- **Routed turnkey (HIGH, #838):** `g-prod-server-404s-non-index-spa-entry-at-root` — a built prod
+  `_server.js` 404s a non-`index` single-file SPA at `/`. Re-verified end-to-end on HEAD and measured
+  away the "fork (b) must carry the auth gate" worry (prod's gate is already inside the candidate loop),
+  handing bryan a one-step ruling package.
 
 ## S397 — 2026-09-03/04 (bryan · ASUS-Vivobook) — the `~` axiom ruled, and the failures were CLAIMS not code
 
