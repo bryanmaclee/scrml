@@ -1,16 +1,69 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-03T06:16:21-06:00  commit: 8e278c73
-# generated-at: 8e278c73 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `8e278c73`. ⚠ **`HEAD` is NOT equal to it this
-# pass** — it is `a97766fc`, a LOCAL, UNPUSHED commit on branch `maps/s395-tail` carrying this pass's
-# own map tail, with a `--name-only` EMPTY source delta. The watermark deliberately tracks the
-# merge-base, NOT `HEAD`: stamping an unpushed branch tip is the S326/S328/S331 orphaned-stamp hazard.
+# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
+# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
+# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
+# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
+# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
+# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
+# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
+# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
+# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
+# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
 # MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `8e278c73`; `git diff --name-only BASE..HEAD --
+# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
 # compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 8e278c73 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor ad7b65dc 8e278c73` -> exit 0.
+# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
+# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+#
+# ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
+#
+# **THE WATERMARK AND THE WALKED WINDOW END AT THE SAME COMMIT.** The source delta walked is
+# `8e278c73..10a4b045` (10 commits, PRs #825-#834, ONE operator), and `10a4b045` is the merge-base
+# AND `origin/main` — unlike S395 (stamp vs unpushed branch tip) and S396 (watermark ahead of the
+# last source-bearing commit). ⚠ **This pass's OWN commit then advances `HEAD` past the watermark,
+# exactly as every pass's does; see the note above line 14. That is the rule working, not a gap.**
+#
+# **THE COMPLETE SOURCE DELTA WAS WALKED — the partial-pass rule is SATISFIED, not waived.**
+# `git diff --name-only 8e278c73..10a4b045` over `compiler/src` · `compiler/native-parser` ·
+# `stdlib` · `scripts` · `lsp` · `conformance` is **FOUR `compiler/src` files and they are all in
+# `codegen/`**, every one read in full, plus 8 conformance files (4 NEW cases):
+#   · `compiler/src/codegen/emit-logic.ts`  (+371/-63) — **#830** (`8d3c7936`) the §32.2.1 WRITE half
+#   · `compiler/src/codegen/emit-expr.ts`   (+166/-16) — **#832** (`c11db440`) the fail-closed `~` floor
+#   · `compiler/src/codegen/index.ts`       (+38)      — **#832** the sink's reset + TWO drains
+#   · `compiler/src/codegen/log-loc.ts`     (+32)      — **#832** `resolveSpanLineCol` (NEW export)
+# `.github/` · `scripts/` · `stdlib/` · `lsp/` · `package.json` · `bun.lock` · `compiler/native-parser/`
+# are all `--name-only` **EMPTY**. `compiler/src/types/` EMPTY for the FIFTEENTH window.
+# `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; `SPEC-INDEX.md` re-generated.
+#
+# ⛑ **THE HEADLINE FINDING IS A ROUTER HOLE, AND IT WAS MEASURED BY THREE DISPATCHES FAILING THE SAME
+# WAY.** Three separate S397 dispatches working the `~` / §32 surface reported that
+# `primary.map.md` gave them **no routing**. A fourth falsified the STRONGER version of that claim:
+# `domain.map.md` carries **17** `~`/§32 hits and always did. So the real defect was narrower and
+# worse — **the material existed and the ROUTER could not reach it.** `primary.map.md` now carries a
+# `~`/§32 Task-Shape Routing row, and it splits the surface into **THREE AXES** because conflating
+# two of them cost this session a wrong-locus round. See that row before touching anything `~`.
+#
+# ⚑ **TWO STANDING TRAPS ON THIS SURFACE, BOTH RE-VERIFIED BY EXECUTION AT THIS WATERMARK:**
+#   (1) **`E-TILDE-001` / `E-TILDE-002` CANNOT FIRE.** The `tilde-init` / `tilde-ref` node kinds have
+#       **FOUR consumers** in `type-system.ts` (`:18426` comment · `:18435` · `:18744` · `:18750`) and
+#       **ZERO producers** anywhere in `compiler/src/` or `compiler/native-parser/` — measured, the
+#       grep returns exactly those four lines and nothing else. The apparent producers are hand-built
+#       object literals in `compiler/tests/unit/type-system.test.js:1751+`. Any §32 reasoning that
+#       assumes enforcement is reasoning about a checker that does not run.
+#   (2) **scrml's AST has NO UNIFORM BINDER REPRESENTATION**, and `ast-builder.js` builds most of it
+#       with ES6 SHORTHAND so a regex keyed on `field:` cannot see it. Details in schema.map.md.
+#
+# ⚑ **S397 — A BRIEFED PREMISE WAS FALSIFIED *BY THE WINDOW IT DESCRIBED*, WHICH IS A DIFFERENT
+# FAILURE FROM THE S396 ONE TWO BANNERS DOWN (that one was wrong when written; this one WENT wrong).**
+# The dispatching brief said SPEC's verbatim INVALID §32 examples "all compile at exit 0". **FALSIFIED BY EXECUTION
+# at this watermark:** §32.5's own `${ process(~) }` now compiles to **exit 1** with
+# `E-CG-TILDE-UNRESOLVED` at a CORRECT `1:11`. The premise was true at `8e278c73` and #832 changed it.
+# What survives is the sharper statement: the code that fires is the CODEGEN floor, not the §32.5
+# TYPE-SYSTEM code the SPEC names — so `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`
+# is now PARTIALLY overtaken and its "ZERO diagnostics" headline is stale for at least that probe.
+#
 #
 # ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
 #
@@ -42,7 +95,16 @@
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
 
-**Currency:** `types/ast.ts` has gained NO new shape for four windows — every landing works through
+**Currency (S397, `10a4b045`):** ⛑ **`compiler/src/types/ast.ts` is `--name-only` EMPTY for the
+FIFTEENTH consecutive window and NO exported type moved anywhere in the compiler — AND THIS MAP IS
+STILL NOT STAMP-ADVANCED ON THAT ZERO, because a load-bearing CODEGEN-INTERNAL shape changed.**
+`EmitLogicOpts.tildeContext` went from `{ var; mode? }` to a four-field object with `armBodyStmts:
+ReadonlySet` and `liftVar` (#830) — see its section below. ⚑ **THE LESSON IS THE INSTRUMENT, NOT THE
+SHAPE: `git diff --name-only -- compiler/src/types/` IS NOT A SUFFICIENT CURRENCY PROBE FOR THIS
+MAP.** Every landing for fifteen windows has worked through existing node kinds or through
+codegen-internal / schema-differ-internal shapes that are not `ast.ts` types, so the probe that
+gates this map has returned EMPTY every time while the map's actual subject matter kept moving.
+The zero is real and it means almost nothing.
 existing node kinds, or through codegen-internal / schema-differ-internal shapes that are NOT
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
@@ -66,6 +128,74 @@ puzzled, and flagged as non-AST so nobody threads them through the node pipeline
 Sole producer: `findObjectShorthandRegions(code)` (:213). Sole consumer: `emit-client.ts`'s
 `rewriteCodeSegment` (:3038). See domain.map.md / dependencies.map.md for why only the
 `object-literal` kind is acted on.
+
+## `EmitLogicOpts.tildeContext` — the §32 `~` context object (CHANGED SHAPE, S397 #830)
+
+**A codegen-internal shape, NOT an `ast.ts` type.** Declared on `EmitLogicOpts` in
+`compiler/src/codegen/emit-logic.ts:118+`. It is here because its shape CHANGED this window in a way
+that silently invalidates any consumer written against the old one.
+
+```
+tildeContext?: {
+  var: string | null;              // the ENCLOSING `~` READ/INIT slot
+  mode?: "single" | "array";       // "array" = loop accumulation (.push)
+  armBodyStmts?: ReadonlySet<any>; // NEW S397 — DIRECT statements of this if-expr's arm bodies
+  liftVar?: string;                // NEW S397 — the ARM'S RESULT variable
+}
+```
+
+⚑ **`var` AND `liftVar` WERE ONE FIELD BEFORE S397, AND THE CONFLATION IS THE ENTIRE HISTORIC DEFECT
+CLASS.** `var` = *"what `~` reads"*; `liftVar` = *"where `lift` writes"*. When they were the same
+field, a bare statement minting into it stole the `lift` target, and an in-arm `~` read resolved to
+the arm's `null`-seeded result var instead of the enclosing accumulator. **A consumer that still
+treats `tildeContext.var` as the arm's result is reading the WRONG SLOT and will compile clean.**
+
+⚑ **`armBodyStmts` IS A `ReadonlySet` OF STATEMENT OBJECTS — MEMBERSHIP IS BY IDENTITY, NOT BY SHAPE
+OR BY POSITION.** It is deliberately not a boolean: a flag on this shared object propagates into every
+child emitter, so the §32.2.1 carve-out was opt-OUT and three consecutive review rounds each found the
+same defect in a construct nobody had enumerated. Identity does not propagate (a nested block's
+children are different objects), so there are **ZERO strip sites**. Predicate: `_isDirectArmBodyStmt`.
+⚠ **`armBodyStmts` does NOT mean "`var` holds the arm's result"**, and the doc comment on the type says
+so explicitly because that misreading is what the field exists to prevent.
+
+⚠ **Only `emitIfExprDecl` mints the 4-field form.** `emitForExprDecl` and `emitMatchExprDecl`
+deliberately mint the pre-S395 `{ var, mode }` shape — §32.2.1 carves out §17.6.2 if-as-expression arm
+bodies only, and a comprehension body (§17.7) or `match` arm (§18) is not covered by any ruling.
+**That asymmetry is intentional; do not normalise it.** Full semantics in domain.map.md's `~` section.
+
+## ⛔ scrml's AST HAS NO UNIFORM BINDER REPRESENTATION — and a `field:` regex cannot see most of it
+
+**THIS BIT FOUR SEPARATE S397 DISPATCHES, WHICH IS WHY IT IS A SECTION AND NOT A FOOTNOTE.** There is
+no single "binder" node, no shared interface, and no consistent field name. A binding appears as at
+least five structurally different things:
+
+| form | field | shape | example / site |
+|---|---|---|---|
+| structured parameter list | `params` | array of param objects | `fn` / `function` declarations |
+| single bare name | `variable` | a bare `string` | `for-stmt` (`ast-builder.js:8817`, shorthand) |
+| **raw paren TEXT** | `binding` | **ONE string, not a list** — `"x, cb"` | `match-arm-block` (`ast-builder.js:10079`); re-parsed downstream by `parseBindingList` (`codegen/emit-control-flow.ts:1173`) |
+| product-pattern arms | `productPatterns` | array | §18.19 multi-scrutinee (`ast-builder.js:9920`, shorthand) |
+| iteration variable(s) | `asName` / `asNames` | bareword string / 2-name array | `each-block` (`ast-builder.js:17016-17017`, shorthand) |
+| variant payload | `payloadBindings` | array | `match-arm-block` (`ast-builder.js:10075`, shorthand) |
+
+⛔ **AND THE GREP TRAP, WHICH IS THE PART THAT ACTUALLY COSTS TIME: `ast-builder.js` BUILDS MOST OF
+THESE WITH ES6 SHORTHAND, SO A REGEX KEYED ON `binding:` / `variable:` / `asName:` CANNOT SEE THEM.**
+MEASURED at this watermark: `grep -n 'binding:' compiler/src/ast-builder.js` returns **7** sites;
+`grep -c 'binding'` returns **77**. The shorthand sites (`binding,` on its own line — `:13812`,
+`:15236`, `:15313`, `:15369`, `:18729`) are invisible to the first probe and are the majority.
+**Grep the bare identifier, then filter — never the `key:` form.** Same trap for `variable,`
+(`:8817`, `:10860`, `:13357`), `productPatterns,`, `payloadBindings,`, `asName,` / `asNames,`.
+
+⚑ **The `binding: "x, cb"` case deserves its own warning**: it is the raw paren-interior text with
+whitespace collapsed, reconstructed at `ast-builder.js:10069` specifically so codegen can re-parse it.
+**A consumer that treats it as a name gets `"x, cb"` as one identifier.** The AST does not hold the
+list; `parseBindingList` derives it.
+
+⚠ **This is a description, not a complaint.** Nothing here says the representation SHOULD be unified —
+that is a design question nobody has ruled on. What it says is: **there is no single place to look, so
+a walk or lint that handles "bindings" must enumerate all six forms, and the enumeration is not
+discoverable by grepping for a field name.**
+
 
 ## §17.1.2 — `ifRaw` / `ifCond` on the three structural node kinds (S302)
 
@@ -417,6 +547,7 @@ changed what the compiler can SAY, not what it accepts.
 
 ## Tags
 #scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth
+#tildecontext-shape #liftvar-vs-var #armbodystmts-readonlyset #no-uniform-binder #es6-shorthand-defeats-field-regex #binding-is-raw-paren-text #parsebindinglist #types-dir-empty-is-not-a-currency-probe
 
 ## Links
 - [primary.map.md](./primary.map.md)

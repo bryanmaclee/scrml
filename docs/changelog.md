@@ -2,6 +2,54 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S397 — 2026-09-03/04 (bryan · ASUS-Vivobook) — the `~` axiom ruled, and the failures were CLAIMS not code
+
+Eleven rulings, five arcs landed. **The session's real output is that almost nothing was broken by bad
+logic** — what went wrong, repeatedly, was something asserting coverage it did not have: a comment, a
+§34 row, a conformance rationale, an escape list wrong three times running, two tripwires, and four of
+the PA's own statements.
+
+**Landed:** #829 (the dPA's own uncommitted returns) · #830 (the `~` arm-body write half; read-half
+widening reverted at the root) · #832 (`E-CG-TILDE-UNRESOLVED` — the orphan fallback fails closed) ·
+#833 (16 gap filings) · #834 (review floor 4→0).
+
+**⚑ THE `~` AXIOM — RULED.** `~` is **ONE thing** (§32.2, the value of the preceding unbound
+expression statement). The array-accumulator role (§48.5.1 / §49.6.1) is retired as a distinct
+meaning. **The ruling is a CONJUNCTION:** one-thing AND extending the loop-expression form to `while`
+/ `do…while` / C-style `for`. Landing the first without the second deletes §49.4.4's sole exception
+and takes `while`'s only value-producing form with it. Decided on a measured 18-shape matrix,
+exhaustive over 3,408 files. **Half the proposal already ships** — `const x = for (const n of xs)
+{ lift n }` compiles at HEAD; the blocker for other loop forms is the parser.
+
+**The counterweight that decided it:** at HEAD the array role has exactly **one** working spelling (a
+bare `return ~` at fn-body top level); `const n = ~.length`, `return ~.length`, `const acc = ~ …` and
+an early in-loop `return ~` all emit correct JS and all exit 1 on a **false `E-FN-008`**. §32.3's own
+list of valid `~` consumptions has zero members that work inside a `fn`. Plus three shipped silent
+exit-0 defects the loop-expression form closes by construction — one returning the wrong value, one
+crashing on empty input, and one **deleting the loop and the following call from the output**, in a
+sample that runs on every `bun run pretest`.
+
+**⚑ `E-TILDE-001/002` HAVE ZERO PRODUCERS.** `tilde-init`/`tilde-ref` have four consumers and no
+producers anywhere in `compiler/src/` or `compiler/native-parser/`. The apparent producers are
+hand-built object literals in `type-system.test.js` — **which is why the pass has passing unit tests
+and never fires on real source.** SPEC's own verbatim INVALID examples at §32.5, §32.6 and §32.7 compiled at exit 0 **at `8e278c73`** — but ⚑ **#832's own fail-closed floor changed that MID-SESSION**: `${ process(~) }` now exits 1 with `E-CG-TILDE-UNRESOLVED` (PA-verified). **The zero-producers finding STANDS** — `E-TILDE-001/002` still never fire; what catches that shape now is the CODEGEN floor, not §32.5's type-system code.
+
+**Q9 (`E-ROUTE-004` untyped-invoked-param) STOPPED BY RULING.** The PA set a stopping rule before
+round 3; round 4 found two HIGH false positives and it fired. bryan ruled **option 3 — build the
+uniform binder-enumeration capability first, then limb (a) on top.** The finding outlives the arc:
+**scrml's AST has no uniform binder representation** — bindings live as structured `params`, a bare
+`variable` string, **raw paren text** (`binding: "x, cb"` pushed as one name), and shape-specific keys
+nobody enumerated (`productPatterns`, `asName`/`asNames`, `payloadBindings`). Branch retained at
+`2faffb80`; its 16-shape battery is the successor's spec.
+
+**Two tripwires had the defect they existed to catch** — one asserting against a hardcoded copy of the
+constant it guards, the other claiming novel-name detection from a closed 15-name list while scanning
+a file whose fields are built with ES6 shorthand.
+
+**The durable, from the agent that made the mistake three times:** *filing a defect is not retracting
+the claim it falsifies — a reader reaches the comment, not the progress doc.*
+
+
 ## S398 — 2026-09-03 (peter · P-Tech1 Windows) — dog-food of fresh SPA / multi-page / engine apps surfaced two new adopter finds
 
 Ran concurrently with S397-bryan (LIVE). A docs-only dog-food session: wrote three fresh adopter

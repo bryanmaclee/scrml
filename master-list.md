@@ -97,6 +97,25 @@ L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C co
 
 All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-f, 11.5, 12, 13) ✅ shipped S59-S61. Per-step commit IDs + landing details preserved in `docs/changelog.md` (S59-S61 entries). A1a (lex+parse) is COMPLETE. Side landing during A1a: documentary `<program>` attributes (`title=`/`description=`/`version=`/`author=`/`license=`) — SPEC §40.7 + emit-html.ts head injection (`4620290`).
 
+> **⚑⚑ S397 (2026-09-03/04, bryan) — THE `~` AXIOM IS RULED. Read this before reasoning from §32 anywhere below.**
+> **`~` is ONE thing** — the value of the preceding unbound expression statement (§32.2). The
+> array-accumulator role (§48.5.1 / §49.6.1) is **retired as a distinct meaning**. ⚑ **The ruling is a
+> CONJUNCTION, not a deletion:** one-thing AND extending the loop-expression form to `while` /
+> `do…while` / C-style `for`. Landing the first without the second **deletes §49.4.4's sole exception
+> and takes `while`'s only value-producing form with it** — capability loss, and NOT authorized.
+> **Half already ships:** `const x = for (const n of xs) { lift n }` compiles at HEAD; the blocker for
+> the other loop forms is the PARSER, and `E-LOOP-007`'s own message already points at the form.
+> **OPEN, and the build must answer it first (PA-inferred, not measured):** §48.5.1's own example may
+> survive UNCHANGED — if a lifting loop in statement position is an unbound expression statement whose
+> value is the array, §32.2 makes `~` that array and `return ~` still works, so the accumulator is
+> DERIVED rather than removed. Matrix: `docs/changes/s397-tilde-one-or-two/progress.md`.
+>
+> ⚑ **AND `E-TILDE-001/002` HAVE NEVER FIRED.** `tilde-init`/`tilde-ref` have four consumers and
+> **ZERO producers**; the apparent producers are hand-built object literals in `type-system.test.js`,
+> which is why the pass has passing unit tests and never fires on real source. SPEC's own verbatim
+> INVALID examples at §32.5, §32.6 and §32.7 compiled at exit 0 **at `8e278c73`** — but ⚑ **#832's own fail-closed floor changed that MID-SESSION**: `${ process(~) }` now exits 1 with `E-CG-TILDE-UNRESOLVED` (PA-verified). **The zero-producers finding STANDS** — `E-TILDE-001/002` still never fire; what catches that shape now is the CODEGEN floor, not §32.5's type-system code. Any §32 reasoning that assumes
+> enforcement is reasoning about a checker that does not run.
+
 ### §0.6 Recent sessions (generated index)
 
 > **Per-session narrative is the changelog dated blocks** (`docs/changelog.md`) — the ONE narrative
