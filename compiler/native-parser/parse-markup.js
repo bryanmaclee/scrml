@@ -1550,6 +1550,31 @@ export function dispatchInLogicEscape(run, cursor, ctx) {
         return;
     }
 
+    // A `/* … */` block comment is a code comment inside a logic body too.
+    // `recognizeCommentForm` knows only the `//` and `<!--` forms (there is no
+    // Block form, and adding one there would wrongly treat `/*` in markup TEXT
+    // as a comment), so skip it DIRECTLY here — mirroring lex-in-block-comment.js's
+    // scanBlockCommentBody. Without this, a `{` / `}` inside the comment (a JSDoc
+    // `@param { … }`, a code example, an unbalanced brace in prose) is counted as
+    // a STRUCTURAL brace: the body-extent depth never returns to the open level,
+    // the context runs to EOF, and the whole `${…}` degrades to a Text node,
+    // dropping every declaration inside — the SAME failure mode the P5-13
+    // string-skip above prevents, and the exact shape of
+    // g-native-parser-drops-last-export-in-hoist-scan (a JSDoc `@param opts { … }`
+    // in stdlib/auth/jwt.scrml swallowed the export that followed it). The live
+    // block-splitter skips block comments in a JS body, so this restores parity.
+    if (peekChar(cursor, 0) === "/" && peekChar(cursor, 1) === "*") {
+        advance(cursor, 2); // consume the `/*`
+        while (isEof(cursor) === false) {
+            if (peekChar(cursor, 0) === "*" && peekChar(cursor, 1) === "/") {
+                advance(cursor, 2); // consume the closing `*/`
+                return;
+            }
+            advance(cursor, 1);
+        }
+        return; // unterminated block comment — consumed to EOF
+    }
+
     // A markup closer (`</>` / `</name>`) — but ONLY when a tag is open
     // WITHIN this logic context (tagFrameDepth > the context-scoped
     // floor). The charter Q1.C contract permits a markup tag inside a

@@ -630,3 +630,43 @@ describe("F3 §6 — corpus exemplar audit (~20 .scrml files, no-throw + shape)"
     });
   }
 });
+
+// =============================================================================
+// g-native-parser-drops-last-export-in-hoist-scan — a `/* … */` BLOCK comment
+// inside a `${…}` logic body must be skipped when scanning brace depth for the
+// body extent, else an unbalanced `{` inside the comment (a JSDoc `@param opts
+// { … }`, a code example) inflates the depth, the `${…}` never finds its close,
+// the whole block degrades to a Text node, and every declaration AFTER the
+// comment is silently dropped. jwt.scrml lost its 5th export (`verifyJwtJwks`)
+// exactly this way. `dispatchInLogicEscape` now skips block comments like it
+// already skipped `//` line comments. (Fixed S400.)
+// =============================================================================
+describe("F3 — block comment in a logic body does not drop a following declaration (g-native-parser-drops-last-export-in-hoist-scan)", () => {
+  test("an unbalanced `{` in a block comment before an export does NOT drop the export", () => {
+    const src = "${\n/** @param opts { a?, b? } */\nexport function f() { return 1 }\n}";
+    const n = nativeSurface(src);
+    const l = liveSurface(src);
+    expect(n.exports.length).toBe(1);
+    expect(n.exports.length).toBe(l.exports.length); // native == live parity
+  });
+
+  test("a block comment with a code example (open brace) mid-body keeps every export", () => {
+    const src = "${\nexport function a() { return 1 }\n/**\n * Example:\n *   const r = a(x, {\n *       k: v,\n *   })\n */\nexport function b() { return 2 }\n}";
+    const n = nativeSurface(src);
+    const l = liveSurface(src);
+    expect(n.exports.length).toBe(2);
+    expect(n.exports.length).toBe(l.exports.length);
+  });
+
+  test("a balanced block comment is unaffected (regression floor)", () => {
+    const src = "${\n/** balanced { x } here */\nexport function f() { return 1 }\n}";
+    const n = nativeSurface(src);
+    expect(n.exports.length).toBe(1);
+  });
+
+  test("a `//` line comment path still works (the sibling it mirrors)", () => {
+    const src = "${\n// note: uses a { brace } in prose\nexport function f() { return 1 }\n}";
+    const n = nativeSurface(src);
+    expect(n.exports.length).toBe(1);
+  });
+});

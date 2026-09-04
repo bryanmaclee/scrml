@@ -851,34 +851,33 @@ describe("dual-pipeline-canary — classifyDivergence LIVE-HOIST-MISCLASSIFY bra
   // drives both pipelines from source, so these tests wire the entire chain:
   // both parsers + the diff + the detector + the verdict.
 
-  // NOTE (baas-auth-flows-jwks-2026-07-06, AMENDED S302): adding
+  // NOTE (baas-auth-flows-jwks-2026-07-06 → S302 → RESOLVED S400): adding
   // `export function verifyJwtJwks` gave jwt.scrml 5 top-level source exports.
-  // The original note recorded BOTH pipelines undercounting — live=1 AND
-  // native=4 — and flagged a FOLLOW-UP to fix the export-hoist drop.
+  // The original note recorded BOTH pipelines undercounting (live=1 AND
+  // native=4); S302 measured the LIVE half fixed (live=5) with native still
+  // dropping the 5th export — the CLEAN exports-axis divergence pinned here as
+  // [[g-native-parser-drops-last-export-in-hoist-scan]], with the standing note
+  // that "when the native drop is fixed, nativeHoist.exports becomes 5, this
+  // assertion fails, and THAT failure is the signal to retire the divergence."
   //
-  // S302 re-measured: **the LIVE half is FIXED.** live now hoists all 5, so the
-  // muddy "both < 5" state is gone and this is now the CLEAN exports-axis case
-  // the original note wanted: live == source exports (5), native undercounts (4,
-  // still dropping the 5th — verifyJwtJwks, the last export in the file).
-  //
-  // The remaining NATIVE under-hoist is a real defect on the impl#2 line and is
-  // tracked as [[g-native-parser-drops-last-export-in-hoist-scan]]. This test
-  // pins it deliberately: when the native drop is fixed, `nativeHoist.exports`
-  // becomes 5, this assertion fails, and THAT failure is the signal to retire
-  // the divergence — not a regression.
-  //
-  // ⚠️ This file is run by NO workflow and is outside the pre-commit hook's
-  // scope, so the stale `liveHoist.exports === 1` assertion sat red and
-  // invisible from the live fix until S302 ran the root-level tests by hand.
-  // See [[g-parity-canary-outside-every-blocking-gate]].
-  test("the real jwt.scrml corpus file classifies DIFF-hoist-count (native under-hoists the 5th export)", () => {
+  // S400 fixed the native drop. Root: `dispatchInLogicEscape` (parse-markup.js)
+  // skipped `//` line comments but NOT `/* … */` BLOCK comments, so the
+  // unbalanced `{` in verifyJwtJwks's JSDoc `@param opts { … }` was counted as a
+  // structural brace — the `${…}` body-extent depth never returned to 0, the
+  // block degraded to a Text node, and every declaration after the comment
+  // (the 5th export) was dropped. Now block comments are skipped in a logic
+  // body (mirroring the live block-splitter), so jwt classifies EXACT: hoist
+  // parity on ALL axes (imports 2, exports 5, typeDecls 1). This test now GUARDS
+  // the fix. (The remaining benign within-node SPAN/FIELD divergences — now
+  // VISIBLE because the body parses — are the M6.5.b.0 allowlist's concern.)
+  test("the real jwt.scrml corpus file classifies EXACT — native hoist parity (was DIFF-hoist-count, native dropped the 5th export past a block comment; fixed S400)", () => {
     const path = __dirname + "/../../stdlib/auth/jwt.scrml";
     const src = readFileSync(path, "utf8");
     const v = classifyDivergence(path, src);
-    expect(v.class).toBe("DIFF-hoist-count");
-    expect(v.explained).toBe(false);
-    expect(v.detail.liveHoist.exports).toBe(5);   // S302: was 1 — live half fixed
-    expect(v.detail.nativeHoist.exports).toBe(4); // still drops verifyJwtJwks
+    expect(v.class).toBe("EXACT");
+    expect(v.explained).toBe(true);
+    expect(v.detail.liveHoist.exports).toBe(5);
+    expect(v.detail.nativeHoist.exports).toBe(5); // S400 — block-comment skip restores the 5th export
   });
 
   test("the real cg.scrml corpus file classifies EXACT post-S142 dynamic-import phantom fix (was LIVE-HOIST-MISCLASSIFY imports-axis)", () => {
