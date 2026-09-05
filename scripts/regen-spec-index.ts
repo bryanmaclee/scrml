@@ -60,7 +60,22 @@ for (const s of sections) {
   console.log(`  ${s.key.padEnd(4)} @ ${s.line}  range=${r.start}-${r.end} size=${r.size}`);
 }
 
-const indexLines = INDEX.split("\n");
+// ⚑ Split on /\r?\n/ and remember the file's own EOL. On a CRLF checkout (every Windows
+// clone with core.autocrlf=true) a bare "\n" split leaves a trailing \r on EVERY element of
+// `out`, and the totals lookup below is `out.indexOf(TOTALS_START)` — Array.prototype.indexOf,
+// i.e. exact element equality — so the marker is never found and the script dies with
+// "the @generated:spec-index-totals block is missing or malformed" while the block is sitting
+// right there in the file. That made `--check` UNPASSABLE on Windows, which in turn made the
+// pre-push generated-doc gate reject every push from a Windows clone for a bogus reason (S401).
+//
+// Same root as the dpa-debt.ts fix in this landing, different manifestation: there it defeated
+// a `$`-anchored regex, here it defeats an exact string compare. Normalizing at the read covers
+// both shapes, which is why it is done here rather than at each use site.
+//
+// The write below re-joins with the ORIGINAL EOL so the file keeps its checked-out line endings
+// and git does not see a whole-file rewrite — same approach as state.ts:341-342.
+const INDEX_EOL = INDEX.includes("\r\n") ? "\r\n" : "\n";
+const indexLines = INDEX.replace(/\r\n/g, "\n").split("\n");
 let inSectionsTable = false;
 let updated = 0;
 const missing: string[] = [];
@@ -131,7 +146,7 @@ if (CHECK) {
 
 out.splice(startIdx + 1, endIdx - startIdx - 1, totalsBody);
 
-writeFileSync(INDEX_PATH, out.join("\n"));
+writeFileSync(INDEX_PATH, out.join(INDEX_EOL));
 console.log(`\nUpdated ${updated} rows; missing ${missing.length}`);
 for (const m of missing) console.log(`  ${m}`);
 console.log(`Totals: ${totalsBody}${totalsUpdated ? "  (CHANGED)" : "  (unchanged)"}`);
