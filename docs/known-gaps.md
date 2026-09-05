@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 87 |
-| MED | 208 |
+| HIGH | 88 |
+| MED | 210 |
 | LOW | 89 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -11713,3 +11713,95 @@ which argues for migrating a `fn` body wholesale or not at all. Relevant to **dp
 Controls: two BOUND comprehensions in one body mint a fresh slot each and are sound; two
 STATEMENT-position lifting loops share ONE slot (a body-scoped accumulator).
 — `NEW S399-bryan (surfaced measuring the ruled `~` arc)`; **HIGH**; open
+
+---
+
+### g-runtime-benchmarks-stale-and-no-perf-gate — the runtime benchmark table has not been re-run since 2026-05-19, the 5.83× partial-update regression that triggered a four-session investigation was never re-measured in its own terms, and nothing in CI would catch a perf regression
+
+<!-- @gap id=g-runtime-benchmarks-stale-and-no-perf-gate sev=MED status=open locus=benchmarks/RESULTS.md,benchmarks/runtime-results.json(stamped 2026-05-19T02:51:43Z) + searched:.github/workflows — no perf job in any blocking or advisory gate prov=empirical:PA-verified-at-aece349d-git-log-on-both-artifacts-plus-the-S87-audit-recommendation-traced-to-six-change-dirs-that-ran-but-never-re-measured -->
+
+**The shape: an instrument that stopped being run, so its silence reads as health.**
+
+`docs/audits/happy-dom-perf-regression-s87-2026-05-12.md` recorded scrml's partial-update regressing
+**0.7 ms → 4.08 ms (5.83×)** — the **worst in the field** that window (React 1.88× · Vue 2.06× ·
+Svelte 1.66×) — and recommended a bisect-and-profile dispatch.
+
+**The dispatch happened.** Six change-dirs (`runtime-perf-scoping`, `perf-characterization`,
+`runtime-perf-phase-2-scoping`, `runtime-perf-phase-3-partial-update-and-swap`,
+`runtime-perf-phase-3-select-row`, `feel-of-performance-approach-a-impl-2026-06-26`) ran S102–S106
+and landed at least a `_scrml_reconcile_list` same-keys fast path. Phase 3 re-measured in **Chrome via
+Playwright** and reported partial-update at **1.00 ms, beating hand-written Vanilla (2.60 ms)**.
+
+⚑ **But the artifacts that produced the original headline were never re-run.** PA-verified:
+`benchmarks/RESULTS.md` last touched **2026-05-19**; `benchmarks/runtime-results.json` stamped
+**2026-05-19T02:51:43Z**. Phase 3 answered in a *different harness*, so the question as asked —
+happy-dom, in the audit's own units — has no answer, and ~4 months of codegen have landed since with
+no partial-update measurement of any kind.
+
+⚑ **And there is no perf gate anywhere.** Searched `.github/workflows` — no perf job, blocking or
+advisory. Consequence, measured this session: a producer-swap arc shipped a **17× compile-time
+regression** (88 KB engine body, 590 ms → 10,039 ms, +9.4 s) that was **invisible at 8.4 KB (1.3×,
+inside noise)** and was caught ONLY by an adversarial `/code-review` pass. No standing instrument
+would have said a word. Fixed before landing — but the catch was a review, not a gate.
+
+**Two halves, separable:** (a) currency — re-run and keep the historical series intact; (b) a gate —
+even an advisory one with a wide band would have caught the 17×. (b) is the operator's call per the
+§8 cry-wolf rule (a perf gate on a noisy shared machine is a strong candidate for the bypassed-then-
+deleted shape), and is NOT proposed here.
+— `NEW S400-bryan (operator asked "what ever happened to the issue that slowed the compiler")`; **MED**; open
+
+---
+
+### g-corpus-emit-differential-incomparable-across-checkout-paths — the differential prints a full CONTENT DIFFERENCES list under an INCOMPARABLE verdict when the two sides sit at different absolute paths, from a path-derived hash; a reader who skims to the list concludes a codegen change touched ~1027 artifacts
+
+<!-- @gap id=g-corpus-emit-differential-incomparable-across-checkout-paths sev=MED status=open locus=scripts/corpus-emit-differential.ts(the --compiler-root comparison path; the chunk cell scope hash is derived from the checkout path, so every artifact differs by that token alone) prov=adopter-dogfood:agent-reported-during-the-prod-root-fallback-arc-1027-of-7427-artifacts-false-diffed-then-VERDICT-NO-DIFFERENCES-on-a-same-root-re-run -->
+
+Capturing the base side from a `git archive` extract at a different absolute path yields
+`NOT A VALID COMPARISON` with **1027 of 7427** artifacts reported differing. The entire delta is the
+path-derived chunk-scope token — `// --- chunk cell scope (01nvfb7a) ---` vs `(000h8maz)` — same byte
+length, different hash. **Any two checkouts at different paths produce this.** Re-running with both
+sides at the same `--compiler-root` gives `VERDICT: NO DIFFERENCES` over the same corpus.
+
+⚑ **The defect is not the false positive — it is that the tool prints the full CONTENT DIFFERENCES
+list anyway, underneath the INCOMPARABLE verdict.** A reader who skims to the list concludes a
+codegen change touched a thousand artifacts. And the docstring instructs pointing `--compiler-root`
+at "a scrml checkout", which is exactly the thing that triggers it.
+
+⚑ **This tool was used as a landing gate three times in this session.** A gate that can report
+catastrophic evidence while measuring nothing is the §8 hollow-gate family inverted — not a check
+that cannot fail, but one that fails loudly for a reason no change caused. Minimum repair: suppress
+the diff list when the verdict is INCOMPARABLE, and normalise or exclude the path-derived token.
+— `NEW S400-bryan (surfaced by the prod-root-fallback dispatch; PA-corroborated by the same tool returning NO DIFFERENCES on a same-root re-run)`; **MED**; open
+
+---
+
+### g-spec-17-6-6-example-miscompiles-to-a-block-scope-escape — SPEC §17.6.6's own canonical example, annotated in the spec as valid, compiles at exit 0 and emits JS that throws ReferenceError at runtime
+
+<!-- @gap id=g-spec-17-6-6-example-miscompiles-to-a-block-scope-escape sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts — the `~` slot mint for a braced if/else arm pair; the mint is emitted INSIDE the consequent block while the reads are emitted after it, and the deciding site was NOT traced prov=empirical:PA-reproduced-at-aece349d-exit-0-zero-diagnostics-node-check-clean-emitted-JS-reads-a-let-from-outside-its-block -->
+
+**PA-REPRODUCED.** SPEC §17.6.6 ships this as a worked example annotated *"valid: both arms lift,
+`~` is always initialized"*:
+
+```scrml
+if (cond) lift a; else lift defaultValue;
+const dbl = ~ * 2;
+```
+
+At HEAD it compiles **exit 0, zero diagnostics**, passes `node --check`, and emits:
+
+```js
+if (_scrml_cs_reactive_get("cond")) {
+  let _scrml_tilde_2 = "A";     // ← block-scoped INSIDE the if
+}
+_scrml_tilde_2 = "B";            // ← written after the block closes
+const dbl = _scrml_tilde_2;      // ← read after the block closes
+```
+
+A guaranteed `ReferenceError` at runtime from a green compile. **`--validate-emit` is structurally
+blind** because the emitted JS is syntactically valid — the defect is scope, not syntax.
+
+Same mechanism as the S397 read-half revert (`let _scrml_tilde_5` minted inside a `while` block and
+read after it), now shown to reach **SPEC's own worked example**. Independently found by dpa-042
+(Call 1), which puts it ahead of every missing diagnostic in that item *"because it defeats the
+premise that the compile is the gate."*
+— `NEW S400-bryan (dpa-042 Call 1; PA-reproduced independently by emission)`; **HIGH**; open
