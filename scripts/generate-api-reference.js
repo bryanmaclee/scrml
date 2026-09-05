@@ -154,13 +154,13 @@ function extractKeywords() {
     {
       keyword: "`pure`",
       description:
-        "Declares a function as side-effect-free. The compiler statically verifies purity constraints (§32).",
+        "Declares a function as side-effect-free. The compiler statically verifies purity constraints (§33).",
       error: "E-PURE-001, E-PURE-002",
     },
     {
       keyword: "`lin`",
       description:
-        "Declares a linear variable that must be consumed exactly once. Enforced at compile time by static analysis (§34).",
+        "Declares a linear variable that must be consumed exactly once. Enforced at compile time by static analysis (§35).",
       error: "E-LIN-001, E-LIN-002, E-LIN-003",
     },
     {
@@ -190,7 +190,7 @@ function extractKeywords() {
     {
       keyword: "`~`",
       description:
-        "Implicit pipeline accumulator. A built-in `lin` variable initialized by unassigned expressions and consumed exactly once (§31).",
+        "Implicit pipeline accumulator. A built-in `lin` variable initialized by unassigned expressions and consumed exactly once (§32).",
       error: "E-TILDE-001, E-TILDE-002",
     },
   ];
@@ -199,7 +199,7 @@ function extractKeywords() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Error codes from §33
+// 4. Error codes from §34
 // ---------------------------------------------------------------------------
 
 function extractErrorCodes() {
@@ -212,16 +212,32 @@ function extractErrorCodes() {
   const start = specLines.findIndex((l) => l.match(/^## 34\.\s+Error Codes/));
   if (start === -1) return codes;
 
-  // Find the end of the section (next ## heading or ---)
+  // ⚑ End the section at the next TOP-LEVEL numbered heading only — NOT at a bare `---`.
+  // §34 contains `---` rules internally, so the old `=== "---"` break stopped at SPEC.md:20381
+  // and put §34.1's 80 native-parser rows (`E-EXPR-*`, `E-STMT-*`, `I-NATIVE-BLOCK-*`) out of
+  // scope entirely. That break was ALSO CRLF-blind, so on Windows it never fired and the bug
+  // was invisible from here; fixing the line endings is what exposed it.
   let end = start + 1;
   while (end < specLines.length) {
     if (specLines[end].match(/^## \d+\./) && end > start + 2) break;
-    if (specLines[end] === "---" && end > start + 5) break;
     end++;
   }
 
+  // ⚑ The code alternation used to be `E-[A-Z]+-\d+|W-[A-Z]+-\d+` — one uppercase family word
+  // plus a NUMERIC suffix. That silently dropped every multi-word or undigited code in the
+  // catalog (`E-TYPE-LIFECYCLE-ON-ENGINE-CELL`, `W-INTERP-IN-RAW-CONTENT`,
+  // `E-ENDPOINT-METHOD-INVALID`, …) — 381 of 768 rows, under a header that claims to list
+  // "All compiler error and warning codes". A half-catalog asserted as complete is worse than
+  // the empty one this landing started from, so the alternation is widened to the real shape:
+  // an `E-`/`W-`/`I-` prefix plus one or more uppercase-alnum segments, optionally backticked,
+  // with `Info` admitted as a severity alongside Error/Warning.
+  //
+  // STRUCK rows (`~~E-CTX-002~~`) stay excluded BY CONSTRUCTION — `~` is not `[EWI]`, so they
+  // never match. That is required, not incidental: §34.0 says a retired row "must NOT enter any
+  // denominator". Measured on SPEC.md: 817 candidate rows → 768 captured, 35 of the 49 excluded
+  // being struck retirements.
   const tableRe =
-    /^\|\s*(E-[A-Z]+-\d+|W-[A-Z]+-\d+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(Error|Warning)\s*\|$/;
+    /^\|\s*`?([EWI]-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)`?\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(Error|Warning|Info)\s*\|$/;
   for (let i = start; i < end; i++) {
     const m = specLines[i].match(tableRe);
     if (m) {
@@ -238,7 +254,7 @@ function extractErrorCodes() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Built-in state types from §35
+// 5. Built-in state types from §36
 // ---------------------------------------------------------------------------
 
 function extractInputStateTypes() {
@@ -257,7 +273,7 @@ function extractInputStateTypes() {
       "`.modifiers` — `{ shift, ctrl, alt, meta }` booleans",
       "`.lastKey` — most recently pressed key (string | null)",
     ],
-    section: "§35.2",
+    section: "§36.2",
   });
 
   // <mouse>
@@ -273,7 +289,7 @@ function extractInputStateTypes() {
       "`.pressed(button)` — true if button is pressed (0=left, 1=middle, 2=right)",
       "`.wheel` — accumulated scroll delta",
     ],
-    section: "§35.3",
+    section: "§36.3",
   });
 
   // <gamepad>
@@ -288,7 +304,7 @@ function extractInputStateTypes() {
       "`.buttons` — array of `{ pressed, value }` objects",
       "`.pressed(index)` — true if button at index is pressed",
     ],
-    section: "§35.4",
+    section: "§36.4",
   });
 
   return types;

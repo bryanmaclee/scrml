@@ -11,7 +11,13 @@ const INDEX_PATH = "compiler/SPEC-INDEX.md";
 const INDEX = readFileSync(INDEX_PATH, "utf8");
 
 type Section = { line: number; key: string };
-const lines = SPEC.split("\n");
+// ⚑ Normalize the SPEC read too, for the same reason the INDEX read is normalized below.
+// Today every consumer of `lines` happens to use `startsWith` or `.trim()`, so a trailing \r is
+// harmless HERE — but that is luck, not design: adding one `=== "---"` compare or `$`-anchored
+// regex over `lines` silently re-opens the exact class this file's own fix closes. Applying the
+// stated principle ("normalize at the read") uniformly is the point; leaving the one raw split
+// inside the file that fixes this bug is how the next instance gets written.
+const lines = SPEC.replace(/\r\n/g, "\n").split("\n");
 const sections: Section[] = [];
 for (let i = 0; i < lines.length; i++) {
   const ln = lines[i];
@@ -74,7 +80,14 @@ for (const s of sections) {
 //
 // The write below re-joins with the ORIGINAL EOL so the file keeps its checked-out line endings
 // and git does not see a whole-file rewrite — same approach as state.ts:341-342.
-const INDEX_EOL = INDEX.includes("\r\n") ? "\r\n" : "\n";
+// ⚑ MAJORITY, not `includes`. The file is fully re-joined with this value, so an all-or-nothing
+// test makes a SINGLE stray line ending rewrite every line in the file — one CRLF pasted into an
+// otherwise-LF SPEC-INDEX.md would flip this to "\r\n" and produce exactly the whole-file diff
+// this approach exists to avoid (and one stray LF in a CRLF file would silently normalize it).
+// Taking the majority keeps the dominant style and confines any churn to the odd line out.
+const crlfCount = (INDEX.match(/\r\n/g) || []).length;
+const lfCount = (INDEX.match(/\n/g) || []).length - crlfCount;
+const INDEX_EOL = crlfCount > lfCount ? "\r\n" : "\n";
 const indexLines = INDEX.replace(/\r\n/g, "\n").split("\n");
 let inSectionsTable = false;
 let updated = 0;
