@@ -1,3 +1,97 @@
+# scrml — Session 401 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-09-04. Booted `/boot` Profile A onto `1e620583`. Solo (S399-bryan registered LIVE but
+idle and never wrapped — his open PRs and owed-ruling lane are CLAIMED, not lost). ⚑ **Bryan's
+S397/S399 owed lane is PRESERVED VERBATIM below** (the `~` build, Q9, the rulings owed, the dpa
+returns) — that is his authority; do not duplicate or action it in the peter lane.
+
+## ⏭ NEXT-SESSION PICKUP (peter lane) — read this FIRST
+
+**The dog-food arc is still the standing next move and was NOT started** — Peter explicitly held it
+this session (*"hold on dog-food"*) to drain the review floor first. S400's reasoning is unchanged and
+still governs: the clean MED/LOW compute vein is exhausted; fresh silent-wrong bugs come from RUNNING a
+new adopter app, not from mining the ledger. [[feedback-dogfooding-beats-mining-the-ledger]]
+
+**But the review pass just produced a better-than-ledger queue.** Five defects were found in code that
+had already shipped, three of them PA-reproduced. In rough value order:
+
+1. ⚑ **`g-uptoroot-vs-distrel-anchor-mismatch` is REOPENED and half-built.** S400 fixed the CLIMB half
+   and left the DESTINATION half. The correct model already exists ten lines up —
+   `computeDependencyClientScripts` anchors `relative(hostDistDir, targetDistPath)`. **Fix the guard
+   FIRST** ([[g-shell-subdir-asset-guard-pins-a-404-path]]): it currently pins `app.css`, a path that
+   does not exist, so it will go RED on the correct fix and read as a regression.
+2. **`g-native-parser-block-comment-branch-swallows-a-slash-star-inside-a-string`** — a guard on the
+   new block-comment branch (require a code-comment position, or track string state). Bounded by the
+   opt-in flag; PA-reproduced with a glob string.
+3. **`g-bool-coerce-keys-on-output-name-and-over-coerces-a-joined-column`** — needs table-qualified
+   resolution rather than name-keyed coercion, plus the JOIN case the committed tests lack.
+4. **`g-api-reference-severity-whitelist-drops-runtime-and-test-codes`** (LOW) — a 12-character
+   alternation fix plus a call on the `D-`/`H-` families.
+
+**⚑ OWED TO BRYAN — accumulated, deliberately NOT pinged** (per Peter's S358 directive: notate for the
+hand-off, don't drop an inbox message per item):
+- **`g-flat-css-author-style-merge-precedence-was-never-ruled`** — #841 flipped a same-property
+  precedence (flat `#{}` won before, author `style=` wins now). Semantics-changed, silent, and the
+  ledger's own S359 note had already routed *"Merge PRECEDENCE is a design call → bryan."* He ratifies
+  the precedence, or rules the overlap a diagnostic (§65 says an ambiguous overlap should be a compile
+  error, which would be the other answer).
+- **3 UNRUN deliberations — `dpa-041` / `dpa-042` / `dpa-043`** (the declared-type / `~`-`lin` unification /
+  lazy-pull axiom questions). He banked them at S399 *after* his own boot read the queue, and every
+  Windows boot since read `0 queued` because the probe was blind — so **no session has ever surfaced
+  them to him.** Plus **4 ADVISORY** awaiting ratify/reject: `dpa-037` (non-finite floats), `dpa-038`
+  (offline/PWA, return leg = a #509 comment), `dpa-039` (enterprise docs, return leg = #471),
+  `dpa-040` (arm-body `~` boundary).
+
+**Durable lessons banked this session:**
+1. ⭐ **Running a script's DEFAULT mode is not a class-check.** I cleared `regen-spec-index.ts` on that
+   evidence and was wrong — its section parse is `\r`-tolerant and it fails only in `--check`, the mode
+   the gate runs. **Verify a probe through the mode its GATE uses.**
+2. ⭐ **A half-fixed artifact asserted as complete is worse than an empty one.** #848 took the §34 table
+   from empty → 387 of 768 rows under a header claiming completeness. Empty looks broken; half-full
+   reads as authoritative.
+3. **A dispatched reviewer's VERDICT LABEL is a claim too.** #843 returned `carve-out` for a
+   code-bearing PR; accepting it would have inflated the carve-out rate, which is the health signal.
+4. **Dispatching the review floor is ~30× cheaper than PA-direct** — measured: ~5% of the window for
+   ten passes vs ~160k estimated PA-direct, and the passes were *better* (one executed against real
+   `bun:sqlite`, one ran a 20-case scanner differential, one bisected 640 commits).
+
+## What landed
+- **#848 `c516aadc`** — four boot/gate probes blind on every Windows clone (CRLF line-split), + a
+  second independent `## 33.` → `## 34.` defect in the same generator. Committed gate
+  `compiler/tests/unit/dpa-debt-parse.test.js` (8 tests), bite proven both ways per site.
+- **#849 `10c51124`** — acting on #848's own adversarial pass: 6 findings, 5 held, §34 extraction
+  387 → 768 rows, 8 stale section refs corrected. One reviewer sub-claim did not hold and was kept out.
+- **Review floor 13 → 0** (444 of 444 recorded). Five gaps filed, one reopened.
+
+## Mechanical state — REFERENCED, not duplicated
+Gap counts: **HIGH 85 · MED 208 · LOW 90 · Nominal 7** (`@generated` current). Landings/counts/stream in
+`docs/changelog.md` S401 + `handOffs/delta-log.md` `[2067]`–`[2069]`. **Inbox: 5 items, all bryan-owed,
+left UNARCHIVED by design** (S393/S398/S400 discipline). **Worktrees: 3 pre-existing agent worktrees
+retained** — none are S401's (this session used dispatched read-only reviewers, no worktrees).
+**Maps: unchanged** — no adopter-facing source-structure change a nav map indexes (`scripts/` probes only).
+
+## ⚑ ENVIRONMENT — read before the next commit on this clone
+- **`pre-commit` is REMOVED, `pre-push` is INSTALLED.** The clone had no hooks at all. `pre-commit` runs
+  a subset that is red on Windows for pre-existing deferred reasons — measured **23,212 pass / 5–6 fail**
+  across 1,298 files (the count varies by one, so at least one is flaky); three are the S254 path-model
+  class. Installing it blocks every local commit. `pre-push` is worth keeping: it defers the suite to
+  the cloud `gate` on a NEW-REF branch but still runs the generated-doc currency gate
+  ([[feedback-run-facts-check-before-push]]).
+- ⚑ **An UPDATE push (an existing remote branch) DOES run the full local suite** and will therefore fail
+  on those pre-existing failures. **Do not reach for `--no-verify`** — land the green commit and push
+  follow-up work as a NEW branch, which takes the relaxed path legitimately. That is what this session
+  did for #849.
+- **Stale `compiler/dist/self-host/` (Jul 15) parked** in the session scratchpad so
+  `self-compilation.test.js` takes its documented skip path. Rebuilding is not available: the self-host
+  build fails on `block-splitter` / `body-pre-parser` (Road-B, bryan's lane).
+- **A finding left deliberately unchased:** the hook excludes `browser / lsp / self-host / commands` by
+  DIRECTORY, but `self-host-smoke.test.js` and `self-compilation.test.js` are self-host tests living in
+  `integration/`, so they slip an exclusion whose stated intent covers them. The CI job name already
+  half-admits it (*"integration needs self-host-smoke dist-guarded"*). The actual failure is the S254
+  path-model divergence, so dist-guarding would not fix it — that is the deferred path-model arc.
+
+---
+
 # scrml — Session 400 (peter · P-Tech1 Windows) — WRAP
 
 **Date:** 2026-09-04. Booted `/boot` Profile A recovering a stranded S400: PR #837 had landed

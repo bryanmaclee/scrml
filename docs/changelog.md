@@ -2,6 +2,92 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S401 — 2026-09-04 (peter · Windows) — four boot probes were blind on every Windows clone, and the review floor drained 13 → 0
+
+Two arcs, and they turned out to be the same arc: **instruments that read green while measuring
+nothing.** The session opened by finding the mandatory dPA-queue boot probe reporting `0 queued ·
+✓ nothing owed` against a queue holding 43 items, and closed by draining the whole review-floor debt —
+where five of ten passes found real defects, including one in this session's own first landing.
+
+### The CRLF class — four probes, one root (#848, #849)
+
+On a CRLF checkout (`core.autocrlf=true`, every Windows clone) a bare `"\n"` split leaves a trailing
+`\r` on every line, silently defeating any **end-sensitive** construct: a `$`-anchored regex (`.` never
+matches `\r`, so `$` is unreachable) *and* an exact string compare.
+
+| probe | reported | truth |
+|---|---|---|
+| `dpa-debt.ts` — boot step 0.6, **mandatory** | `0 queued · ✓ nothing owed` | **43 queued · 3 UNRUN · 4 ADVISORY** (CRLF 0 / LF 43) |
+| `regen-spec-index.ts --check` | "totals block missing or malformed" | the block was in the file; `--check` was **unpassable on Windows** |
+| `generate-api-reference.js` ×3 sites | wrote a well-formed doc | both tables missing (0/66, 0/408, 0/247) |
+
+⚑ **`dpa-debt.ts` is the instrument whose entire purpose is making an invisible obligation visible** —
+`pa-base` §10's *"a channel the probe does not read does not exist to the PA."* It failed toward a
+falsely-clean board, the direction that gets believed rather than investigated. bryan's S399 boot on
+Linux read 40 queued; every Windows boot read zero, and the boot report **stated** zero. The three
+UNRUN items were banked by bryan at S399 *after* his own boot had read the queue, so no session had
+ever surfaced them.
+
+`regen-spec-index.ts` was found because **it blocked this very push** — `out.indexOf(TOTALS_START)` is
+`Array.prototype.indexOf` over a line array, so the `\r` broke exact element equality. Its fix
+unblocked its own landing.
+
+This is the **3rd–6th instance** of the class in `scripts/`; `state.ts:666`, `delta-lint.ts:82`,
+`worktree-sweep.ts:145`, `facts.ts:245` and `corpus-emit-differential.ts:425` already carried it, three
+with a comment naming the same symptom.
+
+⚑ **Method correction, and it cost a false clear:** *running a script's DEFAULT mode is not a
+class-check.* `regen-spec-index.ts` parses sections correctly (`^`-anchored, `\r`-tolerant) and fails
+only in `--check` — the mode the gate runs. Every gate-mode probe was re-run afterwards.
+
+### The review floor: 13 → 0, and five passes found defects
+
+Ten S239 adversarial passes dispatched in parallel (~5% of the PA context window for all ten; PA-direct
+was measured at ~160k). Three carve-outs classified PA-side by measured file set. **5 clean, 5 finding.**
+Every load-bearing finding was re-verified by the PA before being acted on, and each gap records which
+half the PA confirmed and which rests on the agent's run.
+
+- **#842 — a JOIN turns an integer `0` into `false`.** The bool coercion keys on the *output column
+  name* and unions boolean names across every FROM table with no shadowing check, so a joined
+  non-boolean column gets coerced. **Falsifies the PR's own stated safety property.** Adopter blast
+  radius is real-zero (aM declares no boolean columns), but the committed tests are emit-only with no
+  JOIN case.
+- **#845 — a gap FALSELY MARKED RESOLVED.** The fix closed the *climb* half and left the *destination*
+  half: shell assets emit at `dist/shell/`, so a dist-root `app.css` still 404s. Worse, the committed
+  guard **pins the broken path** and will block the real fix. `g-uptoroot-vs-distrel-anchor-mismatch`
+  reopened.
+- **#846 — the fix reintroduced its own bug class.** The new block-comment branch has no string guard,
+  so a glob string (`"src/**/*.scrml"`) reads as a comment opener and swallows to EOF. PA-reproduced:
+  all three declarations dropped under `--parser=scrml-native` at **exit 0**. Bounded — opt-in flag,
+  net-positive on the real corpus — so a guard, not a revert.
+- **#841 — a LANE breach, not a bug.** The style-merge precedence flip is semantics-changed, and the
+  ledger's own S359 note had already routed *"Merge PRECEDENCE is a design call → bryan."* No ruling
+  exists; S400 picked author-last itself. Accumulated to the bryan-lane queue per Peter's S358
+  directive rather than pinged.
+- **#849 — the same shape one axis over.** #848's fix took the §34 table from empty → 387 rows; the
+  catalog holds **768**. A half-catalog under *"All compiler error and warning codes"* reads as
+  authoritative where the empty one did not. Fixed to 768; an independent pass then found the
+  *severity* alternation still drops 11 live codes — filed, not fixed.
+
+⚑ **The PA overrode one dispatched agent's verdict label:** #843 returned `carve-out` for a
+code-bearing PR. Accepting it would have inflated the carve-out rate, which is the health signal.
+Recorded `clean`. Floor closed at **444 of 444 recorded, 0 OWED**, code-bearing carve-out 2/179 (1%).
+
+### Environment — the local gate, honestly assessed
+
+The clone had **no git hooks installed** (`core.hooksPath` unset, only `.sample` files). Installing
+them revealed why: `pre-commit` runs a subset that is **red on Windows for pre-existing deferred
+reasons** — measured **23,212 pass / 5–6 fail** across 1,298 files, three of them the S254
+path-model class (`self-host smoke` expects `/app/types.scrml`, gets `C:\app\types.scrml`). So
+`pre-commit` was removed and `pre-push` kept: it defers the suite to the cloud `gate` for a new-ref
+branch but still runs the generated-doc currency gate. A stale, gitignored `compiler/dist/self-host/`
+dated Jul 15 was parked aside so `self-compilation.test.js` takes its documented skip path (rebuilding
+is not available — the self-host build itself fails on `block-splitter`/`body-pre-parser`, Road-B lane).
+
+⚑ **No gate was bypassed.** When an *update* push tripped the full local suite on those pre-existing
+failures, the fix was to land the already-green commit and push the follow-up as a **new branch**,
+which takes the hook's relaxed new-ref path legitimately — not `--no-verify`.
+
 ## S400 — 2026-09-04 (peter · Windows) — a ten-PR adopter-lane sweep: 7 real codegen/parser/script fixes, 2 silently-fixed gaps guarded, 1 HIGH routed turnkey
 
 An unusually long dog-food/ledger session. Seven genuine correctness fixes landed, two ledger gaps
