@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 85 |
-| MED | 203 |
-| LOW | 88 |
+| MED | 208 |
+| LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -6856,7 +6856,7 @@ scrml-site migrated the 98-page wiki into its own repo (`6554ce7`) and asked whe
 ### G-UPTOROOT-VS-DISTREL-ANCHOR-MISMATCH — the composition `upToRoot` and the dist-relative path anchor differently and disagree when the entry is not at the output base — `NEW S280 (S239 finder B); MED`
 Two path derivations model the same dist layout from different anchors: `toDistRel` (`index.ts` `computeDependencyClientScripts`) uses `relative(outputBaseDir, …)` — which is what `pathFor`/`stripPagesPrefix` use, i.e. the REAL dist layout; the per-page composition `upToRoot` (`index.ts:2311`) uses `relative(dirname(entryFilePath), dirname(filePath))`. They coincide only when the entry sits at `outputBaseDir` or `outputBaseDir/pages`.
 **Repro (finder-B fixture):** shell entry at `shell/app.scrml`, route at `pages/x.scrml`. `dist/x.html` emits `href="../../app.css"`, `src="../../scrml-runtime…"`, `src="../../app.client.js"` — all three escape the dist root. `pageRelDir` computes as `"../pages"`, whose leading segment is `..`, so the `pages` strip does not fire and depth comes out 2 instead of 0.
-`upToRoot` is the wrong one here. Pre-existing; the S280 dep-depth fix neither causes nor worsens it (the fix's code comment was corrected in the same landing to stop claiming this case is handled). **RESOLVED S400-peter.** Reproduced first (shell entry `shell/app.scrml` + root-level route `pages/x.scrml` → `dist/x.html` emitted `../../app.css`, `../../app.client.js`, `../../scrml-runtime…`, all escaping dist). Fix (`index.ts` composition path ~:2992): anchor the `upToRoot` depth on the DIST layout (`relative(cgOutputBaseDir, dirname(filePath))`) instead of the entry-file dir — the exact derivation the own-document `ownUpToRoot` (~:2399) and `toDistRel` already use, and which the code's own comments named as the correct model. Byte-identical when the entry sits at the base or base/pages (the anchors coincide there — the mpa-shell suite is unchanged). `dist/x.html` now emits `app.css`/`app.client.js`/`scrml-runtime…` (dist-root siblings) with no escape. Committed guard `compiler/tests/integration/shell-entry-subdir-asset-path-anchor.test.js` (2/2); shell/composition/output-tree/cross-file suites green (100/0). <!-- @gap id=g-uptoroot-vs-distrel-anchor-mismatch sev=MED status=resolved locus=compiler/src/codegen/index.ts(~:2992 the composition-path upToRoot now anchors on cgOutputBaseDir like ownUpToRoot ~:2399 + toDistRel ~:366, not dirname(entryFilePath)) prov=empirical:S400-peter-reproduced-shell-in-subdir-root-route-emitted-../../app.css-escaping-dist-then-fixed-all-refs-dist-rooted-mpa-shell-byte-identical-committed-guard-2of2 -->
+`upToRoot` is the wrong one here. **⚑ REOPENED S401-peter — the S400 resolve was PARTIAL and this entry's own closing claim is FALSE.** The S239 pass on #845 found the fix closed the CLIMB half (route depth below dist) and left the DESTINATION half: a shell entry in a subdir emits its assets at `dist/shell/app.css` / `dist/shell/app.client.js`, so a dist-ROOT-relative `app.css` still 404s — 2 of 3 refs remain broken, and the sentence below claiming the refs now resolve is wrong. PA-VERIFIED by execution this session: compiling `shell/app.scrml` + `pages/x.scrml` emits `./shell/app.css` and `./shell/app.client.js`, NOT `./app.css`. The correct model already exists ten lines up — `computeDependencyClientScripts` anchors `relative(hostDistDir, targetDistPath)`, which is why `models/auth.client.js` was already correct pre-fix. ⚑ And the committed guard PINS THE BROKEN PATH (see [[g-shell-subdir-asset-guard-pins-a-404-path]]), so it will block the real fix. Original S400 text preserved verbatim from here. Pre-existing; the S280 dep-depth fix neither causes nor worsens it (the fix's code comment was corrected in the same landing to stop claiming this case is handled). **RESOLVED S400-peter.** Reproduced first (shell entry `shell/app.scrml` + root-level route `pages/x.scrml` → `dist/x.html` emitted `../../app.css`, `../../app.client.js`, `../../scrml-runtime…`, all escaping dist). Fix (`index.ts` composition path ~:2992): anchor the `upToRoot` depth on the DIST layout (`relative(cgOutputBaseDir, dirname(filePath))`) instead of the entry-file dir — the exact derivation the own-document `ownUpToRoot` (~:2399) and `toDistRel` already use, and which the code's own comments named as the correct model. Byte-identical when the entry sits at the base or base/pages (the anchors coincide there — the mpa-shell suite is unchanged). `dist/x.html` now emits `app.css`/`app.client.js`/`scrml-runtime…` (dist-root siblings) with no escape. Committed guard `compiler/tests/integration/shell-entry-subdir-asset-path-anchor.test.js` (2/2); shell/composition/output-tree/cross-file suites green (100/0). <!-- @gap id=g-uptoroot-vs-distrel-anchor-mismatch sev=MED status=open locus=compiler/src/codegen/index.ts(~:2992 the composition-path upToRoot now anchors on cgOutputBaseDir like ownUpToRoot ~:2399 + toDistRel ~:366, not dirname(entryFilePath)) prov=empirical:S400-peter-reproduced-shell-in-subdir-root-route-emitted-../../app.css-escaping-dist-then-fixed-all-refs-dist-rooted-mpa-shell-byte-identical-committed-guard-2of2 -->
 
 ### G-DEAD-FUNCTION-MISSES-ARROW-CALLBACK-BODIES — `W-DEAD-FUNCTION` reports a live `fn` dead when its only call sites are inside arrow-function callback bodies — `NEW S280 (scrml-site adopter lint triage); MED`
 The reachability walk behind `W-DEAD-FUNCTION` does **not** traverse arrow-function bodies, so a `fn` called only from inside `.then((r) => …)` — the ordinary shape for fetch-driven client code — is reported as having "no callers". **PA-REPRODUCED S280** on `2e7a32e3` with a 14-line probe: a `fn` called solely inside a `.then()` arrow fires the warning.
@@ -11470,3 +11470,150 @@ The §7 rotation entry for **Bug 15** (`~snapshot` raw-sigil codegen leak, S131)
 comment at `:1254` records the change explicitly). Every other in-tree reference was updated when the
 fallback was struck; the §7 entry was missed and is corrected in place. It is the only edit this filing
 pass made to pre-existing ledger text.
+
+<!-- ⚑ S401-peter filing batch — surfaced by the S239 adversarial review pass draining the review-floor debt (#836–#849, 10 dispatched reviews). Every entry below was RE-VERIFIED by the PA independently of the reviewing agent, and each states which half the PA confirmed and which half rests on the agent's run. -->
+
+<!-- @gap id=g-bool-coerce-keys-on-output-name-and-over-coerces-a-joined-column sev=MED status=open locus=compiler/src/codegen/bool-coerce.ts:50-57(resolveBooleanOutputColumns — the star branch unions the boolean column NAMES of every proj.fromTables entry with no shadowing check, and the emitted _scrml_coerce_bool_cols blind-writes row[name]) prov=review:S401-peter-S239-pass-on-842-agent-REPRODUCED-against-real-bun-sqlite-PA-CONFIRMED-the-mechanism-in-source -->
+### G-BOOL-COERCE-KEYS-ON-OUTPUT-NAME-AND-OVER-COERCES-A-JOINED-COLUMN — a JOIN turns a plain integer `0` into `false` — `NEW S401; MED; open`
+
+#842 coerces boolean-declared SQL columns at the `?{}` decode boundary. It keys the coercion on the
+**output column name**, so when two joined tables share a column name and only one declares it
+`boolean`, the *other* table's integer value is coerced.
+
+```
+-- flags.active is `boolean`; other.active is plain `integer`
+?{`SELECT * FROM flags JOIN other ON other.id = flags.id`}.all()
+   → row 2 returns active: false   (the INTEGER 0 from other.active)
+?{`SELECT flags.active, other.active FROM flags JOIN other ON other.id = flags.id`}.all()
+   → same flip, and this one is a fully resolvable EXPLICIT column list, not a star
+```
+
+⚑ **This falsifies #842's own stated safety property** — the PR asserts "a non-boolean column is
+untouched". Bounded (needs a same-named column on a joined declared table, value exactly 0/1) and
+**silent**: no diagnostic, exit 0. It is the same silent-wrong class the gap was filed for, inverted.
+
+**Adopter blast radius is real-zero, not assumed** — the aM clone declares zero `: boolean` schema
+columns (agent-verified). **Verification split:** the reviewing agent reproduced end-to-end by
+executing the emitted `route.handler` against real `bun:sqlite` with a CSRF'd Request; the **PA
+independently confirmed the mechanism by reading `bool-coerce.ts:50-57`** (the union has no shadowing
+check and the writer is name-keyed) but did NOT re-run the sqlite harness.
+
+Controls that behaved correctly (agent-run): NULL preserved, value `2` untouched, integer-only table
+untouched, `SELECT n AS active` NOT coerced, `SELECT active AS n` coerced under `n`.
+
+**Test gap:** #842's five committed tests are **emit-only** and contain no JOIN/collision case at all.
+
+<!-- @gap id=g-shell-subdir-asset-guard-pins-a-404-path sev=MED status=open locus=compiler/tests/integration/shell-entry-subdir-asset-path-anchor.test.js:85-86(two toContain assertions on dist/x.html name app.css and app.client.js — both resolve to dist/app.css and dist/app.client.js, which do not exist; the shell assets emit at dist/shell/) prov=review:S401-peter-S239-pass-on-845-PA-CONFIRMED-BY-READING-the-assertions-and-BY-EXECUTION-that-the-assets-emit-under-dist-shell -->
+### G-SHELL-SUBDIR-ASSET-GUARD-PINS-A-404-PATH — the committed guard certifies a broken ref and will block the real fix — `NEW S401; MED; open`
+
+The guard #845 landed asserts `dist/x.html` references `app.css` / `app.client.js`. Those resolve to
+`dist/app.css` and `dist/app.client.js`, which **do not exist** — a shell entry in a subdir emits its
+assets at `dist/shell/`. So the test pins the wrong destination and goes RED when the remaining half of
+[[g-uptoroot-vs-distrel-anchor-mismatch]] is fixed correctly.
+
+**PA-VERIFIED both halves directly:** read the assertions at `:85-86`, and compiled a
+`shell/app.scrml` + `pages/x.scrml` set — the emitted tree contains `./shell/app.css` and
+`./shell/app.client.js`, and no `./app.css`.
+
+The guard's `escapesDist` half is sound and should stay; the fix is to replace the two `toContain`
+assertions with an existence check — `existsSync(resolve(dirname(html), ref))` — which would have
+caught the partial fix at landing time instead of certifying it.
+
+<!-- @gap id=g-native-parser-block-comment-branch-swallows-a-slash-star-inside-a-string sev=MED status=open locus=compiler/native-parser/parse-markup.js:1571-1583(and the mirrored parse-markup.scrml:1285-1305 — the new block-comment branch in dispatchInLogicEscape has no string/markup-text guard and consumes to the closing delimiter or EOF; the pre-existing P5-13 string-skip is a narrow 3-char pattern that does not cover it) prov=empirical:S401-peter-PA-REPRODUCED-INDEPENDENTLY-by-CLI-differential-a-glob-string-drops-all-3-declarations-under-parser-scrml-native-at-exit-0 -->
+### G-NATIVE-PARSER-BLOCK-COMMENT-BRANCH-SWALLOWS-A-SLASH-STAR-INSIDE-A-STRING — the #846 fix reintroduced its own bug class — `NEW S401; MED; open`
+
+#846 taught `dispatchInLogicEscape` to skip block comments while counting braces. The branch fires on
+**any** slash-star pair in a `${}` body — including inside a string literal — and consumes to the
+closing delimiter or EOF, swallowing the closing `}`. The block degrades to Text and every following
+declaration is dropped, at **exit 0, with no diagnostic**: the same silent-wrong the PR fixed, one
+shape over.
+
+⚑ **PA-REPRODUCED INDEPENDENTLY** (not relayed) — minimal case, a glob pattern:
+
+```
+${ export const PAGES = "src/**/*.scrml"
+   export function listPages() { return PAGES }
+   export function other() { return 42 } }
+```
+
+| parser | exit | PAGES | listPages | other |
+|---|---|---|---|---|
+| default | 1 | 2 | 1 | 1 |
+| `--parser=scrml-native` | **0** | **0** | **0** | **0** |
+
+**Realistic trigger: glob strings.** The agent's differential found four regressing cases
+(pre-ok → post-DIFF) including an unterminated block-comment opener and one inside markup-as-value.
+
+**Bounded, and NOT a revert candidate:** the native parser is opt-in (`--parser=scrml-native`) and the
+real corpus is net-positive (`jwt.scrml` 4→5 = live parity; `router/index.scrml` 6→6 despite containing
+a glob-ish route pattern). The fix is a guard — require the opener to be at a code-comment position, or
+track string state. ⚑ The fix's own comment names this exact hazard for markup TEXT and then
+reintroduces it for markup-as-value inside `${}`, which routes through the same dispatcher.
+
+**Test gap:** #846's four guards cover the reported instance plus two floors — no opener-in-string, no
+unterminated-comment, no opener-in-markup-text case, i.e. exactly the coverage that would have caught
+this.
+
+<!-- @gap id=g-flat-css-author-style-merge-precedence-was-never-ruled sev=MED status=open locus=compiler/src/codegen/emit-html.ts:2949-2962(the only static style= emit site; the merge declares the author value LAST so it wins, flipping the pre-fix flat-first-attribute-wins outcome) prov=review:S401-peter-S239-pass-on-841-agent-REPRODUCED-the-flip-and-searched-handOffs-and-docs-for-a-ruling-and-found-none -->
+### G-FLAT-CSS-AUTHOR-STYLE-MERGE-PRECEDENCE-WAS-NEVER-RULED — a semantics flip decided in bryan's lane — `NEW S401; MED; open` · ⚑ BRYAN-LANE
+
+#841 merged a flat `#{}` and an author `style=` into one attribute. For a **same-property** overlap the
+rendered winner FLIPPED: pre-fix the flat `#{}` won (HTML5 first-attribute-wins); post-fix the author
+value is declared last and wins. Reproduced: a div with `style="color: blue"` plus a flat
+`#{ color: red; }` renders **blue** now and **red** before. Silent — no diagnostic on that input.
+
+⚑ **The ledger had already routed this decision:** the S359 note on the originating entry reads
+*"Merge PRECEDENCE is a design call → bryan … Direction-of-change (emitted HTML) → bryan. Routed."*
+The reviewing agent searched `handOffs/` and `docs/` and found **no bryan ruling**; S400 picked
+author-last itself. The choice is defensible (CSS last-wins matches author intent) and it is documented
+rather than accidental — but it is a **semantics-changed** landing inside the lane the gap itself named
+as bryan's, which is the `pa-profile-pjoliver11` HARD BOUNDARY.
+
+It also sits against §65's stated posture — *an ambiguous overlap is a compile error, and the compiler
+refuses to silently pick a winner* — since this now silently picks one.
+
+**Owed: bryan ratifies the precedence, or rules the overlap a diagnostic.** Accumulated into the
+hand-off's bryan-lane queue rather than dropped as an inbox ping, per Peter's S358 directive.
+
+**Residual (LOW, pre-existing, NOT from #841):** the merge scans with `break`, so only the FIRST author
+`style=` is folded; two author `style=` attributes still both emit, with no diagnostic — true without
+the flat `#{}` too.
+
+<!-- @gap id=g-api-reference-severity-whitelist-drops-runtime-and-test-codes sev=LOW status=open locus=scripts/generate-api-reference.js:240(the tableRe severity alternation admits only Error, Warning and Info, so any §34 row whose Severity cell reads Runtime or Test is dropped) prov=review:S401-peter-S239-pass-on-849-agent-REPRODUCED-and-enumerated-the-11-dropped-codes -->
+### G-API-REFERENCE-SEVERITY-WHITELIST-DROPS-RUNTIME-AND-TEST-CODES — the completeness claim is still false on a second axis — `NEW S401; LOW; open`
+
+#849 widened the §34 code-shape alternation (387 → 768 rows) but left the **severity** alternation
+admitting only Error/Warning/Info, so 11 live `E-` codes whose Severity cell reads `Runtime` or `Test`
+are still dropped under the header *"All compiler error and warning codes"*: `E-CONTRACT-001-RT`
+(SPEC:19927), `E-ENGINE-INVALID-TRANSITION` (:20007), `E-ENGINE-001-RT` (:20336), `E-CONTRACT-002-RT`
+(:20348), `E-REPLAY-001-RT` (:20349), and `E-TEST-001` through `E-TEST-006` (:19956–19961). Five
+`D-`/`H-` rows also sit outside the prefix class (arguably out of scope).
+
+⚑ **This is the exact shape #849 criticized, one axis over** — a partial catalog asserted as complete.
+The fix is admitting `Runtime|Test` in the alternation plus a decision on the `D-`/`H-` families. LOW
+because the artifact (`docs/api-reference.md`) is generated on demand, untracked and ungated.
+
+<!-- @gap id=g-wdead-arrow-resolve-marker-has-no-locus-and-misstates-the-fixing-commit sev=LOW status=open locus=docs/known-gaps.md(the g-dead-function-misses-arrow-callback-bodies resolved marker carries prov= but no locus=, and its prose asserts the fixing commit is NOT pinned when it is a single commit 73e85e64 in compiler/src/route-inference.ts) prov=review:S401-peter-S239-pass-on-839-agent-BISECTED-the-fixing-commit-and-re-verified-the-resolve-claim-itself-HOLDS -->
+### G-WDEAD-ARROW-RESOLVE-MARKER-HAS-NO-LOCUS-AND-MISSTATES-THE-FIXING-COMMIT — `NEW S401; LOW; open`
+
+The #839 review **confirms the resolve claim itself is correct** — `W-DEAD-FUNCTION` arrow/callback-body
+reachability really was silently fixed, and the agent bisected it to a single commit, `73e85e64`
+(*"fix(route-inference): W-DEAD-FUNCTION false-positives — closure-body calls + first-class-value refs"*),
+verified across 19 probe cases in both directions at HEAD and at historical SHAs. Two ledger-accuracy
+defects remain:
+
+1. The entry and delta-log `[2058]` both assert the fixing commit is *"NOT pinned — W-DEAD
+   caller-detection is spread across several route-inference walks."* It is **one commit, one file**.
+   It also means the gap was fixed five days after the hand-off it was filed from, and then sat open
+   for roughly 640 commits.
+2. The resolved marker carries `prov=` but **no `locus=`**, which `scripts/state.ts:122` documents as a
+   REQUIRED field on that marker; all twelve most recent resolved markers carry one.
+
+**Also recorded, not a defect:** at `73e85e64` a function called only from an itself-dead function no
+longer fires, so transitively-dead code is now unreported — correct per the diagnostic's own
+"has no callers" wording, but worth knowing.
+
+⚑ **Methodology warning from that run, worth carrying:** the agent's first sparse clone had a
+`git checkout` **silently fail on long `handOffs/` paths**, pinning the tree at an old SHA while
+`git status` read clean. It produced four confident false "still fires at X" results before the agent
+caught it. Sparse-checkout to `compiler/` is the fix.
