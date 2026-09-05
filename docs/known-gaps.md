@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 85 |
+| HIGH | 87 |
 | MED | 208 |
-| LOW | 90 |
+| LOW | 89 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -11183,7 +11183,7 @@ the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-pe
 > ⚑⚑ **This file runs on every `bun run pretest`.**
 
 ### g-const-bound-while-emits-raw-scrml-into-the-client-artifact-before-refusing — `const items = while (…) { lift … }` correctly fires `E-LOOP-007`, and codegen still writes the raw scrml source into the `.client.js` as unparseable JavaScript — `NEW S397; MED; open`
-<!-- @gap id=g-const-bound-while-emits-raw-scrml-into-the-client-artifact-before-refusing sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-control-flow.ts — no line located; the `while` reaches the decl-initializer path as unstructured text (the W-TYPE-031 on the same line reports inference stopping at AST node kind `escape-hatch`), so the initializer is passed through verbatim rather than refused prov=empirical:PA-verified-at-c11db440-artifact-inspected-and-node-check-run-on-it -->
+<!-- @gap id=g-const-bound-while-emits-raw-scrml-into-the-client-artifact-before-refusing sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-control-flow.ts — no line located; the `while` reaches the decl-initializer path as unstructured text (the W-TYPE-031 on the same line reports inference stopping at AST node kind `escape-hatch`), so the initializer is passed through verbatim rather than refused prov=empirical:PA-verified-at-c11db440-artifact-inspected-and-node-check-run-on-it CORRECTED-S399-the-entrys-acorn-gate-is-flag-gated-and-default-OFF-aside-is-FALSE-api-js-871-validateEmit-equals-true-is-the-DEFAULT -->
 > **⚑ PA-VERIFIED AT THE FILING WATERMARK.** `const items = while (i < @n) { i = i + 1  lift i }`
 > exits 1 with a correct, well-named `E-LOOP-007` (*"`while` is a statement, not an expression
 > (§49.4.4)"*) — and `dist/…client.js:9` is:
@@ -11344,7 +11344,7 @@ the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-pe
 > direction.
 
 ### g-match-arm-result-is-not-reliably-a-structured-node-in-the-same-match — an inline arm whose result is a call can degrade to a `bare-expr` whose `exprNode` covers only the PATTERN, while a sibling arm in the same `match` becomes a proper `match-arm-inline` with `resultExpr` — `NEW S397; MED; open`
-<!-- @gap id=g-match-arm-result-is-not-reliably-a-structured-node-in-the-same-match sev=MED status=open locus=searched:compiler/src/ast-builder.js(six match-arm-inline construction sites carrying resultExpr at :9918,:10191,:10216,:10240,:10264,:10294) — which site declines for the reported shape was NOT traced, and the six-site spread is itself part of the finding prov=review:S397-adversarial-agent-reported-shape-dependence-observed-in-one-match-NOT-re-verified-here -->
+<!-- @gap id=g-match-arm-result-is-not-reliably-a-structured-node-in-the-same-match sev=MED status=open locus=searched:compiler/src/ast-builder.js(six match-arm-inline construction sites carrying resultExpr at :9918,:10191,:10216,:10240,:10264,:10294) — which site declines for the reported shape was NOT traced, and the six-site spread is itself part of the finding prov=review:S397-adversarial-agent-reported-shape-dependence-observed-in-one-match CORRECTED-S399-PA-REPRODUCED-BY-AST-DUMP-the-TRIGGER-IS-THE-NUMERIC-LITERAL-PATTERN-NOT-THE-RESULT-KIND -->
 > **⚑ AGENT-REPORTED; the locus is a recorded search, not a trace.** For an arm spelled `1 => cb(id)`
 > the arm was observed to degrade to a `bare-expr` whose `exprNode` spans only the pattern, so **no
 > `call` node exists** for the arm result — while a SIBLING arm in the same `match` became a proper
@@ -11362,8 +11362,8 @@ the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-pe
 > degradation stays alive — the entry that handles the reported spelling is one of the six, or none of
 > them. Determining WHICH is the first step of any fix, and it was not taken here.
 
-### g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface — the task-shape router carries no row keyed on `~` / §32, so a dispatch whose symptom is "the accumulator did the wrong thing" is routed only if the author happens to describe it as an if-as-expression — `NEW S397; LOW; open`
-<!-- @gap id=g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface sev=LOW status=open locus=.claude/maps/primary.map.md(rows at :500 and :624 route the if-as-expression binding-site surface and reach the same emitter by a different symptom; no row is keyed on the sigil or on §32) prov=empirical:PA-verified-at-c11db440-all-13-maps-grepped-and-the-stronger-reported-claim-FALSIFIED-in-the-same-grep -->
+### g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface — the task-shape router carries no row keyed on `~` / §32, so a dispatch whose symptom is "the accumulator did the wrong thing" is routed only if the author happens to describe it as an if-as-expression — `NEW S397; LOW; RESOLVED S399` — the `~` Task-Shape Routing row LANDED in #835 (`83f95592`), two commits after this entry was filed in #833. PA-verified by execution: `git show ba739481:.claude/maps/primary.map.md | grep -c 'ANYTHING TOUCHING'` = 0, at HEAD = 1, `git log -S` attributes it to `83f95592`
+<!-- @gap id=g-primary-nav-map-has-no-routing-row-for-the-tilde-accumulator-surface sev=LOW status=resolved locus=.claude/maps/primary.map.md(rows at :500 and :624 route the if-as-expression binding-site surface and reach the same emitter by a different symptom; no row is keyed on the sigil or on §32) prov=empirical:PA-verified-at-c11db440-all-13-maps-grepped-and-the-stronger-reported-claim-FALSIFIED-in-the-same-grep -->
 > ⚑ **THE CLAIM AS RECEIVED WAS FALSE AND IS RECORDED HERE SO IT STOPS PROPAGATING.** Three S397
 > dispatches independently reported *"the `~` / §32 surface has ZERO rows across all 13 nav maps."*
 > One grep refutes it: `domain.map.md` carries an explicit §32 linear-types row at `:68`, the
@@ -11617,3 +11617,99 @@ longer fires, so transitively-dead code is now unreported — correct per the di
 `git checkout` **silently fail on long `handOffs/` paths**, pinning the tree at an old SHA while
 `git status` read clean. It produced four confident false "still fires at X" results before the agent
 caught it. Sparse-checkout to `compiler/` is the fix.
+
+---
+
+### g-local-thunk-callsite-not-awaited — the compiler marks a local thunk `async` per §13.2 and never awaits its own call sites, so a value-position call binds a Promise; the arrow form is refused and the named-`function` form is the identical defect with the diagnostic switched off
+
+<!-- @gap id=g-local-thunk-callsite-not-awaited sev=HIGH status=open locus=searched:compiler/src/codegen/scheduling.ts,compiler/src/codegen/emit-logic.ts — the await-injection stage; the fetch call site inside the thunk IS awaited, the thunk's OWN call site is not, so the injector's site-set is the locus and it was NOT traced prov=adopter:flogence-S37-report-PA-REPRODUCED-BY-EMISSION-at-60c8f927-plus-governing-sentence-quoted-from-§13.2 -->
+
+**PA-CONFIRMED BY EXECUTION at `60c8f927`.** Reported by flogence-PA (S37) against their own compiler and re-derived here on ours.
+
+**The form asymmetry** — identical bodies, identical consumption:
+
+| thunk form | verdict at HEAD |
+|---|---|
+| `const f = () => slowA(1)` | **`E-ASYNC-STDLIB-IN-SYNC-CALLBACK`** — refused |
+| `function f() { return slowA(1) }` | **compiles clean** |
+
+**The accepted form is a false negative.** Emitted, verbatim:
+
+```js
+async function f() {
+  return await _scrml_fetch_slowA_3(1);
+}
+const out = f();      // <-- NOT awaited
+return out;
+```
+
+The thunk is marked `async` and awaits internally; **its own call site is not awaited**, so `out` binds a
+Promise where the source says it binds a number. Exit 0, zero diagnostics. A direct call to the same
+server function IS awaited (`await _scrml_fetch_slowA_3(1)`), so the propagation works for fetch call
+sites and stops at compiler-introduced thunk async-ness.
+
+**GOVERNING SENTENCE — this is conformance restoration, not a design question.** SPEC §13.2
+"Compiler-Managed Asynchrony", normative statements, verbatim:
+
+> *"The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code."*
+> *"Sequence dependent operations using `await` in generated code."*
+> *"The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code."*
+
+The compiler performs the wrap per its own mandate and then fails to sequence the dependent call. One
+section's implementation contradicting itself.
+
+⚑ **DIRECTION: `semantics-changed`** — same source, different behaviour, no diagnostic delta. Base §8
+names this the class the gates are weakest against, so the fix OWES A MEASURED MIGRATION (how many
+corpus sites bind a local-thunk call whose value is used) before it lands. **NOT in the S385 4(b)
+PA-ruling class**, which excludes `semantics-changed`.
+
+⚑ **This is a fresh instance of the class S322 named as the proof case for pausing the freeze campaign** —
+the §13.2 await mandate delivered by post-hoc injectors scanning emitted output, so it catches one
+syntactic form and misses its sibling. Retrofit, not by construction.
+
+**The adopter's second ask** — widen the refusal to cover the named-`function` form until the real fix
+lands — is newly-REJECTING and becomes moot once the await propagation is fixed. Their local
+workaround was neither form: hoist the call out of the thunk (a direct call to an async fn IS
+auto-awaited). Their diagnostic-text point stands — the message's suggested restructure (`a const r =
+… binding`) still fires when applied *inside* the thunk.
+
+Return leg owed to `flogence/handOffs/incoming/`. Source report archived at
+`handOffs/incoming/read/2026-09-04-from-flogence-S37-E-ASYNC-local-thunk-callsite-not-awaited.md`.
+— `NEW S399-bryan (adopter report, PA-reproduced two-sided + governing sentence)`; **HIGH**; open
+
+---
+
+### g-bound-comprehension-between-accumulator-and-tilde-read-hijacks-the-slot — a bound comprehension placed between a statement-position `lift` accumulator and a `return ~` steals the slot; the real accumulator is emitted, filled, and never read
+
+<!-- @gap id=g-bound-comprehension-between-accumulator-and-tilde-read-hijacks-the-slot sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts — the `_scrml_tilde_N` mint/resolve pair; the resolver takes the most recent mint and the statement-position accumulator and the bound comprehension share one namespace; the deciding site was NOT traced prov=empirical:PA-reproduced-AND-RUN-at-83f95592-returns-9-where-§48.5.1-requires-a-b-c -->
+
+**PA-REPRODUCED AND RUN.** Source:
+
+```scrml
+fn collect() {
+    for (const a of ["a","b","c"]) { lift a }
+    const nine = for (const n of [9]) { lift n }
+    return ~
+}
+```
+
+Emitted, verbatim — `~` resolves to the COMPREHENSION's slot; `_scrml_tilde_4` is filled and dead:
+
+```js
+let _scrml_tilde_4 = [];
+for (const a of ["a","b","c"]) { _scrml_tilde_4.push(a); }
+let _scrml_tilde_5 = [];
+for (const n of [9]) { _scrml_tilde_5.push(n); }
+const nine = _scrml_tilde_5;
+return _scrml_tilde_5;
+```
+
+RUN: `collect() === [9]`. SPEC §48.5.1 requires `["a","b","c"]`. Exit 0, zero diagnostics.
+
+⚑ **This is a hazard OF the `~`-one-thing migration itself.** Any migration that rewrites SOME sites in
+a body to the bound-comprehension form while leaving `return ~` elsewhere in that body hits it —
+which argues for migrating a `fn` body wholesale or not at all. Relevant to **dpa-041**.
+
+Controls: two BOUND comprehensions in one body mint a fresh slot each and are sound; two
+STATEMENT-position lifting loops share ONE slot (a body-scoped accumulator).
+— `NEW S399-bryan (surfaced measuring the ruled `~` arc)`; **HIGH**; open
