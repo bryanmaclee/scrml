@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 88 |
+| HIGH | 90 |
 | MED | 210 |
 | LOW | 89 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -11811,3 +11811,82 @@ read after it), now shown to reach **SPEC's own worked example**. Independently 
 (Call 1), which puts it ahead of every missing diagnostic in that item *"because it defeats the
 premise that the compile is the gate."*
 — `NEW S400-bryan (dpa-042 Call 1; PA-reproduced independently by emission)`; **HIGH**; open
+
+---
+
+<!-- ⚑ S402-bryan filing batch — the two HIGHs S400 measured but could not file (the ledger was contended all session; both carry full evidence in #853's commit body). BOTH RE-VERIFIED AT `68ed2ce2` BEFORE FILING rather than relayed from that body — entry 1 reproduced by EXECUTION, entry 2 carried as INHERITED with its source named, because its measurement is a historical-checkout series the PA did not re-run. -->
+
+### g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template — `benchmarks/todomvc/app.scrml` compiles at exit 0 and throws on first render in both harnesses, rendering zero rows, because the emitted `document.querySelector` for its lift target names an element that exists only inside a mount `<template>`; and BOTH TodoMVC test files are green against the dead build
+
+<!-- @gap id=g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(the top-level `const _scrml_lift_tgt_N = document.querySelector(...)` bind is emitted for a logic block whose host element the `if=` Phase-2 lowering has since moved into a mount `<template>`; the deciding site — which stage decides a lift target's bind is top-level rather than mount-scoped — was NOT traced) prov=empirical:PA-reproduced-by-execution-at-68ed2ce2-happy-dom-querySelector-returns-null-while-the-same-selector-matches-inside-one-of-two-template-contents -->
+
+**PA-REPRODUCED BY EXECUTION at `68ed2ce2`**, three-part, each part run rather than read:
+
+1. **It compiles clean.** `bun compiler/bin/scrml.js compile benchmarks/todomvc/app.scrml` — **exit 0**,
+   13 warnings (all `W-TYPE-031-UNPROVEN`), 5 ghost lints, zero errors.
+2. **The lift target is structurally unreachable.** The emitted client carries
+   `const _scrml_lift_tgt_45 = document.querySelector('[data-scrml-logic="_scrml_logic_7"]')` and then
+   `_scrml_lift_tgt_45.innerHTML = ""`. Loading the emitted `app.html` in happy-dom:
+   `querySelector` → **null**; the same selector matches inside **1 of the 2** `<template>` elements'
+   `.content`. `document.querySelector` does not descend into template content, so the bind is `null`
+   and the very next statement is a `TypeError`.
+3. ⚑ **Nothing catches it.** `bun test compiler/tests/browser/browser-todomvc.test.js` at HEAD:
+   **36 pass · 8 skip · 0 fail · 64 expect() calls.** The harness swallows the init throw into
+   `initError` and **no test asserts that a row rendered**, so the suite is green against an app that
+   renders nothing.
+
+**Bisected at S400 to `cdf4f4de` (2026-07-30, "if= Phase 2 — if= REMOVES from the DOM per §17.1")**,
+12 steps — branch content moved into a mount `<template>` while the lift-target bind stayed top-level.
+That bisection is INHERITED from the S400 dispatch and was not re-run here; the three findings above
+were.
+
+⚑ **Same class as `g-call-expression-interpolation-in-if-chain-branch-renders-empty`** (resolved
+S400-peter): that fix stamped `insideMountTemplate` on **static-display** sites. The **lift-target**
+site was not covered — which is the §8 coverage-removal shape read forward: a fix scoped to the
+carriers someone enumerated, with the un-enumerated carrier left silently broken.
+
+⚑ **It blocks the runtime-perf question.** `partial-update` at HEAD is **unmeasurable, not slow** —
+see [[g-runtime-reconciliation-regression-post-may-unmeasurable-at-head]]. Re-establishing any perf
+baseline requires this fixed first.
+— `NEW S402-bryan (evidence measured S400 and left unfiled on a contended ledger; re-reproduced by execution before filing)`; **HIGH**; open
+
+---
+
+### g-runtime-reconciliation-regression-post-may-unmeasurable-at-head — a large post-May runtime regression localised to per-item reconciliation (happy-dom partial-update 1.04 → 17.9 ms, 17.2×; Chrome 0.80 → 260.7 ms, 326×) sits un-owned, and HEAD itself cannot be measured because the benchmark app is dead
+
+<!-- @gap id=g-runtime-reconciliation-regression-post-may-unmeasurable-at-head sev=HIGH status=open locus=searched:compiler/src/codegen/emit-each.ts,dist/scrml-runtime.js(_scrml_reconcile_list) — no locus established; the S400 measurement localises the regression to per-item reconciliation by WHICH BENCHMARKS MOVED, not by tracing a site prov=empirical:S400-dispatch-measured-a-historical-checkout-series-in-both-harnesses-happy-dom-byte-identical-to-the-2026-05-19-lockfile-and-Chrome-148-INHERITED-not-re-run-at-S402 -->
+
+⚑ **CARRIED AS INHERITED, and the distinction is load-bearing.** The series below was measured by the
+S400 benchmark dispatch across historical checkouts (happy-dom 20.8.9, byte-identical to the
+2026-05-19 lockfile; Playwright 1.60.0 / Chrome 148). **The S402 PA did NOT re-run it.** What S402 DID
+verify by execution is the reason it cannot be re-run at HEAD — see
+[[g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template]].
+
+happy-dom `partial-update`, in the S87 audit's own units (vs React):
+
+| checkout | ms | vs React |
+|---|---|---|
+| 2026-04-05 published | 0.7 | 28.7× faster |
+| 2026-05-12 published (the "bad" one) | 4.08 | 9.2× |
+| 2026-05-19 code, measured at S400 | 1.04 | 27.8× — **S102–S106 WORKED** |
+| 2026-07-24 code | 4.79 | 6.1× |
+| 2026-07-30 code | 17.9 | 1.6× |
+| **HEAD** | **unmeasurable** | — |
+
+**So the S87 5.83× was closed and then OVERTAKEN by a larger, later regression.** Chrome is worse:
+`0.80 → 260.7 ms` (**326×**), from 6.9× faster than React to **47× slower**.
+
+**Localised by which benchmarks moved, not by a trace:** swap-rows / remove-row / delete-every-10th
+move together while select-row and bulk-create stay flat → **per-item reconciliation**. Per-round
+ranges are disjoint, so it is not noise. Bundle **+138%**; build **2.06×**.
+
+⚑ **No gate would have caught it, by ruling.** bryan ruled S400: *"I don't think the perf gate is
+worth the trade. easy enough to just recompile and measure time dif on occasion."* That ruling stands
+and is correctly recorded closed on [[g-runtime-benchmarks-stale-and-no-perf-gate]]. **The point here
+is the other half of that trade:** measure-on-occasion is only as real as the command it rests on, and
+`bun run bench` had never worked in this repo (fixed S400) while the app it measures is now dead. The
+ad-hoc discipline currently has nothing executable behind it.
+
+**Owed:** fix the DOA sibling, re-measure at HEAD in the same two harnesses, then bisect the
+2026-05-19 → 2026-07-24 window. Filed without a recommended limb — the locus is not established.
+— `NEW S402-bryan (S400 measurement, unfiled on a contended ledger; carried as inherited with its source named rather than re-stamped)`; **HIGH**; open
