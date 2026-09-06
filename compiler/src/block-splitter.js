@@ -317,7 +317,7 @@ function isComponentName(name) {
  * If EOF is hit before the matching `}`, returns `source.length` (caller
  * handles as "consumed to EOF").
  */
-function skipDollarBrace(source, startPos) {
+export function skipDollarBrace(source, startPos) {
   const len = source.length;
   // expects source[startPos] === "$" && source[startPos+1] === "{"
   let i = startPos + 2;
