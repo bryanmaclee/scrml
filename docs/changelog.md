@@ -7087,6 +7087,37 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-04/05 (S400 — five rulings, two arcs built and held, and a day of false coverage claims)
+
+Sixteen-item ruling board brought on request; bryan ruled five and deferred one architectural fix. The
+session's own finding is that almost every defect was a **claim of coverage that was false** rather than
+bad logic — eight distinct instances, enumerated in `hand-off.md` §4.
+
+- **#836** — banked **dpa-041/042/043** (`:[] =` as the collector type · `~`/`lin` unification · whether
+  `yield` is more than a generator keyword) to the one file the dPA drains, and drained the review floor
+  2 → 0. dpa-043 is axiom-level and carries Approach D (narrow rather than widen) as a first-class option.
+- **#851** — filed the adopter-reported **§13.2 auto-await hole** (HIGH, governing SHALL quoted; the arrow
+  form is refused while the named-`function` form is the same defect with the diagnostic off) and the `~`
+  migration hazard; corrected three #833 claims after re-running all 16 filed entries at HEAD.
+- **#852** — landed the dpa-041/042 results and received flogence's live-agent proof that the auth-await
+  defect **orphans a running agent**. Both inbox drops arrived UNTRACKED — the per-clone hazard, twice.
+- **#853** — three instrument gaps (stale benchmarks with no perf gate · a differential that false-diffs
+  1027 artifacts across checkout paths · SPEC §17.6.6's own example miscompiling) plus the benchmark
+  re-measurement, and fixed `bun run bench`, which had **never worked in this repo**.
+
+**Rulings:** Q1 engine state-child **structural** · Q2 prod-404 **fork (b)** · Q4 §4.18.1 **its own arc** ·
+the `<each>` blindness is **HIGH** · **no perf gate**. Entry-ness unification **deferred to next session**.
+
+**Two arcs built to those rulings and HELD un-landed**, branches retained: the engine state-child producer
+swap (Q1 built and PA-verified both directions, conformance 907/907) and the prod root-entry fallback.
+
+**The measurement that decided the deferral:** entry-ness is reconstructed **11 times from 6 rules**, no
+rule correct on all three real shapes, and the closest is computed in `ast-builder` then discarded.
+
+**Two HIGH defects found and not yet filed:** the TodoMVC benchmark app dead on arrival since 2026-07-30
+with both browser test files green against it, and a post-May **17.2× / 326×** regression localised to
+per-item reconciliation. Evidence is in #853's commit body.
+
 ### 2026-09-02/03 — S395 (bryan): five rulings, four arcs, and nine instruments that read green while wrong
 
 A long deliberation-plus-execution session run concurrently with S396-peter. Five rulings given, four
