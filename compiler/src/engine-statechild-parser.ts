@@ -515,9 +515,11 @@ export function scanForOnTimeoutEntries(
     return false;
   };
 
-  // S98 (anomaly-1 fix) — precompute comment + string regions so regex
-  // matches falling INSIDE a comment / string don't fire as real openers.
-  const commentRegions = computeCommentRegions(bodyRaw);
+  // S98 (anomaly-1 fix) — precompute comment regions so regex matches falling
+  // INSIDE a comment don't fire as real openers. `bodyRaw` is a state-child
+  // BODY, so the locus is `"markup-body"`: `'` and backtick are ordinary
+  // characters there, `"` keeps its span (g-engine-state-child-apostrophe-breaks-parse).
+  const commentRegions = computeCommentRegions(bodyRaw, "markup-body");
   const inCommentRegion = (idx: number): boolean => {
     for (const [start, end] of commentRegions) {
       if (idx >= start && idx < end) return true;
@@ -608,8 +610,10 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
   const out: OnIdleEntry[] = [];
   if (!rulesRaw) return out;
 
-  // S98 (anomaly-1 fix) — comment + string region mask.
-  const commentRegions = computeCommentRegions(rulesRaw);
+  // S98 (anomaly-1 fix) — comment region mask. `rulesRaw` is the ENGINE body,
+  // so the locus is `"markup-body"` (`'` and backtick are ordinary characters
+  // there; `"` keeps its span — g-engine-state-child-apostrophe-breaks-parse).
+  const commentRegions = computeCommentRegions(rulesRaw, "markup-body");
   const inCommentRegion = (idx: number): boolean => {
     for (const [start, end] of commentRegions) {
       if (idx >= start && idx < end) return true;
@@ -677,10 +681,12 @@ export function scanForNestedEngineEntries(bodyRaw: string): NestedEngineEntry[]
 
   let i = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. A `<engine>` inside a
-    // comment or string literal MUST NOT be parsed as a nested-engine opener.
+    // S98 (anomaly-1 fix) — comment skip. A `<engine>` inside a comment MUST
+    // NOT be parsed as a nested-engine opener. `bodyRaw` is a state-child BODY
+    // → `"markup-body"` locus (`'` and backtick are ordinary characters there;
+    // `"` keeps its span — g-engine-state-child-apostrophe-breaks-parse).
     {
-      const skipped = skipCommentOrString(bodyRaw, i);
+      const skipped = skipCommentOrString(bodyRaw, i, "markup-body");
       if (skipped !== i) { i = skipped; continue; }
     }
     const lt = bodyRaw.indexOf("<engine", i);
@@ -689,7 +695,16 @@ export function scanForNestedEngineEntries(bodyRaw: string): NestedEngineEntry[]
     let scanned = i;
     let hitSkippable = false;
     while (scanned < lt) {
-      const sk = skipCommentOrString(bodyRaw, scanned);
+      // finding 2 (S402) — an opener's attribute region and a `${…}` block are
+      // opaque STRUCTURALLY, so this byte-walk can never step into one and read
+      // a `//` / `/*` / `<!--` there as a body comment. (`skipOpaqueSpan` never
+      // engulfs the candidate: `lt` is a `<engine` / `<onTransition` opener,
+      // which the span skip stops at rather than swallowing.)
+      {
+        const op = skipOpaqueSpan(bodyRaw, scanned);
+        if (op.end !== scanned && op.end <= lt) { scanned = op.end; continue; }
+      }
+      const sk = skipCommentOrString(bodyRaw, scanned, "markup-body");
       if (sk !== scanned) {
         if (sk > lt) { i = sk; hitSkippable = true; break; }
         scanned = sk;
@@ -889,10 +904,14 @@ export function scanForOnTransitionEntries(
 
   let i = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. A `<onTransition>` inside
-    // a comment or string literal MUST NOT be parsed as a real opener.
+    // S98 (anomaly-1 fix) — comment skip. A `<onTransition>` inside a comment
+    // MUST NOT be parsed as a real opener. `bodyRaw` here is a state-child BODY
+    // (nested placement) or the ENGINE body (engine-direct placement) — either
+    // way a markup/state body → `"markup-body"` locus. The `<onTransition>`
+    // BODY itself is logic and is scanned by `findOnTransitionCloser`, which
+    // keeps the `"logic-body"` locus.
     {
-      const skipped = skipCommentOrString(bodyRaw, i);
+      const skipped = skipCommentOrString(bodyRaw, i, "markup-body");
       if (skipped !== i) { i = skipped; continue; }
     }
     const lt = bodyRaw.indexOf("<onTransition", i);
@@ -901,7 +920,16 @@ export function scanForOnTransitionEntries(
     let scanned = i;
     let hitSkippable = false;
     while (scanned < lt) {
-      const sk = skipCommentOrString(bodyRaw, scanned);
+      // finding 2 (S402) — an opener's attribute region and a `${…}` block are
+      // opaque STRUCTURALLY, so this byte-walk can never step into one and read
+      // a `//` / `/*` / `<!--` there as a body comment. (`skipOpaqueSpan` never
+      // engulfs the candidate: `lt` is a `<engine` / `<onTransition` opener,
+      // which the span skip stops at rather than swallowing.)
+      {
+        const op = skipOpaqueSpan(bodyRaw, scanned);
+        if (op.end !== scanned && op.end <= lt) { scanned = op.end; continue; }
+      }
+      const sk = skipCommentOrString(bodyRaw, scanned, "markup-body");
       if (sk !== scanned) {
         if (sk > lt) { i = sk; hitSkippable = true; break; }
         scanned = sk;
@@ -1044,8 +1072,13 @@ function findOnTransitionCloser(bodyRaw: string, from: number): number {
   let lowerDepth = 0;
   while (i < bodyRaw.length) {
     // S98 (anomaly-1 fix) — comment / string skip. See skipCommentOrString.
+    // `"logic-body"` locus: an `<onTransition>` body is effect STATEMENTS
+    // (§51.0.H), not markup prose — a `"..."` there IS a string literal, so
+    // delimiter tracking stays on. This is the ONE scanner in this file that
+    // is not at the `"markup-body"` locus
+    // (g-engine-state-child-apostrophe-breaks-parse).
     {
-      const skipped = skipCommentOrString(bodyRaw, i);
+      const skipped = skipCommentOrString(bodyRaw, i, "logic-body");
       if (skipped !== i) { i = skipped; continue; }
     }
     // Skip ${...} interpolation
@@ -1173,9 +1206,13 @@ function findEngineCloser(bodyRaw: string, from: number): number {
   // (closerName.length > 0)` branch — corrupting state-child accounting.
   let lowerDepth = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. See skipCommentOrString.
+    // S98 (anomaly-1 fix) — comment skip. `bodyRaw` is the ENGINE body (state-
+    // children + their nested markup), so the locus is `"markup-body"`: a
+    // contraction in a state-child's prose must not open a phantom string that
+    // swallows the engine's own `</>`
+    // (g-engine-state-child-apostrophe-breaks-parse).
     {
-      const skipped = skipCommentOrString(bodyRaw, i);
+      const skipped = skipCommentOrString(bodyRaw, i, "markup-body");
       if (skipped !== i) { i = skipped; continue; }
     }
     // Skip ${...} interpolation
@@ -1350,17 +1387,81 @@ function findEngineCloser(bodyRaw: string, from: number): number {
  * Recognized regions:
  *   - `// ... \n`            line comment (consumes through the newline)
  *   - `/* ... *\/`           block comment (consumes through the closer)
- *   - `"..."` / `'...'`      string literals (honors `\` escape)
+ *   - `<!-- ... -->`         markup-native comment (§27.2)
+ *   - `"..."` / `'...'`      string literals (honors `\` escape) — LOGIC LOCUS ONLY
  *   - `` `...` ``            backtick template literal (honors `\` escape;
  *                            interior `${...}` is consumed as part of the
  *                            literal since the closing backtick is the real
  *                            terminator and we don't want a stray `${` to
  *                            kick scanning back into "live syntax" mode)
+ *                            — LOGIC LOCUS ONLY
  *
  * Unterminated regions consume to EOF — matches BS-level best-effort
  * recovery for unclosed `//` / `<!-- -->` (block-splitter.js lines 701-704).
+ *
+ * ---------------------------------------------------------------------------
+ * `locus` — g-engine-state-child-apostrophe-breaks-parse (S398/S402)
+ * ---------------------------------------------------------------------------
+ *
+ * ⚑ READ THIS BEFORE WIDENING. The `<match>` sibling fix
+ * (`g-match-arm-apostrophe-bs`, S195/S196) states the S109 locus ruling as
+ * "a markup-text body is TEXT with no string concept" and drops `'` AND `"`
+ * together. **That formulation does NOT transfer to this locus, and the first
+ * cut of this fix transferred it and broke two surfaces.** The governing text
+ * is CHARACTER-SPECIFIC, not body-specific:
+ *
+ *   - §4.18.3 — "The double-quote is the **only** display-text-literal
+ *     delimiter … The apostrophe `'` is an **ordinary interior character** and
+ *     requires no escape … The backtick is likewise an ordinary interior
+ *     character and is NOT a display-text delimiter."
+ *
+ * So `'` and `` ` `` have NO delimiter role outside a logic body — those are the
+ * two this fix drops. `"` KEEPS its role, at every locus here, for two
+ * independent reasons:
+ *
+ *   - §4.18.1 + §4.18.3 — an engine state-child body is **code-default**, NOT
+ *     free-text, and in a code-default body `"…"` is a delimited display-text
+ *     literal with `\"` escapes and `${}` interpolation. Dropping the span made
+ *     `<A rule=.B>"Wrap it in a <p> tag"</>` lose the state-child outright.
+ *   - §5.1 — attribute values are `"`-delimited and are DATA. The span is what
+ *     stopped the two opener-blind scanners here (`computeCommentRegions` and
+ *     the `while (scanned < lt)` re-scan loops) from reading a `//` / `/*` /
+ *     `<!--` inside an attribute value as a real comment. That shield is now
+ *     ALSO structural — see `skipOpaqueSpan` — but the span is load-bearing on
+ *     its own and must not be removed on the strength of the `<match>` wording.
+ *
+ * What §4.18.1/§4.18.2 DO give us is the NESTING rule: a plain-markup element
+ * opened inside a code-default body opens its OWN **free-text** body, where
+ * "a bare run of prose in a `<p>` body is display text, unchanged" (§4.17
+ * carries the same statement for raw-content children). That is why the
+ * apostrophe in `<B><p>it's ready</p></>` is display text. It would also make
+ * an unpaired `"` there display text — but acting on that needs body-mode
+ * nesting state these flat scanners do not carry, so it is filed as a separate
+ * gap rather than approximated by deleting the delimiter.
+ *
+ * Pre-fix, a single contraction in state-child prose (`<B><p>it's ready</p></>`)
+ * opened a phantom string that consumed the `</p>` / `</>` closers through to
+ * EOF, so the state-child had no findable closer and was DROPPED from the
+ * parse — surfacing as `E-ENGINE-STATE-CHILD-MISSING` naming a variant that is
+ * plainly present in source. An EVEN number of apostrophes "closed" the phantom
+ * span and the same program compiled clean; that asymmetry is the proof the
+ * scan was string-lexing prose.
+ *
+ * `"markup-body"` is the locus for every scanner that walks an engine body or a
+ * state-child body (the closer-finders, the nested-element scanners, and the
+ * top-level state-child splitter). `"logic-body"` is the locus for the one
+ * scanner that walks a genuine logic body — `findOnTransitionCloser`, whose
+ * `<onTransition>` body is effect STATEMENTS (§51.0.H), not markup prose.
+ *
+ * Parity note: this matches `findStructuralBodyEnd` in block-splitter.js — the
+ * UPSTREAM stage that captures the engine body raw already treats `'` / `"` at
+ * markup-text level as prose. Keeping delimiter tracking here could never
+ * recover a span BS had already mangled; it only mis-scanned prose that BS had
+ * handed over intact.
  */
-function skipCommentOrString(s: string, i: number): number {
+type ScanLocus = "markup-body" | "logic-body";
+
+function skipCommentOrString(s: string, i: number, locus: ScanLocus): number {
   if (i >= s.length) return i;
   const c = s[i];
   const c2 = s[i + 1];
@@ -1415,7 +1516,40 @@ function skipCommentOrString(s: string, i: number): number {
     return s.length; // unterminated — consume to EOF
   }
 
-  // String literals (single / double quote) — honor backslash escape.
+  // ---- Below this line: STRING-SPAN regions, gated by delimiter + locus. ----
+  // g-engine-state-child-apostrophe-breaks-parse (S398/S402) — `'` and `` ` ``
+  // are NOT span delimiters outside a logic body. SPEC §4.18.3 is explicit and
+  // language-wide: "The double-quote is the **only** display-text-literal
+  // delimiter … The apostrophe `'` is an **ordinary interior character** … The
+  // backtick is likewise an ordinary interior character and is NOT a
+  // display-text delimiter." So a contraction (`it's`), a possessive, or a
+  // stray backtick in prose must be ordinary text here, never an unterminated
+  // span that swallows the body's closers.
+  //
+  // ⚑ `"` KEEPS its span role at EVERY locus, and that is deliberate — it was
+  // wrong in the first cut of this fix (review finding 3, S402). Two governing
+  // rules give `"` a delimiter role exactly where these scanners walk:
+  //   - §4.18.3 — a state-child body is CODE-DEFAULT (§4.18.1), and in a
+  //     code-default body `"…"` IS a delimited display-text literal, with `\"`
+  //     escapes and `${}` interpolation. Dropping the span made
+  //     `<A rule=.B>"Wrap it in a <p> tag"</>` lose the state-child entirely.
+  //   - §5.1 — attribute values are `"`-delimited. The `"` span is what keeps a
+  //     `//`, `/*` or `<!--` INSIDE an attribute value from being read as a
+  //     comment opener by the two scanners here that have no opener-awareness
+  //     (`computeCommentRegions` and the `while (scanned < lt)` re-scan loops).
+  //     Dropping it silently swallowed a following `<onTimeout>` / `<onIdle>` /
+  //     `<onTransition>` at exit 0 with no diagnostic (review finding 1, S402 —
+  //     reproduced base-vs-head by file swap in one checkout).
+  //
+  // The residual — an unpaired `"` in NESTED free-text prose (`<p>The 6" pipe</p>`)
+  // — is PRE-EXISTING (base fails it identically) and is filed as its own gap
+  // rather than folded in here; closing it needs body-mode nesting awareness in
+  // scanners that do not currently have any.
+  const quoteIsDelimiter =
+    c === '"' || (locus === "logic-body" && (c === "'" || c === "`"));
+  if (!quoteIsDelimiter) return i;
+
+  // String literals — honor backslash escape.
   if (c === '"' || c === "'") {
     const quote = c;
     let j = i + 1;
@@ -1464,13 +1598,99 @@ function skipCommentOrString(s: string, i: number): number {
  *
  * Pairs symmetrically with `skipCommentOrString` — both must classify the
  * same character ranges as "skippable", or the two filter paths could
- * disagree on a borderline character.
+ * disagree on a borderline character. That symmetry is why `locus` is
+ * threaded through rather than hard-coded: at the `"markup-body"` locus the
+ * walker-based scanners no longer treat a quote as a span delimiter
+ * (g-engine-state-child-apostrophe-breaks-parse), so this region set must not
+ * either — otherwise an `<onTimeout>` sitting after a contraction in
+ * state-child prose would be filtered out as "inside a string" and silently
+ * dropped while the closer-scan happily walked over it.
  */
-function computeCommentRegions(s: string): Array<[number, number]> {
+/**
+ * Skip an OPAQUE NON-COMMENT span — a `${…}` logic block or a markup element
+ * opener's attribute region — starting at `i`.
+ *
+ * g-engine-state-child-apostrophe-breaks-parse review finding 2 (S402). The
+ * walker-based scanners (`findStateChildCloser`, `findEngineCloser`) never step
+ * INTO an opener: they hand the opener to `findOpenerEnd`, which is quote-,
+ * paren-, `${}`- and angle-aware, and resume past its `>`. They also skip
+ * `${…}` explicitly. **Two scanner families here have neither protection** and
+ * walk byte-by-byte over the whole text: `computeCommentRegions` (the mask
+ * builder behind `scanForOnTimeoutEntries` / `scanForOnIdleEntries`) and the
+ * `while (scanned < lt)` re-scan loops.
+ *
+ * Before this helper, the ONLY thing keeping those two families out of an
+ * attribute value or a logic string was the string-span skip — so a `//`, `/*`
+ * or `<!--` written inside `title='a /* b'` or `${ ['/* x'] }` was shielded by
+ * accident, and any narrowing of the span rules silently un-shielded it. That
+ * is not a theoretical hazard: it was MEASURED. A `/*` inside an attribute
+ * value opened a block comment that ran to EOF and swallowed the following
+ * `<onTimeout>` / `<onIdle>` / `<onTransition>` **at exit 0 with no
+ * diagnostic**.
+ *
+ * The shield is now STRUCTURAL rather than incidental: these regions are opaque
+ * because of what they ARE, not because of which quote character happens to
+ * delimit them. Returns the index one past the span, or `i` unchanged.
+ *
+ * `maskFrom` is where a CALLER building a mask should start recording. For an
+ * opener it is one past the TAG NAME, never the opener's `<` — the
+ * `<onTimeout …/>` / `<onIdle …/>` regexes anchor `m.index` at that `<`, so
+ * masking it would delete the very elements the scan exists to find, while
+ * masking the attribute region still suppresses a nested mention inside some
+ * OTHER element's attribute value (`<a title="<onTimeout after=5s to=.B/>">`).
+ */
+function skipOpaqueSpan(s: string, i: number): { end: number; maskFrom: number } {
+  // `${ … }` logic block — balanced braces. Its interior is LOGIC (§3.1), so a
+  // comment token there is code, not a body comment, and an `<onTimeout>`
+  // mention there is not a real element.
+  if (s[i] === "$" && s[i + 1] === "{") {
+    let j = i + 2;
+    let braceDepth = 1;
+    while (j < s.length && braceDepth > 0) {
+      if (s[j] === "{") braceDepth++;
+      else if (s[j] === "}") braceDepth--;
+      j++;
+    }
+    return { end: j, maskFrom: i };
+  }
+  // Markup element opener `<tag …>` / `<tag …/>`. Attribute values are `"`- (or
+  // legacy `'`-) delimited per §5.1 and are DATA.
+  if (s[i] === "<") {
+    const n = s[i + 1];
+    if (n && ((n >= "a" && n <= "z") || (n >= "A" && n <= "Z") || n === "_")) {
+      let nameEnd = i + 1;
+      while (nameEnd < s.length) {
+        const ch = s[nameEnd]!;
+        if ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") ||
+            (ch >= "0" && ch <= "9") || ch === "_" || ch === "-") nameEnd++;
+        else break;
+      }
+      const openerEnd = findOpenerEnd(s, i + 1);
+      // `openerEnd` is the index of the terminating `>`; advance one past it.
+      // A malformed opener (no `>`) returns -1 — leave it to the caller's
+      // byte-walk rather than consuming the rest of the text.
+      if (openerEnd >= 0) return { end: openerEnd + 1, maskFrom: nameEnd };
+    }
+  }
+  return { end: i, maskFrom: i };
+}
+
+function computeCommentRegions(s: string, locus: ScanLocus): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   let i = 0;
   while (i < s.length) {
-    const skipped = skipCommentOrString(s, i);
+    // finding 2 (S402) — opaque spans FIRST. An opener's attribute region and a
+    // `${…}` block are skipped structurally, so a comment token inside either
+    // can never be mistaken for a body comment regardless of the quote rules.
+    {
+      const op = skipOpaqueSpan(s, i);
+      if (op.end !== i) {
+        if (op.maskFrom < op.end) out.push([op.maskFrom, op.end]);
+        i = op.end;
+        continue;
+      }
+    }
+    const skipped = skipCommentOrString(s, i, locus);
     if (skipped !== i) {
       out.push([i, skipped]);
       i = skipped;
@@ -1685,12 +1905,21 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
   // Symmetric fix applied in `findEngineCloser` + `findOnTransitionCloser`.
   let lowerDepth = 0;
   while (i < rulesRaw.length) {
-    // S98 (anomaly-1 fix) — skip past line/block comments + string literals
-    // FIRST so a stray `${`, `<X`, or `</>` inside comment / string prose is
-    // not mis-recognized as live syntax. See `skipCommentOrString` for
-    // rationale (the AST builder preserves comment text verbatim in rulesRaw).
+    // S98 (anomaly-1 fix) — skip past line/block/markup comments FIRST so a
+    // stray `${`, `<X`, or `</>` inside comment prose is not mis-recognized as
+    // live syntax. See `skipCommentOrString` for rationale (the AST builder
+    // preserves comment text verbatim in rulesRaw).
+    //
+    // `"markup-body"` locus (g-engine-state-child-apostrophe-breaks-parse) —
+    // THIS is the primary defect site. The span being walked is the
+    // state-child's own body plus every nested plain-markup body inside it, and
+    // §4.18.1/§4.18.2 make those nested bodies FREE-TEXT: `<B><p>it's ready</p></>`
+    // is display text. Tracking `'` here opened a phantom string that ate the
+    // `</p>` and `</>` closers through to EOF, so `findStateChildCloser`
+    // returned -1, `parseEngineStateChildren` dropped `<B>` entirely, and SYM
+    // reported `E-ENGINE-STATE-CHILD-MISSING` for a variant present in source.
     {
-      const skipped = skipCommentOrString(rulesRaw, i);
+      const skipped = skipCommentOrString(rulesRaw, i, "markup-body");
       if (skipped !== i) { i = skipped; continue; }
     }
     // Skip ${...} interpolation
@@ -1905,11 +2134,15 @@ export function parseMessageArms(
   // Skip leading whitespace + comments to reach the first arm candidate. The
   // arm region is the leading contiguous `|`-run; if the first non-trivia char
   // is not `|`, there are no message arms and the whole body is render body.
+  // `"markup-body"` locus — `bodyRaw` is a state-child body. Only genuine
+  // trivia (whitespace + comments) is skipped; a leading `"…"` display-text
+  // literal is CONTENT, and either way it is not a `|`, so the arm-region
+  // decision below is unchanged (g-engine-state-child-apostrophe-breaks-parse).
   function skipTrivia(at: number): number {
     let p = at;
     for (;;) {
       while (p < len && /\s/.test(bodyRaw[p]!)) p++;
-      const sk = skipCommentOrString(bodyRaw, p);
+      const sk = skipCommentOrString(bodyRaw, p, "markup-body");
       if (sk !== p) { p = sk; continue; }
       break;
     }
@@ -2138,11 +2371,12 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
 
   let i = 0;
   while (i < rulesRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip at top-level scan. A `<X`
-    // inside a `// line comment` or `"string"` MUST NOT be parsed as a
-    // state-child opener.
+    // S98 (anomaly-1 fix) — comment skip at top-level scan. A `<X` inside a
+    // `// line comment` MUST NOT be parsed as a state-child opener.
+    // `"markup-body"` locus — `rulesRaw` is the ENGINE body
+    // (g-engine-state-child-apostrophe-breaks-parse).
     {
-      const skipped = skipCommentOrString(rulesRaw, i);
+      const skipped = skipCommentOrString(rulesRaw, i, "markup-body");
       if (skipped !== i) { i = skipped; continue; }
     }
     // Find next `<` followed by an uppercase letter (state-child opener).
@@ -2151,26 +2385,26 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     // ss4 item 2 — a `<!-- -->` HTML comment beginning EXACTLY at `lt` would
     // otherwise fall through the `next`-is-uppercase check below (`next` ===
     // `!`) and step INTO the comment at `lt + 1`, past the `<` that
-    // `skipCommentOrString` needs to recognize the comment — so a comment-
-    // interior quote / apostrophe / backtick then opens a phantom string that
-    // swallows the following state-children. Skip the whole skippable span
-    // here. (The inner re-scan below handles a comment / string that STARTS
-    // before `lt` but engulfs it; this handles one that starts AT `lt`.)
+    // `skipCommentOrString` needs to recognize the comment — so the comment's
+    // interior `<X` / `</>` fragments were then read as live structure and the
+    // following state-children were swallowed. Skip the whole skippable span
+    // here. (The inner re-scan below handles a comment that STARTS before `lt`
+    // but engulfs it; this handles one that starts AT `lt`.)
     {
-      const skAtLt = skipCommentOrString(rulesRaw, lt);
+      const skAtLt = skipCommentOrString(rulesRaw, lt, "markup-body");
       if (skAtLt !== lt) { i = skAtLt; continue; }
     }
-    // Comment / string regions between `i` and `lt` may contain stray `<X`
-    // tokens that aren't real openers — re-scan from `i` to `lt` and bail
-    // back to the top of the loop if we hit one. (Cheap: most rulesRaw
-    // strings contain few or no comments.)
+    // Comment regions between `i` and `lt` may contain stray `<X` tokens that
+    // aren't real openers — re-scan from `i` to `lt` and bail back to the top
+    // of the loop if we hit one. (Cheap: most rulesRaw strings contain few or
+    // no comments.)
     let scanned = i;
     let hitSkippable = false;
     while (scanned < lt) {
-      const sk = skipCommentOrString(rulesRaw, scanned);
+      const sk = skipCommentOrString(rulesRaw, scanned, "markup-body");
       if (sk !== scanned) {
         // If the skip region engulfs `lt`, the `<` we found was inside a
-        // comment / string — restart the outer loop from past the region.
+        // comment — restart the outer loop from past the region.
         if (sk > lt) { i = sk; hitSkippable = true; break; }
         scanned = sk;
       } else {
