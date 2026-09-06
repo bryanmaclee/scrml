@@ -30,11 +30,45 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 93 |
+| HIGH | 94 |
 | MED | 212 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-no-unterminated-delimiter-diagnostic-exists-anywhere-so-four-delimiter-classes-consume-to-EOF-silently — `/* */`, `<!-- -->`, strings and backticks all run to end-of-file when unterminated, at exit 0, and the tokenizer does it too
+
+<!-- @gap id=g-no-unterminated-delimiter-diagnostic-exists-anywhere sev=HIGH status=open locus=compiler/src/tokenizer.ts(readBlockComment pushes a COMMENT token to EOF with no diagnostic)+searched:compiler/src — `grep -oE "E-[A-Z-]*UNTERM[A-Z-]*"` returns ZERO matches anywhere in the compiler prov=dd:scrml-support/docs/deep-dives/stateful-scanning-simplify-to-ship-dpa-044-2026-09-06.md-Call-1 -->
+
+**dpa-044's Call 1, which the dPA ruled OUTRANKS the banked simplification question it was asked.**
+`grep -oE "E-[A-Z-]*UNTERM[A-Z-]*"` over `compiler/src` returns **zero**: scrml has **no
+unterminated-delimiter diagnostic at all**. An unterminated `/* */`, `<!-- -->`, string or backtick
+consumes to EOF and the compiler reports nothing — and this is not confined to the ad-hoc body
+scanners, **the tokenizer itself does it** (`readBlockComment`, `tokenizer.ts:1366`, pushes a COMMENT
+token to EOF silently).
+
+⛑ **This is the root under a defect family that has cost more than any other this session.** Rounds 4
+and 5 of the S402 apostrophe arc were both consume-to-EOF: `skipDollarBrace` returning `source.length`
+on a mis-lex, and `computeCommentRegions` then masking `[$, EOF)` and deleting every structural
+element after it — **at exit 0, with no diagnostic**. That arc was stopped at five rounds
+([[g-engine-state-child-apostrophe-breaks-parse]]).
+
+**Measured unpaired openers across 1921 corpus files** (dPA): `/*` **0** · `<!--` **0** · string
+**7** · backtick **1**. So the class is live in the corpus at 8 instances, and the seven strings are
+prose apostrophes — the exact shape of the unlandable arc.
+
+⛑ **Why this is the highest-ratio item on the board:** making it a diagnostic **removes no surface,
+requires no migration, needs no ruling, and closes all four members**. Priced at **6-14h** by the dPA.
+Every alternative on the table (restricting comment forms, removing `~`) is newly-rejecting and owes a
+measured migration; this one is purely additive.
+
+**Scoped arc, with the design constraint that decides whether the follow-on is worth building:**
+`docs/changes/lexical-strip-first-2026-09-06/SCOPING.md` — bryan's strip-first architecture, whose
+acceptance test is a COUNT (how many of the 10 comment-scanning sites can delete their comment handling
+outright once a front pass guarantees no comment survives). If that number is not most of them, the
+strip pass shrinks scanners without retiring them and should not be built as scoped.
+— `NEW S402-bryan (dpa-044 Call 1; the zero-match grep is the finding)`; **HIGH**; open
+
 
 <!-- ⛑ S402-bryan TYPE-CENSUS filing — ONE new HIGH plus the census that reframes the two flint entries above. The census is committed and re-runnable: `bun docs/changes/type-annotation-enforcement-census-2026-09-06/type-annotation-census.mjs` (46 paired control/violation fixtures). -->
 
