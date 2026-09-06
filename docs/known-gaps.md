@@ -11744,7 +11744,13 @@ regression** (88 KB engine body, 590 ms → 10,039 ms, +9.4 s) that was **invisi
 inside noise)** and was caught ONLY by an adversarial `/code-review` pass. No standing instrument
 would have said a word. Fixed before landing — but the catch was a review, not a gate.
 
-**Two halves, separable:** (a) currency — re-run and keep the historical series intact; (b) a gate —
+⚑ **RULED S400 — NO PERF GATE.** bryan, verbatim: *"I don't think the perf gate is worth the trade. easy enough to just recompile and measure time dif on occasion."* Limb (b) is **CLOSED — do not re-propose it**; the cry-wolf cost on a shared multi-agent machine outweighs the catch rate. Recorded here so a newest-first sweep does not read an open question into this entry.
+
+⚑ **AND THE TOOL THAT RULING DEPENDS ON WAS DEAD.** `bun run bench` invoked `--timing`, which is not a recognised option (the real flag is `--verbose`), so it exited 1 without measuring anything — PA-verified broken since **2026-04-10, the initial split from scrml8. It never worked in this repo.** It also pointed at `samples/compilation-tests/`, the NEGATIVE-fixture corpus: 277 expected errors, 1698 warnings, 187 s. Fixed S400 — flag corrected and retargeted to `examples/` (32 real programs, exit 1 from 4 known-failing files incl. the `fail .Variant` gap). **The measurement is the WALL TIME, not the exit code.** Baseline at `aece349d`: **8,095 ms**. An ad-hoc discipline is only as real as the command it rests on, and this one had been dead for five months.
+
+**Remaining half — (a) currency:** re-run and keep the historical series intact. Dispatched S400.
+
+**Original framing, superseded above:** (a) currency — re-run and keep the historical series intact; (b) a gate —
 even an advisory one with a wide band would have caught the 17×. (b) is the operator's call per the
 §8 cry-wolf rule (a perf gate on a noisy shared machine is a strong candidate for the bypassed-then-
 deleted shape), and is NOT proposed here.

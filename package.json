@@ -53,7 +53,7 @@
     "test": "bun test compiler/tests/",
     "test:coverage": "bun test compiler/tests/ --coverage",
     "watch": "bun --watch compiler/src/cli.js compile",
-    "bench": "bun run compiler/src/cli.js compile samples/compilation-tests/ --timing",
+    "bench": "bun run compiler/src/cli.js compile examples/ --verbose",
     "security": "bun run compiler/src/cli.js compile samples/compilation-tests/ && node --check samples/compilation-tests/*/dist/*.client.js 2>&1",
     "lsp": "bun run lsp/server.js --stdio",
     "//types": "S365 — bun runs .ts TRANSPILE-ONLY, so nothing type-checked compiler/src until this landed. See scripts/types-gate.ts; it found nine live exhaustive-switch `never` failures that had been invisible.",
