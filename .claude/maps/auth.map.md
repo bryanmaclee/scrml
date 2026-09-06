@@ -1,21 +1,21 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF** over its keyed file list (`auth-graph.ts` · `protect-analyzer.ts` · `stdlib/auth*` · `commands/dev.js`): `--name-only` EMPTY. ⚠ **THIS IS THE ROW THAT WAS BURNED TWO PASSES AGO BY EXACTLY THIS REASONING** — its cited line range had been deleted by the commit that made its surface non-empty. Re-derive any anchor here by SYMBOL GREP before trusting it.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #

@@ -1,21 +1,21 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **NO EXTERNAL-DEPENDENCY CHANGE for the FOURTH consecutive window** — `bun.lock` is `--name-only` EMPTY and no `dependencies`/`devDependencies` entry was added, removed or re-ranged. ⚠ `package.json` itself DID change (`scripts.bench`); see config.map.md. Internal graph re-walked: **699 local import edges (+24) over 195 files**. The NEW edges are all #859: `compute-pgo-flags.ts -> library-shape.js`, `component-expander.ts -> library-shape.js`, `codegen/index.ts -> library-shape.js`, `library-shape.js -> types/ast.ts` (the `FILE_SHAPES` re-export), plus `ast-builder.js` / `api.js` / `tool-program.ts` switching their `library-shape.js` import from `isForeignLangLibDecl` to `classifyFileShape`.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #
@@ -143,8 +143,14 @@ parsing, cell-accessor-rename), so this widens the internal consumer set, not th
 
 ## Internal Module Graph — compiler pipeline (compiler/src/api.js is the spine)
 
+⛑ **S402 — RE-WALKED AT `499eecce`: 195 source files · 699 local import edges** (was 192 · 672 at
+`fc6df72e`), by `flogence/scripts/mapgen.ts --kind deps`. **+24 edges, and the largest single
+contributor is #859's file-shape consolidation** — see the first row of the table below.
+
+
 | Stage | Module(s) | Feeds |
 |---|---|---|
+| **⛑ FILE SHAPE — SEVEN IMPORTERS OF ONE LEAF, AND FOUR OF THEM ARE HAND COPIES THAT WERE DELETED (NEW row, S402, #859 `85ebbb5f`)** | **`compiler/src/library-shape.js`** (240L) — the SINGLE SOURCE for `classifyFileShape` / `isRecognizedNonEntryShape` / `isLibraryShape` / `isForeignLangLibDecl` | ⛑ **THE EDGE THAT MATTERS IS THE ONE POINTING *INTO* THE TYPE BARREL: `library-shape.js -> types/ast.ts` (`FILE_SHAPES` RE-EXPORT, `:121`) — a `.js` leaf importing from `.ts`, which is unusual in this tree and is FORCED.** `FileShape` is `(typeof FILE_SHAPES)[number]`; declaring the array in `library-shape.js` instead would make the derivation hit TS7016 and collapse the union to `any`. **Do not "clean this up" by moving the array down to the leaf.** ⚑ **NEW IMPORTERS THIS WINDOW (all #859):** `compute-pgo-flags.ts` (the PRECG STAMP) · `component-expander.ts` (the CE RE-STAMP) · `codegen/index.ts` (`getFileShape`). **CHANGED IMPORTERS:** `ast-builder.js` · `api.js` · `tool-program.ts` each swapped `isForeignLangLibDecl` for `classifyFileShape` / `isLibraryShape` / `isRecognizedNonEntryShape`. ⛔ **FOUR HAND COPIES OF THE SHAPE PREDICATE WERE DELETED INTO THIS LEAF, AND ONE OF THEM CITED `ast-builder.js line 12222` — ~7,700 LINES STALE, pointing into an unrelated part of a 20k-line file.** None of the four knew about `"pure-channel"`. ⚠ **THE READ ORDER IS A REAL CONSTRAINT: `api.js`'s W5a is the ONLY PRE-CE READER**; `tool-program.ts` and `codegen/index.ts` run post-CE and want the RE-STAMPED answer. See domain.map.md. |
 | **⛑ §17.1.1 `if-chain` CHILD SHAPE — ONE LEAF, 14 IMPORTERS, 35 CALL SITES, AND *ONE* REMAINING DELIBERATE NON-EDGE (created #805, widened #811, closed onto route inference #818)** | `compiler/src/ast-if-chain.js` — ⚠ **`src/` ROOT, NOT `codegen/`**; `compiler/src/codegen/ast-if-chain.js` does not exist, and consumers import it as `"../ast-if-chain.js"` from `codegen/` and `"./ast-if-chain.js"` from `src/`. **Re-derived at `8e278c73`: 14 importing modules, 35 call sites** (`grep -rl 'from "\.\{1,2\}/ast-if-chain.js"' compiler/src/` -> 14; `ifChainChildNodes(` minus the definition -> 35) — up from 13/32, the delta being **#818's NEW `route-inference.ts:92` edge** plus three call sites (`collect.ts:215`, `route-inference.ts:1137`, `route-inference.ts:1199`). ⛑ **THE NEW EDGE IS SECURITY-BEARING AND ITS DIRECTION MATTERS:** route inference must claim a branch-declared `server fn` BEFORE `codegen/collect.ts` hands the function list to the CLIENT emitter, or the `server fn` BODY ships into `client.js` with no `server.js` — see invariant 86 in primary.map.md. ⚠ **ONE DELIBERATE NON-EDGE REMAINS: `symbol-table.ts:10642`** is a TOTAL `Object.keys` walk that already reaches `branches[].element`; routing it through this enumerator of KNOWN fields would NARROW it. | ⚠ **THIS ROW WAS MALFORMED: two cells in a three-column table.** Closed S397 with this cell rather than by reflowing the prose, because the prose is load-bearing and the defect is structural. **A short row does not error — markdown pads it — so a `sort`/`uniq` on pipe counts is the only thing that sees it.** |
 | CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |

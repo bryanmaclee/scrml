@@ -1,21 +1,21 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **NEW FILE-SHAPE / ENTRY-NESS SECTION** — the closed five-variant set, the ⛔ `fileShape != entry-ness` distinction, and the two-stamp lifecycle. Re-walked.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #
@@ -269,6 +269,110 @@ S287 P2 writes-authority DD S4-A co-location + "your recs"; S288 auto-immutable 
 E-SCHEMA-010 reject-bareword ruling). See error.map.md (the §34 codes), dependencies.map.md (module
 graph), schema.map.md (`TableDecl`/`SecdefFnDecl`/`isEffectivelyImmutable`/the lowering functions),
 build.map.md (`scrml db-migrate` flags), migrations.map.md (the whole apply model).
+
+## §21.5 / §38.12.6 / §40.8 — FILE SHAPE: "what kind of document is this?" (NEW section, S402, #859 `85ebbb5f`)
+
+⛑ **THIS SECTION EXISTS BECAUSE ITS ABSENCE WAS MEASURED.** An S402 dispatch working this exact
+surface reported **"2 incidental hits across all 13 files, zero Task-Shape Routing rows"** —
+reproduced at this watermark: `fileShape` / `library-shape` / `classifyFileShape` / `FILE_SHAPES`
+returned **ZERO in every hand-authored map**. The dispatch's useful pointer came from
+`non-compliance.report.md`, not from any map.
+
+### The concept, and the one distinction that matters
+
+**FILE SHAPE answers "what kind of `.scrml` document is this?" — a FILE fact, derived from the shape
+of the file's TOP-LEVEL nodes.** It is computed by
+`compiler/src/library-shape.js:classifyFileShape(nodes, hasProgramRoot)` and every file classifies to
+EXACTLY ONE of a closed five-member set:
+
+| shape | SPEC | means |
+|---|---|---|
+| `"program"` | §40.8 | declares a top-level `<program>` |
+| `"pure-module"` | §21.5 | pure-type / pure-fn module — **no top-level markup at all** beyond §23.6 `<foreign lang>` library decls |
+| `"pure-channel"` | §38.12.6 | no `<program>`, and **every** top-level markup node is a `<channel>` declaration |
+| `"non-entry-page"` | §40.8 | no `<program>`, declares a top-level `<page>` — the route file of a multi-page app |
+| `"bare-markup"` | (residual) | none of the above. **This is the shape `W-PROGRAM-001` exists to flag.** |
+
+⛑ **`"bare-markup"` BEING THE RESIDUAL IS THE ORGANISING PRINCIPLE, NOT A LEFTOVER.** The set is
+exhaustive by construction, so **a shape nobody anticipated WARNS rather than going silent.** Every
+design decision in the classifier follows from that, including the two counter-intuitive ones below.
+
+### ⛔ FILE SHAPE IS NOT ENTRY-NESS, AND CONFLATING THEM IS THE STANDING TRAP
+
+Per SPEC §40.8 the entry file is *"the file resolved by the build root"* — **a BUILD fact.** A single
+FileAST cannot know whether it is the build root, so **no variant here is called "entry."**
+`"program"` means only *this file declares a top-level `<program>`*: strong evidence for entry-ness
+(§40.8 requires the entry to declare one) but **not the same claim**, because the compiler does not
+enforce uniqueness — `E-PROGRAM-002` is **reserved-not-implemented** (§40.8: *"TBD — separate
+diagnostic; not part of Wave 1"*), so more than one file in a compile unit can carry the shape.
+
+⚠ **`codegen/index.ts`'s entry pick is a HEURISTIC — first file with `hasProgramRoot` wins — and a
+source comment forbids "migrating" it to `getFileShape(f) === "program"`.** The two are the SAME
+test; the gap is the QUESTION. A second top-level `<program>` is silently ignored. Closing it needs a
+build-root entry resolver over the file SET, which is a separate arc. **Anyone who "fixes" this by
+swapping the predicate has changed nothing and will believe they closed a gap.**
+
+### The lifecycle: computed ONCE, stamped TWICE, and the split is deliberate
+
+1. **COMPUTED (no record).** The TAB (`ast-builder.js`) calls `classifyFileShape` to decide
+   `W-PROGRAM-001` — a TAB-time diagnostic, so the TAB must ask the question. ⛑ **It records
+   NOTHING: `buildAST(...).ast.fileShape` is `undefined` BY DESIGN**, and a unit test asserts it.
+2. **STAMPED at the Stage 3.004 PRECG seam** — `compute-pgo-flags.ts:computeFileShape`, called from
+   `api.js`. ⛑ **THE LOCATION IS MEASURED, NOT PREFERRED:** stamping in the TAB instead added
+   **1,012 new MISSING-FIELD divergences** to the within-node live-vs-native parity canary — exactly
+   one per corpus file — because a TAB-only field is invisible to the M5 native pipeline. Stamped at
+   the pipeline-agnostic seam, **both pipelines carry it and there is no mirrored predicate to
+   drift.** Same S115 / DD-#27 precedent as `authConfig` / `middlewareConfig` / the 4 PGO `has*` flags.
+3. **RE-STAMPED by `component-expander.ts`** when CE rebuilds the FileAST with new `nodes`.
+
+⛑ **STEP 3 IS NOT BELT-AND-BRACES — THE PRE-CE AND POST-CE ANSWERS GENUINELY DIFFER.** CHX inlines a
+cross-file channel reference as a `<channel>` markup node, which is a shape-class change. **MEASURED:**
+a file whose top-level markup is only a channel-alias mount —
+
+```
+${ import { "presence" as presence } from './chan.scrml' }
+<presence/>
+```
+
+— classifies **`bare-markup` BEFORE CE and `pure-channel` AFTER it.** A corpus sweep over `examples/`
++ `conformance/cases/channel` (26 CE invocations) found **zero divergence**, so nothing shipped was
+wrong; the adversarial shape above is what makes it a real hazard rather than a theoretical one.
+**Every consumer of the field runs post-CE except one** (`api.js`'s W5a, which reads at the PRECG
+seam and never sees the CE object), so re-stamping is *right*, not merely safe.
+
+### ⚑ Two classifier decisions that look like bugs and are not
+
+- **BRANCH ORDER IS BEHAVIOURAL.** `non-entry-page` is tested **before** `pure-channel` so the one
+  real overlap — a file with BOTH a top-level `<page>` and a top-level `<channel>`, **which the
+  flagship has** — resolves exactly as the legacy `isNonEntryPageFile` precedence did. The
+  classification is behaviour-preserving on that shape rather than quietly re-deciding it.
+- **A NULLISH TOP-LEVEL NODE RETURNS `"bare-markup"`, ON PURPOSE.** The legacy `isPureModuleFile` was
+  `every`-shaped (`nodes.every(n => n && …)`), so a nullish entry made it FALSE and `W-PROGRAM-001`
+  FIRED. The first version of this classifier filtered nullish entries out, which **silently
+  INVERTED that** — such a file became `pure-module` and was SUPPRESSED. ⛑ **Restored not because the
+  shape is reachable (it almost certainly is not), but because becoming more permissive on precisely
+  the input we understand least is the residual principle backwards.**
+
+### Why the consolidation happened: four hand copies, and what one of them was pointing at
+
+`#859` deleted four copies of the shape predicate into one function. The copies were `api.js` W5a
+(whose own comment said *"Mirrors the `isPureModuleFile` predicate in ast-builder.js"* — which is
+what a copy says right up until the original changes), `tool-program.ts:isLibraryShapedFile`,
+`codegen/index.ts` shell composition, and a fourth in codegen's non-entry-page detection.
+⛑ **THAT FOURTH ONE CITED "ast-builder.js line 12222" — a line number roughly 7,700 lines stale by
+the time anyone read it, pointing into an unrelated part of a 20k-line file.** None of the four knew
+about `"pure-channel"`.
+
+⚑ **AND `"pure-channel"` IS THE ONE THAT PROVES THE COST WAS REAL, NOT HYGIENIC.** Before it existed,
+`W-PROGRAM-001` fired on a file-top `<channel>` in a `<program>`-less file — **canonical placement**
+under §38.12.6 + the §38.1 / Insight-30 dispensation — and told the author to add a `<program>`,
+**which §38.1 would then make an ERROR (`E-CHANNEL-OUTSIDE-PROGRAM`).** The warning's prescribed fix
+BROKE the file. **All four canonical flagship channel files
+(`examples/23-trucking-dispatch/channels/*.scrml`) fired it.**
+
+Tests: `compiler/tests/unit/file-shape-classification.test.js` (535L). Types: schema.map.md
+(`FILE_SHAPES` / `FileShape` / `FileAST.fileShape`). Routing: `primary.map.md` Task-Shape Routing,
+first row.
 
 ## The one-landmark invariant + multi-file shell composition (§20.8.1.1 / §40.8.2, #124 Wave-1c PR-1; widened #126/#128)
 

@@ -4500,12 +4500,37 @@ export function exprNodeMatchesIdent(node: ExprNode, name: string, exact: boolea
 }
 
 /**
+ * Is this `template` literal free of interpolation, so that its `value` is the
+ * whole of its runtime text?
+ *
+ * The parser distinguishes the two cases by construction (see the
+ * `TemplateLiteral` arm of `esTreeToExprNode`): a single-quasi template sets
+ * `raw = "`" + cooked + "`"` and `value = cooked`, so `raw` is derivable from
+ * `value`. A multi-quasi template sets `raw` to the ORIGINAL back-tick source —
+ * which contains the `${…}` segments — and `value` to `""`. Reconstructing the
+ * single-quasi form and comparing is therefore an exact test, not a heuristic
+ * scan for `${`.
+ */
+function isStaticTemplateLit(n: LitExpr): boolean {
+  return typeof n.value === "string" && n.raw === "`" + n.value + "`";
+}
+
+/**
  * Classify a literal ExprNode into a SourceInfo-compatible shape.
  * Returns the kind of literal and its value for type inference.
  *
  * Replaces: `extractInitLiteral` (regex parsing of string values).
+ *
+ * Two answers, not one. `literal` means the VALUE is statically known;
+ * `literal-type-only` means the initializer is syntactically a literal of a
+ * known primitive TYPE whose value is not. The distinction is load-bearing:
+ * §7.5.1's `E-TYPE-031` needs only the type, but §53.4's predicate zone
+ * evaluates the VALUE at compile time and elides the runtime guard when it
+ * can. Collapsing the two would make an interpolated template — whose parsed
+ * `value` is the empty string, not its runtime text — statically checkable
+ * against a predicate it has not been shown to satisfy.
  */
-export function classifyLiteralFromExprNode(node: ExprNode): { kind: "literal"; value: string | number } | { kind: "arithmetic" } | { kind: "unconstrained" } {
+export function classifyLiteralFromExprNode(node: ExprNode): { kind: "literal"; value: string | number | boolean } | { kind: "literal-type-only"; type: "string" | "number" | "boolean" } | { kind: "arithmetic" } | { kind: "unconstrained" } {
   if (!node) return { kind: "unconstrained" };
 
   switch (node.kind) {
@@ -4516,6 +4541,19 @@ export function classifyLiteralFromExprNode(node: ExprNode): { kind: "literal"; 
       }
       if (n.litType === "string" && typeof n.value === "string") {
         return { kind: "literal", value: n.value };
+      }
+      if (n.litType === "bool" && typeof n.value === "boolean") {
+        return { kind: "literal", value: n.value };
+      }
+      if (n.litType === "template" && typeof n.value === "string") {
+        // A back-tick template is always a STRING. Whether its value is known
+        // depends on interpolation: the single-quasi branch of the parser
+        // rebuilds `raw` from the cooked text (so `raw === "`" + value + "`"`),
+        // while the multi-quasi branch keeps the real source in `raw` and
+        // records `value: ""` — an empty string that is NOT the value.
+        return isStaticTemplateLit(n)
+          ? { kind: "literal", value: n.value }
+          : { kind: "literal-type-only", type: "string" };
       }
       return { kind: "unconstrained" };
     }

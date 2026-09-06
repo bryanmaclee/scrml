@@ -1,21 +1,21 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **NOT a zero-diff row: `scripts/` changed in FIVE files, one of them NEW** — `scripts/native-parser-flip-harness.ts` (+617), an instrument that PATCHES AND RESTORES `compiler/src/api.js`. `.github/` is `--name-only` EMPTY, so `ci.yml` is byte-identical and `gate` is FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — RE-PARSED at this watermark. Re-walked.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #
@@ -100,7 +100,7 @@ pretest — `bash scripts/compile-test-samples.sh` (populates samples/compilatio
 test — `bun test compiler/tests/`
 test:coverage — `bun test compiler/tests/ --coverage`
 watch — `bun --watch compiler/src/cli.js compile`
-bench — compiles samples/compilation-tests/ with `--timing`
+bench — ⛑ **CHANGED S402 (#853, `1e69d3b2`): `compile examples/ --verbose`** — was `compile samples/compilation-tests/ --timing`. ⚠ **BOTH THE CORPUS AND THE OUTPUT MODE MOVED, so a `bun run bench` result is NOT comparable across `1e69d3b2`.** Context: #853 filed `g-runtime-benchmarks-stale-and-no-perf-gate` (MED) — `benchmarks/RESULTS.md` and `runtime-results.json` were both last touched **2026-05-19**, so ~4 months of codegen landed with no partial-update measurement, **and there is no perf job in any workflow.** ⛔ **A `bench` run is NOT a regression gate and never has been** — the same session shipped a 17x compile-time regression (590ms -> 10,039ms at 88KB) that was invisible at 8.4KB and was caught only by an adversarial review.
 security — compiles samples then `node --check`s every emitted .client.js
 types — `bun scripts/types-gate.ts` (**NEW #665**) — PRINT the current TypeScript diagnostic set over `compiler/src`.
 types:check — `bun scripts/types-gate.ts --check` (**NEW #665**) — diff the diagnostic NAME->COUNT map against `compiler/tests/TYPES-BASELINE.json`; **exit 1 on ANY difference, in EITHER direction**. This is the CI-wired mode (`tracking` job, `continue-on-error` at both job and step level). Record a new baseline with `bun scripts/types-gate.ts --write`.
@@ -584,6 +584,121 @@ inherited the truncated population and reported base 2 / head 2 while an indepen
 the same two revisions got base 44 / head 46. **`pa-base v2.13 §8` names this THE TRUNCATED PROBE: a
 truncated enumeration reads exactly like a complete one.** `scripts/u1-corpus-emit.sh` was deliberately
 EXCLUDED from the #429 landing — it is the gate this tool retired.
+
+## `scripts/native-parser-flip-harness.ts` — THE NATIVE-PARSER DEFAULT-FLIP METER (NEW #870, `94572819`, S402) — **NOT a CI gate, and it MUTATES YOUR WORKING TREE**
+
+    bun scripts/native-parser-flip-harness.ts
+
+⛔ **READ THIS BEFORE RUNNING IT: THIS SCRIPT PATCHES `compiler/src/api.js` IN PLACE AND RESTORES IT.**
+That is not a bug and it is not a shortcut — the design note in the file rejects the two obvious
+alternatives explicitly:
+- **an env var** (`SCRML_PARSER_DEFAULT`) would plant a permanent behavioural backdoor in the compile
+  entry point, and `compiler/src/` is in the published `files` allowlist in `package.json` — **a
+  test-only knob would ship to adopters**;
+- **a `Bun.plugin` `onLoad` transform via `--preload`** never mutates the tree, which is attractive,
+  but it only applies to the test runner's own module graph. **A meaningful slice of the suite SPAWNS
+  the CLI as a subprocess** (dev-server tests, command tests) and `scripts/compile-test-samples.sh` is
+  a separate `bun` invocation entirely — all of those would silently run UNFLIPPED and the meter would
+  **under-report**.
+
+⚑ **THE RESTORE DISCIPLINE, because "it patches your tree" is only safe if this list is true:** it
+**refuses to run if `compiler/src/api.js` is already dirty**; keeps the original bytes **in memory AND
+on disk** under the output dir (`api.js.orig`, for manual rescue); restores in a `finally` **and** on
+`SIGINT`/`SIGTERM`/uncaught; and **verifies the restore is BYTE-IDENTICAL by SHA-256** and shouts if
+it is not.
+
+⛑ **ANCHOR DISCIPLINE — IT HARD-FAILS RATHER THAN MEASURING NOTHING.** Every anchor is a SYMBOL match
+asserted **UNIQUE**; if `api.js` is refactored so an anchor is missing or ambiguous, the script fails
+loudly with the anchor text. **The previous instruments failed by not existing; the next failure mode
+would be an instrument that runs green while measuring the unflipped compiler.**
+
+### Why it exists at all
+The native-parser transition is FROZEN (self-host oracle, off the V1 path), and the operator attached
+an explicit re-trigger to that freeze: *"if verify-harden stops showing a declining divergence count,
+the tail isn't finite -> M5 earns its cost."* **That is a meter, and a meter needs an instrument.**
+Twice the instrument was built as a throwaway and discarded — **the original 429 figure is
+NON-REPRODUCIBLE and retired** because no harness was ever committed; S161 rebuilt one in a throwaway
+worktree and discarded it again; S170's ~508 was the last reading, ~230 sessions stale with no way to
+re-read it except a third reconstruction. **This script IS the instrument.**
+
+### THE TWO FLIPS ARE NOT THE SAME FLIP
+`compileScrml` takes a `parser` option defaulting to `null`, with exactly TWO live consumers (the
+script locates both **by SYMBOL**, not by remembered line numbers):
+
+| mode | what it rewrites | measures |
+|---|---|---|
+| `--mode=routing` **(DEFAULT)** | `const useNativeParser = parser === "scrml-native"` -> `true` | the parser, and only the parser |
+| `--mode=option-default` | the `parser = null` default -> `"scrml-native"` | also fires the `I-PARSER-NATIVE-SHADOW` info diagnostic, so **every test asserting on `result.warnings` shape/length can fail for a reason that has nothing to do with parsing** |
+
+### ⛔ THE CONTROL IS NOT OPTIONAL — THE SUITE IS NOT GREEN AT HEAD
+The script always runs and reports the CONTROL; **there is no way to get a flip number out of it
+without one.** As of 2026-09-06 the CONTROL over `compiler/tests/` is **54 failures — 48 of them the
+documented browser-tier set in `compiler/tests/browser/FAILURE-BASELINE.json`.** ⚠ **It reads 56 on a
+machine where `benchmarks/todomvc/dist/` has never been built**, because the 2 `envExcluded` TodoMVC
+names in that same file gate on a **GITIGNORED artifact**; those two are dropped from both sides.
+**If your CONTROL is not in that neighbourhood the harness is measuring something other than the flip
+and the delta is void.**
+
+### LAST READING — 2026-09-06, `--tier compiler/tests/`
+```
+CONTROL 54 · FLIPPED 1907 · NEW 1860 · GONE 7   (--mode=routing)
+CONTROL 54 · FLIPPED 1901 · NEW 1854 · GONE 7   (--mode=option-default)
+```
+The two modes agree to within 8 names, all run-to-run flake — **so the `I-PARSER-NATIVE-SHADOW`
+diagnostic costs ~0 test failures and the mode choice does not move the meter.**
+
+⛔ **DO NOT COMPARE 1860 TO THE S161..S170 TRAJECTORY (1,150 -> 790 -> 605 -> 525 -> ~508) AS IF IT
+WERE THE SAME MEASUREMENT.** The suite roughly doubled and the language kept growing while the parser
+stayed frozen, so most of the rise is **surface growth, not decay.** Partitioned against the test
+surface as it stood at the S170 reading (`9e306082`, 2026-06-07): **1,382 are in test FILES that did
+not exist then · 62 are in files that existed but tests that did not · 416 are LIKE-FOR-LIKE.**
+⚑ **416 vs ~508 is the honest meter: down ~18% in ~230 sessions — declining but nearly flat.** ⚠ It is
+a **DERIVED** figure, not a directly measured one; reproduce the partition with `git show <sha>:<file>`
+and a verbatim test-title check.
+
+⛑ **AND REPORT THE SETS, NEVER JUST THE COUNT — THE FLIP IS NOT MONOTONE.** All **7 GONE** are
+documented `FAILURE-BASELINE.json` failures in two files
+(`g-emit-lift-markup-text-interp.browser.test.js`, `g-each-peritem-markup-value-ternary.browser.test.js`),
+**both markup-nested-in-body cases the flat legacy body-scanner cannot represent and the native
+parser's body-mode machine gets right.** ⚑ **That is the same architectural class the S402 apostrophe
+arc was stopped on** (structure.map.md, `engine-statechild-parser.ts`) — a count alone hides it.
+
+### Flags and artifacts
+`--tier <paths>` (SPACE-separated, default `compiler/tests/`) · `--out <dir>` (default
+`.native-flip-harness/`, gitignored) · `--control-only` · `--flip-only` · `--report` (re-analyse
+existing artifacts, runs nothing) · `--no-pretest` (skips `scripts/compile-test-samples.sh` on both
+sides — **faster, but the browser tier then reads UNFLIPPED sample artifacts and the number
+under-reports**).
+Artifacts under `--out`: `control.raw.txt` / `flipped.raw.txt` · `control.fails.txt` /
+`flipped.fails.txt` · `control.errors.tsv` / `flipped.errors.tsv` · `delta.md` (NEW/GONE sets +
+family histogram) · `api.js.orig`.
+⚠ **Runtime is ~7 minutes PER SIDE, i.e. ~15 minutes for a full reading.**
+
+## ⛔ SPLIT ON `/\r?\n/`, NEVER ON A BARE `"\n"` — four boot/gate probes were BLIND on every Windows clone (NEW section, S402, #848 `c516aadc`)
+
+**On a CRLF checkout (`core.autocrlf=true` — i.e. every Windows clone) a bare `"\n"` split leaves a
+trailing `\r` on every line.** That silently defeats any END-SENSITIVE construct: a `$`-anchored
+regex (`.` never matches `\r`, so `$` is unreachable) **and** an exact string compare alike.
+⛑ **ALL FOUR PROBES FAILED AT EXIT 0 TOWARD A FALSELY-CLEAN RESULT — the direction that gets believed
+rather than investigated.**
+
+| script | what it read as clean | truth |
+|---|---|---|
+| `scripts/dpa-debt.ts` | `0 queued · ✓ nothing owed` | **43 items banked, 3 UNRUN, 4 ADVISORY awaiting bryan** |
+| `scripts/generate-api-reference.js` | (see #848) | — |
+| `scripts/regen-spec-index.ts` | (see #848) | — |
+| `scripts/corpus-compile-floor.ts` | (see #848 / #844) | — |
+
+⚑ **MEASURED BOTH WAYS, NOT REASONED:** the same real file parsed **CRLF -> 0 / LF -> 43**.
+`handOffs/dpa-queue.md` alone carries **2,721 CRs**. bryan's S399 boot (Linux) read 40 queued; **every
+Windows boot read zero, and the boot report stated zero.** This is the `pa-base` §8 hollow-gate class
+landing on the one instrument whose entire purpose is to make an invisible obligation visible.
+
+⛔ **THE RULE, AND IT GENERALISES BEYOND THESE FOUR:** any script that line-splits a repo `.md` and
+then does an anchored or exact match **must** split on `/\r?\n/`. The fix puts the split in **one
+named constant per file** so the next reader cannot reintroduce a bare `"\n"` locally.
+⚠ **A `wc -l` or a `grep -c` will NOT reproduce this** — both are `\n`-based and agree across
+encodings. **Reproduce by parsing the file under both encodings, which is how #848 was verified.**
 
 ## Content-addressed build assets + cache headers (S265, adopter #82, PR #96)
 

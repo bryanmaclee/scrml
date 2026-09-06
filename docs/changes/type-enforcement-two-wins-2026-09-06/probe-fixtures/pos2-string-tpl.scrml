@@ -1,0 +1,2 @@
+<v>: string = `tpl`
+log(@v)

@@ -1,0 +1,68 @@
+diff --git a/compiler/src/expression-parser.ts b/compiler/src/expression-parser.ts
+index e2fce438..bcce5ac0 100644
+--- a/compiler/src/expression-parser.ts
++++ b/compiler/src/expression-parser.ts
+@@ -4505,7 +4505,7 @@ export function exprNodeMatchesIdent(node: ExprNode, name: string, exact: boolea
+  *
+  * Replaces: `extractInitLiteral` (regex parsing of string values).
+  */
+-export function classifyLiteralFromExprNode(node: ExprNode): { kind: "literal"; value: string | number } | { kind: "arithmetic" } | { kind: "unconstrained" } {
++export function classifyLiteralFromExprNode(node: ExprNode): { kind: "literal"; value: string | number | boolean } | { kind: "arithmetic" } | { kind: "unconstrained" } {
+   if (!node) return { kind: "unconstrained" };
+ 
+   switch (node.kind) {
+@@ -4517,6 +4517,12 @@ export function classifyLiteralFromExprNode(node: ExprNode): { kind: "literal";
+       if (n.litType === "string" && typeof n.value === "string") {
+         return { kind: "literal", value: n.value };
+       }
++      if (n.litType === "template" && typeof n.value === "string") {
++        return { kind: "literal", value: n.value };
++      }
++      if (n.litType === "bool" && typeof n.value === "boolean") {
++        return { kind: "literal", value: n.value };
++      }
+       return { kind: "unconstrained" };
+     }
+ 
+diff --git a/compiler/src/type-system.ts b/compiler/src/type-system.ts
+index d7e7fcd4..18b40bd0 100644
+--- a/compiler/src/type-system.ts
++++ b/compiler/src/type-system.ts
+@@ -585,6 +585,12 @@ function inferExprType(node: ExprNode): InferenceResult {
+       if (lit.litType === "string" && typeof lit.value === "string") {
+         return inferenceOk(tPrimitive("string"));
+       }
++      if (lit.litType === "template" && typeof lit.value === "string") {
++        return inferenceOk(tPrimitive("string"));
++      }
++      if (lit.litType === "bool" && typeof lit.value === "boolean") {
++        return inferenceOk(tPrimitive("boolean"));
++      }
+       return inferenceGap("lit", `\`${lit.litType}\` literal`);
+     }
+ 
+@@ -3388,7 +3394,7 @@ function checkPredicateLiteral(
+  * "unconstrained" — value source cannot be determined at compile time.
+  */
+ type SourceInfo =
+-  | { kind: "literal"; value: number | string }
++  | { kind: "literal"; value: number | string | boolean }
+   | { kind: "predicated"; predType: PredicatedType }
+   | { kind: "unconstrained" }
+   | { kind: "arithmetic" };
+@@ -3416,6 +3422,15 @@ function extractInitLiteral(init: unknown): SourceInfo {
+     return { kind: "literal", value: raw.slice(1, -1) };
+   }
+ 
++  // Boolean literal.
++  if (raw === "true") return { kind: "literal", value: true };
++  if (raw === "false") return { kind: "literal", value: false };
++
++  // Template (back-tick) string literal — a STRING for assignability purposes.
++  if (raw.length >= 2 && raw.startsWith("`") && raw.endsWith("`")) {
++    return { kind: "literal", value: raw.slice(1, -1) };
++  }
++
+   // Arithmetic: *, /, + operators, or digit followed by binary minus
+   if (/[+*\/]/.test(raw) || /\d\s*-/.test(raw)) {
+     return { kind: "arithmetic" };

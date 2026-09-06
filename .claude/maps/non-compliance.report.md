@@ -1,24 +1,409 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# scan mode: FULL_COLD_START (doc-population scan) — run as part of the S397 wrap-6c map refresh
+# generated: 2026-09-06T16:33:44Z  commit: 499eecce
+# scan mode: FULL_COLD_START (doc-population scan) — run as part of the S402 wrap-6c map refresh
 #
-# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`;
-# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 10a4b045 origin/main` -> exit 0.
-# Inbound: `git merge-base --is-ancestor 8e278c73 10a4b045` -> exit 0.
-# ⛑ `HEAD` == `origin/main` == the merge-base WHEN THESE FIGURES WERE MEASURED. The pass then
-# committed itself onto `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now one ahead and the
-# watermark deliberately stays on the merge-base. That commit is `--name-only` EMPTY over every
-# source path, so nothing below moves. **Saying "no divergence" after committing would be N15 again.**
+# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `499eecce`;
+# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound: `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+# ⛑ This pass ran in the MAIN checkout on branch `wrap/s402` with `HEAD` == `origin/main` == the
+# merge-base, and DOES NOT COMMIT ITSELF (the PA lands `.claude/maps/` under an explicit pathspec).
+# So unlike the last five passes there is no self-commit advancing `HEAD` past the stamp to explain.
 #
-# ⛑ **THE HEADLINE IS A DOC-VS-CODE CONTRADICTION INSIDE `compiler/SPEC.md` ITSELF, CREATED BY TWO
-# COMMITS OF THE SAME SESSION, AND IT IS THE FIRST TIME THIS SCAN HAS FOUND ONE IN THE AUTHORITATIVE
-# SPEC RATHER THAN IN A SATELLITE DOC.** #830 wrote a §32.2.1 status note describing an in-arm `~`
-# orphan as *"silently yields `null`"*; #832, four commits later, made that exact shape a **fatal
-# error at exit 1**. The §34 catalog row #832 added is correct. The §32 / §17.6 prose was not
-# updated. **REPRODUCED by compiling SPEC's own worked example.** See N15.
+# ⛑ **THE HEADLINE IS THAT THE PRIOR PASS'S OWN FALSIFICATION WAS ITSELF WRONG-REFERENT, AND THE
+# ARTEFACT THAT CAUSED IT IS AN UNSCANNED 283-FILE DIRECTORY NOBODY'S INSTRUMENT HAS EVER SEEN.**
+# S397 declared N12's standing `2.0 MB` figure *"unsupported by any instrument available in this
+# worktree"* after measuring `du -sh docs/audits` -> 900K. **In the MAIN checkout that command
+# returns 2.0M.** Cause: `docs/audits/` contains a HIDDEN `.scope-c-audit-data/` holding 8 tracked
+# files and a `logs/` subdir of **275 `*.log` files (1.2 MB) ignored by `.gitignore:5`** — which a
+# fresh worktree structurally cannot contain. **Both sides were answering a question neither had
+# asked: neither 2.0 MB nor 900K measures the 20 audit DOCUMENTS.** See N12.
 
-## Summary — S397 pass (this pass)
+## Summary — S402 pass (this pass)
+
+| | |
+|---|---|
+| Scan population (in-scope tracked `.md`) | **121** — `git ls-files '*.md'` minus `docs/changes/` (**1,294**), `spa-lists/`, `archive/`, `handOffs/`, `.claude/` |
+| Excluded by scope rule | `.git/` · `node_modules/` · `archive/` · `handOffs/` (incl. 6 NEW `handOffs/incoming/` files this window) · `.claude/` · `docs/changes/` · `spa-lists/` |
+| In-scope docs CHANGED this window | **7** — `benchmarks/RESULTS.md`, `docs/FACTS.md`, `docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `master-list.md` |
+| New in-scope TRACKED docs this window | **0** |
+| ⚠ New UNTRACKED docs in the tree | **2** (`docs/articles/if-you-give-a-dev-an-enum-*.md`) — see U4 |
+| Non-compliant | **1 NEW (N16, doc-vs-code, MED)** + **2 standing** (N12 — REVISED, N13) |
+| Factually wrong / structurally broken, in-scope | **5 NEW (M8-M12), three in the MAP SET and ⛔ **TWO AUTHORED BY THIS PASS** (M11, M12)** |
+| Uncertain — needs human review | **1 NEW (U4)** + 3 carried (U1, U2, U3) |
+| Closed this pass | **2** — the two S402 router holes (entry-ness, markup-body closer scanning) |
+
+⛑ **THE SECOND-ORDER HEADLINE: THE MAP SET WAS THE BIGGEST FINDING FOR THE THIRD CONSECUTIVE PASS,
+AND THE MECHANISM DIFFERED ALL THREE TIMES.** S396 and S397 found it by re-executing published
+figures. S402 found it three NEW ways: **the two structural probes the prior pass RECOMMENDED as
+standing steps (both fired), an internal contradiction between two figures ~250 lines apart in the
+same file, and a claim this pass wrote and then falsified before publishing.** ⚑ **That last one is
+the useful data point — see M11.** The argument this produces is not "more diligence": it is that
+**every recommended probe must actually be run**, and both of S397's were, for the first time.
+
+---
+
+## N16. ⛔ **NEW, MED** — `docs/pinned-discussions/w-program-001-warning-scope.md` is a PINNED, still-open decision whose subject matter LANDED — under a mechanism it does not list — and TWO of its five cross-references point at files that do not exist.
+
+**Reason:** doc-vs-code + broken cross-reference (combo).
+**Population:** ⚠ **IN SCOPE BUT NEVER SCANNED — this is N13's `docs/pinned-discussions/` hole (1 file, ZERO map coverage) producing its first concrete finding.** The directory has been flagged as unscanned for multiple passes; this is what was in it.
+
+**The doc's own status block, verbatim:**
+
+> **Status:** PINNED for further discussion
+> **Working disposition:** Option 1 (path-based suppression in `samples/compilation-tests/`) for now. **Not yet implemented.**
+> **Authorization status:** … **No compiler change authorized.**
+
+**What actually landed — VERIFIED BY EXECUTION AT THIS WATERMARK, not read off a commit message:**
+
+```
+$ bun compiler/src/cli.js compile <bare markup: `<div><p>hello</p></div>`>
+warning [W-PROGRAM-001]: No <program> root element found. …          1 warning
+
+$ bun compiler/src/cli.js compile <pure module: `${ export fn add(...) { ... } }`>
+Compiled 1 file in 58ms                                              (ZERO warnings)
+```
+
+**`W-PROGRAM-001`'s fire condition is now SHAPE-BASED and is suppressed for three recognized
+non-entry shapes** — `pure-module` (§21.5, S93 Bug 6B), `non-entry-page` (§40.8, S98), and
+`pure-channel` (§38.12.6, #859 `85ebbb5f` THIS WINDOW) — via
+`library-shape.js:isRecognizedNonEntryShape`.
+
+⛑ **THE DOC LISTS FIVE OPTIONS AND THE MECHANISM THAT SHIPPED IS NOT AMONG THEM.** Its Option 3 is
+the closest — *"Only fire when file has substantial markup AND no `<program>`; suppress for tiny
+fragments"* — and it is scored `Heuristic = false-positives + false-negatives`. **What shipped is a
+CLOSED five-variant classification over top-level node shapes, not a size heuristic**, and the doc's
+own risk column is therefore an argument against a design nobody built. A reader who opens this doc
+to decide the question is reasoning from a five-option menu whose winning entry is missing.
+
+⚠ **STATE THE OVERTAKE PRECISELY, BECAUSE THE PINNED QUESTION SURVIVES.** The doc's *headline*
+question — *"is `samples/compilation-tests/` fragment territory or should-be-runnable apps?"* — is
+**genuinely still open** and no code change answers it. What is stale is (a) *"Not yet implemented"*,
+(b) *"No compiler change authorized"* as a description of the compiler's current behaviour, and
+(c) the option menu. **Do not close this doc; re-base it.**
+
+**TWO OF FIVE CROSS-REFERENCES ARE BROKEN — checked by `[ -e ]`, one command each:**
+
+| cited path | exists? |
+|---|---|
+| `docs/audits/scope-c-stage-1-2026-04-25.md` | **NO** |
+| `docs/audits/scope-c-stage-1-sample-classification.md` | **NO** |
+| `docs/audits/.scope-c-audit-data/` | yes — and see N12, it is the hidden directory |
+
+⚠ **AND ITS CENTRAL FIGURE HAS AN EXPIRED DENOMINATOR.** The doc reads *"fires on 224 of 229
+warn-only samples (~98%)"*. `samples/compilation-tests/` now holds **297 top-level `.scrml` (805
+recursive)** — so the ratio cannot be checked against the corpus it describes, and the `~98%` should
+not be quoted anywhere without a re-run.
+
+**Suggested disposition:** **update to match current** — re-base the status block on the shipped
+shape-based mechanism, delete or re-point the two dead cross-references, re-derive or strike the
+224/229 figure, and keep the convention question open as the actual pin. ⚠ **PA-owned; reported, not
+edited.**
+
+---
+
+## STANDING ITEMS — RE-EXECUTED AT `499eecce` (verdicts are commands, not carry-forward)
+
+### N12. `docs/audits/` — **STILL OUTSIDE THE SCAN POPULATION. 16th consecutive pass — AND THE POPULATION IS BIGGER THAN THIS ITEM HAS EVER SAID.**
+
+**Verdict: STILL LIVE, and REVISED in a way that matters.** Re-executed: `ls docs/audits/ | wc -l`
+-> **20**. ⛑ **THAT COMMAND HAS BEEN UNDERCOUNTING FOR SIXTEEN PASSES, BECAUSE `ls` HIDES
+DOTFILES.**
+
+```
+$ ls docs/audits/ | wc -l                        20      (the 20 .md documents)
+$ find docs/audits -type f | wc -l              303
+$ git ls-files docs/audits | wc -l               28      (20 .md + 8 in the hidden dir)
+$ du -sh docs/audits                            2.0M
+$ du -sh docs/audits/.scope-c-audit-data        1.4M     ← 283 files
+$ du -sh docs/audits/.scope-c-audit-data/logs   1.2M     ← 275 *.log, gitignored (.gitignore:5)
+```
+
+**`docs/audits/` contains a HIDDEN `.scope-c-audit-data/` holding a scripts-plus-data bundle — 8
+TRACKED files (`analyze.mjs`, `build-report.mjs`, `classification.json`, `classify.mjs`, `refine.mjs`,
+`results.tsv`, `run.mjs`, `run.sh`) — that NO scan population has ever seen.** It is referenced by
+`docs/pinned-discussions/w-program-001-warning-scope.md` (see N16), which is itself in the other
+unscanned directory.
+
+⛔ **AND THIS RESOLVES THE FIGURE DISPUTE S397 OPENED, AGAINST S397.** The prior pass wrote that the
+standing `2.0 MB` was *"unsupported by any instrument available in this worktree and should be
+re-derived, not carried a 16th time."* **`du -sh docs/audits` returns `2.0M` in the main checkout.**
+The prior pass measured **900K** because it ran in a *git worktree*, which checks out tracked files
+only — so the 1.2 MB of gitignored `*.log` **could not be there.** ⚑ **The tell was in its own
+sentence: "available in this worktree."**
+
+⚠ **BUT THE PRIOR PASS'S CONCLUSION SURVIVES ITS BROKEN PREMISE, AND THAT IS THE POINT WORTH
+KEEPING.** `2.0 MB` reproduces, and it is **still the wrong number for the claim it decorates**: 1.4 MB
+of it is a hidden data/logs bundle. **The honest figure for the 20 audit DOCUMENTS is 651,192 bytes
+(≈636 KiB)** (`cat docs/audits/*.md | wc -c`). **Neither `2.0 MB` nor `900K` measures the documents.**
+**Three passes have now argued about a number that answers a question none of them asked.**
+
+⛑ **THE REUSABLE RULE — AND IT IS NARROWER AND MORE USEFUL THAN "RE-DERIVE":** *a figure measured in
+a WORKTREE and a figure measured in the MAIN checkout are different populations whenever anything
+gitignored is in scope.* `du`, `find`, `wc -c` over a glob, and any directory size all cross that
+line. **State the checkout kind next to any such figure, or use a git-tracked-only instrument
+(`git ls-files … | xargs wc -c`) that cannot differ.**
+
+**Stale anchor, re-executed and UNCHANGED:** `scrml-dev-content-spec-fidelity-2026-05-19.md:5` still
+cites `compiler/SPEC.md (27,945 lines)` against an actual **37,798** — short by **9,853 lines /
+26.1%**, identical to last pass because `compiler/SPEC.md` did not move in this window.
+A bare `grep -l -i superseded docs/audits/*.md` still returns **9** and still over-counts by 4.5x.
+
+**Suggested disposition:** unchanged (deref the two self-declared-superseded audits to
+`scrml-support/archive/`; bring the remaining 18 into the scan population once), **plus two new
+items**: (a) **replace `2.0 MB` with `651,192 bytes over 20 documents`** and note the hidden bundle
+separately; (b) **decide whether `.scope-c-audit-data/`'s 8 tracked files belong in this repo at all**
+— they are audit *tooling* for an audit whose two report files no longer exist (N16).
+
+### N13. Four doc directories with ZERO map coverage — **STILL LIVE, and it produced its first real finding this pass.**
+
+Re-executed: `grep -l 'docs/<dir>' .claude/maps/*.map.md` returns **0** for `docs/heads-up/` (4 files),
+`docs/adopter/` (2), `docs/curation/` (1), `docs/pinned-discussions/` (1).
+
+⛑ **N16 CAME OUT OF `docs/pinned-discussions/` — THE SMALLEST OF THE FOUR, ONE FILE — ON THE FIRST
+PASS THAT ACTUALLY OPENED IT.** That is the argument for closing this item rather than re-measuring
+it a fourth time: **the hole is 8 files total and one read produced a MED finding.**
+⚠ The near-miss noted last pass **recurred and widened**: the peer reports that landed this window
+went to `handOffs/incoming/` (**6 files**, up from 2), not `docs/heads-up/` — two directories
+accumulating similar content under different conventions, only one in any scan population.
+⚠ `docs/heads-up/` is unchanged and ages further: two of its four files carry
+`last-reviewed: 2026-05-29`, i.e. **~100 days**, and `spec-consolidation-2026-05-25.md` is 1,003 lines
+with no `last-reviewed` line at all.
+
+---
+
+## NEW FINDINGS — S402
+
+### M8. ⛔ `primary.map.md` had a routing row rendering only TWO of its THREE cells — and the DROPPED cell was a ⚠ "this row contradicts the source" warning. **Found by the M7 probe the prior pass recommended.**
+
+The `match` block-arm row carried **3 cells in a 2-column table.** ⛑ **GFM DISCARDS cells beyond the
+header count** (it pads short rows, it *drops* long ones), so a **470-character warning — *"THIS ROW
+NOW CONTRADICTS THE SOURCE AND THE GAP LEDGER, AND THE CONTRADICTION IS UNRESOLVED … Adjudicate by
+EXECUTION before trusting either"*** — **rendered nowhere at all.** It was present in the file, absent
+from the document, and every grep-based check the map set runs would have found it.
+
+⚑ **THIS IS STRICTLY WORSE THAN THE M7 CASE IT WAS FOUND BY.** M7's `test.map.md` row *re-columned*
+(the answer moved one column right — wrong place, still readable). **This one DELETED content at
+render time.** Same probe, same file class, a failure mode one notch more severe.
+
+**Two more hits in the same run, both the padding direction** (invariants 46 and 63: 2 cells in a
+3-column table) — in each case an over-escaped `\|` before the final cross-reference cell, so the
+`domain.map.md §18.5 · structure.map.md` and `error.map.md · non-compliance.report.md` pointers
+rendered *inside* the previous cell instead of in the "see also" column.
+
+**All three FIXED this pass** (the 3-cell row's dropped content folded into cell 2 with an escaped
+pipe, so nothing is lost). The probe now returns **clean across all 17 files**.
+⛑ **RECOMMENDATION, RESTATED WITH EVIDENCE: KEEP BOTH PROBES AS UNCONDITIONAL WRAP-6C STEPS.** S397
+recommended them; S402 ran them; **the cell-count probe found 3 defects including one that was
+silently deleting text.** The dedup probe returned clean in every hand-authored map (its only hits
+are the `@generated` files' repeated `## compiler/src/` headings and this report's by-design per-pass
+`## Tags` / `## Links`). ~20 lines, both of them.
+
+### M9. ⛔ `primary.map.md` published `gate is UNCHANGED at 13 steps` in its Task-Shape Routing table while THE SAME FILE published `14 total steps (12 named + 2 uses)` in its Map Index — and no pass caught it.
+
+**Re-parsed at `499eecce`, one command:**
+
+```
+$ awk '/^  gate:/{f=1} f&&/^  [a-z_-]+:/&&!/^  gate:/{f=0} f' .github/workflows/ci.yml \
+    | grep -cE '^      - (name|uses):'
+14          (12 `- name:` + 2 `- uses:`)
+```
+
+**The routing row was wrong; `build.map.md:701` and the Map Index header were right.** `.github/` is
+`--name-only` EMPTY across all 36 commits of this window, so the count is FLAT — **it was the ROW that
+was stale, not the CI.**
+
+⛑ **THIS IS THE INVARIANT-71 TELL — A FIGURE CONTRADICTING A SIBLING FIGURE IN THE SAME FILE — AND IT
+SURVIVED BECAUSE THE TWO LIVE ~250 LINES APART AND NOTHING DIFFS A MAP AGAINST ITSELF.** The dedup
+probe cannot see it (the lines are not duplicates); the cell-count probe cannot see it (both rows are
+well-formed). **A third probe is implied and I am NOT recommending one**: the cheap version is the
+rule already written into the Map Index — *state it both ways or not at all* — because `14` and `12`
+are each correct under a different counting base and **a bare number invites exactly this.** Fixed by
+rewriting the row to carry both figures and the derivation.
+
+### M10. ⚠ The four `*.generated.md` files were stale for the SECOND CONSECUTIVE PASS, and the mechanism is structural rather than neglect.
+
+`@generated 2026-08-29` — **three sessions and 36 commits behind**, wrong against HEAD by 2 source
+files, 21 exported symbols, 24 import edges, 2 E-codes and 37 test files. Regenerated this pass:
+
+| generated map | at `499eecce` | was |
+|---|---|---|
+| `structure.generated.md` | **195 files · 1,505 exported symbols** | 193 · 1,484 |
+| `dependencies.generated.md` | **195 files · 699 local import edges** | 193 · 675 |
+| `error.generated.md` | **452 E-codes with emit sites** | 450 |
+| `test.generated.md` | **1,421 `.test.js` across 12 dirs** | 1,394 across 11 |
+
+⛑ **THEY ARE GITIGNORED, SO NOTHING IN `git status`, NO CI STEP AND NO PRE-COMMIT HOOK CAN EVER
+NOTICE.** That is the whole mechanism, and it means "remember to regenerate" is not a fix.
+**Regeneration is four commands (`bun scripts/mapgen.ts --kind {structure,deps,tests,errors} --root
+<repo> --write` from `flogence/`) and near-zero cost — make it an UNCONDITIONAL wrap-6c step.**
+
+⚠ **AND A WRONG-REFERENT TRAP INSIDE THE VERIFICATION, WORTH RECORDING BECAUSE I HIT IT:** a grep for
+`FILE_SHAPES(const)` returns **zero** and reads as *"the new symbol is not indexed."* **The symbol
+names in these files are BACKTICK-WRAPPED** — `` `FILE_SHAPES`(const):1575 `` — and the correct grep
+returns both it and `` `FileShape`(type):1584 ``. The index was right; the probe was wrong.
+
+### M11. ⚑ **A CLAIM THIS PASS WROTE INTO THREE MAPS WAS FALSE, AND IT WAS CAUGHT ONLY BECAUSE THE NEXT STEP HAPPENED TO READ THE HUNK.**
+
+I wrote — into `primary.map.md` (twice) and `config.map.md` — that `package.json`'s *"entire delta
+over 36 commits is a one-line version bump — no key added, renamed or removed."*
+**FALSIFIED BY `git diff`, one command later:**
+
+```
+-    "bench": "bun run compiler/src/cli.js compile samples/compilation-tests/ --timing",
++    "bench": "bun run compiler/src/cli.js compile examples/ --verbose",
+```
+
+`version` is FLAT at `0.7.1`. The actual change (#853, `1e69d3b2`) moves the `bench` script to a
+**different corpus AND a different output mode**, so **`bun run bench` output is not comparable across
+that commit** — a fact a dev agent would want and would not have gotten.
+
+⛔ **THE MECHANISM IS THE ONE THIS REPORT KEEPS FINDING IN OTHER PEOPLE'S WORK: I REASONED FROM
+`git diff --name-only`.** It returned exactly one file, `package.json`, and I filled in *what* changed
+from the plausible default. **`--name-only` tells you WHICH file and never WHAT changed.** All four
+sites corrected, and `build.map.md`'s `bench` command row rewritten with the new target plus the
+`g-runtime-benchmarks-stale-and-no-perf-gate` context (`benchmarks/RESULTS.md` and
+`runtime-results.json` both last touched **2026-05-19**; **no perf job exists in any workflow**).
+
+⚑ **RECORDED AS A FINDING AGAINST THIS PASS RATHER THAN QUIETLY FIXED, BECAUSE THE RATE IS THE
+DATA.** Three consecutive passes have found the map set's biggest defect to be a figure asserted
+without re-execution, and this one was **authored inside the pass that exists to catch that class**,
+roughly ten minutes after writing the header banner warning about it. **The lesson is not "check
+figures" — it is that a `--name-only` result is a FILE LIST and reading a delta off it is the
+wrong-referent error wearing a git command's clothes.**
+
+### M12. ⚑ **A SECOND CLAIM THIS PASS WROTE WAS WRONG — RELAYED FROM A COMMIT MESSAGE INSTEAD OF ENUMERATED — AND THE TWO TOGETHER ARE THE ACTUAL FINDING.**
+
+Writing the apostrophe routing row, I relayed the arc's *"12 call sites across six scanners"* and then
+**named the six myself**, listing `findOpenerEnd` among the callers of
+`engine-statechild-parser.ts:skipCommentOrString`. **Enumerated by execution instead:**
+
+```
+683,  692   scanForNestedEngineEntries        1473        computeCommentRegions
+895,  904   scanForOnTransitionEntries        1693        findStateChildCloser
+1048        findOnTransitionCloser            1912        skipTrivia
+1178        findEngineCloser                  2145, 2160, 2170  parseEngineStateChildren
+```
+
+**12 call sites — the relayed count is RIGHT — in EIGHT enclosing functions, and `findOpenerEnd` is
+NOT one of them.** ("Six scanners" is defensible under a narrower base: eight functions minus the
+`computeCommentRegions` and `skipTrivia` helpers.) **Corrected in both maps, with the enumeration
+inlined so the next reader does not have to re-derive it.** The arc's separate claim of *"five more
+quote-blind `${…}` brace counters"* is now labelled **RELAYED-UNVERIFIED** rather than published as
+measured — this pass did not reproduce it.
+
+⛔ **M11 AND M12 ARE THE SAME DEFECT AT TWO DIFFERENT SOURCES, AND THAT IS WHY BOTH ARE FILED.** M11
+filled a gap from a `--name-only` file list; M12 filled a gap from a commit message. **Both times the
+count was right and the specifics were invented, and both times a single command would have settled
+it.** ⚑ **The operative rule is not "verify more" — it is that a COUNT and an ENUMERATION are
+different claims, and inheriting a count never licenses authoring the list.** Where this pass could
+not enumerate cheaply, the claim now carries **RELAYED-UNVERIFIED** in the map text itself.
+
+
+---
+
+## UNCERTAIN — needs human review (S402)
+
+### U4. Two untracked article drafts sit in `docs/articles/` and are invisible to every population this report has ever counted.
+
+```
+?? docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md
+?? docs/articles/if-you-give-a-dev-an-enum-PUBLISH.md
+```
+
+**Reason:** population boundary. They are **untracked**, so `git ls-files '*.md'` — the instrument
+every scan population in this report is built on — cannot see them, and they are not gitignored
+either, so they show in `git status` indefinitely. A `-PUBLISH` suffix alongside a dated sibling
+suggests a draft/final pair mid-workflow.
+
+**What to check:** whether these are (a) in-flight authoring that should be committed, (b) scratch
+that should be deleted or moved to `scrml-support/`, or (c) deliberately-untracked local work. ⚠ **If
+untracked drafts are a normal working pattern here, then this report's population definition has a
+standing hole and should say so** — `git ls-files` is a *tracked-files* instrument, and N12's
+worktree-vs-main-checkout lesson is the same class of blind spot one level down.
+⛔ **NOT read, and deliberately: this pass does not open article drafts to judge them.**
+
+⚠ **U1, U2 and U3 carried.** Existence re-verified; content not re-read. ⛑ **U3 is now
+PARTLY ACTIONABLE FOR FREE:** it asks for six `~` probes to be re-run, and `compiler/SPEC.md` did not
+change in this window — so **whatever answer S397 measured at `10a4b045` is still the answer at
+`499eecce` for any probe whose input is SPEC text.** The compiler *did* change, so the probes still
+have to be RUN; but no SPEC re-reading is owed.
+
+---
+
+## CLOSED THIS PASS
+
+### The S402 entry-ness router hole — **CLOSED by this pass's write.**
+
+An S402 dispatch working the `fileShape` surface reported *"2 incidental hits across all 13 files,
+zero Task-Shape Routing rows for this surface."* **REPRODUCED at this watermark:**
+`grep -c 'fileShape\|library-shape\|classifyFileShape\|FILE_SHAPES'` returns **0 in every
+hand-authored map**; the only 5 hits are in the two `@generated` files. **Closed with:** a
+Task-Shape Routing row (now FIRST), a `structure.map.md` ownership entry for `library-shape.js`,
+a `domain.map.md` file-shape section, `schema.map.md` entries for `FILE_SHAPES`/`FileShape`/`fileShape`,
+and a `dependencies.map.md` module-graph row.
+
+⛑ **AND THE DISPATCH SAID SOMETHING ABOUT THIS REPORT THAT THE REPORT SHOULD RECORD: ITS USEFUL
+POINTER CAME FROM `non-compliance.report.md`, NOT FROM ANY MAP.** ⚠ **That is worth watching rather
+than celebrating.** This file is a *findings ledger*; if agents are routing off it, then either the
+maps are under-covering (true this window, twice) **or this report is accreting navigation content
+that belongs in a map and will rot there unread.** Recommend the PA decide which — reported, not
+acted on.
+
+### The S402 markup-body closer-scan router hole — **CLOSED by this pass's write.**
+
+The apostrophe-arc dispatch reported that neither `primary.map.md` nor `structure.map.md` named
+`engine-statechild-parser.ts` or `match-statechild-parser.ts`. **REPRODUCED: 0 hits each.** Its
+progress note observed the sharper version — the set already carried *"a tracker over prose would
+open a 'string' at every apostrophe and never close it"*, attached to `E-STATE-BLOCK-STATEMENT-FORM`,
+**the right principle filed under the wrong locus.** **Closed with:** a Task-Shape Routing row (now
+SECOND) and a `structure.map.md` ownership entry, both built from the dispatch's own candidate row.
+⛔ **The row records the defect as OPEN and carries a do-not-retry warning:**
+`g-engine-state-child-apostrophe-breaks-parse` is MED/open, the fix took five adversarial rounds and
+was **STOPPED BY RULE** (#866), and it lives on unmerged `origin/fix/s402-engine-apostrophe2`
+(`46bb46c9` — `git merge-base --is-ancestor 46bb46c9 origin/main` **exits 1**, checked).
+
+---
+
+## Docs scanned this window — the 7 changed in-scope docs
+
+| doc | verdict |
+|---|---|
+| `docs/FACTS.md` | COMPLIANT — `test files \| 1,435` and `conformance cases \| 897` both reconcile against a `find` re-run at this watermark. |
+| `docs/known-gaps.md` | COMPLIANT — carries `g-engine-state-child-apostrophe-breaks-parse` as **open** with the five-round stop recorded, matching the code. Its `@gap` locus line names the right file and the right helper. |
+| `docs/changelog.md` | ⚠ **MODIFIED-UNCOMMITTED in the working tree at scan time** (`git status` -> ` M docs/changelog.md`). Content not judged; the PA owns it and it is mid-session. |
+| `docs/pr-reviews.md` | COMPLIANT — the S402 review-floor drains are recorded. |
+| `hand-off.md` · `master-list.md` | COMPLIANT — PA-owned session artifacts, in scope, no code claims to falsify. |
+| `benchmarks/RESULTS.md` | ⚠ **SEE M11 / #853.** Touched this window, but the underlying `runtime-results.json` is still stamped **2026-05-19**. `g-runtime-benchmarks-stale-and-no-perf-gate` (MED) is filed and open. |
+
+## Map currency at this stamp — S402
+
+All **12** curated `.map.md` + this report stamped `499eecce`, the `merge-base HEAD origin/main`,
+with `git diff --name-only BASE..HEAD` over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+package.json` **EMPTY** and `merge-base --is-ancestor 499eecce origin/main` exit 0.
+⚠ **`git ls-files .claude/` returns 16 paths** — the 12 maps, this report, `agents/project-mapper.md`,
+`settings.json`, `statusline.mjs`. The four `*.generated.md` are **untracked** (M10).
+⛑ **The complete source delta `10a4b045..499eecce` was walked** — 17 `compiler/src` + 2
+`compiler/native-parser` + 5 `scripts` + 15 test files, across **36 commits and four sessions**. The
+partial-pass rule is SATISFIED, not waived.
+
+## Tags
+#non-compliance #project-mapper #cleanup #scrml #s402 #file-shape #entry-ness #apostrophe-arc
+#map-currency #wrong-referent #worktree-vs-main-checkout #w-program-001
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [structure.map.md](./structure.map.md) · [domain.map.md](./domain.map.md) · [schema.map.md](./schema.map.md)
+- [build.map.md](./build.map.md) · [error.map.md](./error.map.md) · [test.map.md](./test.map.md)
+- [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+
+---
+---
+
+# ══════ PRIOR PASSES — carried verbatim below this line for provenance ══════
+
+## Summary — S397 pass (PRIOR pass — carried for provenance)
 
 | | |
 |---|---|

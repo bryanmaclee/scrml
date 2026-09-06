@@ -1,0 +1,2 @@
+<v>: string = true
+log(@v)

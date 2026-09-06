@@ -30,11 +30,71 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 94 |
-| MED | 212 |
+| HIGH | 95 |
+| MED | 213 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded — `<s> = ` + "`${@a} world`" + ` emits an EMPTY template and the entire initializer is lost, at exit 0 with zero diagnostics
+
+<!-- @gap id=g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded sev=HIGH status=open locus=searched:compiler/src/expression-parser.ts — a multi-quasi template parses to `lit{ raw:"``", value:"" }` so the text never reaches the state-decl initializer; the deciding site was NOT traced, and the `let` form and the single-quasi form both emit correctly prov=empirical:PA-reproduced-on-main-at-499eecce-emits-_scrml_cs_init_set-s-arrow-empty-backticks-with-zero-errors -->
+
+**PA-REPRODUCED ON MAIN at `499eecce`** — surfaced by the S402 two-wins dispatch while verifying a
+candidate patch, and confirmed pre-existing:
+
+```scrml
+<a> = "hello"
+<s> = `${@a} world`      →  _scrml_cs_init_set("s", () => ``)
+```
+
+**Exit 0. Zero diagnostics. The whole initializer is gone.** The multi-quasi template parses to
+`lit{ raw:"``", value:"" }`, so the interpolated text never reaches the emitter.
+
+⛑ **Scoped by measurement, not assumption:** the `let` form emits correctly, and a SINGLE-quasi
+(non-interpolated) template on a state cell emits correctly. It is specifically an INTERPOLATED
+template in a state-cell initializer.
+
+⛑ **THIS IS THE SAME FAMILY AS THE TWO FLINT HIGHs AND IT IS A SHAPE A HUMAN WRITES FIRST.** String
+interpolation into a reactive cell is about as ordinary as scrml gets, it produces silently-wrong
+output with no diagnostic, and the ~2,400-file LLM-authored corpus never surfaced it — the same
+blindness that let [[g-line-comment-truncates-the-rest-of-a-default-logic-body]] and
+[[g-fn-parameter-type-annotations-are-not-enforced]] survive until a human wrote twenty lines.
+
+⛑ **It was DELIBERATELY NOT papered over in the type system.** At a *predicated* state-cell annotation
+the S402 literal-set widening now reasons correctly about this already-wrong AST and reports
+`E-CONTRACT-001 … Value  does not satisfy the predicate` — an odd-looking message whose real cause is
+this data loss upstream. Suppressing that in the type system would have hidden the data loss; the
+dispatch pinned it as a FLIP row in its probe instead (`bug-cell-tpl-interp`,
+`docs/changes/type-enforcement-two-wins-2026-09-06/`).
+— `NEW S402-bryan (surfaced by the two-wins dispatch verifying a candidate patch; PA-reproduced on main)`; **HIGH**; open
+
+
+### g-pinned-w-program-001-discussion-is-stale-its-option-menu-omits-the-mechanism-that-shipped — the PINNED `w-program-001-warning-scope.md` still reads "Not yet implemented / No compiler change authorized" while #859 made the fire condition shape-based, and 2 of its 5 cross-references point at files that do not exist
+
+<!-- @gap id=g-pinned-w-program-001-discussion-is-stale sev=MED status=open locus=docs/pinned-discussions/w-program-001-warning-scope.md(the 5-option menu + the authorization line + 2 dead cross-refs) prov=empirical:S402-maps-refresh-N16-verified-by-execution-bare-markup-fires-a-pure-module-compiles-with-zero-warnings-so-the-condition-is-now-shape-based -->
+
+**Surfaced by the wrap 6c maps refresh (non-compliance N16) and worth filing because it is the
+same-landing supersession discipline failing on a PINNED document.** `#859` (`fileShape`) made the
+`W-PROGRAM-001` fire condition **shape-based** — verified by execution: bare wrapper-less markup fires,
+a pure module compiles with zero warnings, and a §38.12.6 pure-channel file no longer fires at all.
+The pinned discussion still says *"Not yet implemented"* and *"No compiler change authorized"*, and
+**its five-option menu does not contain the mechanism that actually shipped.**
+
+⛑ **DO NOT CLOSE IT — RE-BASE IT.** The *convention* question it pins (which shapes SHOULD warn, and
+whether `samples/compilation-tests/` fragments are in scope at all) is genuinely still open, and that
+open question is what protected 420 corpus files from an unauthorised widening during the entry-ness
+arc — the agent correctly refused a brief instruction on the strength of this document. Its authority
+is intact; only its description of the implementation is stale. Two of its five cross-references also
+point at files that no longer exist.
+
+⛑ **The general shape, which is why this is filed rather than fixed in passing:** a pinned discussion
+is a maintained-tier document that nothing regenerates and no gate reads, so a landing that changes
+the behaviour it describes leaves it asserting a false state indefinitely — and a PINNED doc is
+exactly the kind a future session trusts without re-verifying. `#859` owed it a same-landing update
+(base §2) and did not pay it; this entry is that debt, made visible.
+— `NEW S402-bryan (wrap 6c maps refresh, non-compliance N16; fire condition re-verified by execution)`; **MED**; open
+
 
 ### g-no-unterminated-delimiter-diagnostic-exists-anywhere-so-four-delimiter-classes-consume-to-EOF-silently — `/* */`, `<!-- -->`, strings and backticks all run to end-of-file when unterminated, at exit 0, and the tokenizer does it too
 

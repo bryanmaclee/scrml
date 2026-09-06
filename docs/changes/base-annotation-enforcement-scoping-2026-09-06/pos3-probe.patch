@@ -1,0 +1,272 @@
+diff --git a/compiler/src/type-system.ts b/compiler/src/type-system.ts
+index 881ea134..d7e7fcd4 100644
+--- a/compiler/src/type-system.ts
++++ b/compiler/src/type-system.ts
+@@ -10651,6 +10651,7 @@ function annotateNodes(
+             // at typed-function call-arg positions before the LHS-driven
+             // walk runs, so the no-context branch doesn't fire on them.
+             inferBareVariantsAtCallArgs(initExprForScope, fnSignatures, letSpan, errors);
++            __pos3Probe(initExprForScope, fnSignatures, scopeChain, letSpan);
+             // §59.4 / §14.10 — map-KEY-arg pre-pass. `const x = @m.getOr(.City, 0)`
+             // / `@m[.City]` — the bare KEY variant resolves against the map's
+             // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
+@@ -11120,6 +11121,7 @@ function annotateNodes(
+             // `Tok`). Was ordered AFTER struct-nav → the cross-enum call-arg
+             // resolved too late.
+             inferBareVariantsAtCallArgs(reactInitExprNode, fnSignatures, reactSpan, errors);
++            __pos3Probe(reactInitExprNode, fnSignatures, scopeChain, reactSpan);
+             // §59.4 / §14.10 — map-KEY-arg pre-pass. `@m = @m.insert(.City, v)` —
+             // the bare KEY variant resolves against the map's declared key enum
+             // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
+@@ -11504,6 +11506,7 @@ function annotateNodes(
+             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference at
+             // bare-expr top-level (e.g. `applyState(.V)` as its own stmt).
+             inferBareVariantsAtCallArgs(beExprNode, fnSignatures, beSpan, errors);
++            __pos3Probe(beExprNode, fnSignatures, scopeChain, beSpan);
+             // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
+             // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
+             // against the map's declared key enum + stamps.
+@@ -12078,6 +12081,7 @@ function annotateNodes(
+             // `_bareVariantInferredAtBinaryExpr` on resolved idents so the
+             // downstream walkers can deduplicate.
+             inferBareVariantsAtCallArgs(ifCondExpr, fnSignatures, ifCondSpan, errors);
++            __pos3Probe(ifCondExpr, fnSignatures, scopeChain, ifCondSpan);
+             // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
+             // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
+             // map's declared key enum + stamps.
+@@ -12390,6 +12394,7 @@ function annotateNodes(
+           // the fn's return type (`return wrap(.Paren)` where
+           // `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not `Tok`).
+           inferBareVariantsAtCallArgs(retExprNode, fnSignatures, retSpan, errors);
++          __pos3Probe(retExprNode, fnSignatures, scopeChain, retSpan);
+           // §59.4 / §14.10 — map-KEY-arg pre-pass in a return value
+           // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
+           // the map's declared key enum + stamps, so the return-type-context
+@@ -15824,6 +15829,227 @@ function checkEqPayloadVariantOperands(
+  *   §14.10 line 7291 — "any other position where the type is fixed"
+  *   §34            — E-VARIANT-AMBIGUOUS + E-TYPE-063
+  */
++// ═════════════════════════════════════════════════════════════════════════════
++// THROWAWAY MEASURING INSTRUMENT — base-annotation-enforcement-scoping-2026-09-06
++//
++// NOT A GATE, NOT AN ENFORCEMENT CHANGE. It pushes NOTHING into `errors`, never
++// changes acceptance, and is inert unless `SCRML_POS3_PROBE=1` is set in the
++// environment. It exists to MEASURE the migration cost of widening §7.5.1
++// position 3 (call-site argument assignability) at three inference power
++// levels, so the cost of the widening is a number and not a guess.
++//
++//   L1 — EXACTLY today's `inferExprType` power (number / string / negated
++//        number literal). This is what position 3 would catch if it were wired
++//        up today with no inference work at all.
++//   L2 — L1 + the "literal set" widening §7.5.1's ruled order puts FIRST:
++//        bool literal, template literal, `not` literal, uniform array literal.
++//   L3 — L2 + the decl-site cascade: an ident resolved through the scope chain,
++//        and a call result resolved through an annotated `fn` return type.
++//
++// Delete this block with the dispatch. `docs/changes/
++// base-annotation-enforcement-scoping-2026-09-06/pos3-probe.patch` is the
++// archived copy.
++// ═════════════════════════════════════════════════════════════════════════════
++
++const __POS3_PROBE_ON =
++  typeof process !== "undefined" && !!process.env && process.env.SCRML_POS3_PROBE === "1";
++
++type __Pos3Level = "L1" | "L2" | "L3";
++
++interface __Pos3Hit {
++  file: string;
++  line: number;
++  level: __Pos3Level;
++  fn: string;
++  argIndex: number;
++  param: string;
++  declared: string;
++  actual: string;
++  argKind: string;
++  argLitType: string;
++  argSrc: string;
++}
++
++function __pos3Render(t: ResolvedType): string {
++  switch (t.kind) {
++    case "primitive": return (t as PrimitiveType).name;
++    case "array": return __pos3Render((t as ArrayType).element) + "[]";
++    case "union": return (t as UnionType).members.map(__pos3Render).join("|");
++    case "struct": return (t as StructType).name;
++    case "enum": return (t as EnumType).name;
++    default: return t.kind;
++  }
++}
++
++/**
++ * Infer an argument expression's type at the requested power level.
++ * Returns `null` for "the checker cannot prove anything here" — which, at
++ * every level, means the position is SILENT (no migration cost, and no catch).
++ */
++function __pos3InferArg(
++  arg: unknown,
++  level: __Pos3Level,
++  scopeChain: ScopeChain | null,
++  fnSignatures: Map<string, { params: Array<{ name: string; type: ResolvedType }>; returnType: ResolvedType }>,
++): ResolvedType | null {
++  if (!arg || typeof arg !== "object") return null;
++  const node = arg as { kind?: string } & Record<string, unknown>;
++
++  // L1 — the compiler's ACTUAL inference power today, unmodified.
++  const base = inferExprType(arg as ExprNode);
++  if (base.ok) return base.type;
++  if (level === "L1") return null;
++
++  // L2 — the literal-set widening §7.5.1 rules first.
++  if (node.kind === "lit") {
++    const litType = node.litType as string | undefined;
++    if (litType === "bool") return tPrimitive("boolean");
++    if (litType === "template") return tPrimitive("string");
++    if (litType === "not") return { kind: "not" } as ResolvedType;
++    return null;
++  }
++  if (node.kind === "array") {
++    const els = Array.isArray(node.elements) ? (node.elements as unknown[]) : [];
++    if (els.length === 0) return null;   // element type genuinely unknown
++    const first = __pos3InferArg(els[0], level, scopeChain, fnSignatures);
++    if (!first) return null;
++    for (const e of els) {
++      const t = __pos3InferArg(e, level, scopeChain, fnSignatures);
++      if (!t || !fieldTypeEquals(t, first)) return null;
++    }
++    return tArray(first);
++  }
++  if (level === "L2") return null;
++
++  // L3 — the decl-site cascade.
++  if (node.kind === "ident") {
++    const name = node.name as string | undefined;
++    if (!name || name.startsWith(".") || name === "~") return null;
++    const entry = scopeChain ? scopeChain.lookup(name) : null;
++    if (!entry || entry.kind !== "variable") return null;
++    const rt = entry.resolvedType as ResolvedType | undefined;
++    if (!rt || rt.kind === "asIs" || rt.kind === "unknown") return null;
++    return rt;
++  }
++  if (node.kind === "call") {
++    const callee = node.callee as { kind?: string; name?: string } | undefined;
++    if (callee && callee.kind === "ident" && typeof callee.name === "string") {
++      const sig = fnSignatures.get(callee.name);
++      const rt = sig ? sig.returnType : undefined;
++      if (rt && rt.kind !== "asIs" && rt.kind !== "unknown") return rt;
++    }
++    return null;
++  }
++  return null;
++}
++
++function __pos3Bump(key: string): void {
++  const c = (globalThis as Record<string, unknown>).__POS3_COUNTS as Record<string, number> | undefined;
++  if (c) c[key] = (c[key] ?? 0) + 1;
++}
++
++function __pos3Probe(
++  exprNode: unknown,
++  fnSignatures: Map<string, { params: Array<{ name: string; type: ResolvedType }>; returnType: ResolvedType }>,
++  scopeChain: ScopeChain | null,
++  span: Span,
++): void {
++  if (!__POS3_PROBE_ON) return;
++  if (!exprNode || typeof exprNode !== "object") return;
++
++  const sink = (globalThis as Record<string, unknown>).__POS3_HITS as __Pos3Hit[] | undefined;
++  if (!sink) return;
++
++  const seen = new Set<unknown>();
++  const walk = (node: unknown): void => {
++    if (!node || typeof node !== "object" || seen.has(node)) return;
++    seen.add(node);
++    const n = node as { kind?: string } & Record<string, unknown>;
++
++    if (n.kind === "call") {
++      const callee = n.callee as { kind?: string; name?: string } | undefined;
++      const args = Array.isArray(n.args) ? (n.args as unknown[]) : [];
++      // DENOMINATOR. "N new rejections" is unreadable without "out of how many
++      // positions the check could even SEE". Every counter below is a reach
++      // measurement, not an outcome.
++      __pos3Bump("callNodes");
++      if (!callee || callee.kind !== "ident") __pos3Bump("calleeNotSimpleIdent");
++      else if (!fnSignatures.has(callee.name as string)) __pos3Bump("calleeNotInFnSignatures");
++      if (callee && callee.kind === "ident" && typeof callee.name === "string") {
++        const sig = fnSignatures.get(callee.name);
++        if (sig) {
++          __pos3Bump("callsResolved");
++          for (let i = 0; i < args.length; i++) {
++            const p = sig.params[i];
++            if (!p) { __pos3Bump("argsOverSupplied"); continue; }
++            if (!p.type || p.type.kind === "asIs" || p.type.kind === "unknown") { __pos3Bump("paramUnannotated"); continue; }
++            __pos3Bump("positionsExaminable");
++            for (const level of ["L1", "L2", "L3"] as __Pos3Level[]) {
++              const t = __pos3InferArg(args[i], level, scopeChain, fnSignatures);
++              __pos3Bump(t ? `proven_${level}` : `unprovable_${level}`);
++            }
++          }
++        }
++        if (sig) {
++          for (let i = 0; i < args.length; i++) {
++            const param = sig.params[i];
++            if (!param) continue;                       // arity — a different position
++            let target = param.type;
++            if (!target || target.kind === "asIs" || target.kind === "unknown") continue;
++            // A PREDICATED param is §53's surface, not §7.5.1's. Strip to its
++            // base type and ask only the BASE-assignability question — the
++            // predicate itself already has a working compile/runtime check.
++            // Without this strip the probe reports `charge(50)` on
++            // `charge(a: number(>0))` as a violation, which it is not. That
++            // false positive is itself an implementation finding: the existing
++            // `fieldTypeAssignable` relation is NOT the right predicate for
++            // position 3 as-is.
++            if (target.kind === "predicated") {
++              const bt = (target as PredicatedType).baseType;
++              if (bt === "enum") {
++                const eb = (target as PredicatedType).enumBase;
++                if (!eb) continue;
++                target = eb;
++              } else {
++                target = tPrimitive(bt === "integer" ? "number" : bt);
++              }
++            }
++            for (const level of ["L1", "L2", "L3"] as __Pos3Level[]) {
++              const actual = __pos3InferArg(args[i], level, scopeChain, fnSignatures);
++              if (!actual) continue;                    // unprovable → silent
++              if (fieldTypeAssignable(actual, target)) continue;
++              const a = args[i] as { kind?: string; litType?: string; raw?: string; name?: string } | undefined;
++              sink.push({
++                file: span.file ?? "?",
++                line: span.line ?? 0,
++                level,
++                fn: callee.name,
++                argIndex: i,
++                param: param.name,
++                declared: __pos3Render(target),
++                actual: __pos3Render(actual),
++                argKind: a?.kind ?? "?",
++                argLitType: a?.litType ?? "",
++                argSrc: (a?.raw ?? a?.name ?? "").slice(0, 40),
++              });
++            }
++          }
++        }
++      }
++    }
++
++    for (const key of Object.keys(n)) {
++      if (key === "span" || key === "parent") continue;
++      const child = n[key];
++      if (Array.isArray(child)) { for (const c of child) walk(c); }
++      else if (child && typeof child === "object") walk(child);
++    }
++  };
++  walk(exprNode);
++}
++
++// ═════════════════════ END THROWAWAY MEASURING INSTRUMENT ════════════════════
++
+ function inferBareVariantsAtCallArgs(
+   exprNode: unknown,
+   fnSignatures: Map<string, {

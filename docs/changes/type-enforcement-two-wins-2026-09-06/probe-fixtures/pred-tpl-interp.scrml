@@ -1,0 +1,5 @@
+${
+    let a = "hello"
+    let s: string(.length >= 5) = `${a} world`
+    log(s)
+}
