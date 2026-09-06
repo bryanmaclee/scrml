@@ -1,4 +1,81 @@
-# TodoMVC Benchmark Results — 2026-05-19 v0.3.3 HEAD (S109)
+# TodoMVC Benchmark Results — 2026-09-05 currency refresh (HEAD `42162a38`)
+
+> ## ⚑ 2026-09-05 CURRENCY REFRESH — READ THIS BEFORE ANY NUMBER BELOW
+>
+> **All four benchmark categories were re-measured on 2026-09-05 against HEAD `42162a38`**
+> (`compiler/src` tree `f80a8fc3`, `compiler/runtime` tree `fea0ca81`, `stdlib` tree `f6108a72` —
+> byte-identical at `origin/main` `aece349d` and at `3634fdae`, so the compile artifact is the same
+> whichever of those the checkout sat on). Everything dated 2026-05-19 or earlier is preserved
+> below, unchanged, as `### Historical:` subsections.
+>
+> **The headline finding is not a number. `benchmarks/todomvc/app.scrml` — this document's entire
+> subject, and the program every table below measures — has been DEAD ON ARRIVAL since
+> 2026-07-30.** It compiles at exit 0 with no error diagnostic, and then throws on first render in
+> both happy-dom and real Chrome:
+>
+> ```
+> TypeError: Cannot set properties of null (setting 'innerHTML')   // Chrome
+>   at _scrml_lift_tgt_45.innerHTML = ""                           // app.client.js
+> ```
+>
+> Zero `li.todo-item` render. Driving `_scrml_reactive_set("todos", …)` produces zero rows.
+> **`partial-update` at HEAD is therefore UNMEASURABLE, not slow** — there is nothing to update.
+> Bisected (12 steps, behavioural predicate) to first-bad `cdf4f4de` *(2026-07-30 09:53:39,
+> "feat(codegen): `if=` Phase 2 — `if=` REMOVES from the DOM per §17.1, not display:none" #289)*;
+> last-good `4e354e4d` *(2026-07-30 09:35:18)*. Mechanism: `if=` Phase 2 moved branch content into
+> a mount `<template>`, and `document.querySelector('[data-scrml-logic="…"]')` does not descend into
+> template content, so the module-top-level `const _scrml_lift_tgt_N = …` binds `null` and the
+> first `_scrml_effect` throws. Same class as the known-gaps entry
+> `g-call-expression-interpolation-in-if-chain-branch-renders-empty` (resolved S400-peter), whose
+> `insideMountTemplate` fix covered the STATIC-DISPLAY binding sites but not the LIFT-TARGET site.
+>
+> **A second, independent breakage predates it.** `1c5c2aee` *(2026-07-25, chunk-namespacing BUG-6
+> accessor rename)* namespaced every cell key to `"<token>$name"` and made the `_scrml_cs_*`
+> accessors chunk-IIFE-local. `benchmarks/bench-scrml.js` and `benchmarks/browser/bench-browser-pw.js`
+> still drive the bare global `_scrml_reactive_set("todos", …)`, which now writes a key nothing reads
+> — **silently, with no error**. `compiler/tests/helpers/chunk-scope.js` exists precisely to fix this
+> for the test tiers; `benchmarks/` was never updated. So even without the DOA, the shipped harnesses
+> would have reported a fully-hollow run as a fast one.
+>
+> **Nothing caught either.** `compiler/tests/browser/browser-todomvc.test.js` (36 pass / 8 skip /
+> 0 fail) and `todomvc-e2e.test.js` (10 pass / 0 fail) are both GREEN at HEAD against the DOA build:
+> the harness swallows the client-init throw into an `initError` variable and no test asserts that a
+> row ever renders. `scripts/corpus-compile-floor.ts` checks exit 0, which the DOA build satisfies.
+> There is no perf gate in CI at all (gap `g-runtime-benchmarks-stale-and-no-perf-gate`).
+>
+> **What is measured below instead.** To answer the S87 audit's question in its own terms, three
+> pinned scrml anchors were compiled from worktrees and measured back-to-back with the comparison
+> frameworks in the same interleaved rounds on the same machine on 2026-09-05:
+>
+> | Anchor | Commit | Date | Why |
+> |---|---|---|---|
+> | `scrml@3609985` | `3609985` | 2026-05-19 | the exact code behind this document's prior tables |
+> | `scrml@2d192b6f` | `2d192b6f` | 2026-07-24 | last commit the SHIPPED harness can drive |
+> | `scrml@4e354e4d` | `4e354e4d` | 2026-07-30 | last commit at which the app renders at all |
+> | `scrml@HEAD` | `42162a38` | 2026-09-05 | DOA — reported as such, never as a number |
+>
+> `scrml@3609985` is the control: it is the same source the 2026-05-19 rows were taken from, so the
+> gap between its published number and its number today is environment, and the gap between it and
+> the later anchors is code.
+>
+> **Harness deltas.** Comparison-framework harnesses (`todomvc-{react,svelte,vue,vanilla}/bench.js`)
+> ran UNMODIFIED, and their `dist/` is the frozen 2026-05-19 build. The scrml side ran from a
+> scratchpad copy of `bench-scrml.js` with five deltas, none of which touch the timing protocol:
+> (1) `dist` from argv; (2) resolve the runtime the page's own `<script src>` names — the shipped
+> `readdirSync().find()` picks an arbitrary stale content-hashed runtime out of an accumulating
+> `dist/` (16 of them were present, and it picked a 6-week-old one); (3) chunk-namespace the cell key
+> (a provable no-op on the two pre-`1c5c2aee` anchors, so those two columns are the shipped
+> methodology exactly); (4) a hollow-run guard that aborts if a 10-row write renders zero rows;
+> (5) a per-op filter, because the shipped single-process runner is OOM-killed on this machine
+> (peak RSS > 2 GB — `loadApp()` re-evaluates the whole ~160 KB runtime+client on every `setup()`,
+> ~140 times per full sweep). Each scrml op therefore runs in its own process. **Per-op protocol is
+> unchanged: 3 warmup + 10 measured iterations, median.**
+>
+> **Repeats and noise.** happy-dom: 5 interleaved rounds. Chrome: 3 interleaved rounds. The tables
+> report the median of the round medians, and a min–max range table follows each one so the noise is
+> visible rather than asserted. This machine was running other agents' test suites throughout
+> (1-minute load average between 1.6 and 14.4).
+
 
 > **Update 2026-05-19 (S109):** Bundle Size + Build Performance + Runtime
 > Performance (Real Browser, Playwright) all re-measured against HEAD `3609985`
@@ -21,7 +98,61 @@
 >
 > **Update 2026-05-12 (S86 / v0.2.6+):** [PRIOR — preserved for trend tracking] happy-dom runtime numbers regenerated against HEAD with the indirect-eval `bench-scrml.js` fix (see `docs/changes/wave-3-d3/`). The Chrome-via-Puppeteer section below is the 2026-04-13 v0.2.4-era baseline preserved for trend tracking; rerun Chrome benchmarks under v0.2.6+ to refresh that section.
 
-## Runtime Performance — Real Browser (headless Chrome, medians in ms) — 2026-05-19 v0.3.3 HEAD (Playwright)
+## Runtime Performance — Real Browser (headless Chrome via Playwright, medians in ms) — 2026-09-05 (HEAD `42162a38`)
+
+**Harness:** `benchmarks/browser/bench-browser-pw.js` (scratchpad copy, deltas listed in the banner),
+Playwright `1.60.0`, chromium revision `1223` = **Chrome 148.0.7778.96**, Bun 1.3.14.
+5 warmup + 10 measured iterations per op (5 for `create-10000`), `performance.now()` + forced layout,
+each app served from its own in-process HTTP server. **3 interleaved rounds**; cells are the median of
+the three round medians. Lower is better.
+
+**`scrml@HEAD` is absent from this table because it never rendered a row.** All three rounds logged
+`[pageerror] Cannot set properties of null (setting 'innerHTML')` followed by
+`HOLLOW: 0 rows after a 10-row write`. It is reported as DOA, not as a fast number.
+
+| Operation | scrml@3609985 | scrml@2d192b6f | scrml@4e354e4d | React 19 | Svelte 5 | Vue 3 | Vanilla JS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| create-1000 | 27.3 | 39.4 | 67.8 | 26.7 | 47.3 | 35.4 | 23.3 |
+| replace-1000 | 27.4 | 80.8 | 231.7 | 26.2 | 47.4 | 28.9 | 24.5 |
+| partial-update | 0.80 | 60.9 | 260.7 | 5.50 | 4.70 | 11.9 | 2.55 |
+| delete-every-10th | 2.50 | 79.8 | 318.0 | 4.70 | 3.75 | 8.75 | 1.60 |
+| clear-all | 3.45 | 43.1 | 149.2 | 3.85 | 3.05 | 3.55 | 2.55 |
+| select-row | 0.30 | 0.40 | 0.40 | 0.60 | 0.000 | 0.100 | 0.100 |
+| swap-rows | 2.00 | 139.5 | 596.5 | 20.7 | 3.40 | 7.75 | 0.95 |
+| remove-row | 2.00 | 202.6 | 703.0 | 4.45 | 3.25 | 8.10 | 0.90 |
+| create-10000 | 274.5 | 720.5 | 1379.0 | 251.3 | 510.5 | 325.8 | 237.3 |
+| append-1000 | 27.0 | 429.1 | 1140.8 | 27.1 | 46.0 | 34.9 | 21.3 |
+
+**Ranges (min–max of the 3 round medians):**
+
+| Operation | scrml@3609985 | scrml@2d192b6f | scrml@4e354e4d | React 19 | Svelte 5 | Vue 3 | Vanilla JS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| create-1000 | 24.1–31.4 | 36.2–51.3 | 55.4–110.7 | 22.8–33.7 | 34.2–66.4 | 27.0–41.1 | 20.6–28.8 |
+| replace-1000 | 24.8–32.0 | 68.0–98.8 | 186.8–279.6 | 22.9–33.1 | 32.9–68.8 | 26.6–44.2 | 21.4–29.2 |
+| partial-update | 0.80–0.90 | 56.9–69.5 | 210.6–272.6 | 4.90–6.30 | 4.30–4.95 | 10.7–13.9 | 2.40–2.70 |
+| delete-every-10th | 2.40–2.65 | 72.8–91.2 | 265.0–369.7 | 4.65–5.00 | 3.60–4.15 | 7.75–9.65 | 1.55–1.75 |
+| clear-all | 3.30–3.50 | 41.9–45.8 | 142.3–174.6 | 3.40–3.90 | 2.65–3.15 | 3.45–3.80 | 2.30–2.60 |
+| select-row | 0.30–0.35 | 0.40–0.40 | 0.40–0.40 | 0.55–0.65 | 0.000–0.050 | 0.000–0.100 | 0.050–0.100 |
+| swap-rows | 1.85–2.25 | 126.5–195.5 | 515.0–625.9 | 18.2–27.8 | 2.55–3.65 | 7.30–7.95 | 0.90–1.10 |
+| remove-row | 2.00–2.05 | 162.6–414.2 | 592.6–853.7 | 4.00–4.60 | 2.15–3.30 | 7.70–8.90 | 0.85–1.00 |
+| create-10000 | 254.1–345.4 | 702.5–1430.4 | 1170.3–1522.4 | 204.6–313.4 | 393.9–759.7 | 270.4–500.2 | 206.5–306.7 |
+| append-1000 | 25.4–36.5 | 338.8–520.8 | 997.9–1216.8 | 23.5–40.0 | 38.9–73.6 | 31.3–88.7 | 19.7–25.7 |
+
+**Reading it.** `scrml@3609985` reproduces this document's published 2026-05-19 Chrome row within
+noise — published vs today: partial-update 1.00 / **0.80**, create-1000 25.95 / **27.3**,
+replace-1000 26.35 / **27.4**, clear-all 3.65 / **3.45**, select-row 0.30 / **0.30**. The harness and
+the machine are therefore sound, and the movement in the two later columns is code.
+
+**Chrome `partial-update`: 0.80 ms → 60.9 ms → 260.7 ms — a 326× regression** between 2026-05-19 and
+2026-07-30, on top of which the app then stopped running entirely. `swap-rows` 2.00 → 596.5 (298×),
+`remove-row` 2.00 → 703.0 (352×), `append-1000` 27.0 → 1140.8 (42×), `replace-1000` 27.4 → 231.7 (8.5×).
+`select-row` alone is flat (0.30 → 0.40), which is consistent with the S103 value-indexed subscriber
+dispatch being on a different path from list reconciliation. The per-round ranges are disjoint between
+adjacent anchors on every op **except `create-10000`**, where `scrml@2d192b6f` (702.5–1430.4) overlaps
+`scrml@4e354e4d` (1170.3–1522.4) — that one step is inside the noise and should not be read as resolved.
+Everything else here is.
+
+### Historical: Real Browser (2026-05-19, v0.3.3 HEAD `3609985`, Playwright; preserved for trend tracking)
 
 All five frameworks measured in headless Chrome via **Playwright** (`@playwright/test`'s
 `chromium.launch`). Each framework's production build is served locally over a tiny
@@ -143,7 +274,130 @@ The happy-dom results (below) differ significantly from real Chrome. Key differe
 - happy-dom's `cloneNode(true)` and `innerHTML` are slower than `createElement` (opposite of real browsers)
 - Chrome is 1.2-2x faster than happy-dom at DOM creation
 
-## Runtime Performance — happy-dom (medians in ms, lower is better) — 2026-05-19 v0.3.3 + Phase 3 Candidate A + `!=` follow-on
+## Runtime Performance — happy-dom (medians in ms, lower is better) — 2026-09-05 (HEAD `42162a38`)
+
+**This is the harness the S87 audit's 5.83× was measured on**, so it is the one that answers the
+audit in its own units. happy-dom `20.8.9` (identical to the 2026-05-19 lockfile resolution), Bun
+`1.3.14` (2026-05-19 ran `1.3.13` — the only declared-dependency difference in the whole window).
+3 warmup + 10 measured iterations per op, median. **5 interleaved rounds**; cells are the median of
+the five round medians.
+
+**`scrml@HEAD` is absent because it throws at load in all five rounds** — see the banner.
+
+| Operation | scrml@3609985 | scrml@2d192b6f | scrml@4e354e4d | React 19 | Svelte 5 | Vue 3 | Vanilla JS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| initial-render | 3.67 | 4.18 | 3.58 | 0.92 | 0.91 | 0.66 | 0.45 |
+| create-1000 | 69.3 | 87.7 | 94.4 | 72.6 | 32.8 | 55.4 | 35.7 |
+| replace-1000 | 72.2 | 94.6 | 129.5 | 65.8 | 35.7 | 50.6 | 39.5 |
+| partial-update | 1.04 | 4.79 | 17.9 | 29.1 | 13.5 | 3.96 | 0.83 |
+| delete-every-10th | 2.83 | 7.02 | 17.4 | 34.8 | 11.9 | 3.97 | 1.12 |
+| clear-all | 10.0 | 13.4 | 15.4 | 5.19 | 7.20 | 5.74 | 6.72 |
+| select-row | 0.11 | 0.12 | 0.12 | 3.99 | 0.041 | 0.024 | 0.012 |
+| swap-rows | 1.88 | 5.89 | 16.5 | 35.2 | 20.0 | 3.18 | 0.066 |
+| remove-row | 1.64 | 5.93 | 15.8 | 23.3 | 12.5 | 3.02 | 0.041 |
+| create-10000 | 749.2 | 767.6 | 735.7 | 625.3 | 288.6 | 480.3 | 308.8 |
+| append-1000 | 73.8 | 77.6 | 104.5 | 77.0 | 40.4 | 45.2 | 31.2 |
+
+**Ranges (min–max of the 5 round medians):**
+
+| Operation | scrml@3609985 | scrml@2d192b6f | scrml@4e354e4d | React 19 | Svelte 5 | Vue 3 | Vanilla JS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| initial-render | 3.18–3.95 | 2.95–8.26 | 3.36–8.40 | 0.80–2.13 | 0.70–1.07 | 0.58–0.86 | 0.39–0.88 |
+| create-1000 | 56.2–71.2 | 61.8–138.3 | 74.1–153.4 | 61.6–152.3 | 31.1–35.0 | 50.2–69.1 | 28.9–56.7 |
+| replace-1000 | 63.3–116.3 | 66.9–167.7 | 83.7–193.4 | 51.9–130.9 | 29.0–38.3 | 45.8–62.4 | 26.4–68.2 |
+| partial-update | 0.85–1.80 | 4.26–9.70 | 14.5–31.4 | 27.8–53.9 | 12.7–14.3 | 3.41–6.05 | 0.58–1.60 |
+| delete-every-10th | 2.36–5.24 | 6.05–13.4 | 15.9–32.4 | 22.2–44.0 | 11.0–14.5 | 3.49–4.83 | 0.82–1.95 |
+| clear-all | 7.72–18.3 | 11.1–19.5 | 13.0–31.5 | 4.22–8.96 | 5.67–8.05 | 5.23–7.70 | 5.14–14.3 |
+| select-row | 0.10–0.17 | 0.10–0.15 | 0.092–0.16 | 3.57–8.30 | 0.034–0.042 | 0.021–0.029 | 0.011–0.018 |
+| swap-rows | 1.51–3.63 | 4.89–10.8 | 14.2–24.1 | 31.7–83.0 | 18.6–29.9 | 2.59–6.87 | 0.061–0.11 |
+| remove-row | 1.47–3.77 | 4.61–11.2 | 14.0–34.8 | 21.4–56.8 | 11.4–14.2 | 2.19–4.49 | 0.033–0.12 |
+| create-10000 | 504.9–1334.5 | 600.3–1378.1 | 645.8–1338.1 | 559.4–635.4 | 252.8–344.9 | 391.8–684.8 | 237.7–441.1 |
+| append-1000 | 57.0–123.3 | 70.0–161.0 | 88.7–168.1 | 68.2–85.3 | 32.4–54.2 | 34.0–71.7 | 21.7–50.2 |
+
+### The S87 question, answered in its own units
+
+`docs/audits/happy-dom-perf-regression-s87-2026-05-12.md` asked whether the 0.7 ms → 4.08 ms (5.83×)
+partial-update regression had been closed. Series, happy-dom, `partial-update`:
+
+| Source | scrml | React | Ratio (React ÷ scrml) |
+|---|---:|---:|---:|
+| 2026-04-05 published (v0.1.x) | 0.7 | 20.1 | **28.7×** |
+| 2026-05-12 published (v0.2.6+) — the audit's "bad" row | 4.08 | 37.7 | **9.2×** |
+| 2026-05-19 published (v0.3.3, post S102–S106) | 2.28 | 23.2 | 10.1× |
+| **2026-05-19 CODE, re-measured 2026-09-05** | **1.04** | 29.1 | **27.8×** |
+| **2026-07-24 CODE, measured 2026-09-05** | **4.79** | 29.1 | **6.1×** |
+| **2026-07-30 CODE, measured 2026-09-05** | **17.9** | 29.1 | **1.6×** |
+| **HEAD `42162a38`** | **unmeasurable — app is DOA** | 29.1 | — |
+
+**Verdict: the 5.83× was closed, and then overtaken by a much larger one.** The 2026-05-19 code, put
+on today's machine alongside today's React, measures **27.8× faster than React** — statistically the
+same competitive position as the 28.7× of the 2026-04-05 baseline the audit treated as the good state.
+The S102–S106 runtime-perf arc did what it set out to do.
+
+What the arc could not know is that **a second regression landed after it**: 1.04 → 17.9 ms in
+happy-dom (**17.2×**, against the audit's 5.83×) and 0.80 → 260.7 ms in Chrome (**326×**), taking the
+React advantage from 27.8× to 1.6× in happy-dom and from 6.9× to 0.02× (i.e. 47× *slower* than React)
+in Chrome. It is not confined to `partial-update`: happy-dom `swap-rows` 1.88 → 16.5 (8.8×),
+`remove-row` 1.64 → 15.8 (9.6×), `delete-every-10th` 2.83 → 17.4 (6.1×). `select-row` is untouched
+(0.11 → 0.12), and bulk create is nearly untouched (`create-10000` 749 → 736), which localises the
+cost to the per-item reconciliation path rather than to node creation.
+
+**Noise.** Relative spread across rounds is 67–123% on this machine, which is high. It does not
+threaten the finding: the per-round ranges of the three anchors are **disjoint** — 0.85–1.80 vs
+4.26–9.70 vs 14.5–31.4. Both steps are resolved well above the noise floor.
+
+### Confounds — what moved that is not scrml
+
+The S87 audit flagged that its own 5.83× sat on an older Bun *and* an older happy-dom with 1,402
+commits in between, and that React/Vue/Svelte regressed 1.7–2.1× on the same environment change — so
+roughly 2× of the 5.83× was plausibly environmental. The same discipline, applied here:
+
+**What did NOT move.**
+- **happy-dom is byte-identical.** `20.8.9` both at `3609985` (`git show 3609985:bun.lock`) and today.
+- **Playwright is byte-identical.** `@playwright/test 1.60.0` in the lockfile at `3609985` and today.
+- **`benchmarks/todomvc/app.scrml` is byte-identical** across `3609985`, `4e354e4d` and HEAD
+  (tree `80f400dd`). All three anchors compile the same source; only the compiler differs.
+- **The comparison frameworks are frozen.** `todomvc-{react,svelte,vue}/dist` are the 2026-05-19
+  production builds and their `node_modules` is unchanged, so React/Svelte/Vue are a fixed ruler
+  rather than a second moving part. Their bundle rows reproduce their published values *exactly*,
+  which is the strongest single check that the measurement method is faithful.
+
+**What DID move.**
+- **Bun `1.3.13` → `1.3.14`.** The only declared-dependency change in the window. Affects all
+  columns equally within a round, so it cannot manufacture a scrml-vs-scrml delta.
+- **The machine.** 22 cores / 15.4 GB, running other agents' test suites throughout; 1-minute load
+  average ranged 1.6–14.4 and swap was near-full at times. This is why every table is a median of
+  interleaved rounds with an explicit min–max range beside it.
+- **Chromium build.** Today's runs used chromium rev `1223` (Chrome 148). Which chromium was
+  installed on 2026-05-19 cannot now be recovered. This is a real confound for
+  *published-2026-05-19 vs today*; it is **not** a confound for the three-anchor comparison, which
+  ran on one browser in one session.
+- **happy-dom got slower today for the comparison frameworks**, in the direction the audit warned
+  about: React `partial-update` 23.2 → 29.1, Vue 3.31 → 3.96, Vanilla 0.63 → 0.83, Svelte 13.8 → 13.5
+  (flat). So the environment is *not* uniformly faster — which makes scrml's own movement harder to
+  explain away, not easier.
+
+**The one place my numbers are NOT comparable to the published ones — stated plainly.**
+`scrml@3609985` measures **1.04 ms** on happy-dom `partial-update` today against **2.28 ms**
+published on 2026-05-19, for the *same source*. Every other framework in the same table moved the
+other way. The most likely cause is my own methodology deviation: the shipped `bench-scrml.js` runs
+all eleven ops in one process (and is OOM-killed on this machine at HEAD-era code sizes, peak RSS
+> 2 GB), whereas I ran **one process per op**, so each op gets a cold heap instead of inheriting
+~140 accumulated `loadApp()` re-evaluations. That systematically flatters the scrml column.
+Two things follow, and both matter:
+1. **scrml-anchor-to-scrml-anchor comparisons remain valid** — all three anchors got the identical
+   treatment, so the 1.04 → 4.79 → 17.9 series is apples-to-apples.
+2. **scrml-today-to-scrml-published comparisons are not** — do not read "1.04 vs 2.28" as a
+   2.2× improvement. It is a harness difference.
+The Chrome table has no such split (all ops run in one page, exactly as shipped), and there
+`scrml@3609985` reproduces the published row within noise (0.80 vs 1.00), which is consistent with
+this explanation rather than with a real change in the 2026-05-19 code.
+
+**Also not scrml.** The compiled `dist` for each anchor sits at a different absolute path, so each
+gets a different chunk-namespace token. The token is a path hash of fixed width — size-neutral and
+behaviour-neutral — but it is the reason the harness must read the token rather than assume one.
+
+### Historical: happy-dom (2026-05-19, v0.3.3 + Phase 3 Candidate A + `!=` follow-on; preserved for trend tracking)
 
 **Re-measured 2026-05-19** after S103 Phase 3 Candidate A landing (`91fcc72`) + the `!=` detector follow-on (this dispatch). HEAD ≈ post-`91fcc72`.
 
@@ -285,7 +539,30 @@ At v0.3.0 STABLE this section claimed "scrml wins 0/11 in happy-dom" framed as A
 | create-10000 | 249 | 430 | 218 | 295 |
 | append-1000 | 27.4 | 45.5 | 22.5 | 26.5 |
 
-## Bundle Size (gzipped) — 2026-05-19 v0.3.3 HEAD (S109)
+## Bundle Size (gzipped) — 2026-09-05 (HEAD `42162a38`)
+
+**Method:** `measureDist()` from `scripts/bundle-size-benchmark.js` re-used verbatim (`Bun.gzipSync`,
+same per-extension accounting). scrml compiled fresh through the same `compileScrml()` API the
+script's `buildScrml()` uses. The Vite apps were deliberately **not** rebuilt — their `dist/` is the
+frozen 2026-05-19 production build, which is what makes them a control, and the Chrome harness was
+serving it. Their rows below are therefore the 2026-05-19 artifacts re-measured today.
+
+| Framework | JS (gzip) | CSS (gzip) | Total (gzip) | Raw JS | Dependencies | node_modules |
+|---|---:|---:|---:|---:|---:|---:|
+| **scrml** (HEAD `42162a38`) | **47.0 KB** | 1.2 KB | **48.8 KB** | 158.2 KB | **0** | **0 bytes** |
+| Svelte 5 (frozen 2026-05-19 dist) | 15.7 KB | 1.1 KB | 17.1 KB | 40.2 KB | 3 | ~30 MB |
+| Vue 3 (frozen 2026-05-19 dist) | 26.5 KB | 1.1 KB | 27.8 KB | 65.6 KB | 3 | ~25 MB |
+| React 19 (frozen 2026-05-19 dist) | 61.5 KB | 1.1 KB | 62.8 KB | 193.6 KB | 4 | ~46 MB |
+
+**Control: all three framework rows reproduce their published 2026-05-19 values exactly**
+(15.7 / 26.5 / 61.5 KB JS gzip). The measurement method is faithful, so the scrml delta is entirely code.
+
+**scrml JS gzip 19.7 KB → 47.0 KB = +138% (2.4×) in 3.5 months**; raw JS 73 KB → 158.2 KB (2.2×).
+scrml has gone from *below* Vue 3 on the JS-only axis (19.7 vs 26.5) to 1.8× *above* it, and from
+3.1× smaller than React 19 to 1.3× smaller. The zero-dependency / zero-`node_modules` claim is
+unaffected and still holds.
+
+### Historical: Bundle Size (2026-05-19, v0.3.3 HEAD `3609985`; preserved for trend tracking)
 
 Re-measured 2026-05-19 against HEAD `3609985` (post S108-S109 substantive landings:
 match block-form Phases 3+4, Bug 5 P3 const-fold, Bug 1 floor+full×3 waves,
@@ -372,7 +649,30 @@ elsewhere in the docs that cited "14.8 KB → 39.9 KB" as the Approach-A delta
 compressed a much older regression into the Approach-A story. The honestly-attributed
 Approach-A delta is +4.3 KB; Phase B recovered the delta and then some.
 
-## Build Performance — TodoMVC (10 runs, median) — 2026-05-19 v0.3.3 HEAD (S109)
+## Build Performance — TodoMVC — 2026-09-05 (HEAD `42162a38`)
+
+**Method:** this document's own documented scrml build methodology — in-process via the
+`compileScrml()` API, 3 warmup + 10 measured, median — run as **3 interleaved rounds** against three
+pinned compilers taken from worktrees, so the comparison is same-machine and same-day. The Vite
+frameworks were **not** re-measured: rebuilding them would have destroyed the frozen 2026-05-19 dist
+that the bundle-size and Chrome tables use as their control. Their rows carry forward and are
+labelled as such.
+
+| Compiler | Round medians (ms) | Median (ms) | vs 2026-05-19 code |
+|---|---|---:|---:|
+| scrml @ `3609985` (2026-05-19 code) | 23.90 / 26.34 / 30.08 | **26.3** | — |
+| scrml @ `4e354e4d` (2026-07-30 code) | 58.05 / 64.25 / 63.22 | **63.2** | 2.40× slower |
+| scrml @ `42162a38` (HEAD, 2026-09-05) | 47.61 / 54.13 / 57.06 | **54.1** | **2.06× slower** |
+| Svelte 5 / Vue 3 / React 19 (Vite 6.4) | *not re-measured* | 681 / 697 / 963 | carried from 2026-05-19 |
+
+A separate 5-round HEAD-only run agrees: 56.51 / 49.63 / 49.19 / 48.74 / 51.65 → 49.6 ms.
+
+**scrml compile time roughly doubled: 26.3 → 54.1 ms.** Note that the published 2026-05-19 figure was
+36.7 ms while the *same code* measures 26.3 ms today — today's machine compiles ~1.4× faster — so the
+naive published-to-published comparison (36.7 → 54.1, +47%) *understates* the code regression. Against
+the carried-forward Vite times scrml is still 12.6–17.8× faster, down from 18.6–26.2×.
+
+### Historical: Build Performance (2026-05-19, v0.3.3 HEAD `3609985`; preserved for trend tracking)
 
 Re-measured 2026-05-19 against HEAD `3609985`. scrml measured in-process via
 `compileScrml()` API call (3 warmup + 10 measured). Vite-built frameworks
@@ -562,6 +862,7 @@ All TodoMVC implementations cover the same features:
 
 | Date | scrml build | scrml gzip | Notes |
 |---|---|---|---|
+| **2026-09-05 (currency refresh, HEAD `42162a38`)** | **54.1 ms** | **47.0 KB JS / 48.8 KB total** | **First re-measurement since 2026-05-19 (3.5 months, 2,469 commits).** ⚑ **`benchmarks/todomvc/app.scrml` is DEAD ON ARRIVAL at HEAD** — compiles at exit 0, throws `Cannot set properties of null (setting 'innerHTML')` on first render in BOTH happy-dom and real Chrome, renders zero rows; `partial-update` at HEAD is unmeasurable, not slow. Bisected to `cdf4f4de` (2026-07-30, `if=` Phase 2 mount-`<template>`); last-good `4e354e4d`. A second, independent breakage predates it: `1c5c2aee` (2026-07-25, chunk-namespacing accessor rename) made the shipped benchmark harnesses drive a bare cell key nothing reads — silently. Both browser TodoMVC test files are GREEN against the DOA build (they swallow the init throw and never assert a rendered row). **The S87 5.83× WAS closed**: the 2026-05-19 code re-measured today is 27.8× faster than React on happy-dom `partial-update`, back at the 28.7× of the 2026-04-05 baseline. **A larger regression then landed on top of it**: happy-dom `partial-update` 1.04 → 17.9 ms (17.2×) and Chrome 0.80 → 260.7 ms (326×) between 2026-05-19 and 2026-07-30 code, with `swap-rows` / `remove-row` / `delete-every-10th` moving together and `select-row` / bulk-create untouched. Bundle 19.7 → 47.0 KB JS gzip (+138%); build 26.3 → 54.1 ms same-day (2.06×). Three framework bundle rows reproduce their 2026-05-19 values exactly, and `scrml@3609985` reproduces the 2026-05-19 Chrome row within noise, which is what licenses attributing the rest to code. |
 | 2026-04-05 | 30.9 ms | 13.4 KB | Initial benchmarks |
 | 2026-04-13 | 43.7 ms | 14.8 KB | Post ExprNode migration (Phase 4d), E-SCOPE-001 fix, enum pipe-syntax. Build +41% from ExprNode parsing overhead; bundle +1.4 KB from runtime additions. Runtime perf unchanged. |
 | 2026-05-12 (v0.2.6+ HEAD) | not re-measured | not re-measured | Runtime happy-dom regenerated for HEAD `149c979` (S86 wrap + Wave 2 + Approach A spec anchor); Chrome row carried forward from 2026-04-13 (rerun pending separate dispatch). `bench-scrml.js` switched from IIFE-with-explicit-window-export to indirect-eval `(0, eval)(combinedScript)` after the prior eval pattern broke against v0.2.6+ codegen (D3a finding, D3b fix). TodoMVC `activeCount`/`completedCount` source split into two-statement form to dodge a `.filter(cb).<member>` compiler bug (out-of-scope; separate dispatch pending). Build-time and bundle-size rows not re-measured this pass — they'd need a separate timer-instrumented build script run. happy-dom runtime numbers: scrml beats React in 9/11, Svelte in 6/11, Vue in 5/11. |
