@@ -62,7 +62,7 @@ import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statem
 import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
-import { isForeignLangLibDecl } from "./library-shape.js";
+import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -19935,8 +19935,57 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // the post-AST PRECG seam in api.js, which mutate the FileAST with the same
   // field names. Relocated so the M5 native parser does not have to learn
   // codegen-optimizer caches or program-config extraction. `hasProgramRoot`
-  // STAYS here — it drives the isPureModuleFile / isNonEntryPageFile logic
-  // below and has no codegen-cache role.
+  // STAYS here — it is the raw structural fact `fileShape` is built from and
+  // has no codegen-cache role.
+
+  // ── FILE-SHAPE CLASSIFICATION — computed ONCE, here, and RECORDED. ──────────
+  //
+  // Before this was recorded, the two shape predicates below were local `const`s
+  // consumed by exactly one `if` (the W-PROGRAM-001 suppression) and then
+  // DISCARDED when this function returned. Only `hasProgramRoot` — the weakest
+  // of the signals — survived onto the FileAST, so every downstream consumer
+  // that needed "what shape is this file" either degraded to `hasProgramRoot` or
+  // hand-copied the discarded predicate. Four such copies existed (api.js W5a,
+  // tool-program.ts, codegen/index.ts shell composition, and one more inside
+  // codegen's non-entry-page detection whose own comment cited a line number
+  // ~7,700 lines stale). The classification is now a recorded FACT; consumers
+  // READ it. See `compiler/src/library-shape.js` for the closed variant set.
+  //
+  // Shapes covered, and the SPEC clause each answers to:
+  //   "program"        §40.8  — declares the top-level `<program>`
+  //   "pure-module"    §21.5  — pure-type / pure-fn library module
+  //   "pure-channel"   §38.12.6 — PURE-CHANNEL-FILE (S87 Insight 30)
+  //   "non-entry-page" §40.8  — a route file of a multi-page app
+  //   "bare-markup"    (residual) — the shape W-PROGRAM-001 exists to flag
+  //
+  // ⚑ `fileShape` does NOT say "this file is the application entry". Per SPEC
+  // §40.8 the entry is *"the file resolved by the build root"* — a BUILD fact
+  // that no single FileAST can carry. `"program"` says only that this file
+  // declares a top-level `<program>`.
+  //
+  // ⚑ COMPUTED HERE, STAMPED AT PRECG — and the split is deliberate, following
+  // the S115 (DD #27 / Pivot 2) precedent that `authConfig` / `middlewareConfig`
+  // / the 4 PGO `has*` flags already set. W-PROGRAM-001 is a TAB diagnostic, so
+  // the TAB must ASK the question here. But the FileAST FIELD is stamped by the
+  // pipeline-agnostic `computeFileShape` pass at the Stage 3.004 PRECG seam
+  // (api.js), because that seam runs against whichever pipeline produced the
+  // AST — so the M5 native parser carries the field with no mirror to maintain
+  // and no divergence to allowlist. Measured: stamping here instead added 1,012
+  // new MISSING-FIELD divergences to the within-node parity canary, exactly one
+  // per corpus file. Both sites call the SAME `classifyFileShape` over the SAME
+  // top-level `nodes` (PRECG runs before CE, which is the first pass that can
+  // touch them), so THE WARNING AND THE FIRST STAMP cannot disagree.
+  //
+  // ⚑ THAT GUARANTEE IS SCOPED TO THIS SEAM AND DOES NOT EXTEND DOWNSTREAM.
+  // The very fact that buys it — PRECG runs before CE — is what makes the
+  // PRE-CE answer stale for anything reading after CE, because CHX inlines a
+  // cross-file channel reference as a `<channel>` markup node and that is a
+  // shape-class change (measured: a top-level channel-alias mount goes
+  // `bare-markup` -> `pure-channel` across CE). `component-expander.ts`
+  // therefore RE-STAMPS `fileShape` when it rebuilds the FileAST, so every
+  // post-CE consumer reads a fact about the AST it actually holds.
+  const fileShape = classifyFileShape(nodes, hasProgramRoot);
+
   const ast = {
     filePath,
     nodes,
@@ -19949,46 +19998,26 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     hasProgramRoot,
   };
 
-  // Bug-batch S93 (Bug 6B — non-entry pure-module file):
-  // Per S85 Q2 + SPEC §21.5, a "pure-module file" is a file with NO
-  // top-level markup at all — content is exclusively imports/exports/type
-  // /function/const/let declarations. Such files are valid non-entry
-  // modules (the canonical scrml multi-file shape), and W-PROGRAM-001's
-  // "wrap your content in <program>" hint is misleading for them.
+  // W-PROGRAM-001 fires on exactly one shape: `"bare-markup"` — top-level markup
+  // with no `<program>` wrapper that matches no recognized module shape. Every
+  // other shape is canonical scrml and the warning's "wrap your file content in
+  // <program>" hint would be actively wrong for it:
   //
-  // Detection: a file is pure-module when the top-level `nodes` contain
-  // ZERO markup nodes (after liftBareDeclarations has wrapped bare decls
-  // into synthetic logic blocks). Logic-decl/type-decl/component-def/
-  // import-decl/export-decl/channel-decl nodes are all module-shape;
-  // markup nodes (other than embedded inside logic blocks) signal "this
-  // file is a page, not a module".
-  //
-  // When pure-module shape is detected, suppress W-PROGRAM-001 silently
-  // — the file is a recognized canonical shape and needs no warning.
-  const isPureModuleFile =
-    !hasProgramRoot &&
-    nodes.length > 0 &&
-    nodes.every(n => n && (n.kind !== "markup" || isForeignLangLibDecl(n)));
-
-  // S98 (combined-lint-additions-s98 — Item 1): non-entry `<page>` file
-  // suppression. Per SPEC §40.8: a multi-page app declares its top-level
-  // `<program>` exactly ONCE, in the entry file. Non-entry page files
-  // declare a `<page>` element at file scope WITHOUT a wrapping `<program>`
-  // — the route's `<page>` sits inside the app's `<program>` declared in
-  // `app.scrml`, NOT inside the page file. The W-PROGRAM-001 lint fired
-  // here was a false positive for every `<page>` file in a multi-page app
-  // (17 fires across docs/website/, 20 fires across the trucking-dispatch
-  // page subset, all spurious).
-  //
-  // Detection: file has at least one top-level markup node with `tag ===
-  // "page"`. The file-local check is sufficient and consistent with the
-  // SPEC norm — what the file DECLARES (a `<page>` opener) is the signal,
-  // not what sibling files exist. No cross-file plumbing required.
-  const isNonEntryPageFile =
-    !hasProgramRoot &&
-    nodes.some(n => n && n.kind === "markup" && n.tag === "page");
-
-  if (!hasProgramRoot && !isPureModuleFile && !isNonEntryPageFile) {
+  //   pure-module     Bug-batch S93 (Bug 6B) — §21.5 modules have no markup to
+  //                   wrap; the canonical multi-file shape.
+  //   non-entry-page  S98 (combined-lint-additions-s98, Item 1) — §40.8 puts the
+  //                   app's single `<program>` in the ENTRY file; a route file's
+  //                   `<page>` is a child of THAT one. Wrapping here would
+  //                   declare a second application. (17 spurious fires across
+  //                   docs/website/, 20 across the trucking-dispatch pages.)
+  //   pure-channel    §38.12.6 + §38.1 Insight-30 dispensation — a file-top
+  //                   `<channel>` in a file with NO `<program>` is CANONICAL
+  //                   placement. The warning told the author to add a
+  //                   `<program>`, which §38.1 would then make an ERROR
+  //                   (E-CHANNEL-OUTSIDE-PROGRAM): the fix it prescribed broke
+  //                   the file. All four canonical flagship channel files
+  //                   (examples/23-trucking-dispatch/channels/*.scrml) fired it.
+  if (!isRecognizedNonEntryShape(fileShape) && fileShape !== "program") {
     errors.push(new TABError(
       "W-PROGRAM-001",
       `W-PROGRAM-001: No <program> root element found. Consider wrapping your file ` +

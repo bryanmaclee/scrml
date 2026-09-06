@@ -16,7 +16,7 @@
  * the typer (E-TOOL-002); these helpers only READ the attribute.
  */
 
-import { isForeignLangLibDecl } from "./library-shape.js";
+import { classifyFileShape, isLibraryShape } from "./library-shape.js";
 
 /** A loosely-typed AST node. */
 type ASTNodeLike = Record<string, unknown>;
@@ -74,31 +74,54 @@ export function findAllProgramNodes(fileAST: unknown): ASTNodeLike[] {
 }
 
 /**
- * True when the file is a §21.5 pure-fn LIBRARY file: no top-level `<program>`,
- * exports-bearing, and its top-level nodes are all declarations (no page markup
- * beyond a §23.6 `<foreign lang>` / §44.7.1 `<db src>` library-context decl).
+ * True when the file is a §21.5 pure-fn LIBRARY file: `"pure-module"` file shape
+ * and exports-bearing.
  *
- * Mirrors the W5a auto-detect (api.js) + `isPureModuleFile` (ast-builder.js), so
- * codegen can route such a file to the LIBRARY emit (`<base>.js`) when the BUILD
+ * Codegen routes such a file to the LIBRARY emit (`<base>.js`) when the BUILD
  * contains a `kind="tool"` entry: a tool emits a plain runnable module whose
  * `.scrml` deps must resolve to REAL `.js` modules (not browser client/server
  * artifacts). Browser-app builds (no tool entry) are untouched — a lib there is
  * still consumed via the client `_scrml_modules` registry (emit-client.ts).
+ *
+ * ⛑ This function used to HAND-COPY the shape test (its docstring said it
+ * "mirrors" two other sites), which made it the third of four copies of a
+ * predicate that then changed underneath all of them — none knew about
+ * `"pure-channel"`. It now reads the `fileShape` classification stamped at the
+ * PRECG seam, falling back to the SAME `classifyFileShape` function when handed
+ * an AST that never passed through that seam (direct-codegen unit tests). A
+ * fallback to the identical classifier is not a second decision path; a
+ * re-implementation would have been.
  */
 export function isLibraryShapedFile(fileAST: unknown): boolean {
   if (!fileAST || typeof fileAST !== "object") return false;
   const f = fileAST as ASTNodeLike;
-  // The AST fields (`hasProgramRoot` / `exports`) sit on the inner FileAST at the
-  // codegen stage (the file is a `{ filePath, ast, ... }` wrapper there) but at
-  // top level pre-codegen. Read whichever holds them (same fallback getToolNodes
-  // uses for `nodes`).
-  const inner = (f.ast as ASTNodeLike | undefined) ?? f;
-  if (inner.hasProgramRoot === true) return false;
-  const nodes = getToolNodes(fileAST);
-  if (nodes.length === 0) return false;
-  const exportsList = (inner.exports as unknown[] | undefined) ?? [];
-  if (exportsList.length === 0) return false;
-  return nodes.every((n) => n && (n.kind !== "markup" || isForeignLangLibDecl(n)));
+  // The AST fields sit on the inner FileAST at the codegen stage (the file is a
+  // `{ filePath, ast, ... }` wrapper there) but at top level pre-codegen.
+  //
+  // ⛑ RESOLVE ONE OBJECT AND READ EVERY FIELD FROM IT. This used to do
+  // `const inner = f.ast ?? f` and read `fileShape` / `hasProgramRoot` /
+  // `exports` from `inner`, while taking the NODE LIST from
+  // `getToolNodes(fileAST)` — which prefers the OUTER `f.nodes`. On a
+  // `{ filePath, ast: {...}, nodes: [...] }` object the two disagree, and the
+  // fallback then classified the OUTER node list against the INNER
+  // `hasProgramRoot`: a node list described by flags belonging to a different
+  // object. Same defect as the one fixed in `codegen/index.ts:getFileShape`,
+  // one file over.
+  //
+  // The precedence below is `getToolNodes`'s own (outer `nodes` first), so the
+  // node list this picks is the node list that function would have returned —
+  // the fix is to co-locate the flags with it, not to change which nodes win.
+  const nested = f.ast as ASTNodeLike | undefined;
+  const src: ASTNodeLike = Array.isArray(f.nodes)
+    ? f
+    : nested && Array.isArray(nested.nodes)
+      ? nested
+      : (nested ?? f);
+  const nodes = (Array.isArray(src.nodes) ? src.nodes : []) as ASTNodeLike[];
+  const shape =
+    (src.fileShape as string | undefined) ??
+    classifyFileShape(nodes, src.hasProgramRoot === true);
+  return isLibraryShape(shape, (src.exports as unknown[] | undefined) ?? []);
 }
 
 /**

@@ -64,6 +64,7 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
@@ -2708,6 +2709,17 @@ export function runCG(input: CgInput): CgOutput {
     // per application; the first file with `hasProgramRoot: true` is
     // the entry. Single-file invocations on a non-entry-page file have
     // no shell — fall through to the no-op branch.
+    //
+    // ⚑ THIS IS A HEURISTIC, AND `fileShape` DOES NOT FIX IT — do not "migrate"
+    // it to `getFileShape(f) === "program"` and call that a correction. The two
+    // are the same test; the gap is the QUESTION. Per SPEC §40.8 the entry file
+    // is *"the file resolved by the build root"* — a BUILD fact. This site
+    // infers it from file CONTENT and takes the first match, and the compiler
+    // does not enforce uniqueness (`E-PROGRAM-002` is reserved-not-implemented,
+    // §40.8: "TBD — separate diagnostic; not part of Wave 1"), so a second
+    // top-level `<program>` in the compile unit is silently ignored here.
+    // Closing this needs a build-root entry resolver over the file SET, which
+    // is a separate arc.
     // `hasProgramRoot` lives on the FileAST. In the CG pipeline,
     // fileAST can arrive either as `{ filePath, ast: { hasProgramRoot, ... } }`
     // (wrapped — from CE output before unwrapping) or `{ filePath,
@@ -2715,6 +2727,28 @@ export function runCG(input: CgInput): CgOutput {
     // Check both shapes for robustness.
     function getHasProgramRoot(f: any): boolean {
       return f?.ast?.hasProgramRoot === true || f?.hasProgramRoot === true;
+    }
+    // The §21.5 / §38.12.6 / §40.8 file-shape classification, stamped onto the
+    // FileAST at the PRECG seam (`compute-pgo-flags.ts:computeFileShape`) and
+    // re-stamped by CE. Falls back to the SAME classifier — never to a
+    // re-implementation — for an AST that reached codegen without passing those
+    // seams (direct-codegen unit tests).
+    //
+    // ⛑ The wrapped/unwrapped tolerance is now REAL. This read used to collapse
+    // to `const inner = f?.ast ?? f` and then look only at `inner`, while its
+    // own comment claimed parity with `getHasProgramRoot` — which reads BOTH
+    // levels. On the mixed shape the adjacent comment says can occur (`f.ast`
+    // present, the field carried on the outer object), the fallback classifier
+    // was handed `hasProgramRoot === false` and could answer `non-entry-page`
+    // for a `<program>`-bearing file. Reachable only when `fileShape` is
+    // unstamped, so it was latent — but the comment was wrong either way.
+    // `getHasProgramRoot` is now REUSED rather than re-derived, so the two
+    // cannot drift apart again.
+    function getFileShape(f: any): string {
+      const stamped = f?.ast?.fileShape ?? f?.fileShape;
+      if (stamped) return stamped;
+      const nodes = f?.ast?.nodes ?? f?.nodes ?? [];
+      return classifyFileShape(nodes, getHasProgramRoot(f));
     }
     let entryFile: any = null;
     for (const f of files) {
@@ -2838,21 +2872,22 @@ export function runCG(input: CgInput): CgOutput {
           if (filePath === entryFilePath) continue;
           if (!output.html) continue;
 
-          // Detect non-entry-page files via the same shape as ast-builder.js
-          // line 12222: !hasProgramRoot AND at least one top-level markup
-          // node with tag === "page".
+          // Compose into files whose recorded shape is `"non-entry-page"` — a
+          // route file of a multi-page app (§40.8: no `<program>` of its own,
+          // declares a top-level `<page>`; the app's single `<program>` is in
+          // the entry file).
+          //
+          // ⛑ This was a HAND COPY of `isNonEntryPageFile`, and it cited
+          // "ast-builder.js line 12222" — a line number roughly 7,700 lines
+          // stale by the time anyone read it, pointing at an unrelated part of
+          // a 20k-line file. That is the failure mode a hand copy has and a
+          // recorded fact does not. It now reads the classification stamped at
+          // the PRECG seam (`library-shape.js:classifyFileShape`).
           const fileAST = files.find(
             (f) => (f as any)?.filePath === filePath,
           );
           if (!fileAST) continue;
-          if (getHasProgramRoot(fileAST)) continue;
-          const fileNodes: any[] =
-            (fileAST as any).ast?.nodes ?? (fileAST as any).nodes ?? [];
-          const hasPageOpener = fileNodes.some(
-            (n: any) =>
-              n && n.kind === "markup" && n.tag === "page",
-          );
-          if (!hasPageOpener) continue;
+          if (getFileShape(fileAST) !== "non-entry-page") continue;
 
           // Extract the page's body content from its html envelope —
           // same regex as the entry. The page-tag stripper added to

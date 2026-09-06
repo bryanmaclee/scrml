@@ -15,7 +15,7 @@ import { buildAST } from "./ast-builder.js";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { populateNativeAttrValueExprNodes } from "./native-walker/attrvalue-exprnode-walker.ts";
 import { backfillNativeExprText } from "./native-walker/exprtext-backfill-walker.ts";
-import { computePGOFlags } from "./compute-pgo-flags.ts";
+import { computePGOFlags, computeFileShape } from "./compute-pgo-flags.ts";
 import { computeProgramConfig } from "./compute-program-config.ts";
 import { runCE } from "./component-expander.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
@@ -29,7 +29,7 @@ import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency
 import { runTS, buildTypeRegistry } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
-import { isForeignLangLibDecl } from "./library-shape.js";
+import { isLibraryShape, classifyFileShape } from "./library-shape.js";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -1352,6 +1352,13 @@ export function compileScrml(options = {}) {
   //     `codegen/emit-client.ts:detectRuntimeChunks`.
   //   - `computeProgramConfig` → `authConfig` / `middlewareConfig` consumed by
   //     route-inference.ts (RI), auth-graph.ts (AG) and codegen.
+  //   - `computeFileShape` → `fileShape`, the §21.5 / §38.12.6 / §40.8 file-shape
+  //     classification consumed by W5a below, tool-program.ts and codegen. Lands
+  //     here rather than in the TAB for the same reason as the other two: the
+  //     within-node parity canary compares live-vs-native FileASTs field by
+  //     field, so a TAB-only field is 1,012 new MISSING-FIELD divergences (one
+  //     per corpus file — measured, not estimated). Stamped at this seam, both
+  //     pipelines carry it and no native mirror can drift.
   // Both passes MUTATE the FileAST (`tabResult.ast`) with the same field
   // names the original TAB-time computation used — every downstream consumer
   // reads the identical `fileAST.has*` / `fileAST.authConfig` /
@@ -1370,6 +1377,7 @@ export function compileScrml(options = {}) {
       const cfg = computeProgramConfig(nodes);
       fileAST.authConfig = cfg.authConfig;
       fileAST.middlewareConfig = cfg.middlewareConfig;
+      computeFileShape(fileAST);
       // MCP V0 Sub-unit D — stash <program mcp> opt-in result. Consumed by
       // the auto-activation pass below (which scans every fileAST after the
       // PRECG loop completes) to set emitPerRoute + emit a boot import in
@@ -1405,20 +1413,31 @@ export function compileScrml(options = {}) {
     const allPureFnModules = tabResults.every((tabResult) => {
       const fileAST = tabResult?.ast;
       if (!fileAST) return false;
-      const nodes = fileAST.nodes ?? [];
-      const exportsList = fileAST.exports ?? [];
-      // §21.5 pure-fn-module shape: no <program> root, content is exclusively
-      // declarations (no top-level markup node — after liftBareDeclarations
-      // has wrapped bare decls into synthetic logic blocks), and the file
-      // bears at least one export. Mirrors the `isPureModuleFile` predicate
-      // in ast-builder.js (W-PROGRAM-001 suppression) + the export presence
-      // that distinguishes an importable library from a bare fragment.
-      return (
-        fileAST.hasProgramRoot !== true &&
-        nodes.length > 0 &&
-        nodes.every((n) => n && (n.kind !== "markup" || isForeignLangLibDecl(n))) &&
-        exportsList.length > 0
-      );
+      // §21.5 pure-fn-module shape: `"pure-module"` file shape AND at least one
+      // export (the export is what separates an importable library from a bare
+      // declaration fragment with nothing to import).
+      //
+      // ⛑ This block used to HAND-COPY the `isPureModuleFile` predicate out of
+      // ast-builder.js — its own comment said so ("Mirrors the
+      // `isPureModuleFile` predicate in ast-builder.js"), which is what a copy
+      // says right up until the original changes. It did not know about
+      // `"pure-channel"` and would have gone on not knowing. It now READS the
+      // classification `computeFileShape` stamped at the PRECG seam a few lines
+      // above, so there is nothing left to keep in sync.
+      //
+      // The `?? classifyFileShape(...)` fallback closes an asymmetry rather than
+      // fixing a live bug: this was the one migrated site reading the field bare
+      // while `tool-program.ts` and `codegen/index.ts` both fall back. Because
+      // `isLibraryShape(undefined, exports)` returns false, an unstamped AST
+      // would silently degrade library auto-detect to `mode: 'browser'` — an
+      // EMIT-SHAPE change carrying no diagnostic. The PRECG loop above runs
+      // unconditionally over every `tabResult` today, so this cannot fire; it is
+      // insurance against that loop being reordered or made conditional, which
+      // is exactly the change nobody would think to re-verify here.
+      const shape =
+        fileAST.fileShape ??
+        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true);
+      return isLibraryShape(shape, fileAST.exports ?? []);
     });
     if (allPureFnModules) {
       mode = 'library';

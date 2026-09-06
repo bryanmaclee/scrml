@@ -110,6 +110,7 @@ import type {
 } from "./types/ast.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
+import { classifyFileShape } from "./library-shape.js";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -4706,6 +4707,31 @@ export function runCEFile(
     ...ast,
     nodes: phase2Nodes,
     components: [], // component-def nodes are consumed by this stage
+    // ⚑ RE-STAMPED, not spread-inherited. `fileShape` is first computed at the
+    // Stage 3.004 PRECG seam, which runs BEFORE this pass. The `...ast` spread
+    // above would carry that PRE-CE answer forward while `nodes` is replaced on
+    // the very next line — so every post-CE consumer (`tool-program.ts`'s
+    // `isLibraryShapedFile` via `emit-server.ts` / `emit-tool.ts` / two sites in
+    // `codegen/index.ts`, plus `codegen/index.ts`'s own `getFileShape`) would be
+    // reading a fact about an AST nobody holds any more.
+    //
+    // This is not hypothetical. CHX inlines a cross-file channel reference as a
+    // `<channel>` markup node (see the bullet above), which is precisely a
+    // shape-class change. MEASURED: a file whose top-level markup is only a
+    // channel-alias mount —
+    //     ${ import { "presence" as presence } from './chan.scrml' }
+    //     <presence/>
+    // — classifies `bare-markup` before this pass and `pure-channel` after it.
+    // A corpus sweep over `examples/` + `conformance/cases/channel` (26 CE
+    // invocations) found zero divergence, so nothing shipped was wrong; the
+    // adversarial shape above is what makes it a real hazard rather than a
+    // theoretical one.
+    //
+    // Re-stamping is right rather than merely safe because EVERY consumer of
+    // this field runs after CE and wants the post-CE answer. The one pre-CE
+    // reader, `api.js`'s W5a library auto-detect, reads at the PRECG seam and
+    // never sees this object.
+    fileShape: classifyFileShape(phase2Nodes, ast.hasProgramRoot === true),
   };
 
   // S139 Bug 51 fix — carry non-enumerable annotations forward to the new
