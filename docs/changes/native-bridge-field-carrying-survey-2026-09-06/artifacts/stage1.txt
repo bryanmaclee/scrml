@@ -1,0 +1,47 @@
+cases discovered: 897
+  ... 100/897
+  ... 200/897
+[emit-lift] unhandled attribute value kind: dotted-ident for attr "to"
+  ... 300/897
+  ... 400/897
+  ... 500/897
+  ... 600/897
+  ... 700/897
+  ... 800/897
+
+cases                                : 897
+cases w/ newlyMissing (flip-caused)  : 156
+distinct newly-missing CODES         : 124
+cases where the FLIP threw (ctl ok)  : 0
+
+top newly-missing codes:
+     4  E-STRUCTURAL-ELEMENT-MISPLACED
+     4  E-MATCH-SUBSET-DEAD-ARM
+     4  E-TYPE-020
+     3  W-FOREIGN-UNDECLARED-CAPABILITY
+     3  E-FOREIGN-SIDECAR-NOMINAL
+     3  E-SWITCH-FORBIDDEN
+     3  E-TYPE-031
+     3  E-REACTIVE-003
+     3  E-SQL-003
+     3  E-SQL-006
+     2  E-TYPE-UNKNOWN-NAME
+     2  E-FOREIGN-CAPABILITY-UNKNOWN
+     2  E-CTRL-010
+     2  E-LOOP-007
+     2  E-ENDPOINT-ACCEPTS-NOT-ENUM
+     2  E-ENDPOINT-METHOD-INVALID
+     2  E-DERIVED-ENGINE-NO-WRITE
+     2  E-TYPE-082
+     2  E-VALIDATOR-CIRCULAR-DEP
+     2  E-DECL-NEEDS-INITIALIZER
+     2  I-SSR-AUTH-SCOPED-CLIENT-HYDRATED
+     1  E-API-BASE-MISSING
+     1  E-API-ENDPOINT-MALFORMED
+     1  E-API-ENDPOINT-UNKNOWN
+     1  E-API-METHOD-INVALID
+     1  E-API-PATH-PARAM-UNBOUND
+     1  E-API-REQ-SHAPE-MISMATCH
+     1  W-API-RESPONSE-NOT-VARIANT
+     1  E-API-RESPONSE-TYPE-UNDECLARED
+     1  E-APPLY-NON-INLINABLE-UTILITY

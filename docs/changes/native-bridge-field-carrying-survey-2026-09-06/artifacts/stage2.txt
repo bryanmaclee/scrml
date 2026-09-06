@@ -1,0 +1,66 @@
+cases with newlyMissing: 156
+  ... 25/156
+  ... 50/156
+  ... 75/156
+  ... 100/156
+  ... 125/156
+  ... 150/156
+
+cases profiled                    : 156
+cases with ZERO AST divergence    : 4
+cases where a parse threw         : 0
+cases with native parse ERRORS    : 47
+distinct divergence signatures    : 294
+
+top signatures by case coverage:
+   141/156  KIND-COUNT (untyped-object)
+    61/156  KIND-COUNT type-decl
+    61/156  logic.typeDecls: LIVE-HAS / NATIVE-EMPTY
+    61/156  type-decl.fromExport: NATIVE-ONLY-KEY
+    46/156  KIND-COUNT ident
+    45/156  KIND-COUNT text
+    42/156  KIND-COUNT markup
+    40/156  function-decl.isAsync: NATIVE-ONLY-KEY
+    30/156  function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT
+    29/156  KIND-EXTRA bare-expr (live=0 native=1)
+    26/156  KIND-COUNT bare-expr
+    23/156  (untyped-object).value: NATIVE-ONLY-KEY
+    23/156  KIND-EXTRA ident (live=0 native=1)
+    21/156  (untyped-object).name: LIVE-HAS / NATIVE-ABSENT
+    18/156  KIND-EXTRA call (live=0 native=1)
+    18/156  KIND-EXTRA assign (live=0 native=1)
+    17/156  (untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT
+    16/156  (untyped-object).name: NATIVE-ONLY-KEY
+    16/156  (untyped-object).span: NATIVE-ONLY-KEY
+    15/156  KIND-EXTRA variable-ref (live=0 native=1)
+    15/156  function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT
+    15/156  function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT
+    14/156  (untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT
+    14/156  markup.shorthandBodyRaw: TYPE live=null native=string
+    14/156  KIND-COUNT lit
+    14/156  KIND-EXTRA markup-value (live=0 native=1)
+    13/156  engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT
+    13/156  engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT
+    12/156  KIND-EXTRA member (live=0 native=1)
+    12/156  KIND-EXTRA sql-ref (live=0 native=1)
+    12/156  KIND-ABSENT endpoint-decl (live=1 native=0)
+    12/156  KIND-EXTRA escape-hatch (live=0 native=1)
+    11/156  (untyped-object).method: LIVE-HAS / NATIVE-ABSENT
+    11/156  KIND-COUNT logic
+    11/156  KIND-EXTRA string-literal (live=0 native=1)
+    11/156  (untyped-object).args: LIVE-HAS / NATIVE-ABSENT
+    11/156  KIND-EXTRA bare-expr (live=0 native=2)
+    11/156  KIND-COUNT state-decl
+    11/156  function-decl.isGenerator: NATIVE-ONLY-KEY
+
+cases with ZERO AST divergence (the code stopped firing for a NON-field reason):
+  control-flow/ctrl-004-orphan-else-on-state-opener-pos  missing=["E-CTRL-004"] nativeErrs=[]
+  maps/duplicate-literal-key-pos  missing=["W-MAP-DUPLICATE-LITERAL-KEY"] nativeErrs=[]
+  maps/literal-malformed-pos  missing=["E-MAP-LITERAL-MALFORMED"] nativeErrs=[]
+  middleware/ratelimit-invalid-unit-pos  missing=["E-MW-002"] nativeErrs=[]

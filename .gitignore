@@ -59,3 +59,8 @@ docs/graph/
 # §20.5 (i29e) durable session store (created at app runtime CWD)
 .scrml-sessions.db
 .scrml-sessions.db-*
+
+# scripts/native-parser-flip-harness.ts artifacts — captured suite output +
+# the pre-flip api.js rescue copy. Regenerated on demand; the READING is what
+# gets committed (docs/changes/<id>/), never the multi-MB raw logs.
+.native-flip-harness*/

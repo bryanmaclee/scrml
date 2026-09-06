@@ -1,0 +1,3719 @@
+[
+  {
+    "relDir": "api/api-base-missing-neg",
+    "id": "api-base-missing-neg",
+    "newlyMissing": [
+      "E-API-BASE-MISSING"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-endpoint-malformed-neg",
+    "id": "api-endpoint-malformed-neg",
+    "newlyMissing": [
+      "E-API-ENDPOINT-MALFORMED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA string-literal (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "api/api-endpoint-unknown-neg",
+    "id": "api-endpoint-unknown-neg",
+    "newlyMissing": [
+      "E-API-ENDPOINT-UNKNOWN"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY",
+      "variable-ref.expr: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-method-invalid-neg",
+    "id": "api-method-invalid-neg",
+    "newlyMissing": [
+      "E-API-METHOD-INVALID"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-path-param-unbound-neg",
+    "id": "api-path-param-unbound-neg",
+    "newlyMissing": [
+      "E-API-PATH-PARAM-UNBOUND"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-req-shape-mismatch-neg",
+    "id": "api-req-shape-mismatch-neg",
+    "newlyMissing": [
+      "E-API-REQ-SHAPE-MISMATCH"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY",
+      "variable-ref.expr: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-response-not-variant-info",
+    "id": "api-response-not-variant-info",
+    "newlyMissing": [
+      "W-API-RESPONSE-NOT-VARIANT"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-response-type-undeclared-neg",
+    "id": "api-response-type-undeclared-neg",
+    "newlyMissing": [
+      "E-API-RESPONSE-TYPE-UNDECLARED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "api/api-unknown-type-ref-neg",
+    "id": "api-unknown-type-ref-neg",
+    "newlyMissing": [
+      "E-TYPE-UNKNOWN-NAME"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).path: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).reqShape: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).responseType: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT api-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "apply/apply-non-inlinable-neg",
+    "id": "apply-non-inlinable-neg",
+    "newlyMissing": [
+      "E-APPLY-NON-INLINABLE-UTILITY"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).apply: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).prop: NATIVE-ONLY-KEY",
+      "(untyped-object).value: TYPE live=object native=object|string",
+      "KIND-COUNT (untyped-object)"
+    ]
+  },
+  {
+    "relDir": "apply/apply-unknown-utility-neg",
+    "id": "apply-unknown-utility-neg",
+    "newlyMissing": [
+      "E-APPLY-UNKNOWN-UTILITY"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).apply: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).prop: NATIVE-ONLY-KEY",
+      "(untyped-object).value: TYPE live=object native=object|string",
+      "KIND-COUNT (untyped-object)"
+    ]
+  },
+  {
+    "relDir": "apply/apply-variant-unsupported-neg",
+    "id": "apply-variant-unsupported-neg",
+    "newlyMissing": [
+      "E-APPLY-VARIANT-UNSUPPORTED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).apply: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).prop: NATIVE-ONLY-KEY",
+      "(untyped-object).value: TYPE live=object native=object|string",
+      "KIND-COUNT (untyped-object)"
+    ]
+  },
+  {
+    "relDir": "auth/w-serverload-ungated-pos",
+    "id": "auth-w-serverload-ungated-pos",
+    "newlyMissing": [
+      "W-SERVERLOAD-UNGATED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT sql",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "markup.shorthandBodyRaw: TYPE live=null|string native=string",
+      "state-decl.auth: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.initExpr: NATIVE-ONLY-KEY",
+      "state-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "capability/inheritance-closest-wins-no-union",
+    "id": "capability-inheritance-closest-wins-no-union",
+    "newlyMissing": [
+      "W-FOREIGN-UNDECLARED-CAPABILITY",
+      "E-FOREIGN-SIDECAR-NOMINAL"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT capabilities (live=2 native=0)",
+      "KIND-ABSENT logic (live=1 native=0)",
+      "KIND-ABSENT use-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text",
+      "KIND-EXTRA array (live=0 native=2)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA expr (live=0 native=2)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA lit (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "capability/inheritance-inherit-covers",
+    "id": "capability-inheritance-inherit-covers",
+    "newlyMissing": [
+      "E-FOREIGN-SIDECAR-NOMINAL"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT capabilities (live=1 native=0)",
+      "KIND-ABSENT logic (live=1 native=0)",
+      "KIND-ABSENT use-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text",
+      "KIND-EXTRA array (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA lit (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "capability/inline-block-undeclared",
+    "id": "capability-inline-block-undeclared",
+    "newlyMissing": [
+      "W-FOREIGN-UNDECLARED-CAPABILITY"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-AWAIT-NOT-IN-SCRML",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT foreign (live=1 native=0)",
+      "KIND-ABSENT function-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT export-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "export-decl.isPure: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isReExportAll: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isServer: LIVE-HAS / NATIVE-ABSENT",
+      "logic.exports: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "capability/undeclared-with-foreign",
+    "id": "capability-undeclared-with-foreign",
+    "newlyMissing": [
+      "W-FOREIGN-UNDECLARED-CAPABILITY",
+      "E-FOREIGN-SIDECAR-NOMINAL"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT logic (live=1 native=0)",
+      "KIND-ABSENT use-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text"
+    ]
+  },
+  {
+    "relDir": "capability/unknown-token",
+    "id": "capability-unknown-token",
+    "newlyMissing": [
+      "E-FOREIGN-CAPABILITY-UNKNOWN"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT capabilities (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA array (live=0 native=1)",
+      "KIND-EXTRA expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "capability/unknown-token-mixed-with-valid",
+    "id": "capability-unknown-token-mixed-with-valid",
+    "newlyMissing": [
+      "E-FOREIGN-CAPABILITY-UNKNOWN"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT capabilities (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA array (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=2)",
+      "KIND-EXTRA lit (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "channel/dup-name-cross-file",
+    "id": "channel-dup-name-cross-file",
+    "newlyMissing": [
+      "E-CHANNEL-008"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT import-decl",
+      "import-decl.raw: LIVE-HAS / NATIVE-EMPTY",
+      "logic.imports: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "channel/export-reactive-ref-name",
+    "id": "channel-export-reactive-ref-name",
+    "newlyMissing": [
+      "E-CHANNEL-EXPORT-001"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT text",
+      "KIND-COUNT variable-ref",
+      "KIND-EXTRA ATTR_EQ (live=0 native=1)",
+      "KIND-EXTRA ATTR_IDENT (live=0 native=1)",
+      "KIND-EXTRA ATTR_NAME (live=0 native=1)",
+      "KIND-EXTRA Array (live=0 native=1)",
+      "KIND-EXTRA LogicEscape (live=0 native=1)",
+      "KIND-EXTRA Markup (live=0 native=1)",
+      "KIND-EXTRA StateDecl (live=0 native=1)",
+      "KIND-EXTRA Text (live=0 native=2)",
+      "variable-ref.expr: NATIVE-ONLY-KEY",
+      "variable-ref.sourceText: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "channel/onchange-misplaced",
+    "id": "channel-onchange-misplaced",
+    "newlyMissing": [
+      "E-STRUCTURAL-ELEMENT-MISPLACED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT onchange-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT text",
+      "KIND-EXTRA ATTR_EQ (live=0 native=1)",
+      "KIND-EXTRA ATTR_NAME (live=0 native=4)",
+      "KIND-EXTRA ATTR_STRING (live=0 native=1)",
+      "KIND-EXTRA Markup (live=0 native=5)",
+      "KIND-EXTRA Text (live=0 native=6)",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "string-literal.sourceText: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "channel/onchange-not-exhaustive",
+    "id": "channel-onchange-not-exhaustive",
+    "newlyMissing": [
+      "E-MATCH-NOT-EXHAUSTIVE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT onchange-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT text",
+      "KIND-COUNT variable-ref",
+      "KIND-EXTRA ATTR_EQ (live=0 native=2)",
+      "KIND-EXTRA ATTR_IDENT (live=0 native=1)",
+      "KIND-EXTRA ATTR_NAME (live=0 native=4)",
+      "KIND-EXTRA ATTR_STRING (live=0 native=1)",
+      "KIND-EXTRA Markup (live=0 native=4)",
+      "KIND-EXTRA Text (live=0 native=5)",
+      "KIND-EXTRA absent (live=0 native=2)",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "string-literal.sourceText: NATIVE-ONLY-KEY",
+      "variable-ref.expr: NATIVE-ONLY-KEY",
+      "variable-ref.sourceText: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "channel/shared-modifier",
+    "id": "channel-shared-modifier",
+    "newlyMissing": [
+      "E-CHANNEL-SHARED-MODIFIER"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT state-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT string-literal",
+      "KIND-EXTRA ATTR_EQ (live=0 native=1)",
+      "KIND-EXTRA ATTR_NAME (live=0 native=1)",
+      "KIND-EXTRA ATTR_STRING (live=0 native=1)",
+      "KIND-EXTRA Assignment (live=0 native=1)",
+      "KIND-EXTRA AtCell (live=0 native=1)",
+      "KIND-EXTRA ExprStmt (live=0 native=2)",
+      "KIND-EXTRA Ident (live=0 native=1)",
+      "KIND-EXTRA LogicEscape (live=0 native=1)",
+      "KIND-EXTRA Markup (live=0 native=1)",
+      "KIND-EXTRA NumberLit (live=0 native=1)",
+      "KIND-EXTRA Text (live=0 native=2)",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "string-literal.sourceText: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "components/invalid-prop-decl-syntax-reject",
+    "id": "components-invalid-prop-decl-syntax-reject",
+    "newlyMissing": [
+      "E-COMPONENT-019"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "props-block.propsDecl: TYPE live=array native=string"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-004-orphan-else-on-state-opener-pos",
+    "id": "ctrl-004-orphan-else-on-state-opener-pos",
+    "newlyMissing": [
+      "E-CTRL-004"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": []
+  },
+  {
+    "relDir": "control-flow/ctrl-010-else-on-for-in-if-chain-pos",
+    "id": "ctrl-010-else-on-for-in-if-chain-pos",
+    "newlyMissing": [
+      "E-CTRL-010"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT escape-hatch (live=1 native=0)",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-COUNT variable-ref",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "for-stmt.forKind: NATIVE-ONLY-KEY",
+      "variable-ref.expr: NATIVE-ONLY-KEY",
+      "variable-ref.sourceText: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-010-else-on-for-without-lift-pos",
+    "id": "ctrl-010-else-on-for-without-lift-pos",
+    "newlyMissing": [
+      "E-CTRL-010"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT escape-hatch (live=1 native=0)",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "for-stmt.forKind: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-011-for-in-pos",
+    "id": "ctrl-011-for-in-pos",
+    "newlyMissing": [
+      "E-CTRL-011"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "for-stmt.forKind: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-012-bare-control-flow-in-markup-pos",
+    "id": "ctrl-012-bare-control-flow-in-markup-pos",
+    "newlyMissing": [
+      "E-CONTROL-FLOW-IN-MARKUP"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-013-braceless-for-of-head-pos",
+    "id": "ctrl-013-braceless-for-of-head-pos",
+    "newlyMissing": [
+      "E-FOR-UNPARENTHESIZED-HEAD"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-EXPECT-LPAREN",
+      "E-STMT-EXPECT-RPAREN"
+    ],
+    "note": "",
+    "sigs": [
+      "for-stmt.forKind: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-028-arm-body-tilde-read-orphan-neg",
+    "id": "ctrl-028-arm-body-tilde-read-orphan-neg",
+    "newlyMissing": [
+      "E-CG-TILDE-UNRESOLVED"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT if-expr (live=3 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA if-stmt (live=0 native=3)",
+      "const-decl.ifExpr: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-switch-forbidden-attr-expr-pos",
+    "id": "ctrl-switch-forbidden-attr-expr-pos",
+    "newlyMissing": [
+      "E-SWITCH-FORBIDDEN"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT type-decl",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-switch-forbidden-fn-body-pos",
+    "id": "ctrl-switch-forbidden-fn-body-pos",
+    "newlyMissing": [
+      "E-SWITCH-FORBIDDEN"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT switch-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT escape-hatch",
+      "KIND-COUNT state-decl",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "escape-hatch.raw: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-switch-forbidden-logic-block-pos",
+    "id": "ctrl-switch-forbidden-logic-block-pos",
+    "newlyMissing": [
+      "E-SWITCH-FORBIDDEN"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT switch-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "escape-hatch.raw: LIVE-HAS / NATIVE-EMPTY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "control-flow/loop-007-while-as-expr-no-lift-pos",
+    "id": "loop-007-while-as-expr-no-lift-pos",
+    "newlyMissing": [
+      "E-LOOP-007"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT escape-hatch (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA binary (live=0 native=2)",
+      "KIND-EXTRA ident (live=0 native=3)",
+      "KIND-EXTRA while-stmt (live=0 native=1)",
+      "let-decl.init: LIVE-HAS / NATIVE-EMPTY",
+      "let-decl.initExpr: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "control-flow/loop-007-while-as-expr-pos",
+    "id": "loop-007-while-as-expr-pos",
+    "newlyMissing": [
+      "E-LOOP-007"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT escape-hatch (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA binary (live=0 native=2)",
+      "KIND-EXTRA expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=4)",
+      "KIND-EXTRA lift-expr (live=0 native=1)",
+      "KIND-EXTRA while-stmt (live=0 native=1)",
+      "let-decl.init: LIVE-HAS / NATIVE-EMPTY",
+      "let-decl.initExpr: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "endpoint/accepts-missing",
+    "id": "endpoint-accepts-missing",
+    "newlyMissing": [
+      "E-ENDPOINT-ACCEPTS-MISSING"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/accepts-not-enum-primitive",
+    "id": "endpoint-accepts-not-enum-primitive",
+    "newlyMissing": [
+      "E-ENDPOINT-ACCEPTS-NOT-ENUM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "markup.shorthandBodyRaw: TYPE live=null native=string"
+    ]
+  },
+  {
+    "relDir": "endpoint/accepts-not-enum-struct",
+    "id": "endpoint-accepts-not-enum-struct",
+    "newlyMissing": [
+      "E-ENDPOINT-ACCEPTS-NOT-ENUM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/accepts-unknown-name",
+    "id": "endpoint-accepts-unknown-name",
+    "newlyMissing": [
+      "E-TYPE-UNKNOWN-NAME"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "markup.shorthandBodyRaw: TYPE live=null native=string"
+    ]
+  },
+  {
+    "relDir": "endpoint/arm-body-undefined-scope",
+    "id": "endpoint-arm-body-undefined-scope",
+    "newlyMissing": [
+      "E-SCOPE-001"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/dead-arm",
+    "id": "endpoint-dead-arm",
+    "newlyMissing": [
+      "E-MATCH-SUBSET-DEAD-ARM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/duplicate-arm",
+    "id": "endpoint-duplicate-arm",
+    "newlyMissing": [
+      "E-TYPE-023"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/method-invalid",
+    "id": "endpoint-method-invalid",
+    "newlyMissing": [
+      "E-ENDPOINT-METHOD-INVALID"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/method-missing",
+    "id": "endpoint-method-missing",
+    "newlyMissing": [
+      "E-ENDPOINT-METHOD-INVALID"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/multi-statement-arm",
+    "id": "endpoint-multi-statement-arm",
+    "newlyMissing": [
+      "E-ENDPOINT-MULTI-STATEMENT-ARM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyContentStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/not-exhaustive",
+    "id": "endpoint-not-exhaustive",
+    "newlyMissing": [
+      "E-ENDPOINT-NOT-EXHAUSTIVE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=2)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=2)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "endpoint/path-missing",
+    "id": "endpoint-path-missing",
+    "newlyMissing": [
+      "E-ENDPOINT-PATH-MISSING"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bodyForm: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).bodyRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).isWildcard: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).openerStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).payloadBindingsRaw: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).spanEnd: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).spanStart: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "(untyped-object).variantName: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT endpoint-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA absent (live=0 native=3)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.shorthandBodyRaw: TYPE live=null native=string",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-circular-pos",
+    "id": "engine-derived-engine-circular-pos",
+    "newlyMissing": [
+      "E-DERIVED-ENGINE-CIRCULAR"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).glyph: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).srcOffset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "engine-decl.inlineMatchArmArrows: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.inlineMatchBody: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-markup-write",
+    "id": "engine-derived-engine-markup-write",
+    "newlyMissing": [
+      "E-DERIVED-ENGINE-NO-WRITE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).glyph: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).srcOffset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "engine-decl.inlineMatchArmArrows: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.inlineMatchBody: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-match-nonexhaustive",
+    "id": "engine-derived-engine-match-nonexhaustive",
+    "newlyMissing": [
+      "E-TYPE-020"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).glyph: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).srcOffset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "engine-decl.inlineMatchArmArrows: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.inlineMatchBody: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-no-initial-pos",
+    "id": "engine-derived-engine-no-initial-pos",
+    "newlyMissing": [
+      "E-DERIVED-ENGINE-NO-INITIAL"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).glyph: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).srcOffset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "engine-decl.inlineMatchArmArrows: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.inlineMatchBody: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-no-rules-pos",
+    "id": "engine-derived-engine-no-rules-pos",
+    "newlyMissing": [
+      "E-DERIVED-ENGINE-NO-RULES"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).glyph: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).srcOffset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT absent (live=2 native=0)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA dotted-ident (live=0 native=2)",
+      "engine-decl.inlineMatchArmArrows: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.inlineMatchBody: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-statechild-write",
+    "id": "engine-derived-engine-statechild-write",
+    "newlyMissing": [
+      "E-DERIVED-ENGINE-NO-WRITE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).glyph: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).srcOffset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "engine-decl.inlineMatchArmArrows: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.inlineMatchBody: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/initial-cell-type-pos",
+    "id": "engine-initial-cell-type-pos",
+    "newlyMissing": [
+      "E-ENGINE-INITIAL-CELL-TYPE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT absent (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA dotted-ident (live=0 native=2)",
+      "engine-decl.initialCell: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.initialVariant: TYPE live=null native=string",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/initial-cell-undeclared-pos",
+    "id": "engine-initial-cell-undeclared-pos",
+    "newlyMissing": [
+      "E-ENGINE-INITIAL-CELL-UNDECLARED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT absent (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA dotted-ident (live=0 native=2)",
+      "engine-decl.initialCell: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.initialVariant: TYPE live=null native=string",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/onidle-misplaced-pos",
+    "id": "engine-onidle-misplaced-pos",
+    "newlyMissing": [
+      "E-IDLE-MISPLACED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT absent (live=3 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA dotted-ident (live=0 native=3)",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY",
+      "variable-ref.expr: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/ontimeout-misplaced-markup-pos",
+    "id": "engine-ontimeout-misplaced-markup-pos",
+    "newlyMissing": [
+      "E-STRUCTURAL-ELEMENT-MISPLACED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT absent (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA dotted-ident (live=0 native=3)",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/ontimeout-misplaced-pos",
+    "id": "engine-ontimeout-misplaced-pos",
+    "newlyMissing": [
+      "E-STRUCTURAL-ELEMENT-MISPLACED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT absent (live=2 native=0)",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA dotted-ident (live=0 native=3)",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "engine/payload-reserved-collision-pos",
+    "id": "engine-payload-reserved-collision-pos",
+    "newlyMissing": [
+      "E-ENGINE-PAYLOAD-RESERVED-COLLISION"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT absent",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA dotted-ident (live=0 native=2)",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/fail-variant-payload-arity-neg",
+    "id": "error-fail-variant-payload-arity-neg",
+    "newlyMissing": [
+      "E-TYPE-082"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "fail-expr.args: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.argsExpr: LIVE-HAS / NATIVE-ABSENT",
+      "fail-expr.enumType: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variant: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variantExpr: NATIVE-ONLY-KEY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/fail-variant-payload-arity-too-few-neg",
+    "id": "error-fail-variant-payload-arity-too-few-neg",
+    "newlyMissing": [
+      "E-TYPE-082"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "fail-expr.enumType: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variant: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variantExpr: NATIVE-ONLY-KEY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/failable-match-nonexhaustive-err",
+    "id": "error-failable-match-nonexhaustive-err",
+    "newlyMissing": [
+      "E-TYPE-020"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT fail-expr (live=1 native=0)",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT lit",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA binary (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=2)",
+      "function-decl.errorType: TYPE live=string|undefined native=string",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "given-guard.separatorGlyph: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "match-expr.body: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.header: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.headerExpr: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.id: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.rawArms: NATIVE-ONLY-KEY",
+      "match-expr.subject: NATIVE-ONLY-KEY",
+      "return-stmt.matchExpr: LIVE-HAS / NATIVE-ABSENT",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/failable-match-nonexhaustive-ok",
+    "id": "error-failable-match-nonexhaustive-ok",
+    "newlyMissing": [
+      "E-TYPE-020"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT fail-expr (live=1 native=0)",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT lit",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA binary (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=2)",
+      "function-decl.errorType: TYPE live=string|undefined native=string",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "given-guard.separatorGlyph: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "match-expr.body: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.header: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.headerExpr: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.id: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.rawArms: NATIVE-ONLY-KEY",
+      "match-expr.subject: NATIVE-ONLY-KEY",
+      "return-stmt.matchExpr: LIVE-HAS / NATIVE-ABSENT",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/handler-non-exhaustive",
+    "id": "error-handler-non-exhaustive",
+    "newlyMissing": [
+      "E-TYPE-080"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).armArrow: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).binding: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).handler: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).handlerExpr: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).pattern: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT guarded-expr (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT call",
+      "KIND-COUNT ident",
+      "KIND-COUNT lit",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=2)",
+      "fail-expr.args: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.argsExpr: LIVE-HAS / NATIVE-ABSENT",
+      "fail-expr.enumType: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variant: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variantExpr: NATIVE-ONLY-KEY",
+      "function-decl.errorType: TYPE live=string|undefined native=string",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "let-decl.init: LIVE-HAS / NATIVE-EMPTY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/propagate-in-non-failable-fn-pos",
+    "id": "error-propagate-in-non-failable-fn-pos",
+    "newlyMissing": [
+      "E-ERROR-003"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT call (live=1 native=0)",
+      "KIND-ABSENT propagate-expr (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA const-decl (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "fail-expr.enumType: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variant: LIVE-HAS / NATIVE-EMPTY",
+      "fail-expr.variantExpr: NATIVE-ONLY-KEY",
+      "function-decl.errorType: TYPE live=string|undefined native=string",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/propagate-incompat-variants",
+    "id": "error-propagate-incompat-variants",
+    "newlyMissing": [
+      "E-ERROR-010"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT call (live=1 native=0)",
+      "KIND-ABSENT fail-expr (live=1 native=0)",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-ABSENT propagate-expr (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA binary (live=0 native=1)",
+      "KIND-EXTRA const-decl (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "given-guard.separatorGlyph: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/propagate-non-failable-callee-pos",
+    "id": "error-propagate-non-failable-callee-pos",
+    "newlyMissing": [
+      "E-ERROR-004"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT call (live=1 native=0)",
+      "KIND-ABSENT propagate-expr (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA const-decl (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "function-decl.errorType: TYPE live=string|undefined native=string",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "error/renders-undefined-var",
+    "id": "error-renders-undefined-var",
+    "newlyMissing": [
+      "E-ERROR-006"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT type-decl",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "fn/arrow-body-reject",
+    "id": "fn-arrow-body-reject",
+    "newlyMissing": [
+      "E-FN-ARROW-BODY"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNCLOSED-PAREN",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-FN-NAME",
+      "E-STMT-FUNCTION-BODY",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).code: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).message: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).offset: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT function-decl",
+      "KIND-COUNT ident",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "escape-hatch.fnArrowDiagnostic: LIVE-HAS / NATIVE-ABSENT",
+      "escape-hatch.raw: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "fn/async-decl-reject",
+    "id": "fn-async-decl-reject",
+    "newlyMissing": [
+      "E-FN-005"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "fn/equals-body-reject",
+    "id": "fn-equals-body-reject",
+    "newlyMissing": [
+      "E-FN-EQUALS-BODY"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT lit",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "foreign/foreign-bare-block-neg",
+    "id": "foreign-bare-block-neg",
+    "newlyMissing": [
+      "E-FOREIGN-004"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-OBJECT-PROP",
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT foreign (live=1 native=0)",
+      "KIND-ABSENT function-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT export-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "export-decl.isPure: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isReExportAll: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isServer: LIVE-HAS / NATIVE-ABSENT",
+      "logic.exports: LIVE-HAS / NATIVE-EMPTY",
+      "markup.closerForm: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "foreign/foreign-crossing-shadow-neg",
+    "id": "foreign-crossing-shadow-neg",
+    "newlyMissing": [
+      "E-FOREIGN-006"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT foreign (live=1 native=0)",
+      "KIND-ABSENT function-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT export-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "export-decl.isPure: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isReExportAll: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isServer: LIVE-HAS / NATIVE-ABSENT",
+      "logic.exports: LIVE-HAS / NATIVE-EMPTY",
+      "markup.closerForm: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "foreign/foreign-inline-no-lang-neg",
+    "id": "foreign-inline-no-lang-neg",
+    "newlyMissing": [
+      "E-FOREIGN-003"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-OBJECT-PROP",
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT foreign (live=1 native=0)",
+      "KIND-ABSENT function-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT export-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "export-decl.isPure: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isReExportAll: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isServer: LIVE-HAS / NATIVE-ABSENT",
+      "logic.exports: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "foreign/foreign-lang-unsupported-neg",
+    "id": "foreign-lang-unsupported-neg",
+    "newlyMissing": [
+      "E-FOREIGN-005"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-OBJECT-PROP",
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT foreign (live=1 native=0)",
+      "KIND-ABSENT function-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT export-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "export-decl.isPure: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isReExportAll: LIVE-HAS / NATIVE-ABSENT",
+      "export-decl.isServer: LIVE-HAS / NATIVE-ABSENT",
+      "logic.exports: LIVE-HAS / NATIVE-EMPTY",
+      "markup.closerForm: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "forms/compound-render-not-bindable",
+    "id": "forms-compound-render-not-bindable",
+    "newlyMissing": [
+      "E-CELL-RENDER-SPEC-NOT-BINDABLE"
+    ],
+    "nativeParseErrors": [
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT render-spec (live=1 native=0)",
+      "KIND-ABSENT state-decl (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA absent (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "forms/compound-validator-circular-dep",
+    "id": "forms-compound-validator-circular-dep",
+    "newlyMissing": [
+      "E-VALIDATOR-CIRCULAR-DEP"
+    ],
+    "nativeParseErrors": [
+      "E-CTX-001",
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT ident (live=2 native=0)",
+      "KIND-ABSENT member (live=2 native=0)",
+      "KIND-ABSENT render-spec (live=2 native=0)",
+      "KIND-ABSENT state-decl (live=3 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA absent (live=0 native=8)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "forms/compound-validator-circular-dep-self",
+    "id": "forms-compound-validator-circular-dep-self",
+    "newlyMissing": [
+      "E-VALIDATOR-CIRCULAR-DEP"
+    ],
+    "nativeParseErrors": [
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT ident (live=1 native=0)",
+      "KIND-ABSENT member (live=1 native=0)",
+      "KIND-ABSENT render-spec (live=1 native=0)",
+      "KIND-ABSENT state-decl (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA absent (live=0 native=4)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "forms/derived-validators-reject",
+    "id": "forms-derived-validators-reject",
+    "newlyMissing": [
+      "E-DERIVED-WITH-VALIDATORS"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "state-decl.validators: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "forms/msgchain-colon-reject",
+    "id": "forms-msgchain-colon-reject",
+    "newlyMissing": [
+      "E-VALIDATOR-INLINE-COLON"
+    ],
+    "nativeParseErrors": [
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT render-spec (live=1 native=0)",
+      "KIND-ABSENT state-decl (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA absent (live=0 native=4)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "forms/msgchain-dynamic-reject",
+    "id": "forms-msgchain-dynamic-reject",
+    "newlyMissing": [
+      "E-VALIDATOR-INLINE-DYNAMIC"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-TYPE-NAME",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT render-spec (live=1 native=0)",
+      "KIND-ABSENT state-decl (live=2 native=0)",
+      "KIND-ABSENT string-literal (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT lit",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA binary (live=0 native=6)",
+      "KIND-EXTRA escape-hatch (live=0 native=4)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "KIND-EXTRA type-decl (live=0 native=2)",
+      "markup.attrs: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "forms/validator-applies-min-on-string-reject",
+    "id": "forms-validator-applies-min-on-string-reject",
+    "newlyMissing": [
+      "E-TYPE-031"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "lit.value: TYPE live=number|string native=string",
+      "state-decl.validators: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "forms/validator-applies-pattern-on-number-reject",
+    "id": "forms-validator-applies-pattern-on-number-reject",
+    "newlyMissing": [
+      "E-TYPE-031"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT escape-hatch (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "state-decl.validators: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "forms/validator-vocab-unknown-reject",
+    "id": "forms-validator-vocab-unknown-reject",
+    "newlyMissing": [
+      "E-TYPE-031"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).args: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT render-spec (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "state-decl.initExpr: TYPE live=null native=object",
+      "state-decl.renderSpec: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.validators: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "lifecycle/cleanup-error-call-expression",
+    "id": "lifecycle-cleanup-error-call-expression",
+    "newlyMissing": [
+      "E-LIFECYCLE-002"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT cleanup-registration (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT call",
+      "KIND-COUNT ident",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "lifecycle/cleanup-error-non-function",
+    "id": "lifecycle-cleanup-error-non-function",
+    "newlyMissing": [
+      "E-LIFECYCLE-004"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT cleanup-registration (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "lifecycle/cleanup-error-outside-element-scope",
+    "id": "lifecycle-cleanup-error-outside-element-scope",
+    "newlyMissing": [
+      "E-LIFECYCLE-001"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT cleanup-registration (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "lifecycle/effect-on-derived-engine",
+    "id": "lifecycle-effect-on-derived-engine",
+    "newlyMissing": [
+      "E-ENGINE-EFFECT-ON-DERIVED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT type-decl",
+      "engine-decl.derivedExprNode: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.derivedExprText: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffect: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.openerEffectMalformed: LIVE-HAS / NATIVE-ABSENT",
+      "engine-decl.serverFlagBare: LIVE-HAS / NATIVE-ABSENT",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "linear/must-use-unread-pos",
+    "id": "linear-must-use-unread-pos",
+    "newlyMissing": [
+      "E-MU-001"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT tilde-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=1)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "loop/w-assign-001-severity-pos",
+    "id": "loop-w-assign-001-severity-pos",
+    "newlyMissing": [
+      "W-ASSIGN-001"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT tilde-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT assign",
+      "KIND-COUNT ident",
+      "KIND-EXTRA bare-expr (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "maps/duplicate-literal-key-pos",
+    "id": "maps-duplicate-literal-key-pos",
+    "newlyMissing": [
+      "W-MAP-DUPLICATE-LITERAL-KEY"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": []
+  },
+  {
+    "relDir": "maps/literal-malformed-pos",
+    "id": "maps-literal-malformed-pos",
+    "newlyMissing": [
+      "E-MAP-LITERAL-MALFORMED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": []
+  },
+  {
+    "relDir": "maps/struct-key-literal-pos",
+    "id": "maps-struct-key-literal-pos",
+    "newlyMissing": [
+      "W-MAP-STRUCT-KEY-LITERAL"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT type-decl",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "markup-handler/multi-stmt-handler-attr-pos",
+    "id": "multi-stmt-handler-attr-pos",
+    "newlyMissing": [
+      "E-MULTI-STATEMENT-HANDLER"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=2)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "match-block/member-access-nonexhaustive",
+    "id": "match-block-member-access-nonexhaustive",
+    "newlyMissing": [
+      "E-TYPE-020"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=1 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-block/member-access-subset-dead-arm",
+    "id": "match-block-member-access-subset-dead-arm",
+    "newlyMissing": [
+      "E-MATCH-SUBSET-DEAD-ARM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=3 native=0)",
+      "KIND-ABSENT match-arm-inline (live=3 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-match-012-tnot-missing-not-arm-pos",
+    "id": "match-codes-e-match-012-tnot-missing-not-arm-pos",
+    "newlyMissing": [
+      "E-MATCH-012"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=2 native=0)",
+      "KIND-ABSENT match-arm-inline (live=2 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-match-arm-markup-in-value-pos",
+    "id": "match-codes-e-match-arm-markup-in-value-pos",
+    "newlyMissing": [
+      "E-MATCH-ARM-MARKUP-IN-VALUE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=2 native=0)",
+      "KIND-ABSENT markup-value (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=3 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-match-block-in-lift-pos",
+    "id": "match-codes-e-match-block-in-lift-pos",
+    "newlyMissing": [
+      "E-MATCH-BLOCK-IN-LIFT"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT variable-ref (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA Markup (live=0 native=2)",
+      "KIND-EXTRA Text (live=0 native=3)",
+      "KIND-EXTRA match-block (live=0 native=1)",
+      "for-stmt.forKind: NATIVE-ONLY-KEY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "markup.attrs: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-syntax-010-else-not-last-pos",
+    "id": "match-codes-e-syntax-010-else-not-last-pos",
+    "newlyMissing": [
+      "E-SYNTAX-010"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=2 native=0)",
+      "KIND-ABSENT match-arm-inline (live=2 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-syntax-011-guard-clause-pos",
+    "id": "match-codes-e-syntax-011-guard-clause-pos",
+    "newlyMissing": [
+      "E-SYNTAX-011"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-MATCH-ARROW",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-MATCH-PATTERN",
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT binary (live=1 native=0)",
+      "KIND-ABSENT lit (live=2 native=0)",
+      "KIND-ABSENT match-arm-inline (live=2 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT member",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA escape-hatch (live=0 native=2)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-type-006-multi-scrutinee-union-pos",
+    "id": "match-codes-e-type-006-multi-scrutinee-union-pos",
+    "newlyMissing": [
+      "E-TYPE-006"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-MATCH-PATTERN",
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=1 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT escape-hatch",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=3)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "escape-hatch.raw: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-type-024-struct-subject-pos",
+    "id": "match-codes-e-type-024-struct-subject-pos",
+    "newlyMissing": [
+      "E-TYPE-024"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=1 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "match-codes/e-type-025-asis-subject-pos",
+    "id": "match-codes-e-type-025-asis-subject-pos",
+    "newlyMissing": [
+      "E-TYPE-025"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT lit (live=2 native=0)",
+      "KIND-ABSENT match-arm-inline (live=2 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isGenerator: NATIVE-ONLY-KEY",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "meta/meta-invalid-token-neg",
+    "id": "meta-invalid-token-neg",
+    "newlyMissing": [
+      "E-META-002"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-EXTRA escape-hatch (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "meta/meta-nested-block-neg",
+    "id": "meta-nested-block-neg",
+    "newlyMissing": [
+      "E-META-009"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-PARAM",
+      "E-EXPR-UNCLOSED-PAREN",
+      "E-EXPR-FUNCTION-BODY",
+      "E-EXPR-UNCLOSED-BRACE",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT call",
+      "KIND-COUNT ident",
+      "KIND-COUNT meta",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA binary (live=0 native=1)",
+      "KIND-EXTRA block (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=2)",
+      "KIND-EXTRA lambda (live=0 native=1)",
+      "KIND-EXTRA object (live=0 native=1)",
+      "KIND-EXTRA prop (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "middleware/duplicate-handle-pos",
+    "id": "middleware-duplicate-handle-pos",
+    "newlyMissing": [
+      "E-MW-005"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "middleware/ratelimit-invalid-unit-pos",
+    "id": "middleware-ratelimit-invalid-unit-pos",
+    "newlyMissing": [
+      "E-MW-002"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": []
+  },
+  {
+    "relDir": "module/e-export-002-component-multiroot-reject",
+    "id": "e-export-002-component-multiroot-reject",
+    "newlyMissing": [
+      "E-EXPORT-002"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text",
+      "KIND-EXTRA markup (live=0 native=3)"
+    ]
+  },
+  {
+    "relDir": "module/e-export-003-attr-conflict-reject",
+    "id": "e-export-003-attr-conflict-reject",
+    "newlyMissing": [
+      "E-EXPORT-003"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text",
+      "KIND-EXTRA absent (live=0 native=1)",
+      "KIND-EXTRA markup (live=0 native=2)",
+      "KIND-EXTRA string-literal (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "module/e-import-pinned-invalid-reject",
+    "id": "e-import-pinned-invalid-reject",
+    "newlyMissing": [
+      "E-IMPORT-PINNED-INVALID"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-UNCLOSED-IMPORT",
+      "E-STMT-EXPECT-FROM",
+      "E-STMT-MODULE-SOURCE",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).imports: LIVE-HAS / NATIVE-EMPTY",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-EXTRA escape-hatch (live=0 native=2)",
+      "import-decl.raw: LIVE-HAS / NATIVE-EMPTY",
+      "import-decl.source: LIVE-HAS / NATIVE-EMPTY",
+      "logic.imports: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "module/e-use-001-use-inside-logic-reject",
+    "id": "e-use-001-use-inside-logic-reject",
+    "newlyMissing": [
+      "E-USE-001"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT use-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA ident (live=0 native=2)"
+    ]
+  },
+  {
+    "relDir": "protect/sse-yield-strip",
+    "id": "protect-sse-yield-strip",
+    "newlyMissing": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-FUNCTION-BODY",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT object (live=1 native=0)",
+      "KIND-ABSENT prop (live=3 native=0)",
+      "KIND-ABSENT yield-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA bare-expr (live=0 native=4)",
+      "KIND-EXTRA escape-hatch (live=0 native=3)",
+      "function-decl.body: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.route: LIVE-HAS / NATIVE-ABSENT",
+      "lit.value: TYPE live=number|string native=string"
+    ]
+  },
+  {
+    "relDir": "reactive/cell-ambiguous-member-render-pos",
+    "id": "reactive-cell-ambiguous-member-render-pos",
+    "newlyMissing": [
+      "E-CELL-AMBIGUOUS-MEMBER-RENDER"
+    ],
+    "nativeParseErrors": [
+      "E-CTX-001",
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT render-spec (live=2 native=0)",
+      "KIND-ABSENT state-decl (live=4 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "reactive/debounce-on-derived",
+    "id": "reactive-debounce-on-derived",
+    "newlyMissing": [
+      "E-DEBOUNCED-WITH-DERIVED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).debounced: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT literal (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "state-decl.reactivity: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/debounce-on-server",
+    "id": "reactive-debounce-on-server",
+    "newlyMissing": [
+      "E-DEBOUNCED-WITH-SERVER"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).debounced: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT literal (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "state-decl.reactivity: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/decl-needs-initializer-array-pos",
+    "id": "reactive-decl-needs-initializer-array-pos",
+    "newlyMissing": [
+      "E-DECL-NEEDS-INITIALIZER"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-STATE-DECL-INIT"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT array (live=1 native=0)",
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "state-decl.initExpr: TYPE live=object native=null|object"
+    ]
+  },
+  {
+    "relDir": "reactive/decl-needs-initializer-pos",
+    "id": "reactive-decl-needs-initializer-pos",
+    "newlyMissing": [
+      "E-DECL-NEEDS-INITIALIZER"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-STATE-DECL-INIT"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "state-decl.initExpr: TYPE live=object native=null|object"
+    ]
+  },
+  {
+    "relDir": "reactive/decl-rhs-interp-wrapped-pos",
+    "id": "reactive-decl-rhs-interp-wrapped-pos",
+    "newlyMissing": [
+      "E-DECL-RHS-INTERP-WRAPPED"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident"
+    ]
+  },
+  {
+    "relDir": "reactive/derived-default-on-const",
+    "id": "reactive-derived-default-on-const",
+    "newlyMissing": [
+      "E-DERIVED-WRITE"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "state-decl.defaultExpr: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "reactive/is-literal-rhs-reject",
+    "id": "reactive-is-literal-rhs-reject",
+    "newlyMissing": [
+      "E-EQ-005"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-IS-SUFFIX",
+      "E-STMT-EXPECT-RPAREN",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT lit",
+      "KIND-EXTRA binary (live=0 native=1)",
+      "escape-hatch.raw: LIVE-HAS / NATIVE-EMPTY",
+      "lit.value: TYPE live=number|string native=null|number|string"
+    ]
+  },
+  {
+    "relDir": "reactive/reactivity-attr-conflict",
+    "id": "reactive-reactivity-attr-conflict",
+    "newlyMissing": [
+      "E-REACTIVITY-ATTR-CONFLICT"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).debounced: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).throttled: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT literal (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "state-decl.reactivity: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/reset-reserved-identifier",
+    "id": "reactive-reset-reserved-identifier",
+    "newlyMissing": [
+      "E-RESERVED-IDENTIFIER"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/server-fn-authority-wholly-server-error",
+    "id": "reactive-server-fn-authority-wholly-server-error",
+    "newlyMissing": [
+      "E-REACTIVE-003"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-FUNCTION-BODY",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT assign",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "function-decl.body: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/server-fn-cps-marshal-derived-warn",
+    "id": "reactive-server-fn-cps-marshal-derived-warn",
+    "newlyMissing": [
+      "W-SERVER-DERIVED-MARSHAL"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT member",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "for-stmt.forKind: NATIVE-ONLY-KEY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/server-fn-derived-read-error",
+    "id": "reactive-server-fn-derived-read-error",
+    "newlyMissing": [
+      "E-REACTIVE-003"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-FUNCTION-BODY",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT assign",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "function-decl.body: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/server-fn-rawvar-read-error",
+    "id": "reactive-server-fn-rawvar-read-error",
+    "newlyMissing": [
+      "E-REACTIVE-003"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-FUNCTION-BODY",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT const-decl (live=1 native=0)",
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT assign",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "expr.expr: NATIVE-ONLY-KEY",
+      "function-decl.body: LIVE-HAS / NATIVE-EMPTY",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/shape4-refinement-no-default",
+    "id": "reactive-shape4-refinement-no-default",
+    "newlyMissing": [
+      "E-REFINEMENT-NO-DEFAULT"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-STATE-DECL-INIT"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "state-decl.init: LIVE-HAS / NATIVE-EMPTY",
+      "state-decl.initExpr: LIVE-HAS / NATIVE-EMPTY",
+      "state-decl.refinementNoRhsBase: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "reactive/shape4-struct-not-lifecycle",
+    "id": "reactive-shape4-struct-not-lifecycle",
+    "newlyMissing": [
+      "E-TYPE-001"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-STATE-DECL-INIT"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT function-decl (live=1 native=0)",
+      "KIND-ABSENT ident (live=1 native=0)",
+      "KIND-ABSENT let-decl (live=1 native=0)",
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT member (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT type-decl",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "state-decl.implicitNotLifecycle: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.init: LIVE-HAS / NATIVE-EMPTY",
+      "state-decl.initExpr: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "reactive/write-not-in-logic-context-pos",
+    "id": "write-not-in-logic-context-pos",
+    "newlyMissing": [
+      "E-WRITE-NOT-IN-LOGIC-CONTEXT"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=1)"
+    ]
+  },
+  {
+    "relDir": "refinement/subset-dead-arm-pos",
+    "id": "refinement-subset-dead-arm-pos",
+    "newlyMissing": [
+      "E-MATCH-SUBSET-DEAD-ARM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT lit (live=3 native=0)",
+      "KIND-ABSENT match-arm-inline (live=3 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT match-expr",
+      "KIND-COUNT type-decl",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "match-expr.body: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.header: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.headerExpr: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.id: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.matchExpr: LIVE-HAS / NATIVE-ABSENT",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "refinement/subset-notin-dead-arm-pos",
+    "id": "refinement-subset-notin-dead-arm-pos",
+    "newlyMissing": [
+      "E-MATCH-SUBSET-DEAD-ARM"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT lit (live=4 native=0)",
+      "KIND-ABSENT match-arm-inline (live=4 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT match-expr",
+      "KIND-COUNT type-decl",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "match-expr.body: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.header: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.headerExpr: LIVE-HAS / NATIVE-ABSENT",
+      "match-expr.id: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.matchExpr: LIVE-HAS / NATIVE-ABSENT",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "server-db/server-fn-writes-reactive-cell-pos",
+    "id": "server-db-server-fn-writes-reactive-cell-pos",
+    "newlyMissing": [
+      "E-RI-002"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "const-decl.initExpr: NATIVE-ONLY-KEY",
+      "const-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "server-db/sql-row-contract-mismatch-pos",
+    "id": "server-db-sql-row-contract-mismatch-pos",
+    "newlyMissing": [
+      "E-SQL-ROW-CONTRACT-MISMATCH"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT const-decl",
+      "KIND-COUNT ident",
+      "KIND-COUNT logic",
+      "KIND-COUNT markup",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "KIND-EXTRA props-block (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "const-decl.initExpr: NATIVE-ONLY-KEY",
+      "const-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT",
+      "logic.components: LIVE-HAS / NATIVE-EMPTY",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY",
+      "variable-ref.expr: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "server-fn/e-route-003-pos",
+    "id": "server-fn-e-route-003-nonserializable-return-pos",
+    "newlyMissing": [
+      "E-ROUTE-003"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "server-fn/e-route-004-pos",
+    "id": "server-fn-e-route-004-nonserializable-param-pos",
+    "newlyMissing": [
+      "E-ROUTE-004"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeAnnotation: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-COUNT (untyped-object)",
+      "function-decl.hasReturnType: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "function-decl.returnTypeAnnotation: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "sql/bare-identifier-body-e-sql-003-neg",
+    "id": "sql-bare-identifier-body-e-sql-003-neg",
+    "newlyMissing": [
+      "E-SQL-003"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "sql/comment-cloaked-body-e-sql-003-neg",
+    "id": "sql-comment-cloaked-body-e-sql-003-neg",
+    "newlyMissing": [
+      "E-SQL-003"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "sql/prepare-cps-return-e-sql-006-neg",
+    "id": "sql-prepare-cps-return-e-sql-006",
+    "newlyMissing": [
+      "E-SQL-006"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT sql",
+      "KIND-COUNT state-decl",
+      "KIND-EXTRA assign (live=0 native=2)",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=2)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "markup.shorthandBodyRaw: TYPE live=null|string native=string",
+      "state-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "sql/prepare-pattern-c-cell-e-sql-006-neg",
+    "id": "sql-prepare-pattern-c-cell-e-sql-006",
+    "newlyMissing": [
+      "E-SQL-006"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT sql",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "markup.shorthandBodyRaw: TYPE live=null|string native=string",
+      "state-decl.initExpr: NATIVE-ONLY-KEY",
+      "state-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "sql/prepare-ws-onserver-e-sql-006-neg",
+    "id": "sql-prepare-ws-onserver-e-sql-006",
+    "newlyMissing": [
+      "E-SQL-006"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).bindingKind: NATIVE-ONLY-KEY",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT call-ref",
+      "KIND-COUNT ident",
+      "KIND-COUNT logic",
+      "KIND-COUNT sql",
+      "KIND-COUNT string-literal",
+      "KIND-COUNT text",
+      "KIND-EXTRA ATTR_CALL (live=0 native=1)",
+      "KIND-EXTRA ATTR_EQ (live=0 native=2)",
+      "KIND-EXTRA ATTR_NAME (live=0 native=2)",
+      "KIND-EXTRA ATTR_STRING (live=0 native=1)",
+      "KIND-EXTRA Array (live=0 native=1)",
+      "KIND-EXTRA Assignment (live=0 native=1)",
+      "KIND-EXTRA AtCell (live=0 native=1)",
+      "KIND-EXTRA Call (live=0 native=1)",
+      "KIND-EXTRA ExprStmt (live=0 native=1)",
+      "KIND-EXTRA FunctionDecl (live=0 native=1)",
+      "KIND-EXTRA Ident (live=0 native=1)",
+      "KIND-EXTRA LogicEscape (live=0 native=2)",
+      "KIND-EXTRA Markup (live=0 native=1)",
+      "KIND-EXTRA Member (live=0 native=1)",
+      "KIND-EXTRA Sql (live=0 native=1)",
+      "KIND-EXTRA StateDecl (live=0 native=1)",
+      "KIND-EXTRA Text (live=0 native=1)",
+      "KIND-EXTRA array (live=0 native=1)",
+      "KIND-EXTRA assign (live=0 native=1)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "call-ref.sourceText: NATIVE-ONLY-KEY",
+      "for-stmt.forKind: NATIVE-ONLY-KEY",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.initExpr: NATIVE-ONLY-KEY",
+      "state-decl.pinned: NATIVE-ONLY-KEY",
+      "state-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT",
+      "string-literal.sourceText: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "sql/runtime-expr-body-e-sql-003-neg",
+    "id": "sql-runtime-expr-body-e-sql-003-neg",
+    "newlyMissing": [
+      "E-SQL-003"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "function-decl.isAsync: NATIVE-ONLY-KEY",
+      "function-decl.isHandleEscapeHatch: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "ssr/i-ssr-auth-scoped-prerender-omitted-pos",
+    "id": "ssr-i-ssr-auth-scoped-prerender-omitted-pos",
+    "newlyMissing": [
+      "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).optional: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeExpr: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-ABSENT state-constructor-def (live=1 native=0)",
+      "KIND-ABSENT state-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT string-literal",
+      "KIND-EXTRA assign (live=0 native=2)",
+      "KIND-EXTRA bare-expr (live=0 native=4)",
+      "KIND-EXTRA binary (live=0 native=2)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA ident (live=0 native=4)",
+      "KIND-EXTRA lit (live=0 native=2)",
+      "KIND-EXTRA member (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "markup.shorthandBodyRaw: TYPE live=null|string native=string"
+    ]
+  },
+  {
+    "relDir": "ssr/i-ssr-each-client-rendered-subset-pos",
+    "id": "ssr-i-ssr-each-client-rendered-subset-pos",
+    "newlyMissing": [
+      "I-SSR-EACH-CLIENT-RENDERED"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).optional: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeExpr: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT state-constructor-def (live=1 native=0)",
+      "KIND-ABSENT state-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT string-literal",
+      "KIND-EXTRA assign (live=0 native=2)",
+      "KIND-EXTRA binary (live=0 native=2)",
+      "KIND-EXTRA escape-hatch (live=0 native=2)",
+      "KIND-EXTRA lit (live=0 native=2)"
+    ]
+  },
+  {
+    "relDir": "ssr/ssr-auth-scoped-cell-not-seeded",
+    "id": "ssr-auth-scoped-cell-not-seeded",
+    "newlyMissing": [
+      "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"
+    ],
+    "nativeParseErrors": [
+      "E-CTX-001",
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).method: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).optional: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).typeExpr: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT sql (live=1 native=0)",
+      "KIND-ABSENT state-constructor-def (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-COUNT member",
+      "KIND-COUNT state-decl",
+      "KIND-COUNT text",
+      "KIND-EXTRA binary (live=0 native=2)",
+      "KIND-EXTRA call (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "KIND-EXTRA sql-ref (live=0 native=1)",
+      "state-decl.auth: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.initExpr: TYPE live=undefined native=object",
+      "state-decl.serverAuthorityTable: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.sqlNode: LIVE-HAS / NATIVE-ABSENT",
+      "state-decl.stateType: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "style/theme-misplaced",
+    "id": "style-theme-misplaced",
+    "newlyMissing": [
+      "E-STRUCTURAL-ELEMENT-MISPLACED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).span: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT theme-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT markup",
+      "KIND-COUNT text"
+    ]
+  },
+  {
+    "relDir": "style/theme-name-collision",
+    "id": "style-theme-name-collision",
+    "newlyMissing": [
+      "E-NAME-COLLIDES-RESERVED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT text",
+      "const-decl.init: LIVE-HAS / NATIVE-EMPTY"
+    ]
+  },
+  {
+    "relDir": "style/theme-variant-not-in-set",
+    "id": "style-theme-variant-not-in-set",
+    "newlyMissing": [
+      "E-TYPE-063"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).tokens: LIVE-HAS / NATIVE-ABSENT",
+      "(untyped-object).value: TYPE live=object|string native=object",
+      "(untyped-object).variant: LIVE-HAS / NATIVE-ABSENT",
+      "KIND-ABSENT theme-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "expr.expr: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "type-state-codes/e-state-terminal-mutation-pos",
+    "id": "e-state-terminal-mutation-pos",
+    "newlyMissing": [
+      "E-STATE-TERMINAL-MUTATION"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-MARKUP-002",
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT markup-value (live=1 native=0)",
+      "KIND-ABSENT transition-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-EXTRA binary (live=0 native=5)",
+      "KIND-EXTRA escape-hatch (live=0 native=5)",
+      "KIND-EXTRA state (live=0 native=1)",
+      "markup.closerForm: LIVE-HAS / NATIVE-EMPTY",
+      "state-constructor-def.isSubstate: LIVE-HAS / NATIVE-ABSENT",
+      "state-constructor-def.parentState: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "type-state-codes/e-state-transition-illegal-pos",
+    "id": "e-state-transition-illegal-pos",
+    "newlyMissing": [
+      "E-STATE-TRANSITION-ILLEGAL"
+    ],
+    "nativeParseErrors": [
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-EXPR-UNEXPECTED",
+      "E-MARKUP-002",
+      "E-CTX-001"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT markup-value (live=1 native=0)",
+      "KIND-ABSENT transition-decl (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-EXTRA binary (live=0 native=5)",
+      "KIND-EXTRA escape-hatch (live=0 native=5)",
+      "KIND-EXTRA state (live=0 native=1)",
+      "markup.closerForm: LIVE-HAS / NATIVE-EMPTY",
+      "state-constructor-def.isSubstate: LIVE-HAS / NATIVE-ABSENT",
+      "state-constructor-def.parentState: LIVE-HAS / NATIVE-ABSENT"
+    ]
+  },
+  {
+    "relDir": "type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos",
+    "id": "e-state-undeclared-nested-each-in-match-arm-pos",
+    "newlyMissing": [
+      "E-STATE-UNDECLARED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA ATTR_EQ (live=0 native=1)",
+      "KIND-EXTRA ATTR_IDENT (live=0 native=1)",
+      "KIND-EXTRA ATTR_NAME (live=0 native=1)",
+      "KIND-EXTRA AtCell (live=0 native=1)",
+      "KIND-EXTRA ExprStmt (live=0 native=1)",
+      "KIND-EXTRA LogicEscape (live=0 native=1)",
+      "KIND-EXTRA Markup (live=0 native=5)",
+      "KIND-EXTRA Text (live=0 native=6)",
+      "KIND-EXTRA variable-ref (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "match-block.armBodyChildren: LIVE-HAS / NATIVE-ABSENT",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "type-state-codes/e-type-045-prefix-not-negation-pos",
+    "id": "e-type-045-prefix-not-negation-pos",
+    "newlyMissing": [
+      "E-TYPE-045"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-EXPECT-RPAREN",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-EXPR-UNEXPECTED",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "note": "",
+    "sigs": [
+      "(untyped-object).name: NATIVE-ONLY-KEY",
+      "(untyped-object).span: NATIVE-ONLY-KEY",
+      "(untyped-object).value: NATIVE-ONLY-KEY",
+      "KIND-ABSENT html-fragment (live=1 native=0)",
+      "KIND-ABSENT unary (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT lit",
+      "KIND-COUNT markup",
+      "KIND-COUNT text",
+      "KIND-EXTRA bare-expr (live=0 native=3)",
+      "KIND-EXTRA escape-hatch (live=0 native=1)",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "KIND-EXTRA string-literal (live=0 native=1)",
+      "lit.value: TYPE live=boolean native=boolean|null"
+    ]
+  },
+  {
+    "relDir": "type-state-codes/e-type-081-partial-match-render-pos",
+    "id": "e-type-081-partial-match-render-pos",
+    "newlyMissing": [
+      "E-TYPE-081"
+    ],
+    "nativeParseErrors": [
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT lit (live=1 native=0)",
+      "KIND-ABSENT match-arm-inline (live=1 native=0)",
+      "KIND-ABSENT match-stmt (live=1 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT ident",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA bare-expr (live=0 native=2)",
+      "KIND-EXTRA match-expr (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  },
+  {
+    "relDir": "type-state-codes/e-type-lifecycle-variant-not-transitioned-pos",
+    "id": "e-type-lifecycle-variant-not-transitioned-pos",
+    "newlyMissing": [
+      "E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED"
+    ],
+    "nativeParseErrors": [],
+    "note": "",
+    "sigs": [
+      "KIND-ABSENT html-fragment (live=2 native=0)",
+      "KIND-COUNT (untyped-object)",
+      "KIND-COUNT bare-expr",
+      "KIND-COUNT markup",
+      "KIND-COUNT type-decl",
+      "KIND-EXTRA markup-value (live=0 native=1)",
+      "logic.typeDecls: LIVE-HAS / NATIVE-EMPTY",
+      "type-decl.fromExport: NATIVE-ONLY-KEY"
+    ]
+  }
+]

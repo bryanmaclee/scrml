@@ -1,0 +1,145 @@
+===== bun test compiler/tests/conformance/corpus-bridge.test.js exit=0 =====
+bun test v1.3.14 (0d9b296a)
+Note(PA): Database file '/tmp/scrml-conf-impl1-Ouh5Qx/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-NIRFTj/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+
+compiler/tests/conformance/corpus-bridge.test.js:
+[scrml errorBoundary _scrml_error_boundary_1] caught error variant LoadError::Timeout {
+  __scrml_error: true,
+  type: "LoadError",
+  variant: "Timeout",
+  data: null,
+}
+[scrml errorBoundary _scrml_error_boundary_2] caught error variant LoadError::NotFound {
+  __scrml_error: true,
+  type: "LoadError",
+  variant: "NotFound",
+  data: {
+    id: "missing",
+  },
+}
+[scrml errorBoundary _scrml_error_boundary_1] caught error variant LoadError::Timeout {
+  __scrml_error: true,
+  type: "LoadError",
+  variant: "Timeout",
+  data: null,
+}
+[scrml errorBoundary _scrml_error_boundary_1] caught error variant PaymentError::InsufficientFunds {
+  __scrml_error: true,
+  type: "PaymentError",
+  variant: "InsufficientFunds",
+  data: {
+    available: 50,
+    requested: 75,
+  },
+}
+[scrml errorBoundary _scrml_error_boundary_1] caught error variant LoadError::Timeout {
+  __scrml_error: true,
+  type: "LoadError",
+  variant: "Timeout",
+  data: null,
+}
+[scrml errorBoundary _scrml_error_boundary_1] caught error variant LoadError::NotFound {
+  __scrml_error: true,
+  type: "LoadError",
+  variant: "NotFound",
+  data: {
+    id: "missing",
+  },
+}
+TypeError: _scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert is not a function. (In '_scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert("Y", 2)', '_scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert' is undefined)
+      at _scrml_attr_onclick_1 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9223:137)
+      at <anonymous> (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9229:53)
+      at #callDispatchEventListeners (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:226:47)
+      at dispatchEvent (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:104:14)
+      at #goThroughDispatchEventPhases (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:172:33)
+      at dispatchEvent (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:100:18)
+      at dispatchEvent (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/nodes/html-button-element/HTMLButtonElement.js:323:35)
+      at dispatch (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/driver.ts:67:6)
+      at applyInput (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/driver.ts:97:5)
+      at driveInputs (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/driver.ts:153:11)
+      at async runCaseRuntime (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/run.ts:573:15)
+      at async <anonymous> (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/compiler/tests/conformance/corpus-bridge.test.js:62:32)
+
+Note(PA): Database file '/tmp/scrml-conf-impl1-HHe3gC/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-xoHPf9/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-aebNYR/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-tM1vIA/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-0AofXx/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-vWP70j/nonexistent.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-vA0y6C/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-C7qHnE/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-TRH8Rl/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-t0ynAL/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-O5Mhvq/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-YJ9sUO/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-ZlwA8t/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-2RJxPN/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-edzH6y/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-2E9UzG/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-zPxUR9/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-FcF4UO/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-LuZNU7/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+error: E-CONTRACT-001-RT: Value constraint violated at runtime.
+  Variable: amt
+  Constraint: (>0 && <10000)
+  Value: 15000
+  Location:  (fn process, parameter 'amt')
+      at _scrml_process_4 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9211:11)
+      at _scrml_attr_onclick_2 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9230:64)
+      at <anonymous> (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9236:53)
+      at #callDispatchEventListeners (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:226:47)
+      at dispatchEvent (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:104:14)
+      at #goThroughDispatchEventPhases (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:172:33)
+      at dispatchEvent (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/event/EventTarget.js:100:18)
+      at dispatchEvent (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/node_modules/happy-dom/lib/nodes/html-button-element/HTMLButtonElement.js:323:35)
+      at dispatch (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/driver.ts:67:6)
+      at applyInput (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/driver.ts:97:5)
+      at async runCaseRuntime (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/run.ts:573:15)
+      at async <anonymous> (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/compiler/tests/conformance/corpus-bridge.test.js:62:32)
+
+[scrml errorBoundary _scrml_error_boundary_2] caught error variant LoadError::Timeout {
+  __scrml_error: true,
+  type: "LoadError",
+  variant: "Timeout",
+  data: null,
+}
+Note(PA): Database file '/tmp/scrml-conf-impl1-cgTcg6/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-or74vz/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-kMVlUg/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-fHtQFY/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-V5rQaK/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-WOrSyX/sqlite:./app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-Y0zutX/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-bt4gKZ/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+[scrml errorBoundary orders] caught non-! runtime error (host backstop, §19.6.8) SyntaxError: JSON Parse error: Unexpected EOF
+      at async _scrml_fetch_loadAllOrders_3 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9347:50)
+      at async <anonymous> (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9368:81)
+
+[scrml errorBoundary invoices] caught non-! runtime error (host backstop, §19.6.8) SyntaxError: JSON Parse error: Unexpected EOF
+      at async _scrml_fetch_loadAllInvoices_4 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9361:50)
+      at async <anonymous> (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9370:85)
+
+Note(PA): Database file '/tmp/scrml-conf-impl1-k9zYAV/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-Eb9uI5/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-KAp32y/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-KNYcIC/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-64SGVf/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-TXHTMu/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-impl1-L4fnhF/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-BMqyS6/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+[scrml errorBoundary secretCell] caught non-! runtime error (host backstop, §19.6.8) SyntaxError: JSON Parse error: Unexpected EOF
+      at async _scrml_fetch_loadSecret_3 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9315:50)
+      at async <anonymous> (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9336:82)
+
+[scrml errorBoundary publicCell] caught non-! runtime error (host backstop, §19.6.8) SyntaxError: JSON Parse error: Unexpected EOF
+      at async _scrml_fetch_loadPublic_4 (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9329:50)
+      at async <anonymous> (file:///home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a014db979569c457f/conformance/adapters/impl1-ts.ts:9338:82)
+
+Note(PA): Database file '/tmp/scrml-conf-impl1-hGfEqq/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+Note(PA): Database file '/tmp/scrml-conf-server-rXkcBv/app.db' does not exist. Using in-memory schema from ?{} blocks for compile-time validation.
+
+ 898 pass
+ 0 fail
+ 5606 expect() calls
+Ran 898 tests across 1 file. [31.47s]

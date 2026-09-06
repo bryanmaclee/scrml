@@ -1,0 +1,19 @@
+{
+  "none": {
+    "stillMissing": 156,
+    "recovered": []
+  },
+  "oracleText": {
+    "stillMissing": 148,
+    "recovered": [
+      "engine/derived-engine-markup-write",
+      "engine/derived-engine-no-initial-pos",
+      "engine/derived-engine-no-rules-pos",
+      "engine/derived-engine-statechild-write",
+      "error/renders-undefined-var",
+      "lifecycle/effect-on-derived-engine",
+      "loop/w-assign-001-severity-pos",
+      "type-state-codes/e-type-lifecycle-variant-not-transitioned-pos"
+    ]
+  }
+}
