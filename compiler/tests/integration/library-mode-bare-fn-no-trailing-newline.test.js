@@ -64,6 +64,34 @@ function compileLib(name, source) {
   };
 }
 
+/**
+ * True when `js` contains a COMPLETE `export function <name>(…) { … }`
+ * declaration — head present, and the body's opening brace balanced by a closing
+ * one inside the module.
+ *
+ * ⚑ WHY THIS IS NOT A `.toContain("export function add(a, b) { return a + b }")`.
+ * It used to be, and that assertion was pinning the RAW-TEXT SLICER'S BYTE LAYOUT
+ * rather than the invariant this file is named for. The gap here is that the fn's
+ * own closing `}` must not be eaten as a `${…}` wrapper close — a structural
+ * property, entirely indifferent to whether the emit is one line or four. When
+ * S402 routed library fns through the structural emitter by default, the same fn
+ * came out as `export function add(a, b) {\n  return a + b;\n}` — whole, valid,
+ * callable, and failing four byte-exact assertions. Matching the layout instead
+ * of the property is what made a formatting change look like a regression, so the
+ * check now asserts the property.
+ */
+function containsWholeFn(js, name) {
+  const head = new RegExp(`export function ${name}\\s*\\([^)]*\\)\\s*\\{`);
+  const m = head.exec(js);
+  if (!m) return false;
+  let depth = 0;
+  for (let i = m.index + m[0].length - 1; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) return true;
+  }
+  return false;
+}
+
 describe("g-library-bare-fn-no-trailing-newline-brace-strip", () => {
   test("bare single fn, NO trailing newline → compiles clean, fn's own brace intact, runs", async () => {
     const src = `export fn add(a, b) { return a + b }`; // NB: no trailing newline
@@ -71,7 +99,7 @@ describe("g-library-bare-fn-no-trailing-newline-brace-strip", () => {
     expect(r.errors).toEqual([]); // was [E-CODEGEN-INVALID-LOGIC]
     expect(r.libExists).toBe(true);
     // The fn is emitted whole — its closing brace was NOT consumed as a wrapper `}`.
-    expect(r.libraryJs).toContain("export function add(a, b) { return a + b }");
+    expect(containsWholeFn(r.libraryJs, "add")).toBe(true);
     // Runtime half: the emitted module imports and the fn is callable.
     const m = await import(pathToFileURL(r.libPath).href);
     expect(m.add(2, 3)).toBe(5);
@@ -81,7 +109,7 @@ describe("g-library-bare-fn-no-trailing-newline-brace-strip", () => {
     const src = `export fn add(a, b) { return a + b }\n`;
     const r = compileLib("bare_with_nl", src);
     expect(r.errors).toEqual([]);
-    expect(r.libraryJs).toContain("export function add(a, b) { return a + b }");
+    expect(containsWholeFn(r.libraryJs, "add")).toBe(true);
     const m = await import(pathToFileURL(r.libPath).href);
     expect(m.add(2, 3)).toBe(5);
   });
@@ -90,8 +118,8 @@ describe("g-library-bare-fn-no-trailing-newline-brace-strip", () => {
     const src = `export fn add(a, b) { return a + b }\nexport fn mul(a, b) { return a * b }`;
     const r = compileLib("two_bare_no_nl", src);
     expect(r.errors).toEqual([]);
-    expect(r.libraryJs).toContain("export function add(a, b) { return a + b }");
-    expect(r.libraryJs).toContain("export function mul(a, b) { return a * b }");
+    expect(containsWholeFn(r.libraryJs, "add")).toBe(true);
+    expect(containsWholeFn(r.libraryJs, "mul")).toBe(true);
     const m = await import(pathToFileURL(r.libPath).href);
     expect(m.add(2, 3)).toBe(5);
     expect(m.mul(2, 3)).toBe(6);
@@ -104,11 +132,16 @@ describe("g-library-bare-fn-no-trailing-newline-brace-strip", () => {
     const src = `\${\n  export fn add(a, b) { return a + b }\n  export fn mul(a, b) { return a * b }\n}`;
     const r = compileLib("wrapped_no_nl", src);
     expect(r.errors).toEqual([]);
-    expect(r.libraryJs).toContain("export function add(a, b) { return a + b }");
-    expect(r.libraryJs).toContain("export function mul(a, b) { return a * b }");
-    // No dangling wrapper artifact: the emitted module has no stray top-level `}`
-    // on its own line where the wrapper close would have leaked.
-    expect(r.libraryJs).not.toMatch(/^\}\s*$/m);
+    expect(containsWholeFn(r.libraryJs, "add")).toBe(true);
+    expect(containsWholeFn(r.libraryJs, "mul")).toBe(true);
+    // No dangling wrapper artifact. This used to be `not.toMatch(/^\}\s*$/m)` —
+    // "no `}` alone on a line" — which reads as a leak check but is really a
+    // layout check: a structurally-emitted fn closes with exactly that, and did
+    // once S402 routed library fns by default. The property actually wanted is
+    // that no brace is UNMATCHED, so count them.
+    const opens = (r.libraryJs.match(/\{/g) || []).length;
+    const closes = (r.libraryJs.match(/\}/g) || []).length;
+    expect(closes).toBe(opens);
     const m = await import(pathToFileURL(r.libPath).href);
     expect(m.add(2, 3)).toBe(5);
     expect(m.mul(2, 3)).toBe(6);
