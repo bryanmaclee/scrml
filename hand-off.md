@@ -125,6 +125,14 @@ predicates — is what the agent applied to detection and did not generalise.
 4. **★ I told an agent dev was precedent for prepending.** `dev.js:1020` says the opposite.
 5. **★ I under-counted the gap ledger** (78/206 vs 85/211) with a grep requiring attribute order.
 
+## Gate at close (S400)
+`bun test unit+integration+conformance` — **23,240 pass · 70 skip · 0 fail**.
+Gaps: **HIGH 88 · MED 210 · LOW 89 · Nominal 7**. Main `1e69d3b2` → wrap PR. Coherence 0/0 both repos.
+⚑ **Maps UNCHANGED and that is correct** — zero compiler-source commits reached main this session; all
+compiler work is held on the three retained branches. Do not read the stale watermark as a skipped step.
+⚑ **~80 stale agent worktrees have accumulated** under `.claude/worktrees/`. Not this session's (mine are
+the three named in §3, all retained deliberately). A sweep needs a dry-run listing targets first.
+
 ## Mechanical state
 Landings, counts and the session stream: `docs/changelog.md` + `handOffs/delta-log.md`. Review floor
 drained 2→0 and re-recorded. Three worktrees retained (§3). Inbox: flogence ×2 received and committed
