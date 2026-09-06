@@ -1,309 +1,131 @@
-# scrml — Session 401 (peter · P-Tech1 Windows) — WRAP
+# scrml — Session 400 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-09-04. Booted `/boot` Profile A onto `1e620583`. Solo (S399-bryan registered LIVE but
-idle and never wrapped — his open PRs and owed-ruling lane are CLAIMED, not lost). ⚑ **Bryan's
-S397/S399 owed lane is PRESERVED VERBATIM below** (the `~` build, Q9, the rulings owed, the dpa
-returns) — that is his authority; do not duplicate or action it in the peter lane.
+**Date:** 2026-09-04/05. Booted `/boot` Profile A onto `83f95592`. Ran alongside peter (S398→S401).
+Main closed at `1e69d3b2`. Four landings: **#836 · #851 · #852 · #853**.
 
-## ⏭ NEXT-SESSION PICKUP (peter lane) — read this FIRST
-
-**The dog-food arc is still the standing next move and was NOT started** — Peter explicitly held it
-this session (*"hold on dog-food"*) to drain the review floor first. S400's reasoning is unchanged and
-still governs: the clean MED/LOW compute vein is exhausted; fresh silent-wrong bugs come from RUNNING a
-new adopter app, not from mining the ledger. [[feedback-dogfooding-beats-mining-the-ledger]]
-
-**But the review pass just produced a better-than-ledger queue.** Five defects were found in code that
-had already shipped, three of them PA-reproduced. In rough value order:
-
-1. ⚑ **`g-uptoroot-vs-distrel-anchor-mismatch` is REOPENED and half-built.** S400 fixed the CLIMB half
-   and left the DESTINATION half. The correct model already exists ten lines up —
-   `computeDependencyClientScripts` anchors `relative(hostDistDir, targetDistPath)`. **Fix the guard
-   FIRST** ([[g-shell-subdir-asset-guard-pins-a-404-path]]): it currently pins `app.css`, a path that
-   does not exist, so it will go RED on the correct fix and read as a regression.
-2. **`g-native-parser-block-comment-branch-swallows-a-slash-star-inside-a-string`** — a guard on the
-   new block-comment branch (require a code-comment position, or track string state). Bounded by the
-   opt-in flag; PA-reproduced with a glob string.
-3. **`g-bool-coerce-keys-on-output-name-and-over-coerces-a-joined-column`** — needs table-qualified
-   resolution rather than name-keyed coercion, plus the JOIN case the committed tests lack.
-4. **`g-api-reference-severity-whitelist-drops-runtime-and-test-codes`** (LOW) — a 12-character
-   alternation fix plus a call on the `D-`/`H-` families.
-
-**⚑ OWED TO BRYAN — accumulated, deliberately NOT pinged** (per Peter's S358 directive: notate for the
-hand-off, don't drop an inbox message per item):
-- **`g-flat-css-author-style-merge-precedence-was-never-ruled`** — #841 flipped a same-property
-  precedence (flat `#{}` won before, author `style=` wins now). Semantics-changed, silent, and the
-  ledger's own S359 note had already routed *"Merge PRECEDENCE is a design call → bryan."* He ratifies
-  the precedence, or rules the overlap a diagnostic (§65 says an ambiguous overlap should be a compile
-  error, which would be the other answer).
-- **3 UNRUN deliberations — `dpa-041` / `dpa-042` / `dpa-043`** (the declared-type / `~`-`lin` unification /
-  lazy-pull axiom questions). He banked them at S399 *after* his own boot read the queue, and every
-  Windows boot since read `0 queued` because the probe was blind — so **no session has ever surfaced
-  them to him.** Plus **4 ADVISORY** awaiting ratify/reject: `dpa-037` (non-finite floats), `dpa-038`
-  (offline/PWA, return leg = a #509 comment), `dpa-039` (enterprise docs, return leg = #471),
-  `dpa-040` (arm-body `~` boundary).
-
-**Durable lessons banked this session:**
-1. ⭐ **Running a script's DEFAULT mode is not a class-check.** I cleared `regen-spec-index.ts` on that
-   evidence and was wrong — its section parse is `\r`-tolerant and it fails only in `--check`, the mode
-   the gate runs. **Verify a probe through the mode its GATE uses.**
-2. ⭐ **A half-fixed artifact asserted as complete is worse than an empty one.** #848 took the §34 table
-   from empty → 387 of 768 rows under a header claiming completeness. Empty looks broken; half-full
-   reads as authoritative.
-3. **A dispatched reviewer's VERDICT LABEL is a claim too.** #843 returned `carve-out` for a
-   code-bearing PR; accepting it would have inflated the carve-out rate, which is the health signal.
-4. **Dispatching the review floor is ~30× cheaper than PA-direct** — measured: ~5% of the window for
-   ten passes vs ~160k estimated PA-direct, and the passes were *better* (one executed against real
-   `bun:sqlite`, one ran a 20-case scanner differential, one bisected 640 commits).
-
-## What landed
-- **#848 `c516aadc`** — four boot/gate probes blind on every Windows clone (CRLF line-split), + a
-  second independent `## 33.` → `## 34.` defect in the same generator. Committed gate
-  `compiler/tests/unit/dpa-debt-parse.test.js` (8 tests), bite proven both ways per site.
-- **#849 `10c51124`** — acting on #848's own adversarial pass: 6 findings, 5 held, §34 extraction
-  387 → 768 rows, 8 stale section refs corrected. One reviewer sub-claim did not hold and was kept out.
-- **Review floor 13 → 0** (444 of 444 recorded). Five gaps filed, one reopened.
-
-## Mechanical state — REFERENCED, not duplicated
-Gap counts: **HIGH 85 · MED 208 · LOW 90 · Nominal 7** (`@generated` current). Landings/counts/stream in
-`docs/changelog.md` S401 + `handOffs/delta-log.md` `[2067]`–`[2069]`. **Inbox: 5 items, all bryan-owed,
-left UNARCHIVED by design** (S393/S398/S400 discipline). **Worktrees: 3 pre-existing agent worktrees
-retained** — none are S401's (this session used dispatched read-only reviewers, no worktrees).
-**Maps: unchanged** — no adopter-facing source-structure change a nav map indexes (`scripts/` probes only).
-
-## ⚑ ENVIRONMENT — read before the next commit on this clone
-- **`pre-commit` is REMOVED, `pre-push` is INSTALLED.** The clone had no hooks at all. `pre-commit` runs
-  a subset that is red on Windows for pre-existing deferred reasons — measured **23,212 pass / 5–6 fail**
-  across 1,298 files (the count varies by one, so at least one is flaky); three are the S254 path-model
-  class. Installing it blocks every local commit. `pre-push` is worth keeping: it defers the suite to
-  the cloud `gate` on a NEW-REF branch but still runs the generated-doc currency gate
-  ([[feedback-run-facts-check-before-push]]).
-- ⚑ **An UPDATE push (an existing remote branch) DOES run the full local suite** and will therefore fail
-  on those pre-existing failures. **Do not reach for `--no-verify`** — land the green commit and push
-  follow-up work as a NEW branch, which takes the relaxed path legitimately. That is what this session
-  did for #849.
-- **Stale `compiler/dist/self-host/` (Jul 15) parked** in the session scratchpad so
-  `self-compilation.test.js` takes its documented skip path. Rebuilding is not available: the self-host
-  build fails on `block-splitter` / `body-pre-parser` (Road-B, bryan's lane).
-- **A finding left deliberately unchased:** the hook excludes `browser / lsp / self-host / commands` by
-  DIRECTORY, but `self-host-smoke.test.js` and `self-compilation.test.js` are self-host tests living in
-  `integration/`, so they slip an exclusion whose stated intent covers them. The CI job name already
-  half-admits it (*"integration needs self-host-smoke dist-guarded"*). The actual failure is the S254
-  path-model divergence, so dist-guarding would not fix it — that is the deferred path-model arc.
+**The framing: the day's defects were almost all CLAIMS OF COVERAGE THAT WERE FALSE.** Not bad logic —
+instruments, comments, docstrings and normative sentences asserting they checked something they did
+not. Eight distinct instances, listed in §4. If you read one thing here, read that.
 
 ---
 
-# scrml — Session 400 (peter · P-Tech1 Windows) — WRAP
+## ⏭ NEXT-SESSION PICKUP
 
-**Date:** 2026-09-04. Booted `/boot` Profile A recovering a stranded S400: PR #837 had landed
-mid-session and the window closed before wrapping. Ran the recovery + a long adopter-lane sweep.
-Concurrent with S399-bryan (registered, then quiet). ⚑ **Bryan's S397/S399 owed lane is PRESERVED
-VERBATIM below (the `~` build, Q9, rulings owed, the dpa returns) — that is bryan's authority; do not
-duplicate or action it in the peter lane.**
+### 1. ⚑⚑ ENTRY-NESS IS NOT A FACT THE COMPILER RECORDS — bryan deferred the fix to next session
+**Ruled S400, verbatim: *"we will have to take that fix next session."*** Measured, not asserted:
+**11 sites reconstruct "which document is the application entry", using 6 different rules**, and
+**no rule is correct on all three real shapes** (flagship · `<program>`-less SPA · channel+page).
 
-## ⏭ NEXT-SESSION PICKUP (peter lane) — read this FIRST
+| rule | where | flagship | `<prog>`-less | channel+page |
+|---|---|---|---|---|
+| A `hasProgramRoot` | 6 sites incl. `auth-graph.ts:971` | ✓ | ✗ | ✓ |
+| B 3-way shape | `ast-builder.js` — **computed, used for ONE lint, DISCARDED** | ✗ | ✓ | ✗ |
+| C pure-module+exports | `api.js:1413` — **a hand copy of B, says so in its own comment** | — | — | — |
+| D not-a-top-level-`<page>` | the S400 arc | ✗ | ✓ | ✗ |
+| E `inputFiles.length === 1` | `dev.js:949` — **no AST consulted at all** | — | — | — |
+| F filesystem position | `route-inference.ts:6392` | ✗ | ✓ | ✗ |
 
-**The clean MED/LOW compute vein is EXHAUSTED.** Ten PRs landed this session (see `docs/changelog.md`
-S400 + delta-log `[2056]`–`[2066]`); everything reproducible-and-landable in the adopter-compute lane
-has landed. The remaining ledger MED/LOWs are, by repeated finding this session: (a) already
-silently-fixed (mark, don't build — verify by execution first), (b) bryan ruling-lane (scope/grammar
-decisions — route, don't land), or (c) needing deep bisection each. **So the next peter session should
-DOG-FOOD a fresh adopter app** (the proven vein — silent-wrong render/runtime bugs the ledger misses),
-NOT keep mining the ledger. [[feedback_dogfooding_beats_mining_the_ledger]]
+**The fix is smaller than it looks: stop discarding B**, teach it channel files + wrapper-less entries,
+have consumers read it. Touches ast-builder · auth-graph · codegen/index · route-inference · dev · api.
+**Re-runnable census probe:** `docs/changes/prod-root-fallback-gated-2026-09-05/rulecensus.ts`.
+⚑ Falls out of it: `W-PROGRAM-001` fires on all four canonical §38.12.6 channel files in the flagship —
+the compiler telling an adopter to wrap a channel in `<program>`.
 
-**Durable lessons banked this session (each cost real time to learn):**
-1. ⭐ **Reproduce-first is non-negotiable, and `write:false` skips the emit-parse gate.** Three ledger
-   MEDs were silently-fixed (marked, not built); one nearly slipped as a `write:false` false-negative
-   (E-CODEGEN-INVALID-LOGIC only fires under `write:true`/`validateEmit`). [[project_compiler_diagnostic_fields]]
-2. ⭐ **"Disproportionate, recommend wrap" was PREMATURE on the native-parser bisection.** Peter pushed;
-   the bisection found a clean one-line root fast (block comments uncounted in `dispatchInLogicEscape`).
-   A shadow-impl label is not a reason to skip a reproducible bug.
-3. **Exhaust our lane before routing to bryan** — new memory this session; bryan's plate is always full,
-   and a bryan-endorsed direction (bool-column) is OURS to build no matter the file count. [[feedback_exhaust_our_lane_before_routing_to_bryan]]
-4. **Verify the CLASS** — the each call-ref fix had 2 unfiled siblings; the timer if-chain-descent was
-   the same class as the lint walks.
+### 2. TWO HIGH DEFECTS FOUND AND **NOT YET FILED** (ledger was contended all session)
+Both are in #853's commit body with full evidence; neither is in `docs/known-gaps.md`.
+- **`benchmarks/todomvc/app.scrml` is DEAD ON ARRIVAL since `cdf4f4de` (2026-07-30, `if=` Phase 2
+  mount-`<template>`).** Compiles exit 0, throws on first render in BOTH harnesses, zero rows.
+  `querySelector` does not descend into template content so `const _scrml_lift_tgt_N` binds null.
+  Bisected 12 steps; 24-line repro. ⚑ **`browser-todomvc.test.js` (36/0) and `todomvc-e2e.test.js`
+  (10/0) are GREEN against the dead build** — the harness swallows the init throw into `initError`
+  and no test asserts a rendered row. Same class as `g-call-expression-interpolation-in-if-chain-
+  branch-renders-empty` (resolved S400-peter): that fix stamped `insideMountTemplate` on static-display
+  sites, not the lift-target site.
+- **A post-May runtime regression: happy-dom `partial-update` 1.04 → 17.9 ms (17.2×), Chrome
+  0.80 → 260.7 ms (326×, from 6.9× faster than React to 47× slower).** Moves swap-rows / remove-row /
+  delete-every-10th together while select-row and bulk-create stay flat → **per-item reconciliation**.
+  Bundle +138%, build 2.06×. Per-round ranges disjoint; not noise.
 
-## What landed (10 PRs — full detail in changelog S400 + delta `[2056]`–`[2066]`)
-7 real fixes (#837 static-interp-if-branch · #840 each call-ref operator +2 siblings · #841 flat-CSS
-style merge · #842 sqlite bool-column coercion · #843 timer-in-if-chain · #844 compile-floor
-vanished-root · #845 shell-subdir asset paths · #846 native-parser block-comment) · 2 staleness
-resolves (#839 W-DEAD-arrow · if-chain-descent) · 1 HIGH routed turnkey (#838 prod-404). Model default
-switched to Opus 5 (`~/.claude/settings.json`) — for a LIVE session use `/model` (a settings change
-does not hot-swap the running model).
+### 3. TWO ARCS HELD — branches retained, both clean, neither landed
+- **Engine state-child producer swap** — `worktree-agent-ad288a300a89587b0` @ **`32621e48`**.
+  ⚑ **bryan's Q1 ruling IS BUILT AND PA-VERIFIED BOTH DIRECTIONS** (nested state-child → new
+  `E-ENGINE-STATE-CHILD-NESTED`; `<p><Card/></p>` chrome → compiles). Conformance 907/907, `-neg`
+  bite-checked, §51.0.B amendment written, `E-CTX-001` reused as a second fire site rather than minted
+  (§4.18.3 already assigned it — that call was right, do not undo it).
+  **HELD on a reviewer-reported HIGH I did NOT reproduce** (mark RELAYED): `containsPascalCaseOpenerDeep`
+  `continue`s on non-`Markup` children while `walkMisplacedStateChildren` now descends them, so they
+  disagree and `E-ENGINE-RULE-LEGACY-SYNTAX` fires on an ordinary arrow function, its early `return`
+  suppressing the errors that name the real cause. The `-neg` fixture misses it only because it has
+  no `=>`. Sibling MEDIUM at `engineHasUnmodellableOpener`. **The agent's transcript is GONE — resume
+  is impossible; the branch is what survives.**
+- **Prod root-entry fallback (b)** — `worktree-agent-a7754ec5541a9ab8f` @ **`b0e9469d`**. Stopped by
+  §1's ruling. The single-document SPA case works end-to-end (incl. `auth="required"` → 302, no leak);
+  the multi-file case is disabled by the missing entry fact.
+- **Apostrophe branch** — `worktree-agent-a908cd66f7d2bf2db` @ `856e8f27`. Superseded; its six
+  conformance cases were harvested into the swap. Safe to sweep.
 
-## Mechanical state — REFERENCED, not duplicated
-Gap counts (post-merge): HIGH 85 · MED 203 · LOW 88 (`@generated:gap-counts` current). Tree clean.
-Landings/counts/stream in `docs/changelog.md` + `handOffs/delta-log.md`. **Inbox: 5 items, all
-bryan-owed (4 routes + the S400 prod-404 TURNKEY package), left UNARCHIVED by design** (S393/S398
-discipline — bryan's rulings). **Worktrees: 3 PRE-EXISTING agent worktrees retained** (S397-era +
-`fix/server-map-set-runtime-inline` @ dbcaff4b, peter's own unmerged Aug-28 work) — NONE are S400's
-(S400 used no worktrees); left intact to avoid clobbering unmerged work. Maps: no adopter-facing
-source-structure change that a nav map indexes (native-parser + codegen internals) — note as
-maps-unchanged rather than a refresh.
+### 4. ⚑ THE DAY'S DEFECT CLASS — false claims of coverage. Eight instances.
+1. `E-PROGRAM-002` cited by a docstring as existing — **unimplemented; two of three grep hits were that
+   docstring's own comments.**
+2. `bun run bench` passed `--timing`, not an option — **broken since 2026-04-10, never worked in this
+   repo**, and pointed at the negative-fixture corpus. Fixed S400; baseline now 8,095 ms on `examples/`.
+3. `corpus-emit-differential.ts` false-diffs **1027 of 7427** artifacts across checkout paths and prints
+   the full CONTENT DIFFERENCES list **under an INCOMPARABLE verdict**. Used as a landing gate 3× today.
+4. `E-TILDE-001/002` — four consumers, **zero producers**; never fired on real source.
+5. Two tripwires carrying **the exact defect they existed to catch**.
+6. `"cannot corrupt closer-finding"` shipped into the ledger and falsified by the next round's own code.
+7. **SPEC §17.6.6's own worked example**, annotated *"valid"*, compiles exit 0 / `node --check` clean and
+   emits a `let` read from outside its block — guaranteed `ReferenceError`. Filed HIGH.
+8. Both TodoMVC test files green against a dead app (§2).
 
----
+### 5. RULINGS OWED — bryan's
+- **dpa-037 / 038 / 039 / 040** — four calls each; **039 time-sensitive** (warns dpa-030 must not be
+  ratified on its premises). **dpa-041 / 042 returned S400** — four calls each, in `handOffs/dpa-queue.md`.
+- **§35.8's "the full `lin` rule set applies to `~`" is FALSE on the merits** — dpa-040 and dpa-042
+  reached it independently from different directions. That convergence is itself the finding.
+- **Q8 `fail .Variant`** — `E-ERROR-009` rejects it while `match` accepts bare-variant on the same type
+  in the same file. §14.10 grants inference at LHS/parameter positions; a `fail` operand is neither.
+- **Promote `compiler/tests/commands/`** into a blocking job — its one-decider security assertion sits
+  outside every gate that can fail a merge.
+- **The `/` route collision** — §47.9.2 routes two sources to `/` in a multi-page app with both an entry
+  shell and `pages/index.scrml`. Unowned.
+- **Bare markup under `pages/`** served at both `/` and `/foo` — undecided, no governing sentence.
+- **FSP `Initialize`** (~5 days) · **`g-cli-emits-artifacts` tier** (ruled MED S354, measured HIGH S397).
 
-# scrml — Session 397 (bryan · ASUS-Vivobook) — WRAP
-
-**Date:** 2026-09-03/04. Booted `/boot` Profile A onto `c91969c7`. Ran alongside S398-peter (wrapped
-mid-session, #831).
-
-**The framing: eleven rulings, five arcs landed, and the session's real output is that the failures
-were CLAIMS, not code.** Almost nothing was broken by bad logic. What went wrong, repeatedly, was
-something asserting coverage it did not have — a comment, a §34 row, a conformance rationale, an
-escape list, two tripwires, and four of my own statements to bryan.
-
----
-
-## ⏭ NEXT-SESSION PICKUP (read this FIRST)
-
-### 1. ⚑⚑ THE `~` AXIOM IS RULED AND THE BUILD IS NOT WRITTEN
-
-**`~` is ONE thing** — the value of the preceding unbound expression statement (§32.2). The array
-accumulator role (§48.5.1 / §49.6.1) is retired as a distinct meaning.
-
-⚑ **The ruling is a CONJUNCTION, not a deletion.** Per S276/S130 it adopted the full text, which said
-*"make `~` one thing AND give every loop form the expression form `for…of` already has."* Landing
-one-thing without the loop-expression extension **deletes §49.4.4's sole exception and takes `while`'s
-only value-producing form with it.** That is capability loss and it is NOT authorized.
-
-**What the build must carry:**
-- **(1) RATIFIED** — extend the loop-expression form to `while` / `do…while` / C-style `for`. The
-  blocker is the **parser**, not codegen: `const x = for (const n of xs) { lift n }` **already
-  compiles at HEAD** (PA-verified). `while` lands as an escape-hatch ParseError, which is exactly what
-  `E-LOOP-007` keys on — and `E-LOOP-007`'s own message already says *"or refactor to a `for/lift`
-  expression."*
-- **(2) FLAGGED, NOT CONFIRMED** — make a loop-expression legal as a value-form arm's lifted value.
-  The answered text named it; the rec SENTENCE named only (1). **The PA reads the durable as carrying
-  both and will build both; bryan may narrow to (1) at any time.** Recorded so a narrowing is a
-  decision, not a silence.
-- **⚑ AN OPEN QUESTION THE BUILD MUST ANSWER EXPLICITLY (PA-inferred, NOT measured):** under
-  one-thing + loops-as-expressions, **§48.5.1's own example may survive UNCHANGED** — if
-  `for (…) { lift item }` in statement position is an unbound expression statement whose value is the
-  array, §32.2 makes `~` that array and `return ~` still works. The accumulator would be **DERIVED**
-  from the single meaning rather than removed, and the two normative sections would stop contradicting
-  without either being struck. **Not verified. Answer it first; it resizes the whole arc.**
-
-**Full shape matrix** (18 shapes, every verdict compiled, exhaustive over 3,408 files → 33 read-shape
-lines in 13 files, zero missed): `docs/changes/s397-tilde-one-or-two/progress.md`, tail section
-`FINAL VERDICT + MATRIX`.
-
-### 2. ⚑ Q9 IS STOPPED BY RULING, NOT BY FAILURE — and the successor's spec already exists
-
-`E-ROUTE-004`'s untyped-invoked-param hole. Limb (a) stays ratified; **bryan ruled option 3: build the
-uniform binder-enumeration capability FIRST, then (a) on top.**
-
-**Branch RETAINED: `worktree-agent-a63f48a15ea0539dd` @ `2faffb80`, worktree retained.** Nothing lost.
-
-**Why it stopped:** the PA set a stopping rule before round 3 — *if a round-4 review still finds a
-false positive of this class, stop and take the mechanism back to bryan.* Round 4 found two HIGH false
-positives (multi-payload match arm; §18.19 product arm), both PA-reproduced. **The rule fired and was
-honored.** Four rounds, each closing the reported case, each followed by another instance.
-
-**The real finding, and it outlives this arc: scrml's AST has no uniform binder representation.**
-Bindings are stored at least four incompatible ways — structured `params`; a bare `variable` string;
-**RAW PAREN TEXT** (`binding: "x, cb"`, pushed as ONE name, so `.includes("cb")` is false forever);
-and **shape-specific keys nobody enumerated** (`productPatterns` — §18.19 product arms carry bindings
-ONLY there with no `binding` key at all — plus `asName`/`asNames`, `payloadBindings`).
-
-**The successor's spec is already written:** the 16-shape measured battery in
-`compiler/tests/unit/route-wire-serializability.test.js` on that branch, plus the four unreported
-conflations the round-3 agent's own audit found. Also banked: *an expression that degrades to raw text
-has no `call` node to find* — one sentence covering block lambdas and C-style headers
-(`escape-hatch`), template literals (`lit`), and foreign bodies (opaque string), replacing an escape
-count that was wrong three times running (two → three → at least five).
-
-⚑ **The adopter closure is unblocked by this and is a DIFFERENT gap.** Limb (a) never could have
-caught peter's reported instance: `runGatedAgentic`'s body is one `_={ }=` foreign hatch, so there is
-no call node. **The real fix for them is `g-library-mode-no-typed-payload-match`** — the gap their
-untyped-signature idiom exists to dodge. Close it and the idiom disappears.
-
-### 3. RULINGS OWED — bryan's
-
-- **§32.6 narrow-vs-broad** — largely MOOTED and worth closing cheaply: the elision is **provably
-  vacuous** (`tilde-init`/`tilde-ref` have four consumers and ZERO producers, so the predicate returns
-  `false` unconditionally). SPEC's own verbatim INVALID examples at §32.5, §32.6 and §32.7 compiled at exit 0 **at `8e278c73`** — but ⚑ **#832's own fail-closed floor changed that MID-SESSION**: `${ process(~) }` now exits 1 with `E-CG-TILDE-UNRESOLVED` (PA-verified). **The zero-producers finding STANDS** — `E-TILDE-001/002` still never fire; what catches that shape now is the CODEGEN floor, not §32.5's type-system code.
-- **Q2(b) and Q2(c)** — comprehension bodies and match arm bodies, deferred to the dPA's return; it
-  returned. dpa-040's substructural pole argues limb (c) is **REJECTED on soundness**, not deferred.
-- **Contract vs constraint** (idea 1's surviving half) — weighed, not ruled. PA lands on **targeted
-  constraint at boundaries**; the **transitive-vs-direct footprint question is what actually decides
-  it**, and the state↔logic axiom cuts against universal constraint.
-- **Q4–Q8** — five ruling-gated adopter gaps, all peter's dog-food, **none re-derived by the PA**.
-- **dpa-037 / 038 / 039** awaiting ratify-or-reject. ⚑ **039 is TIME-SENSITIVE and warns `dpa-030`
-  must not be ratified on its premises.** 038 returned *"substantially duplicative of dpa-028."*
-- **peter's prod-404 fork** (#831 inbox) — a single-file SPA named `app.scrml` 404s at `/` in
-  production while dev serves it. ⚑ **This is the FUNCTIONAL half of the gap ruling 2b called
-  "structurally safe."**
-- **peter's engine-apostrophe report** — a `'` in an `<engine>` state-child body breaks the parse.
-  The S196 fix un-generalized to a second locus. **Governing sentence exists (S109), so it is a
-  conformance-restoration FIX, not a ruling** — PA should verify the sentence is in SPEC and dispatch.
-- **`g-cli-emits-artifacts-on-failed-compile` severity** — ruled MED at S354(b); S397 measures HIGH.
-  The filing agent recorded the disagreement rather than overriding a ruling. Yours.
-
-### 4. Mechanical state — REFERENCED, not duplicated
-Landings, counts and the session stream are in `docs/changelog.md` and the delta-log. Review floor
-**0 OWED** at close (drained 4→0, self-recorded at rate zero). Maps refreshed at 6c. Worktrees: five
-swept; **one retained** (§2). Inbox: **four items deliberately UNARCHIVED, all bryan's.**
+### 6. RULED THIS SESSION — do not re-open
+- **Q1 engine state-child: STRUCTURAL** (built, held per §3).
+- **Q2 prod-404: fork (b), gated root fallback** (built, held per §1).
+- **NO PERF GATE** — *"easy enough to just recompile and measure time dif on occasion."* Recorded on the
+  gap entry so a sweep does not read an open question into it.
+- **The `<each>` blindness is HIGH** — *"I would consider that a high bug."*
+- **§13.2 auto-await is not a question** — bryan: *"I dont see a Q here."* Correct: no adopter can depend
+  on the current behaviour because §19.9.8 forbids `await` in source, so every affected site is already
+  broken. It is a plain conformance fix; I had escalated a process obligation into a question.
 
 ---
 
-## 🔭 DURABLE FINDINGS
+## 🔭 DURABLE
+**The meta-pattern, twice in one day: the compiler computes a fact, does not record it, and N places
+reconstruct it badly.** Morning — `engine-decl.bodyChildren` already carried the structure and PASS 11
+fell back to a text re-scanner because nobody built the bridge; Phase A10/S78 delivered the fact and the
+follow-through was never done. Afternoon — entry-ness, §1. **Look for this shape first.**
 
-### A. ⭐⭐ The failures were CLAIMS, not code — and the formulation is the keeper
-From the agent that made the mistake three times inside one arc:
-> **Filing a defect is not retracting the claim it falsifies — a reader reaches the comment, not the
-> progress doc.**
-
-It had *measured* each truth, written it into a DEFERRED list, and left the contradicting claim
-standing in the comment and the §34 catalog row. Three false claims in the floor arc alone: *"the
-build fails so the placeholder never ships"* (reproduced FALSE — exit 1 and the artifact still
-ships), a conformance rationale claiming *"once per read"* against a code that fires once per
-**emission**, and a span claim of exact attribution that resolved every error to `1:1`.
-
-### B. ⭐⭐ Two tripwires had the exact defect they existed to catch
-One asserted against a **hardcoded copy** of the constant it guards — the copy drifts, the guard stays
-green, the classifier goes blind; the const was also dead code referenced only from a doc comment,
-which is *how* it could drift. The other claimed novel-field-name detection from a **closed 15-name
-alternation**, and scanned only `types/ast.ts` while the live AST is built in `ast-builder.js` — which
-uses **ES6 shorthand**, so fields existing only in shorthand (`asName`, `asNames`, `payloadBindings`)
-are structurally unreachable by its regex. Both were caught by *running* them, never by reading.
-
-### C. ⭐⭐ `E-TILDE`'s producers exist only as unit-test fixtures
-`tilde-init`/`tilde-ref` have four consumers and **zero producers** in `compiler/src/` or
-`compiler/native-parser/`. The apparent producers are hand-built object literals in
-`type-system.test.js` — **which is precisely why the pass has passing unit tests and never fires on
-real source.** The hollow-gate mechanism, named exactly.
-
-### D. ⭐ Base drift got more dangerous as main moved faster
-Five catches. Early ones would have reverted a changelog block; **the worst would have silently
-un-landed the entire fail-closed floor arc ten minutes after merging it** — 13 of 23 files in a delta
-were a merged feature showing as reversions. Another would have deleted two of peter's inbox reports.
-⚑ **A wholesale file-delta is only safe against a base you have re-fetched THIS minute.**
-
-### E. ⭐ Gates caught what four agents and the PA did not
-The pre-push generated-doc gate, twice — the second time because a fix round invalidated a regen that
-had been run honestly two rounds earlier. Its own message names the trap: *"regenerate AFTER your last
-content commit, not before it."*
-
----
+**Corollary, from the arc that stopped:** when a walker's reach widens, every predicate sharing that
+traversal must be told. Three instances in one arc. The structural answer — one descent, per-consumer
+predicates — is what the agent applied to detection and did not generalise.
 
 ## ⚑ MISSES (mine)
+1. **★★★ I nearly rejected a correct SPEC citation** because I read the §47.9.2 heading ("Per-Artifact
+   Output Path"), saw it was about paths, and stopped — the route-inference table is inside it. The
+   agent was right; I was about to overrule it.
+2. **★★ Two false-negative probes.** A grep for `__scrml_engine_[a-zA-Z]+_idle` that missed a
+   hash-encoded name and read as agreement; an HTML-comment fixture for a defect that only reproduces
+   with `/* */`. Both times my "did not reproduce" was the probe, not the code.
+3. **★★ I over-escalated §13.2** into a question for bryan when the direction analysis dissolved it.
+4. **★ I told an agent dev was precedent for prepending.** `dev.js:1020` says the opposite.
+5. **★ I under-counted the gap ledger** (78/206 vs 85/211) with a grep requiring attribute order.
 
-1. **★★★ I manufactured corroboration.** I told bryan the `~`/§32 surface has *"zero rows across all
-   13 nav maps, confirmed independently by three dispatches."* `domain.map.md` has **17 hits**,
-   identical count at both SHAs. The floor agent had explicitly said `domain.map.md` carried
-   substantial `~` material and scoped its claim to the orphan fallback. **I flattened three SCOPED
-   claims into one ABSOLUTE claim and attributed agreement to them that none of them expressed.**
-2. **★★ I assembled a defect backlog against a moving base.** Findings measured at an S397
-   *intermediate* SHA, filed against `origin/main`. **A1 was already fixed and A3 did not reproduce**
-   — two of three would have entered a 900-marker ledger as open defects.
-3. **★★ Two premise corrections I gave bryan were themselves wrong** — the floor's "one known site"
-   (that file emits ZERO orphans; its bug is a different axis) and "the accumulator resolves
-   correctly" (for the `while` case the whole block is deleted).
-4. **★ I presented the loop-expression form as proposed. It ships** for `for…of`.
-5. **★ I predicted shape 4 would break one-thing. Shape 7 did.**
-6. **★ Commit timeouts twice** — 2-minute default, then 5, when the hook now exceeds both. Both times
-   I checked git STATE not the exit code, and both times nothing had half-landed.
-
-**The pattern, unchanged from S395 and sharper: my verification holds when I EXECUTE and fails when I
-RELAY — including relaying my own earlier reading, and now including synthesizing agreement across
-sources that did not agree.**
+## Mechanical state
+Landings, counts and the session stream: `docs/changelog.md` + `handOffs/delta-log.md`. Review floor
+drained 2→0 and re-recorded. Three worktrees retained (§3). Inbox: flogence ×2 received and committed
+(both arrived **untracked** — the per-clone hazard, twice in one day); peter's four remain bryan's.
