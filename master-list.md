@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `5be53a4f` — wrap(s402): the first human-written scrml, three measurements against "is this salvageable", and two type-enforcement wins — **LOCAL-ONLY**
+- `a5a9dac6` — wrap(s402): the first human-written scrml, three measurements against "is this salvageable", and two type-enforcement wins — **LOCAL-ONLY**
 - `83f95592` — wrap(s397): the `~` axiom ruled as a conjunction, and the failures were claims not code (#835) — **pushed**
 - `8e278c73` — wrap(s395): five rulings, four arcs, and nine instruments that read green while wrong (#824) — **pushed**
 - `0dc4d014` — wrap(s393): verification kept changing the answer — four premises died on contact with execution, two of them mine (#812) — **pushed**
