@@ -1,0 +1,10 @@
+${
+    type User:struct = {
+        name: string
+    }
+    fn f(u: User?) -> string {
+        if (u is not) { return "none" }
+        return u.name
+    }
+    log(f(not))
+}

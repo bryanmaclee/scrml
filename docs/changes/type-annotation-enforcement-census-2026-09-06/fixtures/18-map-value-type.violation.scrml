@@ -1,0 +1,2 @@
+<m>: [string: number] = ["a": "not a number"]
+log(@m)

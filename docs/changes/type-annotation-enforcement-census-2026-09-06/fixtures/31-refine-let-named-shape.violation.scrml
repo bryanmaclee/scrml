@@ -1,0 +1,4 @@
+${
+    let e: string(email) = "definitely not an email"
+    log(e)
+}

@@ -1,0 +1,4 @@
+${
+    let x: number(>0) = 5
+    log(x)
+}

@@ -1,0 +1,14 @@
+<program db="./census.db">
+<schema>
+    nums {
+        id:  integer primary key
+        qty: integer not null
+    }
+</>
+${
+    server function addRow() {
+        return ?{`INSERT INTO nums (qty) VALUES (5)`}
+    }
+}
+<div>ok</>
+</program>

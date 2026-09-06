@@ -1,0 +1,4 @@
+${
+    let u: string | number = 5
+    log(u)
+}

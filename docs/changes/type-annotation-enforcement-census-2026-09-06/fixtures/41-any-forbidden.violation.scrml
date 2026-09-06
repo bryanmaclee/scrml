@@ -1,0 +1,4 @@
+fn f(a: any) -> number {
+    return 1
+}
+log(f(1))

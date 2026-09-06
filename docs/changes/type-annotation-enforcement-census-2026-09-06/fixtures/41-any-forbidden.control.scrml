@@ -1,0 +1,4 @@
+fn f(a: asIs) -> number {
+    return 1
+}
+log(f(1))

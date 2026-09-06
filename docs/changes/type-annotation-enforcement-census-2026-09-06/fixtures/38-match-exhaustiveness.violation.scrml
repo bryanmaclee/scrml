@@ -1,0 +1,10 @@
+${
+    type Color:enum = { Red | Green | Blue }
+    fn name(c: Color) -> string {
+        return match c {
+            .Red :> "r"
+            .Green :> "g"
+        }
+    }
+    log(name(Color.Red))
+}

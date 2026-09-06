@@ -1,0 +1,4 @@
+${
+    let xs: string[] = [1, 2, 3]
+    log(xs)
+}

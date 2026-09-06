@@ -1,0 +1,14 @@
+${
+    type User:struct = {
+        name: string,
+    }
+    fn loadUser() -> (not to User) {
+        return not
+    }
+    fn useIt() -> string {
+        const u = loadUser()
+        if (u is not) { return "absent" }
+        return u.name
+    }
+    log(useIt())
+}

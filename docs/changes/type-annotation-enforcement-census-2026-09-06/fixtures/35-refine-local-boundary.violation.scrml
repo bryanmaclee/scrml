@@ -1,0 +1,7 @@
+${
+    fn process(raw: number) -> number {
+        let amount: number(>0 && <10000) = raw
+        return amount
+    }
+    log(process(-50))
+}

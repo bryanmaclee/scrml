@@ -1,0 +1,6 @@
+${
+    fn f() -> string {
+        return not
+    }
+    log(f())
+}

@@ -1,0 +1,9 @@
+${
+    type User:struct = {
+        name: string
+    }
+}
+<u>: User? = not
+${
+    log(@u.name)
+}

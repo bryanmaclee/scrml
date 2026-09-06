@@ -1,0 +1,4 @@
+${
+    let e: string(email) = "user@example.com"
+    log(e)
+}

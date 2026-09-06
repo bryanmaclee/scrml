@@ -30,11 +30,55 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 92 |
+| HIGH | 93 |
 | MED | 212 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+<!-- ⛑ S402-bryan TYPE-CENSUS filing — ONE new HIGH plus the census that reframes the two flint entries above. The census is committed and re-runnable: `bun docs/changes/type-annotation-enforcement-census-2026-09-06/type-annotation-census.mjs` (46 paired control/violation fixtures). -->
+
+### g-e-type-031-is-blind-to-boolean-literals-so-spec-7-5-1s-only-normative-SHALL-is-unmet-for-a-third-of-its-own-domain — `E-TYPE-031` fires on 4 of 6 unpredicated primitive annotation/literal pairs; both misses are a `boolean` literal, and boolean is STRUCTURALLY excluded from the classifier's return type
+
+<!-- @gap id=g-e-type-031-is-blind-to-boolean-literals sev=HIGH status=open locus=compiler/src/expression-parser.ts(classifyLiteralFromExprNode — the switch handles litType number and string and falls through to unconstrained otherwise; its return type is declared `value: string | number`, so boolean is structurally outside the classifier's domain)+compiler/src/type-system.ts(extractInitLiteral, same two branches; the consuming arm at annotateNodes guards on srcInfo.kind === "literal" so a boolean initializer never reaches the comparison even though that arm's own primitives set DOES contain "boolean") prov=empirical:S402-census-executed-46-paired-control-violation-fixtures-the-6-cell-matrix-is-4-fires-2-silent-and-both-silences-are-the-boolean-literal -->
+
+**§7.5.1 makes exactly ONE normative assignability promise** — that `E-TYPE-031` fires for an unpredicated `{number, string, boolean}` annotation whose initializer is a literal of a different primitive type. **Measured cell by cell, it holds for 4 of 6:**
+
+| annotation \ literal | `"str"` | `42` | `true` |
+|---|---|---|---|
+| `string` | — | **fires** | ⛑ **SILENT** |
+| `number` | **fires** | — | ⛑ **SILENT** |
+| `boolean` | **fires** | **fires** | — |
+
+**Root cause traced, not guessed** (`verified by reading`): `classifyLiteralFromExprNode` declares its return as `value: string | number`, so `boolean` is **structurally excluded from the classifier's domain** — the switch handles `"number"` and `"string"` and falls through to `unconstrained`. The sibling `extractInitLiteral` has the same two branches, and the consuming arm at `annotateNodes` guards on `srcInfo.kind === "literal"`, so a boolean initializer never reaches the comparison **even though that arm's own `primitives` set does contain `"boolean"`**. Two functions, one missing case each.
+
+⛑ **WHY THIS IS HIGH RATHER THAN LOW.** §7.5.1 is the section that DEFERS positions 2-5 (*"NOT YET CHECKED … SHALL compile"*). The whole defensibility of that deferral rests on position 1 actually holding. **It does not hold for a third of its own stated literal domain** — so the one guarantee the type system's base layer makes about itself is unmet, silently, and the section that concedes everything else does not honour the thing it kept.
+
+### ⛑ THE CENSUS THAT PRODUCED IT — 28% of the type-annotation surface is enforced, and the split is the finding
+
+**Committed + re-runnable:** `docs/changes/type-annotation-enforcement-census-2026-09-06/` (46 paired control/violation fixtures; the paired design caught 5 syntactically-dead fixtures on the first pass that would each have been reported as a false hole).
+
+| surface | positions | enforced | DECORATIVE |
+|---|---|---|---|
+| **§53 predicates / refinements** | 7 | **6** (3 compile + 3 runtime) | 1 |
+| **§7.5 base-type annotations** | 29 | **4** | **25** |
+
+⛑ **scrml HAS A WORKING TYPE-ENFORCEMENT ENGINE. IT IS NOT CONNECTED TO PLAIN TYPE ANNOTATIONS.** PA-verified at the emitted-source level — same position, same file, one character of difference in the annotation:
+
+```js
+// fn charge(a: number)     →  function _scrml_charge_1(a) { return a; }
+// fn charge(a: number(>0)) →  if (!((a > 0))) { throw new Error("E-CONTRACT-001-RT: …
+//                                Variable: a / Constraint: (>0) / Value: -50 / (fn charge, parameter 'a')
+```
+
+**The 26 decorative rows partition three ways, and they are three different fixes:** **8** are decorative by EXPLICIT SPEC RULING (§7.5.1's S365 deferral — [[g-fn-parameter-type-annotations-are-not-enforced]] lives entirely here) · **6** are SPECIFIED AND DEAD (a §34 code exists, its fire condition is met, nothing is emitted — `E-TYPE-072`, `E-TYPE-046` [fires only on a reactive-cell receiver, not on a `let` or `fn` param, so §34's own literal example is the case that does not fire], `E-TYPE-043`, `E-TYPE-004`, and this entry's `E-TYPE-031`) · **12** were NEVER SPECIFIED (array element, union member, struct-field construction, enum payload TYPE, map key, map value, schema column vs inserted value, component prop, `int`, non-literal initializers, and **fn call ARITY** — `fn two(a,b)` called `two(1)` compiles clean).
+
+⛑ **THE ERGONOMIC INVERSION IS THE PART THAT MATTERS FOR A HUMAN-USABLE LANGUAGE.** The advanced syntax is enforced; the basic one is ignored. An author writing `a: number` — the form a human reaches for first — gets nothing; `a: number(>0)` gets a boundary guard with an excellent diagnostic. **bryan hit exactly this on his first twenty hand-written lines**, and the corpus never did, because the corpus is LLM-authored and reaches for whatever it has seen.
+
+⛑ **AND THE ANNOTATION IS INERT DOWNSTREAM, NOT ONLY AT THE DECLARATION.** A `fn` parameter annotation does not feed bare-variant inference — `fn f(c: Color) { return c is .Red }`, type-correct scrml, fails `E-VARIANT-AMBIGUOUS`, while the identical expression on a state cell compiles — yet `match` exhaustiveness DOES consume it. **Consumers disagree about whether the annotation exists.**
+
+**The honest read (INFERRED):** a floor, but a floor with a working engine underneath it. This is not a type system that was never designed — the predicate half is built end-to-end with static errors, boundary runtime guards and correct three-zone classification. What is missing is the base-assignability layer feeding it. **That is wiring, not invention** — but a language that accepts `fn bad(a: number, b: string) -> number { return a * b }` in silence is not defensible on the grounds that a SPEC section concedes it.
+
 
 <!-- ⛑ S402-bryan FLINT filing batch — TWO entries, both found by bryan hand-writing ~20 lines of scrml in the `flint` repo (`trystuff.scrml`) and both PA-REPRODUCED BY EXECUTION at `f2338816` with minimal one-line discriminators. ⚑ THE PROVENANCE IS THE POINT: this is the FIRST scrml ever written by a human. The entire ~2,400-file corpus is LLM-authored, so it has never exercised human writing patterns — twenty hand-written lines produced two HIGHs that the whole corpus never surfaced. Cross-ref [[project_no_human_has_written_scrml_before_bryan]]. -->
 

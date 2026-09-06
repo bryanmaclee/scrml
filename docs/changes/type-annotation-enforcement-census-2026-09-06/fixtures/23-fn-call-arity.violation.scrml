@@ -1,0 +1,4 @@
+fn two(a: number, b: number) -> number {
+    return a + b
+}
+log(two(1))

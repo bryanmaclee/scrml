@@ -1,0 +1,5 @@
+${
+    fn src() -> number { return 1 }
+    let x: string = src()
+    log(x)
+}

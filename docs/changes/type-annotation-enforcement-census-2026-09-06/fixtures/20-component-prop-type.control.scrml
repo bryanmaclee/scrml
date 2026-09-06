@@ -1,0 +1,8 @@
+<program>
+${
+    const Badge = <div props={ count: number }>
+        <span>${count}</>
+    </>
+}
+<Badge count={7} />
+</program>
