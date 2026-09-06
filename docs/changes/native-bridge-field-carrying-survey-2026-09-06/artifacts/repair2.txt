@@ -1,0 +1,7 @@
+target cases (stage-1 newlyMissing): 156
+[emit-lift] unhandled attribute value kind: dotted-ident for attr "to"
+repair=functionDeclKeys still-missing 156/156   RECOVERED 0
+[emit-lift] unhandled attribute value kind: dotted-ident for attr "to"
+repair=engineDeclKeys   still-missing 156/156   RECOVERED 0
+[emit-lift] unhandled attribute value kind: dotted-ident for attr "to"
+repair=allFieldKeys     still-missing 156/156   RECOVERED 0

@@ -1,0 +1,9 @@
+{
+  "label": "flipped",
+  "mode": "routing",
+  "tier": "compiler/tests/conformance/corpus-bridge.test.js",
+  "pretest": false,
+  "head": "bf600bc99899232c7c51ba1b25b9f1bfd86f1973",
+  "ranAt": "2026-09-06T14:23:16.868Z",
+  "seconds": 29.3
+}

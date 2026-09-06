@@ -1,0 +1,405 @@
+[
+  {
+    "relDir": "apply/apply-non-inlinable-neg",
+    "missing": [
+      "E-APPLY-NON-INLINABLE-UTILITY"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "apply/apply-unknown-utility-neg",
+    "missing": [
+      "E-APPLY-UNKNOWN-UTILITY"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "apply/apply-variant-unsupported-neg",
+    "missing": [
+      "E-APPLY-VARIANT-UNSUPPORTED"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "channel/dup-name-cross-file",
+    "missing": [
+      "E-CHANNEL-008"
+    ],
+    "sigs": [
+      "(untyped-object).imported: VALUE-DIFF live-only=[] native-only=[]",
+      "(untyped-object).local: VALUE-DIFF live-only=[] native-only=[]",
+      "(untyped-object).pinned: VALUE-DIFF live-only=[] native-only=[]",
+      "import-decl.isDefault: VALUE-DIFF live-only=[] native-only=[]",
+      "import-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "import-decl.raw: VALUE-DIFF live-only=[\"\\\"import { chat as ChatX } from \\\\\\\"./x.scrml\\\\\\\"\\\"\",\"\\\"import { chat as ChatY } from \\\\\\\"./y.scrml\\\\\\\"\\\"\"] native-only=[\"\\\"\\\"\",\"\\\"\\\"\",\"\\\"\\\"\"]",
+      "import-decl.source: VALUE-DIFF live-only=[] native-only=[]",
+      "markup.closerForm: VALUE-DIFF live-only=[\"\\\"self-closing\\\"\",\"\\\"self-closing\\\"\"] native-only=[\"\\\"\\\"\",\"\\\"\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "components/invalid-prop-decl-syntax-reject",
+    "missing": [
+      "E-COMPONENT-019"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-004-orphan-else-on-state-opener-pos",
+    "missing": [
+      "E-CTRL-004"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-011-for-in-pos",
+    "missing": [
+      "E-CTRL-011"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\"[ \\\\\\\"a\\\\\\\" , \\\\\\\"b\\\\\\\" ]\\\"\"] native-only=[\"\\\"[\\\\\\\"a\\\\\\\", \\\\\\\"b\\\\\\\"]\\\"\"]"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-012-bare-control-flow-in-markup-pos",
+    "missing": [
+      "E-CONTROL-FLOW-IN-MARKUP"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\"[ \\\\\\\"a\\\\\\\" , \\\\\\\"b\\\\\\\" ]\\\"\"] native-only=[\"\\\"[\\\\\\\"a\\\\\\\", \\\\\\\"b\\\\\\\"]\\\"\"]",
+      "text.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "text.value: VALUE-DIFF live-only=[] native-only=[\"\\\"\\\\n    for (x of @items) { lift <li>${x}</> }\\\\n\\\"\"]"
+    ]
+  },
+  {
+    "relDir": "control-flow/ctrl-switch-forbidden-attr-expr-pos",
+    "missing": [
+      "E-SWITCH-FORBIDDEN"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\". Idle\\\"\"] native-only=[\"\\\".Idle\\\"\"]",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-circular-pos",
+    "missing": [
+      "E-DERIVED-ENGINE-CIRCULAR"
+    ],
+    "sigs": [
+      "(untyped-object).glyph: SLOT-ABSENT-IN-NATIVE (live values [\"\\\":>\\\"\",\"\\\":>\\\"\",\"\\\":>\\\"\"])",
+      "engine-decl.derivedExprNode: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "engine-decl.derivedExprText: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "engine-decl.initialCell: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "engine-decl.inlineMatchBody: SLOT-ABSENT-IN-NATIVE (live values [\"\\\".Calm :> .Healthy\\\\n  .Tense :> .AtRisk\\\"\",\"\\\".Healthy :> .Calm\\\\n  .AtRisk :> .Tense\\\"\"])",
+      "engine-decl.openerEffect: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "engine-decl.openerEffectBadSlice: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "engine-decl.openerEffectMalformed: SLOT-ABSENT-IN-NATIVE (live values [\"false\",\"false\"])",
+      "engine-decl.serverFlagBare: SLOT-ABSENT-IN-NATIVE (live values [\"false\",\"false\"])",
+      "engine-decl.serverSource: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "engine-decl.sourceVar: VALUE-DIFF live-only=[\"\\\"health\\\"\",\"\\\"mood\\\"\"] native-only=[\"\\\"match\\\"\",\"\\\"match\\\"\"]",
+      "markup.closerForm: VALUE-DIFF live-only=[\"\\\"self-closing\\\"\",\"\\\"self-closing\\\"\",\"\\\"self-closing\\\"\"] native-only=[\"\\\"\\\"\",\"\\\"\\\"\",\"\\\"\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\",\"null\"])",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-match-nonexhaustive",
+    "missing": [
+      "E-TYPE-020"
+    ],
+    "sigs": [
+      "(untyped-object).glyph: SLOT-ABSENT-IN-NATIVE (live values [\"\\\":>\\\"\",\"\\\":>\\\"\"])",
+      "engine-decl.derivedExprNode: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.derivedExprText: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.initialCell: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.inlineMatchBody: SLOT-ABSENT-IN-NATIVE (live values [\"\\\".A :> .X\\\\n    .B :> .Y\\\"\"])",
+      "engine-decl.openerEffect: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.openerEffectBadSlice: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.openerEffectMalformed: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "engine-decl.serverFlagBare: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "engine-decl.serverSource: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.sourceVar: VALUE-DIFF live-only=[\"\\\"src\\\"\"] native-only=[\"\\\"match\\\"\"]",
+      "markup.closerForm: VALUE-DIFF live-only=[\"\\\"self-closing\\\"\",\"\\\"self-closing\\\"\"] native-only=[\"\\\"\\\"\",\"\\\"\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\",\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\"Src . A\\\"\"] native-only=[\"\\\"Src.A\\\"\"]",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "engine/derived-engine-no-initial-pos",
+    "missing": [
+      "E-DERIVED-ENGINE-NO-INITIAL"
+    ],
+    "sigs": [
+      "(untyped-object).glyph: SLOT-ABSENT-IN-NATIVE (live values [\"\\\":>\\\"\",\"\\\":>\\\"\"])",
+      "engine-decl.derivedExprNode: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.derivedExprText: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.initialCell: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.inlineMatchBody: SLOT-ABSENT-IN-NATIVE (live values [\"\\\".Small :> .Healthy\\\\n  .Big :> .AtRisk\\\"\"])",
+      "engine-decl.openerEffect: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.openerEffectBadSlice: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.openerEffectMalformed: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "engine-decl.serverFlagBare: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "engine-decl.serverSource: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.sourceVar: VALUE-DIFF live-only=[\"\\\"marioState\\\"\"] native-only=[\"\\\"match\\\"\"]",
+      "markup.closerForm: VALUE-DIFF live-only=[\"\\\"self-closing\\\"\",\"\\\"self-closing\\\"\"] native-only=[\"\\\"\\\"\",\"\\\"\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\",\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\". Small\\\"\"] native-only=[\"\\\".Small\\\"\"]",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "error/renders-undefined-var",
+    "missing": [
+      "E-ERROR-006"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[\"\\\"{ InvalidAmount ( reason : string )\\\\nrenders < div class = \\\\\\\"error\\\\\\\" > ${badVar} < / > }\\\"\"] native-only=[\"\\\"{ InvalidAmount ( reason : string )\\\\nrenders < div class = \\\\\\\"error\\\\\\\" > $ { badVar } < / > }\\\"\",\"\\\"{ InvalidAmount ( reason : string )\\\\nrenders < div class = \\\\\\\"error\\\\\\\" > $ { badVar } < / > }\\\"\"]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "forms/derived-validators-reject",
+    "missing": [
+      "E-DERIVED-WITH-VALIDATORS"
+    ],
+    "sigs": [
+      "(untyped-object).args: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "(untyped-object).name: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"min\\\"\",\"\\\"req\\\"\"])",
+      "lit.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "lit.litType: VALUE-DIFF live-only=[] native-only=[]",
+      "lit.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "lit.value: VALUE-DIFF live-only=[] native-only=[]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])"
+    ]
+  },
+  {
+    "relDir": "forms/validator-applies-min-on-string-reject",
+    "missing": [
+      "E-TYPE-031"
+    ],
+    "sigs": [
+      "(untyped-object).name: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"min\\\"\"])",
+      "lit.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "lit.litType: VALUE-DIFF live-only=[\"\\\"number\\\"\"] native-only=[]",
+      "lit.raw: VALUE-DIFF live-only=[\"\\\"3\\\"\"] native-only=[]",
+      "lit.value: VALUE-DIFF live-only=[\"3\"] native-only=[]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])"
+    ]
+  },
+  {
+    "relDir": "lifecycle/effect-on-derived-engine",
+    "missing": [
+      "E-ENGINE-EFFECT-ON-DERIVED"
+    ],
+    "sigs": [
+      "engine-decl.derivedExprText: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"${ @count > 5 ? .High : .Low } effect=${ log(\\\\\\\"boot\\\\\\\") }\\\"\"])",
+      "engine-decl.initialCell: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.inlineMatchArmArrows: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.inlineMatchBody: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.openerEffect: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"log(\\\\\\\"boot\\\\\\\")\\\"\"])",
+      "engine-decl.openerEffectBadSlice: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "engine-decl.openerEffectMalformed: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "engine-decl.serverFlagBare: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "engine-decl.serverSource: SLOT-ABSENT-IN-NATIVE (live values [\"null\"])",
+      "ident.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "ident.name: VALUE-DIFF live-only=[\"\\\"$\\\"\"] native-only=[]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\",\"null\"])",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "maps/duplicate-literal-key-pos",
+    "missing": [
+      "W-MAP-DUPLICATE-LITERAL-KEY"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\"[ \\\\\\\"DAL\\\\\\\" : 3 , \\\\\\\"DAL\\\\\\\" : 5 ]\\\"\"] native-only=[\"\\\"[\\\\\\\"DAL\\\\\\\": 3, \\\\\\\"DAL\\\\\\\": 5]\\\"\"]",
+      "state-decl.typeAnnotation: VALUE-DIFF live-only=[\"\\\"[string:int]\\\"\"] native-only=[\"\\\"[ string : int ]\\\"\"]"
+    ]
+  },
+  {
+    "relDir": "maps/literal-malformed-pos",
+    "missing": [
+      "E-MAP-LITERAL-MALFORMED"
+    ],
+    "sigs": [
+      "(untyped-object).message: VALUE-DIFF live-only=[\"\\\"E-MAP-LITERAL-MALFORMED: map-literal entry `\\\\\\\"DAL\\\\\\\" :` has a missing value (§59.3).\\\"\"] native-only=[\"\\\"E-MAP-LITERAL-MALFORMED: a map-literal entry has a missing value (§59.3).\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\"[ \\\\\\\"DAL\\\\\\\" : ]\\\"\"] native-only=[\"\\\"[:]\\\"\"]",
+      "state-decl.typeAnnotation: VALUE-DIFF live-only=[\"\\\"[string:int]\\\"\"] native-only=[\"\\\"[ string : int ]\\\"\"]"
+    ]
+  },
+  {
+    "relDir": "maps/struct-key-literal-pos",
+    "missing": [
+      "W-MAP-STRUCT-KEY-LITERAL"
+    ],
+    "sigs": [
+      "(untyped-object).message: VALUE-DIFF live-only=[\"\\\"W-MAP-STRUCT-KEY-LITERAL: struct/enum-key map literal `{ a : 1 }: …` parse-accepts but v1 codegen requires the `.insert({ a : 1 }, …)` form (§59.3/§59.12).\\\"\"] native-only=[\"\\\"W-MAP-STRUCT-KEY-LITERAL: struct/enum-key map literal parse-accepts but v1 codegen requires the `.insert(key, …)` form (§59.3/§59.12).\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "state-decl.init: VALUE-DIFF live-only=[\"\\\"[ { a : 1 } : 5 ]\\\"\"] native-only=[\"\\\"[{ a: 1 }: 5]\\\"\"]",
+      "state-decl.typeAnnotation: VALUE-DIFF live-only=[\"\\\"[P:int]\\\"\"] native-only=[\"\\\"[ P : int ]\\\"\"]",
+      "type-decl.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.name: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.raw: VALUE-DIFF live-only=[] native-only=[]",
+      "type-decl.typeKind: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "middleware/duplicate-handle-pos",
+    "missing": [
+      "E-MW-005"
+    ],
+    "sigs": [
+      "(untyped-object).name: VALUE-DIFF live-only=[\"\\\"request\\\"\",\"\\\"request\\\"\",\"\\\"resolve\\\"\"] native-only=[]",
+      "function-decl.errorType: SLOT-ABSENT-IN-NATIVE (live values [null,null])",
+      "function-decl.isHandleEscapeHatch: SLOT-ABSENT-IN-NATIVE (live values [\"true\",\"true\"])",
+      "function-decl.method: SLOT-ABSENT-IN-NATIVE (live values [null,null])",
+      "function-decl.route: SLOT-ABSENT-IN-NATIVE (live values [null,null])",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "return-stmt.expr: VALUE-DIFF live-only=[\"\\\"resolve ( request )\\\"\",\"\\\"resolve ( request )\\\"\"] native-only=[\"\\\"resolve(request)\\\"\",\"\\\"resolve(request)\\\"\"]"
+    ]
+  },
+  {
+    "relDir": "middleware/ratelimit-invalid-unit-pos",
+    "missing": [
+      "E-MW-002"
+    ],
+    "sigs": [
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "reactive/derived-default-on-const",
+    "missing": [
+      "E-DERIVED-WRITE"
+    ],
+    "sigs": [
+      "lit.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "lit.litType: VALUE-DIFF live-only=[] native-only=[]",
+      "lit.raw: VALUE-DIFF live-only=[\"\\\"0\\\"\"] native-only=[]",
+      "lit.value: VALUE-DIFF live-only=[\"0\"] native-only=[]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "state-decl.defaultExpr: VALUE-DIFF live-only=[] native-only=[]"
+    ]
+  },
+  {
+    "relDir": "server-fn/e-route-003-pos",
+    "missing": [
+      "E-ROUTE-003"
+    ],
+    "sigs": [
+      "function-decl.errorType: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.hasReturnType: SLOT-ABSENT-IN-NATIVE (live values [\"true\"])",
+      "function-decl.isHandleEscapeHatch: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "function-decl.method: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.returnTypeAnnotation: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"snippet\\\"\"])",
+      "function-decl.route: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "server-fn/e-route-004-pos",
+    "missing": [
+      "E-ROUTE-004"
+    ],
+    "sigs": [
+      "(untyped-object).name: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"cb\\\"\"])",
+      "(untyped-object).typeAnnotation: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"fn()\\\"\"])",
+      "function-decl.errorType: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.hasReturnType: SLOT-ABSENT-IN-NATIVE (live values [\"true\"])",
+      "function-decl.isHandleEscapeHatch: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "function-decl.method: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.returnTypeAnnotation: SLOT-ABSENT-IN-NATIVE (live values [\"\\\"string\\\"\"])",
+      "function-decl.route: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "sql/bare-identifier-body-e-sql-003-neg",
+    "missing": [
+      "E-SQL-003"
+    ],
+    "sigs": [
+      "function-decl.errorType: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.isHandleEscapeHatch: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "function-decl.method: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.route: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "sql/comment-cloaked-body-e-sql-003-neg",
+    "missing": [
+      "E-SQL-003"
+    ],
+    "sigs": [
+      "(untyped-object).name: VALUE-DIFF live-only=[\"\\\"q\\\"\"] native-only=[]",
+      "function-decl.errorType: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.isHandleEscapeHatch: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "function-decl.method: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.route: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "sql/runtime-expr-body-e-sql-003-neg",
+    "missing": [
+      "E-SQL-003"
+    ],
+    "sigs": [
+      "(untyped-object).name: VALUE-DIFF live-only=[\"\\\"q\\\"\"] native-only=[]",
+      "function-decl.errorType: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.isHandleEscapeHatch: SLOT-ABSENT-IN-NATIVE (live values [\"false\"])",
+      "function-decl.method: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "function-decl.route: SLOT-ABSENT-IN-NATIVE (live values [null])",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])"
+    ]
+  },
+  {
+    "relDir": "style/theme-name-collision",
+    "missing": [
+      "E-NAME-COLLIDES-RESERVED"
+    ],
+    "sigs": [
+      "const-decl.init: VALUE-DIFF live-only=[\"\\\"<div class=\\\\\\\"swatch\\\\\\\">\\\\n<span>brand token</span>\\\\n< / div >\\\"\"] native-only=[\"\\\"\\\"\"]",
+      "markup.shorthandBodyRaw: SLOT-ABSENT-IN-NATIVE (live values [\"null\",\"null\"])",
+      "text.kind: VALUE-DIFF live-only=[] native-only=[]",
+      "text.value: VALUE-DIFF live-only=[] native-only=[\"\\\"\\\\n      \\\"\",\"\\\"\\\\n    \\\"\"]"
+    ]
+  }
+]

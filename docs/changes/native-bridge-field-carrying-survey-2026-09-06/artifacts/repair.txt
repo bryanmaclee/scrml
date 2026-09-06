@@ -1,0 +1,5 @@
+target cases (stage-1 newlyMissing): 156
+[emit-lift] unhandled attribute value kind: dotted-ident for attr "to"
+repair=none             still-missing 156/156   RECOVERED 0
+[emit-lift] unhandled attribute value kind: dotted-ident for attr "to"
+repair=typeDecls        still-missing 156/156   RECOVERED 0
