@@ -11756,6 +11756,32 @@ even an advisory one with a wide band would have caught the 17×. (b) is the ope
 deleted shape), and is NOT proposed here.
 — `NEW S400-bryan (operator asked "what ever happened to the issue that slowed the compiler")`; **MED**; open
 
+⚑ **S402-bryan, from the S239 review-floor pass on #853 — THE FLAG FIX IS REAL AND THE INSTRUMENT
+STILL DOES NOT DISCHARGE THE RULING IT WAS FIXED TO SUPPORT.** Verified in both directions:
+
+- **The fix holds.** `--timing` appears **zero** times in `compiler/src/cli.js` and
+  `compiler/src/commands/compile.js`; `--verbose` appears **22** times in the latter. Correct call.
+- **But the command reports no comparable number.** `bun run bench` at `b8f1e69f` exits **1** and
+  emits **2622 lines** containing **zero** lines matching `total` / `elapsed` / `overall` / `summary`
+  and **zero** `Compiled` lines. The wall time must be taken externally (`date +%s%N` around it) or
+  read out of 2622 lines of per-stage-per-file output.
+- **And the baseline is not durable.** The `8,095 ms` figure the S400 landing recorded lives in
+  **exactly one place — `hand-off.md:71` — which ROTATES at the next wrap.** It was never written into
+  `benchmarks/RESULTS.md`, the very file whose staleness opened this thread. Grep for `8,095`/`8095`
+  across all tracked `.md`/`.json` returns that single hand-off line.
+- **The gap is already visible.** A re-run at `b8f1e69f` measured **4224 ms** against the recorded
+  **8095 ms** — a **1.9× spread** on the same machine, with no recorded method (warm/cold, machine,
+  concurrent load) to explain it or to make a future comparison meaningful.
+
+**Why this matters and is not pedantry:** bryan ruled NO PERF GATE at S400 in favour of *"easy enough
+to just recompile and measure time dif on occasion."* **That ruling stands and is correct.** But an
+ad-hoc discipline needs two things the repo does not currently have: a command that reports a
+comparable number, and a durable baseline to compare it against. The S400 landing fixed the flag —
+the half that was loudly broken — and left both of these. **Minimum repair, in the ruling's own
+spirit and cheap:** have the bench script print one aggregate wall-time line, and record the
+baseline + its method in `benchmarks/RESULTS.md` rather than in a rotating hand-off.
+— `AMENDED S402-bryan (S239 review-floor pass on #853; every claim above executed or grepped, none relayed)`
+
 ---
 
 ### g-corpus-emit-differential-incomparable-across-checkout-paths — the differential prints a full CONTENT DIFFERENCES list under an INCOMPARABLE verdict when the two sides sit at different absolute paths, from a path-derived hash; a reader who skims to the list concludes a codegen change touched ~1027 artifacts
