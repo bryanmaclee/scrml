@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 90 |
-| MED | 210 |
+| MED | 211 |
 | LOW | 89 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -11890,3 +11890,50 @@ ad-hoc discipline currently has nothing executable behind it.
 **Owed:** fix the DOA sibling, re-measure at HEAD in the same two harnesses, then bisect the
 2026-05-19 → 2026-07-24 window. Filed without a recommended limb — the locus is not established.
 — `NEW S402-bryan (S400 measurement, unfiled on a contended ledger; carried as inherited with its source named rather than re-stamped)`; **HIGH**; open
+
+---
+
+### g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only — the five `scrml dev` server/watcher tests pass locally in under 2.2 s per file and fail in cloud CI at exactly their own `waitFor` budgets, so the advisory `tracking` job has been RED on every recent main run and the directory a ruling proposes promoting into a BLOCKING gate cannot be promoted as-is
+
+<!-- @gap id=g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only sev=MED status=open locus=compiler/tests/commands/dev-compile-throw-fail-closed.test.js:56(waitFor timeoutMs=10_000),compiler/tests/commands/dev-watcher-churn-starvation.test.js:47(same),compiler/tests/commands/dev-server-hot-reload-724.test.js:51(timeoutMs=12_000) — the WAIT BUDGETS are the locus; the reason the cloud runner does not satisfy them inside those budgets was NOT determined prov=empirical:PA-executed-both-sides-at-ca00872e-all-five-pass-locally-2-plus-3-in-1.88s-and-2.11s-while-CI-durations-12421-10496-10440-10445-10470ms-match-the-12s-and-10s-waitFor-budgets-exactly -->
+
+**PA-VERIFIED BY EXECUTING BOTH SIDES at `ca00872e`.** This is a local-vs-cloud split, not a code
+defect, and the numbers identify the mechanism precisely:
+
+| test | CI duration | its own `waitFor` budget |
+|---|---|---|
+| hot-reload #724 — server-fn edit picked up live | 12421 ms | **12_000** |
+| §1 compile THROW → fail CLOSED | 10496 ms | **10_000** |
+| §2 delete-then-restore | 10440 ms | **10_000** |
+| §3 atomic save (tmp + rename) | 10445 ms | **10_000** |
+| watcher debounce is BOUNDED under sibling churn | 10470 ms | **10_000** |
+
+**Every failure duration is its own budget plus poll overhead.** These are `waitFor` expiries — the
+polled condition never becomes true inside the budget — **not assertion failures**. Locally the same
+five run green: `dev-server-hot-reload-724` + `dev-watcher-churn-starvation` = 2 pass / 0 fail in
+**1.88 s**; `dev-compile-throw-fail-closed` = 3 pass / 0 fail in **2.11 s**. There is no `skipIf`, no
+CI env guard, and no `process.env` branch in any of the three files — both environments run the same
+tests.
+
+⚑ **`tracking` has been RED on the last five main runs** (34004975692 · 33932093128 · 33931707165 ·
+33926196006 · 33921997228) and on this session's own PR #855, identically. It is `continue-on-error`,
+so the workflow conclusion reads **success** on every one of them and nothing surfaces. **That is the
+§8 absorbed-escape-hatch in its terminal state: an advisory signal that is always red conveys exactly
+as much information as one that is always green.**
+
+⚑ **THE DECISION THIS BEARS ON, and it is already on the operator's board.** The owed ruling
+*"promote `compiler/tests/commands/` into a blocking job — its one-decider security assertion sits
+outside every gate that can fail a merge"* is **correct about the hole and cannot be executed as
+written**: promoting this directory today makes `main` permanently un-mergeable for reasons no change
+caused — the exact cry-wolf shape §8 says gets bypassed and then deleted. **The wait-budget defect is
+a precondition of that promotion, not a separate cleanup.**
+
+**What was NOT determined, and is the next step:** *why* the cloud runner fails to satisfy the polled
+condition within 10–12 s when a local machine does it in under one. Candidates, none measured — runner
+CPU share on a spawn-heavy test (each spawns a real `scrml dev` child + reverse proxy), container
+`inotify` semantics under the watcher, or cold `bun install`/compile cost inside the first poll window.
+**Raising the budgets is the wrong first move**: it would convert a red signal into a slow green one
+without establishing whether the dev server is genuinely slower to become ready in a container — which
+is itself adopter-relevant. Instrument first (log time-to-first-successful-poll on both sides), then
+decide.
+— `NEW S402-bryan (found by not merging past a red advisory job; both sides executed rather than either inferred)`; **MED**; open
