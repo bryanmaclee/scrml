@@ -30,11 +30,73 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 90 |
+| HIGH | 92 |
 | MED | 212 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+<!-- ⛑ S402-bryan FLINT filing batch — TWO entries, both found by bryan hand-writing ~20 lines of scrml in the `flint` repo (`trystuff.scrml`) and both PA-REPRODUCED BY EXECUTION at `f2338816` with minimal one-line discriminators. ⚑ THE PROVENANCE IS THE POINT: this is the FIRST scrml ever written by a human. The entire ~2,400-file corpus is LLM-authored, so it has never exercised human writing patterns — twenty hand-written lines produced two HIGHs that the whole corpus never surfaced. Cross-ref [[project_no_human_has_written_scrml_before_bryan]]. -->
+
+### g-line-comment-truncates-the-rest-of-a-default-logic-body — a single `//` comment line in a `<program>` body SILENTLY DELETES every statement after it, and takes the diagnostics that would have fired on them with it
+
+<!-- @gap id=g-line-comment-truncates-the-rest-of-a-default-logic-body sev=HIGH status=open locus=searched:compiler/src/block-splitter.js,compiler/src/ast-builder.js — the §40.8 `default-logic` body-mode path that auto-lifts bare top-level declarations; the deciding site was NOT traced prov=empirical:PA-reproduced-at-f2338816-two-files-identical-except-ONE-comment-line-without-it-E-STATE-UNDECLARED-fires-and-all-three-statements-emit-with-it-ZERO-diagnostics-and-everything-after-the-comment-is-gone -->
+
+**PA-REPRODUCED BY EXECUTION, one-line discriminator.** Two files identical except for a single inserted comment line:
+
+```scrml
+<program>
+   const anchor = 1
+   log("BEFORE")
+//   <wop> = 5          ← the ONLY difference
+   log(@wop)
+   log("AFTER")
+   <p>y</>
+</program>
+```
+
+| | diagnostics | emitted |
+|---|---|---|
+| **without** the comment line | **`E-STATE-UNDECLARED` fires** (correctly — `@wop` is undeclared) | all three statements |
+| **with** the comment line | **NONE** | only `log("BEFORE")` |
+
+⛑ **THE DIAGNOSTIC LOSS IS THE SEVERE HALF, NOT THE MISSING CODE.** `@wop` is undeclared in both files. Without the comment the compiler says so. With it, the statement is discarded before anything can check it — so a real, ruled diagnostic (§6.1.2 / the S397 Q3 ruling: *"`@name` resolves to a REACTIVE BINDING; anything else is `E-STATE-UNDECLARED`"*) is silently suppressed by an unrelated comment several lines earlier. **A comment changes whether type-checking happens.**
+
+⛑ **HOW IT PRESENTED TO THE ADOPTER, because the mis-diagnosis is instructive.** bryan read it as *"the compiler ignores that lines are commented — declaring a variable in a comment makes that variable available."* Measured, the truth is the opposite and worse: **nothing executes from the comment; his real code disappears after it.** He inferred availability from the absence of an error, and the absence of the error was itself the bug. Anyone triaging this from the symptom description alone will look in the wrong place.
+
+**Second shape, likely the same root:** a bare expression statement with NO preceding declaration in a `<program>` body is also dropped — `<program>
+ log("KEEP-ME")
+ <p>y</>
+</program>` emits nothing, while adding `const anchor = 1` before it makes the call emit. So §40.8 `default-logic` drops statements in at least two ways.
+
+⛑ **LAYER: FRONT-END.** §40.8's `default-logic` is the **distinct THIRD body-mode** that §4.18 explicitly declines to classify (§4.18.1 carries the reciprocal cross-ref). Same layer as [[g-engine-state-child-apostrophe-breaks-parse]], whose fix took five adversarial rounds and could not be landed because flat scanners cannot represent a nested grammar. The native parser is immune to that class by construction (real body-mode machine, PARSE-FAILURE 0 across the corpus). **Do not attempt a scan-tweak fix here before that architectural question is ruled** — the apostrophe arc is the measured precedent for what that costs.
+— `NEW S402-bryan (found by bryan hand-writing flint/trystuff.scrml; PA-reproduced with a one-line discriminator)`; **HIGH**; open
+
+### g-fn-parameter-type-annotations-are-not-enforced — `fn` parameter types are accepted, emitted, and checked against nothing: not the arguments at the call site, not the body, not the declared return type
+
+<!-- @gap id=g-fn-parameter-type-annotations-are-not-enforced sev=HIGH status=open locus=searched:compiler/src/type-system.ts — no arg-vs-param reconciliation was located; `paramType` appears only on the §14.9 snippet type and in a §53 predicate-parse path, and the deciding site for ordinary `fn` params was NOT traced prov=empirical:PA-reproduced-at-f2338816-fn-bad-a-number-b-string-returns-a-times-b-called-with-a-string-in-the-number-slot-compiles-clean-ZERO-diagnostics-and-emits-the-call-verbatim -->
+
+**PA-REPRODUCED BY EXECUTION.** This program compiles clean with **zero diagnostics**:
+
+```scrml
+fn bad(a: number, b: string) -> number {
+   return a * b
+}
+log(bad("QQQ","x"))
+```
+
+Emitted verbatim: `function _scrml_bad_1(a, b) { return a * b; }` and `_scrml_log(..., _scrml_bad_1("QQQ", "x"))`. **Three independent checks are absent at once:**
+1. **Argument vs parameter** — a `string` literal is passed into `a: number`.
+2. **Body vs parameter types** — `a * b` multiplies a `number` by a `string`.
+3. **Body vs declared return** — `-> number` is never reconciled with what `a * b` yields (`NaN`).
+
+⛑ **LAYER: POST-PARSE.** This is the type system, NOT the front-end — a native-parser swap fixes **none** of it. That distinction is load-bearing for the salvageability question this was filed under: the front-end holes have a condemned layer and a built replacement; this one does not.
+
+⛑ **IT IS A FAMILY, NOT A ONE-OFF.** Adjacent already-open entries: [[g-fn-params-typed-string-actually-objects]] · [[g-fn-parameter-lifecycle-position-unenforced]] · [[g-route-004-untyped-fn-param-escapes-serializability-gate]] (E-ROUTE-004 inspects only ANNOTATED param types — which this entry shows are themselves unchecked, so the two compose badly). The S397 Q9 arc separately measured that **scrml's AST has no uniform binder representation** (bindings stored at least four incompatible ways) and that **440 untyped params ride the `asIs` hatch**.
+
+⛑ **THE ADOPTER'S OWN FRAMING IS THE REASON THIS IS HIGH AND NOT MED**, bryan verbatim: *"That was 100% of the sample of what I attempted with the type system, not confidence inspiring."* One attempt, one hole. **A census of the whole annotation surface — enforced vs warned vs decorative vs no-spec — is dispatched** (`docs/changes/type-annotation-enforcement-census-2026-09-06/`) precisely because a 1-of-1 sample cannot distinguish an isolated hole from a floor, and that distinction decides how much of the language is real.
+— `NEW S402-bryan (found by bryan hand-writing flint/trystuff.scrml; PA-reproduced; census dispatched to size the family)`; **HIGH**; open
+
 
 <!-- ⚑ S345 filing batch — the S342 arc-audit backlog (bryan-ratified): 40 entries sourced from scrml-support/handOffs/s342-arc-audit/ (classify-write, g263, derived-transitive, harness, tare-pr501, dead-session) -->
 
