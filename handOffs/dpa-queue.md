@@ -2719,3 +2719,117 @@ what is missing; the panel MUST include a voice arguing D or the fork is not fai
 ### Report-back
 §3 shape — one-liner + artifact path + staged insight CANDIDATE + a `(dpa:)` delta-log breadcrumb.
 **Do NOT ratify.** This one is bryan's alone.
+
+---
+
+## [dpa-044] deep-dive — Which surface forms force STATEFUL SCANNING, and what does removing each buy in measured defect terms? (SIMPLIFY-TO-SHIP)
+status: banked     # BANKED S402 2026-09-06 (bryan: "bank the dpa")
+
+### Origin — bryan, verbatim, S402
+
+> "I am wondering if simplifying some would help. for instance if scrml disallowed in line comments
+> `/* */` and only allowed `//comments` that are the first significant char. This is just an example,
+> how many forms of loops do we support? are big swaths of bugs fixable by removing confussion?"
+
+and, on the disposition of the specific candidates:
+
+> "as far as I can tell, all of those things (except do while (the devils loop)) are still necessary.
+> but `~` is not NECESSARY. It is a nicety (mostly for humans) I want it. But I want a truly usable
+> language (at least a confident V1) more."
+
+⚑ **That second quote is a RULING INPUT, not context.** It disposes of the loop question (all forms
+stay except `do…while`), and it puts `~` — a shipped, spec'd, human-facing convenience — explicitly on
+the table against V1 confidence. **The operator has pre-authorised the trade; the DD's job is to price
+it, not to re-ask whether he wants it.**
+
+### Scope-lock
+
+**IN:** the LEXICAL/surface layer only — forms whose recognition requires a scanner to carry state
+across characters (comments, string spans, interpolation bounds, attribute regions, body modes).
+**OUT:** semantic multiplicity (how many ways to express a loop, a match, a state decl) EXCEPT where a
+form provably forces scanner state. **OUT:** anything that widens surface — this is a restrict-only DD.
+
+### The discriminator the PA proposes, to be tested not assumed
+
+> **Surface multiplicity that forces STATEFUL SCANNING is expensive. Surface multiplicity that is just
+> more parse rules is cheap.**
+
+If that holds, it predicts: comments are expensive (a scanner must know whether it is *inside* one),
+loop keywords are cheap (one more production, no new state). **The DD should try to falsify it** —
+it is a PA hypothesis, not a finding.
+
+### ⚑ MEASURED BY THE PA AT `2d6f0ef8` — verify by execution before reasoning from any of it
+
+**Comments — the evidence is defect-attribution, not usage counts, which is why it is strong:**
+- **22 source files hand-roll comment scanning** (`grep -rlE '"/\*"|"<!--"|skipComment|computeCommentRegions' compiler/src`).
+- **Three open gaps are literally named for the absence of that state:**
+  `g-markup-body-const-at-scan-has-no-comment-state` · `g-state-block-bare-write-scan-has-no-comment-state` ·
+  `g-state-block-statement-form-disarmed-by-an-unpaired-block-comment-opener`.
+- **Four comment-scanning defects surfaced in two days:** peter's #846 (block comments in a `${}` body
+  dropping declarations) · the S402 apostrophe arc (**five adversarial rounds, could not be landed**) ·
+  the round-4/5 findings (`skipDollarBrace` not backtick- or comment-aware, masking to EOF) ·
+  `g-line-comment-truncates-the-rest-of-a-default-logic-body` (**HIGH**, found by bryan hand-writing).
+- ⚑ **The asymmetry bryan's proposal exploits:** `//` is SELF-TERMINATING at newline; `/* */` runs to
+  **EOF** when unterminated — which is exactly the failure mode in rounds 4 and 5. And `//`-at-first-
+  significant-char goes further: it makes comment detection a **LINE-PREFIX TEST requiring no scanner
+  state at all**. That does not simplify the grammar; it **deletes a stateful problem from 22 sites.**
+
+**`~` — the operator has made it negotiable, and it is expensive:**
+- **7 open HIGH gaps + 1 LOW** name it: `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples` ·
+  `g-bare-expr-in-if-arm-rebinds-tilde-context-corrupting-the-result-var` ·
+  `g-tilde-in-string-literal-corrupted-to-scrml-tilde-token` ·
+  `g-let-decl-reading-tilde-swallows-the-following-statement-which-is-never-compiled` ·
+  `g-fn-local-tilde-detection-is-a-text-regex-so-member-access-on-tilde-false-fires-e-fn-008` ·
+  `g-bare-expr-between-a-lift-loop-and-the-tilde-read-silently-replaces-the-accumulator` ·
+  `g-bound-comprehension-between-accumulator-and-tilde-read-hijacks-the-slot` ·
+  `g-tilde-typed-must-use-decl-emits-a-phantom-bare-tilde-statement-into-the-ast`.
+- **THREE of the banked dPA items are about `~` alone** — dpa-040 (is an if-arm body a `~` boundary?) ·
+  dpa-041 (does the declared type replace the accumulator role?) · dpa-042 (do `~` and `lin` unify?).
+- **A ratified-but-unbuilt axiom conjunction** rides on it (S397: `~` is one thing AND every loop form
+  gains the expression form `for…of` already has — landing the first limb without the second is
+  capability loss and NOT authorized).
+- **Blast radius is measured, not assumed:** `lift ` appears in **189 of 1920** corpus `.scrml`.
+- ⚑ **AND `E-TILDE-001/002` HAVE NEVER FIRED** — four consumers, zero producers; SPEC's own verbatim
+  INVALID examples at §32.5/§32.6/§32.7 compiled at exit 0. So part of what `~` costs is *unenforced*
+  surface, which is the cheapest kind to remove and the most misleading to keep.
+
+**Loops — bryan has DISPOSED of this limb; do not re-litigate it.** All forms stay except `do…while`.
+Corpus counts (`.scrml` only, 1920 files) are recorded as BLAST RADIUS ONLY, never as demand evidence
+(the corpus is 100% LLM-authored — [[feedback_corpus_zero_is_not_demand_evidence]]): `for (` 215 ·
+`lift ` 189 · `<each ` 81 · `.filter(` 50 · `.map(` 40 · `while (` 35 · `.forEach(` 6 · **`do {` 4** ·
+`.reduce(` 3 · `function*` 3.
+
+### Load-bearing constraints
+
+- **RESTRICT-ONLY.** Fork-rule row 1 (LIMIT wins), the limit-primitives axiom, S371 refuse-the-complement.
+  This DD may not propose widening anything.
+- **Every removal is NEWLY-REJECTING** (base §8) and therefore owes a **MEASURED migration** — compile
+  the corpus, report the count and files. Assumed-zero is not measured-zero.
+- **A `~` removal is NOT a mechanical strike.** S397's conjunction means the loop-expression form is
+  entangled with it; a proposal that removes `~` while leaving `while`'s only value-producing form
+  broken is capability loss wearing a simplification costume.
+- **Do not price in defect-count alone.** A form can be cheap to scan and still be the right thing to
+  keep, and `~` is explicitly wanted by the operator. **The deliverable is a PRICE, not a verdict on
+  taste.**
+- ⚑ **The corpus cannot answer "is this necessary."** It is LLM-authored and has never seen a human
+  writing pattern; bryan's ~20 hand-written lines in `flint` produced two HIGHs the whole corpus never
+  surfaced. Where the DD needs usage evidence about HUMAN need, say so and mark the gap.
+
+### What a verdict has to deliver
+
+1. **The stateful-scanning census** — every surface form, classified: forces scanner state / does not.
+   With the site count for each, the way the 22 comment-scanning files were counted.
+2. **A price per removal candidate**: defect surface closed (named gaps), migration cost (measured),
+   capability lost, and what it does to the 22-site problem.
+3. **A verdict on the PA's discriminator** — does "stateful scanning is expensive, parse rules are
+   cheap" survive contact with the census, or does it need replacing?
+4. **The `~` price specifically**, because the operator has pre-authorised the trade and it is the
+   single largest named candidate: what does removing it close, what does it cost to migrate 189 files,
+   what does S397's conjunction do to that number, and is there a middle (e.g. keep `~` but make it
+   lexically trivial) that buys most of the defect reduction without the capability loss.
+5. **What it does NOT buy.** The honest half: which open defects survive every proposed simplification.
+
+### Report-back
+
+`scrml-support/docs/deep-dives/` + flip `status: banked → complete` + the `(dpa: …)` delta-log
+breadcrumb. **RUN-not-RATIFY** — the dPA never flips to `ratified`; that is the PA's act with bryan.
