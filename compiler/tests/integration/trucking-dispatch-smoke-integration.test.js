@@ -442,7 +442,18 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // INFERRED (which stays 0 here — `pages/` is present, suppressing it).
     // Aggregate 42 -> 43.
     "W-OUTLET-ABSENT-SOFT-NAV-DISABLED": 1,
-    "W-PROGRAM-001": 4,
+    // entry-ness-unification (2026-09-05): W-PROGRAM-001 was 4 here, and all
+    // four were SPURIOUS — one each on channels/{customer-events,dispatch-board,
+    // driver-events,load-events}.scrml, every one of which is a canonical
+    // PURE-CHANNEL-FILE per SPEC §38.12.6 and self-documented as such in its own
+    // header comment. The warning told the author to wrap the file in
+    // `<program>`, and §38.1 would then have made that an ERROR
+    // (E-CHANNEL-OUTSIDE-PROGRAM) — the fix it prescribed broke the file. The
+    // TAB's suppression set knew only pure-module and non-entry-page shapes; it
+    // now classifies via `library-shape.js:classifyFileShape`, which carries
+    // `"pure-channel"`. REMOVED rather than set to 0, per this file's convention
+    // (a 0-count entry trips the "no UNEXPECTED codes" inverse test).
+    // Aggregate 418 -> 414.
     // phase-b1-examples-rewrite (ss11 item 7, canonical-form pass): each trucking
     // page file carried a redundant top-level `${ import ... }` wrapper inside its
     // `<page>` body. Under v0.3 default-logic mode bare top-level imports+decls

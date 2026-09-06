@@ -1552,6 +1552,38 @@ export interface MiddlewareConfig {
 // ---------------------------------------------------------------------------
 
 /**
+ * The closed set of `.scrml` file shapes, as a frozen runtime array. Every file
+ * classifies to EXACTLY one; `"bare-markup"` is the residual, so the set is
+ * exhaustive by construction and an unanticipated shape falls into the
+ * W-PROGRAM-001 branch rather than into silence.
+ *
+ * ⚑ THIS IS THE ONE DEFINITION. `FileShape` below is DERIVED from it, and
+ * `library-shape.js` RE-EXPORTS this same frozen array rather than declaring a
+ * second copy — so the runtime list and the compile-time union cannot drift.
+ * They were briefly two hand-synced lists with nothing cross-checking them,
+ * which reintroduced, one layer up, exactly the four-hand-copies failure this
+ * change exists to remove.
+ *
+ * It lives HERE rather than in `library-shape.js` because the derivation only
+ * works in this direction: `library-shape.js` is untyped from TypeScript's side
+ * (importing it from a `.ts` raises TS7016 — "implicitly has an 'any' type"), so
+ * a `typeof FILE_SHAPES[number]` written against THAT module would silently
+ * collapse to `any` and quietly delete the type rather than derive it.
+ *
+ * The classifier that produces these values is `library-shape.js:classifyFileShape`.
+ */
+export const FILE_SHAPES = Object.freeze([
+  "program",
+  "pure-module",
+  "pure-channel",
+  "non-entry-page",
+  "bare-markup",
+] as const);
+
+/** Exactly one of {@link FILE_SHAPES} — derived, never hand-listed. */
+export type FileShape = (typeof FILE_SHAPES)[number];
+
+/**
  * The complete AST for a single scrml source file.
  * Produced by `buildAST()` / `runTAB()`.
  */
@@ -1575,6 +1607,21 @@ export interface FileAST {
   channelDecls?: ChannelDeclNode[];
   /** True if the file has a `<program>` root element. */
   hasProgramRoot: boolean;
+  /**
+   * The §21.5 / §38.12.6 / §40.8 FILE-SHAPE classification — "what kind of
+   * document is this?" — computed once by `library-shape.js:classifyFileShape`
+   * and stamped at the Stage 3.004 PRECG seam (`compute-pgo-flags.ts:
+   * computeFileShape`), so both the live and the M5 native pipeline carry it.
+   *
+   * Optional in the type for the same reason the PGO `has*` flags are: an AST
+   * that has not reached PRECG does not have it yet.
+   *
+   * ⚑ NOT "is this the application entry". Per SPEC §40.8 the entry file is
+   * *"the file resolved by the build root"* — a BUILD fact that no single
+   * FileAST can carry. `"program"` says only that this file declares a
+   * top-level `<program>`. See the `library-shape.js` module header.
+   */
+  fileShape?: FileShape;
   /** Auth configuration from `<program>` attributes, or null. */
   authConfig: AuthConfig | null;
   /** Middleware configuration from `<program>` attributes, or null. */

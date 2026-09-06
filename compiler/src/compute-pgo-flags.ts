@@ -1,5 +1,8 @@
+import { classifyFileShape } from "./library-shape.js";
+
 /**
- * compute-pgo-flags — downstream pre-codegen pass for the 4 PGO has* flags.
+ * compute-pgo-flags — downstream pre-codegen passes: the 4 PGO has* flags, and
+ * the §21.5 / §38.12.6 / §40.8 file-shape classification (`computeFileShape`).
  *
  * Relocated S115 (DD #27 / F5 / Pivot 2) out of `ast-builder.js`'s TAB-time
  * FileAST assembly into a pipeline-agnostic post-AST / pre-codegen pass. The
@@ -13,8 +16,13 @@
  *   - `hasForStmt`          — any `for-stmt` node anywhere in the AST.
  *
  * These gate runtime-chunk emission in `codegen/emit-client.ts:detectRuntimeChunks`.
- * `hasProgramRoot` is NOT computed here — it is consumed inside `ast-builder.js`
- * itself (drives `isPureModuleFile` / `isNonEntryPageFile`) and stays there.
+ *
+ * `hasProgramRoot` is NOT computed here — it is the raw structural observation
+ * each parser makes at assembly time and stays there. What IS computed here is
+ * `fileShape`, the classification BUILT on it (see `computeFileShape` below).
+ * ⛑ This paragraph previously read *"`hasProgramRoot` … drives
+ * `isPureModuleFile` / `isNonEntryPageFile` and stays there"* — both of those
+ * predicates are gone, replaced by `library-shape.js:classifyFileShape`.
  *
  * Walk shape, sentinels, early-exit and conservatism semantics are transplanted
  * VERBATIM from the original `detectResetExprPresence` /
@@ -210,4 +218,44 @@ export function computePGOFlags(nodes: any[]): PGOFlags {
   const hasEqualityExpr = detectEqualityExprPresence(nodes);
   const { hasChunkedMarkupTag, hasForStmt } = detectMarkupForStmtChunkPresence(nodes);
   return { hasResetExpr, hasEqualityExpr, hasChunkedMarkupTag, hasForStmt };
+}
+
+// ---------------------------------------------------------------------------
+// File-shape classification — the same relocation shape, for the same reason.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stamp the §21.5 / §38.12.6 / §40.8 FILE SHAPE onto a FileAST.
+ *
+ * PURE-of-its-inputs, mutating only the FileAST slot — same contract as
+ * `computePGOFlags` above, and it lives here for the same S115 reason: a derived
+ * FileAST field that BOTH pipelines must carry belongs at the pipeline-agnostic
+ * PRECG seam, not in either parser's assembly. The M5 native parser gets
+ * `fileShape` with no mirrored predicate to maintain and no divergence to
+ * allowlist.
+ *
+ * ⚑ The TAB (`ast-builder.js`) independently CALLS `classifyFileShape` to decide
+ * `W-PROGRAM-001`, because that is a TAB-time diagnostic. It does not stamp.
+ * Both call sites use this one classifier over the same top-level `nodes` — the
+ * PRECG seam runs before CE, the first pass that can mutate them — so the
+ * warning and the FIRST stamp cannot disagree.
+ *
+ * ⚑ That is a statement about THIS seam only. CE rebuilds the FileAST with new
+ * `nodes`, and CHX inlining turns a channel-alias reference into a `<channel>`
+ * markup node — a shape-class change (measured: `bare-markup` -> `pure-channel`
+ * on a top-level channel-alias mount). `component-expander.ts` RE-STAMPS the
+ * field there so post-CE consumers do not read this pre-CE answer.
+ *
+ * ⚑ `fileShape` is NOT "is this file the application entry". Per SPEC §40.8 the
+ * entry is *"the file resolved by the build root"*, a BUILD fact. See the
+ * `library-shape.js` module header.
+ *
+ * @param fileAST A FileAST from either pipeline; `nodes` + `hasProgramRoot` are read.
+ */
+export function computeFileShape(fileAST: any): void {
+  if (!fileAST || typeof fileAST !== "object") return;
+  fileAST.fileShape = classifyFileShape(
+    fileAST.nodes ?? [],
+    fileAST.hasProgramRoot === true,
+  );
 }
