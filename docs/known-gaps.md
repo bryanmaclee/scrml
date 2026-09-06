@@ -2189,6 +2189,46 @@ accumulating unnoticed is the empirical proof that it does.
 ### g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy — the stale-worktree sweep has been owed since S268 because its natural probe answers the wrong question: we land by copying file CONTENT, so an agent branch is never an ancestor of main and `--merged` reports "nothing prunable" forever — `NEW S326-bryan; MED; open`
 <!-- @gap id=g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy sev=MED status=open locus=searched:scripts/,compiler/scripts/ — no script implements wrap 6b; the step is manual prose in ../scrml-support/pa-scrml-overlay.md {{wrap_step_fills}} 6b prov=rationale:the-sweep-owed-since-S268-is-a-probe-mismatch-not-a-backlog -->
 
+⛑ **S402-bryan — THE BITE PROOF S365 SAID WAS THE REMAINING WORK IS DONE, TWO-SIDED, AND THE SWEEP NOW HAS ITS FIRST TRUSTWORTHY NUMBER.**
+
+⛑ **FIRST: THE METHOD IS STRANDED IN AN UNMERGED PR.** S365 derived the working probe and recorded it on this entry — but that landed only on the branch of **PR #655 (`docs/s365-sweep-probe-method`), still OPEN since 2026-08-23.** `main`'s copy of this entry is the S326 DIAGNOSIS only; the method is not here. So the work exists, is correct, and is invisible to every session that reads main — the same shape as a deliberation banked outside the drain path (base §10). **#655 should land.**
+
+**The probe, implemented and executed at `603d1429`** (per-file content compare restricted to the files the BRANCH changed, plus S365's "did main change it after the merge" discriminator):
+
+```sh
+mb=$(git merge-base origin/main "$b")
+for f in $(git diff --name-only "$mb" "$b"); do
+  git diff --quiet "$b" origin/main -- "$f" && continue        # content is in main
+  git diff --quiet "$mb" origin/main -- "$f" && echo "ABSENT: $f"   # main never touched it => genuinely absent
+done                                                            # else: main moved it after the merge => false positive
+```
+
+**THE BITE PROOF — two-sided, and the positive control is stronger than the planted branch S365 proposed:**
+
+| control | expected | probe said |
+|---|---|---|
+| `worktree-agent-ad288a300a89587b0` (engine state-child swap, **held, unlanded**) | KEEP | **KEEP** — 30 touched, 28 genuinely absent |
+| `worktree-agent-a7754ec5541a9ab8f` (prod-404 fork (b), **held, unlanded**) | KEEP | **KEEP** — 6 touched, 5 absent |
+| `worktree-agent-a908cd66f7d2bf2db` (apostrophe branch, **superseded, unlanded**) | KEEP | **KEEP** — 17 touched, 16 absent |
+| `worktree-agent-aec4d874cd0003ee3` (entry-ness, **squash-merged as #859 this session**) | SWEEPABLE | **SWEEPABLE** — 14 touched, **0** absent |
+
+⛑ **Why the positive control is the load-bearing half:** it is a REAL squash-merge from this session, and the naive `--is-ancestor` probe called it *unmerged* twenty minutes before it was landed. A planted synthetic branch proves the KEEP direction only; this proves both, on real history, against the exact failure mode that made the previous probes useless.
+
+**FIRST TRUSTWORTHY DRY RUN — 88 branches, NOTHING REMOVED:**
+
+| | count |
+|---|---|
+| **SWEEPABLE** (every change present in main) | **48** |
+| **KEEP** (work genuinely absent from main) | **36** |
+| live / deliberately retained (excluded by name) | 4 |
+
+⛑ **The broken ancestry probe said 30 merged / 53 not — it under-reported sweepable by 18**, which is exactly the squash-merge blindness S365 diagnosed, now measured rather than argued.
+
+⛑ **AND THE 36 IS ITSELF A FINDING, NOT JUST A DENOMINATOR.** Thirty-six agent branches carry file content that never reached main — orphaned work from crashed, superseded or abandoned dispatches, several touching 30+ files. That is a separate question from disk hygiene and should not be swept without someone deciding whether any of it is worth recovering.
+
+**NOT EXECUTED, deliberately.** A wrong sweep is irreversible work loss; the standing rule is dry-run-then-authorize, and removal is bryan's call. **Remaining work is now small and named:** promote the probe from prose to `scripts/` so wrap 6b has an executable step (this entry's own locus says *"no script implements wrap 6b; the step is manual prose"* — the obligation and the probe still do not resolve to the same artifact, base §10), and land #655.
+— `BITE PROOF SUPPLIED S402-bryan (two-sided, executed at 603d1429; the positive control is this session's own squash-merged branch)`
+
 **The mismatch.** Wrap step 6b says to land-then-remove worktrees whose work integrated this session.
 The obvious probe is `git branch --merged origin/main`. That is correct under a merge-based landing
 model and **structurally wrong under ours**: `{{landing_command_fills}}` lands an agent's work by
