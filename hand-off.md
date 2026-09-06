@@ -1,139 +1,122 @@
-# scrml — Session 400 (bryan · ASUS-Vivobook) — WRAP
+# scrml — Session 402 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-09-04/05. Booted `/boot` Profile A onto `83f95592`. Ran alongside peter (S398→S401).
-Main closed at `1e69d3b2`. Four landings: **#836 · #851 · #852 · #853**.
+**Date:** 2026-09-05/06. Booted `/boot` Profile A onto `68ed2ce2`. Ran solo (S401-peter wrapped).
+**14 PRs landed.** Mechanical state — landings, counts, the session stream — is in `docs/changelog.md`
+and `handOffs/delta-log.md` ([2812]–[2855]); this file carries only what those cannot.
 
-**The framing: the day's defects were almost all CLAIMS OF COVERAGE THAT WERE FALSE.** Not bad logic —
-instruments, comments, docstrings and normative sentences asserting they checked something they did
-not. Eight distinct instances, listed in §4. If you read one thing here, read that.
+**The framing: this session stopped being an execution session.** Mid-way, bryan hand-wrote ~20 lines
+of scrml on his other machine — **the first scrml ever written by a human** — and found two HIGHs the
+entire 2,400-file LLM-authored corpus had never surfaced. Everything after that is measurement against
+one question: *is this language salvageable?*
 
 ---
 
 ## ⏭ NEXT-SESSION PICKUP
 
-### 1. ⚑⚑ ENTRY-NESS IS NOT A FACT THE COMPILER RECORDS — bryan deferred the fix to next session
-**Ruled S400, verbatim: *"we will have to take that fix next session."*** Measured, not asserted:
-**11 sites reconstruct "which document is the application entry", using 6 different rules**, and
-**no rule is correct on all three real shapes** (flagship · `<program>`-less SPA · channel+page).
+### 1. ⚑⚑ OPEN ON THE `int`/`number` RULING — bryan's explicit instruction
+> *"start next session with expounding on int/number"*
 
-| rule | where | flagship | `<prog>`-less | channel+page |
-|---|---|---|---|---|
-| A `hasProgramRoot` | 6 sites incl. `auth-graph.ts:971` | ✓ | ✗ | ✓ |
-| B 3-way shape | `ast-builder.js` — **computed, used for ONE lint, DISCARDED** | ✗ | ✓ | ✗ |
-| C pure-module+exports | `api.js:1413` — **a hand copy of B, says so in its own comment** | — | — | — |
-| D not-a-top-level-`<page>` | the S400 arc | ✗ | ✓ | ✗ |
-| E `inputFiles.length === 1` | `dev.js:949` — **no AST consulted at all** | — | — | — |
-| F filesystem position | `route-inference.ts:6392` | ✗ | ✓ | ✗ |
+**It blocks §7.5.1 position 3 — bryan's own `fn bad(a: number, b: string)` case.** Position 3 is
+**97.5% false-positive today**: of 40 corpus rejections, **37 are `f(k: int)` called with `1`**, and
+**SPEC has no `int`/`number` assignability rule anywhere** (searched; §53's grammar lists `integer` as
+a base type, §14.1.2 lists `int` as a builtin, nothing rules the pair). `int` → `tPrimitive("integer")`
+in `BUILTIN_TYPES`; `fieldTypeEquals` compares primitives by NAME.
 
-**The fix is smaller than it looks: stop discarding B**, teach it channel files + wrapper-less entries,
-have consumers read it. Touches ast-builder · auth-graph · codegen/index · route-inference · dev · api.
-**Re-runnable census probe:** `docs/changes/prod-root-fallback-gated-2026-09-05/rulecensus.ts`.
-⚑ Falls out of it: `W-PROGRAM-001` fires on all four canonical §38.12.6 channel files in the flagship —
-the compiler telling an adopter to wrap a channel in `<program>`.
+**One sentence of SPEC unblocks the check bryan actually wanted.** The remaining 3 of 40: 1 union-source
+gap in `fieldTypeAssignable`, and **1 genuine defect** in the flagship (`loads.scrml`, `matchesFilter`
+passes `loadStatus: string` into `isActiveLoad(status: LoadStatus)`; the author's own comment shows they
+knew).
 
-### 2. TWO HIGH DEFECTS FOUND AND **NOT YET FILED** (ledger was contended all session)
-Both are in #853's commit body with full evidence; neither is in `docs/known-gaps.md`.
-- **`benchmarks/todomvc/app.scrml` is DEAD ON ARRIVAL since `cdf4f4de` (2026-07-30, `if=` Phase 2
-  mount-`<template>`).** Compiles exit 0, throws on first render in BOTH harnesses, zero rows.
-  `querySelector` does not descend into template content so `const _scrml_lift_tgt_N` binds null.
-  Bisected 12 steps; 24-line repro. ⚑ **`browser-todomvc.test.js` (36/0) and `todomvc-e2e.test.js`
-  (10/0) are GREEN against the dead build** — the harness swallows the init throw into `initError`
-  and no test asserts a rendered row. Same class as `g-call-expression-interpolation-in-if-chain-
-  branch-renders-empty` (resolved S400-peter): that fix stamped `insideMountTemplate` on static-display
-  sites, not the lift-target site.
-- **A post-May runtime regression: happy-dom `partial-update` 1.04 → 17.9 ms (17.2×), Chrome
-  0.80 → 260.7 ms (326×, from 6.9× faster than React to 47× slower).** Moves swap-rows / remove-row /
-  delete-every-10th together while select-row and bulk-create stay flat → **per-item reconciliation**.
-  Bundle +138%, build 2.06×. Per-round ranges disjoint; not noise.
+⚑ **And be honest about what position 3 buys**, because the scoping was: **900 of 1034 resolved call
+positions have an UNANNOTATED param**, and `compiler/self-host` has **74 `fn` declarations with ZERO
+annotated parameters**. Enforcement has almost nothing to bite on *in the corpus* — but the corpus is
+LLM-authored, and the one human who wrote scrml annotated on his first try and got nothing back.
 
-### 3. TWO ARCS HELD — branches retained, both clean, neither landed
-- **Engine state-child producer swap** — `worktree-agent-ad288a300a89587b0` @ **`32621e48`**.
-  ⚑ **bryan's Q1 ruling IS BUILT AND PA-VERIFIED BOTH DIRECTIONS** (nested state-child → new
-  `E-ENGINE-STATE-CHILD-NESTED`; `<p><Card/></p>` chrome → compiles). Conformance 907/907, `-neg`
-  bite-checked, §51.0.B amendment written, `E-CTX-001` reused as a second fire site rather than minted
-  (§4.18.3 already assigned it — that call was right, do not undo it).
-  **HELD on a reviewer-reported HIGH I did NOT reproduce** (mark RELAYED): `containsPascalCaseOpenerDeep`
-  `continue`s on non-`Markup` children while `walkMisplacedStateChildren` now descends them, so they
-  disagree and `E-ENGINE-RULE-LEGACY-SYNTAX` fires on an ordinary arrow function, its early `return`
-  suppressing the errors that name the real cause. The `-neg` fixture misses it only because it has
-  no `=>`. Sibling MEDIUM at `engineHasUnmodellableOpener`. **The agent's transcript is GONE — resume
-  is impossible; the branch is what survives.**
-- **Prod root-entry fallback (b)** — `worktree-agent-a7754ec5541a9ab8f` @ **`b0e9469d`**. Stopped by
-  §1's ruling. The single-document SPA case works end-to-end (incl. `auth="required"` → 302, no leak);
-  the multi-file case is disabled by the missing entry fact.
-- **Apostrophe branch** — `worktree-agent-a908cd66f7d2bf2db` @ `856e8f27`. Superseded; its six
-  conformance cases were harvested into the swap. Safe to sweep.
+### 2. THE THREE MEASUREMENTS — all landed, all re-runnable
+- **Native-parser flip** (`scripts/native-parser-flip-harness.ts`, committed): control 54 · **NEW 1860 /
+  GONE 7**. Like-for-like **416 vs S170's 508** (−18%), and the decline was **not** bought by parser
+  work. **~90 sessions to flip.**
+- **Bridge survey**: the optimistic case is **dead**. Plumbing ≤3% (an oracle upper bound), real parser
+  divergence **73%**, ~23 clusters, largest a **122-edit-site check relocation**. **17% of conformance
+  sources fail to parse** under native. ⚑ The premise it tested — "the bridge doesn't carry AST fields"
+  — was **never measurable**: `conformance/run.ts:326` `missing` holds *codes*, not fields.
+- **Type-annotation census** (re-runnable): **28% → 33% enforced** after this session's two wins. The
+  split is the finding: §53 predicates **6/7**, §7.5 base annotations **4/29 → 6/29**.
 
-### 4. ⚑ THE DAY'S DEFECT CLASS — false claims of coverage. Eight instances.
-1. `E-PROGRAM-002` cited by a docstring as existing — **unimplemented; two of three grep hits were that
-   docstring's own comments.**
-2. `bun run bench` passed `--timing`, not an option — **broken since 2026-04-10, never worked in this
-   repo**, and pointed at the negative-fixture corpus. Fixed S400; baseline now 8,095 ms on `examples/`.
-3. `corpus-emit-differential.ts` false-diffs **1027 of 7427** artifacts across checkout paths and prints
-   the full CONTENT DIFFERENCES list **under an INCOMPARABLE verdict**. Used as a landing gate 3× today.
-4. `E-TILDE-001/002` — four consumers, **zero producers**; never fired on real source.
-5. Two tripwires carrying **the exact defect they existed to catch**.
-6. `"cannot corrupt closer-finding"` shipped into the ledger and falsified by the next round's own code.
-7. **SPEC §17.6.6's own worked example**, annotated *"valid"*, compiles exit 0 / `node --check` clean and
-   emits a `let` read from outside its block — guaranteed `ReferenceError`. Filed HIGH.
-8. Both TodoMVC test files green against a dead app (§2).
+⚑ **THE TWO LAYERS SWAPPED PLACES against the session's opening read.** The type system — which I
+called healthy off a clean entry-ness landing — has the **tractable** problem (a working engine simply
+not wired to plain annotations). The parser — which has a built replacement and a ratified deletion
+plan — has the **intractable** one.
 
-### 5. RULINGS OWED — bryan's
-- **dpa-037 / 038 / 039 / 040** — four calls each; **039 time-sensitive** (warns dpa-030 must not be
-  ratified on its premises). **dpa-041 / 042 returned S400** — four calls each, in `handOffs/dpa-queue.md`.
-- **§35.8's "the full `lin` rule set applies to `~`" is FALSE on the merits** — dpa-040 and dpa-042
-  reached it independently from different directions. That convergence is itself the finding.
-- **Q8 `fail .Variant`** — `E-ERROR-009` rejects it while `match` accepts bare-variant on the same type
-  in the same file. §14.10 grants inference at LHS/parameter positions; a `fail` operand is neither.
-- **Promote `compiler/tests/commands/`** into a blocking job — its one-decider security assertion sits
-  outside every gate that can fail a merge.
-- **The `/` route collision** — §47.9.2 routes two sources to `/` in a multi-page app with both an entry
-  shell and `pages/index.scrml`. Unowned.
-- **Bare markup under `pages/`** served at both `/` and `/foo` — undecided, no governing sentence.
-- **FSP `Initialize`** (~5 days) · **`g-cli-emits-artifacts` tier** (ruled MED S354, measured HIGH S397).
+### 3. HELD, NOT LANDED
+- **PR #865 (DRAFT) — the apostrophe fix.** `worktree-agent-a4652f4f211575b20` @ `3e310877`, 56 tests.
+  **Stopped by rule at five rounds**; four of five each produced a NEW same-class silent drop. Round
+  5's case is ordinary scrml. **Ruling owed** — restructure to one shared body-mode-aware scanner ·
+  a narrower fix (may not exist) · or neither, because Charter B deletes the block-splitter.
+- **Three S400 branches still retained** (`ad288a300a89587b0` @ `32621e48` · `a7754ec5541a9ab8f` @
+  `b0e9469d` · `a908cd66f7d2bf2db` @ `856e8f27`). ⚑ **The prod-404 arc is NOT unblocked by the
+  entry-ness landing** — §40.8 makes entry identity a BUILD fact over a file SET.
 
-### 6. RULED THIS SESSION — do not re-open
-- **Q1 engine state-child: STRUCTURAL** (built, held per §3).
-- **Q2 prod-404: fork (b), gated root fallback** (built, held per §1).
-- **NO PERF GATE** — *"easy enough to just recompile and measure time dif on occasion."* Recorded on the
-  gap entry so a sweep does not read an open question into it.
-- **The `<each>` blindness is HIGH** — *"I would consider that a high bug."*
-- **§13.2 auto-await is not a question** — bryan: *"I dont see a Q here."* Correct: no adopter can depend
-  on the current behaviour because §19.9.8 forbids `await` in source, so every affected site is already
-  broken. It is a plain conformance fix; I had escalated a process obligation into a question.
+### 4. RULINGS OWED — bryan's
+- **`int`/`number` assignability** (§1 above) — the opener.
+- **The apostrophe restructure fork** (§3).
+- **dpa-043 (lazy/pull/`yield`)** and **dpa-044 (stateful scanning)** — both COMPLETE-ADVISORY, awaiting
+  ratification. dpa-043's banked question is **false as framed** (scrml has had normative lazy pull since
+  §6.6.3, predating §13.6); dpa-044's **Call 1 outranks its own banked question**.
+- **dpa-037/038/039/040/041/042** — still owed, 039 time-sensitive.
+- **The worktree sweep** — 48 sweepable, **36 branches carrying work that never reached main**.
+- **S391 FSP `Initialize`** — read and decision-ready in one screen.
+- The `/` route collision · the pre-CE alias-mount residual · `g-cli-emits-artifacts` tier.
+
+### 5. RULED THIS SESSION — do not re-open
+- **The native-parser meter is VOID** — *"the honest answer is: I don't know."* Measured ambiguous by
+  construction. Retired as an instrument; do not quote it either way.
+- **All loop forms stay except `do…while`.**
+- **`~` is negotiable** against V1 confidence — but **every voice refused the bare delete**; the middle
+  bryan named (keep it, make it lexically trivial) is the right diagnosis, and the migration sizing is
+  **not done** and must precede scheduling.
+- **Land the two cheap wins; bank strip-first.** Both done.
 
 ---
 
 ## 🔭 DURABLE
-**The meta-pattern, twice in one day: the compiler computes a fact, does not record it, and N places
-reconstruct it badly.** Morning — `engine-decl.bodyChildren` already carried the structure and PASS 11
-fell back to a text re-scanner because nobody built the bridge; Phase A10/S78 delivered the fact and the
-follow-through was never done. Afternoon — entry-ness, §1. **Look for this shape first.**
 
-**Corollary, from the arc that stopped:** when a walker's reach widens, every predicate sharing that
-traversal must be told. Three instances in one arc. The structural answer — one descent, per-consumer
-predicates — is what the agent applied to detection and did not generalise.
+**The corpus cannot answer ergonomic questions, and this session proved it twice.** Twenty
+hand-written lines produced more signal than 2,400 generated files. Every HIGH filed today is a shape a
+human reaches for first: a comment mid-body, an annotated `fn` parameter, an interpolated template in a
+state cell. **The corpus is an artifact of what LLMs have seen, and it is blind in exactly the places a
+human is not.** Where a design question needs usage evidence about HUMAN need, the corpus is not
+evidence — say so and mark the gap.
+
+**The verification lesson, paid for four times today: a control that shares state with the thing under
+test proves nothing.** I compared "base vs head" using a checkout that already had the fix pulled into
+it and nearly overruled a genuine HIGH. A probe grep pulled `#385` out of a report *header*. A fixture
+injected a token into a different state-child than the one under test. **Every one read as clean.**
+
+---
 
 ## ⚑ MISSES (mine)
-1. **★★★ I nearly rejected a correct SPEC citation** because I read the §47.9.2 heading ("Per-Artifact
-   Output Path"), saw it was about paths, and stopped — the route-inference table is inside it. The
-   agent was right; I was about to overrule it.
-2. **★★ Two false-negative probes.** A grep for `__scrml_engine_[a-zA-Z]+_idle` that missed a
-   hash-encoded name and read as agreement; an HTML-comment fixture for a defect that only reproduces
-   with `/* */`. Both times my "did not reproduce" was the probe, not the code.
-3. **★★ I over-escalated §13.2** into a question for bryan when the direction analysis dissolved it.
-4. **★ I told an agent dev was precedent for prepending.** `dev.js:1020` says the opposite.
-5. **★ I under-counted the gap ledger** (78/206 vs 85/211) with a grep requiring attribute order.
 
-## Gate at close (S400)
-`bun test unit+integration+conformance` — **23,240 pass · 70 skip · 0 fail**.
-Gaps: **HIGH 88 · MED 210 · LOW 89 · Nominal 7**. Main `1e69d3b2` → wrap PR. Coherence 0/0 both repos.
-⚑ **Maps UNCHANGED and that is correct** — zero compiler-source commits reached main this session; all
-compiler work is held on the three retained branches. Do not read the stale watermark as a skipped step.
-⚑ **~80 stale agent worktrees have accumulated** under `.claude/worktrees/`. Not this session's (mine are
-the three named in §3, all retained deliberately). A sweep needs a dry-run listing targets first.
+1. **★★★ Contaminated control.** 27 fix-markers in the tree I called "base" vs 0 at `origin/main`; every
+   comparison measured the fix against itself. I told the agent the regression looked pre-existing. It
+   was real, the reviewer was right.
+2. **★★ Ran the advisory `types` gate, never `types:check`** — a separate gate against
+   `TYPES-BASELINE.json` that was exit 1 with 2 of ours.
+3. **★★ Gave an agent a bad instruction** — *"get `types:check` to exit 0"* — which it correctly refused;
+   exit 0 was only reachable by absorbing 12 unrelated diagnostics.
+4. **★★ A commit message asserted two gaps were "filed"** while `known-gaps.md` was not in the commit.
+5. **★ Relayed bryan's simplification thesis as the narrower question** ("would removal fix the HIGH")
+   into dpa-044; his claim is about HARDENING COST.
+6. **★ Recorded `#385` as deliberately-left-owed** — it was reviewed clean at S316; my grep matched the
+   probe's header line.
+7. **★ Two numbers of mine did not reproduce**: "22 files hand-roll comment scanning" (it is **10**) and
+   "12 call sites across six scanners" (12 sites, **8** enclosing functions; `findOpenerEnd` not among
+   them). Both corrected by the agents that checked them.
 
-## Mechanical state
-Landings, counts and the session stream: `docs/changelog.md` + `handOffs/delta-log.md`. Review floor
-drained 2→0 and re-recorded. Three worktrees retained (§3). Inbox: flogence ×2 received and committed
-(both arrived **untracked** — the per-clone hazard, twice in one day); peter's four remain bryan's.
+## Gate at close
+Cloud `gate` GREEN. `tracking` RED — pre-existing and filed
+(`g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only`); five dev-server tests expire their
+own `waitFor` budgets in cloud CI while passing locally. Gaps **HIGH 95 · MED 213 · LOW 90 · Nominal 7**.
+Review floor: 1 OWED (the instrument's own recursion). Maps refreshed — ⚑ the watermark was **4 sessions
+behind, not 1**. ⚑ **~116 worktrees have accumulated**; the sweep probe is now bite-proven and the dry
+run is recorded, but **nothing was removed** — that is bryan's call.

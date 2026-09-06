@@ -26,13 +26,20 @@
  *   that is a regression, not a stricter compiler.
  *
  * WHAT IS DELIBERATELY *NOT* TESTED HERE
- *   - E-TYPE-031's fire behaviour is unchanged (rung 0 changed nothing about
- *     it); `gauntlet-s19/type-annot-mismatch.test.js` owns that.
- *   - Rungs 1-3 (widening the literal set, argument / return / operand
- *     positions, the builtin-method catalog) are separate dispatches. The
- *     `inferenceGap` arms they will convert are asserted here AS GAPS, on
- *     purpose: when a rung lands, the corresponding test below flips from
- *     "reports a gap" to "infers a type", and that flip is the rung's proof.
+ *   - E-TYPE-031's fire behaviour; `gauntlet-s19/type-annot-mismatch.test.js`
+ *     owns that.
+ *   - The remaining rungs (argument / return / operand positions, the
+ *     builtin-method catalog) are separate dispatches. The `inferenceGap` arms
+ *     they will convert are asserted here AS GAPS, on purpose: when a rung
+ *     lands, the corresponding test below flips from "reports a gap" to "infers
+ *     a type", and that flip is the rung's proof. Section 3 carries the flip
+ *     marker that says so at the point of use.
+ *
+ * LANDED SINCE
+ *   - S402 — the §7.5.1 position-1 LITERAL SET. `bool` and `template` literals
+ *     now infer, so `let flag = true` and ``let s = `hi` `` moved from
+ *     GAP_CASES (section 3) to SILENT_CASES (section 4). The `lit` gap row is
+ *     re-pointed at the `not` literal, which `inferExprType` still declines.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -227,11 +234,29 @@ describe("S365 §14.7 — an authored `asIs` is silent, because a human signed f
 
 describe("S365 §7.5 — a defeated inference warns, names the node kind, and still compiles", () => {
 
+  // ⚑ FLIP MARKERS. Every row here is an OPEN gap in `inferExprType`, asserted
+  // as a gap ON PURPOSE. Closing one of these is a §7.5.1 widening, and the
+  // proof that it landed is that the matching row below turns RED. A red row
+  // here therefore means one of two things and you must decide which:
+  //
+  //   (a) you closed the gap  → MOVE the row to SILENT_CASES in section 4 and
+  //                             say so in the commit; the flip IS the evidence.
+  //   (b) you broke something → the gap arm stopped firing for a reason you did
+  //                             not intend. That is a regression.
+  //
+  // Green-turning-red is not automatically breakage in this describe block, and
+  // reading it that way is how a landed widening gets reverted by mistake.
+  //
+  // S402 precedent: the `lit` row used to read `let flag = true`. The §7.5.1
+  // position-1 literal-set widening typed `bool` and `template` literals, so
+  // that row went red and MOVED to SILENT_CASES. The row is re-pointed here at
+  // the `not` literal — the one `litType` `inferExprType` still declines to
+  // type — so the `lit` gap arm stays pinned rather than disappearing with it.
   const GAP_CASES = [
     ["call",    'fn loadBox() {\n    return 1\n  }\n  let box = loadBox()\n  print(box)'],
     ["array",   "let xs = [1, 2, 3]\n  print(xs.length)"],
     ["object",  "let cfg = { a: 1 }\n  print(cfg.a)"],
-    ["lit",     "let flag = true\n  print(flag)"],
+    ["lit",     "let x = not\n  print(x is not)"],
     ["binary",  'let z = "x" * 2\n  print(z)'],
     ["ternary", "let n = 1\n  let t = n > 0 ? 1 : 2\n  print(t)"],
   ];
@@ -276,9 +301,16 @@ describe("S365 §7.5 — a defeated inference warns, names the node kind, and st
 
 describe("S365 — inference that SUCCEEDS stays silent", () => {
 
+  // The four literal forms that denote a §7.5 primitive are all typed. `bool`
+  // and `template` arrived with the S402 §7.5.1 position-1 literal-set
+  // widening — they were GAP_CASES rows until that landed, and moving them
+  // here is the widening's proof (see the flip-marker note in section 3).
   const SILENT_CASES = [
     ["number literal", "let n = 5\n  print(n)"],
     ["string literal", 'let s = "hi"\n  print(s)'],
+    ["boolean literal", "let flag = true\n  print(flag)"],
+    ["template literal", "let s = `hi`\n  print(s)"],
+    ["interpolated template literal", 'let a = "hi"\n  let s = `${a}!`\n  print(s)'],
     ["negative number literal", "let n = -42\n  print(n)"],
     ["annotated primitive", "let n: number = 5\n  print(n)"],
   ];

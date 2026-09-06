@@ -489,23 +489,32 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // inference, and say so. The program is unchanged: same emit, same acceptance,
     // exit 0.
     //
-    // WHERE THE 338 COME FROM — measured, not estimated:
+    // WHERE THE 321 COME FROM — measured, not estimated:
     //     232  call            a call result with no annotation and no known
     //                          `fn` signature (rung 2/3: return-type inference)
     //      28  ternary         branch types not unified
     //      27  member          member access (rung 3: the builtin-method catalog)
-    //      17  lit             `bool` / template literals — inference types only
-    //                          `number` and `string` today (rung 1)
     //      14  binary          operand typing does not exist at all (rung 3)
     //      10  index
     //       5  ident
     //       5  array           element type not unified
+    //       0  lit             ← RETIRED by S402, see below
     //
-    // 68% of it is ONE node kind (`call`), and rungs 1-3 retire most of the rest.
-    // When those land this number SHALL fall, and a fall is the success signal —
-    // update it downward here and say which rung bought the reduction.
+    // 72% of it is ONE node kind (`call`), and the remaining rungs retire most
+    // of the rest. When those land this number SHALL fall, and a fall is the
+    // success signal — update it downward here and say which rung bought the
+    // reduction.
+    //
+    // ⚑ S402 — §7.5.1 position-1 LITERAL SET. 338 -> 321, aggregate 414 -> 397.
+    // A DOWNWARD move, and it is the fix working, not a regression. The `lit`
+    // row above was 17: `inferExprType` typed only `number` and `string`
+    // literals, so every un-annotated `let flag = true` and ``let s = `hi` ``
+    // in this app reported a coverage hole in the COMPILER. `bool` and
+    // `template` now infer, the 17 are gone, and `lit` is 0 rather than absent
+    // because the arm still exists for the `not` literal — it simply has no
+    // site in this app.
     // Aggregate 74 -> 80 (#409 W-IF-IN-EACH) -> 418.
-    "W-TYPE-031-UNPROVEN": 338,
+    "W-TYPE-031-UNPROVEN": 321,
   };
 
   test("aggregate diagnostic count matches baseline", () => {

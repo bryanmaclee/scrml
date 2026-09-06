@@ -576,14 +576,30 @@ function inferExprType(node: ExprNode): InferenceResult {
 
     case "lit": {
       const lit = node as LitExpr;
-      // Only `number` and `string` are typed today. The others are named gaps
-      // rather than quiet `asIs`, which is what makes the rung-1 widening a
-      // measurable decision instead of a guess.
+      // The four literal forms that denote a §7.5 primitive are typed. The
+      // remaining `litType`s (`not`, and the two deprecated `null`/`undefined`
+      // variants) are named gaps rather than quiet `asIs` — §42 absence is a
+      // separate question from primitive assignability, and naming the gap is
+      // what makes closing it a measurable decision instead of a guess.
+      //
+      // S402 (§7.5.1 position-1 literal-set widening) added `bool` and
+      // `template`. Before it, `let flag = true` and ``let s = `hi` `` each
+      // emitted `W-TYPE-031-UNPROVEN` at ``gap at `lit` `` — the compiler
+      // reporting a coverage hole over two of the language's four literal
+      // forms. A `template` is a string whether or not it interpolates, so
+      // this arm does not need the static/interpolated distinction that
+      // `classifyLiteralFromExprNode` draws for §53.4's benefit.
       if (lit.litType === "number" && typeof lit.value === "number") {
         return inferenceOk(tPrimitive("number"));
       }
       if (lit.litType === "string" && typeof lit.value === "string") {
         return inferenceOk(tPrimitive("string"));
+      }
+      if (lit.litType === "template" && typeof lit.value === "string") {
+        return inferenceOk(tPrimitive("string"));
+      }
+      if (lit.litType === "bool" && typeof lit.value === "boolean") {
+        return inferenceOk(tPrimitive("boolean"));
       }
       return inferenceGap("lit", `\`${lit.litType}\` literal`);
     }
@@ -3382,22 +3398,51 @@ function checkPredicateLiteral(
 /**
  * SourceInfo — describes what the type system knows about a value at an assignment site.
  *
- * "literal"       — value is a known compile-time number or string literal.
- * "predicated"    — value already carries a predicate constraint.
- * "arithmetic"    — value is the result of arithmetic on a predicated type (T-PRED-5).
- * "unconstrained" — value source cannot be determined at compile time.
+ * "literal"           — the VALUE is known at compile time (number, string or boolean).
+ * "literal-type-only" — the initializer is syntactically a literal of a known
+ *                       primitive TYPE, but its value is not statically known.
+ *                       §7.5.1 assignability needs only the type; §53.4's
+ *                       predicate zone needs the value, and must not pretend it
+ *                       has one. An INTERPOLATED template literal is this kind.
+ * "predicated"        — value already carries a predicate constraint.
+ * "arithmetic"        — value is the result of arithmetic on a predicated type (T-PRED-5).
+ * "unconstrained"     — value source cannot be determined at compile time.
  */
 type SourceInfo =
-  | { kind: "literal"; value: number | string }
+  | { kind: "literal"; value: number | string | boolean }
+  | { kind: "literal-type-only"; type: "string" | "number" | "boolean" }
   | { kind: "predicated"; predType: PredicatedType }
   | { kind: "unconstrained" }
   | { kind: "arithmetic" };
 
 /**
+ * The primitive type a SourceInfo denotes, or null when it denotes none.
+ *
+ * This is the ONE thing §7.5.1 position 1 and position 2 need from a source:
+ * the primitive name to compare against the annotation. It deliberately does
+ * NOT expose the value — that is §53.4's business, and the two questions have
+ * different answers for an interpolated template.
+ */
+function sourcePrimitiveType(info: SourceInfo): "string" | "number" | "boolean" | null {
+  if (info.kind === "literal") {
+    const t = typeof info.value;
+    return t === "string" || t === "number" || t === "boolean" ? t : null;
+  }
+  if (info.kind === "literal-type-only") return info.type;
+  return null;
+}
+
+/**
  * Try to extract a SourceInfo from a raw init expression string.
- * Conservative: only matches unambiguous numeric or string literals.
+ * Conservative: only matches unambiguous numeric, string, boolean or
+ * back-tick-template literals.
  * Returns "arithmetic" if binary arithmetic operators are detected.
  * Returns "unconstrained" for everything else.
+ *
+ * This is the FALLBACK path — used only where a declaration carries no parsed
+ * `initExpr`. `classifyLiteralFromExprNode` is the structured equivalent and
+ * the two SHALL agree on the literal set, or §7.5.1 enforcement would depend
+ * on which parse path a declaration happened to take.
  */
 function extractInitLiteral(init: unknown): SourceInfo {
   if (typeof init !== "string") return { kind: "unconstrained" };
@@ -3414,6 +3459,20 @@ function extractInitLiteral(init: unknown): SourceInfo {
       ((raw.startsWith('"') && raw.endsWith('"')) ||
        (raw.startsWith("'") && raw.endsWith("'")))) {
     return { kind: "literal", value: raw.slice(1, -1) };
+  }
+
+  // Boolean literal.
+  if (raw === "true") return { kind: "literal", value: true };
+  if (raw === "false") return { kind: "literal", value: false };
+
+  // Back-tick template literal — a STRING. Its VALUE is known only when the
+  // template carries no `${…}` interpolation; see `isStaticTemplateLit` in
+  // expression-parser.ts for the structured equivalent of this test.
+  if (raw.length >= 2 && raw.startsWith("`") && raw.endsWith("`")) {
+    const body = raw.slice(1, -1);
+    return body.includes("${")
+      ? { kind: "literal-type-only", type: "string" }
+      : { kind: "literal", value: body };
   }
 
   // Arithmetic: *, /, + operators, or digit followed by binary minus
@@ -3624,9 +3683,26 @@ function classifyPredicateZone(
 
   switch (sourceInfo.kind) {
     case "literal":
+      // A BOOLEAN literal is not a value this machinery can decide:
+      // `evaluatePredicateOnLiteral` is defined over `number | string`, and
+      // `checkPredicateLiteral` returns `null` — "cannot be determined" — for a
+      // boolean by construction. Before the S402 literal-set widening
+      // (§7.5.1 position 1) a boolean could not reach here at all, because the
+      // syntactic classifier never produced one; it classified as
+      // `unconstrained` and got a BOUNDARY runtime guard. Returning "static"
+      // here would silently DELETE that guard in exchange for a compile-time
+      // check that does not happen. So the zone is unchanged from what this
+      // position had before the widening — which is also the honest answer.
+      if (typeof sourceInfo.value === "boolean") return "boundary";
       // T-PRED-1: evaluate predicate against literal at compile time
       checkPredicateLiteral(targetType, sourceInfo.value, span, errors);
       return "static";
+
+    case "literal-type-only":
+      // The TYPE is known, the value is not (an interpolated template). There
+      // is nothing to evaluate statically, so the runtime check stands —
+      // T-PRED-2, the same answer `unconstrained` gets.
+      return "boundary";
 
     case "predicated":
       // T-PRED-4: does the source constraint statically imply the target?
@@ -10439,8 +10515,11 @@ function annotateNodes(
             if (letAnnoType && letAnnoType.kind !== "asIs") {
               resolvedType = letAnnoType;
             }
-            // §14: E-TYPE-031 literal-mismatch for unpredicated primitive annotations
-            // (number/string/boolean). More elaborate type inference can come later; this
+            // §7.5.1 position 1 — E-TYPE-031 literal-mismatch for unpredicated
+            // primitive annotations (number/string/boolean). This is the ONE
+            // normative assignability promise §7.5.1 makes, and it is checked
+            // over all four literal forms as of S402: `"s"`, `42`, `true`,
+            // `` `tpl` ``. More elaborate type inference can come later; this
             // catches the common case of `const n: number = "x"`.
             const annotBase = letAnnot.trim();
             const primitives = new Set(["number", "string", "boolean"]);
@@ -10448,18 +10527,16 @@ function annotateNodes(
               const srcInfo = (n as any).initExpr
                 ? classifyLiteralFromExprNode((n as any).initExpr)
                 : extractInitLiteral((n as ASTNodeLike).init);
-              if (srcInfo.kind === "literal") {
-                const actualKind = typeof srcInfo.value;
-                if (actualKind !== annotBase) {
-                  const letSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-                  errors.push(new TSError(
-                    "E-TYPE-031",
-                    `E-TYPE-031: type annotation \`${annotBase}\` does not match initializer of type \`${actualKind}\` ` +
-                    `(\`${(n as ASTNodeLike).name ?? "<anonymous>"}\` at line ${letSpan.line}). ` +
-                    `Either change the annotation to \`${actualKind}\`, or change the initializer to a \`${annotBase}\` value.`,
-                    letSpan,
-                  ));
-                }
+              const actualKind = sourcePrimitiveType(srcInfo);
+              if (actualKind && actualKind !== annotBase) {
+                const letSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                errors.push(new TSError(
+                  "E-TYPE-031",
+                  `E-TYPE-031: type annotation \`${annotBase}\` does not match initializer of type \`${actualKind}\` ` +
+                  `(\`${(n as ASTNodeLike).name ?? "<anonymous>"}\` at line ${letSpan.line}). ` +
+                  `Either change the annotation to \`${actualKind}\`, or change the initializer to a \`${annotBase}\` value.`,
+                  letSpan,
+                ));
               }
             }
           }
@@ -10486,11 +10563,9 @@ function annotateNodes(
           const srcInfo = (n as any).initExpr
             ? classifyLiteralFromExprNode((n as any).initExpr)
             : extractInitLiteral((n as ASTNodeLike).init);
-          if (srcInfo.kind === "literal") {
-            const actualKind = typeof srcInfo.value;
-            if (actualKind === "string" || actualKind === "number" || actualKind === "boolean") {
-              resolvedType = tPrimitive(actualKind);
-            }
+          const actualKind = sourcePrimitiveType(srcInfo);
+          if (actualKind) {
+            resolvedType = tPrimitive(actualKind);
           }
         }
         // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — call-result type. When
@@ -10900,6 +10975,45 @@ function annotateNodes(
               zone: reactZone,
               sourceKind: reactSourceInfo.kind,
             };
+          } else {
+            // §7.5.1 position 2 — E-TYPE-031 on an annotated STATE-CELL
+            // declaration. Same rule, same literal set and same message as
+            // position 1 above (`let` / `const`); this is the reactive-decl
+            // site, and it is the only thing that was missing.
+            //
+            // `<n>: number = "nope"` compiled silently until S402 — a state
+            // cell is where an adopter's data actually lives, so the position
+            // §7.5.1 left unchecked was the one carrying the most weight.
+            //
+            // §7.5.1's ruled S365 ordering says position 2 "rides with the
+            // state-cell decl work". bryan diverged from that at S402 ("land
+            // the two cheap wins") on the measurement that it costs ~20 lines
+            // at ZERO migration — corpus diff 0 files, suite churn 0 — so
+            // waiting bought nothing. The divergence is recorded in §7.5.1
+            // rather than left to drift silently.
+            //
+            // The `int` annotation stays OUT: §7.5.1 enumerates `number`,
+            // `string`, `boolean` and nothing else, and `int`/`number`
+            // assignability has no ruling anywhere in SPEC.
+            const reactAnnotBase = reactAnnot.trim();
+            const reactPrimitives = new Set(["number", "string", "boolean"]);
+            if (reactPrimitives.has(reactAnnotBase)) {
+              const reactInitExpr = (n as any).initExpr;
+              const reactSrcInfo: SourceInfo = reactInitExpr
+                ? classifyLiteralFromExprNode(reactInitExpr)
+                : extractInitLiteral((n as ASTNodeLike).init);
+              const reactActualKind = sourcePrimitiveType(reactSrcInfo);
+              if (reactActualKind && reactActualKind !== reactAnnotBase) {
+                const reactSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                errors.push(new TSError(
+                  "E-TYPE-031",
+                  `E-TYPE-031: type annotation \`${reactAnnotBase}\` does not match initializer of type \`${reactActualKind}\` ` +
+                  `(\`${(n as ASTNodeLike).name ?? "<anonymous>"}\` at line ${reactSpan.line}). ` +
+                  `Either change the annotation to \`${reactActualKind}\`, or change the initializer to a \`${reactAnnotBase}\` value.`,
+                  reactSpan,
+                ));
+              }
+            }
           }
         }
         // §51.3.3: Check for machine binding annotation (@var: MachineName)

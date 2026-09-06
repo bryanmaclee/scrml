@@ -1,0 +1,2 @@
+<v>: boolean = 42
+log(@v)

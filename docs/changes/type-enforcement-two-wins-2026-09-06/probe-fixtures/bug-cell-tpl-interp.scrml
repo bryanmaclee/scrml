@@ -1,0 +1,3 @@
+<a> = "hello"
+<s>: string(.length >= 5) = `${@a} world`
+log(@s)

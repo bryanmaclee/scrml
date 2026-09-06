@@ -1,0 +1,4 @@
+${
+    let v: string = `tpl`
+    log(v)
+}

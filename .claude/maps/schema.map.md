@@ -1,21 +1,21 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **`compiler/src/types/` IS NON-EMPTY FOR THE FIRST TIME IN SIXTEEN WINDOWS** — `types/ast.ts` +47 at `85ebbb5f` (#859): `FILE_SHAPES` (`:1575`) · `FileShape` (`:1584`) · `FileAST.fileShape?` . Nothing else in `types/` moved. Re-walked, not stamp-advanced.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #
@@ -229,6 +229,37 @@ A pass expecting a typed node for them finds nothing, and a field added to eithe
 `tsc`. Same class as `<outlet>` and the DB-authoritative shapes below.
 
 ## Root pipeline types
+
+⛑ **S402 — `compiler/src/types/` IS NON-EMPTY FOR THE FIRST TIME IN SIXTEEN WINDOWS.** `types/ast.ts`
+gained **+47 lines** at `85ebbb5f` (#859): a frozen runtime array, the union derived from it, and one
+new optional `FileAST` field. Everything else in this file is unchanged over `10a4b045..499eecce`.
+
+### FILE_SHAPES  [types/ast.ts:1575]  — a frozen `as const` array, the CLOSED set
+```
+FILE_SHAPES = Object.freeze(["program", "pure-module", "pure-channel", "non-entry-page", "bare-markup"] as const)
+```
+Every `.scrml` file classifies to EXACTLY one. **`"bare-markup"` is the RESIDUAL**, so the set is
+exhaustive by construction and an unanticipated shape falls into the `W-PROGRAM-001` branch rather
+than into silence.
+
+⛔ **THIS IS THE ONE DEFINITION, AND ITS LOCATION IS FORCED — NOT A STYLE CHOICE.**
+`compiler/src/library-shape.js:121` RE-EXPORTS this array (`export { FILE_SHAPES } from "./types/ast.ts"`)
+rather than declaring a second copy. **The derivation only works in this direction:** `library-shape.js`
+is untyped from TypeScript's side (importing it from a `.ts` raises TS7016 — "implicitly has an 'any'
+type"), so a `typeof FILE_SHAPES[number]` written against THAT module would **silently collapse to
+`any` and delete the type rather than derive it.**
+⚠ **A SECOND LITERAL LIST ANYWHERE IS THE DRIFT #859 EXISTS TO REMOVE, AND IT WAS COMMITTED ONCE
+DURING THAT ARC AND CAUGHT.** The `.js` module's own JSDoc `@typedef` IMPORTS the union rather than
+restating it, for the same reason — a restated union would type-check JS callers against a stale
+closed set while the runtime array carried a new member, and the §1 identity test (which compares the
+runtime arrays only) would have stayed GREEN through it.
+
+### FileShape  [types/ast.ts:1584]
+```
+type FileShape = (typeof FILE_SHAPES)[number]
+```
+**DERIVED, never hand-listed.**
+
 ### FileAST  [types/ast.ts:1551]
 filePath: string
 nodes: ASTNode[]
@@ -238,8 +269,30 @@ components: ComponentDefNode[]
 typeDecls: TypeDeclNode[]
 channelDecls?: ChannelDeclNode[]
 hasProgramRoot: boolean
+fileShape?: FileShape          — **NEW #859.** The §21.5 / §38.12.6 / §40.8 file-shape classification.
 authConfig: AuthConfig | null
 middlewareConfig: MiddlewareConfig | null
+
+⛑ **`fileShape` IS OPTIONAL FOR THE SAME REASON THE PGO `has*` FLAGS ARE — an AST that has not
+reached PRECG does not have it yet — AND THAT OPTIONALITY IS A LIVE HAZARD, NOT A FORMALITY.**
+**`buildAST(...).ast.fileShape` IS `undefined` BY DESIGN** and a unit test asserts it: the TAB CALLS
+`classifyFileShape` for the `W-PROGRAM-001` decision but records nothing. The STAMP is
+`compute-pgo-flags.ts:computeFileShape` at the **Stage 3.004 PRECG seam** (`api.js`), and
+`component-expander.ts` **RE-STAMPS** it after CE rebuilds `nodes`.
+⚠ **READING THE FIELD BARE OFF A NON-PRECG AST DEGRADES SILENTLY.** `isLibraryShape(undefined, exports)`
+returns `false`, so an unstamped AST quietly flips library auto-detect to `mode: 'browser'` — an
+**EMIT-SHAPE change carrying no diagnostic.** All three consumers now fall back to the SAME
+`classifyFileShape` function (never to a re-implementation): `api.js` W5a, `tool-program.ts:isLibraryShapedFile`,
+`codegen/index.ts:getFileShape`.
+⛔ **`fileShape` IS NOT "IS THIS FILE THE APPLICATION ENTRY".** Per SPEC §40.8 the entry is *"the file
+resolved by the build root"* — a **BUILD** fact no single FileAST can carry. `"program"` says only
+that this file declares a top-level `<program>`, and `E-PROGRAM-002` (uniqueness) is
+reserved-not-implemented, so more than one file in a compile unit can carry the shape.
+⚑ **TWO WRAPPED/UNWRAPPED READ BUGS WERE FIXED IN THE SAME COMMIT AND BOTH HAD THE SAME SHAPE:**
+`tool-program.ts` and `codegen/index.ts:getFileShape` each resolved the NODE LIST from one object and
+the FLAGS from another, so the fallback classified a node list against `hasProgramRoot` belonging to a
+different object — answering `"non-entry-page"` for a `<program>`-bearing file. **At the codegen stage
+a file is a `{ filePath, ast, nodes? }` wrapper; resolve ONE object and read every field from it.**
 
 ### TABOutput  [types/ast.ts:1582]
 Output shape of the TAB (Typed AST Builder) pipeline stage; wraps FileAST + TABErrorInfo[].

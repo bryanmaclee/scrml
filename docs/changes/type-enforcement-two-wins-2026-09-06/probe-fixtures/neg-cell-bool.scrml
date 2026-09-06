@@ -1,0 +1,2 @@
+<flag>: boolean = true
+log(@flag)

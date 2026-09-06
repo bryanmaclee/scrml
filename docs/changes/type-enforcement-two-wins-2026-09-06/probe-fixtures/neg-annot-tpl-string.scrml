@@ -1,0 +1,5 @@
+${
+    let a = "hi"
+    let s: string = `${a}!`
+    log(s)
+}

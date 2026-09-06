@@ -1,0 +1,2 @@
+<v>: string = "nope"
+log(@v)

@@ -1,0 +1,4 @@
+${
+    let s: string(.length >= 5) = `hello world`
+    log(s)
+}

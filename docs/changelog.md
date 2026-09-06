@@ -2,6 +2,91 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S402 — 2026-09-05/06 (bryan · ASUS-Vivobook) — the first human-written scrml, and three measurements against "is this salvageable"
+
+Opened as an execution session and became an assessment. Mid-session bryan hand-wrote **~20 lines of
+scrml** on his other machine — **the first scrml ever written by a human**, since the ~2,400-file
+corpus is 100% LLM-authored — and hit two HIGHs the entire corpus had never surfaced. The rest of the
+session put numbers against the question that raised: *is this language salvageable, or does the
+bathwater go out?*
+
+**12 PRs landed.** Full session stream in `handOffs/delta-log.md`.
+
+### The execution half (before the assessment)
+
+**#859 — entry-ness → `FileAST.fileShape`.** bryan's S400 deferral. Four adversarial rounds; the agent
+**corrected the brief on a load-bearing point** — SPEC §40.8 makes entry identity a BUILD fact over a
+file SET that no FileAST can carry, so the recorded fact became *file shape*, a closed set with a
+residual so it is exhaustive by construction. It also **refused to build a shape the brief asked for**,
+correctly: it would have silenced `W-PROGRAM-001` across 420 corpus files, the subject of a pinned
+discussion reading *"No compiler change authorized."* Placement was decided by measurement — stamping
+in the TAB added 1,012 canary divergences; the PRECG seam keeps it byte-identical.
+
+**#865 — the apostrophe arc, STOPPED BY RULE at five rounds and NOT landed.** Four of five rounds each
+produced a *new* silent-drop of the same class. Round 5's case was ordinary scrml — a contraction in a
+template literal making a following `<onTimeout>` vanish. Diagnosis is architectural: six body walkers
+each hand-roll lexing of a genuinely nested grammar, and flat scanners cannot represent it. Held as a
+draft with the full record on the gap.
+
+### The assessment half — three measurements
+
+**Native-parser flip (#870).** Control 54 · flipped 1907 · **NEW 1860 / GONE 7**. Raw up 3.7×;
+like-for-like **416 vs S170's 508, down 18%** — and the decline was *not* bought by parser work (7
+incidental commits since June). **~90 sessions to flip**, and the one credible discount died: the
+bridge survey found plumbing is **≤3%**, real parser divergence **73%**, and the premise that the
+failures were missing AST fields was **never measurable** — `conformance/run.ts` `missing` holds
+*codes*, not fields. **17% of conformance sources fail to parse** under native.
+
+**Type-annotation census (#869).** **28% of the surface enforced** — but the split is the finding:
+§53 predicates **6/7**, §7.5 base annotations **4/29**. *scrml has a working enforcement engine that is
+not connected to plain type annotations* — same position, one character apart, `a: number` emits
+nothing while `a: number(>0)` emits an `E-CONTRACT-001-RT` boundary check. bryan's bug is in the 8
+positions §7.5.1 **explicitly concedes** — he walked into the documented edge on first contact.
+
+**Cost scoping.** Falsified the PA's prior that migration would dominate — **but for a worse reason**:
+migration is ~0 because *900 of 1034 resolved call positions have an unannotated parameter*, and
+`compiler/self-host` has **74 `fn` declarations with ZERO annotated parameters**. Position 3 is
+**97.5% false-positive** today, 37 of 40 rejections being `int` vs `number` — **for which SPEC has no
+assignability rule anywhere.**
+
+### Rulings and banked work
+
+**The native-parser meter is VOID** — bryan: *"the languge, compiler, and me are all different then at
+the creation of that meter … the honest answer is: I don't know."* Measured ambiguous by construction
+(green on a fixed surface, red on a moving one). Retired as an instrument.
+
+**Loops stay except `do…while`; `~` is negotiable** — *"~ is not NECESSARY … But I want a truly usable
+language (at least a confident V1) more."* **dpa-044 refused the bare delete**: S397's conjunction is
+unbuilt so removal is *undefined* risk, and the eight `~` gaps indict a design, not the idea. The
+middle bryan named — keep it, make it lexically trivial — is the right diagnosis.
+
+**Strip-first banked (#871)** with the HIGH under it: `grep -oE "E-[A-Z-]*UNTERM[A-Z-]*"` over
+`compiler/src` returns **ZERO** — scrml has no unterminated-delimiter diagnostic at all, and the
+tokenizer runs to EOF silently too. Highest ratio on the board: no surface removed, no migration, no
+ruling, closes all four members, 6–14h.
+
+### Filed from the twenty lines
+
+`g-line-comment-truncates-the-rest-of-a-default-logic-body` (HIGH) — one inserted `//` line and
+`E-STATE-UNDECLARED` stops firing while every statement after it vanishes. **The diagnostic loss is the
+severe half**: a comment several lines earlier decides whether type-checking happens.
+`g-fn-parameter-type-annotations-are-not-enforced` (HIGH) — three checks absent at once.
+`g-e-type-031-is-blind-to-boolean-literals` (HIGH) — §7.5.1's *only* normative SHALL holds at **4 of
+8**; scoping later corrected the filing (three functions, not two; template literals a whole untested
+miss class).
+
+### Misses (mine)
+
+**★★★ I nearly overruled a genuine HIGH on a contaminated control** — my "base" checkout already had
+the fix pulled into it (27 markers vs 0 at `origin/main`), so every comparison measured the fix against
+itself. **★★ I ran the advisory `types` gate and never `types:check`**, a separate gate that was red.
+**★★ I gave an agent a bad instruction** (*get `types:check` to exit 0*) which it correctly refused —
+exit 0 was only reachable by absorbing 12 unrelated diagnostics. **★ A commit message asserted two gaps
+were "filed" when the file was not in the commit.** **★ `#385` was recorded as deliberately-left-owed;
+it was already reviewed clean at S316** — my grep pulled it out of the probe's *header* line.
+
+---
+
 ## S401 — 2026-09-04 (peter · Windows) — four boot probes were blind on every Windows clone, and the review floor drained 13 → 0
 
 Two arcs, and they turned out to be the same arc: **instruments that read green while measuring

@@ -1,0 +1,4 @@
+${
+    let v: boolean = "nope"
+    log(v)
+}

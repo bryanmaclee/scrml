@@ -1,0 +1,44 @@
+diff --git a/compiler/src/type-system.ts b/compiler/src/type-system.ts
+index d7e7fcd4..e360ba75 100644
+--- a/compiler/src/type-system.ts
++++ b/compiler/src/type-system.ts
+@@ -10901,6 +10901,29 @@ function annotateNodes(
+               zone: reactZone,
+               sourceKind: reactSourceInfo.kind,
+             };
++          } else if (__POS2_CANDIDATE) {
++            // THROWAWAY CANDIDATE — §7.5.1 position 2 (state-cell declaration).
++            // Byte-for-byte the `let`/`const` arm from the position-1 site,
++            // re-pointed at the reactive-decl node. Measuring instrument only.
++            const annotBase = reactAnnot.trim();
++            const primitives = new Set(["number", "string", "boolean"]);
++            if (primitives.has(annotBase)) {
++              const srcInfo = (n as any).initExpr
++                ? classifyLiteralFromExprNode((n as any).initExpr)
++                : extractInitLiteral((n as ASTNodeLike).init);
++              if (srcInfo.kind === "literal") {
++                const actualKind = typeof srcInfo.value;
++                if (actualKind !== annotBase) {
++                  const rSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
++                  errors.push(new TSError(
++                    "E-TYPE-031",
++                    `E-TYPE-031: type annotation \`${annotBase}\` does not match initializer of type \`${actualKind}\` ` +
++                    `(\`${(n as ASTNodeLike).name ?? "<anonymous>"}\` at line ${rSpan.line}).`,
++                    rSpan,
++                  ));
++                }
++              }
++            }
+           }
+         }
+         // §51.3.3: Check for machine binding annotation (@var: MachineName)
+@@ -15851,6 +15874,9 @@ function checkEqPayloadVariantOperands(
+ // archived copy.
+ // ═════════════════════════════════════════════════════════════════════════════
+ 
++const __POS2_CANDIDATE =
++  typeof process !== "undefined" && !!process.env && process.env.SCRML_POS2_CANDIDATE === "1";
++
+ const __POS3_PROBE_ON =
+   typeof process !== "undefined" && !!process.env && process.env.SCRML_POS3_PROBE === "1";
+ 

@@ -1,21 +1,21 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **§34 catalog FLAT at `815` across all 36 commits** — `compiler/SPEC.md` is `--name-only` EMPTY over the window, so a moved total would have been the anomaly. `error.generated.md` re-walked: **452 codes with a live emit site (+2)**. Re-walked.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #
@@ -157,6 +157,13 @@ here — the fire site was found by grep, exactly the failure mode
 row now exists AND it fires; the prior "NOT implemented — do not add" note here is RETIRED).
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
+
+⛑ **S402: 815 — FLAT ACROSS ALL 36 COMMITS OF `10a4b045..499eecce`, AND THAT IS VERIFIED BY THE CHEAPEST POSSIBLE CHECK RATHER THAN ASSUMED.** `git diff --name-only 10a4b045..499eecce -- compiler/SPEC.md compiler/SPEC-INDEX.md` is **EMPTY** — four sessions of compiler work moved **zero normative text** — so a MOVED catalog total would have been the anomaly, not a flat one. `bun scripts/s34-census.ts` **RE-EXECUTED at this watermark** returns `815 rows (§34 19605..20491, derived) · 2007 source files · 897 conformance cases`; buckets `STRUCK 34 · PINNED 344 · IMPL-SITES 304 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`; dispositions `BUILD-ARC 70 · HOME-NO-SHALL 26 · NOMINAL-HOME 12 · ORPHAN-INDEX 4`. **Every bucket and every disposition is identical to the S397 reading — as it must be, on an untouched SPEC.**
+⚠ **THE ONE FIGURE THAT MOVED IS `source files` (`1958 -> 2007`), AND IT IS THE ONE THE STANDING RULE SAYS NOT TO PUBLISH.** It is environment-dependent (it counts what is on disk in THIS checkout, including untracked artifacts), so **a difference there is NOT evidence of source growth and must never be quoted as such.** Recorded here only to pre-empt the next reader treating it as a discrepancy.
+⛑ **AND THE EMIT-SITE WALK MOVED WHILE THE CATALOG DID NOT — `error.generated.md` went `450 -> 452`.** ⚠ **DO NOT RECONCILE THE TWO.** The generated figure counts codes with a live EMIT SITE found by a source walk; the census counts §34 CATALOG rows. **A moving emitter count under a flat catalog is the NORMAL state** — `85ebbb5f` and `8a68d960` added emit sites for codes that were already cataloged. This window is the cleanest demonstration yet that the two numbers answer different questions.
+⚑ **STANDING, RE-VERIFIED AT THIS WATERMARK — `E-PROGRAM-002` IS STILL RESERVED-NOT-IMPLEMENTED, AND #859 NOW DEPENDS ON THAT FACT IN A COMMENT.** §40.8 marks it *"TBD — separate diagnostic; not part of Wave 1"*, so the compiler does not enforce `<program>` uniqueness, so `codegen/index.ts`'s entry pick must stay a first-match heuristic. **A future pass that implements `E-PROGRAM-002` must revisit that comment** — see domain.map.md's file-shape section and `primary.map.md`'s first Task-Shape Routing row.
+⚑ **STANDING, UNCHANGED: `E-TILDE-001` / `E-TILDE-002` STILL HAVE ZERO PRODUCERS.** Nothing in this window touched `type-system.ts`.
+⛔ **AND ONE DIAGNOSTIC IN THIS CATALOG IS ACTIVELY MISLEADING AT THIS WATERMARK: `E-ENGINE-STATE-CHILD-MISSING`.** On an ODD apostrophe count in a nested `<p>` inside an `<engine>` state-child it fires **naming a state-child that is PRESENT IN SOURCE**, so the remedy it prescribes ("Add the missing state-child") is unfollowable and the true cause (an apostrophe) appears nowhere. **That is a SECOND defect on top of the parse bug**, and it is worse than the resolved `<match>` sibling's `E-CTX-001 "Unclosed <match>"`. OPEN — `g-engine-state-child-apostrophe-breaks-parse` (MED). Locus and the do-not-retry warning: `primary.map.md` Task-Shape Routing, second row.
 
 ⛑ **S397: 815 distinct diagnostic codes** cataloged in §34 at `10a4b045` — **+1 over `ad7b65dc`/`8e278c73`, zero removed. The one is `E-CG-TILDE-UNRESOLVED`** (see its own section below). `bun scripts/s34-census.ts` **RE-EXECUTED at this watermark**, returning `815 rows (§34 19605..20491, derived) · 1958 source files · 897 conformance cases`; buckets `STRUCK 34 · PINNED 344 · IMPL-SITES 304 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM 112`. ⚑ **PINNED moved `343 -> 344` and every other bucket is FLAT — which is the correct signature for a code that landed WITH a `-neg` conformance case** (`ctrl-028`), rather than the IMPL-SITES bump a code landing without one produces. ⚠ **THE DISPOSITIONS UNDER `FALSE-CLAIM` DID MOVE, AND THE FLAT TOTAL HIDES IT: `BUILD-ARC 71 -> 70`, `HOME-NO-SHALL 27 -> 26`, `NOMINAL-HOME 10 -> 12`, `ORPHAN-INDEX 4` flat — sum 112 at BOTH ends.** Two rows were re-dispositioned INTO `NOMINAL-HOME` from the other two buckets. `E-CG-TILDE-UNRESOLVED` is not among them (it is PINNED, not FALSE-CLAIM), so this is a re-classification of PRE-EXISTING rows, most plausibly a consequence of the §32.2.1 Nominal markers landing upstream and being picked up by the census's banner-window heuristic (T4). **Do not read `FALSE-CLAIM 112` as "nothing moved" — diff the dispositions, not the bucket.** Cross-checked a second way per the standing single-oracle caution: `bun scripts/s34-census.ts --check-new --base 8e278c73` reports **2 new/changed rows, all well-formed (provenance resolves) — PASS**, and the SPEC diff confirms both rows are the SAME code (main catalog `SPEC.md:20310`, appendix index `:25812`). Only the main-catalog row falls inside the derived range, so **2 rows = +1 to the count**, which is why `--check-new`'s "2" and the census's "+1" are consistent rather than contradictory. `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; the §34 range moved `19456..20341 -> 19605..20491` (§32.2.1 is a NEW subsection inserted upstream of §34 — re-derive the range from the `## 34.` / `## 35.` headings EVERY time, never bake it).
 

@@ -1,21 +1,21 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-04T14:07:46Z  commit: 10a4b045
-# generated-at: 10a4b045 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == **`10a4b045`**, and that is the watermark.
-# ⛑ **`HEAD` AGREED WITH IT WHEN THESE FIGURES WERE MEASURED AND DOES NOT AGREE NOW, BY CONSTRUCTION —
-# stating it the other way would repeat the exact defect this pass filed as N15.** Every measurement
-# below was taken with `HEAD` == `10a4b045`; the pass then committed ITSELF onto branch
-# `worktree-agent-a0256c43fbd4d5a40`, so `HEAD` is now that commit and is one ahead. That commit is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
-# (it touches `.claude/maps/` only), so no figure below is affected. **The watermark deliberately
-# tracks the merge-base, NOT `HEAD`:** a branch tip is squash-merged onto `main` under a DIFFERENT
-# SHA, and stamping one is the S326/S328/S331 orphaned-stamp hazard.
-# MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `10a4b045`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 10a4b045 origin/main` -> **exit 0**. Inbound check (invariant 48) also
-# run: `git merge-base --is-ancestor 8e278c73 10a4b045` -> **exit 0**.
+# updated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
+# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+#
+# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
+#
+# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
+# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
+# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
+#
+# **THIS MAP:** **`1,421` `.test.js` by mapgen / `1,435` by raw `find`** (the 14-file gap is mapgen skipping root-level `compiler/tests/*.test.js` — re-verified, not carried). **ZERO conformance CASES changed across 36 commits** while 15 test files did. Re-walked.
 #
 # ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
 #
@@ -113,7 +113,52 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, ⛑ **S397: 1,425** `*.test.js` total at `10a4b045`, +1 this window)
+## Test Categories (compiler/tests/, ⛑ **S402: 1,435** `*.test.js` total at `499eecce`, +10 this window)
+
+⛑ **S402 — RE-DERIVED BY EXECUTION AT `499eecce`, NOT SHIFTED.** `1,425 -> 1,435 (+10)` over the
+FOUR-SESSION window `10a4b045..499eecce`, by the same `find` this section mandates:
+
+    browser 103 · commands 17 · conformance 133 · e2e-render-map 2 · integration 217 ·
+    lsp 11 · self-host 4 · unit 934          = 1,421  (category dirs)
+    + 14 at `compiler/tests/*.test.js` root  = 1,435
+
+**Movement: `unit +8` · `integration +1` · `browser +1`; `commands` / `conformance` /
+`e2e-render-map` / `lsp` / `self-host` and the 14 root-level files are FLAT. ZERO deletions, ninth
+window running.** Cross-checked against the citable authority and it reconciles exactly:
+`docs/FACTS.md` reads `test files | 1,435` and `conformance cases | 897`.
+
+⛔ **THE HEADLINE IS WHAT DID *NOT* MOVE: `conformance/` IS `--name-only` EMPTY ACROSS ALL 36 COMMITS.**
+`conformance cases` is FLAT at **897**, and 15 test files changed while **zero conformance cases did**
+— including for eight `fix(codegen):` landings (#837, #840, #841, #842, #843, #845, #846). ⚠ **Every
+regression guard this window lives in `compiler/tests/`, which is the tier `build.map.md`'s "WHICH
+GATE RUNS WHICH TEST TIER" section warns is NOT uniformly blocking.** Before citing this window's
+coverage as language-level, check which gate actually runs the file you are pointing at — the
+conformance corpus is the language-1.0 gate and it did not move.
+
+⚑ **THE LARGEST NEW FILE IS `compiler/tests/unit/file-shape-classification.test.js` (535L)**, the
+guard for #859's `classifyFileShape`. ⛑ **It contains the assertion that most often surprises people
+on that surface: `buildAST(...).ast.fileShape` IS `undefined` — asserted deliberately, because the
+TAB computes the shape for `W-PROGRAM-001` and does NOT record it.** Anyone "fixing" that assertion
+is undoing the design; see domain.map.md's file-shape section for why the stamp lives at the PRECG
+seam instead.
+
+Other notable new files this window: `unit/dpa-debt-parse.test.js` (115L, the CRLF-split guard —
+build.map.md) · `unit/each-peritem-callref-operator-arg.test.js` · `unit/timer-in-if-chain-branch.test.js`
+· `unit/sqlite-bool-column-coercion.test.js` · `unit/flat-css-plus-author-style-merge.test.js` ·
+`unit/wdead-arrow-callback-reachability.test.js` · `unit/corpus-compile-floor-per-root.test.js` ·
+`integration/shell-entry-subdir-asset-path-anchor.test.js` ·
+`browser/browser-static-interp-if-branch.test.js`.
+
+⚠ **AND THE MECHANICAL INDEX DISAGREES WITH THIS SECTION BY 14, BY DESIGN — DO NOT "RECONCILE" IT.**
+`.claude/maps/test.generated.md` reports **1,421 across 12 dirs** because `mapgen.ts` walks category
+directories and skips `fixtures`/`helpers`, so it never sees the **14** root-level
+`compiler/tests/*.test.js`. **Re-verified this pass by execution (`ls compiler/tests/*.test.js | wc -l`
+-> 14), not carried**, and `1421 + 14 = 1435` reconciles exactly.
+
+---
+
+### PRIOR WINDOW (S397) — carried for provenance
+
 
 ⛑ **S397 — RE-DERIVED BY EXECUTION AT `10a4b045`, NOT SHIFTED.** `1,424 -> 1,425 (+1)` over
 `8e278c73..10a4b045`, by the same `find` this section mandates:
