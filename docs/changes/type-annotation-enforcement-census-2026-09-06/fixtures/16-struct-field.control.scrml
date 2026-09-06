@@ -1,0 +1,8 @@
+${
+    type Point:struct = {
+        n: number,
+        label: string,
+    }
+    let p: Point = { n: 1, label: "ok" }
+    log(p)
+}

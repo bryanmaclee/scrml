@@ -1,0 +1,2 @@
+<m>: [string: number] = [99: 1]
+log(@m)

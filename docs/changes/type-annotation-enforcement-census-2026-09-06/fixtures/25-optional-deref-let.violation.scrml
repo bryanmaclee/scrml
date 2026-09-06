@@ -1,0 +1,7 @@
+${
+    type User:struct = {
+        name: string
+    }
+    let u: User? = not
+    log(u.name)
+}

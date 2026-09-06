@@ -1,0 +1,8 @@
+${
+    type Note:enum = {
+        Empty |
+        Filled(msg: string)
+    }
+    let a: Note = Note.Filled("hello")
+    log(a)
+}

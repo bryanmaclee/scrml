@@ -1,0 +1,4 @@
+fn takesNumber(a: number) -> number {
+    return a
+}
+log(takesNumber(42))

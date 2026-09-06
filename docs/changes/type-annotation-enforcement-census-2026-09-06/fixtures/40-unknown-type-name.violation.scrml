@@ -1,0 +1,4 @@
+fn f(a: Frobnicate) -> number {
+    return 1
+}
+log(f(1))

@@ -1,0 +1,5 @@
+${
+    fn src() { return 1 }
+    let v = src()
+    log(v)
+}

@@ -1,0 +1,4 @@
+${
+    const x: string = 123
+    log(x)
+}

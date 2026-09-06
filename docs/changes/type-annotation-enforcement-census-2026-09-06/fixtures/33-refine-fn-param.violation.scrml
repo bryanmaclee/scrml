@@ -1,0 +1,6 @@
+${
+    fn charge(amount: number(>0 && <10000)) -> number {
+        return amount
+    }
+    log(charge(-50))
+}

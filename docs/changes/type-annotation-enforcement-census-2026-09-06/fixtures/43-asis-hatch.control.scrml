@@ -1,0 +1,4 @@
+${
+    let x: asIs = 1
+    log(x)
+}

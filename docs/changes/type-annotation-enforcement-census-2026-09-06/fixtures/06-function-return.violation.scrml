@@ -1,0 +1,6 @@
+${
+    function answer() -> number {
+        return "nope"
+    }
+    log(answer())
+}

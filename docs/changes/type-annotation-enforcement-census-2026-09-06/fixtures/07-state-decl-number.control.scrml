@@ -1,0 +1,2 @@
+<n>: number = 0
+log(@n)

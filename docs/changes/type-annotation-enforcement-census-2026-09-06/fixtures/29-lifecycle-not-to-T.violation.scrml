@@ -1,0 +1,13 @@
+${
+    type User:struct = {
+        name: string,
+    }
+    fn loadUser() -> (not to User) {
+        return not
+    }
+    fn useIt() -> string {
+        const u = loadUser()
+        return u.name
+    }
+    log(useIt())
+}

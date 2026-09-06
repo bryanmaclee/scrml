@@ -1,0 +1,6 @@
+${
+    function mul(a: number, b: number) -> number {
+        return a * b
+    }
+    log(mul(2, 3))
+}

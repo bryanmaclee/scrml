@@ -1,0 +1,4 @@
+${
+    const x: string = "ok"
+    log(x)
+}

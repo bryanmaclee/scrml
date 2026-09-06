@@ -1,0 +1,6 @@
+${
+    function answer() -> number {
+        return 42
+    }
+    log(answer())
+}

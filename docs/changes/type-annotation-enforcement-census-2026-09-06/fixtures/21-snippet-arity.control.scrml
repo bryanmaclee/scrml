@@ -1,0 +1,9 @@
+<program>
+${
+    const Row = <div props={ label: string, deco: snippet(t: string) }>
+        <span>${label}</>
+        ${render deco(label)}
+    </>
+}
+<Row label="hi" deco={ (t) => <em>${t}</em> } />
+</program>

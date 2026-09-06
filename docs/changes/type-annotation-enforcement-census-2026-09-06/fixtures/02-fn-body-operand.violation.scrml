@@ -1,0 +1,4 @@
+fn mul(a: number, b: string) -> number {
+    return a * b
+}
+log(mul(2, "x"))

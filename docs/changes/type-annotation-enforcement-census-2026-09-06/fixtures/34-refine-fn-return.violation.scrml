@@ -1,0 +1,6 @@
+${
+    fn f() -> number(>0) {
+        return -1
+    }
+    log(f())
+}

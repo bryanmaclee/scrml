@@ -1,0 +1,7 @@
+${
+    type Order:struct = {
+        qty: number(>0)
+    }
+    let o: Order = { qty: -3 }
+    log(o)
+}

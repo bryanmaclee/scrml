@@ -1,0 +1,2 @@
+<n>: int = "not an int"
+log(@n)
