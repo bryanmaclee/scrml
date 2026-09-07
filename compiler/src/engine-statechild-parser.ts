@@ -515,11 +515,12 @@ export function scanForOnTimeoutEntries(
     return false;
   };
 
-  // S98 (anomaly-1 fix) — precompute comment + string regions so regex
-  // matches falling INSIDE a comment / string don't fire as real openers.
-  const commentRegions = computeCommentRegions(bodyRaw);
-  const inCommentRegion = (idx: number): boolean => {
-    for (const [start, end] of commentRegions) {
+  // S98 (anomaly-1 fix; S405 — comments only, no string regions) — precompute
+  // comment regions so regex matches falling INSIDE a comment don't fire as
+  // real openers.
+  const maskedRegions = computeMaskedRegions(bodyRaw);
+  const inMaskedRegion = (idx: number): boolean => {
+    for (const [start, end] of maskedRegions) {
       if (idx >= start && idx < end) return true;
     }
     return false;
@@ -534,7 +535,7 @@ export function scanForOnTimeoutEntries(
   while ((m = re.exec(bodyRaw)) !== null) {
     const startIdx = m.index;
     if (inSkipRegion(startIdx)) continue;
-    if (inCommentRegion(startIdx)) continue;
+    if (inMaskedRegion(startIdx)) continue;
 
     const attrs = m[1] ?? "";
     // Extract `after=` value — accepts:
@@ -608,10 +609,10 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
   const out: OnIdleEntry[] = [];
   if (!rulesRaw) return out;
 
-  // S98 (anomaly-1 fix) — comment + string region mask.
-  const commentRegions = computeCommentRegions(rulesRaw);
-  const inCommentRegion = (idx: number): boolean => {
-    for (const [start, end] of commentRegions) {
+  // S98 (anomaly-1 fix; S405 — comments only) — comment region mask.
+  const maskedRegions = computeMaskedRegions(rulesRaw);
+  const inMaskedRegion = (idx: number): boolean => {
+    for (const [start, end] of maskedRegions) {
       if (idx >= start && idx < end) return true;
     }
     return false;
@@ -621,7 +622,7 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(rulesRaw)) !== null) {
     const startIdx = m.index;
-    if (inCommentRegion(startIdx)) continue;
+    if (inMaskedRegion(startIdx)) continue;
     const attrs = m[1] ?? "";
 
     // Extract `after=` value — accepts:
@@ -677,8 +678,8 @@ export function scanForNestedEngineEntries(bodyRaw: string): NestedEngineEntry[]
 
   let i = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. A `<engine>` inside a
-    // comment or string literal MUST NOT be parsed as a nested-engine opener.
+    // S98 (anomaly-1 fix; S405 — comments only) — comment skip. A `<engine>`
+    // inside a comment MUST NOT be parsed as a nested-engine opener.
     {
       const skipped = skipCommentOrString(bodyRaw, i);
       if (skipped !== i) { i = skipped; continue; }
@@ -686,10 +687,13 @@ export function scanForNestedEngineEntries(bodyRaw: string): NestedEngineEntry[]
     const lt = bodyRaw.indexOf("<engine", i);
     if (lt < 0) break;
     // Re-scan i..lt for skippable regions that might engulf the candidate.
+    // S405 fix round 2 — this inner re-scan walks ACROSS body text toward `lt`,
+    // so it can enter an opener's attribute interior. It must be opener-aware:
+    // see `skipOpenerAware`.
     let scanned = i;
     let hitSkippable = false;
     while (scanned < lt) {
-      const sk = skipCommentOrString(bodyRaw, scanned);
+      const sk = skipOpenerAware(bodyRaw, scanned);
       if (sk !== scanned) {
         if (sk > lt) { i = sk; hitSkippable = true; break; }
         scanned = sk;
@@ -703,7 +707,14 @@ export function scanForNestedEngineEntries(bodyRaw: string): NestedEngineEntry[]
     const nextCh = bodyRaw[lt + 7];
     if (nextCh !== undefined && nextCh !== " " && nextCh !== "\t" &&
         nextCh !== "\n" && nextCh !== ">" && nextCh !== "/") {
-      i = lt + 1;
+      // S405 fix round 2 — advance past the WHOLE opener, not one byte. A bare
+      // `lt + 1` leaves the scan position INSIDE the opener, and the next
+      // iteration's re-scan then reads that opener's ATTRIBUTE INTERIOR as body
+      // bytes — which is the same opener-blindness the re-scans themselves were
+      // just fixed for, reached by a different route. Falls back to `lt + 1`
+      // when the `<` is not tag-shaped (ordinary prose `<`).
+      const jumped = skipTagShapedOpener(bodyRaw, lt);
+      i = jumped !== lt ? jumped : lt + 1;
       continue;
     }
 
@@ -889,8 +900,8 @@ export function scanForOnTransitionEntries(
 
   let i = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. A `<onTransition>` inside
-    // a comment or string literal MUST NOT be parsed as a real opener.
+    // S98 (anomaly-1 fix; S405 — comments only) — comment skip. A
+    // `<onTransition>` inside a comment MUST NOT be parsed as a real opener.
     {
       const skipped = skipCommentOrString(bodyRaw, i);
       if (skipped !== i) { i = skipped; continue; }
@@ -898,10 +909,13 @@ export function scanForOnTransitionEntries(
     const lt = bodyRaw.indexOf("<onTransition", i);
     if (lt < 0) break;
     // Re-scan i..lt for skippable regions that might engulf the candidate.
+    // S405 fix round 2 — opener-aware; see `skipOpenerAware`. Opener-blindness
+    // here deleted the whole `__scrml_engine_…_fire_hooks` function from the
+    // emitted bundle with zero diagnostics.
     let scanned = i;
     let hitSkippable = false;
     while (scanned < lt) {
-      const sk = skipCommentOrString(bodyRaw, scanned);
+      const sk = skipOpenerAware(bodyRaw, scanned);
       if (sk !== scanned) {
         if (sk > lt) { i = sk; hitSkippable = true; break; }
         scanned = sk;
@@ -915,11 +929,22 @@ export function scanForOnTransitionEntries(
     const nextCh = bodyRaw[lt + 13];
     if (nextCh !== undefined && nextCh !== " " && nextCh !== "\t" &&
         nextCh !== "\n" && nextCh !== ">" && nextCh !== "/") {
-      i = lt + 1;
+      // S405 fix round 2 — advance past the WHOLE opener, not one byte. A bare
+      // `lt + 1` leaves the scan position INSIDE the opener, and the next
+      // iteration's re-scan then reads that opener's ATTRIBUTE INTERIOR as body
+      // bytes — which is the same opener-blindness the re-scans themselves were
+      // just fixed for, reached by a different route. Falls back to `lt + 1`
+      // when the `<` is not tag-shaped (ordinary prose `<`).
+      const jumped = skipTagShapedOpener(bodyRaw, lt);
+      i = jumped !== lt ? jumped : lt + 1;
       continue;
     }
     if (inSkipRegion(lt)) {
-      i = lt + 1;
+      // Same reasoning — do not leave the position inside the opener. Jumping
+      // to just past this opener's `>` still lets a NESTED `<onTransition>` in
+      // its body be found on a later iteration.
+      const jumped = skipTagShapedOpener(bodyRaw, lt);
+      i = jumped !== lt ? jumped : lt + 1;
       continue;
     }
 
@@ -1043,7 +1068,7 @@ function findOnTransitionCloser(bodyRaw: string, from: number): number {
   // depth via the PascalCase branch below).
   let lowerDepth = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. See skipCommentOrString.
+    // S98 (anomaly-1 fix; S405 — comments only) — comment skip. See skipCommentOrString.
     {
       const skipped = skipCommentOrString(bodyRaw, i);
       if (skipped !== i) { i = skipped; continue; }
@@ -1173,7 +1198,7 @@ function findEngineCloser(bodyRaw: string, from: number): number {
   // (closerName.length > 0)` branch — corrupting state-child accounting.
   let lowerDepth = 0;
   while (i < bodyRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip. See skipCommentOrString.
+    // S98 (anomaly-1 fix; S405 — comments only) — comment skip. See skipCommentOrString.
     {
       const skipped = skipCommentOrString(bodyRaw, i);
       if (skipped !== i) { i = skipped; continue; }
@@ -1330,35 +1355,119 @@ function findEngineCloser(bodyRaw: string, from: number): number {
 }
 
 /**
- * S98 (anomaly-1 fix) — comment/string skip helper.
+ * S98 (anomaly-1 fix) — comment skip helper.
  *
  * Engine `rulesRaw` body text is preserved VERBATIM by the AST builder (it
  * concatenates `child.raw` from each block-splitter child, INCLUDING `comment`
  * children — see ast-builder.js around line 9886). That means line comments,
- * block comments, and string literals end up in the text we hand to the
- * scanners below. Without this helper, a stray `${`, `<X`, `<engine`, or `</>`
- * inside a comment / string is mis-recognized as live syntax — derailing
- * depth tracking and (in the original repro) firing
- * `E-ENGINE-STATE-CHILD-MISSING` because the scanner walked clear past the
- * real `</>` closer in pursuit of a `}` that lived only in comment prose.
+ * block comments, and HTML comments end up in the text we hand to the scanners
+ * below. Without this helper, a stray `${`, `<X`, `<engine`, or `</>` inside a
+ * comment is mis-recognized as live syntax — derailing depth tracking and (in
+ * the original repro) firing `E-ENGINE-STATE-CHILD-MISSING` because the scanner
+ * walked clear past the real `</>` closer in pursuit of a `}` that lived only
+ * in comment prose.
  *
- * Returns the index ONE PAST the end of the comment / string region starting
- * at `i`. Returns `i` (unchanged) when `i` is not the start of any such
- * region — callers should compare for inequality to decide whether to
- * `continue` the outer loop.
+ * Returns the index ONE PAST the end of the comment region starting at `i`.
+ * Returns `i` (unchanged) when `i` is not the start of any such region —
+ * callers should compare for inequality to decide whether to `continue` the
+ * outer loop.
  *
  * Recognized regions:
- *   - `// ... \n`            line comment (consumes through the newline)
+ *   - `// ... \n`            line comment (consumes through the newline; a
+ *                            `//` that is part of a URL is DATA, not a comment
+ *                            — see `urlSlashesAt`)
  *   - `/* ... *\/`           block comment (consumes through the closer)
- *   - `"..."` / `'...'`      string literals (honors `\` escape)
- *   - `` `...` ``            backtick template literal (honors `\` escape;
- *                            interior `${...}` is consumed as part of the
- *                            literal since the closing backtick is the real
- *                            terminator and we don't want a stray `${` to
- *                            kick scanning back into "live syntax" mode)
+ *   - `<!-- ... -->`         HTML markup comment (§27.2)
  *
- * Unterminated regions consume to EOF — matches BS-level best-effort
- * recovery for unclosed `//` / `<!-- -->` (block-splitter.js lines 701-704).
+ * Unterminated-region recovery is NOT uniform across the three, and the split
+ * is deliberate — each branch matches what the BLOCK SPLITTER does with the same
+ * bytes, because a disagreement between those two scans is the desync class this
+ * whole file keeps getting bitten by:
+ *   - `//`     consumes to EOF (end-of-input IS end-of-line, SPEC §27.1).
+ *   - `<!--`   consumes to EOF — matches `block-splitter.js:skipHtmlComment`
+ *              (`:358-368`), which unconditionally `return len` and is called
+ *              that way by `findStructuralBodyEnd` (`:793`).
+ *   - `/*`     does NOT consume; an unterminated `/*` is PROSE (returns `i`).
+ *              This matches BS's containment pre-scan (`:2581-2596`), which
+ *              likewise declines to treat an uncontained `/*` as a comment.
+ * ⚠ Do NOT "unify" these three for tidiness. S405 fix round 1 extended the `/*`
+ * rule to `<!--` by analogy and it created exactly the desync described above.
+ *
+ * **String literals and backticks are deliberately NOT skipped** — mirrors the
+ * sibling `match-statechild-parser.ts:skipMatchComment` and
+ * `block-splitter.js:findStructuralBodyEnd`, which dropped their string
+ * branches at S196 (`g-match-arm-apostrophe-bs`). This helper carried them
+ * until S405 and they were WRONG at every one of its call sites, for two
+ * independent reasons:
+ *
+ *   1. **`'` and `` ` `` are not delimiters anywhere in scrml.** SPEC §4.18.3:
+ *      *"A display-text literal is delimited by the double-quote character `"`
+ *      on both ends. The double-quote is the **only** display-text-literal
+ *      delimiter."* and *"The apostrophe `'` is an **ordinary interior
+ *      character** … it carries no delimiter role and requires no escape …
+ *      The backtick `` ` `` is likewise an ordinary interior character and is
+ *      NOT a display-text delimiter."* (`SPEC.md:1219-1220`; §5.1 says the same
+ *      for attribute strings — *"scrml uses one string delimiter, `"`,
+ *      language-wide"*). So an apostrophe in `<p>it's ready</p>` opened a
+ *      phantom string that ran to EOF and derailed every closer scan reached
+ *      from here → a FALSE `E-ENGINE-STATE-CHILD-MISSING` naming a variant that
+ *      is present in source. An EVEN apostrophe count inside one scan window
+ *      masked it, which is what proved the scan was string-lexing.
+ *
+ *   2. **The `"` branch protected nothing this scanner can reach.** `"` IS a
+ *      real delimiter in a code-default body (the §4.18.3 display-text literal)
+ *      and inside an opener's attribute values — but neither span arrives here.
+ *      Opener-internal quotes are consumed by `findOpenerEnd`'s own `inQuote`
+ *      tracker before the walkers' outer loop sees them (exactly as
+ *      `findArmCloser`'s `q`-loop does in the match parser).
+ *
+ *      ⚠ **THIS SAFETY ARGUMENT IS NARROWER THAN IT READS, AND THE NEXT AUTHOR
+ *      SHOULD NOT HAVE TO RE-DERIVE THAT.** `findOpenerEnd`'s `inQuote` tracker
+ *      treats `'` as an OPENING delimiter (`if (c === '"' || c === "'")`). So the
+ *      exact defect deleted from this helper — an apostrophe opening a phantom
+ *      span — SURVIVES ONE LAYER DOWN, at the very site this argument leans on.
+ *      Per §4.18.3 (`SPEC.md:1219-1220`) `'` carries no delimiter role
+ *      **language-wide**, so that tracker is itself out of conformance; `"` is
+ *      legitimate there (attribute values ARE `"`-delimited, §5.1) but `'` is not.
+ *      It is PRE-EXISTING — `main` behaves identically — so it is deliberately
+ *      NOT fixed here and is filed separately. But note that the S405 work
+ *      WIDENED its reach: `findOpenerEnd` is now reached from five additional
+ *      scan paths covering every lowercase opener and closer in every scanned
+ *      body, where previously only PascalCase / `<engine>` / `<onTransition>`
+ *      openers reached it. Fixing it is a strictly larger blast radius than it
+ *      was before this change, not a smaller one. And a display-text
+ *      literal that CONTAINS a structural token — `"go </> now"`, `"a < b"`,
+ *      `"rate 50 // 100"`, `"write <!-- here"` — is already torn apart upstream
+ *      by the block splitter / context checker (`E-CTX-001` / `E-CTX-003`),
+ *      whose body-end scan has had no string branches since S196. Skipping
+ *      `"..."` here bought no protection and cost the same phantom-string
+ *      defect on an odd `"` (`<p>a 6" pipe</p>`) in a nested plain-markup
+ *      free-text body (`SPEC.md:1090` — *"any plain-markup element body [is a]
+ *      free-text body"*; S109).
+ *
+ * ⚑ **HOW THAT SECOND CLAIM WAS CHECKED, AND THE POPULATION IT RANGES OVER.**
+ * The first S405 round asserted it after probing four tokens and got the
+ * population WRONG, which cost a fix round. The population is not a list of
+ * tokens someone thought of — it is DERIVED from this file:
+ *   (a) the region-openers this helper still recognizes = its own `if (c === …)`
+ *       branch list = **`//`, `/*`, `<!--`** (THREE, not two — `/*` is the one
+ *       the first round missed, and it is the only one that does NOT already
+ *       fail upstream); and
+ *   (b) the byte sequences the CALLERS test for = every `startsWith("…")` in
+ *       this file plus the bare `<`+letter opener check = **`</`, `</>`, `${`,
+ *       `<engine`, `<onTransition`, `</onTransition`, `<tag`**.
+ * Crossed with the two LOCATIONS a body-scan can reach — inside a display-text
+ * literal, and inside an attribute value — that is the complete grid, and it is
+ * regenerable by grep rather than by recall. `compiler/tests/integration/
+ * engine-statechild-prose-punctuation.test.js` carries the cells that moved.
+ * ⚠ If you add a branch to this helper or a `startsWith` to a caller, you have
+ * widened the population and the grid must be re-derived.
+ *
+ * Restoring a string branch here would restore both defects. If a code-default
+ * display-text literal ever needs to carry a structural token, the fix belongs
+ * upstream in the block splitter's body-end scan, not in this flat helper — a
+ * flat scanner cannot represent §4.18's per-body nesting of code-default and
+ * free-text modes.
  */
 function skipCommentOrString(s: string, i: number): number {
   if (i >= s.length) return i;
@@ -1382,7 +1491,28 @@ function skipCommentOrString(s: string, i: number): number {
     return j;
   }
 
-  // Block comment: `/* ... */`
+  // Block comment: `/* ... */`.
+  //
+  // S405 fix-round — an UNTERMINATED `/*` is NOT a comment; return `i` and let
+  // the caller treat it as prose. It previously consumed to EOF, and once the
+  // string branches were gone that turned an everyday glob or path
+  // (`title="glob /*.ts"`, `"src /*.ts"`) into TOTAL SCAN LOSS: in
+  // `computeMaskedRegions` it masked every later `<onTimeout>` / `<onIdle>`
+  // match, silently dropping the timer from the emitted output with no
+  // diagnostic at all; in the walkers it swallowed the state-child closers and
+  // fired a FALSE E-ENGINE-STATE-CHILD-MISSING.
+  //
+  // This does NOT desync us from the block splitter — it CONVERGES with it.
+  // Measured at S405: `<A rule=.B><p>glob /*.ts here</p></>` fails identically
+  // before and after the S405 delta, and the ONLY diagnostics are
+  // E-ENGINE-STATE-CHILD-MISSING with NO `E-CTX-*`. That proves BS accepted
+  // those bytes and this flat helper alone rejected them, so declining to eat
+  // to EOF moves this scan TOWARD BS's classification, not away from it.
+  //
+  // Aligned with the dpa-044 Call 1 ruling (2026-09-07): an unterminated
+  // delimiter should surface as a DIAGNOSTIC rather than silently consuming to
+  // EOF. The diagnostic itself is a SEPARATE arc with its own scope and is
+  // deliberately NOT built here — this change only stops the silent consumption.
   if (c === "/" && c2 === "*") {
     let j = i + 2;
     while (j < s.length) {
@@ -1391,19 +1521,21 @@ function skipCommentOrString(s: string, i: number): number {
       }
       j++;
     }
-    return s.length; // unterminated — consume to EOF
+    return i; // UNTERMINATED — not a comment; treat as prose.
   }
 
   // HTML markup comment: `<!-- ... -->` (§27.2 — the markup-context native
-  // comment). The whole span MUST be opaque: an odd quote / apostrophe /
-  // backtick OR a `</Variant>` / `<tag>` mention inside a comment must not open
-  // a phantom string or be read as a structural opener/closer by the walker.
-  // Before this branch the walker fell through `<` and then tripped on a
-  // comment-interior quote, opening a phantom string that swallowed the
-  // subsequent state-children → a spurious E-ENGINE-STATE-CHILD-MISSING
-  // (g-blocksplitter-comment-span-not-opaque, ss4 item 2). Pairs with
-  // `skipHtmlComment` in block-splitter.js; `computeCommentRegions` records the
-  // returned span as a comment region automatically.
+  // comment). The whole span MUST be opaque: a `</Variant>` / `<tag>` mention
+  // inside a comment must not be read as a structural opener/closer by the
+  // walker. Historically (ss4 item 2,
+  // g-blocksplitter-comment-span-not-opaque) this branch also shielded the
+  // then-present string branches — the walker fell through `<`, tripped on a
+  // comment-interior quote, and opened a phantom string that swallowed the
+  // subsequent state-children → a spurious E-ENGINE-STATE-CHILD-MISSING. Those
+  // string branches were deleted at S405, so that half of the rationale is now
+  // history; the tag-mention half is live and is why the branch stays. Pairs
+  // with `skipHtmlComment` in block-splitter.js; `computeMaskedRegions`
+  // records the returned span as a comment region automatically.
   if (c === "<" && c2 === "!" && s[i + 2] === "-" && s[i + 3] === "-") {
     let j = i + 4;
     while (j < s.length) {
@@ -1412,71 +1544,163 @@ function skipCommentOrString(s: string, i: number): number {
       }
       j++;
     }
-    return s.length; // unterminated — consume to EOF
-  }
-
-  // String literals (single / double quote) — honor backslash escape.
-  if (c === '"' || c === "'") {
-    const quote = c;
-    let j = i + 1;
-    while (j < s.length) {
-      const ch = s[j];
-      if (ch === "\\") {
-        j += 2; // skip escaped char
-        continue;
-      }
-      if (ch === quote) return j + 1;
-      j++;
-    }
-    return s.length; // unterminated
-  }
-
-  // Backtick template literal — consume the whole literal, including any
-  // interior `${...}` (the closing backtick is the real terminator). We
-  // honor backslash escape on regular chars but NOT brace-depth: the
-  // template-literal grammar already guarantees balanced braces inside
-  // interpolations, and any imbalance is the user's problem (and would
-  // have surfaced at TAB tokenization, not here).
-  if (c === "`") {
-    let j = i + 1;
-    while (j < s.length) {
-      const ch = s[j];
-      if (ch === "\\") {
-        j += 2;
-        continue;
-      }
-      if (ch === "`") return j + 1;
-      j++;
-    }
-    return s.length; // unterminated
+    // ⚑ S405 fix-round 2 — REVERTED. Fix round 1 made this `return i` "by the
+    // same reasoning as the `/*` branch above". THE REASONING DOES NOT TRANSFER,
+    // and checking the analogy instead of assuming it is the whole point:
+    //   · BS's `/*` path has a CONTAINMENT PRE-SCAN (block-splitter.js
+    //     :2581-2596 — "is there a `*/` before this brace context's closing `}`
+    //     (or EOF)? … if (!commentContained) … Not a real comment … Emit the `/`
+    //     as ordinary text"). BS therefore ALSO declines an unterminated `/*`,
+    //     so the `/*` branch above genuinely CONVERGES with BS.
+    //   · BS's `skipHtmlComment` (:358-368) UNCONDITIONALLY `return len` on an
+    //     unterminated `<!--`, and `findStructuralBodyEnd` calls it that way
+    //     (:793). There is no containment pre-scan for `<!--`.
+    // So returning `i` here CREATED the BS desync the `/*` branch correctly
+    // avoids. Confirmed at unit level: with `return i`, a body carrying
+    // `<A/>` then `<!-- temporarily disabled` then `<B/>` parses as ["A","B"] —
+    // the commented-out state-child is WIRED UP ANYWAY, while BS reads it as
+    // commented out. Consume to EOF, matching BS.
+    return s.length; // unterminated — consume to EOF, MATCHING BS (see above).
   }
 
   return i;
 }
 
 /**
- * S98 (anomaly-1 fix) — precompute the set of comment + string-literal
+ * S405 fix round 2 — the opener jump, factored out so the fix shape is stated
+ * ONCE and every opener-blind scan uses the same one.
+ *
+ * ⛔ **THE ARCHITECTURAL FINDING OF THE WHOLE S405 ARC, IN ONE PARAGRAPH.**
+ * `skipCommentOrString`'s `"` / `'` / backtick branches were doing DOUBLE DUTY.
+ * They were (wrongly) lexing strings in markup prose — that is the bug S405
+ * deleted, and deleting it is correct. But they were ALSO (accidentally)
+ * shielding every flat scan in this file from reading an opener's ATTRIBUTE
+ * INTERIOR as body bytes, because an attribute value is quoted and the string
+ * branch skipped straight over it. Removing them did not create the
+ * opener-blindness; it UNMASKED a pre-existing architectural gap. The gap is
+ * closed here, at each flat scan, rather than by restoring the shield.
+ *
+ * `skipTagShapedOpener` returns the index one past a tag-shaped opener's `>`,
+ * or `i` unchanged. "Tag-shaped" is `<` followed by a letter or `/` — the same
+ * guard the walkers use. `<!--` is NOT tag-shaped (`!` is neither), so an HTML
+ * comment still reaches the comment branch instead of being eaten as an opener.
+ * `findOpenerEnd` carries its own `inQuote` + `${...}` tracking, so
+ * `href="//cdn.x"`, `title="glob /*.ts"` and `alt="a <!-- b"` all stay opaque.
+ * An unterminated opener (`findOpenerEnd` -> -1) returns `i`; the caller
+ * advances one byte rather than consuming to EOF.
+ *
+ * ⚠ **BE PRECISE ABOUT WHAT "ordinary prose is untouched" DOES AND DOES NOT
+ * MEAN — an earlier draft of this docstring over-claimed it and the claim is
+ * load-bearing.** `a < b`, `<3` and `<-` are genuinely untouched: the character
+ * after `<` is not a letter or `/`. But a `<` IMMEDIATELY followed by a LETTER
+ * **is** treated as an opener even in prose (`<b` in "temp <below 5"), and
+ * `findOpenerEnd` then runs forward to the next unbalanced top-level `>`, which
+ * can be ARBITRARILY FAR and can swallow a real state-child. That shape is the
+ * single cause of every fuzz-corpus regression seen against this helper. It is
+ * tolerable only because such a source ALREADY fails upstream, identically, on
+ * both trees — the block splitter reads the same `<b` as a tag. It is NOT a
+ * property of this helper that prose is safe; it is a property of the shared
+ * `<`-overload that scrml has language-wide. Do not weaken the upstream check on
+ * the strength of a comment here.
+ */
+function skipTagShapedOpener(s: string, i: number): number {
+  if (s[i] !== "<") return i;
+  const next = s[i + 1];
+  const tagShaped = next !== undefined &&
+    (next === "/" || (next >= "a" && next <= "z") || (next >= "A" && next <= "Z"));
+  if (!tagShaped) return i;
+  const openerEnd = findOpenerEnd(s, i + 1);
+  return openerEnd >= 0 ? openerEnd + 1 : i;
+}
+
+/**
+ * Comment-or-opener skip: `skipCommentOrString` first (so `<!-- -->` wins), then
+ * the tag-shaped opener jump. Returns `i` unchanged when neither applies, so
+ * callers keep the existing `if (skipped !== i)` idiom.
+ *
+ * ⚠ Use THIS, not bare `skipCommentOrString`, in any loop that scans ACROSS
+ * body text toward a structural target — such a loop can walk into an opener's
+ * attribute interior. A loop that merely halts at the first non-trivia byte
+ * (e.g. `parseMessageArms`' `skipTrivia`) cannot, and correctly does not use it.
+ */
+function skipOpenerAware(s: string, i: number): number {
+  const skipped = skipCommentOrString(s, i);
+  if (skipped !== i) return skipped;
+  return skipTagShapedOpener(s, i);
+}
+
+/**
+ * S98 (anomaly-1 fix; S405 — comments only) — precompute the set of comment
  * regions in a body text. Returns `[start, end)` half-open intervals sorted
  * by start. Used by the regex-based scanners (`scanForOnTimeoutEntries`,
- * `scanForOnIdleEntries`) to filter out matches that fall inside a comment
- * or string. The walker-based scanners (`findStateChildCloser`, etc.) call
- * `skipCommentOrString` per-iteration instead.
+ * `scanForOnIdleEntries`) to filter out matches that fall inside a comment.
+ * The walker-based scanners (`findStateChildCloser`, etc.) call
+ * `skipCommentOrString` per-iteration instead. String literals are NOT
+ * regions — see `skipCommentOrString` for the SPEC 4.18.3 / S196 reasoning.
  *
  * Pairs symmetrically with `skipCommentOrString` — both must classify the
  * same character ranges as "skippable", or the two filter paths could
  * disagree on a borderline character.
+ *
+ * ⚠ **THIS HELPER IS THE ONE CALLER THAT `findOpenerEnd` DOES NOT PROTECT, AND
+ * THAT ASYMMETRY WAS A REAL DEFECT (S405 fix-round).** The six WALKER call
+ * sites never see an opener's interior: on a tag-shaped `<` they call
+ * `findOpenerEnd` (which has its own `inQuote` + `${...}` tracking) and jump
+ * straight past the whole opener. This helper was a FLAT scan with no opener
+ * awareness, so it read attribute-value bytes as body bytes. Once the string
+ * branches were deleted, `<p title="glob /*.ts">` opened a block-comment region
+ * that masked every later `<onTimeout>` / `<onIdle>` regex match — the timer
+ * vanished from the emitted output with NO error and NO warning. Silent
+ * behaviour loss, which is worse than the loud false error this arc set out to
+ * fix. The opener jump below closes that gap by giving this scan the same
+ * opener-awareness the walkers already had.
  */
-function computeCommentRegions(s: string): Array<[number, number]> {
+function computeMaskedRegions(s: string): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   let i = 0;
   while (i < s.length) {
+    // 1. A comment region starting here wins. `<!-- -->` is checked in here and
+    //    NOT by the opener jump below, because `<!` is not tag-shaped.
     const skipped = skipCommentOrString(s, i);
     if (skipped !== i) {
       out.push([i, skipped]);
       i = skipped;
-    } else {
-      i++;
+      continue;
     }
+    // 2. A tag-shaped opener/closer — jump the WHOLE thing so attribute
+    //    interiors are never scanned for comment starts, AND record the
+    //    opener's INTERIOR as a masked region. Shared with the three other
+    //    formerly-opener-blind scans — see `skipTagShapedOpener`.
+    //
+    // ⚑ S405 round 3 — RECORDING is separate from JUMPING, and skipping it was a
+    // real regression. The jump alone stops a comment OPENER inside an attribute
+    // from starting a region; it does NOT stop the two regex-based scanners
+    // (`scanForOnTimeoutEntries` / `scanForOnIdleEntries`) from matching
+    // `<onTimeout …/>` / `<onIdle …/>` TEXT inside an attribute value, because
+    // those two filter their matches only against this array. On `main` the
+    // deleted `"` branch recorded that text as a string region, so it was masked
+    // by accident. Without the record below,
+    // `<p title="use <onTimeout after=1s to=.A/> here">` registers a PHANTOM
+    // timer. That also made these two scanners asymmetric with
+    // `scanForOnTransitionEntries` / `scanForNestedEngineEntries`, which get the
+    // protection structurally via `skipOpenerAware`.
+    //
+    // ⛔ THE SPAN IS THE INTERIOR `[i + 1, openerEnd)`, NOT THE WHOLE OPENER, AND
+    // THE DIFFERENCE IS LOAD-BEARING. A real top-level `<onTimeout after=1s
+    // to=.A/>` IS itself a tag-shaped opener; masking its own span would mask
+    // its own regex match (which starts AT the `<`, i.e. at `i`) and SILENTLY
+    // DELETE EVERY REAL TIMER — far worse than the phantom this fixes. Starting
+    // the region at `i + 1` leaves a match anchored at `i` visible while masking
+    // everything nested inside the opener.
+    const jumped = skipTagShapedOpener(s, i);
+    if (jumped !== i) {
+      // `jumped` is one past the opener's `>`, so the interior ends at
+      // `jumped - 1`. Guard against a zero/negative-width span.
+      if (jumped - 1 > i + 1) out.push([i + 1, jumped - 1]);
+      i = jumped;
+      continue;
+    }
+    i++;
   }
   return out;
 }
@@ -1685,10 +1909,12 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
   // Symmetric fix applied in `findEngineCloser` + `findOnTransitionCloser`.
   let lowerDepth = 0;
   while (i < rulesRaw.length) {
-    // S98 (anomaly-1 fix) — skip past line/block comments + string literals
-    // FIRST so a stray `${`, `<X`, or `</>` inside comment / string prose is
-    // not mis-recognized as live syntax. See `skipCommentOrString` for
-    // rationale (the AST builder preserves comment text verbatim in rulesRaw).
+    // S98 (anomaly-1 fix; S405 — comments only, no string literals) — skip
+    // past line/block/HTML comments FIRST so a stray `${`, `<X`, or `</>`
+    // inside comment prose is not mis-recognized as live syntax. See
+    // `skipCommentOrString` for rationale (the AST builder preserves comment
+    // text verbatim in rulesRaw), including why body-level `'` / `"` /
+    // backtick are PROSE and are deliberately NOT skipped.
     {
       const skipped = skipCommentOrString(rulesRaw, i);
       if (skipped !== i) { i = skipped; continue; }
@@ -2138,9 +2364,12 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
 
   let i = 0;
   while (i < rulesRaw.length) {
-    // S98 (anomaly-1 fix) — comment / string skip at top-level scan. A `<X`
-    // inside a `// line comment` or `"string"` MUST NOT be parsed as a
-    // state-child opener.
+    // S98 (anomaly-1 fix; S405 — comments only) — comment skip at the
+    // top-level scan. A `<X` inside a `// line comment`, a `/* block comment */`
+    // or an `<!-- HTML comment -->` MUST NOT be parsed as a state-child opener.
+    // A `<X` inside a `"..."` display-text literal IS now parsed as an opener —
+    // body-level quotes are prose, not delimiters (SPEC §4.18.3; see
+    // `skipCommentOrString`).
     {
       const skipped = skipCommentOrString(rulesRaw, i);
       if (skipped !== i) { i = skipped; continue; }
@@ -2151,26 +2380,34 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     // ss4 item 2 — a `<!-- -->` HTML comment beginning EXACTLY at `lt` would
     // otherwise fall through the `next`-is-uppercase check below (`next` ===
     // `!`) and step INTO the comment at `lt + 1`, past the `<` that
-    // `skipCommentOrString` needs to recognize the comment — so a comment-
-    // interior quote / apostrophe / backtick then opens a phantom string that
-    // swallows the following state-children. Skip the whole skippable span
-    // here. (The inner re-scan below handles a comment / string that STARTS
+    // `skipCommentOrString` needs to recognize the comment. The whole skippable
+    // span is skipped here so a `<Variant>` MENTION inside the comment is not
+    // read as a real opener. (⚑ S405: the original note continued "…so a
+    // comment-interior quote / apostrophe / backtick then opens a phantom
+    // string that swallows the following state-children". That half is now
+    // HISTORY — the string branches were deleted at S405 and no quote can open
+    // a span any more. The tag-mention half above is still live and is why this
+    // skip stays.) (The inner re-scan below handles a comment that STARTS
     // before `lt` but engulfs it; this handles one that starts AT `lt`.)
     {
       const skAtLt = skipCommentOrString(rulesRaw, lt);
       if (skAtLt !== lt) { i = skAtLt; continue; }
     }
-    // Comment / string regions between `i` and `lt` may contain stray `<X`
+    // Comment regions between `i` and `lt` may contain stray `<X`
     // tokens that aren't real openers — re-scan from `i` to `lt` and bail
     // back to the top of the loop if we hit one. (Cheap: most rulesRaw
     // strings contain few or no comments.)
+    // S405 fix round 2 — opener-aware (see `skipOpenerAware`). This is the LIVE
+    // symbol-table path (`symbol-table.ts` calls `parseEngineStateChildren`), and
+    // opener-blindness here dropped state-children silently: a
+    // `<a title="glob /*.ts">` above the children took BOTH of them to zero.
     let scanned = i;
     let hitSkippable = false;
     while (scanned < lt) {
-      const sk = skipCommentOrString(rulesRaw, scanned);
+      const sk = skipOpenerAware(rulesRaw, scanned);
       if (sk !== scanned) {
         // If the skip region engulfs `lt`, the `<` we found was inside a
-        // comment / string — restart the outer loop from past the region.
+        // comment — restart the outer loop from past the region.
         if (sk > lt) { i = sk; hitSkippable = true; break; }
         scanned = sk;
       } else {
@@ -2180,7 +2417,21 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     if (hitSkippable) continue;
     const next = rulesRaw[lt + 1];
     if (!next || next < "A" || next > "Z") {
-      i = lt + 1;
+      // S405 fix round 2 — advance past the WHOLE opener, not one byte. A bare
+      // `lt + 1` leaves the scan position INSIDE the opener, and the next
+      // iteration's re-scan then reads that opener's ATTRIBUTE INTERIOR as body
+      // bytes — which is the same opener-blindness the re-scans themselves were
+      // just fixed for, reached by a different route. Falls back to `lt + 1`
+      // when the `<` is not tag-shaped (ordinary prose `<`).
+      // ⚑ THIS IS THE HOT ONE. Here `lt` is the next `<` of ANY kind, so every
+      // lowercase HTML opener in a state-child body took this branch and left
+      // the scan sitting inside it. `<a href="//cdn.x">` above the children then
+      // opened a line comment from inside the attribute and swallowed the
+      // state-child that followed on the same line; a `title="glob /*.ts"`
+      // paired with any later `*/` took BOTH children to zero. This is the LIVE
+      // symbol-table path, and it failed silently.
+      const jumped = skipTagShapedOpener(rulesRaw, lt);
+      i = jumped !== lt ? jumped : lt + 1;
       continue;
     }
 

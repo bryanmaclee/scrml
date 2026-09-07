@@ -13,6 +13,18 @@
  * not opaque. Fixed by adding an HTML-comment branch to `skipCommentOrString`;
  * `computeCommentRegions` (built on it) inherits the fix.
  *
+ * ⚑ CURRENCY NOTE (S405) — THE PARAGRAPH ABOVE IS HISTORY, NOT THE CURRENT
+ * CONTRACT. It is left in the past tense on purpose because it records why this
+ * file exists, but `skipCommentOrString` no longer recognizes `"..."`, `'...'`
+ * or backtick literals at all: those branches were DELETED at S405 (SPEC
+ * §4.18.3 — `"` is the only string delimiter in scrml and `'` / backtick are
+ * ordinary interior characters). The helper's live region set is exactly
+ * `//`, `/* *​/`, `<!-- -->`. The tests below are unaffected — they assert that
+ * an HTML comment is opaque, which is still true and is now the ONLY reason the
+ * quote characters inside these fixtures are harmless. Current behaviour is
+ * specified in
+ * `compiler/tests/integration/engine-statechild-prose-punctuation.test.js`.
+ *
  * Empirically confirmed at the e2e layer too: the block-splitter already
  * captures the engine body + children intact (its `skipHtmlComment` is correct)
  * — the defect was solely in the engine-statechild-parser walker.
