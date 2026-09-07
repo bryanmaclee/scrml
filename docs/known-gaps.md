@@ -30,11 +30,160 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 96 |
+| HIGH | 99 |
 | MED | 217 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-tenant-floor-does-not-harvest-raw-DDL-so-the-protect-and-tenant-floors-disagree-on-what-a-schema-is — the §14.8.9 protect floor was TAUGHT the raw-DDL `<schema>` form; the §14.8.10 tenant floor was not, so a raw-DDL + no-`<db>` app gets a silently inert tenant floor
+
+<!-- @gap id=g-tenant-floor-does-not-harvest-raw-DDL sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts(buildTenantContext — both legs come up empty: the schemaByTable leg is built from per-`<db>` protectAnalysis.views, and the `<schema>` leg dies in parseSchemaBlock which recognizes ONLY the `tableName { col: type }` DSL at compiler/src/schema-differ.js:31; the sibling protect floor solves this with harvestRawCreateTables at compiler/src/protect-analyzer.ts:454, called :557 — the tenant floor has ZERO references to it) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-END-TO-END-at-0d8d7eac-by-a-4-app-matrix -->
+
+**REPRODUCED END-TO-END at `0d8d7eac`** by a dispatched agent; the load-bearing asymmetry
+PA-confirmed independently by symbol.
+
+**The 4-app matrix isolates it to an INTERSECTION, which is sharper than "schema-only apps are
+inert"** — every app has a `tenant_id` column and the same `SELECT id, name, tenant_id FROM assets`:
+
+| app | `<schema>` form | `<db>`? | tenant floor |
+|---|---|---|---|
+| A | DSL | no | **ACTIVE** |
+| B | **raw DDL** | **no** | **⛑ INERT** |
+| C | raw DDL | yes | ACTIVE |
+| D | DSL | yes | ACTIVE |
+
+```
+A_server.js:  let x = _scrml_tenant_tag(await _scrml_sql`SELECT …`, "tenant_id", false);
+B_server.js:  let x = await _scrml_sql`SELECT …`;                    // no tag, no redact
+```
+In B, `_scrml_tenant_redact` / `_scrml_active_tenant` / `tenantId` occur **0 times**. Compile exit
+**0**; four diagnostics, all unrelated. There is **no "schema block yielded zero tables" diagnostic
+anywhere** in `compiler/src/`.
+
+⚑⚑ **THE FINDING IS NOT "an off-grammar body is dropped" — IT IS THAT TWO ADJACENT SECURITY FLOORS
+DISAGREE ON WHAT COUNTS AS A SCHEMA DECLARATION.** Raw DDL is not the §39.2 `<schema>` grammar, but it
+is NOT merely tolerated — the compiler deliberately supports it for the *protect* floor.
+`harvestRawCreateTables` (`protect-analyzer.ts:454`, called `:557`) was added under
+`g-schema-block-raw-ddl` for exactly this, and says so verbatim:
+
+> *"we harvest those statements too … so a raw-DDL `<schema>` feeds the shadow DB exactly like a `?{}`
+> CREATE TABLE — otherwise the raw form reaches NEITHER `parseSchemaBlock` NOR the `?{}` walker and
+> E-PA-002 false-fires even though the author DID supply DDL."*
+
+**PA-verified: `tenant-egress.ts` and `db-authoritative.ts` contain ZERO references to it.** The
+§14.8.9 floor was taught the form; the §14.8.10 floor was not. The fix is to teach the tenant leg the
+same harvester, not to reject the input.
+
+**NOT an S288 regression — the alternative is FALSIFIED.** App A proves the S288 fix is live
+(`emit-server.ts:1769` passes `extractDesiredSchema(fileAST).tables` into `buildTenantContext`,
+`tenant-egress.ts:90`) and a DSL `<schema>`-only app activates the floor.
+
+⚑ **CORRECTION to dpa-039, which claimed the `<schema>`-only path has "no coverage at all":** FALSE.
+`compiler/tests/integration/schema-only-tenant-principal.test.js` is the S288 regression lock for
+exactly that shape and passes **7/0**. What is true is narrower and still worth fixing:
+`conf-TENANT-FLOOR.test.js`'s single app builder (`tenantApp`, `:32`) pairs a raw-DDL `<schema>` with
+a `<db>`, so the conformance gate drives the floor **100% from the `<db>` registry** and never
+exercises the `<schema>` leg. **The uncovered cell is B, and no case builds it.**
+
+**Blast radius, measured:** 95 `.scrml` carry a `<schema>`; ~30 use raw DDL; **4 use raw DDL with no
+`<db>` at all** — `samples/gauntlet-r14/htmx-forms.scrml`,
+`samples/compilation-tests/{server-005-mixed,server-008-form-handler,gauntlet-r10-react-wizard}.scrml`.
+**None declares `tenant_id`, so none is presently exploitable** — but the corpus teaches the shape,
+including to gauntlet devs.
+
+⚠ **Two limbs NOT verified, flagged rather than assumed:** dpa-039's *"five silent-drop points in
+series"* — one drop was confirmed (`parseSchemaBlock` → zero tables) plus the empty `<db>` leg and the
+`_tenantActive` cascade; **treat "five" as unverified.** And runtime exploitation (a cross-tenant row
+actually reaching a client over HTTP) was NOT tested — the proof here is compile-time: the
+`_scrml_tenant_tag` call is absent from the emission.
+— `NEW S405-bryan (dpa-039 Call finding; reproduced end-to-end by dispatch, the two-floors-disagree asymmetry PA-confirmed by symbol)`; **HIGH**; open
+
+### g-baseline-csrf-arm-has-no-instanceof-Response-guard-so-a-deliberate-403-ships-200 — a server fn returning `new Response("forbidden", {status:403})` comes back **200 / application/json / `{}`**, no diagnostic
+
+<!-- @gap id=g-baseline-csrf-arm-has-no-instanceof-Response-guard sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(the baseline-CSRF server-fn arm emits `_resultExprCsrf` with NO `instanceof Response` passthrough; the authed arm's guard is the ONLY one on a server-fn result path — locate by symbol `grep -n "instanceof Response" emit-server.ts`, the other four hits are the handle() middleware path) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-by-EXECUTION-at-0d8d7eac-403-returns-200 -->
+
+**REPRODUCED BY EXECUTION at `0d8d7eac`** — a dispatched agent drove the emitted WinterCG `fetch()`
+with a valid CSRF cookie+header pair; the PA independently confirmed the structural asymmetry.
+
+```
+/_scrml/__ri_route_denyIt_2     # body: return new Response("forbidden", {status: 403, ...})
+  status        = 200
+  content-type  = application/json
+  body          = "{}"
+```
+
+`JSON.stringify(new Response(...))` is `"{}"`, so **a deliberate 403 or redirect silently becomes an
+empty 200.** Compiler exit `0`; the ONLY diagnostic emitted was an unrelated `W-PROGRAM-001`. No
+diagnostic code for manual-`Response` egress exists in `compiler/src/` at all.
+
+**The asymmetry is real and PA-confirmed by symbol** — identical source body, opposite security outcome:
+
+| arm | guard | executed 403 result |
+|---|---|---|
+| default (baseline-CSRF, selector `useBaselineCsrf` at `:3804`) | **none** | **200 / application/json / `{}`** |
+| authed (`<program auth="required">`) | `if (_scrml_result instanceof Response) return _scrml_result;` (`:4509`) | **403 / text/plain / `"forbidden"`** |
+
+⚑ **The guard was written 13 days BEFORE its own precondition was voided.** The guard is `ec0142aa`
+(#452, 2026-08-06); the allowlist landing that admitted `Response` to logic scope is **`a7e99e8f`
+(S355/#590, 2026-08-19)** — *not* S352, which the dPA and this PA both mis-attributed. Its comment
+still reads *"guarded even though no corpus source reaches it today (a plain body naming `Response`
+build-blocks on E-SCOPE-001)"* — **a precondition that no longer holds.**
+
+⚑⚑ **An in-repo correction to that comment EXISTS AND IS UNMERGED.** `87c4c773` is **not an ancestor
+of HEAD** (PA-verified) and `grep -c 'This guard is LOAD-BEARING'` at HEAD returns **0**. So main
+carries the stale rationale, and the next reader is told the shape is unreachable.
+
+**Surface distinction the dPA blurred, and it narrows the fix:** SPEC §40.3.5's blessed
+`new Response("Forbidden", {status:403})` example is the **`handle()` middleware** path, which IS
+guarded (`:3230/:3270/:3274/:3283`). What reproduces is the **server-fn body** egress — a different
+surface, and one §14.8.9/§14.8.10 explicitly enumerates. The fix is the passthrough guard on the
+unprotected arms, not a change to `handle()`.
+
+⚠ **Not socket-level.** The agent drove the emitted module's exported `fetch(request)` with real
+`Request` objects rather than booting a listener — the same dispatch path, but stated so the limit is
+on the record.
+
+**Distinct from `docs/known-gaps.md`'s neighbouring entry** on the `instanceof Response` passthrough
+returning UN-REDACTED protected columns — that is the opposite polarity (guard present, leaks) and
+this is guard absent, drops. Fixing this one without the other converts a dropped 403 into a leak.
+— `NEW S405-bryan (dpa-039 Call finding; reproduced by execution via dispatch, structural asymmetry + the unmerged correction PA-confirmed independently)`; **HIGH**; open
+
+### g-chunks-json-names-chunk-urls-that-are-never-written — the emitted per-route manifest advertises 3 chunk URLs and only 1 exists on disk, so any consumer following it 404s
+
+<!-- @gap id=g-chunks-json-names-chunk-urls-that-are-never-written sev=HIGH status=open locus=compiler/src/api.js(chunks.json manifest write — the tier1/tier2 descriptors are emitted into the manifest while their payload writes are elided for the empty-payload hash)+searched:compiler/src/commands/compile.js,compiler/src/runtime-template.js prov=dd:scrml-support/docs/deep-dives/offline-pwa-cold-boot-dpa-038-2026-09-03.md+empirical:PA-reproduced-by-execution-at-0d8d7eac -->
+
+**PA-REPRODUCED BY EXECUTION at `0d8d7eac`** (not relayed — the dPA claim was independently re-run):
+
+```
+$ bun compiler/bin/scrml.js compile app.scrml --output-dir out2 --emit-per-route
+$ cat out2/chunks.json      # entryPoints -> _anonymous -> { initial, tier1, tier2 }
+    /app/_anonymous.initial.01wpbsu1.js
+    /app/_anonymous.tier1.00kas4tt.js
+    /app/_anonymous.tier2.00kas4tt.js
+$ find out2 -name '*.js'    # ONE of the three exists
+    out2/app/_anonymous.initial.01wpbsu1.js
+```
+
+`tier1` and `tier2` share the same hash (`00kas4tt` — the empty-payload hash) and neither file is
+written. **The manifest lies about its own artifacts, silently, at exit 0.**
+
+**Adopter-visible consequence, and it is why this is HIGH:** `cache.addAll()` rejects **atomically**
+on a single 404, so a service worker precaching this list fails `install` and the cold offline boot
+fails completely, with no obvious cause. This defeated the **ratified dpa-028 direction**, which named
+`chunks.json` as the precache source (RATIFIED S347). The correct set is `_SCRML_IMMUTABLE`, emitted
+into the production `dist/_server.js` by `scrml build` (`compiler/src/commands/build.js:484`,
+source-verified) — that is the set of artifacts actually written.
+
+⚠ **UNVERIFIED limb, flagged rather than assumed:** `runtime-template.js` carries `_SCRML_CHUNKS`, a
+"per-app chunks.json manifest mirror", and the §47 tier-1 idle-prefetch reads the tier URLs. If that
+prefetch fires on the unwritten tier chunks it is a 404 on every production page load, which would
+widen this well past PWA consumers. **NOT tested. Test before scoping the fix.**
+
+**Fix direction (not ruled):** either write the tier chunks, or omit from the manifest any chunk whose
+payload write was elided. The second is the smaller change and keeps determinism-replay intact.
+Corrected on #509 and the adopter was told to use `_SCRML_IMMUTABLE` in the interim.
+— `NEW S405-bryan (surfaced by dpa-038; PA-reproduced independently by execution before it was posted to an adopter issue)`; **HIGH**; open
 
 ### g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded — `<s> = ` + "`${@a} world`" + ` emits an EMPTY template and the entire initializer is lost, at exit 0 with zero diagnostics
 
@@ -98,7 +247,31 @@ exactly the kind a future session trusts without re-verifying. `#859` owed it a 
 
 ### g-no-unterminated-delimiter-diagnostic-exists-anywhere-so-four-delimiter-classes-consume-to-EOF-silently — `/* */`, `<!-- -->`, strings and backticks all run to end-of-file when unterminated, at exit 0, and the tokenizer does it too
 
-<!-- @gap id=g-no-unterminated-delimiter-diagnostic-exists-anywhere sev=HIGH status=open locus=compiler/src/tokenizer.ts(readBlockComment pushes a COMMENT token to EOF with no diagnostic)+searched:compiler/src — `grep -oE "E-[A-Z-]*UNTERM[A-Z-]*"` returns ZERO matches anywhere in the compiler prov=dd:scrml-support/docs/deep-dives/stateful-scanning-simplify-to-ship-dpa-044-2026-09-06.md-Call-1 -->
+<!-- @gap id=g-no-unterminated-delimiter-diagnostic-exists-anywhere sev=HIGH status=open ruled=S405-bryan-dpa-044-call-1 locus=compiler/src/tokenizer.ts(readBlockComment pushes a COMMENT token to EOF with no diagnostic)+searched:compiler/src — `grep -oE "E-[A-Z-]*UNTERM[A-Z-]*"` returns ZERO matches anywhere in the compiler prov=ruling:user-voice-scrml.md-S405-bryan-"dpa-044-call-1"+dd:scrml-support/docs/deep-dives/stateful-scanning-simplify-to-ship-dpa-044-2026-09-06.md-Call-1 -->
+
+⚑ **RULED S405 (bryan: "dpa-044 call 1").** Make unterminated delimiters a DIAGNOSTIC. Per S276/S130
+this adopts the full text it answered: *no surface removed, no migration, closes all four members* —
+and it is `newly-rejecting`, therefore reversible.
+
+⛑ **BUT THE DIAGNOSTIC MUST BE SCOPED BY BODY MODE, AND THE SCOPE IS NOT YET RULED — PA-verified at
+`0d8d7eac` by execution, do not re-derive:**
+
+| case | today |
+|---|---|
+| `<p>it's ready</p>` in a **plain-markup** body (odd apostrophe count) | **compiles clean** — `'` correctly has NO delimiter role there (S109 / §4.18.1 free-text) |
+| the same `<p>` **nested inside an engine state-child** | **`E-ENGINE-STATE-CHILD-MISSING` on `.B`** — the false error `g-engine-state-child-apostrophe-breaks-parse` reports |
+
+So an unterminated-delimiter diagnostic fired **in a free-text body would be a FALSE POSITIVE on
+ordinary prose** — it would newly assert that an apostrophe in markup text opens a string, which is
+exactly what S109 ruled against and what **dpa-045** reopens. The 7 "unpaired string opener" corpus
+sites dpa-044 measured are prose apostrophes, i.e. this shape.
+
+**Buildable NOW, unconditionally:** the diagnostic in genuine CODE positions — a real unterminated
+`/* */`, `<!-- -->`, string or backtick in a logic / meta / SQL context, and the `tokenizer.ts`
+`readBlockComment` EOF path. That limb needs nothing from dpa-045 and closes the round-4/5
+consume-to-EOF family.
+**Gated on dpa-045:** whether the diagnostic has any meaning at all inside a markup free-text body.
+Do not build that limb first.
 
 **dpa-044's Call 1, which the dPA ruled OUTRANKS the banked simplification question it was asked.**
 `grep -oE "E-[A-Z-]*UNTERM[A-Z-]*"` over `compiler/src` returns **zero**: scrml has **no
