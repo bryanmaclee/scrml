@@ -64,6 +64,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-042 | **COMPLETE (ADVISORY) dPA 2026-09-05 — awaiting bryan; FOUR calls, §9.** ⚑ Call 1 OUTRANKS the banked question — SPEC §17.6.6's OWN canonical example compiles GREEN (exit 0, zero diagnostics, `node --check` clean) and emits JS that throws `ReferenceError`; an in-repo fixture already asserts the missing `E-TILDE-001`. ⚑ Call 2: §35.8's "the full `lin` rule set applies to `~`" is FALSE ON THE MERITS (orchestrator-verified) — `TildeTracker:18380` is a one-cell init/consume state machine (definite assignment + single introduction) while `lin`'s three codes count ELIMINATIONS; not one is about what `~` enforces. ⚑ Call 3: the non-cosmetic unification is one WALK + one JOIN parameterized by a lattice (3/4 poles converge) — NOT the rule set; delete both `~` joins (`:18855` fail-open, `:18942` fail-closed), reify the producer at PARSE. ⚑ Call 4: the two live verdicts — distinct-but-shared-engine vs retire-and-desugar-to-`lin` — are INCOMPATIBLE (a 1:1 desugar changes the error set); yours. Zero-producers CONFIRMED exhaustively; guard-deletion DISPROVEN by in-memory execution (byte-identical, 6/6). §32.6 loop inversion convergent with dpa-040 Call 3. → `scrml-support/docs/deep-dives/tilde-lin-unification-producer-gap-dpa-042-2026-09-05.md` | dPA advisory — PA to review |
 | dpa-043 | **COMPLETE (ADVISORY) dPA 2026-09-06 — awaiting bryan; AXIOM-LEVEL, ladder row 7, his non-delegable call.** ★★ **Call 1 OUTRANKS the banked question — it is FALSE AS FRAMED.** scrml has had a normative lazy-pull evaluation model since **SPEC.md:2898 §6.6.3 "Evaluation Strategy — Lazy Pull with Dirty Flags"** (`const <name> = expr` derived cells: re-evaluated on read, dirty-flagged on write, DAG-checked §6.6.10) — it PREDATES §13.6. The real fork is narrower: does scrml also need an **ITERATOR-shaped** lazy pull alongside the declarative one? ★★ **Call 2 — A and C REJECTED 3/3, by two independent derivations.** The origin's lexical-boundary premise defeats §7040 but **never reaches §13.6, which already legalizes `function*`/`yield` INSIDE `${}`** (SPEC.md:7905, verbatim). So A does not dissolve §7040's footgun — it **recreates it one level down inside `${}`**, where the boundary cannot save it, and would re-derive §10.2 coercion + §10.5.5 concurrent-emission + §17.6.10 + §48.5 under pull semantics across **219** `lift` files (violating "I don't want go and change everything"). ★★ **Call 3 — the live fork is B vs D; panel split 1/1/1** (lazy=B · eager=B+D · simplicity=D). ⚑ **The lazy-pull pole was briefed to argue A or C and REFUSED**, declining to "manufacture a widening my own discipline would reject from anyone else" — the strongest signal in the run. ★★ **Call 4 (ORCHESTRATOR-MEASURED, CORRECTS A POLE) — scrml's SSE lowering has NO BACKPRESSURE.** `emit-server.ts:3684` emits `async start(_scrml_ctrl)` **not** `pull()`, and **`desiredSize` occurs 0 times in all of `compiler/src/`**; the unbounded `while(true){yield}` form (scrml's OWN conformance case) enqueues without bound. The surface justifying §13.6 does not implement the capability that would justify lazy/pull. **Call 5 — UNANIMOUS FLOOR, all three poles independently: adjudicate `lift` vs `yield` IN WRITING IN THE SPEC whatever the ruling** (+ record the measured outcome; + rename `E-SSE-001`, whose own SPEC text at :7979 apologizes for its name). **MEASURED BY EXECUTION at HEAD `c64c8400`** over TRACKED `.scrml`: **2,476** corpus · **12** generator-using · **11/11 `function*` are `server function*`** · **0** in stdlib(53)/samples(877)/examples(71)/compiler(123)/benchmarks(7) · **219** use `lift`. ⚑ Two measurement traps corrected in-run: naive `find` reports **261,307** (258,886 are `.claude/` session artifacts); naive `grep` reports generators in the self-host + native parser (those are `"yield"` as a **string in an EXPR_KEYWORDS set** + comment text — `compiler/` has **zero**). ⚑ **Corpus-zero is COST + MIGRATION evidence, NEVER demand evidence** (LLM-authored corpus) — all three poles held to this; D breaks **zero** existing programs. **NOT RATIFIED — RUN-not-RATIFY.** ⚑ **SIDE-FINDINGS, route to PA, NOT part of the ruling:** (1) **SILENT-WRONG CODEGEN — `type X:enum = { A  B }` (space-separated) drops every variant after the first**, both emits, **exit 0, no diagnostic**; comma/newline/pipe all correct; **space is NOT a SPEC-sanctioned form** and should be a parse error. Blast radius **1 file** — `conformance/cases/server-fn/sse-generator-binding-seed-survives/case.scrml`, which therefore has `Phase.Active === undefined` and an `<Active>` arm that can never fire, **yet still passes** (it asserts only the pre-event seed, `#active count 0` — right for the wrong reason). (2) SSE errors still swallowed by an empty `catch` at `emit-server.ts:3768` — giti-025 unfixed. (3) `W-LINT-018` false-fires TWICE on the sanctioned generator surface. | artifact `scrml-support/docs/debates/lazy-pull-yield-emit-primitive-dpa-043-2026-09-06.md` · bryan rules |
 | dpa-044 | **COMPLETE (ADVISORY) dPA 2026-09-06 — awaiting bryan; FOUR calls, §7.** ⚑ **Call 1 OUTRANKS the banked question** — silent consume-to-EOF is UNIVERSAL (the tokenizer does it too, `readBlockComment` tokenizer.ts:1366; **no `E-*UNTERMINATED*` diagnostic exists anywhere in the compiler**), so making it a DIAGNOSTIC removes NO surface, costs NO migration, and closes all four members. ★★ **The discriminator is FALSE as framed** and the hazard is a FOUR-member class — `/* */` · `<!-- -->` (§27.2, a THIRD comment form the item never mentions, 35 corpus files) · strings · backticks. **Measured unpaired openers: `/*` 0 · `<!--` 0 · string 7 · backtick 1** — the proposal removes the two forms with ZERO instances and keeps the two with EIGHT (prose apostrophes = the S402 unlandable arc). **The sole HIGH is triggered by `//` at first significant char — bryan's exact SURVIVING form** — and its second shape drops a statement with no comment at all (§40.8 `default-logic` root). Restriction still worth taking (≤3.6% migration; deletes `urlSlashesAt` + collapses 3 line scanners), but as a blast-radius cap, not as the defect fix. ⚑ Item's headline **"22 files" does not reproduce — it is 10** at its own commit. ⚑ **This row did not exist until the dPA added it** — the item was banked with no table row, so `dpa-debt` read `0 UNRUN`; third witnessed obligation-vs-probe mismatch (§8). | dPA drain 2026-09-06 |
+| dpa-045 | **BANKED — UNRUN** (S405 2026-09-07) — **AXIOM-LEVEL (ladder row 7), one-at-a-time, bryan fires.** Should text in a plain-markup body BE a string? SPEC §4.18.8 names this as **scope (a) — all-bodies**, *"costed and NOT chosen for v0.4"*; DD-1 rejected it as *"a coherence/aesthetics argument, not a friction-elimination argument."* ⚑ **The DD must weigh a THIRD pole S111 never costed — (a′) the body IS an implicit template** (Lit's model; tags are the delimiters, author writes no quotes, exactly two active sequences `${` and `<`) — which claims scope (a)'s structural win at ZERO author tax and ZERO migration. ★ **UPSTREAM of two live items:** if (a′) holds, peter's apostrophe arc (#862/#865, unlandable at five rounds) and `g-splitblocks-consumes-dollar-brace…` (HIGH) are both closed BY CONSTRUCTION and neither fix should be built. | banked S405-bryan ("bank the dpa and Ill fire it.") |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -2843,3 +2844,134 @@ Corpus counts (`.scrml` only, 1920 files) are recorded as BLAST RADIUS ONLY, nev
 
 `scrml-support/docs/deep-dives/` + flip `status: banked → complete` + the `(dpa: …)` delta-log
 breadcrumb. **RUN-not-RATIFY** — the dPA never flips to `ratified`; that is the PA's act with bryan.
+
+---
+
+## [dpa-045] debate — Should text in a plain-markup body BE a string? (AXIOM-LEVEL · the S111 scope-(a) reopen)
+status: banked   # banked → running → complete → ratified(by PA)
+banked:    S405 2026-09-07 (bryan: "bank the dpa and Ill fire it.")
+
+### Origin — bryan, verbatim, S405
+
+Opening the `${`-in-a-top-level-template ruling, the PA recommended a fix (B+C) that rests on S109's
+*"markup-text body is TEXT with no string concept."* bryan's reply:
+
+> "s109 was a long time ago. B+C may be correct. But lets look at: if text in a markup body *should* be
+> a string."
+
+⚑ **That is a REOPEN of a ratified axiom, deliberately, and it is licensed by S322** — the freeze
+campaign is paused, the first question is *"is this the best expression of the intent?"*, and a
+widening (or here, a re-drawing) CAN be the right answer. **S109 and S111 get no deference for having
+been ruled.** The DD's job is to answer the question on today's evidence, not to defend the prior.
+
+### Scope-lock
+
+**IN:** the text/code boundary in a **plain-markup free-text body** (`<p>`, `<h1>`, `<div>`, component
+bodies, `<errors>` override templates) — §4.18.1's free-text mode — and the `default-logic` third mode
+(§40.8) which §4.18 explicitly declines to classify.
+**IN:** whether §4.18's two-mode split is the right axis at all, or an artifact of a frequency argument.
+**OUT:** code-default bodies (§4.18 scope (b)) — those already have the `"..."` literal and are NOT in
+question; the DD may only ask whether they COMPOSE with the outcome.
+**OUT:** `<pre>`/`<code>` raw-content (§4.17) — an orthogonal locus-gating mechanism that already works.
+**OUT:** the comment-form question — that is dpa-044, complete and awaiting bryan. Do not re-run it.
+
+### The three poles — and the third is the contribution
+
+| pole | rule | author tax | migration |
+|---|---|---|---|
+| **(b) status quo** | two body modes; free-text is a **heuristic** text/code classification | none | none |
+| **(a) explicit text** | every display-text node is a written `"..."` literal (Elm `text "…"`) | **every text node** | **~2555 files** |
+| **(a′) implicit template** | the body IS a string literal delimited by its own opener `>` and closer, with exactly **two active sequences — `${` and `<`**; `'`, `` ` ``, `/`, `//` are content BY CONSTRUCTION | **none** | **none** |
+
+**(a′) is the pole S111 never had.** Both S111 DDs read "text is a string" as Camp A (author writes the
+quotes), which is why DD-1 could correctly report it *"supported by Elm alone."* (a′) is Lit's model —
+`` html`<p>hello ${name}</p>` `` — where the markup body is itself a template literal.
+
+⚑ **The PA's own strongest objection to (a′), stated so the DD attacks it rather than discovers it:**
+(a′) may not be a change of camp at all. JSX/Vue/Svelte already claim to be "text, with `{expr}` as the
+exception," and (a′) is arguably that sentence written precisely. **Rebut or confirm this directly** —
+the PA's position is that it is the point rather than a refutation, because the S322 re-examination test
+is retrofit-vs-by-construction and does not care whether the author-visible surface moves. That position
+is a hypothesis and should be falsified if it is wrong.
+
+### ⚑ MEASURED BY THE PA AT `4d057a58` — verify by execution before reasoning from any of it
+
+- **§4.18.2's own rationale is a FREQUENCY argument and names the heuristic out loud:** *"a mandatory
+  visible marker replaces a **heuristic** … The marker lands on display text only in the loci where
+  display text is the **minority content**."* S111 identified the heuristic AND the by-construction
+  answer, then applied the answer to 3 loci and left the heuristic where content is most common.
+- **The costing is stale by 2×.** DD-3 priced scope (a) against `block-splitter.js` at **2055 LOC**.
+  Measured today: **4011 LOC** — roughly double in ~3½ months. The heuristic engine is append-biased.
+- **The compiler's own source pays the tax.** `compiler/native-parser/body-mode.scrml` — the file that
+  IMPLEMENTS §4.18 — must *"PARAPHRASE any brace-bearing sigil in commentary"* and assemble sigil
+  strings *"via character concatenation"*, because a literal sigil in a scrml line-comment *"opens a
+  spurious context that derails closure detection"* (ANOMALY-1). **11 native-parser files carry it.**
+- **The friction has moved off DD-1's map.** DD-1 rejected (a) because friction was *"overwhelmingly
+  concentrated in code-bearing bodies, not in `<p>` prose."* Since: the `${` HIGH fires at a
+  **`default-logic`** body — §4.18.1 says that mode is *"neither free-text mode nor code-default mode"*
+  and it has NO quoted-text model at all; plus `g-default-logic-auto-lift-silently-disabled-by-a-
+  preceding-prose-line`; plus peter's apostrophe route where **4 of 5 adversarial rounds each introduced
+  a NEW silent-drop of the same class** — a fix that will not converge.
+- **Timing, honestly — the last cheap moment, not a free one.** MK3 is **COMPLETE** in the native parser
+  (`body-mode` + `display-text-literal` + interpolation all landed), so the two-mode split is now
+  implemented **twice**. But the native parser is still opt-in (`--parser=scrml-native`) and the legacy
+  BS is what ships, so the cutover has not happened.
+- **Prior art (DD-1 Part 2, still current):** Camp A explicit-text = Elm, Hyperscript/Mithril — friction
+  *"None recurring."* Camp B free-text = JSX/Vue/Svelte, the camp scrml is in — every member carries
+  named recurring friction (escape mechanisms, whitespace guessing, `{' '}` as a hand-rolled
+  explicit-text patch, MDX spun off as a separate language). Camp C code-default = Lisp, ~65 years stable.
+
+### What survives every pole — do not claim otherwise
+
+`<` stays genuinely overloaded: `<div>` is a tag and `<x> = 0` is a state declaration, both at body
+position. DD-3 already flagged this — *"the text-disambiguation half goes, the state-decl-shape half
+stays."* No pole deletes the classifier; (a′) deletes the half that generates the bug families.
+
+### What the DD/debate owes
+
+1. **Falsify or confirm the PA's (a′)-is-not-camp-B objection above.** This decides whether (a′) is a
+   real third pole or a restatement of the status quo.
+2. **Whitespace.** §4.18.5 runs TWO regimes — verbatim inside a display-text literal, HTML-collapse in
+   free-text bodies. Under (a) they must reconcile; under (a′) which one governs, and does answering it
+   break existing `<p>` layout? **This is the most likely place (a′) dies.**
+3. **Direction-of-change per base §8, per pole.** The PA's read: (a) is newly-rejecting at
+   corpus-scale (a measured migration of ~everything); (a′) claims `inert` on the author surface but is
+   `semantics-changed` wherever the heuristic currently guesses right by accident. **The second claim is
+   PA-inferred and unmeasured — measure it.** An artifact differential over the corpus is the instrument.
+4. **The `W-DISPLAY-TEXT-OVERQUOTE` question.** That lint (§4.18.7, S181) exists ONLY because there are
+   two modes. Count what else in the diagnostic catalog is a two-mode artifact — a bug family that
+   cannot exist under a one-model answer is evidence, and nobody has counted it.
+5. **Does the outcome compose with code-default bodies (scope b), or supersede them?** If (a′) wins, is
+   `"..."` in an engine state-child still the right marker, or does it become the odd one out?
+
+### ⚑ Standing corrections to the record this item rests on — PA-verified at `4d057a58`
+
+The S404 filing of `g-splitblocks-consumes-dollar-brace…` carries three claims the PA reproduced as
+**wrong**; the DD must not inherit them:
+1. *"everything after it is silently discarded"* — **false.** It is a three-way context escape: the
+   interpolation interior is emitted as a **live executed top-level statement** (`_scrml_audit_2("render");`
+   for `` <banner>: string = `Welcome ${audit("render")} back` ``) and the tail **leaks into the rendered
+   HTML body as page text.** Data crosses into code context AND markup context.
+2. *"Searched §3.1, §4.18, §7.4.2, §40.8 — no governing sentence found"* — **false.** §7.5.1 names
+   *"a back-tick template (which denotes a `string` whether or not it interpolates)"* as one of the four
+   scrml primitive literal forms, in a rule binding *"position 2 — a state-cell declaration (§6.1.5)"*;
+   the same section says *"an interpolated template literal is such a literal."* And §5.5.3 carries a
+   full SHALL-set for `${@varName}` **inside a template literal** — PA-verified WORKING by emission
+   (`class="badge badge-${@tone}"` emits the reactive `setAttribute` §5.5.3 describes).
+3. *"all 37 … are indented"* — **false mechanism and the number does not reproduce.** Indentation is not
+   the discriminator (an indented case breaks identically); being inside a `${}` block is. A
+   bite-proven census (5/5 on reproducers, scope+totals printed) finds **0 back-tick-template state-decl
+   inits in 1920 files**; an independent whole-tree grep finds **3**, all S404's own probe fixtures, none
+   interpolating. Meanwhile **630 interpolating templates across 262 files** exist elsewhere — the
+   construct is pervasive, just never in the position that breaks. Per the reverse-ouroboros rule that
+   zero is **blast radius only**, and the corpus is 100% LLM-authored.
+
+### Cross-refs
+
+SPEC §4.18 (canonical, incl. §4.18.8's scope-(a) record) · §40.8 (`default-logic`, the third mode) ·
+§7.5.1 · §5.5.3 · §4.17 · §34 (`E-UNQUOTED-DISPLAY-TEXT`, `W-DISPLAY-TEXT-OVERQUOTE`) ·
+`scrml-support/docs/deep-dives/quoted-text-model-{design-space,depth-of-fix,friction-and-prior-art}-2026-05-20.md`
+(DD-2/DD-3/DD-1 — the S111 record; **DD-3's LOC baseline is stale by 2×**) ·
+`compiler/native-parser/body-mode.scrml` (MK3, complete) · dpa-044 (comment forms — complete, adjacent,
+do not re-run) · `g-splitblocks-consumes-dollar-brace-inside-a-top-level-template-truncating-the-string`
+(HIGH, held behind this) · `g-engine-state-child-apostrophe-breaks-parse` + #862/#865 (held behind this).
