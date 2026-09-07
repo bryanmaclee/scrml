@@ -79,6 +79,40 @@ const LIB_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
  * the raw path, where its `@x` leaks verbatim and fails LOUDLY — the honest
  * outcome until a library-mode ruling on `@`-cells exists.
  */
+/**
+ * Un-lowered scrml-only syntax left in an otherwise-accepted structural emit —
+ * the companion gate to `unmetRuntimeHelperRefs`, for constructs that need no
+ * runtime helper and so slip past it.
+ *
+ * ⚑ THE ONE THAT FORCED THIS: `!{ … }` (a guarded expression). Measured on
+ * `let v: int = !{ n }` in a match-free library fn:
+ *
+ *   base  `let v: int = !{ n }`   INVALID JS — fails loudly the moment it is imported
+ *   arc   `let v = !{n};`         VALID JS. `!` applied to an object literal, so it
+ *                                 evaluates to `false`, ALWAYS, in a fn typed `-> int`
+ *
+ * Both at exit 0 with ZERO diagnostics. The structural path re-prints the guard's
+ * inner text without lowering it, and `!{…}` happens to be syntactically legal
+ * JavaScript — which is exactly what makes it worse than the leak it replaced.
+ * Turning a LOUD failure into a SILENT WRONG ANSWER is the one direction this
+ * widening must never move in, and it is the same argument the
+ * `LIB_RUNTIME_HELPERS` comment above makes for `_scrml_structural_eq`; that
+ * guard simply cannot see a construct with no `_scrml_*` reference to catch.
+ *
+ * Read the EMITTED BYTES rather than the AST, for the reason
+ * `unmetRuntimeHelperRefs` states — and here additionally because a guarded-expr's
+ * node shape is not reliably visible where the router runs.
+ */
+function unloweredScrmlSyntax(emitted: string): string[] {
+  const found: string[] = [];
+  // `!{` — a guarded expression that did not lower. Legal JS, always falsy.
+  if (/!\s*\{/.test(emitted)) found.push("!{ } guarded expression");
+  // `_={` — foreign code that did not lower (belt-and-braces; the router already
+  // excludes foreign-bearing fns by AST, this catches any path that gets past it).
+  if (/_=\s*\{/.test(emitted)) found.push("_={ }= foreign block");
+  return found;
+}
+
 function unmetRuntimeHelperRefs(emitted: string): string[] {
   const unmet = new Set<string>();
   const re = /\b(_scrml_[A-Za-z0-9_$]*)\s*\(/g;
@@ -776,6 +810,12 @@ function emitControlFlowLibraryFns(
     // would PARSE and then throw on first call. Discard it and leave the fn on
     // the raw path, where the same construct fails loudly instead.
     if (unmetRuntimeHelperRefs(emitted).length > 0) continue;
+    // ⚑ Companion gate: scrml-only syntax the structural path re-printed WITHOUT
+    // lowering, which needs no runtime helper and so is invisible to the check
+    // above. `!{ … }` is the live case and it is the worst possible shape —
+    // legal JavaScript that is always `false`. Fall back to raw, where the same
+    // construct fails loudly. See `unloweredScrmlSyntax`.
+    if (unloweredScrmlSyntax(emitted).length > 0) continue;
     removals.push(range);
     outLines.push(emitted);
   }
@@ -930,6 +970,9 @@ function rawFallbackReason(fnNode: ASTNode): string | null {
       reason = "`_={ … }=` foreign code (emit-logic nulls a foreign init off the server boundary)";
       return;
     }
+    // (A `!{ … }` guarded expression is caught AFTER emission instead — see
+    // `unloweredScrmlSyntax`. Its AST shape is not reliably visible at this point in
+    // the pipeline, and the emitted bytes are the ground truth anyway.)
     for (const key of Object.keys(o)) {
       const v = o[key];
       if (v && typeof v === "object") walk(v);
