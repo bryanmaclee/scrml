@@ -30,11 +30,53 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 100 |
+| HIGH | 101 |
 | MED | 223 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-the-foreign-opener-grammar-is-hand-spelled-in-five-places-at-three-levels-of-completeness — SPEC 23.2 defines `_` + ZERO OR MORE `=` + `{`, and no two detectors agree on how much of it to match
+
+<!-- @gap id=g-foreign-opener-grammar-hand-spelled-five-places sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts:389+compiler/src/type-system.ts:473+compiler/src/lint-w-interp-in-raw-content.js:51+compiler/src/codegen/protect-egress.ts+compiler/src/ast-builder.js:18392(the-one-correct-spelling) prov=empirical:PA-read-all-five-sites-on-main+review:S405-arc-A-and-arc-B-each-found-one-independently -->
+
+**SPEC 23.2 defines the foreign-code opener as `_` followed by ZERO OR MORE `=` then `{`** — `_{`,
+`_={`, `_=={`, and so on. **Five sites hand-spell that grammar and only ONE is correct.**
+
+| site | matches | verified |
+|---|---|---|
+| `ast-builder.js:18392` | **the full grammar** | the one correct spelling |
+| `codegen/tenant-egress.ts:389` | level **0** only | PA-read on main |
+| `type-system.ts:473` | levels **0 and 1** only | PA-read on main |
+| `lint-w-interp-in-raw-content.js:51` | level **0** only, for **EVERY** sigil | PA-read on main |
+| `codegen/protect-egress.ts` | was level 0 only | found + fixed in the S405 arc-A branch |
+
+**THE INVERSION IS WHAT MAKES THIS HIGH.** `W-FOREIGN-001` actively steers authors AWAY from level 0.
+So these detectors recognize **exactly the spelling the compiler discourages** and miss the spellings
+it recommends. Two of the five are security floors.
+
+**Both reproduced by execution, independently, by two different S405 agents that could not see each
+other's work:**
+- **protect side:** `let w = _={ JSON.stringify(v) }=` shipped `passwordHash` at **exit 0**.
+- **tenant side:** levels 1/2/3 compiled at **exit 0, zero errors**; executed with ambient tenant `A`,
+  the wire carried `{"id":2,"name":"THEIRS","tenant_id":"B"}` — a live cross-tenant isolation escape,
+  executed, not theoretical.
+
+**Why ONE gap and not five:** the defect is not any single regex — it is that a normative grammar with
+a `*` in it is **re-derived by hand at every consumer**, so each gets a different prefix and no gate
+compares them. Fixing the two remaining sites leaves the next author free to hand-spell a sixth. The
+structural fix is **a single exported predicate** (the `ast-builder.js:18392` pattern) that every
+consumer calls, plus a probe that fails when a new hand-spelling appears.
+
+**This is the S405 enumeration-scope pattern in its purest form** — four tokens where there were five ·
+tokens x locations where the missing axis was scan sites · three sink-proofs agreeing on an incomplete
+sink set · and now five spellings of one grammar where nobody enumerated the spellings. Each analysis
+was rigorous; each had the wrong axis.
+
+**Two of the five are fixed** (arc A protect-egress, arc B tenant-egress), both landing in the S405
+dpa-039 defect set. **`type-system.ts` and `lint-w-interp-in-raw-content.js` are untouched and outside
+both arcs' file boundaries** — they need an owner.
+— `NEW S405-bryan (arc A and arc B each found one independently; PA read all five sites on main and confirmed the levels)`; **HIGH**; open
 
 ### g-tenant-floor-does-not-harvest-raw-DDL-so-the-protect-and-tenant-floors-disagree-on-what-a-schema-is — the §14.8.9 protect floor was TAUGHT the raw-DDL `<schema>` form; the §14.8.10 tenant floor was not, so a raw-DDL + no-`<db>` app gets a silently inert tenant floor
 
