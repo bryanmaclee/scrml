@@ -1722,6 +1722,31 @@ export interface LitExpr {
     /** @deprecated S90 M-7C-D-12 Track 1 — use `"not"` with `raw: "undefined"` for user-source forbidden-token detection. */
     | "undefined"
     | "not";        // §42 absence value — compiles to null
+  /**
+   * `litType: "template"` ONLY — does this back-tick template carry a `${…}`
+   * interpolation?
+   *
+   * CARRIED, never inferred. The `TemplateLiteral` arm of `esTreeToExprNode`
+   * knows the answer exactly (it branches on `quasis.length`) and stamps it
+   * here; every consumer reads it rather than re-deriving it from `raw` /
+   * `value`.
+   *
+   * ⚑ WHY THIS FIELD EXISTS. The previous test was
+   * `raw === "\`" + value + "\`"`, whose doc comment called it "an exact test,
+   * not a heuristic". It is not exact: it is ALSO true when `raw === "\`\`"`
+   * and `value === ""`, and that pair is what a multi-quasi template degrades
+   * to whenever its source text could not be recovered (the `astring`
+   * last-resort fallback in the same arm, or an upstream stage that truncated
+   * the initializer). A genuinely EMPTY single-quasi template and a DEGRADED
+   * interpolated one are indistinguishable in `(raw, value)` — so §53.4's
+   * predicate zone could classify an interpolated template as STATIC and
+   * check it against the empty string, which is not its value.
+   *
+   * Absent (`undefined`) on hand-synthesized nodes that did not come from this
+   * parser; consumers SHALL fall back to scanning `raw` rather than to the
+   * `(raw, value)` reconstruction.
+   */
+  hasInterpolation?: boolean;
 }
 
 // ---- Compound Primary Nodes ----

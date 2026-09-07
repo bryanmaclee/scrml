@@ -485,7 +485,50 @@ function translateTemplateLit(nativeExpr) {
         }
     }
     raw = raw + "`";
-    return makeLit(raw, raw, "template", nativeExpr.span);
+
+    // ⚑ `value` IS NOT `raw`, AND GETTING THAT WRONG IS A SOUNDNESS BUG, NOT A
+    // COSMETIC ONE. This constructor used to be `makeLit(raw, raw, …)`, so a
+    // native template's `value` carried the DELIMITERS — `` `abc` `` (5 chars)
+    // for a literal whose value is `abc` (3). That was survivable only by
+    // accident: `isStaticTemplateLit` used to reconstruct "`" + value + "`"
+    // and compare it to `raw`, a test that can never match when `value`
+    // already has the backticks, so every native template fell through to
+    // `literal-type-only` and §53.4 kept its runtime guard. The moment the
+    // answer became CARRIED rather than inferred (`hasInterpolation`), that
+    // accidental fall-through disappeared and the corrupt value would have
+    // been routed straight into the STATIC zone — a false `E-CONTRACT-001` on
+    // valid code in one direction, and a silently elided boundary guard in the
+    // other. The native path is not exotic here: `sourceNeedsLiveFallback`
+    // (`component-expander.ts:1087`) routes only INTERPOLATED templates to the
+    // live parser, so STATIC templates reach this function BY DESIGN.
+    //
+    // The two fields therefore mirror the live `TemplateLiteral` arm exactly:
+    //   no interpolation -> `value` is the COOKED body (escapes resolved,
+    //                       delimiters excluded), matching the single-quasi
+    //                       branch's `value: cooked`;
+    //   interpolation    -> `value` is "", matching the multi-quasi branch.
+    //                       "" is NOT the text; `hasInterpolation` is what
+    //                       says so, which is the whole reason it is carried.
+    const hasInterpolation = exprs.length > 0;
+    let cooked = "";
+    if (!hasInterpolation) {
+        for (let i = 0; i < quasis.length; i = i + 1) {
+            const q = quasis[i];
+            cooked = cooked + ((q && q.cooked !== undefined && q.cooked !== null) ? String(q.cooked) : "");
+        }
+    }
+    const lit = makeLit(raw, cooked, "template", nativeExpr.span);
+    // `LitExpr.hasInterpolation` — CARRIED, never inferred from `raw`/`value`.
+    // `exprs.length` is the native pipeline's exact witness, the counterpart of
+    // the live pipeline's `quasis.length` test in the `TemplateLiteral` arm of
+    // `esTreeToExprNode`. Stamping it here keeps the two pipelines at
+    // FIELD-level parity (the within-node canary counts a field the live side
+    // emits and this one does not as a MISSING-FIELD divergence), and it is
+    // also what makes §53.4's predicate zone answerable from a native AST:
+    // without it, `raw` alone cannot distinguish an interpolated template that
+    // lost its source text from a genuinely empty one.
+    lit.hasInterpolation = hasInterpolation;
+    return lit;
 }
 
 // --- composite-primary constructors ------------------------------------------
