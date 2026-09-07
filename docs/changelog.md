@@ -7224,8 +7224,10 @@ as already red on main's own latest run.
 
 **Cleanup:** `scratchpad/` deleted — 491 files / 13.8 MB of spent per-session probes (S373→S403),
 never gitignored so it was untracked noise at every boot. Five memories pointing into it were updated
-rather than left to rot. Worktrees swept from 6 → 5; two agent branches retained carrying unlanded
-work (`a17aa532…` ahead=1, `a451e4f6…` the parked arc ahead=2).
+rather than left to rot. Worktrees swept 6 → 5 at wrap step 6b, then → **4** when the last
+zero-ahead worktree (`afce71a5…`, initially blocked by the tool classifier) was removed by hand at
+Peter's instruction; two agent branches retained carrying unlanded work (`a17aa532…` ahead=1,
+`a451e4f6…` the parked arc ahead=2), both re-verified at S408.
 
 ### 2026-09-06 (S404 — a ruling in two messages, then a day of instruments being wrong, mine included)
 
