@@ -7172,6 +7172,61 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-07 (S406 — peter — a host lockup investigated: the obvious cause measured and FALSIFIED)
+
+Booted `/boot` Profile A, then Peter reported his machine had locked up hard the previous day —
+unresponsive to input, three forced restarts. That became the session. **No compiler work landed;**
+the library-mode structural-routing arc is PARKED untouched.
+
+**The incident.** A single `bun.exe` reached **82 GB committed** on a 32 GB box (9 GB pagefile ⇒
+~41 GB commit limit). The System event log carries the whole cascade: Resource-Exhaustion 2004 →
+`disk` 51 paging errors → an `nvlddmkm` Event-153 storm every ~3s → total UI freeze → Kernel-Power 41
+/ 6008. Three hard resets, at 1:19, 2:16 and 4:23 PM on 2026-09-06.
+
+**⚑ The obvious cause was measured and DISPROVED — do not re-run the guess.** Every candidate was
+executed inside a Windows Job Object with a kernel-enforced commit cap and per-second sampling:
+
+| candidate | peak commit | scale |
+|---|---|---|
+| `bun test compiler/tests/` | **2.433 GB** | 31,420 tests / 1,451 files / 325s |
+| bulk compile, one process | **1.281 GB** | 805 files |
+| `bun run bench` | **0.835 GB** | 71 files |
+| `bun conformance/run.ts` | **1.037 GB** | full corpus |
+| `scrml dev` (watch server) | **0.473 GB** | 40 rebuilds |
+| `scrml serve` (hot compiler) | **0.535 GB** | 200 compilations |
+
+The suite's curve *falls* after t=187s (2.433 → 1.994 GB) as GC reclaims; both long-lived servers
+plateau. **Nothing in the normal toolchain can produce 82 GB**, so the culprit is atypical and remains
+UNIDENTIFIED. The GPU (drivers already updated — the `nvlddmkm` errors are a symptom of starvation),
+the disks (both `Healthy`; Event 51 is explicitly "during a paging operation") and the bun version
+(1.4.0 stable, above the `>=1.3.13` pin) were each cleared with the reason each looked guilty.
+
+**A bun bug report was prepared and correctly NOT filed.** Peter asked to route it upstream; bun's own
+`--help` documents the default test mode as letting *"files see each other's leftovers"*, and the
+measurement then cleared bun entirely — leaving *less* evidence of a defect than when the report was
+requested.
+
+**Delivered — and both guards were BITE-TESTED, the first design failing its own test.** A polling
+watchdog set to 2 GB let a 60 GB/s allocator reach **5.96 GB** before the kill landed (3× overshoot);
+the Job Object cap held the identical runaway to **1.977 GB against a 2 GB cap** (23 MB overshoot),
+because the kernel enforces it at allocation time and is rate-independent. bun has no heap-limit flag
+(only `--smol` and `--heap-prof*`), so an OS-level cap is the only hard ceiling available.
+
+- **`BunMemorySentinel`** — a logon scheduled task that logs every bun process's **full command line**
+  (via `Win32_Process`, which `Get-Process` cannot supply) and kills at 20 GB. This closes the
+  identification gap: a recurrence names itself. Ran the entire hunt, including the 325s full suite,
+  with zero false fires.
+- **A kernel-capped runner** for anything deliberately heavy, plus a 4-page incident report.
+
+**Landed:** #886 `chore(s406)` — archives the library-mode `BRIEF.md`, untracked since dispatch (the
+base §5 miss), and drains the inbox. Docs-only; `gate` PASS, `windows` PASS, `tracking` FAIL verified
+as already red on main's own latest run.
+
+**Cleanup:** `scratchpad/` deleted — 491 files / 13.8 MB of spent per-session probes (S373→S403),
+never gitignored so it was untracked noise at every boot. Five memories pointing into it were updated
+rather than left to rot. Worktrees swept from 6 → 5; two agent branches retained carrying unlanded
+work (`a17aa532…` ahead=1, `a451e4f6…` the parked arc ahead=2).
+
 ### 2026-09-06 (S404 — a ruling in two messages, then a day of instruments being wrong, mine included)
 
 bryan's standing instruction opened the session (*"start next session with expounding on int/number"*)
