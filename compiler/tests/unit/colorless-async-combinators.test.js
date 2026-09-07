@@ -132,7 +132,19 @@ describe("sync callback stays native (the 689-site common case is byte-stable)",
 }
 `);
     expect(codes).not.toContain(CODE);
-    expect(js).toContain("hs.filter(h => h.active)");
+    // ⚑ RETARGETED (S408) — was `.toContain("hs.filter(h => h.active)")`, an exact
+    // TEXT match. Since library fns route through the structural emitter by default,
+    // the predicate is re-printed from the AST and normalises to `(h) => h.active`.
+    // That is a pure LAYOUT change: same callee, same sync predicate, same semantics.
+    //
+    // ⚑ AND IT NARROWS THIS BLOCK'S CLAIM, SO SAY SO RATHER THAN QUIETLY PASS: the
+    // describe title says the 689-site common case is "byte-stable", and after
+    // route-by-default it is no longer byte-stable — it is CALL-SHAPE stable. The
+    // property this test actually protects (a sync callback is NOT colored async and
+    // pulls in NO combinator) is untouched and is pinned by the three assertions
+    // around this one. The byte-level half was collateral of the routing change and
+    // is measured: 36 of the 118-file library population are reformat-only diffs.
+    expect(js).toMatch(/hs\.filter\(\s*\(?\s*h\s*\)?\s*=>\s*h\.active\s*\)/);
     expect(js).not.toMatch(/async function activeOnes/);
     expect(js).not.toContain("_scrml_filterAsync");
   });
