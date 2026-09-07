@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 100 |
-| MED | 220 |
+| MED | 223 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -12635,3 +12635,21 @@ The two extra failures in run 1 were `(E) client-codegen SKIP — NO endpoint su
 ⚑ **The 5 standing failures are NOT this gap and are unchanged on both bun versions:** three in `self-host-smoke.test.js` (the S254 path-model class, plus the open `g-selfhost-smoke-resolves-projectroot-to-MAIN…`) and two in `session-secure-b4b5-roundtrip.test.js`.
 — `NEW S408-peter (found while acceptance-testing a bun upgrade; attributed by running the SAME suite on both versions plus a repeat on the new one, rather than by reasoning from the failure text)`; **MED**; open
 <!-- @gap id=g-endpoint-conformance-node-check-tests-time-out-under-full-suite-load sev=MED status=open locus=compiler/tests/integration/endpoint-conformance-integration.test.js(the two tests that spawn `node --check` as a subprocess; the 5000ms default test budget is the locus, not the assertions — both failures are `timed out after 5000ms`) prov=empirical:PA-ran-the-identical-capped-suite-three-times-1.4.2-gave-7-fail-then-1.4.0-gave-5-then-1.4.2-again-gave-5-with-byte-identical-fail-sets-and-the-two-extra-were-timeouts-at-5940ms-and-7558ms-that-pass-in-isolation-on-BOTH-versions -->
+
+### g-library-enum-runtime-collides-with-a-user-const-and-the-diagnostic-blames-codegen — eight `compiler/native-parser/*.scrml` modules cannot compile because the compiler's enum runtime binding collides with a hand-written mirror const, and the error tells the author to file a compiler bug
+
+A library file's enum type-decl emits a runtime binding `const X = Object.freeze({ … })` (§21.2). Eight native-parser modules ALSO hand-declare `export const X = Object.freeze({ … })` — written deliberately, and labelled in-source as *"variant tags (mirror of the canonical enum's .Variant names)"*, back when library mode did not emit enum runtimes at all. Two top-level `const X` in one ES module is a hard `SyntaxError`.
+
+**PA-MEASURED at `80f8d9eb`** over the 118-file library population, by parsing each emitted `libraryJs` with acorn — **8 modules**, one duplicated identifier each: `block-context.scrml` (BlockContext) · `body-mode.scrml` (BodyMode) · `bracket-stack.scrml` (BracketKind) · `display-text-literal.scrml` (DisplayTextLiteral) · `error-recovery.scrml` (ErrorRecovery) · `lex-mode.scrml` (LexMode) · `parse-mode.scrml` (ParseMode) · `tag-frame.scrml` (TagKind).
+
+⛑ **IT IS LOUD, AND THAT IS THE GOOD HALF — do not read this as silent-wrong.** Through the CLI the §2.2.1 CG emit gate refuses the artifact: compiling `lex-mode.scrml` with `-o` gives exit 2, **1 error, no artifacts written**. (An API-level `compileScrml({write:false})` probe does NOT run that gate and returns the invalid text happily — worth knowing before reading any `libraryJs` probe as evidence of what ships. That is how this entry's severity was first mis-read.)
+
+⛑ **THE DEFECT WORTH FIXING IS THAT THE DIAGNOSTIC IS WRONG ABOUT WHOSE FAULT IT IS.** The message is *"This is a compiler defect (codegen produced malformed output). Please report it."* It is not a compiler defect: it is a name collision between generated and authored code, and the actionable fix is for the author to delete a mirror const the compiler now supersedes. The author is instead instructed to file a compiler bug. Same shape [[g-library-mode-cell-access-has-no-runtime]] names for `@`-cells — *a downstream parse error that blames codegen for a source-level violation*.
+
+**Fix fork, with a recommendation:**
+- **(a) RECOMMENDED — diagnose the collision by name**, at the enum decl or the colliding const: *"enum `LexMode` emits a runtime binding that collides with the `const LexMode` exported at line 148; remove the hand-written mirror."* Turns an unactionable self-blame into a one-line fix and keeps the compiler's binding authoritative.
+- **(b) Suppress the compiler's enum runtime when a user binding of the same name is exported** ("the author wins"). Cheaper, but it silently decides WHICH of two same-named bindings the module exports — a silent resolution of an ambiguity the author does not know they have. Not recommended.
+
+Either way the eight sources should lose their now-redundant mirrors; that half is a source edit under `compiler/native-parser/`, a different owner's surface, so it is named here rather than done.
+— `NEW S408-peter (found while auditing the 18 still-invalid library modules from the #893 differential; severity CORRECTED DOWN mid-investigation once the CLI gate was actually checked — the first read, from an API probe, wrongly looked silent)`; **MED**; open
+<!-- @gap id=g-library-enum-runtime-collides-with-a-user-const-and-the-diagnostic-blames-codegen sev=MED status=open locus=compiler/src/codegen/emit-library.ts(the-21.2-enum-runtime-emit)+the-generic-CG-malformed-output-message prov=empirical:PA-parsed-every-emitted-libraryJs-over-the-118-file-population-at-80f8d9eb-8-modules-each-with-one-duplicated-identifier-and-CLI-exit-2-1-error-no-artifacts-written -->
