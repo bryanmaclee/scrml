@@ -6237,12 +6237,32 @@ literal set and unknown type NAMES first, then position 3 (argument), then 4 (re
 widening above, which closed position 2 early on a zero-migration measurement; the rest of the
 sequence stands.** Each depends on the inference result type §7.5.2 introduces.
 
-⚑ **Position 3 is BLOCKED, not merely next.** Measured over 1920 corpus `.scrml` files, turning on
-argument assignability with today's inference produces 37 new rejections of which **all 37 are false
-positives**, and every one is the same shape: a `number` literal passed to an `int`-annotated
+⚑ **Position 3 is BLOCKED, not merely next.** Measured over the **1920-file five-root set**
+(`examples` · `samples` · `conformance` · `stdlib` · `benchmarks` — the roots
+`scripts/corpus-emit-differential.ts` walks; **NOT the whole corpus, which is 2555 `.scrml` files —
+this figure excludes `compiler/`**), turning on
+argument assignability with today's inference produces new rejections **every one of which is a false
+positive**, and every one is the same shape: a `number`-typed argument reaching an `int`-annotated
 parameter. `int` resolves to a distinct primitive and assignability compares primitives by NAME, so
-`number` is not assignable to `int` — and this specification rules that pair NOWHERE. Position 3
-cannot be turned on before an `int` / `number` assignability ruling exists.
+`number` is not assignable to `int`.
+
+⚑ **CORRECTED 2026-09-06 (S404) — the SHAPE claim above holds exactly; the COUNT did not reproduce.**
+This section asserted *"37 new rejections of which all 37 are false positives."* Re-measured with a
+purpose-built re-runnable instrument (`scripts/int-number-census.ts`, `--summary` / `--json`), over
+this section's own 1920-file five-root population: **69 provable rejections of 120 int-parameter
+arguments** (93 under strict name-equality), of which **43 are direct integral literals** and
+**0 are non-numeric**. The zero is the load-bearing half and it survived an adversarial round — there
+are **no true positives**, so no ruling undoes any of them. The original figure was ~1.9× low and its
+*"all 37"* framing merged two shapes: the direct integral literals plus 26 unannotated declarations
+whose literal initializer types as `number`. Whole-tree (2555 files): 195 of 276 / 228 strict / 169
+integral / 0 non-numeric. **Re-run the instrument rather than re-quoting either number.**
+
+⚑ **THE BLOCKING CONDITION IS NOW SATISFIED — `int` is a REFINEMENT (subtype) of `number`, ruled S404.**
+The rule is not yet written into this section, because the normative text lands with the
+implementation (the bare-`int` desugar plus the §53.4 zone wiring, gated on an artifact differential —
+the change is `semantics-changed` for a non-literal argument, which no diagnostic delta reveals).
+Until that lands, position 3 remains NOT CHECKED and the row in the table above stands.
+`provenance: ruling:user-voice-scrml.md S404 "actually I meant a"`
 
 ### 7.5.2 Unproven types — `asIs` is a signature, not a shrug
 
