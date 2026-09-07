@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 100 |
-| MED | 219 |
+| MED | 220 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -12595,3 +12595,25 @@ emits `_scrml_cs_reactive_set("full", `hello `);` — **`"hello "`.** The interp
 **Blast radius MEASURED, not assumed:** 0 real-corpus sites (all 37 interpolated-template declaration initializers in the corpus are *indented* — inside `fn` bodies, `${}` blocks or markup — where the splitter keeps the block whole); the only 7 top-level hits are #873's own probe fixtures. ⚑ **Per the reverse-ouroboros rule that is a BLAST-RADIUS figure, not demand evidence** — ``<full>: string = `${@first} ${@last}` `` is an obviously natural derived cell, and the corpus is 100% LLM-authored.
 — `NEW S404-bryan (found by a dispatched agent falsifying the PA's own premise; PA then reproduced the root independently on unpredicated, non-@, single-line source)`; **HIGH**; open
 <!-- @gap id=g-splitblocks-consumes-dollar-brace-inside-a-top-level-template-truncating-the-string sev=HIGH status=open locus=compiler/src/block-splitter.js(splitBlocks — back-tick tracking exists only under frame.type === "meta", so a top-level template's ${ opens a logic block; the deciding site was traced by the agent and CONFIRMED by the PA from the emitted initializer, not from reading the scanner) prov=empirical:PA-reproduced-at-069e86fd-hello-dollar-1-plus-1-world-emits-hello-space-at-exit-0-with-zero-diagnostics-no-predicate-no-at-sigil-and-identical-at-base-499eecce -->
+
+### g-endpoint-conformance-node-check-tests-time-out-under-full-suite-load — the two `node --check` subprocess tests in `endpoint-conformance-integration.test.js` expire a 5 s budget under the 1,300-file parallel suite, so the gate reads RED for a reason no change caused
+
+**Measured across three full runs of `bun test compiler/tests/{unit,integration,conformance}` on the same tree (`410b567f`), same 8 GB kernel-capped runner, same machine:**
+
+| run | bun | pass | fail | wall | peak commit |
+|---|---|---|---|---|---|
+| 1 | 1.4.2 | 23,329 | **7** | 237.9 s | 2.045 GB |
+| 2 | 1.4.0 | 23,331 | 5 | 232.2 s | 2.157 GB |
+| 3 | 1.4.2 | 23,331 | 5 | 235.4 s | 2.12 GB |
+
+The two extra failures in run 1 were `(E) client-codegen SKIP — NO endpoint surface in the client bundle (§61.6)` > *"the client bundle carries no endpoint handler / route / decode surface"* (5940.85 ms) and *"the emitted `.client.js` is `node --check` clean"* (7558.85 ms). **Both report `this test timed out after 5000ms` — a budget expiry, not an assertion failure.** Neither reproduced in run 3 on the identical toolchain, and both pass in isolation (the three implicated files alone: 36 pass / 5 fail on 1.4.0 AND on 1.4.2, byte-identical fail sets).
+
+**Root, and it is structural rather than incidental:** these two tests are the ones that **spawn `node --check` as a subprocess**, per the resolved `g-node-check-oracle-cjs-parses-esm-artifacts` (S301), which named this exact file and this exact test when it wrote `{"type":"module"}` into each harness temp root. A fixed 5 s budget therefore has to cover **process-spawn latency for an external `node`** while 1,300 test files run in parallel. That is load-sensitive by construction; it is not a property of the code under test.
+
+⚑ **The interesting part is what this nearly caused.** Run 1 was the acceptance run for a `bun` 1.4.0 → 1.4.2 upgrade, and 7-vs-the-remembered-5 reads exactly like *"the upgrade broke two tests."* It did not: run 2 pins the 1.4.0 baseline at the same 5, and run 3 pins 1.4.2 at the same 5. **A toolchain change is precisely the context in which this flake is most likely to be mis-attributed**, because a version bump supplies a ready causal story for a number that moved on its own.
+
+**Not fixed here** — the honest fix is a budget that scales with load (or a serial lane for subprocess-spawning tests), and picking it is a harness-policy call rather than a mechanical patch. Same family as `g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only` (MED, open): a wall-clock budget the runner cannot meet under contention. The §8 concern is the one the S301 gap already stated — *red for reasons no change caused → gets bypassed → gets deleted.*
+
+⚑ **The 5 standing failures are NOT this gap and are unchanged on both bun versions:** three in `self-host-smoke.test.js` (the S254 path-model class, plus the open `g-selfhost-smoke-resolves-projectroot-to-MAIN…`) and two in `session-secure-b4b5-roundtrip.test.js`.
+— `NEW S408-peter (found while acceptance-testing a bun upgrade; attributed by running the SAME suite on both versions plus a repeat on the new one, rather than by reasoning from the failure text)`; **MED**; open
+<!-- @gap id=g-endpoint-conformance-node-check-tests-time-out-under-full-suite-load sev=MED status=open locus=compiler/tests/integration/endpoint-conformance-integration.test.js(the two tests that spawn `node --check` as a subprocess; the 5000ms default test budget is the locus, not the assertions — both failures are `timed out after 5000ms`) prov=empirical:PA-ran-the-identical-capped-suite-three-times-1.4.2-gave-7-fail-then-1.4.0-gave-5-then-1.4.2-again-gave-5-with-byte-identical-fail-sets-and-the-two-extra-were-timeouts-at-5940ms-and-7558ms-that-pass-in-isolation-on-BOTH-versions -->
