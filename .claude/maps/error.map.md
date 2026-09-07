@@ -1,13 +1,48 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-06T16:33:44Z  commit: 499eecce
-# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
-# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
+# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
 # past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
-# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
-# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
-# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+#
+# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
+#
+# ⛑ **RE-WALKED ON THE DIAGNOSTIC SURFACE. §34 CATALOG IS FLAT AT 815 AND THE RANGE MOVED +60.**
+# `bun scripts/s34-census.ts` RE-EXECUTED at this watermark: **815 rows (§34 `19665..20551`, derived)**
+# — was `19605..20491` at `499eecce`. **The total did not move; the range did**, by exactly the
+# §7.5.1 amendment's +60 SPEC lines. Re-derive the range from the `## 34. Error Codes` / `## 35.`
+# headings, never from a baked number.
+#
+# ⛑ **BUCKETS RE-EXECUTED AT THIS WATERMARK, AND THEY NOW SUM TO THE TOTAL — which the previously
+# published line did not.** `STRUCK 34 · PINNED 344 · IMPL-SITES 304 · DECLARED-AHEAD 18 ·
+# RUNTIME-SURFACED 3 · FALSE-CLAIM 112` = **815**, matching the catalog total exactly. The bucket line
+# this replaces was stamped `2ec2ce3a` and summed **814** with `PINNED 343`; the +1 is PINNED, and it
+# is the one catalog addition since that table was cut. ⚑ **FALSE-CLAIM DISPOSITIONS REDISTRIBUTED AT
+# A FLAT TOTAL and that is worth reading as a signal, not noise:** `BUILD-ARC 71 -> 70` ·
+# `HOME-NO-SHALL 27 -> 26` · `ORPHAN-INDEX 4` (flat) · `NOMINAL-HOME 10 -> 12`. Two rows moved from
+# "someone is building it" / "no SHALL backs it" into "declared Nominal at home" — a re-classification,
+# not a fix. Per invariant 71 this table now prints the SHA it was executed at, in its own heading.
+#
+# ⛑ **`E-TYPE-031` GAINED A THIRD FIRING POSITION THIS WINDOW, AND ITS §34 ROW WAS UPDATED IN THE SAME
+# LANDING RATHER THAN LEFT TO ROT.** The row is a MEASUREMENT row (it publishes push-site counts), so
+# a widening that did not update it would have turned the row into the false claim it was written to
+# remove. Now: **19 push sites, exactly three positions** — (a) annotated `let`/`const` decl, ONE site,
+# `type-system.ts` `annotateNodes`; (b) **NEW, §7.5.1 position 2** — annotated STATE-CELL decl, ONE
+# site, same function's reactive-decl arm, landed S402 in `069e86fd`; (c) validator predicate / arity /
+# arg-shape, SEVENTEEN sites, all in `symbol-table.ts` `checkValidator` + `checkArgShape`. ⛔ **The
+# prop-passing position (§15.3/§15.10) and the `using`-constraint position have ZERO push sites and DO
+# NOT FIRE** — specified, not implemented.
+#
+# ⚠ **`E-CONTRACT-001` HAD ZERO OCCURRENCES IN ANY HAND-AUTHORED MAP BEFORE THIS PASS** (one hit, in
+# the `@generated` `error.generated.md`). An S404 dispatch working §53.4 predicate zones reported the
+# set not load-bearing. Its emitter is `checkPredicateLiteral` (`type-system.ts:3338`, push at `:3382`),
+# gated by `classifyPredicateZone` (`:3840`); a `boundary` zone emits a RUNTIME `E-CONTRACT-001-RT`
+# check instead of the compile-time error. **The full routing lives in `primary.map.md` Task-Shape
+# Routing row 2**, including why an interpolated template must never reach the static evaluator.
 #
 # ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
 #
@@ -964,6 +999,7 @@ once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for
 ## Tags
 #scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13
 #e-cg-tilde-unresolved #tilde-accumulator #section-32 #fail-closed-floor #narrow-sink #two-drains #reset-once-per-run #process-level-not-filesystem-level #partial-span-position #resolvespanlinecol #spanfromestree-hardcodes-1-1 #cardinality-per-emission #e-tilde-001-zero-fire-sites #zero-producers #cause-traced #815-codes #pinned-344
+#e-type-031-three-positions #section-7-5-1-position-2 #e-contract-001 #e-contract-001-rt #classifypredicatezone #checkpredicateliteral #buckets-sum-to-total #dispositions-redistributed #catalog-flat-815 #range-moved-not-total
 
 ## Links
 - [primary.map.md](./primary.map.md)

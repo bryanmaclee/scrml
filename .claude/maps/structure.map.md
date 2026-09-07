@@ -1,14 +1,38 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-09-06T16:33:44Z  commit: 499eecce
-# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
-# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so there is no self-commit
-# advancing `HEAD` past the stamp. MAP-STAMP RULE run at WRITE time, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `499eecce`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor 499eecce origin/main` -> **exit 0**. Inbound check (invariant 48):
-# `git merge-base --is-ancestor 10a4b045 499eecce` -> **exit 0**.
+# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
+# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
+# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
+# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+#
+# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
+#
+# ⛑ **`compiler/src` IS FLAT AT 195 FILES — ZERO ADDED, ZERO DELETED.** All four changed compiler
+# files are EDITS: `type-system.ts` · `expression-parser.ts` · `types/ast.ts` ·
+# `native-parser/translate-expr.js`. `docs/FACTS.md` re-reads **250,065 lines across 195 files** (the
+# LINE count moved +1,206 since S397's 248,859; the FILE count did not).
+#
+# **ONE NEW TOP-LEVEL SCRIPT: `scripts/int-number-census.ts` (1,650L, #875)** — a re-runnable post-AST
+# census over `int`/`integer` annotation positions and call sites. `--summary` / `--json` /
+# `--roots=a,b` / `--selftest`. It is NOT in `ci.yml`, NOT in `bun test`, NOT in a hook — hand-run, in
+# the same class as `scripts/corpus-emit-differential.ts`. It imports the compiler's own
+# `runBlockSplitter` / `runTAB` / `buildTypeRegistry` / `resolveTypeExpr` / `parseStructBody` from
+# `type-system.ts` and `parseSchemaBlock` from `schema-differ.js`, so it is a NEW CONSUMER of both.
+#
+# ⛑ **A ROUTING FACT ABOUT THIS TREE THAT WAS NOT WRITTEN DOWN ANYWHERE, AND IT COSTS A SESSION TO
+# REDISCOVER: `compiler/src/block-splitter.js` DECIDES TEMPLATE-LITERAL AND `${…}` BEHAVIOUR BEFORE
+# THE EXPRESSION PARSER EXISTS.** `splitBlocks` (`:893`) is Stage 2 of the pipeline; its back-tick
+# tracking lives at `:2790` and is guarded by `frame.type === "meta"` — the comment there says so
+# outright ("Only applies to meta blocks"). At file top level there is no meta frame, so a `${` inside
+# a template opens a LOGIC BLOCK and the template is shredded. **Anyone routed to
+# `expression-parser.ts` or `type-system.ts` for a template/interpolation question is looking
+# downstream of the decision.** Filed HIGH:
+# `g-splitblocks-consumes-dollar-brace-inside-a-top-level-template-truncating-the-string`. Full detail
+# in `primary.map.md` Task-Shape Routing row 3.
 #
 # ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
 #
@@ -325,6 +349,7 @@ node_modules, dist, build, target, .git, .jj, .claude, vendor, __pycache__ — p
 ## Tags
 #scrml #map #structure #entry-points #directory-layout #w-dead-function-locus #not-usage-analyzer #route-inference #detect-runtime-chunks #markup-value-blind-spot #chunk-pruning #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #boot-iife #outlet-resident #region-cleanups #route-region #chunk-iife #wrap-chunk-body #no-route-splitter #emit-reactive-wiring #emit-event-wiring #emit-client #timer-start #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #machine-retired #e-deprecated-001 #migrate-codemod #projection-rewrite #fail-closed-codemod #engine-audit #audit-registry #cell-scope-accessors #property-tests #project-state-child-rules #vacuous-test-skip #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #mount-body-expr-node #consume-error-type-annotation #failable-generic-return #e-cg-006 #request-ref-sigil #scan-lhs-left #dispatch-called-targets #template-dispatch-scan #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #browser-baseline #failure-name-set #s34-census #§34.0 #gap-attribute-bag #locus-attr #state-ts #ast-builder #named-regex-openers #no-attrs-array #structural-if #§17.1.2 #native-parity-obligation #facts-md-authority #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #dist-relative-local-specifier #export-let-var #serve-tool-reachability #crossFileClientReads #match-arm-autoawait #crossmodule-async-markup #keep-alive #review-debt-script #puppeteer-skip-download #pr-405-landed #cps-choke-point-landed #inject-promise-await-retired #inject-fn-body-server-call-awaits #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #one-provider-three-consumers #decision-sites-3-to-1 #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #post-fn-name-mangle #owning-file-filter #cross-file-server-fn-collision #match-iife-header-from-emitted-body #await-absorb #session-proxy-bind #gh357 #sql-interpolation-session #csrf-token-disclosure #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #dangling-ref-class #corpus-emit-differential #corpus-check-goggles #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #1878-sources #standing-pre-land-gate #region-fence #two-region-classes #lexical-vs-structural #code-segments #classify-brace-group #find-object-shorthand-regions #object-shorthand-expansion #proto-shorthand-b31 #join-around-runtime-slot #runtime-slot-exclusion #embed-runtime #register-fn-name #identifier-shape-guard #zero-width-alternation #response-envelope #one-exit #instanceof-response-passthrough #redact-before-serialize #bun-welcome-page #session-cookie-wrap #object-hasown #prototype-chain-read #show-false-ssr #initial-bool-map #byte-inert #block-arm-value-position #split-block-statements #each-shorthand-markup-fn-mount #workflow-dispatch #manual-refire #prospective-not-retroactive #422-target-ref #§18.5-four-routes #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #closes-block-statement #statement-start-whitelist #per-arm-declarednames #re-dispatch-not-drop-opts #step-3b #§6.6.19 #e-derived-server-only-reach #two-module-sets-deliberately-different #escalation-vs-async #scan-for-server-only-binding-refs #per-function-literal #collectfilefunctions-yields-function-decl-only #line-numbers-re-derived #4653-not-4535 #4727-not-4466 #s34-census-windows-fix-landed #filurltopath #review-debt-code-bearing #state-ts-marker-truncation #auto-widen-scan #scripts-is-code-bearing #240107-lines #1334-tests #880-conformance #807-codes #24-commit-window #three-new-probe-scripts #deferred-lifecycle-body-tags #collect-ts-descent-gate #request-and-channel-excluded #structural-derived-walk #skip-derived-walk-key #depth-cap-512 #stale-orphaned-doc-comment-on-main #ssr-fallback-descriptor #i-ssr-each-client-rendered #e-each-body-decl-unsupported #each-request-ids-stash #reparse-lift-attr-request-ref #escape-hatch-node #tool-import-tree-shake #component-expander-augmentation #timeout-tag-added #hand-maintained-vs-derived-list #filesscanned-is-environment-dependent #tracked-1850-to-1858 #boot-read-set-gate #dpa-debt-probe #detection-not-control #242954-lines #1378-tests #883-conformance #810-codes #190-src-files #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #emit-transition-css #transitions-chunk-retired #38-keyframes #app-wide-union #soft-nav-stylesheet-gap #csp-default-src-self #diagnostic-format #strip-redundant-code #delta-lint #corpus-zero-debt #pr-539-landed #types-gate-NOT-on-main #asis-split-NOT-on-main #toggle-lowering-decision-sites #resolve-synth-cell-prefix #each-block-from-markup-node #lift-vs-structural #parse-lift-tag #navigate-utilities #ast-path-lowering #rewrite-block-body #when-worker-handler #prop-substitution #usage-analyzer-dead-surface #lint-e-state-block-statement-form #stage-2-5c #pre-ast-lint #leaf-module #not-an-invariant-55-violation #onion-dispatch-is-in-build-js #api-js-seam-line-refs #194-tracked-files #§52.13 #protected-document #s380-incremental #per-item-match-redispatch #derived-cell-scrutinee #ast-scoped-snippet-substitution #uncommitted-dev-js-caveat
 #log-loc-new-export #resolvespanlinecol #spanfromestree-hardcodes-1-1 #codegen-four-files #tilde-accumulator #anchor-drift-315-lines
+#block-splitter-decides-first #splitblocks-meta-frame-only #int-number-census #new-script-not-gated #195-files-flat
 
 ## Links
 - [primary.map.md](./primary.map.md)

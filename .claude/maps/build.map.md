@@ -1,13 +1,30 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-06T16:33:44Z  commit: 499eecce
-# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
-# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
+# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
 # past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
-# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
-# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
-# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+#
+# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
+#
+# ⛑ **THE CI HALF IS RE-MEASURED ZERO-DIFF: `git diff --name-only 499eecce..68cfac6d -- .github/`
+# -> **EMPTY**.** So `ci.yml`, `advisory-review.yml` and `cloud-maps.yml` are byte-identical and the
+# blocking `gate` job is FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — carried on a
+# verified-empty diff rather than re-parsed, and stated both ways because "14" and "12" are each
+# correct under a different counting base. `package.json` is `--name-only` EMPTY too, so no `scripts`
+# entry moved.
+#
+# **ONE NEW HAND-RUN INSTRUMENT, NOT WIRED TO ANY GATE: `bun scripts/int-number-census.ts` (#875).**
+# Flags: `--summary` (totals only, the DONE-PROBE shape) · `--json` (machine-readable, every site) ·
+# `--roots=a,b,c` (restrict to top-level roots; §7.5.1's own population is
+# `--roots=examples,samples,conformance,stdlib,benchmarks`) · `--selftest` (fixture-driven classifier
+# check). Non-zero exit on a collapsed population or a failed selftest. ⚠ **It is NOT in `ci.yml`, NOT
+# in `bun test`, NOT in a hook** — same class as `scripts/corpus-emit-differential.ts` and
+# `scripts/s34-census.ts`: run it BY HAND, and re-run it rather than quoting a number out of SPEC.
 #
 # ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
 #
@@ -972,6 +989,7 @@ None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
 #scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows #ctx-ts-not-on-main #gate-13-steps
+#int-number-census #hand-run-instrument #not-gated #gate-flat-14-steps #ci-zero-diff
 
 ## Links
 - [primary.map.md](./primary.map.md)

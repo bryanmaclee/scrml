@@ -1,6 +1,177 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-06T16:33:44Z  commit: 499eecce
+# generated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# scan mode: INCREMENTAL_UPDATE (doc-population delta scan) — run as part of the S404 wrap-6c refresh
+#
+# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `68cfac6d`;
+# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound: `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+# ⛑ This pass ran in the MAIN checkout on branch `wrap/s404` with `HEAD` == `origin/main` == the
+# merge-base, and DOES NOT COMMIT ITSELF (the PA lands `.claude/maps/` under an explicit pathspec).
+#
+# ⛔ **THE S404 HEADLINE IS NOT A DOCUMENT. IT IS THIS MAP SET, AND THE FINDING IS STRUCTURAL RATHER
+# THAN A LIST OF STALE LINES: THE ROUTER CANNOT KEEP UP WITH THE SESSION THAT IS READING IT, AND
+# THREE PASSES OF THE AGREED MITIGATION HAVE NOT CHANGED THAT.** Filed below as **S1 (`router-lag`)**.
+# The dispatching brief for this pass named the same thing and asked that it be said rather than
+# papered over. It is said. See S1 before reading anything else in this report.
+
+## Summary — S404 pass (this pass)
+
+| | |
+|---|---|
+| Scan population (in-scope tracked `.md`) | **122** (+1) — `git ls-files '*.md'` minus `docs/changes/`, `spa-lists/`, `archive/`, `handOffs/`, `.claude/` |
+| In-scope docs CHANGED this window | **9** — `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `docs/FACTS.md`, `docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, and the two `docs/articles/if-you-give-a-dev-an-enum-*.md` |
+| New in-scope TRACKED docs this window | **2** — both articles; **this RESOLVES the standing U4** (they were untracked at S402) |
+| Non-compliant | **1 NEW (N17, doc-vs-spec, MED)** + standing (N12, N13) |
+| ⛔ Structural findings against the MAP SET itself | **1 NEW (S1, `router-lag`, HIGH)** — supersedes the "add a row and move on" handling of the S397/S402 instances |
+| Factually wrong / collision hazard, in-scope | **1 NEW (M13, LOW-but-live)** |
+| Uncertain — needs human review | **1 NEW (U5)** + carried U1, U2, U3 |
+| Closed this pass | **2** — **U4** (articles now tracked) and **N16** (the pinned `W-PROGRAM-001` discussion got a `docs/known-gaps.md` HOME this window, `g-pinned-w-program-001-discussion-is-stale-...`) |
+
+⛑ **AND ONE THING WENT RIGHT IN A WAY WORTH RECORDING AS PRECEDENT, BECAUSE THIS REPORT IS MOSTLY A
+LEDGER OF THE OPPOSITE.** `compiler/SPEC.md` §7.5.1 carried a load-bearing measurement — *"37 new
+rejections of which all 37 are false positives"* — that a purpose-built instrument then **falsified**
+(the real figures are 69 provable / 93 strict / 43 integral / 0 non-numeric). The response was the
+compliant one on every axis: the figure was **corrected IN PLACE** in the normative section rather
+than left standing or quietly dropped; the correction **names its own method and population**; the
+**instrument shipped** (`scripts/int-number-census.ts`, #875) so the number is re-derivable instead of
+relayed; and the section now says *"Re-run the instrument rather than re-quoting either number."*
+**A falsified measurement inside a §62.2 normative contract is the exact defect §34.0 exists to close,
+and this is what closing it looks like.** Cross-checked here by RE-EXECUTING the instrument at this
+watermark: it reproduces the corrected figures exactly.
+
+---
+
+## S1. ⛔ **NEW, HIGH, STRUCTURAL — `router-lag`: `primary.map.md`'s Task-Shape Routing is one window behind BY CONSTRUCTION, and the agreed mitigation has now failed three times in a row**
+
+**Target:** `.claude/maps/primary.map.md` (the map set itself, not a repo doc).
+**Reason:** structural — the artifact's update cadence cannot satisfy its stated purpose.
+
+**The measurement, four passes deep:**
+
+| pass | surface the session was working | what a grep across ALL map files returned |
+|---|---|---|
+| S397 | `~` / §32 pipeline accumulator | no routing row; the material existed in `domain.map.md` (17 hits) and the ROUTER could not reach it |
+| S402 | file-shape / entry-ness | **0** hits for `fileShape` · `library-shape` · `classifyFileShape` · `FILE_SHAPES` in every hand-authored map |
+| S402 | `<engine>` / `<match>` closer scanning | **0** hits for `engine-statechild-parser.ts` and `match-statechild-parser.ts` |
+| **S404** | §7.5.1 assignability | **0** hits for `fieldTypeAssignable` · `fieldTypeEquals` · `§7.5.1` · `integer` across all 17 files |
+| **S404** | §53.4 template classification | **0** for `isStaticTemplateLit` · `literal-type-only` · `extractInitLiteral` · `hasInterpolation` · `scanSingleStringLiteral` · `rawTemplateHasInterpolation`; `E-CONTRACT-001` had exactly ONE hit and it was in the `@generated` `error.generated.md` |
+
+**Every one of those zeros was reported by a dispatched agent FIRST and reproduced by the map pass
+SECOND.** The signal is not noise and it is not one agent's search skill.
+
+**The mechanism, stated plainly.** A wrap-6c pass runs at the END of a session and writes rows
+describing the window that just CLOSED. The agents who read those rows are dispatched during the
+session that is OPEN, on surfaces that by definition have not been walked yet. **The router is
+therefore one window behind at all times, and the lag is not a scheduling problem that better
+discipline fixes — it is where the artifact sits in the loop.**
+
+⛔ **THE MITIGATION ADOPTED AT S397 AND RE-ADOPTED AT S402 IS: "write a routing row for every surface
+the walked window touched, before any figure is re-derived." IT HAS NOW BEEN APPLIED THREE TIMES AND
+THE HOLE REAPPEARED ALL THREE TIMES.** It cannot do otherwise: it guarantees a row exists for the
+session that no longer needs it. This pass applied it again — rows 1, 2 and 3 of Task-Shape Routing
+are new and they close both S404 holes — **and this finding exists so that closure is not mistaken for
+a fix.** The next session working a fresh surface should expect the same zero.
+
+**What a dev agent should do with this, which is the only part that is actionable today:**
+
+- **Read `Task-Shape Routing` as "surfaces someone FINISHED working."** It is excellent on settled
+  ground and structurally silent on live ground.
+- **For a LIVE surface, `docs/known-gaps.md` and `handOffs/delta-log.md` beat this map set**, because
+  they are written DURING the session by the people doing the work. That is not a defect in them and
+  not a reason to distrust the maps — it is simply where the freshness lives. `docs/known-gaps.md`
+  gained **8 new gap entries** this window; `primary.map.md` gained 3 rows, all retrospective.
+- **A zero-hit grep across `.claude/maps/` is EVIDENCE, not a dead end.** Report it. Both S404
+  dispatches did, and both reports were correct and reproducible.
+
+**Suggested disposition:** `escalate to the PA as a system-design question, not a map defect`. The
+options this pass can see, none of which it is authorized to choose: (a) accept the lag explicitly and
+say so in the map's own header (partially done — this pass writes it into the banner and Key Facts);
+(b) move routing generation to dispatch time rather than wrap time, so a row is written when a surface
+is OPENED; (c) route agents to `docs/known-gaps.md` FIRST and treat the map set as the settled-ground
+index it actually is. ⚠ **This pass deliberately does NOT pick one** — it is a workflow ruling.
+
+---
+
+## N17. ⛔ **NEW, MED** — `docs/PA-SCRML-REFERENCE.md` cites `SPEC §55.1 line 24295` twice, and that line number was WRONG AT THE DOC'S OWN COMMIT — not merely drifted since
+
+**Reason:** doc-vs-spec (stale/false provenance).
+**Population:** in scope; last touched `f4ec0400` (2026-08-28, #746).
+
+**Measured at this watermark:** `sed -n '24295p' compiler/SPEC.md` returns a **BLANK LINE**. §55.1 —
+*The shared validator core vocabulary (L4)* — actually begins at **`compiler/SPEC.md:34762`**. The
+citation is off by **more than 10,000 lines**, which is far past any plausible drift.
+
+⛑ **AND IT WAS ALREADY WRONG WHEN IT WAS WRITTEN, WHICH IS THE STRONGER AND MORE USEFUL FINDING.**
+Checked out at the doc's OWN last commit: `git show f4ec0400:compiler/SPEC.md | sed -n '24295p'`
+returns **`#### 41.16.11 Compile-time recognition`**, and §55.1 was at **`:34444`**. So this is not a
+line that rotted — **it never pointed at §55.1 at all.** Same class as the four internally-contradictory
+figures invariant 71 was written for, and the `912`/`915` prefix-grep figure this very pass caught
+again in `primary.map.md`.
+
+⚑ **THE SUBSTANTIVE CLAIM AROUND THE CITATION IS CORRECT AND SHOULD NOT BE TOUCHED.** The doc says
+`E-TYPE-031` fires on validator arity / per-arg shape mismatches from `symbol-table.ts`
+`walkValidatorTypeCheck` (SYM PASS 7) — **verified: that is position (c), 17 of the code's 19 push
+sites.** Only the `line 24295` provenance is false.
+
+⛔ **THE GENERAL RULE THIS RE-CONFIRMS, AND SPEC'S OWN §34 `E-TYPE-031` ROW ALREADY STATES IT:** *"a
+line number is the one part of a provenance note CI can never falsify: it rots silently and forever."*
+`scripts/s34-census.ts` resolves a PATH and a SYMBOL but strips `:N` (`PATH_REF` ends `(?::\d+)?`).
+**A `§N.N` section citation is checkable; a `line NNNNN` citation is not.**
+
+**Suggested disposition:** `update to match current` — delete `line 24295` from both occurrences and
+cite `§55.1` alone. **Do not "correct" it to `:34762`**; that number will be wrong by the next SPEC
+edit and nothing will fail when it is.
+
+---
+
+## M13. ⚠ **NEW, LOW severity but LIVE — two unrelated `37`s sit on the same §7.5.1/§53.4 surface, one RETIRED and one CURRENT, and conflating them resurrects a falsified figure**
+
+**Reason:** collision hazard between a retired measurement and a live one.
+
+- **RETIRED:** SPEC §7.5.1's *"**37** new rejections of which all 37 are false positives"* — falsified
+  this window; the real figures are **69** provable / 93 strict / 43 integral / 0 non-numeric.
+- **LIVE and CORRECT:** `docs/known-gaps.md:12345` and `hand-off.md:48` — *"0 real-corpus sites (all
+  **37** interpolated-template declaration initializers in the corpus are indented)"*. This is a
+  **blast-radius count of template-literal initializers**, an entirely different population from the
+  int-parameter arguments the retired figure counted.
+
+**Both live within a few sections of each other in the same doc set, on the same session's surface,
+and both are the bare token `37`.** A reader grepping `37` on this surface will find the live one and
+can easily read it as corroboration of the dead one. ⚠ **The retired figure survives ON PURPOSE in
+three places** — SPEC §7.5.1's correction paragraph, `docs/changelog.md:7202`, and the RESOLVED gap
+`g-spec-7-5-1-false-positive-count-was-1-9x-low-...` — all three of which correctly label it as
+falsified. **Nothing here needs deleting.**
+
+**Suggested disposition:** `update to match current` (cosmetic) — when either `37` is next edited, give
+it its population inline (`37 interpolated-template initializers`, not `37 sites`). ⚑ **And per the
+reverse-ouroboros rule, note that the live 37 is a BLAST-RADIUS figure and NOT demand evidence** —
+`docs/known-gaps.md` already says so in place, which is the correct handling.
+
+---
+
+## U5. ⚠ **NEW, uncertain — `docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md` describes itself as "Untracked and uncommitted" and is now TRACKED**
+
+**Reason:** self-contradicting status block (the doc's own metadata is falsified by its location).
+**What to check:** the file's line 4 reads, verbatim, *"Newest draft at the top; superseded drafts kept
+below under Previous versions so a cut line can be pulled back. **Untracked and uncommitted.**"* It was
+added to the index this window (`git diff --diff-filter=A 499eecce..HEAD`), together with its
+`-PUBLISH.md` sibling. **This CLOSES the standing U4** (which flagged them as untracked docs in the
+tree) — the question is now the opposite one.
+
+**The judgement a human owns, and it is a real fork:** a 1,074-line working file carrying **seven
+superseded drafts** is now in the repo's version history, which is the thing version history is
+for — so the "Previous versions" apparatus is arguably now redundant, and the doc is arguably
+`archive/`-shaped rather than `docs/`-shaped. **This pass takes no position** because the retention of
+cut lines for pull-back is an authorial workflow, not a currency question. ✔ **Content compliance was
+checked and PASSES:** a grep cross-check of every backticked identifier in the 148-line
+`-PUBLISH.md` (the shipping artifact) against `compiler/src` · `compiler/SPEC.md` · `stdlib` returns
+**3 of 3 found, 0 missing** — it describes behaviour the compiler actually has.
+
+**Suggested disposition:** `uncertain — needs human review`. At minimum, delete the
+"Untracked and uncommitted" sentence from the working file, which is now false.
+
+---
 # scan mode: FULL_COLD_START (doc-population scan) — run as part of the S402 wrap-6c map refresh
 #
 # MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `499eecce`;
@@ -390,6 +561,7 @@ partial-pass rule is SATISFIED, not waived.
 ## Tags
 #non-compliance #project-mapper #cleanup #scrml #s402 #file-shape #entry-ness #apostrophe-arc
 #map-currency #wrong-referent #worktree-vs-main-checkout #w-program-001
+#router-lag #structural-finding #map-set-is-the-finding #stale-line-citation #wrong-at-its-own-commit #section-55-1 #provenance-symbol-not-line #37-collision #retired-vs-live-figure #falsified-measurement-corrected-in-place #int-number-census #articles-now-tracked #u4-closed #n16-homed
 
 ## Links
 - [primary.map.md](./primary.map.md)

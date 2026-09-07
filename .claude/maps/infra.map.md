@@ -1,13 +1,19 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-09-06T16:33:44Z  commit: 499eecce
-# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
-# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
+# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
 # past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
-# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
-# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
-# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+#
+# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
+#
+# ⛑ **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF.** Command: `git diff --name-only 499eecce..68cfac6d --
+# .github/ Dockerfile docker-compose.yml '*.tf'` -> **EMPTY**. All three workflows are byte-identical;
+# no deploy target, container definition or cloud resource moved in this window.
 #
 # ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
 #
@@ -157,6 +163,7 @@ Do not go looking for an App install.
 
 ## Tags
 #scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows #zero-infra-diff
+#zero-diff-window
 
 ## Links
 - [primary.map.md](./primary.map.md)

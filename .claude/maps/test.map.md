@@ -1,13 +1,36 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-06T16:33:44Z  commit: 499eecce
-# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
-# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
+# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
 # past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
-# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
-# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
-# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+#
+# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
+#
+# ⛑ **`1,436` `.test.js` BY RAW `find`, AND IT RECONCILES EXACTLY WITH THE CI-GATED `docs/FACTS.md`
+# (`test files | 1,436`).** +1 over S402's 1,435. ⚠ The mapgen figure (`test.generated.md`) is a
+# DIFFERENT question — it walks category subdirectories and skips root-level
+# `compiler/tests/*.test.js`, which is the standing ~14-file gap; do not diff the two series.
+#
+# **THE ONE NEW FILE: `compiler/tests/unit/template-literal-interpolation-classification.test.js`
+# (+652, #877)** — the §53.4 template-literal classification suite. THREE existing files changed:
+# `unit/gauntlet-s19/type-annot-mismatch.test.js` **+191** (the §7.5.1 position-1/2 widening's 8-cell
+# matrix), `unit/s365-asis-unknown-split.test.js` **+48**, and
+# `integration/trucking-dispatch-smoke-integration.test.js` **+23**.
+#
+# ⛔ **`conformance cases` IS FLAT AT 897 AND `conformance/cases` IS `--name-only` EMPTY ACROSS ALL FIVE
+# COMMITS.** A normative §7.5.1 widening — `E-TYPE-031` now fires at a position where programs
+# previously compiled silently — landed with **ZERO new conformance cases**, pinned only by unit tests.
+# Per the §34 census that is exactly why the affected codes sit in IMPL-SITES rather than PINNED: a
+# unit test is not a conformance pin, and §62.2 makes the conformance corpus the versioned contract.
+#
+# ⚑ **A SECOND RE-RUNNABLE MEASUREMENT INSTRUMENT EXISTS AND IT IS NOT A TEST:**
+# `bun scripts/int-number-census.ts --selftest` is a fixture-driven check of that script's own
+# classifiers, run by hand. It is not in `bun test` and nothing gates it.
 #
 # ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
 #
@@ -767,6 +790,7 @@ tool is marked `HARD REQ n` at its site so a future editor can see what they wou
 ## Tags
 #scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed
 #ctrl-025-028 #tilde-accumulator #codecounts-is-an-emission-property #neg-case-pins-cardinality #case-flipped-sides #integration-tier-is-not-gated #1425-tests #897-conformance
+#1436-tests #897-conformance-flat #normative-widening-zero-conformance-cases #template-literal-classification-suite #unit-pin-is-not-a-conformance-pin
 
 ## Links
 - [primary.map.md](./primary.map.md)
