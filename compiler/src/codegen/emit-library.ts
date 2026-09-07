@@ -902,6 +902,34 @@ function rawFallbackReason(fnNode: ASTNode): string | null {
       reason = "if-expression-value binding (emitIfExprDecl lowers to null)";
       return;
     }
+    // ⚑ `_={ … }=` FOREIGN CODE — and this exclusion is the one that keeps the
+    // widening honest. `emitLibraryFnMember` lowers a fn body at the CLIENT
+    // boundary, and `emit-logic.ts` gates the real foreign emit on
+    // `opts.boundary === "server"` (:2148). Off the server boundary a
+    // `const x = _={ … }=` initializer becomes literally
+    //   `const x = null; // foreign-init for x — _{} runs server-side; …`
+    // so the function keeps its signature, PARSES, exports, and returns null —
+    // silent-wrong output, which is strictly worse than the raw path's honest
+    // verbatim copy. Measured: routing by default this way broke
+    // `standalone-tool-target.test.js` "Flag C" — a foreign-only library
+    // emitted `export function runOpen(…) { const out = null; return out; }`
+    // where the base emits `export async function runOpen`, so an importing
+    // §64 tool awaited a function that no longer does anything.
+    //
+    // ⚑ The corpus differential was BLIND to this: no library module in the
+    // 118-file population carries a `_{}` foreign init, so the population
+    // measured 0 regressions while a committed test failed. A zero over a path
+    // the population never exercises is not coverage.
+    //
+    // The RIGHT long-term answer is probably that a library module has no
+    // client/server split at all and should lower foreign at the server
+    // boundary — but "what boundary is a library module?" is a language
+    // question, not a codegen one, so it is routed rather than decided here.
+    // Falling back to raw is inert (byte-identical to today) and honest.
+    if (o.kind === "foreign" || o.foreignNode) {
+      reason = "`_={ … }=` foreign code (emit-logic nulls a foreign init off the server boundary)";
+      return;
+    }
     for (const key of Object.keys(o)) {
       const v = o[key];
       if (v && typeof v === "object") walk(v);
