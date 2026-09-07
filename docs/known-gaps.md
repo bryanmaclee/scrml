@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 99 |
-| MED | 217 |
+| HIGH | 100 |
+| MED | 219 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -148,6 +148,83 @@ on the record.
 returning UN-REDACTED protected columns — that is the opposite polarity (guard present, leaks) and
 this is guard absent, drops. Fixing this one without the other converts a dropped 403 into a leak.
 — `NEW S405-bryan (dpa-039 Call finding; reproduced by execution via dispatch, structural asymmetry + the unmerged correction PA-confirmed independently)`; **HIGH**; open
+
+### g-no-dollar-brace-escape-exists-in-a-free-text-body-so-escaped-interpolation-silently-double-fires — `<p>Cost: \${5}</p>` emits `Cost: \5` at exit 0, zero diagnostics: the backslash stays content AND the interpolation fires
+
+<!-- @gap id=g-no-dollar-brace-escape-in-a-free-text-body sev=HIGH status=open locus=searched:compiler/src/block-splitter.js,compiler/src/ast-builder.js,compiler/SPEC.md-§4.18.3 — §4.18.3 defines `\${` as an escape ONLY inside a `"..."` display-text literal (code-default bodies); NO escape is defined for, or implemented in, a plain-markup free-text body prov=dd:scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round-1+empirical:PA-reproduced-by-execution-at-8f1cea31 -->
+
+**PA-REPRODUCED BY EXECUTION at `8f1cea31`.** Surfaced in dpa-045 round 1 and volunteered by (a′)'s
+own advocate as *the largest unpriced cost of its own proposal*; reproduced independently here.
+
+```scrml
+<p>Cost: \${5}</p>
+```
+→ emitted HTML: **`<p>Cost: \5</p>`** — exit 0, **zero diagnostics.**
+
+**Both halves are wrong at once:** the backslash is emitted as literal content (so the author's escape
+intent is visibly broken in the output) **and** the `${5}` interpolation fires anyway (so the escape
+did not escape). There is no way to render a literal `${` in a plain-markup body.
+
+**§4.18.3 defines the `\${` escape ONLY for a display-text literal** — i.e. inside `"..."` in a
+code-default body. A free-text body has no escape catalog at all, and none is implemented. So this is
+not a broken escape; it is an **absent** one, in the body mode where prose actually lives.
+
+**Why HIGH and not MED:** it is the S402/S404 family — *you write ordinary code, the compiler accepts
+it, and it silently does the wrong thing.* Same class as the interpolated-template initializer and the
+type-alias annotation void.
+
+⚑ **Bears on dpa-045 and should be priced with it, not against it.** Round 1 raised this as a cost of
+the (a′) camp, but it reproduces **under the status quo** — it is a defect of the current free-text
+model, not of the proposal. Filing it separately so the ruling is not charged for a pre-existing hole.
+— `NEW S405-bryan (dpa-045 round 1, volunteered by the (a′) advocate against its own interest; PA-reproduced by execution)`; **HIGH**; open
+
+### g-lt-followed-by-space-is-read-as-a-tag-opener-so-ordinary-prose-comparisons-cascade — `<p>if a < b then stop</p>` raises `E-CTX-001` claiming `</div>` tries to close `<b>`
+
+<!-- @gap id=g-lt-space-read-as-tag-opener sev=MED status=open locus=searched:compiler/src/block-splitter.js,compiler/src/ast-builder.js,compiler/SPEC.md — SPEC has NO `tag-open` production and no `U+003C` text; the divergence from the HTML5 tag-open state (which requires an ASCII alpha after `<`) is unspecified in either direction prov=dd:scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round-1+empirical:PA-reproduced-by-execution-at-8f1cea31 -->
+
+**PA-REPRODUCED BY EXECUTION at `8f1cea31`:**
+
+```scrml
+<p>if a < b then stop</p>
+```
+→ `error [E-CTX-001]: '</div>' tries to close '<b>' …` + a second cascaded `E-CTX-001`. **`< b` was
+read as a tag opener.**
+
+**HTML5's tag-open state requires an ASCII alpha immediately after `<`**; a `<` followed by SPACE is
+text. scrml diverges. Note the divergence is partial and therefore confusing: `<3`, `<-` and `<=`
+are fine — it is specifically `<` + space + letter that opens a phantom tag.
+
+**SPEC is silent** — there is no `tag-open` production and no `U+003C` prose, so neither the current
+behaviour nor the HTML5 behaviour is written down. Reported at **17 corpus files** by dpa-045 round 1
+(count RELAYED, not PA-re-measured).
+
+**Loud, not silent** — hence MED, not HIGH. But the diagnostic names a tag the author never wrote,
+which is the Class-D desync signature: *an invented entity name absent from source.*
+— `NEW S405-bryan (dpa-045 round 1; PA-reproduced by execution)`; **MED**; open
+
+### g-sql-opener-in-prose-still-consumes-to-EOF-though-§4.17-cites-that-exact-shape-as-fixed — `<p>The ?{ syntax opens SQL.</p>` raises `E-CTX-003` "Unclosed 'p'"
+
+<!-- @gap id=g-sql-opener-in-prose-consumes-to-eof sev=MED status=open locus=searched:compiler/src/block-splitter.js(the `?{` bracket-matched scanner, SPEC §44.8),compiler/SPEC.md-§4.17 — §4.17 claims the class is fixed for `<pre>`/`<code>`; the plain-markup prose case is not covered and still cascades prov=dd:scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round-1+empirical:PA-reproduced-by-execution-at-8f1cea31 -->
+
+**PA-REPRODUCED BY EXECUTION at `8f1cea31`:**
+
+```scrml
+<p>The ?{ syntax opens SQL.</p>
+```
+→ `error [E-CTX-003]: Unclosed 'p' — opened but never closed before end of file.` + a cascaded
+`E-CTX-003` for `div`. The `?{` opened a SQL context that consumed to EOF.
+
+⚑ **The documentation contradiction is the sharp half.** SPEC §4.17 cites **this exact sentence
+shape** as the motivating example for a class it declares FIXED — *"adopters no longer need
+entity-escapes"* — but the fix landed for `<pre>`/`<code>` raw-content elements only. **Ordinary
+prose in a `<p>` still cascades**, and the S108 record says otherwise, so a reader checking the spec
+concludes this works.
+
+**Composes with `g-no-unterminated-delimiter-diagnostic-exists-anywhere`** (dpa-044 Call 1, RULED
+S405): the `?{` here is an unterminated delimiter consuming to EOF, and the ruled diagnostic would at
+least name it — though in a free-text body the right answer is that `?{` in prose is content, which is
+the dpa-045 question.
+— `NEW S405-bryan (dpa-045 round 1; PA-reproduced by execution; documented nowhere else)`; **MED**; open
 
 ### g-chunks-json-names-chunk-urls-that-are-never-written — the emitted per-route manifest advertises 3 chunk URLs and only 1 exists on disk, so any consumer following it 404s
 
