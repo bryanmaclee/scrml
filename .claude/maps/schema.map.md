@@ -1,13 +1,35 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-06T16:33:44Z  commit: 499eecce
-# generated-at: 499eecce — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`499eecce`**. This pass ran in the
-# MAIN checkout on branch `wrap/s402` and does NOT commit itself, so no self-commit advances `HEAD`
+# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
+# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
+# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
 # past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
-# `499eecce`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
-# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 499eecce origin/main` -> exit 0.
-# Inbound (invariant 48): `git merge-base --is-ancestor 10a4b045 499eecce` -> exit 0.
+# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
+# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
+#
+# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
+#
+# ⛑ **RE-WALKED ON THIS MAP'S OWN SURFACE, WHICH IS NON-EMPTY FOR THE SECOND CONSECUTIVE WINDOW.**
+# `git diff --name-only 499eecce..68cfac6d -- compiler/src/types/` -> **`compiler/src/types/ast.ts`,
+# +25 lines**, and the 25 are ONE optional field plus its 20-line doc comment. `stdlib/` and every
+# `*.d.ts` / `*.proto` / `*.graphql` glob are `--name-only` **EMPTY**.
+#
+# **THE ONE NEW FIELD: `LitExpr.hasInterpolation?: boolean` (`compiler/src/types/ast.ts:1725`, #877).**
+# See "AST literal nodes" below. ⛔ **It is CARRIED, never inferred, and the field's own doc comment is
+# the normative statement of why** — the retired alternative was reconstructing the answer as
+# ``raw === "`" + value + "`"``, a test whose own comment called it "an exact test, not a heuristic"
+# and which is ALSO satisfied by ``raw === "``"`` / `value === ""`, the exact pair a multi-quasi
+# template degrades to when its source text could not be recovered.
+#
+# ⚠ **A KNOWN HOLE IN THIS MAP, NAMED RATHER THAN QUIETLY FILLED: an S404 dispatch reported that this
+# file's only assignability paragraph — the `asIs`/`unknown` permissiveness split — is TRUE but
+# answers a DIFFERENT question from §7.5.1 positional assignability**, and `primary.map.md`'s
+# `inferExprType` routing row was sending assignability tasks here. That row now says it is not the
+# assignability row. **§7.5.1 / `E-TYPE-031` / `int`-vs-`number` live in `primary.map.md` Task-Shape
+# Routing row 1**, because the answer is "which of five positions is implemented" (two) plus "which
+# function you must NOT route to" (`fieldTypeAssignable`) — routing facts, not type shapes.
 #
 # ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
 #
@@ -326,7 +348,85 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 
 **Misc runtime-adjacent** — TransactionBlockNode [1352], CleanupRegistrationNode [1361], WhenEffectNode [1373], WhenMessageNode [1387], UploadCallNode [1398], AuthConfig [1503] (see the "duplicate AuthConfig shapes" note in auth.map.md), MiddlewareConfig [1515].
 
-**Expression-layer types (ExprNode union, [types/ast.ts:2082])** — IdentExpr [1638], LitExpr [1660], ArrayExpr [1683], ObjectExpr [1690] / ObjectProp [1696], SpreadExpr [1702], UnaryExpr [1719], BinaryExpr [1747], AssignExpr [1769], TernaryExpr [1781], MemberExpr [1799], IndexExpr [1810], CallExpr [1820], NewExpr [1830], LambdaExpr [1858], CastExpr [1886], MatchExpr [1904], MapEntry [1929] / MapLitExpr [1956] (§59 value-native map/set), SqlRefExpr [1977], InputStateRefExpr [1991] (§36 `<#id>` reads), EscapeHatchExpr [2005] (`_{}` foreign block), ResetExpr [2046], MarkupValueExpr [2070].
+**Expression-layer types (ExprNode union, [types/ast.ts:2154])** — ⛑ **EVERY ANCHOR IN THIS PARAGRAPH RE-DERIVED BY SYMBOL GREP AT `68cfac6d`, NOT SHIFTED BY A LINE DELTA — the `compiler/src/types/ast.ts` surface was NON-EMPTY this window and the map's own rule requires it. The carried values were stale by ~25-72 lines across the board (`LitExpr` was cited `[1660]`, it is `[1707]`).** IdentExpr [1685], **LitExpr [1707]**, ArrayExpr [1755], ObjectExpr [1762] / ObjectProp [1768, a `type` union not an `interface`], SpreadExpr [1774], UnaryExpr [1791], BinaryExpr [1819], AssignExpr [1841], TernaryExpr [1853], MemberExpr [1871], IndexExpr [1882], CallExpr [1892], NewExpr [1902], LambdaExpr [1930], CastExpr [1958], MatchExpr [1976], MapEntry [2001] / MapLitExpr [2028] (§59 value-native map/set), SqlRefExpr [2049], InputStateRefExpr [2063] (§36 `<#id>` reads), EscapeHatchExpr [2077] (`_{}` foreign block), ResetExpr [2118], MarkupValueExpr [2142].
+
+## §53.4 / §7.5.1 — `LitExpr` and the `hasInterpolation` field (NEW #877, at `68cfac6d`)
+
+### LitExpr  [types/ast.ts:1707]  — re-derived by symbol grep at this watermark
+```
+kind: "lit"
+span: ExprSpan
+raw: string                                   // raw source text, delimiters INCLUDED
+value: string | number | boolean | null       // number -> parsed float; string -> UNESCAPED content;
+                                              // bool -> true/false; not -> null
+litType: "number" | "string" | "template" | "bool" | "null"(dep) | "undefined"(dep) | "not"
+hasInterpolation?: boolean                    // NEW #877 — `litType: "template"` ONLY
+```
+
+⛔ **`hasInterpolation` IS CARRIED, NEVER INFERRED, AND THE FIELD EXISTS BECAUSE THE INFERENCE WAS
+UNSOUND — NOT BECAUSE IT WAS SLOW.** The retired test was ``raw === "`" + value + "`"``, and its own
+doc comment described it as *"an exact test, not a heuristic"*. **It is not exact.** It is ALSO
+satisfied by ``raw === "``"`` with `value === ""` — precisely the pair a multi-quasi template degrades
+to when its source text could not be recovered (the `astring` last-resort fallback in the same parser
+arm sets exactly that, and so does any upstream stage that truncated the initializer). **A genuinely
+EMPTY single-quasi template and a DEGRADED interpolated one are indistinguishable in `(raw, value)`.**
+
+⚑ **THE FIELD IS OPTIONAL AND THE FALLBACK IS SPECIFIED, WHICH MATTERS FOR HAND-SYNTHESIZED NODES.**
+`undefined` means the node did not come from either parser (unit tests, older synthesis paths).
+Consumers **SHALL** fall back to SCANNING `raw` for an unescaped `${` — `rawTemplateHasInterpolation`
+(`expression-parser.ts:4528`, exported) — and **never** to the `(raw, value)` reconstruction this
+field exists to retire. A `\${` is an ESCAPED dollar-brace and is literal text, not an interpolation.
+
+**Stamped at three sites on the LIVE pipeline** (`compiler/src/expression-parser.ts`, all inside
+`esTreeToExprNode`): the `Literal` arm (`:2321`, via `rawTemplateHasInterpolation(raw)`), the
+`TemplateLiteral` single-quasi branch (`:2363` — `hasInterpolation: false`, `value: cooked`), and the
+multi-quasi branch (`:2396-2406` — `hasInterpolation: true`, `value: ""`). **And at one site on the
+NATIVE pipeline**: `translateTemplateLit` (`compiler/native-parser/translate-expr.js:485+`), stamping
+from `exprs.length`, the native counterpart of `quasis.length`.
+
+⛔ **THE NATIVE SIDE ALSO STOPPED PUTTING `raw` IN `value`, AND THAT IS A SOUNDNESS FIX, NOT A
+TIDY-UP.** It used to construct `makeLit(raw, raw, "template", span)`, so a native template's `value`
+carried its own delimiters — `` `abc` `` (5 chars) for a literal whose value is `abc` (3). That was
+survivable only by ACCIDENT: the old reconstruction can never match when `value` already has
+back-ticks, so every native template fell through to `literal-type-only` and §53.4 kept its runtime
+guard. **The moment the answer became carried, that accidental fall-through disappeared** and the
+corrupt value would have been routed straight into the STATIC zone — a false `E-CONTRACT-001` on valid
+code one way, a silently elided boundary guard the other. The two pipelines are now at FIELD-LEVEL
+parity here, which the within-node canary checks (a field the live side emits and the native side does
+not is a MISSING-FIELD divergence). ⚠ `sourceNeedsLiveFallback` (`component-expander.ts:1087`) routes
+only INTERPOLATED templates to the live parser, so **STATIC templates reach the native function by
+design** — this is not an exotic path.
+
+### The classifier output vocabulary — `literal` vs `literal-type-only`
+
+`classifyLiteralFromExprNode` (exported, `expression-parser.ts`) returns one of FOUR shapes, and the
+first two are the load-bearing distinction:
+
+| shape | meaning | who needs it |
+|---|---|---|
+| `{ kind: "literal", value }` | the VALUE is statically known | §53.4's `checkPredicateLiteral` — evaluates the predicate at compile time and may ELIDE the runtime guard |
+| `{ kind: "literal-type-only", type }` | syntactically a literal of a known primitive TYPE whose value is NOT known | §7.5.1's `E-TYPE-031` — needs only the type |
+| `{ kind: "arithmetic" }` | binary arithmetic detected | inference |
+| `{ kind: "unconstrained" }` | nothing determinable | inference |
+
+⛔ **AN INTERPOLATED TEMPLATE IS `literal-type-only { type: "string" }` — ALWAYS.** Collapsing the two
+shapes would make it statically checkable against a predicate it has not been shown to satisfy, and
+§7.5.1 states that prohibition normatively: *a widening of the literal set SHALL NOT convert a §53.4
+BOUNDARY assignment into a STATIC one for a literal whose VALUE is not statically determined.*
+
+⚑ **THERE ARE TWO READERS AND THEY MUST AGREE ON THE LITERAL SET.** The structured one above consumes
+`isStaticTemplateLit` (`expression-parser.ts:4566`). The FALLBACK, used only where a declaration
+carries no parsed `initExpr`, is `extractInitLiteral` (`type-system.ts:3626`) — whose quoted-string AND
+back-tick branches were BOTH replaced by one scanner at #877: `scanSingleStringLiteral` (`:3518`) with
+`cookOneEscape` (`:3446`) and `skipNestedLiteral` (`:3583`). ⛑ **The scanner runs BEFORE the arithmetic
+test on purpose** — that test is a bare `/[+*\/]/` over the whole string and cannot see quoting, so it
+would misclassify the legitimate static literals `` `a + b` `` and `"a + b"`. The ordering is safe only
+because the scanner REJECTS a compound expression (`"ab" + "cd"`) rather than mistaking it for a single
+literal, which is exactly what the two `startsWith`/`endsWith` branches it replaces used to do.
+
+⚠ **BEFORE YOU REPRODUCE ANYTHING ON THIS SURFACE: at file top level the interpolation is destroyed by
+`block-splitter.js` `splitBlocks` BEFORE the expression parser runs** (back-tick tracking exists only
+under `frame.type === "meta"`). See `primary.map.md` Task-Shape Routing row 3 — OPEN/HIGH.
 
 ## GITI-038 — `ReturnStmtNode.fnExprNode` (a returned function expression)
 `return function name(){…}` / `return async function name(){…}` is parsed STRUCTURALLY, not stripped-and-hoisted. `ReturnStmtNode` [types/ast.ts:1071] carries an optional `fnExprNode?: FunctionDeclNode` field [types/ast.ts:1081] holding the returned closure as a full `function-decl` node — the SAME shape a top-level `FunctionDeclNode` uses. `RETURN_DECL_KW` (ast-builder.js) covers only `const`/`let`/`type`/`fn` — `function`/`async function` route through a recursive `parseOneStatement()` call.
@@ -512,6 +612,68 @@ decidable, since a name bound by a NEARER ctx must suppress re-resolving a same-
 ## §20.5 session-establishment — new attributes/config fields, NOT a new FileAST node type
 No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier. See auth.map.md for the three separate non-FileAST "auth config" shapes. **S288: `tenant-egress.ts`'s `buildTenantContext` now takes a second, optional arg (the `<schema>`-declared tables, from `extractDesiredSchema(fileAST).tables`) and unions them into `TenantContext.tenantScopedTables`** — previously it read ONLY the `<db>`-derived `ProtectContext.schemaByTable` registry, which left a `<schema>`-only app (no `<db>` block) with an EMPTY tenant set even though §14.8.10 says a `<schema>` table's `tenant_id` column presence IS the tenant declaration. See domain.map.md's §14.8.11 section for the full defect narrative (`g-dbauth-session-principal-not-wired`, RESOLVED S288).
 
+## §14.8.8 — the ONLY structural-subtyping path in the type system (and it is NOT argument assignability)
+
+⚑ **ZERO OCCURRENCES OF `fieldTypeAssignable` / `fieldTypeEquals` EXISTED IN ANY MAP BEFORE S404**, and
+an S404 dispatch went looking for them here. They are recorded now WITH their bound, because the bound
+is the whole point.
+
+### fieldTypeAssignable(src: ResolvedType, target: ResolvedType) -> boolean  [type-system.ts:1201]
+### fieldTypeEquals(a: ResolvedType, b: ResolvedType) -> boolean  [type-system.ts:1220]
+
+⛔ **ONE CALLER, AND IT IS NOT THE ONE YOU WANT.** `fieldTypeAssignable` is reached only from
+`checkSqlRowWidthSubtype` (`:1178`, call at `:1189`), which answers exactly one question: *is a SQL
+projection row `S` WIDTH-SUBTYPE-assignable to a developer-declared `:struct` contract `T`?* Its own
+docstring says **"NOT a general subtyping relation"** and **"this is the ONLY structural-subtyping path
+in the type system"**. The caller must have already confirmed `S` is a SQL projection row
+(`isSqlProjectionRowStruct`) and `T` a declared `:struct`. **General struct assignment is NOMINAL
+(§14.8.1) and does not route through it.** `checkSqlRowWidthSubtype` itself has two callers
+(`:14435`, `:14562`) and is re-exported at `:28887` for tests.
+
+The relation, stated so nobody re-derives it wrong:
+
+| src / target | result |
+|---|---|
+| `asIs` or `unknown` on EITHER side | **assignable** (degraded column, or a signed-for escape hatch) — no false positive on a gracefully-degraded column |
+| target is a `union` | assignable iff src is assignable to ANY member (covers `string \| not` optional contract fields) |
+| target is `not` | assignable only from `not` |
+| anything else | `fieldTypeEquals` — primitives by **NAME**, structs/enums **nominally**, arrays by element equality, everything else same-`kind`-is-sufficient. **No deep structural subtyping.** |
+| EXTRA fields in `S` | **allowed** — that is the width-subtyping half |
+| MISSING field in `S` | violation, `reason: "missing"` |
+
+⛔ **"PRIMITIVES BY NAME" IS WHY `int` IS NOT `number` IN THIS COMPILER TODAY**, and it is the mechanism
+behind §7.5.1's position-3 block. ⚑ **A REFINEMENT (subtype) READING WAS RULED AT S404 — `int` IS a
+refinement of `number` — but the normative text is NOT YET WRITTEN and no code implements it.** Do not
+"fix" `fieldTypeEquals` on the strength of the ruling; the ruling lands with the bare-`int` desugar and
+the §53.4 zone wiring, gated on an artifact differential.
+
+### §7.5.1 assignability — TWO of five positions are implemented, and position 3 has NO code at all
+
+| # | position | form | status |
+|---|---|---|---|
+| 1 | annotated variable declaration | `let n: number = "nope"` | **CHECKED** — `E-TYPE-031`, `type-system.ts:10702-10725` (`annotateNodes`) |
+| 2 | annotated state-cell declaration | `<n>: number = "nope"` | **CHECKED** (NEW, S402 `069e86fd`) — `type-system.ts:11163-11200`, same function's reactive-decl arm |
+| 3 | argument | `fn f(x: number)` called `f("nope")` | **not checked — NO IMPLEMENTATION EXISTS** |
+| 4 | return | `fn f() -> number { return "nope" }` | not checked |
+| 5 | operand | `let z = "x" * 2` | not checked |
+
+Both checked positions use the SAME rule, message and literal set: annotation ∈ {`number`, `string`,
+`boolean`} (⛔ **`int` is deliberately EXCLUDED**), initializer ∈ {`"s"`, `42`, `true`, `` `tpl` ``},
+all **8 off-diagonal cells** fire and all 4 diagonal cells stay silent. A back-tick template denotes a
+`string` whether or not it interpolates. `not` is §42's absence value and is governed by `E-TYPE-041`.
+
+⛔ **BOTH SITES LIVE IN THE `else` BRANCH OF A `kind !== "predicated"` TEST, WHICH IS AN OPEN HOLE.**
+`<n>: number(>0) = "nope"` compiles with **no diagnostic and zero runtime guards** — adding a predicate
+makes the annotation check strictly WEAKER. Same at position 1, so it is not a regression; but §7.5.1
+as landed claims position 2 is CHECKED "with the same rule and same 8 cells" and carries no predicated
+carve-out. Filed MED, **RELAYED-UNVERIFIED**:
+`g-position-2-annotation-check-skipped-when-the-annotation-carries-a-predicate`.
+
+⚑ **THE POPULATION FIGURE IS RE-DERIVABLE — `bun scripts/int-number-census.ts` (#875).** Do not quote
+a number from SPEC; SPEC's original "37 rejections, all 37 false positives" did not reproduce and was
+corrected in place at S404. Re-executed here on the five-root 1920-file set: **69 provable rejections of
+120 int-parameter arguments, 93 strict, 43 integral literals, 0 non-numeric, Q4 reverse 0 of 81.**
+
 ## Type-system ResolvedType layer (type-system.ts, not ast.ts)
 FunctionType [type-system.ts:~470], MapType [:328] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom). **`:line` figures in this row shifted ~+10 when #665 inserted the split; the shapes are unchanged.**
 
@@ -601,6 +763,7 @@ changed what the compiler can SAY, not what it accepts.
 ## Tags
 #scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth
 #tildecontext-shape #liftvar-vs-var #armbodystmts-readonlyset #no-uniform-binder #es6-shorthand-defeats-field-regex #binding-is-raw-paren-text #parsebindinglist #types-dir-empty-is-not-a-currency-probe
+#litexpr-hasinterpolation #carried-not-inferred #raw-value-aliasing #literal-vs-literal-type-only #section-53-4 #section-7-5-1 #fieldtypeassignable #fieldtypeequals #section-14-8-8 #width-subtyping-only #primitives-by-name #int-vs-number #position-3-has-no-code #anchors-re-derived-by-symbol-grep
 
 ## Links
 - [primary.map.md](./primary.map.md)

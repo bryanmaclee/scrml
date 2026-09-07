@@ -7172,6 +7172,78 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-06 (S404 — a ruling in two messages, then a day of instruments being wrong, mine included)
+
+bryan's standing instruction opened the session (*"start next session with expounding on int/number"*)
+and he ruled it in two messages. Everything after was verification, and most of what was verified
+turned out to be wrong — the SPEC's own count, a wrap PR's unreviewed payload, an agent's fix, and
+twice my own claims. Four PRs landed. Review floor drained 4 → 0 and re-incurred 2.
+
+**⚑ RULED — `int` is a REFINEMENT (subtype) of `number`.** Option (a). The §53.4 three-zone model
+decides each site; the safe direction never rejects. ⚑ bryan first answered "b", then corrected to
+"a" and asked whether that matched his own description — **it did, and the PA had mis-read it.** Of
+his three clauses two are neutral between the options; the third, *"int is a subtype of number is
+empirically true"*, is (a)'s entire thesis while (b)'s offered text was *"keep them DISTINCT"*. The
+PA had noticed the clause and then written that the two "express the same truth". They do not.
+The ruling also settles a SPEC-vs-code disagreement nothing had named: §53.2.1's grammar lists
+`integer` as a PEER base-type while `hostReceiverKind` and `HOST_METHOD_RETURNS` both normalize
+`integer`→`number` citing §53. Settled in the code's favour.
+
+**⚑ RULED — FSP `Initialize` = coherent-(A)**, plus the handshake-response-shape design insight,
+ratified separately because it generalizes: *a plural field commits a protocol to
+membership-correctness the moment it exists; the only two non-lying resolutions are
+collapse-to-singular or enumerate-correctly.* A ~6-day-old routed deliberation, returned to peter.
+
+- **#874** — the S310 return leg. Carries the ruling, the ratified insight, confirmation that peter's
+  fork-resolving grep REPRODUCED, and the consumer-side count he structurally could not run from
+  inside flogenceP: **scrml-side blast radius is ZERO** (no FSP client; the boot digest reads the
+  flogence db directly; nothing pins `fsp/2026-06`).
+- **#875** — `scripts/int-number-census.ts`, the instrument §7.5.1's own blocking sentence demanded.
+  ⚑ **The SPEC's figure does not reproduce.** It claims *"37 new rejections of which all 37 are false
+  positives"*; measured on its own population it is **69 provable / 93 strict of 120**, 43 integral
+  literals, **0 non-numeric**. The SHAPE claim holds exactly — the count was ~1.9× low, and its
+  *"1920 corpus `.scrml`"* was one harness's five roots, not the corpus (2555). Corrected in place.
+  The instrument itself took an S239 pass (4 HIGH) and a fix round: enum-payload annotations had **no
+  bucket at all**, and the omission was masked by a perfect `900 of 900` because an enum body counted
+  as a parsed struct body when its field set came back empty.
+- **#876** — five filings + the §7.5.1 correction. ⚑ Includes the session's **real** finding (below)
+  and a correction against the PA's own earlier HIGH.
+- **#877** — §53.4 template classification: `LitExpr.hasInterpolation` is now **carried**, not
+  reconstructed from `(raw, value)`. ⚑ The S239 pass **caught the fix introducing a new HIGH** —
+  `translateTemplateLit` called `makeLit(raw, raw, …)`, so the native pipeline's `value` includes the
+  back-ticks; stamping the flag short-circuited a test that had been failing *by accident* and routed
+  native templates STATIC with a 5-char value where the real one is 3. **Two pipelines agreeing on a
+  field NAME need not agree on its ENCODING.**
+
+**⚑ THE FINDING OF THE DAY, and it is pre-existing.** A `${` inside a top-level back-tick template is
+consumed as a **logic-block opener**, truncating the string:
+`` <full>: string = `hello ${1 + 1} world` `` emits `"hello "` at **exit 0 with zero diagnostics**.
+`splitBlocks` tracks back-ticks only under a `meta` frame. **There is no working path** — nested
+inside `${}` the same shape fails loudly with `E-CODEGEN-INVALID-LOGIC`. §44.8 already governs the
+`?{` opener after the identical silent-data-loss class; **nothing governs `${`**, so it is a RULING,
+not a fix. Filed HIGH.
+
+**⚑ THE PA'S OWN SHARPEST MISS.** The HIGH first filed against #873 said *"a 22-character value now
+inhabits a `<= 8` predicate unchecked."* False. The guard count was verified (2 → 0) and the value
+was inferred, never read. **Both sides emit `""`; the base guards were vacuous.** #873 had removed a
+guard that was **masking** the truncation bug above, and satisfying the PA's own DONE-PROBE would
+have restored the mask. A dispatched agent falsified it at the artifact level. Entry corrected
+HIGH → MED in the same session, against the PA.
+
+**Other findings, all measured:** a **type alias silently voids the annotation** that uses it
+(`type Name = string` + `<a>: Name = 42` exits 0 while the bare-`string` control fires E-TYPE-031) —
+same family as the two S402 HIGHs · the **recent-sessions index drops 43% of wraps**, because the
+matcher cannot see `wrap/sNNN`, *which is what PR-flow itself produces*, and it bit live when
+`--write` removed the S402 line and back-filled S378 with `--check` green · the **within-node parity
+canary cannot see an improvement** — `subtractAllowlist` clamps at 0 while the test's own header
+promises the signal surfaces, so the allowlist ratchets one way only and #877's −46 closed
+divergences are invisible to it · `types:check` is red on main with 12 pre-existing diagnostics.
+
+**Two zeros that are not coverage**, both surfaced by an agent against its own work: the corpus
+artifact differential is **blind** to #877's HIGH fix (0 translations reached `translateTemplateLit`
+over 1920 sources), and `extractInitLiteral`'s population is 0. The same agent **declined to certify
+a reachability claim the PA had relayed**, after three attempts to construct a reaching case failed.
+
 ### 2026-09-04/05 (S400 — five rulings, two arcs built and held, and a day of false coverage claims)
 
 Sixteen-item ruling board brought on request; bryan ruled five and deferred one architectural fix. The
