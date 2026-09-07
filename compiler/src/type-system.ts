@@ -3433,6 +3433,185 @@ function sourcePrimitiveType(info: SourceInfo): "string" | "number" | "boolean" 
 }
 
 /**
+ * Cook one backslash escape starting at `body[i]` (which IS the backslash).
+ * Returns the produced text and the index just past the escape.
+ *
+ * Mirrors the escapes the LIVE pipeline resolves (acorn's cooked value), so a
+ * declaration classified through the fallback carries the same VALUE as the
+ * same declaration classified through `classifyLiteralFromExprNode`. §53.4
+ * evaluates that value against a predicate, so "close enough" is not close
+ * enough: `` `a\`b` `` is THREE characters, and returning the un-cooked body
+ * would report four.
+ */
+function cookOneEscape(body: string, i: number): { text: string; next: number } {
+  const c = body[i + 1];
+  if (c === undefined) return { text: "\\", next: i + 1 };
+  switch (c) {
+    case "n": return { text: "\n", next: i + 2 };
+    case "t": return { text: "\t", next: i + 2 };
+    case "r": return { text: "\r", next: i + 2 };
+    case "b": return { text: "\b", next: i + 2 };
+    case "f": return { text: "\f", next: i + 2 };
+    case "v": return { text: "\v", next: i + 2 };
+    case "0":
+      // `\0` is NUL only when not followed by another digit.
+      if (!/[0-9]/.test(body[i + 2] ?? "")) return { text: "\0", next: i + 2 };
+      return { text: "0", next: i + 2 };
+    case "x": {
+      const hex = body.slice(i + 2, i + 4);
+      if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+        return { text: String.fromCharCode(parseInt(hex, 16)), next: i + 4 };
+      }
+      return { text: "x", next: i + 2 };
+    }
+    case "u": {
+      if (body[i + 2] === "{") {
+        const close = body.indexOf("}", i + 3);
+        const hex = close < 0 ? "" : body.slice(i + 3, close);
+        if (hex && /^[0-9a-fA-F]+$/.test(hex)) {
+          const cp = parseInt(hex, 16);
+          if (cp <= 0x10ffff) return { text: String.fromCodePoint(cp), next: close + 1 };
+        }
+        return { text: "u", next: i + 2 };
+      }
+      const hex = body.slice(i + 2, i + 6);
+      if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+        return { text: String.fromCharCode(parseInt(hex, 16)), next: i + 6 };
+      }
+      return { text: "u", next: i + 2 };
+    }
+    // `\n` as a LINE CONTINUATION inside a quoted string produces nothing.
+    case "\n": return { text: "", next: i + 2 };
+    // Everything else — including `\\`, `\"`, `\'`, `` \` `` and `\$` — is the
+    // escaped character itself.
+    default: return { text: c, next: i + 2 };
+  }
+}
+
+/**
+ * Is `raw` EXACTLY ONE string / template literal, and if so what is its cooked
+ * value and does it interpolate?
+ *
+ * ⚑ WHY A SCANNER AND NOT A `startsWith`/`endsWith` PAIR. "begins with a quote
+ * character and ends with the same quote character" is NOT "is one literal".
+ * `` `abc` + `de` `` satisfies it, and so does `"ab" + "cd"` — and because
+ * those tests ran BEFORE the arithmetic test, the fallback returned a `literal`
+ * of eleven and nine characters respectively for expressions whose runtime
+ * values are five and four. On the §53.4 path that elides a boundary guard
+ * against a value nobody computed. Both branches had the identical defect, one
+ * line apart; both are replaced by this one scanner.
+ *
+ * ⚑ AND WHY IT COOKS. The structured classifier reports the COOKED value
+ * (acorn's), and `extractInitLiteral`'s own contract is that the two SHALL
+ * agree on the literal set. Returning `raw.slice(1, -1)` broke that for every
+ * literal containing an escape.
+ *
+ * Interpolation is tracked with a real nesting counter rather than a
+ * `.includes("${")` scan, so a nested template inside an interpolation —
+ * `` `a${`b`}c` `` — is ONE interpolated template, not a parse failure, and an
+ * ESCAPED `\${` is literal text rather than an interpolation.
+ *
+ * Returns `null` when `raw` is not exactly one literal (an unterminated one, or
+ * a compound expression), leaving the caller to fall through to its arithmetic
+ * and unconstrained answers.
+ */
+function scanSingleStringLiteral(
+  raw: string,
+): { cooked: string; interpolated: boolean } | null {
+  const quote = raw[0];
+  if (quote !== '"' && quote !== "'" && quote !== "`") return null;
+
+  let cooked = "";
+  let interpolated = false;
+  let i = 1;
+
+  while (i < raw.length) {
+    const c = raw[i];
+
+    if (c === "\\") {
+      const esc = cookOneEscape(raw, i);
+      cooked += esc.text;
+      i = esc.next;
+      continue;
+    }
+
+    if (c === quote) {
+      // The literal closes here. It is ONE literal only if nothing follows.
+      return i === raw.length - 1 ? { cooked, interpolated } : null;
+    }
+
+    if (quote === "`" && c === "$" && raw[i + 1] === "{") {
+      // A real interpolation. Skip its body with a brace counter that respects
+      // nested strings and nested templates, so `` `a${`b`}c` `` scans as one
+      // template rather than terminating at the inner back-tick.
+      interpolated = true;
+      i += 2;
+      let depth = 1;
+      while (i < raw.length && depth > 0) {
+        const d = raw[i];
+        if (d === "\\") { i += 2; continue; }
+        if (d === "{") { depth++; i++; continue; }
+        if (d === "}") { depth--; i++; continue; }
+        if (d === '"' || d === "'" || d === "`") {
+          const inner = raw.slice(i);
+          const consumed = skipNestedLiteral(inner);
+          if (consumed < 0) return null;   // unterminated nested literal
+          i += consumed;
+          continue;
+        }
+        i++;
+      }
+      if (depth > 0) return null;          // unterminated interpolation
+      continue;
+    }
+
+    cooked += c;
+    i++;
+  }
+
+  return null;                             // unterminated literal
+}
+
+/**
+ * How many characters does the string / template literal at the START of `s`
+ * occupy, including both delimiters? `-1` when it is unterminated.
+ *
+ * Used only to step OVER a literal nested inside a `${…}` interpolation, where
+ * the cooked value is irrelevant — the enclosing template is interpolated, so
+ * its value is not statically known regardless of what the nested literal says.
+ */
+function skipNestedLiteral(s: string): number {
+  const quote = s[0];
+  let i = 1;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "\\") { i += 2; continue; }
+    if (c === quote) return i + 1;
+    if (quote === "`" && c === "$" && s[i + 1] === "{") {
+      i += 2;
+      let depth = 1;
+      while (i < s.length && depth > 0) {
+        const d = s[i];
+        if (d === "\\") { i += 2; continue; }
+        if (d === "{") { depth++; i++; continue; }
+        if (d === "}") { depth--; i++; continue; }
+        if (d === '"' || d === "'" || d === "`") {
+          const consumed = skipNestedLiteral(s.slice(i));
+          if (consumed < 0) return -1;
+          i += consumed;
+          continue;
+        }
+        i++;
+      }
+      if (depth > 0) return -1;
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
  * Try to extract a SourceInfo from a raw init expression string.
  * Conservative: only matches unambiguous numeric, string, boolean or
  * back-tick-template literals.
@@ -3454,25 +3633,30 @@ function extractInitLiteral(init: unknown): SourceInfo {
     return { kind: "literal", value: parseFloat(raw) };
   }
 
-  // String literal: single or double quoted (at least 2 chars: open+close quote)
-  if (raw.length >= 2 &&
-      ((raw.startsWith('"') && raw.endsWith('"')) ||
-       (raw.startsWith("'") && raw.endsWith("'")))) {
-    return { kind: "literal", value: raw.slice(1, -1) };
-  }
-
   // Boolean literal.
   if (raw === "true") return { kind: "literal", value: true };
   if (raw === "false") return { kind: "literal", value: false };
 
-  // Back-tick template literal — a STRING. Its VALUE is known only when the
-  // template carries no `${…}` interpolation; see `isStaticTemplateLit` in
-  // expression-parser.ts for the structured equivalent of this test.
-  if (raw.length >= 2 && raw.startsWith("`") && raw.endsWith("`")) {
-    const body = raw.slice(1, -1);
-    return body.includes("${")
-      ? { kind: "literal-type-only", type: "string" }
-      : { kind: "literal", value: body };
+  // ONE string or back-tick-template literal — single-quoted, double-quoted or
+  // back-tick, all three answered by the same scanner because all three had the
+  // same defect. A template is a STRING whose VALUE is known only when it
+  // carries no `${…}` interpolation; see `isStaticTemplateLit` in
+  // expression-parser.ts for the structured equivalent.
+  //
+  // This runs BEFORE the arithmetic test on purpose: the arithmetic test is a
+  // bare `/[+*\/]/` over the whole string and cannot see quoting, so it would
+  // misclassify the legitimate static literals `` `a + b` `` and `"a + b"`.
+  // Ordering is safe only because the scanner rejects a COMPOUND expression
+  // (`"ab" + "cd"`, `` `abc` + `de` ``) rather than mistaking it for one
+  // literal — which is exactly what the two `startsWith`/`endsWith` branches
+  // this replaces used to do.
+  {
+    const lit = scanSingleStringLiteral(raw);
+    if (lit) {
+      return lit.interpolated
+        ? { kind: "literal-type-only", type: "string" }
+        : { kind: "literal", value: lit.cooked };
+    }
   }
 
   // Arithmetic: *, /, + operators, or digit followed by binary minus

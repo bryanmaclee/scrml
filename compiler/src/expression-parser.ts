@@ -2312,6 +2312,14 @@ export function esTreeToExprNode(
       if (typeof value === "string") {
         // Template literals that survived preprocessing are string literals
         const litType = raw && raw.startsWith("`") ? "template" : "string";
+        if (litType === "template") {
+          // This arm did NOT come through the `TemplateLiteral` case, so there
+          // is no `quasis` count to read. `raw` here IS the literal's own
+          // source text, so scanning it for an unescaped `${` is a real test
+          // on real text — not the `(raw, value)` reconstruction that
+          // `LitExpr.hasInterpolation` exists to retire.
+          return { kind: "lit", span, raw, value, litType, hasInterpolation: rawTemplateHasInterpolation(raw) } satisfies LitExpr;
+        }
         return { kind: "lit", span, raw, value, litType } satisfies LitExpr;
       }
       // Regex literal — ESTree represents `/[^a-z0-9]+/g` as a `Literal` whose
@@ -2349,7 +2357,10 @@ export function esTreeToExprNode(
         const quasi = quasis[0];
         const cooked = (quasi as { value?: { cooked?: string } }).value?.cooked ?? "";
         const raw = "`" + cooked + "`";
-        return { kind: "lit", span, raw, value: cooked, litType: "template" } satisfies LitExpr;
+        // `quasis.length === 1` IS the no-interpolation case, by ESTree
+        // construction. Stamp it so no consumer has to re-derive it from
+        // `raw`/`value` — see `LitExpr.hasInterpolation`.
+        return { kind: "lit", span, raw, value: cooked, litType: "template", hasInterpolation: false } satisfies LitExpr;
       }
       // Multi-quasi template — reconstruct the original backtick source from
       // the ESTree node's start/end offsets within `rawSource` (which is the
@@ -2382,11 +2393,17 @@ export function esTreeToExprNode(
       // text (matches the single-quasi branch above for un-interpolated parts);
       // for the multi-quasi case we just record empty since the cooked value
       // isn't meaningful without interpolation values.
+      // ⚑ `hasInterpolation: true` is stamped from `quasis.length > 1`, which
+      // is the ONLY reliable witness at this point. It must NOT be re-derived
+      // downstream from `raw`, because `templateRaw` may have degraded to
+      // "``" through the last-resort fallback above — indistinguishable from a
+      // genuinely empty template in `(raw, value)`. See `LitExpr.hasInterpolation`.
       return {
         kind: "lit", span,
         raw: templateRaw,
         value: "",
         litType: "template",
+        hasInterpolation: true,
       } satisfies LitExpr;
     }
 
@@ -4500,19 +4517,56 @@ export function exprNodeMatchesIdent(node: ExprNode, name: string, exact: boolea
 }
 
 /**
+ * Does this back-tick source text carry an unescaped `${…}` interpolation?
+ *
+ * Used ONLY where no `quasis` count is available (see the `Literal` arm of
+ * `esTreeToExprNode`, and the `hasInterpolation`-absent fallback in
+ * `isStaticTemplateLit`). A `\${` is an ESCAPED dollar-brace and is literal
+ * text, so the scan counts the preceding run of backslashes and treats an ODD
+ * run as an escape.
+ */
+export function rawTemplateHasInterpolation(raw: string): boolean {
+  if (typeof raw !== "string") return false;
+  for (let i = 0; i < raw.length - 1; i++) {
+    if (raw[i] !== "$" || raw[i + 1] !== "{") continue;
+    let backslashes = 0;
+    for (let j = i - 1; j >= 0 && raw[j] === "\\"; j--) backslashes++;
+    if (backslashes % 2 === 0) return true;
+  }
+  return false;
+}
+
+/**
  * Is this `template` literal free of interpolation, so that its `value` is the
  * whole of its runtime text?
  *
- * The parser distinguishes the two cases by construction (see the
- * `TemplateLiteral` arm of `esTreeToExprNode`): a single-quasi template sets
- * `raw = "`" + cooked + "`"` and `value = cooked`, so `raw` is derivable from
- * `value`. A multi-quasi template sets `raw` to the ORIGINAL back-tick source —
- * which contains the `${…}` segments — and `value` to `""`. Reconstructing the
- * single-quasi form and comparing is therefore an exact test, not a heuristic
- * scan for `${`.
+ * ⚑ THE ANSWER IS CARRIED, NOT INFERRED. `LitExpr.hasInterpolation` is stamped
+ * by the `TemplateLiteral` arm of `esTreeToExprNode` from `quasis.length`,
+ * which is the only witness that is always right.
+ *
+ * The previous implementation inferred it — `raw === "\`" + value + "\`"` —
+ * and its comment called that "an exact test, not a heuristic". **It is not
+ * exact.** The reconstruction is ALSO satisfied by `raw === "\`\`"` /
+ * `value === ""`, which is precisely what a multi-quasi template degrades to
+ * when its source text could not be recovered: the `astring` last-resort
+ * fallback in that same arm sets exactly that pair, and so does any upstream
+ * stage that truncated the initializer before the expression parser saw it.
+ * A genuinely EMPTY template and a DEGRADED interpolated one are
+ * indistinguishable in `(raw, value)`, so §53.4's predicate zone could call an
+ * interpolated template STATIC and evaluate its predicate against `""` — a
+ * value it does not have. SPEC §7.5.1 forbids exactly that: a widening of the
+ * literal set SHALL NOT convert a §53.4 BOUNDARY assignment into a STATIC one
+ * for a literal whose VALUE is not statically determined.
+ *
+ * The `undefined` fallback covers hand-synthesized nodes (unit tests, older
+ * synthesis paths). It scans `raw` for an unescaped `${` — a real test on real
+ * text — rather than falling back to the reconstruction this function exists
+ * to retire.
  */
 function isStaticTemplateLit(n: LitExpr): boolean {
-  return typeof n.value === "string" && n.raw === "`" + n.value + "`";
+  if (typeof n.value !== "string") return false;
+  if (typeof n.hasInterpolation === "boolean") return !n.hasInterpolation;
+  return !rawTemplateHasInterpolation(n.raw);
 }
 
 /**
