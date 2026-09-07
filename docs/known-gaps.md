@@ -149,6 +149,55 @@ returning UN-REDACTED protected columns — that is the opposite polarity (guard
 this is guard absent, drops. Fixing this one without the other converts a dropped 403 into a leak.
 — `NEW S405-bryan (dpa-039 Call finding; reproduced by execution via dispatch, structural asymmetry + the unmerged correction PA-confirmed independently)`; **HIGH**; open
 
+### g-findOpenerEnd-inQuote-treats-apostrophe-as-a-string-delimiter-against-§4.18.3 — the safety argument for deleting the engine scanner's string branches rests on a tracker that has the same defect
+
+<!-- @gap id=g-findOpenerEnd-inQuote-treats-apostrophe-as-delimiter sev=MED status=open locus=compiler/src/engine-statechild-parser.ts(findOpenerEnd — its `inQuote` tracker opens a span on `'`; locate by symbol `grep -n "function findOpenerEnd"`, do NOT trust a line number) prov=review:S405-adversarial-round-3-finding-3+empirical:PA-reproduced-by-execution-on-main-at-8f1cea31 -->
+
+**PA-REPRODUCED BY EXECUTION on `main`** — this is NOT introduced by the free-move arc; it is
+pre-existing and the arc merely made it visible.
+
+```scrml
+<engine for=S initial=.Run>
+  <li : <b>Bob's</b>>          <!-- one apostrophe in a §4.14 :-shorthand markup-as-value body -->
+  <Run rule=.Done><p>go</p></>
+  <Done><p>fin</p></>
+</>
+```
+→ **2 × `E-CTX-*`.** The identical source with `Bob` instead of `Bob's` → **0 errors.**
+
+**Mechanism:** `findOpenerEnd`'s `inQuote` tracker treats `'` as an **opening delimiter**, so the
+apostrophe opens a phantom span that closes on the next apostrophe; the prose `>` after it then
+terminates the "opener" early and a following state-child is lost.
+
+⚑ **This is out of conformance with a sentence SPEC states language-wide** (§4.18.3, `SPEC.md:1220`):
+
+> *"The apostrophe `'` is an **ordinary interior character** … it carries no delimiter role … The
+> backtick is likewise an ordinary interior character and is NOT a display-text delimiter."*
+
+and §5.1's `"`-only attribute convention — *"scrml uses one string delimiter language-wide."*
+
+⚑⚑ **THE UNCOMFORTABLE PART, and it is why this is filed rather than folded into the arc.** The
+free-move arc deleted the `'` / backtick / `"` branches from `skipCommentOrString` on exactly that
+§4.18.3 licence — and its safety argument for the deletion being safe is *"opener-internal quotes are
+consumed by `findOpenerEnd`'s own `inQuote` tracker."* **That tracker has the same defect.** So the
+deleted class survives one layer down, at the very site named as the safety guarantee.
+
+**The arc also WIDENS this defect's reach without introducing it:** `findOpenerEnd` is now reached
+from five new scan paths covering every lowercase opener and closer in every scanned body, where
+previously only PascalCase / `<engine>` / `<onTransition>` openers reached it. Main behaves
+identically on the repro above, so it is not a regression — but the population that can trip it grew.
+
+**Fix direction (not ruled):** apply the same §4.18.3 licence one layer down — `'` and backtick lose
+their delimiter role in `findOpenerEnd`'s tracker, leaving `"` alone. That is the same delta the arc
+applied to `skipCommentOrString`, and the arc's three rounds are the evidence for what it costs:
+expect the deletion to unmask opener-blindness elsewhere, and audit at **LOOP granularity, not
+function granularity** — three of the four in-class loops in the sibling case sat inside functions
+that also contained a safe loop, so a function-level analysis reports them safe.
+
+**Related:** `g-engine-state-child-apostrophe-breaks-parse` (the routed adopter report the arc closes)
+· dpa-045 (whether markup body text is a string at all) · dpa-044 Call 1 (RULED S405).
+— `NEW S405-bryan (surfaced by the round-3 adversarial pass as its finding 3; PA-reproduced by execution on main, so pre-existing not introduced)`; **MED**; open
+
 ### g-no-dollar-brace-escape-exists-in-a-free-text-body-so-escaped-interpolation-silently-double-fires — `<p>Cost: \${5}</p>` emits `Cost: \5` at exit 0, zero diagnostics: the backslash stays content AND the interpolation fires
 
 <!-- @gap id=g-no-dollar-brace-escape-in-a-free-text-body sev=HIGH status=open locus=searched:compiler/src/block-splitter.js,compiler/src/ast-builder.js,compiler/SPEC.md-§4.18.3 — §4.18.3 defines `\${` as an escape ONLY inside a `"..."` display-text literal (code-default bodies); NO escape is defined for, or implemented in, a plain-markup free-text body prov=dd:scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round-1+empirical:PA-reproduced-by-execution-at-8f1cea31 -->
@@ -4780,7 +4829,9 @@ The §19.15.3 exhaustiveness/type fence fires E-RENDER-NOT-ENUM only when X's `o
 <!-- @gap id=g-match-arm-apostrophe-bs sev=MED status=resolved -->
 
 ### g-engine-state-child-apostrophe-breaks-parse — the S196 apostrophe fix was applied to the `<match>`-arm parser but NEVER to the `<engine>` state-child parser, so an apostrophe in an engine state-child body still breaks the parse — with a MORE misleading diagnostic than the match sibling. **PA-CONFIRMED BY EXECUTION on `c91969c7`, minimal + control + mechanism.** An `<engine for=S initial=.A>` whose state-child body carries prose with a straight `'` — bare (`<B><button>don't click</button></>`) or in a nested plain-markup child (`<Done><p>Thanks. We'll email you.</p></>`) — fails to compile with `E-ENGINE-STATE-CHILD-MISSING: <engine for=S> body is missing a state-child for variant .B … Add the missing state-child <B>...</>`, **naming a state-child that is present in source**. Controls: `We will`/`don't`→`do not` compile clean; the apostrophe is the whole variable. **Mechanism = string-lexing, proven by parity:** an ODD apostrophe count breaks, an EVEN count compiles (`<B><p>it's here, don't leave</p></>` — 2 apostrophes — COMPILES) — the closer-scan reads `'` as a string-span open, and an unterminated span swallows the `</>` closer plus any following state-children, so the last variant reads as "missing." **Direct SIBLING of the RESOLVED `g-match-arm-apostrophe-bs` (S196):** same class ("markup-text prose `'` read as a string delimiter"), same S109 locus ruling (*"markup-text body is TEXT with no string concept"*) — but that fix landed at `block-splitter.js:findStructuralBodyEnd` + `match-statechild-parser.ts:findArmCloser/findNextArmOpener`, and the engine state-child parser is a DISTINCT file with its own closer-scan. This is the same generalize-per-locus shape as `g-shorthand-interp-engine-element-loci` (the S196 `:`-shorthand fix ALSO needed separate engine-locus wiring). Normal markup (outside engines) handles `'` fine (`<div><p>we'll email you.</p></div>` compiles) — the defect is confined to the code-default state-child body scan. ⚑ **The diagnostic is a second defect on top of the parse bug** — it is MORE misleading than the match sibling's `E-CTX-001 "Unclosed <match>"`: it sends the author to add a state-child that already exists, so the remedy is un-followable and the true cause (an apostrophe) appears nowhere. Contractions (don't / we'll / it's / can't) are ubiquitous in UI copy, and `<engine>` is the flagship Tier-2 construct the tier ladder + `bun scrml promote` steer authors toward — so this is high-traffic. **Locus (PA-LOCATED, not fully traced):** `compiler/src/engine-statechild-parser.ts` closer-finding scan (the "interior quote / apostrophe / backtick … opens a phantom string" hazard is acknowledged in comments at :1398 / :2155, but the guard is incomplete for a plain-body apostrophe); fix template is the S196 match fix per the S109 ruling. Fail-LOUD (exit 1), so not silent-wrong — filed **MED** to match the resolved match sibling, with the misleading-diagnostic + pillar-feature aggravators flagged for re-tiering. — `NEW S398-peter (engine dog-food — a sign-up wizard whose Done step said "We'll email you"; PA-reproduced minimal + even/odd mechanism + normal-markup control; routed to bryan — engine/native-parser surface)`; **MED**; open
-<!-- @gap id=g-engine-state-child-apostrophe-breaks-parse sev=MED status=open locus=compiler/src/engine-statechild-parser.ts(closer-finding scan treats markup-text '/" as a string-span delimiter — the S196 g-match-arm-apostrophe-bs fix at block-splitter.js+match-statechild-parser.ts was never generalized to this locus; phantom-string hazard acknowledged at :1398/:2155 but guard incomplete for plain-body apostrophe) prov=empirical:PA-two-sided-on-c91969c7-apostrophe-in-engine-state-child-body-E-ENGINE-STATE-CHILD-MISSING-naming-a-present-child-vs-do-not/We-will-controls-clean-and-EVEN-apostrophe-count-compiles-proving-string-lexing-normal-markup-p-with-apostrophe-fine -->
+<!-- @gap id=g-engine-state-child-apostrophe-breaks-parse sev=MED status=resolved locus=compiler/src/engine-statechild-parser.ts(closer-finding scan treats markup-text '/" as a string-span delimiter — the S196 g-match-arm-apostrophe-bs fix at block-splitter.js+match-statechild-parser.ts was never generalized to this locus; phantom-string hazard acknowledged at :1398/:2155 but guard incomplete for plain-body apostrophe) prov=empirical:PA-two-sided-on-c91969c7-apostrophe-in-engine-state-child-body-E-ENGINE-STATE-CHILD-MISSING-naming-a-present-child-vs-do-not/We-will-controls-clean-and-EVEN-apostrophe-count-compiles-proving-string-lexing-normal-markup-p-with-apostrophe-fine resolved-by=S405-free-move-071645ec-four-rounds -->
+⚑ **RESOLVED S405** by the free-move arc (`engine-statechild-parser.ts` — the `"`/`'`/backtick branches deleted from `skipCommentOrString`, plus opener-awareness at the four in-class scan loops). Peter's diagnosis held on every point. **It was NOT the ~35-LOC "free move" it was billed as** — four rounds, five HIGHs found by the adversarial gate, +477/-113 on the parser. The real finding: the string branches were doing DOUBLE DUTY, also shielding four opener-blind flat scanners from reading attribute interiors, so deleting them unmasked a pre-existing architectural gap. Residual filed separately: `g-findOpenerEnd-inQuote-treats-apostrophe-as-delimiter`.
+
 
 ⛑⛑ **S402-bryan — FIVE ROUNDS, STOPPED BY RULE RATHER THAN FINISHED. The fix is BUILT and HELD at PR #865 (draft); it is NOT landed, and it should not be landed as-is.**
 
