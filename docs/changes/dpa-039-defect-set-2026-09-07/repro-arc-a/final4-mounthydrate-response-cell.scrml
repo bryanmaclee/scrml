@@ -1,0 +1,16 @@
+<program db="sqlite:./app.db" auth="none">
+<schema>
+  ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  ?{`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`}
+</schema>
+<db src="app.db" protect="passwordHash" tables="users,notes"></db>
+${
+  server function loadUsers() { return ?{`SELECT * FROM users`}.all() }
+  server function loadNotes() { return Response.redirect("/home", 302) }
+  <userCell server> = loadUsers()
+  <noteCell server> = loadNotes()
+}
+<main>
+  <ul><each in=@userCell key=@.id as u><li class="u">${u.name}</li></each></ul>
+</main>
+</program>

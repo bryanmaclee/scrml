@@ -287,11 +287,30 @@ function responseGuardedReturns(fnNode) {
         && n.test.right.type === "Identifier" && n.test.right.name === "Response") {
       const narrowed = n.test.left.name;
       const arm = n.consequent.type === "BlockStatement" ? n.consequent.body : [n.consequent];
-      for (const s of arm) {
-        if (s.type === "ReturnStatement" && s.argument?.type === "Identifier" && s.argument.name === narrowed) {
-          guarded.add(s);
+      // ⚑ THE WALK IS RECURSIVE OVER THE NARROWED ARM, NOT A SINGLE LEVEL.
+      // Everything inside `if (x instanceof Response) { … }` is narrowed, however
+      // deeply nested, so `return x` at ANY depth in that arm is a Response
+      // return. The §14.8.9 guard is now two levels —
+      //   `if (r instanceof Response) { if (r.body === null) return r; return refuse(); }`
+      // — and a one-level scan reported the inner `return r` as a BARE return,
+      // i.e. as a handler exit that is not a Response, which it demonstrably is.
+      // A recognizer that is shallower than the code it recognizes reports a
+      // defect where there is none, and (worse) would miss one where there is.
+      const collectNarrowedReturns = (node) => {
+        if (!node || typeof node !== "object") return;
+        if (Array.isArray(node)) { for (const c of node) collectNarrowedReturns(c); return; }
+        if (!node.type) return;
+        // Do not cross into a nested function — its `return` is not this exit.
+        if (/^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/.test(node.type)) return;
+        if (node.type === "ReturnStatement" && node.argument?.type === "Identifier" && node.argument.name === narrowed) {
+          guarded.add(node);
         }
-      }
+        for (const k of Object.keys(node)) {
+          if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+          collectNarrowedReturns(node[k]);
+        }
+      };
+      for (const s of arm) collectNarrowedReturns(s);
     }
     for (const k of Object.keys(n)) {
       if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
@@ -303,9 +322,29 @@ function responseGuardedReturns(fnNode) {
 }
 
 /** `new Response(…)`, or a compiler guard variable that only ever holds one. */
+/**
+ * Compiler-emitted helpers whose return value IS a `Response` by construction.
+ *
+ * ⚑ THIS IS A LIST, AND A LIST IS THE WEAK PART OF THIS WHOLE ANALYSIS. A new
+ * compiler helper that builds a `Response` and is not added here reports as a
+ * BARE return, and this suite fails with a confusing "not a Response" message
+ * about emission that is in fact correct. Keep it in sync; the assertion is
+ * only as complete as this set.
+ */
+const RESPONSE_YIELDING_HELPERS = new Set([
+  // §14.8.9 (S405) — the protect floor's refusal for an egress it cannot
+  // inspect. Returns a 500 `Response` carrying no application data.
+  "_scrml_protect_opaque_refusal",
+]);
+
 function yieldsResponse(expr) {
   if (!expr) return false;
   if (expr.type === "NewExpression" && expr.callee.type === "Identifier" && expr.callee.name === "Response") return true;
+  if (
+    expr.type === "CallExpression" &&
+    expr.callee.type === "Identifier" &&
+    RESPONSE_YIELDING_HELPERS.has(expr.callee.name)
+  ) return true;
   // `const _scrml_authResult = _scrml_auth_check(req); if (_scrml_authResult) return _scrml_authResult;`
   if (expr.type === "Identifier" && /^_scrml_(authResult|csrf_403|slAuth)/.test(expr.name)) return true;
   if (expr.type === "AwaitExpression") return yieldsResponse(expr.argument);

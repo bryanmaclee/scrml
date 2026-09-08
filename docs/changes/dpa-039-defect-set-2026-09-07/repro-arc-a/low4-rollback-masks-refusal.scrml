@@ -1,0 +1,16 @@
+<program db="./app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+    ?{`CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, body TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users,posts">
+    ${
+      server function load(id: string)! SqlError {
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all()
+        return { a: a, b: b }
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

@@ -1,13 +1,12 @@
-<program lang="js">
+<program>
   <schema>
     ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
   </schema>
   <db src="app.db" protect="passwordHash" tables="users">
     ${
-      function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let payload = _={ JSON.stringify(u) }=
-        return payload
+      function goHome(id) {
+        let u = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return new Response(not, { status: 302, headers: { Location: "/home" } })
       }
     }
   </db>

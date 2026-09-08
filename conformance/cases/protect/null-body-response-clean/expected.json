@@ -1,0 +1,12 @@
+{
+  "id": "protect-null-body-response-clean",
+  "description": "§14.8.9 — the explicit null-body form `new Response(not, { status: 302, headers: { Location: ... } })` in a `protect=` file compiles with NO protect diagnostic at all: not E-PROTECT-005 (it carries no body) and not W-PROTECT-005 (the runtime guard recognizes it exactly via `.body === null` and passes it through with its status and headers intact). This is the resolution W-PROTECT-005 names, so it is pinned as a case rather than asserted in prose.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "A diagnostic that names a working path owes a proof that the path works. W-PROTECT-005 tells the adopter to write this exact shape, so this case compiles it: `not` (scrml's absence, §42) lowers to a JS `null` body, which is the one thing both the compile scan (`isProvablyNullBodyResponse`) and the runtime guard (`.body === null`) recognize as payload-free. Together with `w-protect-005-null-body-static` this pins the adopter-facing contract of the §14.8.9 floor: a `protect=` app keeps full control of STATUS and HEADERS; what it gives up is authoring the BODY.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROTECT-005", "W-PROTECT-005", "E-PROTECT-004"]
+  }
+}

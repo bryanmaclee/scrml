@@ -1,0 +1,13 @@
+{
+  "id": "protect-w-protect-005-null-body-static",
+  "description": "§14.8.9 — `Response.redirect(...)` in a `protect=` file COMPILES (it carries no body, so there is nothing the egress floor could fail to inspect) but fires W-PROTECT-005 (warning), because the RUNTIME guard still refuses it: Bun gives redirect/error a 0-byte ReadableStream rather than a null body, and a secret-carrying `new Response(body, {status:302, headers:{Location}})` is indistinguishable from one at the exit. The seam is reported at build time instead of surfacing as a 500 on the first request.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "E-PROTECT-005's rationale is that a hand-serialized BODY is an opaque stream the floor cannot read; a null-body construction has no such stream, so firing the hard error on `Response.redirect` / `Response.error` contradicts the diagnostic's own justification — and because that gate has no escape hatch, it made redirects impossible in any `protect=` app, including one whose SELECT projects every protected column out (this case does exactly that: `SELECT id, name`, no protected column). But permitting them SILENTLY would swap a loud build error for a runtime 500, which is a worse defect, so the compile-time warning names the gap and gives the exact rewrite (`new Response(not, { status: 302, headers: { Location: ... } })`) that the runtime guard recognizes via `.body === null`. Paired with `null-body-response-clean`, which shows that rewrite compiling warning-free.",
+  "expect": {
+    "codes": ["W-PROTECT-005"],
+    "notCodes": ["E-PROTECT-005", "E-PROTECT-004"],
+    "severity": { "W-PROTECT-005": "warning" }
+  }
+}

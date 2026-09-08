@@ -1,0 +1,11 @@
+<program>
+  <state>
+    <ok> = false
+  </state>
+  ${
+    server fn denyIt(token) {
+      return new Response("forbidden", { status: 403, headers: { "Content-Type": "text/plain" } })
+    }
+  }
+  <div><p>hi</p></div>
+</program>

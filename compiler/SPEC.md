@@ -8819,21 +8819,106 @@ width-contract (it operates on the value before serialization; it does not widen
 
 **Closed-world precondition (raw / foreign egress).** Soundness rests on every construction being
 compiler-emitted and descriptor-preserving. An egress path the compiler cannot analyze — a `_{}`
-foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value
-(§14.1.1) — that carries a protected-origin column SHALL **fail closed**: `E-PROTECT-004` (the row
-cannot be proven redacted at an un-analyzable egress; declassify explicitly with `reveal` or
-project the column out). The compiler never silently ships a protected-origin column through a path
-it cannot redact.
+foreign-code block (§23), an author-constructed `Response` (§40), or an `asIs`-typed value
+(§14.1.1) — that carries a protected-origin column SHALL **fail closed**. The compiler never
+silently ships a protected-origin column through a path it cannot redact.
+
+⚑ **S405 amendment — THE PRECONDITION IS ENFORCED IN THREE PLACES AND THEY DO NOT CARRY EQUAL
+WEIGHT. A conformant implementation SHALL NOT present the first two as the guarantee.** The prior
+wording folded all three egress kinds into a single `E-PROTECT-004` and thereby stated, in effect,
+that a per-body source-text co-occurrence test discharged a confidentiality obligation. It does
+not: such a test is defeated by ordinary function extraction (the query in a helper, the raw egress
+in the caller), and no amount of additional recognized spellings repairs that — a completeness fix
+on that mechanism has no terminating condition. The three limbs, weakest first:
+
+1. **`E-PROTECT-004` — a conservative LINT, not a guarantee.** Per-body co-occurrence of a
+   protected-origin `?{}` with a `_{}` foreign block (§23) or an `asIs` value (§14.1.1). It covers
+   the §14.8.9 **derived-flow boundary**, which this section already declares out of the soundness
+   claim, so its incompleteness is not a new hole — but it SHALL be described as a lint.
+   Suppression is **column-keyed**: a `reveal("col")` discharges it only for a query whose
+   protected OUTPUT columns are ALL named by a reveal in that body. An unresolvable
+   (strip-all) query can never be discharged by named reveals, and a `reveal` with a non-literal
+   argument names no column and discharges nothing.
+2. **`E-PROTECT-005` — a HARD compile error, raised structurally at emission.** A server function,
+   `<endpoint>` arm or `server function*` generator in a scope that declares `protect=` columns and
+   which **serializes its own response BODY** SHALL be a compile error. The compiler owns and
+   mediates the egress envelope; it cannot mediate a body the author already serialized, because
+   that body is an opaque stream and the §14.8.9 descriptor does not survive the author's own
+   serialization. Raised where the compiler is about to emit the envelope, not by scanning source.
+   ⛔ **There is NO escape hatch, and `reveal("col")` deliberately does NOT discharge it** —
+   `reveal` declassifies a named column at a value the floor can still walk, and a hand-serialized
+   body is not walkable at all. It is **file-scoped, not query-scoped**: it fires wherever the body
+   is built, even in a function that selects no protected column, because keying it on the query
+   would restore the co-occurrence hole limb 1 has.
+3. **The runtime refusal — THE GUARANTEE.** At every compiler-emitted egress sink on a
+   protect-active path, a value that is a `Response` **carrying a body** SHALL be **refused**, not
+   passed through: the sink returns a compiler-owned refusal carrying no application data, and the
+   redaction walk raises on such a `Response` nested inside a payload. `instanceof Response` is an
+   exact test on the actual value, so this limb has no spelling problem, no extraction hole and no
+   aliasing hole — it catches an aliased constructor, an awaited `fetch`, a `.clone()` and a
+   callee's return alike. **A refusal SHALL be observable** — on a stream sink it SHALL emit a
+   terminal error frame and a server-side log rather than ending the stream silently. Limbs 1 and 2
+   are early warnings that move the failure to build time; this is what makes the property hold.
+
+⛔ **THE LIMBS SHALL DECIDE ON THE SAME BASIS — PROVENANCE, NOT SHAPE.** Every limb is answering one
+question: *is this response AUTHOR-owned (unmediated) or COMPILER-owned (already mediated)?* A
+compiler-emitted response — the §53.9.4 `E-CONTRACT-001-RT` 400, a §40.2 CSRF 403, the envelope
+itself — is mediated by construction and **SHALL NOT be refused**. An implementation whose
+compile-time limb decides by provenance (which code emitted it) while its runtime limb decides by
+shape (does it carry a body) has a **seam**, and every construction where the two disagree is a
+defect: a payload-free author response is refused when it should pass, and a body-carrying compiler
+response is refused when it must pass — the latter turning the compiler's own `400` into a `500`.
+A conformant implementation SHALL carry provenance to the sink (e.g. a non-serializing mark applied
+where the compiler constructs the response) so both limbs decide alike, and SHALL check
+mechanically that every compiler-emitted response reaching a guarded sink carries it.
+
+⚑ **THE UNIT OF ALL THREE LIMBS IS THE BODY, NOT THE `Response`, AND A CONFORMANT IMPLEMENTATION
+SHALL NOT CONFLATE THEM.** A `Response` with a **null body** — a redirect, a `204`, a network-error
+response — carries no payload, so there is nothing for a protected column to hide in and nothing
+for the floor to fail to inspect. Limbs 2 and 3 SHALL permit it. Stated as the adopter-facing
+contract: **a `protect=` app keeps full control of STATUS and HEADERS, and gives up authoring the
+BODY.** An implementation that refuses null-body responses removes the ability to redirect from a
+`protect=` app entirely, with no workaround, and is non-conformant.
+
+⚠ **The compile-time and run-time limbs can prove different things about a null body, and the gap
+SHALL be reported rather than left to surface at request time.** A construction the compiler can
+prove payload-free but the runtime sink cannot recognize as such — on the reference implementation,
+`Response.redirect(...)` and `Response.error()`, which materialize a zero-length stream rather than
+a null body — SHALL compile and SHALL raise **`W-PROTECT-005`**, naming the equivalent explicit
+null-body form that both limbs recognize. Permitting them silently is non-conformant: it converts a
+diagnosable build-time condition into a runtime failure.
 
 **Diagnostics** (named now; emitted when the floor build lands, per the §60 / §61 / §26.8
 named-codes-land-with-impl precedent — Rule 4):
 - **`I-PROTECT-STRIP-001`** (Info) — names each column the egress sink stripped (the redaction is
   never silent — the dev sees what the floor removed). Also fires on the wholesale strip of an
   unresolvable-dynamic-SQL row.
-- **`E-PROTECT-004`** (Error) — a protected-origin column reaches a compiler-unanalyzable egress
-  (raw `_{}` / manual `Response` / `asIs`) where strip-by-origin cannot be guaranteed, and it is
-  not `reveal`-declassified. The confidentiality sibling of `E-PROTECT-001` (read-site) in the
-  return-boundary direction.
+- **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
+  compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
+  cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
+  that query. A conservative lint over the derived-flow boundary — see limb 1 above. The
+  confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction.
+- **`E-PROTECT-005`** (Error) — a server function, `<endpoint>` arm or `server function*` generator
+  in a scope that declares `protect=` columns serializes its own response BODY. See limb 2 above.
+- **`W-PROTECT-005`** (Warning) — the same scope returns a response the compiler can prove
+  payload-free but the runtime sink cannot recognize as such. It compiles; the warning names the
+  equivalent explicit null-body form that both limbs accept. See the ⚠ note above.
+
+**Composition with §8.11 mount-hydration.** The synthetic `/__mountHydrate` route (§8.11) coalesces
+two or more `server @var` loaders into one JSON response. It is a **client egress** and SHALL apply
+this section's redaction at its sink, on BOTH its all-public and its per-cell auth-gated arms. The
+per-cell auth gate and the egress floor are orthogonal — auth decides *whether* a cell is sent, the
+floor decides *which of its columns* may cross — so an authorized cell still owes the strip.
+
+⚠ **Composition with §19.9.6 idempotency — a KNOWN LIMIT, recorded so it is not rediscovered as a
+defect.** A server function that returns its own `Response` exits the handler ahead of the A9-Ext-5
+idempotency store, so a non-monotone CPS batch returning an author-owned response is **not covered
+by `Idempotency-Key` dedup** and a retry re-executes the body. This is a property of the store's
+shape, not an oversight of the egress guard: `_scrml_idempotency_store` persists a serialized STRING
+against a fixed `200`, and capturing an author response for replay would require reading its body —
+consuming the stream that is about to be returned — and would replay it under the wrong status and
+without its headers. Closing it needs a store that can hold status + headers + a buffered body,
+which is a §19.9.6 change.
 
 **The DX layer (deferred — incremental, not load-bearing).** An *early authoring-time* static
 error reading the **same** provenance map — flagging a protected-origin return at compile time
@@ -19834,7 +19919,9 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `<db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
 | E-SQL-ROW-CONTRACT-MISMATCH | §14.8.8 | A SQL-projection-row value (a Tranche-1 typed `?{ SELECT ... }` row, or its per-item element) is passed to a component prop whose declared type is a developer-authored `:struct` contract, and the row does NOT structurally width-subtype into that contract: either (a) the contract requires a field the row does not project (`missing`), or (b) the row projects the field but its type is not assignable to the contract's declared type (`incompatible`). One diagnostic fires PER unsatisfied field, naming the field + the contract type. BOUNDED: this is the ONLY structural-subtyping path — it applies solely when the SOURCE is a SQL-projection row (`<sql-row>` provenance) and the TARGET is a declared `:struct` prop contract. General struct-to-struct assignment stays NOMINAL (§14.8.1) and never triggers this code. EXTRA columns in the row are allowed (width-subtyping). (Catalog addition: typed-sql-row Tranche 2 — Shape C, ratified S175; emitted at `compiler/src/type-system.ts` `checkPropContract` via `checkSqlRowWidthSubtype`; the call-site descriptor is recorded by `compiler/src/component-expander.ts` as `__propContractChecks`.) | Error |
 | ~~E-PROTECT-002~~ | §11.3.3 | **Retired 2026-08-01 (S310) — fold-orphan.** §11 is *"State Objects and `protect=` (Reserved — Folded)"*; its content moved to §6 / §52 / §14.8.9, and this row was left pointing into the dissolved §11.3.3. Searched §11.3.3, §52, §14.8.9 and the whole SPEC — **no normative definition survives anywhere**; the code appeared ONLY in this index row and has no emitter. The behaviour it named (protected-field access reachable client-side) is owned by the LIVE §14.8.9 protect-floor **E-PROTECT-004** (protected-origin column resolved through the SQL FROM/JOIN alias map) plus §12.2 server-placement inference. Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
-| E-PROTECT-004 | §14.8.9 | A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) reaches a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, where origin-keyed structural redaction (§14.8.9) cannot be guaranteed, and the column is not `reveal`-declassified. Fail-closed: the compiler will not ship a protected column through a path it cannot redact. Resolution: declassify explicitly with `value.reveal("col")`, or project the column out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. (Catalog addition S230 dpa-017; named now, fires when the §14.8.9 floor build lands per Rule 4 / §60/§61/§26.8 precedent.) | Error |
+| E-PROTECT-004 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) **co-occurs, in one function body,** with a compiler-unanalyzable egress — a `_{}` foreign-code block (§23) or an `asIs`-typed value (§14.1.1) — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, and the column is not `reveal`-declassified. Resolution: declassify EVERY protected output column of that query with `value.reveal("col")`, or project them out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. ⛔ **THIS IS A CONSERVATIVE LINT AND §14.8.9 NOW SAYS SO NORMATIVELY — DO NOT CITE IT AS A CONFIDENTIALITY GUARANTEE.** It is a per-body SOURCE-TEXT co-occurrence test, and ordinary function extraction defeats it: REPRODUCED at `8fa6854d`, the same code with the query in a helper and the raw egress in the caller compiled at exit 0 while the one-body form fired. Recognizing more spellings does not repair that — a completeness fix on this mechanism has no done-condition, which is exactly why the repair sat unscheduled for ~40 sessions. It bounds the §14.8.9 DERIVED-FLOW boundary, which that section already excludes from its soundness claim, so its incompleteness is disclosed rather than new. ⚑ **TWO CHANGES AT S405, BOTH NEWLY-REJECTING.** (a) **The `Response` kind LEFT this row** — an author-constructed `Response` is now `E-PROTECT-005`, raised structurally at emission, because that limb was the one whose text co-occurrence stood in for a REAL compiler-visible fact (the emitted envelope is fail-open on a `Response`). Do not re-add it here. (b) **Suppression is COLUMN-keyed, not existence-keyed** — previously ANY `.reveal(` anywhere in the body disarmed the gate for EVERY protected column in it, so `reveal("email")` silently declassified `passwordHash` (REPRODUCED). A strip-all (unresolvable-SQL) query can never be discharged by named reveals; a `.reveal(<non-literal>)` names no readable column and discharges nothing. ⚑ **AND THE `_{}` LIMB DID NOT FIRE ON THE SYNTAX §23 RECOMMENDS, WHICH IS WHY THIS ROW NOW STATES THE OPENER FAMILY.** §23.2 defines the opener as `_` + **zero or more** `=` + `{`, and `W-FOREIGN-001` steers authors AWAY from the level-0 `_{`; the predicate matched level 0 ONLY until S405, so it recognized exactly the spelling the compiler discourages. REPRODUCED at `8fa6854d`: `let w = _={ JSON.stringify(v) }=` in a `protect=` body compiled at exit 0 with no diagnostic and shipped `passwordHash` in full. Cases: `conformance/cases/protect/raw-egress-e004` (fires, level-1 opener) · `reveal-suppresses-e004` (discharged) · `reveal-wrong-column-e004` (NOT discharged — the column-keyed proof). *(Catalog addition S230 dpa-017; scope corrected + narrowed S405 arc A, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` via `detectProtectedRawEgress`.)* | Error |
+| E-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A server function, `<endpoint>` arm or `server function*` generator in a scope that declares `protect=` columns SERIALIZES ITS OWN RESPONSE BODY.** The compiler owns the §14.8.9 egress envelope and MEDIATES it — `_scrml_protect_redact` walks the value, reads each protected-origin descriptor and strips what was not `reveal`-declassified. It cannot mediate a body the author already serialized: that body is an opaque stream the floor cannot read, and the Symbol-keyed descriptor does not survive the author's own `JSON.stringify`. So the compiler refuses to emit an envelope it cannot mediate. Resolution: return the VALUE (the compiler serializes and redacts it for you); or move the function into a file that declares no `protect=` columns. ⛔ **THERE IS NO ESCAPE HATCH AND `reveal("col")` DELIBERATELY DOES NOT DISCHARGE IT.** `reveal` declassifies a NAMED COLUMN at a value the floor can still WALK; a hand-serialized body is not walkable, so there is no column to admit and nothing for the stamp to mean. ⚑ **THE UNIT IS THE BODY, NOT THE `Response` — AND GETTING THAT WRONG SHIPPED A BUILD BREAK WITH NO WORKAROUND.** The first S405 landing gated the full WHATWG producer set, including `Response.redirect` and `Response.error`, both of which have a NULL BODY. There is no stream to fail to inspect, so the error contradicted its own rationale, and its stated resolution ("return the value") **cannot produce a 302**. Combined with the no-escape-hatch rule that meant a `protect=` app could not redirect from a server fn or an `<endpoint>` arm AT ALL — REPRODUCED base-clean / tip-failing on a fn whose SELECT projected every protected column out. Now gated on BODY-CARRYING constructions only (`new Response(<body>, …)` and `Response.json(…)`); `new Response()` / `new Response(not, …)` are silent, and the two null-body statics raise `W-PROTECT-005` instead. **The adopter-facing contract is one sentence: a `protect=` app keeps full control of STATUS and HEADERS and gives up authoring the BODY.** ⛔ **IT IS FILE-SCOPED, NOT QUERY-SCOPED, AND THAT IS DELIBERATE.** It fires wherever the body is built, even in a function that selects no protected column. Keying it on the query would make it a per-body CO-OCCURRENCE test — the exact mechanism `E-PROTECT-004`'s `Response` limb was deleted for, since moving the query one function away defeats it (measured). Immunity to extraction is bought by keying on the CONSTRUCTION alone, and the message says so. ⚑ **EARLY WARNING, NOT THE GUARANTEE.** Detection is an acorn scan over the ALREADY-LOWERED body slice in CODE POSITION (the name inside a string literal or comment does not fire). A `Response` reached by ALIASING, `await fetch(...)`, `.clone()`, or a callee outside the slice is invisible to ANY syntactic scan; chasing those spellings is the unbounded fix this arc refuses. **Those are caught by §14.8.9 limb 3 — the RUNTIME refusal, where `instanceof Response` is exact.** An unparseable slice does not fire (fail-open FOR THE WARNING ONLY, defensible solely because limb 3 holds). Cases: `conformance/cases/protect/e-protect-005-pos` (fires) · `e-protect-005-neg` (same source, `protect=` removed, compiles) · `null-body-response-clean` (the null-body form is silent). *(Catalog addition S405 arc A, scope corrected in the S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`, scanning via `compiler/src/codegen/protect-egress.ts` `findAuthoredResponseConstruction`.)* | Error |
+| W-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A scope that declares `protect=` columns returns a response the COMPILER can prove payload-free but the RUNTIME sink cannot recognize as such** — on this implementation `Response.redirect(...)` and `Response.error()`. It COMPILES (there is no body for the §14.8.9 floor to fail to inspect, so `E-PROTECT-005` would be wrong), but the runtime guard still refuses it with a 500. Resolution: write the equivalent explicit null-body form, which BOTH limbs accept — `new Response(not, { status: 302, headers: { Location: "/where" } })`, `new Response(not, { status: 204 })`. ⚑ **THIS ROW EXISTS BECAUSE THE TWO LIMBS CAN PROVE DIFFERENT THINGS, AND THE SEAM HAD TO GO SOMEWHERE VISIBLE.** MEASURED on Bun 1.3.14: `new Response()` / `new Response(null, …)` give `.body === null`, but `Response.redirect(...)` and `Response.error()` give a **0-byte ReadableStream**, so the sink's non-destructive test cannot distinguish them from a body-carrying response. And it must not try: `new Response("s3cret", {status:302, headers:{Location:"/h"}})` presents IDENTICALLY — same `location`, no `content-length`, same `.body` shape — so any heuristic short of consuming (and destroying) the stream is unsound. ⛔ **The alternative to this warning is silence, and silence here is a WORSE defect than the build break it replaced**: the shape would compile clean and then 500 on the first request. A diagnosable build-time condition SHALL NOT be converted into a runtime failure. Cases: `conformance/cases/protect/w-protect-005-null-body-static` (fires) · `null-body-response-clean` (the named resolution, compiled — a diagnostic that names a working path owes a proof that it works). *(Catalog addition S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`.)* | Warning |
 | I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands.) | Info |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |

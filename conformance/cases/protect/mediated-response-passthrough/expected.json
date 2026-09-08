@@ -1,0 +1,12 @@
+{
+  "id": "protect-mediated-response-passthrough",
+  "description": "§14.8.9 / §53.9.4 — a `protect=` app with a PREDICATED server-fn parameter compiles clean and keeps the compiler's own `E-CONTRACT-001-RT` 400. The baseline-CSRF arm emits that boundary check INSIDE the capture IIFE, so its 400 `Response` becomes `_scrml_result` and reaches the opaque-result guard; the guard must recognize it as compiler-owned and pass it through rather than refusing it as an author-built body.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "⚑ THIS CASE PINS A SEAM, NOT A FEATURE. The compile-time gate and the runtime guard both answer 'is this Response AUTHOR-owned?', and they used to answer it with DIFFERENT predicates: the gate by PROVENANCE (it scans only the author-body window, so compiler-emitted responses are excluded positionally) and the guard by SHAPE (`.body === null`, a proxy for 'carries a payload', not for 'who built it'). Every place provenance and shape disagreed was a defect — `Response.redirect` is author-owned but payload-free (W-PROTECT-005), and this §53.9.4 400 is compiler-owned but body-carrying, so the guard turned the compiler's own 400 into a 500 `ProtectOpaqueEgress` with no build-time warning. Predicated params are common, so it was a live user-visible regression. The repair gives the runtime limb access to provenance — a Symbol-keyed mediation mark applied where the compiler constructs the response — so BOTH limbs now decide on the same basis. The invariant ('every Response constructed inside a capture IIFE is either author-written or mediation-marked') is asserted mechanically over the emitted text by the SEAM test, so a NEW compiler emitter appearing in that window fails a test instead of reaching an adopter.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROTECT-005", "W-PROTECT-005", "E-PROTECT-004"]
+  }
+}

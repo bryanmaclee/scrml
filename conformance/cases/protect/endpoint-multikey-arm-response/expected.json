@@ -1,0 +1,13 @@
+{
+  "id": "protect-endpoint-multikey-arm-response",
+  "description": "§14.8.9 / §61 — a MULTI-KEY object-literal `<endpoint>` arm that builds a response body fires E-PROTECT-005. The multi-key literal is the canonical §61 arm shape, and it is the shape the gate's probe wrapper could not parse: framed as a STATEMENT, `{ jsonrpc: \"2.0\", result: ... }` is a labeled block whose body is not an expression, so acorn threw and the fail-open path returned no-fire.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-response-scan.test.js",
+  "rationale": "⚑ THIS CASE PINS A ROOT CAUSE, NOT A SPELLING. The scanner parses a slice of already-lowered JS by framing it in a probe function, and it used to GUESS the frame — one wrapper for every input. That guess produced two silent holes one review round apart: first a §37 generator body's `yield` did not parse (fixed by adding `*` to the wrapper — a symptom fix), then an `<endpoint>` arm's EXPRESSION framed as a STATEMENT did not parse. The second was the more dangerous shape because it LOOKED like coverage: a single-key `{ r: new Response(x) }` happens to parse as a label and DID fire, while every multi-key arm was silently unscanned. The repair is structural — the caller now declares the slice's syntactic category (`\"statements\"` | `\"expression\"`) and each category is framed with the maximal context for it (an async-generator body; that body with the slice parenthesized), so completeness is by construction rather than by enumerating constructs that have broken so far. Paired with the clean multi-key arm in the unit suite, which must NOT fire — parenthesizing everything would otherwise trade a silent miss for a false positive.",
+  "expect": {
+    "codes": ["E-PROTECT-005"],
+    "notCodes": ["W-PROTECT-005"],
+    "severity": { "E-PROTECT-005": "error" }
+  }
+}
