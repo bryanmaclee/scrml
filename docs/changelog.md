@@ -7210,6 +7210,61 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-07/08 (S408 — peter — seven arcs, and seven instruments that measured their own reach)
+
+A long throughput session on the Windows clone, successor to a LIVE S407-bryan throughout (his lane was
+articles + the dpa-039 security arcs; disjoint by construction). **Seven landings, every one gate-green.**
+
+| PR | |
+|---|---|
+| **#890** | the review floor drained, and #889's worktree record corrected — it said `6 → 5` with one stuck, actual was `6 → 4` with none |
+| **flogence#6** | **FSP `Initialize` becomes a self-handshake** (`fsp/2026-09`), implementing the S404 coherent-(A) ruling |
+| **#891** | **bun 1.4.0 → 1.4.2 accepted**, with the attribution that made it safe |
+| **#893** | **the parked library-mode arc lands** — after the PA pass found three regressions in it |
+| **#894** | the enum/const binding collision filed, with a fork and a recommendation |
+| **#897** | that collision given a **precise diagnostic** instead of "report a compiler bug" |
+| **#898** | span verification lifted to the other two splicers — **the SQL one fails CLOSED** |
+
+**The library-mode arc is the session's centre.** It had been parked since S403. Re-based onto current main
+and re-differentialled, it looked clean: 118-file population, 47 byte-identical, 71 changed, **0 newly-failing**.
+The S239 adversarial pass found **three regressions the differential could not see** — (1) a foreign-bearing fn
+had its body **nulled** (`emitLibraryFnMember` lowers at the CLIENT boundary; `emit-logic.ts` gates the real
+foreign emit on `boundary === "server"`), so the fn kept its signature, parsed, exported, and returned `null`;
+(2) a fifth layout-coupled assertion, whose retarget **narrows the block's own "byte-stable" claim** to
+call-shape stable; and (3) a `!{}` guarded expr that emitted **legal JavaScript which is always `false`** in a
+fn typed `-> int`, at exit 0 with zero diagnostics — where the base emitted invalid JS that fails LOUDLY.
+Turning a loud failure into a silent wrong answer is the one direction that widening must never move in.
+
+**⛑ The lesson, and it cost seven wrong probes: an instrument that reports zero is reporting on its own reach,
+not on the code.** The corpus differential scored the arc clean because the population contains no `_{}` and no
+`!{}` in a library fn. `RESTORED = 0` read as *the arc buys nothing* when the class battery said **3/14 → 13/14**
+— the zero measured the corpus's composition. A text scan for duplicate `const` fired on **11 modules that parse
+clean**. The AST replacement looked equally broken until the TEST was found wrong (`res.errors` is unit-wide,
+so an imported module's error was blamed on the input file). A forced `mode:"library"` returned **2937** library
+files out of 2574 scanned, against a true 118. And an API `compileScrml({write:false})` probe read as
+silent-wrong output where the CLI emit gate refuses the artifact loudly — which corrected a gap's severity
+downward mid-filing.
+
+**⛑ Three filed fix-directions needed re-deriving before implementation.** #893's own resolved-gap text recorded
+*"0 newly-failing"*; it had three. `g-library-fn-decl-span-unverified-splice` said *"lift the guard to all three
+splicers (cheap)"* — right for the async limb, and for the SQL limb it would have turned a **confidentiality
+boundary fail-open**, since that pass prunes server-only `?{}` fns OUT of the client-facing artifact. And the
+enum-collision gap's own severity, filed hours earlier in this same session, was too high. *A filed direction is
+a hypothesis with a citation — including one you filed yourself, an hour ago.*
+
+**Also:** bun 1.4.2's acceptance run showed **7 fails against a remembered 5**, which reads exactly like *the
+upgrade broke two tests*. It did not — a standalone 1.4.0 binary gave 5, and a repeat on 1.4.2 gave 5 with a
+byte-identical fail set. The two extras were 5s timeouts on the only tests that spawn `node --check` as a
+subprocess. Filed as its own gap: **a toolchain change is exactly the context where such a flake is
+mis-attributed**, because the version bump supplies a ready causal story for a number that moved on its own.
+
+**Gate at close:** full suite from the settled tree — **23,604 pass / 5 fail / 99 skip**, 23,718 tests across 1,304 files, 214 s, peak 2.04 GB under an 8 GB kernel cap. The 5 are the standing baseline (three self-host-smoke path-model + two session-secure). Cloud `gate` green on every PR this session; `tracking` red is the known non-required tier, independently re-verified as already red on main.
+
+Language-surface review on #893 recorded: **not a widening** (§7.5 and §14.10 already license the forms, so
+conformance restoration) but **`semantics-changed` declared** — 572 call sites move scrml `==` from JavaScript
+loose equality to §45 structural equality, verified independently against normal-mode output.
+
+
 ### 2026-09-07 (S406 — peter — a host lockup investigated: the obvious cause measured and FALSIFIED)
 
 Booted `/boot` Profile A, then Peter reported his machine had locked up hard the previous day —
