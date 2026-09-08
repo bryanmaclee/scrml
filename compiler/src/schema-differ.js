@@ -131,6 +131,386 @@ function findSchemaBlockEnd(text, openIdx) {
 }
 
 /**
+ * The ONE recognizer for a raw `CREATE TABLE … (…)` statement.
+ *
+ * ⚑ IT LIVES HERE, not in protect-analyzer.ts, and that is a fix rather than a
+ * preference. protect-analyzer.ts's own line 631 comment says the early PA stage
+ * deliberately avoids pulling a codegen module; importing the harvester FROM
+ * protect-analyzer into `gauntlet-phase1-checks.js` dragged `bun:sqlite` and
+ * `node:fs` into a stage that had been kept free of them — the mirror of the
+ * invariant that comment protects. `schema-differ.js` is the `< schema>` parser
+ * and imports nothing but `sql-ident.ts`, so BOTH floors and the GCP1 checks can
+ * read it without dragging a runtime.
+ *
+ * Groups: 1 = optional schema qualifier · 2 = table name · 3 = column-def body.
+ *
+ * ⚑ THE QUALIFIER IS RECOGNIZED AND THEN STRIPPED. `CREATE TABLE public.assets
+ * (…)` and `CREATE TABLE "public"."assets" (…)` are the ordinary Postgres
+ * spellings, and the §14.8.11 db-authoritative tier is Postgres-ONLY — so the
+ * likeliest spelling for the tier's own adopters used to match NOTHING here, and
+ * a `< schema>` full of them declared zero tables and left the §14.8.10 isolation
+ * floor inert at exit 0. Recognizing it is not enough on its own, though:
+ * `resolveDb` REPLAYS these statements into an in-memory SQLite shadow DB, and
+ * SQLite has no such namespace — an unstripped `public.assets` throws and takes
+ * the whole `< db>` block's type views down with `E-PA-003`. So the harvester
+ * normalizes the statement to its unqualified form. The shadow DB is a
+ * compile-time column-shape device that is discarded after PA; the namespace is
+ * not part of what it models.
+ */
+/**
+ * ⚑ THE REGEX MATCHES THE HEAD ONLY. IT DOES NOT MATCH THE COLUMN BODY, AND THAT
+ * IS THE WHOLE POINT.
+ *
+ * The previous shape ended in `\(([^)]+(?:\([^)]*\)[^)]*)*)\)` — a body group
+ * good for exactly ONE level of nesting. Every defect this recognizer has had
+ * traces to that group. It clips at an inner `)` the moment a column carries a
+ * parenthesized type or a `CHECK`, and the clip is silent:
+ *   · the stored statement becomes unbalanced, so `resolveDb`'s shadow-DB replay
+ *     dies with `E-PA-003: incomplete input` and takes the `< db>` block's whole
+ *     type views with it — MEASURED on `VARCHAR(80)`, `NUMERIC(10,2)` and a
+ *     `CHECK (…)` first column, and **PRE-EXISTING on origin/main** for the
+ *     unqualified spellings (verified by running main's exact regex side by side);
+ *   · the column list loses everything after the clip, so a `tenant_id` sitting
+ *     behind a `VARCHAR(80)` disappears and the §14.8.10 floor goes inert.
+ *
+ * The previous round patched that with a `sourceText` re-find, and the patch then
+ * COLLIDED with the qualifier normalization landing in the same round: the stored
+ * statement said `assets`, the body said `public.assets`, `indexOf` returned -1,
+ * and the recovery silently never fired — reproducing the original defect on
+ * exactly the Postgres spelling the tier targets.
+ *
+ * So the body group is DELETED rather than repaired, and with it both sides of
+ * that seam. The regex finds `CREATE TABLE [<qual>.]<name> (`; the balanced,
+ * quote- and comment-aware scanner finds the matching `)`. There is no nesting
+ * limit left to exceed, no clipped statement to recover from, and no re-find to
+ * mis-align. Groups: 1 = optional schema qualifier · 2 = table name.
+ */
+const CREATE_TABLE_HEAD_RE =
+  /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?(\w+)["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/gi;
+
+/**
+ * ONE pass over `text`, yielding a complete record per `CREATE TABLE` found:
+ * the unqualified name, the COMPLETE statement (qualifier normalized away), and
+ * the column-def body — all read from the ORIGINAL text at the match's own
+ * offset, so nothing is ever re-found by string.
+ *
+ * @returns {Array<{key: string, name: string, statement: string, body: string}>}
+ */
+function scanCreateTables(text) {
+  const found = [];
+  if (typeof text !== "string") return found;
+  CREATE_TABLE_HEAD_RE.lastIndex = 0;
+  let m;
+  while ((m = CREATE_TABLE_HEAD_RE.exec(text)) !== null) {
+    const bodyStart = m.index + m[0].length;          // just past the `(`
+    const bodyEnd = findRawDdlBodyEnd(text, bodyStart);
+    if (bodyEnd === -1) {
+      // Genuinely unterminated source — not a clip. Skip it rather than store an
+      // unexecutable statement; a later `E-PA-002`/`W-SCHEMA-NO-TABLES-DECLARED`
+      // reports the absence honestly.
+      continue;
+    }
+    const statementRaw = text.slice(m.index, bodyEnd + 1);
+    // Strip the schema qualifier from the STORED statement: `resolveDb` replays
+    // it into in-memory SQLite, which has no such namespace, and an unstripped
+    // `public.assets` throws. Only the `<qual> .` run goes; the table name's own
+    // quoting and the entire body are carried verbatim.
+    const statement = m[1]
+      ? statementRaw.replace(/(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)["`'[]?\w+["`'\]]?\s*\.\s*/i, "$1")
+      : statementRaw;
+    found.push({
+      key: m[2].toLowerCase(),
+      name: m[2],
+      statement,
+      body: text.slice(bodyStart, bodyEnd),
+    });
+    // Resume PAST the real end, so a nested `(` inside this body can never be
+    // mistaken for the start of another table.
+    CREATE_TABLE_HEAD_RE.lastIndex = bodyEnd + 1;
+  }
+  return found;
+}
+
+/**
+ * Harvest every `CREATE TABLE … (…)` in `text` into `out`, keyed by the
+ * LOWERCASED unqualified table name, storing the COMPLETE statement with any
+ * schema qualifier normalized away.
+ *
+ * @param {string} text
+ * @param {Map<string,string>} out
+ * @param {boolean} overwrite `true` = a later statement replaces an earlier one
+ *   (the `?{}` SQL-node walker's long-standing behaviour); `false` = first wins,
+ *   so a higher-precedence source already in `out` is never displaced (the
+ *   raw-DDL `< schema>` behaviour).
+ */
+export function harvestCreateTables(text, out, overwrite) {
+  for (const t of scanCreateTables(text)) {
+    if (!overwrite && out.has(t.key)) continue;
+    out.set(t.key, t.statement);
+  }
+}
+
+/**
+ * Harvest the raw-DDL `< schema>` form as TABLE DECLARATIONS — name + column
+ * names — in the same single pass, reading the body from the original text.
+ *
+ * This is what `extractDesiredSchema` consumes. It deliberately does NOT go
+ * through the statement map and back: a round trip through a stored string is
+ * what created the normalize-vs-re-find seam, and there is no reason for the
+ * §14.8.10 declaration read to take it.
+ *
+ * @returns {Array<{name: string, columns: Array<{name: string, type: string, scrmlType: string}>}>}
+ */
+export function harvestRawCreateTableDecls(text) {
+  return scanCreateTables(text).map((t) => ({
+    name: t.name,
+    columns: columnsFromDdlBody(t.body),
+  }));
+}
+
+/**
+ * First-wins harvest of the raw-DDL `< schema>` form (g-schema-block-raw-ddl).
+ *
+ * THE ONE RECOGNIZER, shared by both security floors. The defect this exists to
+ * prevent is precisely that TWO adjacent floors disagreed about what counts as a
+ * schema declaration: §14.8.9 was taught the raw-DDL form and §14.8.10 was not,
+ * so a raw-DDL + no-`< db>` app got a silently INERT tenant floor at exit 0. A
+ * second, better recognizer on either side would re-open that divergence in the
+ * other direction.
+ * See `parseRawCreateTableColumns` below for the column read.
+ */
+export function harvestRawCreateTables(text, out) {
+  harvestCreateTables(text, out, false);
+}
+
+/**
+ * Read the table name + COLUMN NAMES out of ONE raw `CREATE TABLE … (…)`
+ * statement — the statement text `harvestRawCreateTables` hands back for the
+ * raw-DDL `< schema>` form (g-schema-block-raw-ddl).
+ *
+ * WHY THIS IS NOT "a second harvester" (dpa-039 arc B). Harvesting = FINDING the
+ * `CREATE TABLE` statements in a body; that stays in exactly one place
+ * (`harvestRawCreateTables` / `CREATE_TABLE_RE`), because two floors disagreeing
+ * about what counts as a table declaration is the defect being closed here. This
+ * function does the DIFFERENT job of reading columns out of a statement that
+ * recognizer already found, and it deliberately inherits that recognizer's
+ * boundary rather than improving on it.
+ *
+ * SCOPE — deliberately NAMES ONLY, and the fail-direction is the reason.
+ * §14.8.10 asks one question of a `< schema>` table: does it carry a `tenant_id`
+ * column? That is answered by the column NAME set. This parser therefore does
+ * NOT attempt to recover constraints, defaults, foreign keys or CHECK bodies —
+ * a partial constraint read would be strictly worse than none, because
+ * `diffSchema` would then treat the recovered-but-incomplete table as desired
+ * state and emit a LOSSY `CREATE TABLE` (or, on a table that already exists,
+ * `W-SCHEMA-002` DROP COLUMN for every constraint-bearing column this parser did
+ * not recover — data loss). `diffSchema` accordingly SKIPS `rawDdl` tables; see
+ * the guard there.
+ *
+ * TABLE-LEVEL CONSTRAINT CLAUSES ARE SKIPPED, and skipping them cannot hide a
+ * `tenant_id` column: `PRIMARY KEY (tenant_id, id)` / `FOREIGN KEY (tenant_id)
+ * REFERENCES …` / `CONSTRAINT … UNIQUE (tenant_id)` all NAME the column without
+ * DECLARING it, so treating them as columns would make the floor believe a
+ * `tenant_id` output column exists when it does not — and the floor would then
+ * emit a projection add against a column the table lacks (a hard SQL failure at
+ * runtime, not a safe over-fire). The discriminator word `tenant_id` is itself
+ * never a constraint-leader keyword, so a genuine column declaration can never
+ * be skipped by this list.
+ *
+ * ⚑ THE `sourceText` RECOVERY PARAMETER IS GONE, and its removal is the fix
+ * rather than a simplification. It existed to re-find a CLIPPED statement inside
+ * the body it came from and re-read the columns — and in the very next round it
+ * COLLIDED with the qualifier normalization added beside it: the stored statement
+ * said `assets`, the body said `public.assets`, `indexOf` returned -1, the
+ * recovery silently never fired, and the original defect came back on exactly the
+ * Postgres spelling the §14.8.11 tier targets. Two individually-correct fixes
+ * cancelling.
+ *
+ * Statements are no longer clipped AT ALL (`CREATE_TABLE_HEAD_RE` matches only
+ * the head; a balanced scanner finds the close), so there is nothing to recover
+ * from and no re-find to mis-align. One side of the seam is DELETED instead of
+ * both sides being patched.
+ *
+ * ⚑ NO PRODUCTION CALLER AS OF THIS ROUND — stated rather than left implicit.
+ * `extractDesiredSchema` moved to `harvestRawCreateTableDecls`, so every in-tree
+ * caller of this function is now a TEST. That is the inverse of a silently dead
+ * limb (a path no test enters) and a milder smell, but it is still one: an export
+ * whose only consumer is its own suite rots. It is kept as the single-statement
+ * entry point — a genuine API shape, and one that CANNOT drift from the harvest
+ * because both read columns through `columnsFromDdlBody`. Retiring it in favour
+ * of `harvestRawCreateTableDecls(sql)[0]` is a clean follow-up, deliberately not
+ * bundled into a defect round.
+ *
+ * @param {string} createTableSql one complete `CREATE TABLE … (…)` statement
+ * @returns {{ name: string, columns: Array<{name: string, type: string, scrmlType: string}> } | null}
+ *   null when the text is not a recognizable CREATE TABLE.
+ */
+export function parseRawCreateTableColumns(createTableSql) {
+  if (typeof createTableSql !== "string") return null;
+  // The optional schema qualifier is accepted here too, so this stays usable on
+  // an UNNORMALIZED statement (a caller's own text, a test fixture).
+  const head = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?\w+["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/i.exec(createTableSql);
+  if (!head) return null;
+  const bodyStart = head.index + head[0].length;
+  const bodyEnd = findRawDdlBodyEnd(createTableSql, bodyStart);
+  const body = createTableSql.slice(bodyStart, bodyEnd === -1 ? createTableSql.length : bodyEnd);
+  return { name: head[1], columns: columnsFromDdlBody(body) };
+}
+
+/**
+ * Read the COLUMN NAMES out of a CREATE-TABLE column-def body. The single
+ * implementation behind both `parseRawCreateTableColumns` (one statement) and
+ * `harvestRawCreateTableDecls` (the harvest pass) — so the two can never drift
+ * on what counts as a column.
+ */
+function columnsFromDdlBody(body) {
+  const columns = [];
+  for (const item of splitTopLevelCommas(body)) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    if (isTableLevelConstraint(trimmed)) continue;
+    // `name TYPE …` — the name may be bare, "double-quoted", `back-quoted`,
+    // 'single-quoted' or [bracketed].
+    const decl = /^(?:"([^"]+)"|`([^`]+)`|'([^']+)'|\[([^\]]+)\]|([A-Za-z_]\w*))\s*([A-Za-z_]\w*)?/.exec(trimmed);
+    if (!decl) continue;
+    const name = decl[1] ?? decl[2] ?? decl[3] ?? decl[4] ?? decl[5];
+    if (!name) continue;
+    const rawType = decl[6] ?? "text";
+    columns.push({ name, type: rawType.toUpperCase(), scrmlType: rawType.toLowerCase() });
+  }
+  return columns;
+}
+
+/**
+ * Is this comma-separated item a TABLE-LEVEL CONSTRAINT rather than a column?
+ *
+ * ⚑ A KEYWORD-PREFIX TEST IS WRONG HERE, and measurably so. The first version of
+ * this check skipped any item whose leading word was one of nine constraint
+ * words, which silently DROPPED real columns that happen to be named with one:
+ * `CREATE TABLE settings (key TEXT, value TEXT, tenant_id TEXT)` returned
+ * `["value","tenant_id"]` — the `key` column vanished. `key`, `index`, `check`,
+ * `unique`, `like`, `exclude`, `primary`, `foreign` and `constraint` are all
+ * legal column names.
+ *
+ * So the test matches the constraint PRODUCTIONS, not the leading word. A
+ * table-level constraint is always the keyword followed by something a column
+ * declaration never has there — `KEY`, a `(`, or (after `CONSTRAINT <name>`)
+ * another constraint keyword — whereas a column is the name followed by its TYPE.
+ *
+ * MEASURED: this recovers EIGHT of the nine as columns. `like` is the ninth and
+ * is irreducible at this grain — `LIKE other_table` (the Postgres table-copy
+ * clause, which lives INSIDE the column list) and `like TEXT` (a column) are the
+ * same shape, so no leading-word test separates them, and this resolves it as
+ * the clause.
+ *
+ * ⚑ That residual is closed by the SQL grammar rather than by a heuristic:
+ * `LIKE` is a RESERVED WORD, so a column genuinely named `like` must be quoted —
+ * and `"like" TEXT`, `` `like` TEXT `` and `[like] TEXT` all parse correctly
+ * here, while the unquoted copy clause is still skipped. Adding a type-name
+ * allowlist to also catch the ILLEGAL unquoted spelling would trade a named
+ * residual for a new guess surface, so it is deliberately not done.
+ */
+function isTableLevelConstraint(item) {
+  // ⚑ `KEY`/`INDEX` NEEDS ONE MORE DISCRIMINATOR, because the MySQL constraint
+  // `KEY idx_name (col_a, col_b)` and the COLUMN `key VARCHAR(50)` are the same
+  // token shape — word, word, parenthesized list. The first version tested only
+  // that shape, so `settings (key VARCHAR(50), value TEXT, tenant_id TEXT)`
+  // returned `["value","tenant_id"]` and the `key` column vanished. My own doc
+  // block claimed this class was measured and fixed; the test only covered
+  // `key TEXT`, so the parenthesized-type form was never exercised — the fix
+  // landed in a cell nobody had crossed.
+  //
+  // The discriminator is the paren CONTENT: a TYPE's argument is numeric
+  // (`VARCHAR(50)`, `NUMERIC(10,2)`), an index's is a COLUMN LIST (identifiers).
+  const keyIndex = /^(?:INDEX|KEY)\s+\w+\s*\(([^)]*)\)/i.exec(item);
+  const keyIndexIsConstraint = keyIndex !== null && !/^[\s\d,]*$/.test(keyIndex[1]);
+  return (
+    /^(?:PRIMARY|FOREIGN)\s+KEY\b/i.test(item) ||
+    /^(?:UNIQUE|CHECK|EXCLUDE)\s*\(/i.test(item) ||
+    /^UNIQUE\s+KEY\b/i.test(item) ||
+    /^(?:INDEX|KEY)\s*\(/i.test(item) ||   // the UNNAMED form `KEY (col)`
+    keyIndexIsConstraint ||                 // the NAMED form `KEY idx (col_a, col_b)`
+    /^CONSTRAINT\s+\w+\s+(?:PRIMARY|FOREIGN|UNIQUE|CHECK|EXCLUDE)\b/i.test(item) ||
+    /^LIKE\s+\w+\s*$/i.test(item)
+  );
+}
+
+/**
+ * Index of the `)` that closes the column-def list opened just before `from`,
+ * skipping `'…'` / `"…"` / `` `…` `` literals, `--` line comments and
+ * `/* … *\/` block comments. Returns -1 when unbalanced.
+ */
+function findRawDdlBodyEnd(src, from) {
+  let depth = 0;
+  let i = from;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "-" && src[i + 1] === "-") {
+      const nl = src.indexOf("\n", i);
+      i = nl === -1 ? src.length : nl + 1;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      const close = src.indexOf("*/", i + 2);
+      i = close === -1 ? src.length : close + 2;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== c) j++;
+      i = j + 1;
+      continue;
+    }
+    if (c === "(") { depth++; i++; continue; }
+    if (c === ")") {
+      if (depth === 0) return i;
+      depth--; i++; continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Split a CREATE-TABLE column-def body on TOP-LEVEL commas — commas not nested
+ * inside `(…)` and not inside a quoted literal or a comment. A naive
+ * `split(",")` shreds `DECIMAL(10,2)`, `CHECK (x IN ('a','b'))` and a composite
+ * `PRIMARY KEY (a, b)`.
+ */
+function splitTopLevelCommas(body) {
+  const items = [];
+  let depth = 0;
+  let cur = "";
+  let i = 0;
+  while (i < body.length) {
+    const c = body[i];
+    if (c === "-" && body[i + 1] === "-") {
+      const nl = body.indexOf("\n", i);
+      i = nl === -1 ? body.length : nl + 1;
+      continue;
+    }
+    if (c === "/" && body[i + 1] === "*") {
+      const close = body.indexOf("*/", i + 2);
+      i = close === -1 ? body.length : close + 2;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`") {
+      let j = i + 1;
+      while (j < body.length && body[j] !== c) j++;
+      cur += body.slice(i, Math.min(j + 1, body.length));
+      i = j + 1;
+      continue;
+    }
+    if (c === "(") { depth++; cur += c; i++; continue; }
+    if (c === ")") { depth = Math.max(0, depth - 1); cur += c; i++; continue; }
+    if (c === "," && depth === 0) { items.push(cur); cur = ""; i++; continue; }
+    cur += c; i++;
+  }
+  items.push(cur);
+  return items;
+}
+
+/**
  * Parse a P2 SECURITY-DEFINER `fn` declaration starting at `startIdx`
  * (`fnHead` = the `/^fn\s+NAME\s*\(/` match already run by the caller).
  *
@@ -746,6 +1126,22 @@ export function diffSchema(desired, actual, options = {}) {
   const driver = options.driver ?? "sqlite";
   const sql = [];
   const warnings = [];
+
+  // ⚑ THE DIFFER SEES NO RAW-DDL TABLES AT ALL, AND THAT IS ENFORCED AT THE
+  // CONSUMER, NOT HERE. `extractDesiredSchema` harvests raw `CREATE TABLE`
+  // `< schema>` declarations because the §14.8.10 tenant floor needs their column
+  // names — but `scrml db-migrate` was never designed for a table whose DDL the
+  // compiler only partially recovers, and every defect the migrate half of this
+  // arc produced traced to those tables becoming visible to it.
+  //
+  // So the split is at `extractDesiredSchema`'s TWO CONSUMERS: the tenant path
+  // takes the raw tables, the migrate path declines them at its own boundary
+  // (`commands/db-migrate.js`, `collectDesired`). This function is therefore
+  // BYTE-IDENTICAL to its pre-arc behaviour and needs no `rawDdl` awareness — the
+  // four migrate findings are gone BY CONSTRUCTION rather than by guards here.
+  // Teaching the differ to migrate a raw-DDL `< schema>` (by REPLAYING the
+  // author's own statement, not by regenerating it) is the real fix and is a
+  // separate, re-scoped arc.
 
   const actualMap = new Map(actual.tables.map(t => [t.name, t]));
   const desiredMap = new Map(desired.tables.map(t => [t.name, t]));

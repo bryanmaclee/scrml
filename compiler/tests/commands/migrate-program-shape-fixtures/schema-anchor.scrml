@@ -7,6 +7,9 @@
 
 <program db="./demo.db">
   <schema>
-    users: { id: integer, name: text }
+    users {
+      id: integer primary key
+      name: text
+    }
   </schema>
 </program>
