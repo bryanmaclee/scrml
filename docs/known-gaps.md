@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 101 |
-| MED | 227 |
+| MED | 228 |
 | LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1370,6 +1370,35 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 ### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; resolved by #473 (the fileURLToPath swap) — prose lagged the already-resolved marker; PA-reverified clean on Windows both modes S341-peter`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
 
+### g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails — 12 tests early-return on a null module, so BREAKING the module under test reads as failures dropping 3 → 1
+
+<!-- @gap id=g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails sev=MED status=open locus=compiler/tests/integration/self-host-smoke.test.js(the `const scrmlModule = extractScrmlLogic()` seam and every `if (!scrmlModule) return;` guard — locate by that guard STRING, there are 12) prov=empirical:S410-peter-measured-both-states-on-this-box-while-attempting-the-blocked-fileURLToPath-swap -->
+
+`self-host-smoke.test.js` evals an extracted logic block into `scrmlModule`. **12 of its tests then
+guard with `if (!scrmlModule) return;`** — so if the extraction fails, those 12 do not fail, do not
+skip, and do not report: they **pass, having asserted nothing.**
+
+**Measured, by breaking the module on purpose** (the `fileURLToPath` swap this file's sibling gap
+records as blocked):
+
+| | module loads (clean HEAD) | module fails to load |
+|---|---|---|
+| headline | 22 pass / **3 fail** | 24 pass / **1 fail** |
+| expect() calls | **45** | **15** |
+
+**Breaking the module under test makes the suite look BETTER.** Three genuine parity failures are
+replaced by silence, and the only signal that anything is wrong is the assertion count collapsing
+from 45 to 15 — a number nobody reads, and which no gate checks.
+
+⚑ This is the `refuseDegenerateProjection` shape one level down: the guard exists so the file can run
+when self-host is unbuildable, which is reasonable — but *silently passing* is the wrong expression of
+it. `test.skip`, or a single up-front assertion that the module loaded (there IS one, and it is the
+only thing that failed), would both preserve the intent without manufacturing 12 green ticks.
+**Recommend: make the 12 guards `skip` rather than `return`, so an unbuildable self-host is VISIBLE
+in the suite output instead of invisible.** Not done here — it is a test-policy change on a file whose
+failures are a known cross-OS baseline, and it should land with whoever unblocks the sibling gap.
+— `NEW S410-peter (found by measuring both states while attempting the blocked fileURLToPath swap, then reverting it)`; **MED**; open
+
 ### g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname — both `module-resolver.scrml` copies compute `STDLIB_ROOT` from `new URL(import.meta.url).pathname` (the Windows `/C:/…` fragile form the census gap fixed one file over), BUT the source-level `fileURLToPath` fix is BLOCKED — `NEW S341-peter (sweeping the g-s34-census CLASS after it turned out already-fixed); LOW; open (blocked-on the codegen miscompile below — see #520)`
 <!-- @gap id=g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname sev=LOW status=open locus=compiler/self-host/module-resolver.scrml:48,stdlib/compiler/module-resolver.scrml:48 prov=rationale:same-new-URL-import-meta-url-pathname-windows-fragile-pattern-as-the-resolved-census-gap-but-the-compiled-STDLIB_ROOT-is-already-garbage-all-OS-via-a-codegen-miscompile-so-the-source-swap-is-moot-until-that-lands -->
 
@@ -1379,6 +1408,35 @@ the compiled output); (2) it is **moot** — the compiled `STDLIB_ROOT` is alrea
 because codegen replaces the `import.meta.url` inside the `const` initializer with the whole initializer
 expression (self-referential duplication). That codegen miscompile is the real blocker, routed to bryan's
 `import.meta` (g-263) lane via **#520** (`handOffs/incoming/…S341-peter-to-S341-bryan-import-meta-const-init-mangling.md`, merged). Unblock this LOW once the codegen fix lands.
+
+⚑⚑ **BLOCKER (1) RE-VERIFIED S410-peter, STILL LIVE — and the ATTEMPT WAS MADE AND REVERTED, so the
+next reader does not have to make it again.** I implemented the obvious `fileURLToPath` swap in both
+copies before reading this far into the entry. It is wrong, and here is the precise mechanism the
+S341 note does not spell out:
+
+`self-host-smoke.test.js` calls `extractScrmlLogic()`, which pulls the file's LOGIC BLOCK out and
+`eval`s it — **it does not include the `^{ }` meta block**, where `resolve`/`dirname`/`existsSync`
+(and any added `fileURLToPath`) are imported. So the swap makes the eval throw, and
+`scrmlModule` comes back **null**.
+
+⚑ **AND THE FAILURE PRESENTS AS AN IMPROVEMENT, WHICH IS WHY IT IS WORTH WRITING DOWN.** Measured on
+this box:
+
+| | clean HEAD | with the `fileURLToPath` swap |
+|---|---|---|
+| `logic block can be extracted and evaluated` | pass | **FAIL** |
+| `buildImportGraph` / `resolveModules` parity ×3 | **FAIL ×3** | "pass" |
+| headline | 22 pass / 3 fail · **45 expect() calls** | 24 pass / 1 fail · **15 expect() calls** |
+
+The three parity failures do not get FIXED — **12 tests in that file guard with
+`if (!scrmlModule) return;`**, so when the module fails to load they all early-return and pass
+VACUOUSLY. The pass count rises, the failure count falls, and the assertion count **drops from 45 to
+15** — which is the only number that reveals it. Filed separately as
+[[g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails]].
+
+Blocker (2) was NOT re-tested this session; the codegen `import.meta`-in-const-initializer mangling
+is still the real gate on this entry. **The correct order stands: land the codegen fix, then the
+source swap, then a smoke-test that cannot pass vacuously.**
 
 **RESOLVED S335-peter** — re-verified on THIS Windows box vs HEAD `cdf19c01`: `scripts/s34-census.ts` now resolves its own path via `fileURLToPath(import.meta.url)` (commit `0beddacc`, with a Windows-rationale comment) and runs to completion (full 807-row census). The `new URL(...).pathname` leading-slash-drive break is gone.
 
