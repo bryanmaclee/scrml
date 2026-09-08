@@ -329,6 +329,7 @@ function collectAsyncFnKeywordTargets(
 function collectSqlFnRemovalRanges(
   logicBody: unknown,
   sourceText: string,
+  unverifiableSqlSpans?: Array<{ name: string; span: Span }>,
 ): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
   if (!Array.isArray(logicBody)) return ranges;
@@ -343,13 +344,30 @@ function collectSqlFnRemovalRanges(
     const key = `${sp.start}:${sp.end}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    // Extend backward to swallow `export` + optional `pure`/`server` modifiers
-    // (§21.5.1). Anchored at end-of-lookback so only keywords immediately
-    // preceding the function-decl span are captured.
-    const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
-    const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
-    const prefixLen = m ? m[1].length : 0;
-    ranges.push({ start: sp.start - prefixLen, end: sp.end });
+    // ⚑ VERIFIED SPAN — AND THE FAILURE ACTION HERE IS INVERTED FROM THE OTHER
+    // TWO SPLICERS, WHICH IS WHY THE FILED RESIDUAL'S "lift it to all three" IS
+    // NOT QUITE RIGHT. For `emitControlFlowLibraryFns` and `emitAsyncLibraryFns`,
+    // an unverifiable span means "leave the fn on the raw path" — inert, and it
+    // fails loudly downstream. Here the removal is not an optimisation, it is a
+    // CONFIDENTIALITY BOUNDARY: this pass exists to prune a server-only `?{}` /
+    // transaction fn OUT of the importable, client-facing library `.js` (see this
+    // function's contract above). Silently skipping the splice would LEAVE the
+    // SQL body in that artifact — fail-OPEN, in the one place this file must fail
+    // closed.
+    //
+    // So an unverifiable span is recorded and raised as a hard error by the
+    // caller, rather than dropped. Reported, not pruned, not leaked.
+    const range = verifiedFnRemovalRange(n, sourceText);
+    if (!range) {
+      if (unverifiableSqlSpans) {
+        unverifiableSqlSpans.push({
+          name: typeof n.name === "string" ? n.name : "(anonymous)",
+          span: sp,
+        });
+      }
+      continue;
+    }
+    ranges.push(range);
   }
   return ranges;
 }
@@ -382,7 +400,26 @@ function pruneServerFnsAndLowerGuarded(
   // Merging them here BEFORE the guarded-expr lowering means a `!{}` inside an
   // async fn is SKIPPED (its span falls inside a removal) — emitLibraryFnMember
   // lowers it structurally instead, so it is not double-lowered here.
-  const removals = [...collectSqlFnRemovalRanges(logicBody, sourceText), ...extraRemovals];
+  // ⚑ A `?{}`/transaction fn whose span cannot be VERIFIED is a hard error, not a
+  // skipped splice — this pass is a confidentiality boundary (server SQL must not
+  // reach the importable client-facing `.js`), so it fails CLOSED. See
+  // `collectSqlFnRemovalRanges`.
+  const unverifiableSqlSpans: Array<{ name: string; span: Span }> = [];
+  const removals = [
+    ...collectSqlFnRemovalRanges(logicBody, sourceText, unverifiableSqlSpans),
+    ...extraRemovals,
+  ];
+  for (const { name, span } of unverifiableSqlSpans) {
+    errors.push(new CGError(
+      "E-CG-SQL-FN-UNVERIFIABLE-SPAN",
+      `E-CG-SQL-FN-UNVERIFIABLE-SPAN: the server-only SQL function \`${name}\` ` +
+        `carries a declaration span that cannot be verified against its own source ` +
+        `text, so it cannot be safely pruned from the importable library module. ` +
+        `Emitting anyway would leave its \`?{}\` body in a client-facing artifact, ` +
+        `so compilation stops instead (§44.7.1, W5b).`,
+      span,
+    ));
+  }
 
   const guarded: ASTNode[] = [];
   collectGuardedExprs(logicBody, guarded);
@@ -707,14 +744,20 @@ function emitAsyncLibraryFns(
   const outLines: string[] = [];
   try {
     for (const fn of toEmit) {
-      const sp = fn.span as Span | undefined;
-      if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
-      // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the
-      // decl span starts at `function`/`fn` (mirrors collectSqlFnRemovalRanges).
-      const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
-      const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
-      const prefixLen = m ? m[1].length : 0;
-      removals.push({ start: sp.start - prefixLen, end: sp.end });
+      // ⚑ VERIFIED SPAN (g-library-fn-decl-span-unverified-splice). A
+      // `function-decl` span is not reliable — measured on
+      // `compiler/native-parser/ast-expr.scrml`, every top-level `export fn`
+      // reports a start ~22 chars INSIDE its own parameter list and an end that
+      // overshoots into the next statement's comment. Splicing those offsets
+      // emits mangled text rather than either the raw copy or the structural
+      // emit, and it does so SILENTLY.
+      //
+      // Failure action here is FALL BACK TO RAW, matching
+      // `emitControlFlowLibraryFns`: the fn keeps its verbatim source text, which
+      // loses the async lowering and fails loudly rather than corrupting the file.
+      const range = verifiedFnRemovalRange(fn, sourceText);
+      if (!range) continue;
+      removals.push(range);
       outLines.push(
         emitLibraryFnMember(fn, {
           isExported: fn.fromExport === true,
