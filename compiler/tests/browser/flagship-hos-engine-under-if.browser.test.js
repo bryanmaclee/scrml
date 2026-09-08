@@ -31,7 +31,7 @@
  * that the defect is gone.
  */
 
-import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { readFileSync, existsSync, rmSync, mkdirSync, readdirSync, mkdtempSync } from "fs";
@@ -48,6 +48,15 @@ const APP = resolve(REPO, "examples/23-trucking-dispatch");
 // which surfaces here as an empty `html` and a bare assertion failure that
 // names nothing. mkdtemp removes the shared name entirely.
 const OUT = mkdtempSync(resolve(tmpdir(), "scrml-flagship-hos-"));
+
+// ⚑ S410 — mkdtemp gives a UNIQUE dir per run and nothing removed it, so every
+// invocation leaked a full compiled app (~115 files) into the system temp dir
+// permanently. The `afterEach` below unregisters happy-dom; it does NOT touch this
+// tree. `force: true` so a run that never reached `artifacts()` cannot fail here.
+// g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive.
+afterAll(() => {
+  try { rmSync(OUT, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+});
 
 let art = null;
 function artifacts() {
@@ -100,7 +109,14 @@ function artifacts() {
       for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
         const q = resolve(dir, e.name);
         if (e.isDirectory()) walkOut(q);
-        else if (e.name.endsWith(suffix)) hits.push(q);
+        // ⚑ S410 — was `e.name.endsWith(suffix)`, which also matches a file whose name
+        // merely ENDS with the target: `echos.html`.endsWith("hos.html") is true, so a
+        // sibling page could be silently substituted for the artifact under test.
+        // Basename EQUALITY is what the two real callers ("hos.html" / "hos.client.js")
+        // mean. ⚑ The empty-suffix call at the loud-fail path below means "every file"
+        // and relied on `endsWith("")` being universally true — so it is preserved
+        // explicitly rather than lost to the tightening.
+        else if (suffix === "" || e.name === suffix) hits.push(q);
       }
     };
     if (existsSync(OUT)) walkOut(OUT);

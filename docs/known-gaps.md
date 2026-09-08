@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 99 |
-| MED | 226 |
-| LOW | 90 |
+| HIGH | 102 |
+| MED | 229 |
+| LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -60,18 +60,111 @@ by trying to reproduce them.**
 4. **The §14.8.11 grant loop iterated the unfiltered set** — `GRANT … ON "assets"` for a table the
    same plan refused to create → `relation does not exist` → whole migration rolled back.
 
-**Two recognizer defects travel with the landed tenant half and are owed here** (narrow,
-non-destructive, exit-0 inertness): `isTableLevelConstraint` eats a column named `key`/`index` whose
+**Two recognizer defects travel with the landed tenant half and are owed here** (~~narrow,
+non-destructive, exit-0 inertness~~ — ⚑ **see the S410 correction below; the second one is neither
+narrow nor non-destructive**): `isTableLevelConstraint` eats a column named `key`/`index` whose
 type carries non-numeric arguments (`key GEOMETRY(Point, 4326)`, `key ENUM('a','b')`); and three-part
 `CREATE TABLE db.schema.table (…)` matches nothing, so the tenant floor is inert for it and
 `W-SCHEMA-NO-TABLES-DECLARED` does not cover it (it fires only at zero tables *total*).
+
+⚑⚑ **SEVERITY CONTRADICTED BY EXECUTION — S410-peter. The three-part limb is a LIVE SILENTLY-INERT
+§14.8.10 SECURITY FLOOR, and it is split out below as its own HIGH. ROUTED TO BRYAN (security floor
++ §14.8.10 surface — not peter's to fix).**
+
+PA-reproduced by compilation on HEAD `2e570b7e`, raw-DDL `<schema>` with **no** `<db>`, every app
+carrying `tenant_id` and the same `SELECT id, name, tenant_id FROM assets` — **controls first, so the
+negative measures something:**
+
+| `CREATE TABLE …` spelling | tenant floor | `_scrml_tenant_tag` / `_redact` |
+|---|---|---|
+| `assets (…)` — **control** | **ACTIVE** | true / true |
+| `public.assets (…)` — **control** | **ACTIVE** | true / true |
+| `mydb.public.assets (…)` | **⛑ INERT** | false / false |
+| `mydb.public.assets (…)` **+ any second bare table** | **⛑ INERT** | false / false |
+
+**Root, read in source:** `compiler/src/schema-differ.js:188` `CREATE_TABLE_HEAD_RE` admits **exactly
+one** optional qualifier — `/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?(\w+)["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/gi`
+— so the two-qualifier spelling matches nothing, and backtracking cannot recover it (the un-qualified
+alternative needs `(` immediately after the first identifier, which `.public` defeats).
+
+⚑ **The fourth row is the sharp one and it is WORSE than the filing implies.** With a single qualified
+table you at least get `W-SCHEMA-NO-TABLES-DECLARED`. Add **any** second recognized table and that
+last hint is suppressed — the isolation floor is then inert with **no diagnostic of any kind**.
+
+**Why "non-destructive" is the wrong word:** this is byte-for-byte the failure mode
+`g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** for — a silently inert multi-tenant
+isolation floor — differing only in identifier spelling. #900 closed the *instance*; the *class* is
+open. The MED rating carries no stated ground for why the same silent inertness is MED here.
 ⚑ `like` is genuinely undecidable by a leading-word test and is correctly handled by the **grammar**
 (`LIKE` is reserved, so a column named `like` must be quoted) — **do not replace that with a heuristic.**
 
 **One stale comment in this arc's territory:** `schema-differ.js:307` still says *"`diffSchema`
 accordingly SKIPS `rawDdl` tables"*, which stopped being true when the decline moved to the
-consumer's boundary.
+consumer's boundary. ⚑ **S410-peter — the enumeration is one short, same axis:**
+`compiler/src/codegen/db-authoritative.ts:113-116` carries the same now-false statement
+(*"so `diffSchema` skips `rawDdl` tables rather than emit a lossy `CREATE TABLE`"*), in a file this
+arc edited. One axis, two instances, one enumerated.
 — `NEW S405-bryan (deferred half of the dpa-039 arc-B split; the four findings are pre-split measurements, not live defects)`; **MED**; open
+
+### g-tenant-floor-inert-for-a-two-qualifier-CREATE-TABLE — `db.schema.table` matches the harvest regex nowhere, so §14.8.10 is silently inert; a second table removes the last warning
+
+<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js:188(CREATE_TABLE_HEAD_RE — ONE optional qualifier only; locate by the regex CONST NAME, not the line)+compiler/src/codegen/tenant-egress.ts(buildTenantContext, the consumer that comes up empty) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE -->
+
+**ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
+
+The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
+(`e74f5423`); that flip is genuine and was independently reproduced-as-fixed. **But it closed the
+instance, not the class.** Full reproduction, controls, root cause and the diagnostic-suppression
+detail are recorded in the `g-migrate-consumer-not-raw-ddl-aware` entry above, where this limb was
+originally filed as MED "narrow, non-destructive" — a rating **execution contradicts**.
+
+One-line restatement: a raw-DDL `<schema>` with no `<db>` whose table is spelled
+`CREATE TABLE mydb.public.assets (…)` compiles with **no tenant tag and no redaction wired**, and if
+any second recognized table is present, **without `W-SCHEMA-NO-TABLES-DECLARED` either** — a
+multi-tenant isolation floor that is silently absent.
+
+⚑ **Fix direction is NOT obvious and is deliberately not prescribed here.** Widening the regex to
+`n` qualifiers is the tempting move, but the qualifier is normalized away downstream, so
+`a.assets` and `b.assets` would collapse to one key — the S405 arc already had two of its own fixes
+cancel each other on exactly this seam (#900 round 3). **Decide the identity model before the regex.**
+— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; open
+
+### g-7.5.2-has-no-row-for-annotated-plus-inference-defeated — the remedy the diagnostic itself recommends routes authors into an unspecified cell
+
+<!-- @gap id=g-7-5-2-no-row-for-annotated-plus-inference-defeated sev=MED status=open owner=bryan locus=compiler/src/type-system.ts:10831(the `!letAnnot &&` guard on the W-TYPE-031-UNPROVEN emit; locate by the CODE STRING)+compiler/SPEC.md-§7.5.2(the four-row split table) prov=review:S410-peter-pickup-1-re-derivation+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e -->
+
+**ROUTED TO BRYAN — §7.5.2 is a normative table with a missing row; what SHOULD happen in that cell
+is a language question.**
+
+§7.5.2's split table has four rows: `asIs` (silent), `unknown` (passes + `W-TYPE-031-UNPROVEN`),
+declared-type-and-it-fits (silent), and doesn't-fit (`E-TYPE-031`). **There is no row for
+`annotated` + `inference defeated`** — and that cell occurs.
+
+PA-reproduced on HEAD, browser mode, `fn calc(n: number) -> number`, the fn genuinely called so
+`W-DEAD-FUNCTION` cannot confound it:
+
+| declaration | result |
+|---|---|
+| `let v: number = "nope"` — **positive control** | `E-TYPE-031` ✔ harness reaches the checker |
+| `let v = !{ n }` (untyped) | **`W-TYPE-031-UNPROVEN`** — inference IS defeated on this node |
+| `let v: number = !{ n }` | **silent** — no error, no warning |
+
+The silence is deliberate: `type-system.ts:10831` guards the emit with `!letAnnot`. **The problem is
+what the warning's own text then tells the author:** *"To prove it, annotate the declaration —
+`name: <type> = …`."* Annotating proves nothing here — it binds `number` while the initializer is a
+`boolean`, and §7.5.1 position 1 fires only on syntactically-determined **literals**, so no check
+runs. The remedy converts an honest *"I could not type this"* into a silent assertion that it **is**
+a `number`.
+
+That is precisely the property §7.5.2 exists to remove — *"absence of a diagnostic and success were
+the same observation"* — reintroduced through the remedy the diagnostic recommends.
+
+⚑ **NOT filed as a silent-wrong-output bug.** §7.5.1 is explicit that *"a program that assigns a
+non-assignable value at those positions SHALL compile"*, and that `int` is **deliberately** outside
+the checked set. Two candidate HIGHs were chased off this and **both were killed on the governing
+SPEC text**. What remains is narrow and real: an uncrossed cell in the very matrix built to stop
+uncrossed cells (the S405 durable, one level down).
+— `NEW S410-peter (falling out of the PICKUP-1 re-derivation)`; **MED**; open
 
 ### g-two-shipped-error-codes-have-ZERO-mentions-in-SPEC-md — `E-CG-ENUM-BINDING-COLLISION` and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` emit from the compiler and appear nowhere in the normative catalog
 
@@ -319,7 +412,15 @@ own advocate as *the largest unpriced cost of its own proposal*; reproduced inde
 
 **Both halves are wrong at once:** the backslash is emitted as literal content (so the author's escape
 intent is visibly broken in the output) **and** the `${5}` interpolation fires anyway (so the escape
-did not escape). There is no way to render a literal `${` in a plain-markup body.
+did not escape). ~~There is no way to render a literal `${` in a plain-markup body.~~
+
+⚑ **OVER-CLAIM CORRECTED S410-peter — the defect and its HIGH stand; this sentence does not.** There
+**is** a way, and SPEC §4.17 documents it at `:1121` as the workaround the docs corpus already
+accumulated: `<p>Cost: &#36;{5}</p>` compiles at **exit 0 with ZERO diagnostics** and renders
+`Cost: ${5}`. (`$&#123;5}` does **not** work — `E-CTX-001` on the stray `}`.) The accurate claim is
+that the **ergonomic `\${` escape is absent and silently double-wrong**, not that the capability is
+missing. ⚑ The same over-claim is repeated verbatim in delta-log `[2899]` and is superseded there
+by a later entry rather than edited, per append-only.
 
 **§4.18.3 defines the `\${` escape ONLY for a display-text literal** — i.e. inside `"..."` in a
 code-default body. A free-text body has no escape catalog at all, and none is implemented. So this is
@@ -347,12 +448,30 @@ model, not of the proposal. Filing it separately so the ruling is not charged fo
 read as a tag opener.**
 
 **HTML5's tag-open state requires an ASCII alpha immediately after `<`**; a `<` followed by SPACE is
-text. scrml diverges. Note the divergence is partial and therefore confusing: `<3`, `<-` and `<=`
-are fine — it is specifically `<` + space + letter that opens a phantom tag.
+text. scrml diverges. ~~Note the divergence is partial and therefore confusing: `<3`, `<-` and `<=`
+are fine — it is specifically `<` + space + letter that opens a phantom tag.~~
 
-**SPEC is silent** — there is no `tag-open` production and no `U+003C` prose, so neither the current
-behaviour nor the HTML5 behaviour is written down. Reported at **17 corpus files** by dpa-045 round 1
+~~**SPEC is silent** — there is no `tag-open` production and no `U+003C` prose, so neither the current
+behaviour nor the HTML5 behaviour is written down.~~ Reported at **17 corpus files** by dpa-045 round 1
 (count RELAYED, not PA-re-measured).
+
+⚑⚑ **CORRECTED S410-peter — TWO struck claims, and the second one makes the implied fix DANGEROUS.**
+
+- **SPEC is NOT silent.** The behaviour is normative under a different name — the **deprecated
+  whitespace opener**. §4.3 (`SPEC.md:409`): *"P1: **both forms** (`<state-type>` and
+  `< state-type>`) compile. The space-after-`<` form emits `W-WHITESPACE-001`."* §4.6
+  (`SPEC.md:533`) worked-examples this exact confusion: *"the block splitter would see
+  `< MAX_ITEMS` (with a space) and **open a state block named `MAX_ITEMS`**."* `W-WHITESPACE-001`
+  is live (§15.15.5) and `E-WHITESPACE-001` is reserved (§63.7, removal **unscheduled**).
+  Verified live: `< div>hello</div>` compiles and emits `W-WHITESPACE-001`. The original search
+  looked for HTML5-shaped terms (`tag-open`, `U+003C`) and concluded silence from their absence.
+  ⚑ **Consequence for the fix:** adopting HTML5's alpha-after-`<` rule **would reject
+  `< engine>` / `< db>` / `< userBadge name(string)>`, which §4.3 says SHALL compile in P1.** The
+  only clean lever is the `E-WHITESPACE-001` deprecation endpoint — which is bryan's to schedule.
+- **The trigger is mis-stated.** It is `<` + **whitespace**, regardless of what follows — not
+  `<` + space + letter. Measured: `a < 3 then stop` → phantom `'<3>'`; `x <  9` → `'<9>'`;
+  `a < -b` → `'<-b>'`; `a < , b` and `a < = b` → an **empty-named** tag `'<>'`. (The first half
+  holds: `a <3 b`, `a <- b`, `a <= b` all compile clean and emit verbatim.)
 
 **Loud, not silent** — hence MED, not HIGH. But the diagnostic names a tag the author never wrote,
 which is the Class-D desync signature: *an invented entity name absent from source.*
@@ -368,13 +487,27 @@ which is the Class-D desync signature: *an invented entity name absent from sour
 <p>The ?{ syntax opens SQL.</p>
 ```
 → `error [E-CTX-003]: Unclosed 'p' — opened but never closed before end of file.` + a cascaded
-`E-CTX-003` for `div`. The `?{` opened a SQL context that consumed to EOF.
+`E-CTX-003` for `div`. ~~The `?{` opened a SQL context that consumed to EOF.~~
 
-⚑ **The documentation contradiction is the sharp half.** SPEC §4.17 cites **this exact sentence
-shape** as the motivating example for a class it declares FIXED — *"adopters no longer need
-entity-escapes"* — but the fix landed for `<pre>`/`<code>` raw-content elements only. **Ordinary
-prose in a `<p>` still cascades**, and the S108 record says otherwise, so a reader checking the spec
-concludes this works.
+⚑⚑ **CAUSE CORRECTED S410-peter — the symptom above reproduces, the stated CAUSE and SCOPE are both
+FALSE. Do not act on the struck text.**
+
+- **No SQL context is opened.** The consumer is the **orphan-brace tracker**, and only when no
+  matching `}` precedes EOF. PA-reproduced on HEAD: `<p>The ?{ syntax } opens SQL.</p>` compiles at
+  **exit 0 with ZERO errors** and emits verbatim; so does `<p>Use ?{ and } carefully.</p>`.
+- **The S108 gate DID land for plain-markup prose** — the "`<pre>`/`<code>` only" scope is wrong.
+  `compiler/src/block-splitter.js:3132-3157` states the mechanism and names the real residual:
+  *"the `{` hits the orphan-brace handler … As long as the author's prose closes the brace … the
+  orphan-brace machinery decrements back to zero. Unbalanced `?{` alone produces an `E-CTX-003`
+  unclosed-brace error."*
+- **The entry quoted half a sentence.** SPEC:1165's *"adopters no longer need entity-escapes"* is
+  verbatim, but the immediately preceding clause — *"the `{` is tracked as an orphan-brace and
+  **pairs with a matching `}` if present**"* — is exactly the qualifier that makes the cause wrong.
+
+**The residual that IS real, and it is narrower:** the promised unclosed-**brace** diagnostic never
+fires. What fires is `E-CTX-003` naming unclosed **elements** (`p`/`div`/`program`) — i.e. the
+diagnostic **mis-attributes to constructs the author closed correctly**. Anyone acting on the
+original text would go extend the `<pre>`/`<code>` gate to prose: **work already done.**
 
 **Composes with `g-no-unterminated-delimiter-diagnostic-exists-anywhere`** (dpa-044 Call 1, RULED
 S405): the `?{` here is an unterminated delimiter consuming to EOF, and the ruled diagnostic would at
@@ -732,6 +865,37 @@ Emitted verbatim: `function _scrml_bad_1(a, b) { return a * b; }` and `_scrml_lo
 
 ### g-recent-sessions-index-drops-named-session-wraps — `master-list.md`'s `@generated:recent-sessions` forensic index silently omits **every** wrap commit whose subject carries a contributor suffix, so a whole collaborator's sessions are invisible on a board that reads complete. **PA-CONFIRMED BY EXECUTION on `2ec2ce3a`**: `isSessionClose` (`scripts/state.ts:551-552`) tests `/\bwrap\(s\d+\)/i`, which requires the `)` to follow the digits immediately — `wrap(s390)` MATCHES, `wrap(s389-peter)` does NOT. Measured over the last 600 commits: **12 `wrap(sNNN)` seen, 5 `wrap(sNNN-name)` dropped**, and the index therefore jumps `wrap(s385)` → `wrap(s390)` with S386/S387/S388/S389 absent. ⚑ **The guard cannot see this, by construction.** `refuseDegenerateProjection` fires only on the ZERO-population path (`NO_SESSIONS_SENTINEL`), and its own doc comment records that this guard already went dead once for a different reason — so a **partial** drop is exactly the case it does not cover. A truncated enumeration reads identically to a complete one (base §8, the truncated probe). **This is NOT filed as a turnkey fix, because the fix direction is a question, not a defect:** widening the regex to `\bwrap\(s\d+[^)]*\)` makes one shared index carry both contributors' sessions, and it is not established that a shared index is what is wanted — a per-contributor index, or an explicit contributor column, may be the right shape. Whoever rules it owes a bite proof: the current matcher has never been shown to fail, which is why it has been wrong for at least five sessions with a green `--check` the whole time. — `NEW S391-bryan (found while regenerating the block during a wrap-6d gate failure; matcher behaviour proven by executing the regex against the real commit subjects, not by reading it)`; **MED**; open
 <!-- @gap id=g-recent-sessions-index-drops-named-session-wraps sev=MED status=open locus=scripts/state.ts:551-552(isSessionClose requires a close-paren immediately after the session digits, so a contributor-suffixed wrap subject never matches; recentSessions at :570 then never sees it and refuseDegenerateProjection at :430 only guards the zero-population case) prov=empirical:executed-the-matcher-against-real-commit-subjects-12-of-17-wrap-commits-matched-5-dropped-all-of-them-the-wrap-sNNN-name-form -->
+
+⚑⚑ **ALL FOUR MATCHING DEFECTS FIXED S410-peter — BUT THIS ENTRY STAYS `open` DELIBERATELY**, because
+the S391 note below reserves the *mechanism* question for bryan (a session anchor is a fact the wrap
+procedure KNOWS and could record as a trailer or tag, rather than being re-derived from prose — the
+S338 Rule 7 shape). Flipping this to `resolved` would erase a reserved ruling. **What is closed is
+the matching; what is open is whether matching is the right instrument at all.**
+
+Fixed in `scripts/state.ts`, and the S404 amendment's own bite proof is met — a test asserting a
+subject of **each** form (`compiler/tests/unit/state-session-close-suffix.test.js`, 21 cases):
+
+1. **contributor-suffixed** `wrap(sNNN<sep>who)` — ⚑ and the separator is **not just `-`**: real
+   subjects use `-`, `.`, a space and `·` (`wrap(S313.bryan)`, `wrap(S312 peter)`,
+   `wrap(S310·peter)`). A first S410 attempt allowed only `-` and **still dropped 19 of the 79**.
+2. **the PR-flow slash form** `wrap/sNNN (#PR)` — the amendment is right that this is the one that
+   matters most, and right that a paren-only widening misses it. Confirmed live: regenerating now
+   surfaces `069e86fd — wrap/s402 (#873)`, which the index had never shown.
+3. **`sessionNumOf`** carried the identical close-paren requirement and returned `null` for exactly
+   the subjects `isSessionClose` rejected — so the per-session dedup was dead for them too. **The two
+   halves failed together, which is why neither could reveal the other.**
+4. **the S391 FALSE POSITIVE** — `/\(s\d+\):\s*wrap\b/` admitted `maps(S391): wrap-6c refresh …`
+   because `\b` matches before the `-`. Now `wrap(?![-\w])`. Both directions of the same regex are
+   pinned, since the population it reported was *neither a subset nor a superset* of the real one.
+
+⚑ **THE FILED SIZE WAS WRONG, AND SO WAS THE FIRST RE-MEASUREMENT — measured, not relayed.** Over the
+last 600 commits: **100 paren-family wrap subjects, 21 matched, 79 dropped**, split **51 peter- + 28
+bryan-suffixed** — so this was never peter-lane blindness, it hit whoever used a suffix. Plus 3
+slash-form wraps outside that family entirely.
+⚑ And the obvious probe for the dropped set is itself broken, inflating the answer to 100:
+`wrap\(s[0-9]+[^)]` matches `wrap(s408)` because `[0-9]+` **backtracks** — it takes `40` and lets
+`[^)]` eat the `8`. The character after the digit run must be excluded as **both** `)` and a digit.
+That mis-measurement was made and caught during this fix, and is pinned in the test file.
 
 ⚑ **AMENDED S404-bryan — there is a SECOND dropped form, it is bigger than the filed one, and it bit LIVE this session.** The entry above names the contributor-suffix form (`wrap(sNNN-name)`). The matcher `/\bwrap\(s\d+\)/i` ALSO misses **`wrap/sNNN`** — the slash form, which is what **PR-flow itself produces**: the overlay's wrap step 7 says to commit onto a `wrap/sNNN` feature branch, and `gh pr create --fill` then titles the PR from the BRANCH name, so the squash-merge subject is `wrap/s402 (#873)` with no parenthesis anywhere. **Re-measured over the last 600 commits on `origin/main`, S404:** `wrap(sNNN)` **16** · `wrap(sNNN-name)` **9** · `wrap/sNNN` **3** — so the index sees **16 of 28 wrap merges and drops 12 (43%)**, against the original entry's 12-of-17.
 
@@ -1206,6 +1370,189 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 ### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; resolved by #473 (the fileURLToPath swap) — prose lagged the already-resolved marker; PA-reverified clean on Windows both modes S341-peter`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
 
+### g-tracking-job-is-red-as-a-whole-so-a-new-regression-in-it-is-invisible — the exact disease the browser tier was CURED of at S313, still live one level up, on the job that holds integration + lsp + commands
+
+<!-- @gap id=g-tracking-job-is-red-as-a-whole sev=MED status=open owner=bryan locus=.github/workflows/ci.yml(the `tracking` job — the "integration + lsp + commands" step and the types gate above it)+scripts/browser-baseline.ts(the PROVEN pattern to copy)+compiler/tests/TYPES-BASELINE.json(a second instance of it) prov=empirical:S410-peter-read-the-workflow-while-answering-how-to-get-a-clean-full-suite-pass -->
+
+**ROUTED TO BRYAN — `ci.yml` is his active surface (#907 is gate hardening). Filed, not fixed.**
+
+The `gate` job is blocking and green. The `tracking` job is non-blocking and **red as a whole**, and
+it carries `integration + lsp + commands` (labelled *"promotion candidates"*). Because the job is red
+wholesale, **a genuine NEW regression in any of those tiers is invisible** — indistinguishable from
+the standing backlog. `compiler/tests/lsp/workspace-l2.test.js` has 5 failures sitting there for
+exactly this reason.
+
+⚑ **This is not a new principle — the project already diagnosed and cured it one level down.** The
+browser tier had the identical shape until S313, and `ci.yml`'s own comment states it better than a
+filing can:
+
+> *a permanently-red step is "useless in both directions at once" — a real regression is invisible
+> (red either way), and a failed step **HALTS the job**, so every step after it was skipped… verified,
+> not assumed* (the within-node parity step reported `skipped` on run 30742472551 and had therefore
+> never run at all).
+
+**The fix is the pattern already proven FOUR times in this repo** — `browser-baseline.ts --check`,
+`corpus-compile-floor.baseline.json`, `TYPES-BASELINE.json`, and the facts / SPEC-INDEX / delta-log
+invariant gates. All **bidirectional**: fail on a NEW break *and* on a stale entry. Give each
+`tracking` tier a failure NAME-SET baseline so it exits 0 while the set is unchanged and 1 the moment
+a name joins or leaves. **That is the precondition for promoting a tier into `gate` at all** — which
+is what the "promotion candidates" label is already promising.
+
+**Done-condition:** a new regression introduced into `integration` / `lsp` / `commands` turns the
+step red; the standing backlog does not.
+— `NEW S410-peter (found reading ci.yml to answer "how do we ensure a clean full-suite pass")`; **MED**; open
+
+### g-no-baseline-asserts-that-tests-actually-asserted — every gate checks names, counts or exit codes; none checks that a single `expect()` ran, which is the only number that catches a self-disabled harness
+
+<!-- @gap id=g-no-baseline-asserts-that-tests-actually-asserted sev=MED status=open locus=scripts/browser-baseline.ts+compiler/tests/TYPES-BASELINE.json+scripts/corpus-compile-floor.ts(the three baselines that would each take an assertion-count floor)+.github/workflows/ci.yml(the per-tier steps that would carry it) prov=empirical:S410-peter-two-files-measured-45-to-15-and-35-to-0-assertions-while-the-pass-count-ROSE -->
+
+This repo has four bidirectional baselines and they are good ones — but **every single one asserts
+names, counts, or exit codes. None asserts that any test actually ASSERTED anything.**
+
+**Measured this session, twice, and in both cases the pass count moved in the FLATTERING direction:**
+
+| file | headline | `expect()` calls |
+|---|---|---|
+| `self-host-smoke.test.js`, module loads | 22 pass / **3 fail** | **45** |
+| …same file, module broken | 24 pass / **1 fail** | **15** |
+| `browser-reactive-arrays.test.js`, as found | **35 pass / 0 fail** | **0** |
+
+`browser-reactive-arrays` would have passed **every existing gate in this repo** — name-set, exit
+code, count — while running **zero assertions**, for a file `master-list.md:253` already recorded as
+*"Skipped"*. The assertion count was the only number that revealed it, and nothing reads it.
+
+**Done-condition:** each gated tier carries a minimum `expect()`-call floor alongside its name-set
+baseline; a tier whose assertion count collapses fails even if its pass/fail counts improve.
+⚑ Cheap by construction — bun already prints the number; the baselines already have a home for it.
+— `NEW S410-peter (the through-line of the session: every broken instrument failed toward GREEN)`; **MED**; open
+
+### g-self-host-tab-test-is-an-unbounded-memory-runaway — `bun test compiler/tests/self-host/tab.test.js` grows ~720 MB/s with no plateau (6.53 → 8.69 GB in THREE SECONDS) and is the strongest candidate yet for the unidentified S406 82 GB machine lockup
+
+<!-- @gap id=g-self-host-tab-test-is-an-unbounded-memory-runaway sev=HIGH status=open locus=compiler/tests/self-host/tab.test.js(526 lines; dies BEFORE the first test result, so the runaway is in module collection or the beforeAll — NOT yet bisected within the file) prov=empirical:S410-peter-caught-live-by-the-BunMemorySentinel-log-with-full-command-line-then-narrowed-by-elimination -->
+
+⚑⚑ **READ THIS BEFORE RUNNING IT.** The command below will consume the machine if unguarded. On this
+clone `BunMemorySentinel` kills it (which is why it exits **127** with **28 bytes** of output — it
+dies before the runner flushes anything). Elsewhere, wrap it:
+`powershell -File C:\Users\pjoli\bun-guard\run-capped.ps1 -CapGB 6 bun test compiler/tests/self-host/tab.test.js`
+
+**Caught in the act by the sentinel, with the full command line — the exact gap S406 could not close
+because `Get-Process` cannot supply one:**
+
+```
+13:44:15 [WARN] pid 11848 — commit 6.532 GB (ws 6.016 GB), free 1.51 GB
+                CMDLINE: bun.exe test compiler/tests/self-host/tab.test.js
+13:44:18 [KILL] pid 11848 — free RAM 0.31 GB < 1.5 GB while this process holds 8.69 GB
+```
+
+**6.53 → 8.69 GB in 3 seconds, accelerating, no plateau.** A directory-level sample gave the same
+shape: `1.44 → 3.15 → 4.78 GB` over 4.5 s. Three independent kills recorded at 4.2 / 5.0 / 5.3 GB
+earlier the same day.
+
+⚑ **WHY THIS IS PROBABLY THE S406 CULPRIT.** S406 lost a day to one `bun.exe` reaching **82 GB
+committed** on a 32 GB box (three forced restarts), and the culprit was **never identified**. At
+~720 MB/s this reaches 82 GB in **roughly two minutes**. S406's own candidate table measured
+`bun test compiler/tests/` at 2.433 GB — so the whole-tier run did NOT surface it, which is exactly
+why an isolated-file runaway could hide behind a green aggregate.
+**NOT PROVEN to be the same incident — but it is the first reproducible runaway with a name.**
+
+**ELIMINATED BY MEASUREMENT — the surface is much narrower than "the self-host tier":**
+
+| step | result |
+|---|---|
+| compile `tab.scrml` (library, `write:true`) | **0.37 s · 0 errors · ~0 GB** ✅ |
+| `import` the emitted `tab.js` (36,865 bytes) | **0.01 s · ~0 GB** ✅ |
+| compile `bs.scrml` (browser) | 0.3 s · ~0 GB ✅ |
+| `ast.test.js` · `bpp.test.js` · `bs.test.js` | all complete clean (bpp 34 pass) ✅ |
+| **`tab.test.js` under `bun test`** | ⛑ **runaway** |
+
+So it is **NOT** "compiling `tab.scrml` is expensive" and **NOT** the emitted module — both are clean
+standalone. It manifests only under the bun test runner, and the file dies **before the first test
+result prints**, which puts it in module collection or `beforeAll`.
+
+**Is it bun / Windows?** No evidence for either. This is unbounded JS allocation, not a path or
+filesystem behaviour, and S406 measured and cleared bun for the general case. Treat "bun's fault" as
+unsupported until something contradicts it.
+
+**Pre-existing, not introduced by S410:** this session's only `compiler/src` changes were
+comment- and message-text-only (`emit-library.ts` comments — zero non-comment lines changed;
+`ast-builder.js` / `gauntlet-phase3-eq-checks.js` diagnostic strings), and `exit=127` on this tier was
+separately observed with files reverted to main.
+
+**NEXT STEP (ruled by peter S410: "take care of it first thing next session"):** bisect *inside*
+`tab.test.js` — halve the file under `run-capped.ps1 -CapGB 6` until the allocating construct is
+named. Do NOT start from a hypothesis about which construct it is; the three most obvious candidates
+(the compile, the import, the sibling test files) are already eliminated above.
+— `NEW S410-peter (caught by the BunMemorySentinel installed the same session; narrowed by elimination, not yet root-caused)`; **HIGH**; open
+
+### g-guarded-early-return-tests-report-vacuous-passes — the CLASS: a precondition guard with no assertion turns N tests into green ticks that assert nothing. `browser-reactive-arrays.test.js` was reporting **35 pass with ZERO assertions executed**
+
+<!-- @gap id=g-guarded-early-return-tests-report-vacuous-passes sev=MED status=resolved resolved-by=S410-peter locus=compiler/tests/browser/browser-reactive-arrays.test.js(the `_SKIP_REACTIVE_ARRAYS` + `distExists` seam)+compiler/tests/unit/emit-logic-s19-error-handling.test.js(the `runtimeClasses` extraction seam)+compiler/tests/browser/browser-todomvc.test.js(the CORRECT shape, copied) prov=empirical:S410-peter-swept-the-class-repo-wide-after-finding-the-self-host-smoke-instance-then-measured-each-file -->
+
+**Found by sweeping the CLASS after [[g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails]]
+turned up one instance.** The shape is `if (!precondition) return;` inside a test, with **no assertion
+anywhere that the precondition held**. When it fails the tests do not fail, do not skip, and do not
+report — they pass having asserted nothing.
+
+Repo-wide sweep of `^\s*if \(!\w+\) return;` in `compiler/tests/`:
+
+| file | guard | count | had a loud assertion? | state found |
+|---|---|---|---|---|
+| `browser-todomvc.test.js` | `!distExists` | 43 | ✅ **two** `expect(distExists)` | correct — fixture present, tests real |
+| `browser-reactive-arrays.test.js` | `!distExists` | 35 | ❌ **zero** | ⛑ **35 pass / 0 fail / ZERO assertions** |
+| `emit-logic-s19-error-handling.test.js` | `!runtimeClasses` | 12 | ❌ **zero** | passing for real, but the trap was latent |
+| `self-host-smoke.test.js` | `!scrmlModule` | 12 | ✅ one | the sibling entry above |
+
+⚑ **`browser-reactive-arrays` is the sharp one.** `const _SKIP_REACTIVE_ARRAYS = true` (a *legitimate*
+decision — the file hangs happy-dom; a real browser passes) forced `distExists` false, so all 35 tests
+early-returned and the runner printed **35 PASS**. `master-list.md:253` already records this file as
+*"Skipped"* — so **the document and the runner disagreed, and the runner is the one CI prints.** Anyone
+reading the suite output saw 35 passing reactive-array reconciliation tests that do not exist.
+
+**FIXED S410-peter:**
+- `browser-reactive-arrays.test.js` — its 7 `describe`s now route through
+  `describeMaybe = _SKIP_REACTIVE_ARRAYS ? describe.skip : describe`. Output went from
+  **35 pass / 0 fail** to **0 pass / 35 skip / 0 fail**. The decision is unchanged; only the honesty of
+  the report is. The per-test guards are left in place — unreachable while the flag is set, still
+  correct if it is ever cleared.
+- `emit-logic-s19-error-handling.test.js` — gains a `§0: harness precondition` test asserting the
+  extraction succeeded, modelled on `browser-todomvc`'s shape. ⚑ **Bite-tested rather than assumed:**
+  with a simulated extraction failure it goes **43 pass / 1 fail** and assertions drop 65 → 51; without
+  the guard the same breakage read **43 pass / 0 fail**.
+
+**The general rule this file now demonstrates in three places:** *a precondition guard owes a
+precondition assertion.* Otherwise the harness can disable itself and the only trace is the
+`expect() calls` count — a number nobody reads and no gate checks.
+— `NEW S410-peter (class sweep off the self-host-smoke instance)`; **MED**; resolved
+
+### g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails — 12 tests early-return on a null module, so BREAKING the module under test reads as failures dropping 3 → 1
+
+<!-- @gap id=g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails sev=MED status=open locus=compiler/tests/integration/self-host-smoke.test.js(the `const scrmlModule = extractScrmlLogic()` seam and every `if (!scrmlModule) return;` guard — locate by that guard STRING, there are 12) prov=empirical:S410-peter-measured-both-states-on-this-box-while-attempting-the-blocked-fileURLToPath-swap -->
+
+`self-host-smoke.test.js` evals an extracted logic block into `scrmlModule`. **12 of its tests then
+guard with `if (!scrmlModule) return;`** — so if the extraction fails, those 12 do not fail, do not
+skip, and do not report: they **pass, having asserted nothing.**
+
+**Measured, by breaking the module on purpose** (the `fileURLToPath` swap this file's sibling gap
+records as blocked):
+
+| | module loads (clean HEAD) | module fails to load |
+|---|---|---|
+| headline | 22 pass / **3 fail** | 24 pass / **1 fail** |
+| expect() calls | **45** | **15** |
+
+**Breaking the module under test makes the suite look BETTER.** Three genuine parity failures are
+replaced by silence, and the only signal that anything is wrong is the assertion count collapsing
+from 45 to 15 — a number nobody reads, and which no gate checks.
+
+⚑ This is the `refuseDegenerateProjection` shape one level down: the guard exists so the file can run
+when self-host is unbuildable, which is reasonable — but *silently passing* is the wrong expression of
+it. `test.skip`, or a single up-front assertion that the module loaded (there IS one, and it is the
+only thing that failed), would both preserve the intent without manufacturing 12 green ticks.
+**Recommend: make the 12 guards `skip` rather than `return`, so an unbuildable self-host is VISIBLE
+in the suite output instead of invisible.** Not done here — it is a test-policy change on a file whose
+failures are a known cross-OS baseline, and it should land with whoever unblocks the sibling gap.
+— `NEW S410-peter (found by measuring both states while attempting the blocked fileURLToPath swap, then reverting it)`; **MED**; open
+
 ### g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname — both `module-resolver.scrml` copies compute `STDLIB_ROOT` from `new URL(import.meta.url).pathname` (the Windows `/C:/…` fragile form the census gap fixed one file over), BUT the source-level `fileURLToPath` fix is BLOCKED — `NEW S341-peter (sweeping the g-s34-census CLASS after it turned out already-fixed); LOW; open (blocked-on the codegen miscompile below — see #520)`
 <!-- @gap id=g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname sev=LOW status=open locus=compiler/self-host/module-resolver.scrml:48,stdlib/compiler/module-resolver.scrml:48 prov=rationale:same-new-URL-import-meta-url-pathname-windows-fragile-pattern-as-the-resolved-census-gap-but-the-compiled-STDLIB_ROOT-is-already-garbage-all-OS-via-a-codegen-miscompile-so-the-source-swap-is-moot-until-that-lands -->
 
@@ -1215,6 +1562,35 @@ the compiled output); (2) it is **moot** — the compiled `STDLIB_ROOT` is alrea
 because codegen replaces the `import.meta.url` inside the `const` initializer with the whole initializer
 expression (self-referential duplication). That codegen miscompile is the real blocker, routed to bryan's
 `import.meta` (g-263) lane via **#520** (`handOffs/incoming/…S341-peter-to-S341-bryan-import-meta-const-init-mangling.md`, merged). Unblock this LOW once the codegen fix lands.
+
+⚑⚑ **BLOCKER (1) RE-VERIFIED S410-peter, STILL LIVE — and the ATTEMPT WAS MADE AND REVERTED, so the
+next reader does not have to make it again.** I implemented the obvious `fileURLToPath` swap in both
+copies before reading this far into the entry. It is wrong, and here is the precise mechanism the
+S341 note does not spell out:
+
+`self-host-smoke.test.js` calls `extractScrmlLogic()`, which pulls the file's LOGIC BLOCK out and
+`eval`s it — **it does not include the `^{ }` meta block**, where `resolve`/`dirname`/`existsSync`
+(and any added `fileURLToPath`) are imported. So the swap makes the eval throw, and
+`scrmlModule` comes back **null**.
+
+⚑ **AND THE FAILURE PRESENTS AS AN IMPROVEMENT, WHICH IS WHY IT IS WORTH WRITING DOWN.** Measured on
+this box:
+
+| | clean HEAD | with the `fileURLToPath` swap |
+|---|---|---|
+| `logic block can be extracted and evaluated` | pass | **FAIL** |
+| `buildImportGraph` / `resolveModules` parity ×3 | **FAIL ×3** | "pass" |
+| headline | 22 pass / 3 fail · **45 expect() calls** | 24 pass / 1 fail · **15 expect() calls** |
+
+The three parity failures do not get FIXED — **12 tests in that file guard with
+`if (!scrmlModule) return;`**, so when the module fails to load they all early-return and pass
+VACUOUSLY. The pass count rises, the failure count falls, and the assertion count **drops from 45 to
+15** — which is the only number that reveals it. Filed separately as
+[[g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails]].
+
+Blocker (2) was NOT re-tested this session; the codegen `import.meta`-in-const-initializer mangling
+is still the real gate on this entry. **The correct order stands: land the codegen fix, then the
+source swap, then a smoke-test that cannot pass vacuously.**
 
 **RESOLVED S335-peter** — re-verified on THIS Windows box vs HEAD `cdf19c01`: `scripts/s34-census.ts` now resolves its own path via `fileURLToPath(import.meta.url)` (commit `0beddacc`, with a Windows-rationale comment) and runs to completion (full 807-row census). The `new URL(...).pathname` leading-slash-drive break is gone.
 
@@ -3022,9 +3398,39 @@ duplicates, or narrow one row so the two triggers are genuinely disjoint (E-TYPE
 also claims `=== not` / `!== not`, which `E-EQ-004` may already own — worth checking before retiring).
 
 ### g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid — the `!= not` fix-hint names `is not not` where §42.2.2a says `is some` exists precisely to avoid it
-<!-- @gap id=g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid sev=LOW status=open -->
+<!-- @gap id=g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid sev=LOW status=resolved resolved-by=S410-peter -->
 
 > **RULED S305 — bundle with [[g-e-eq-001-message-names-types-not-the-operand]]** (same file, same golden baseline regen). See that entry for the reasoning.
+
+⚑⚑ **BOTH HALVES RESOLVED S410-peter — and the bundle's own premise had expired.** S305 bundled these
+because they shared *"the same golden baseline regen"*. That cost is already paid: `e-eq-001` is
+**landed on HEAD** (`describeOperand` at `gauntlet-phase3-eq-checks.js:650`, message at `:663`) and
+the golden already carries the provenance-rich form —
+``E-EQ-001: cannot compare `n` (`number`, inferred from its initializer at line 3) …``. So the
+`e-eq-002` half needed **no regen at all**: the baseline's only `E-EQ-002` row is the `==` branch.
+
+⚑⚑ **AND THE FILED DEFECT WAS THE SMALLER HALF — THERE ARE TWO EMIT SITES, AND THE ONE THAT ACTUALLY
+FIRES WAS SEMANTICALLY INVERTED.** The entry names `gauntlet-phase3-eq-checks.js` (the `is not not`
+double-negative hint). But `ast-builder.js:5337` emits `E-EQ-002` **first**, at parse time, and it
+hardcoded *"use `is not`"* for **both** operators:
+
+| source | means | old advice | correct |
+|---|---|---|---|
+| `x == not` | x is ABSENT | `is not` ✅ | `is not` |
+| `x != not` | x is PRESENT | **`is not`** ⛑ **inverse** | `is some` |
+
+So on the `!=` arm the diagnostic told the author to write **the opposite condition**. Found by
+writing the pin first: the new test failed with ``Received: …`!= not` … use `is not`…`` — neither the
+`is not not` the entry describes nor the `is some` expected — which is what exposed the second site.
+⚑ Note the **recovery** in that same block already had it right (`!=` → `is not not`), so the message
+and the recovery three lines apart contradicted each other.
+
+**Landed:** both messages now advise `is not` / `is some` by operator; the module docstring line
+corrected. Pinned by `compiler/tests/unit/e-eq-002-hint-is-some.test.js`, whose second case is a
+**regression guard on the `==` arm** — a one-sided test would let a careless fix invert it.
+⚑ The `ast-builder` **recovery string is deliberately unchanged**: `is not not` is semantically
+correct there and is a token sequence fed back into the parse, so swapping it is a behaviour change
+owing its own differential. This fix is diagnostic TEXT only — inert.
 
 **Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:585` — `const replacement = eqNode.op === "==" ? "is not" : "is not not";`
 
@@ -3038,7 +3444,7 @@ to replace. One-word fix (`"is not not"` → `"is some"`); the `==` branch's `is
 
 
 ### g-e-eq-001-message-names-types-not-the-operand — `E-EQ-001` reports the two TYPES but neither which operand carries which, nor where its type came from; the adopter paid ~15 bisect cycles for the difference
-<!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=open -->
+<!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=resolved resolved-by=S410-peter -->
 **⚑ TRIAGE S325-peter: the E-EQ-001 EMIT half appears LANDED** (`gauntlet-phase3-eq-checks.js:642` `describeOperand` names each operand + type provenance in the `:655` message). Kept `open` because RULED-S305 BUNDLED with `g-e-eq-002` behind one shared `e2e-render-map-baseline.json` regen; confirm e-eq-002 + the golden regen before closing.
 
 > **RULED S305 — BUNDLE with `g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid` into ONE message-quality arc.** Both live in `gauntlet-phase3-eq-checks.js`, and both require the SAME golden `e2e-render-map-baseline.json` regen (E-EQ-001 at `:2119`; E-EQ-002 appears twice). Doing them separately pays the regen twice and reviews the same golden file twice, for two edits a few lines apart. One arc, one regen, one review.
@@ -10323,7 +10729,7 @@ Same class as the S280 README flagship that had never compiled and the S292 `orm
 Pre-existing (the try/catch is unchanged context in #530). Fix: a missing referenced runtime is a FAILURE (throw, naming the path), never a fallback to source; and at least one assertion that pins a runtime-version-bearing behaviour (a symbol or marker present only in the current runtime) so a stale runtime reads red. Same class as the S345 `read() → ""` shapes in the flagship test.
 
 ### g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive — the flagship-hos test's `mkdtempSync` output dir is never removed (215 dirs / 442 MB under `/tmp/scrml-flagship-hos-*` on this box today, ~2.1 MB × 115 files each; REGRESSION by #531 — the fixed path it replaced was `rmSync`'d per call), and #534's `e.name.endsWith("hos.html")` matches `echos.html` (a misleading loud failure for an unrelated page) — `NEW S346-bryan (S239 review-floor pass on #531 + #534, PA-verified); LOW; open`
-<!-- @gap id=g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive sev=LOW status=open locus=compiler/tests/browser/flagship-hos-engine-under-if.browser.test.js:50(mkdtempSync at module load, no afterAll rmSync)+:103(endsWith("hos.html")) prov=rationale:review-floor-on-531-534-fails-in-the-safe-direction-loud-not-silent-but-a-tmp-on-tmpfs-or-a-busy-shared-box-would-feel-the-leak -->
+<!-- @gap id=g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive sev=LOW status=resolved resolved-by=S410-peter locus=compiler/tests/browser/flagship-hos-engine-under-if.browser.test.js:50(mkdtempSync at module load, no afterAll rmSync)+:103(endsWith("hos.html")) prov=rationale:review-floor-on-531-534-fails-in-the-safe-direction-loud-not-silent-but-a-tmp-on-tmpfs-or-a-busy-shared-box-would-feel-the-leak -->
 
 Also cosmetic from the same pass: on the loud-fail path `art` is never cached, so each of the 7 tests recompiles the whole app; `expect(errors).toEqual([])` in `boot()` is unreachable-dead post-#531. Fix: `afterAll(() => rmSync(OUT, {recursive:true, force:true}))`; basename match (`=== "hos.html"`) instead of suffix.
 
@@ -11990,7 +12396,7 @@ the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-pe
 > literal `1:1` unless its own formatter re-derives from the offset.
 
 ### g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards — the reasoning corrected at `emit-expr.ts:1281` survives verbatim at three other sites in the same file, two of them the stated safety argument for security guards — `NEW S397; LOW; open`
-<!-- @gap id=g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards sev=LOW status=open locus=compiler/src/codegen/emit-expr.ts:1382(the E-SESSION-VALUE placeholder) and :3795 and :3818(the two leak-guard comments) prov=empirical:PA-verified-at-c11db440-all-three-sites-grepped-and-read-and-the-premise-independently-disproved-twice-this-pass -->
+<!-- @gap id=g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards sev=LOW status=resolved resolved-by=S410-peter locus=compiler/src/codegen/emit-expr.ts:1382(the E-SESSION-VALUE placeholder) and :3795 and :3818(the two leak-guard comments) prov=empirical:PA-verified-at-c11db440-all-three-sites-grepped-and-read-and-the-premise-independently-disproved-twice-this-pass -->
 > **⚑ PA-VERIFIED AT THE FILING WATERMARK.** `emit-expr.ts:1281-1295` records that *"the build fails
 > on the error, so the placeholder never ships"* is FALSE, and names three other sites carrying it.
 > All three are present at `c11db440`: `:1382` (*"the build fails on the error, so it never ships"*),
@@ -12218,12 +12624,75 @@ untouched, `SELECT n AS active` NOT coerced, `SELECT active AS n` coerced under 
 **Test gap:** #842's five committed tests are **emit-only** and contain no JOIN/collision case at all.
 
 <!-- @gap id=g-shell-subdir-asset-guard-pins-a-404-path sev=MED status=open locus=compiler/tests/integration/shell-entry-subdir-asset-path-anchor.test.js:85-86(two toContain assertions on dist/x.html name app.css and app.client.js — both resolve to dist/app.css and dist/app.client.js, which do not exist; the shell assets emit at dist/shell/) prov=review:S401-peter-S239-pass-on-845-PA-CONFIRMED-BY-READING-the-assertions-and-BY-EXECUTION-that-the-assets-emit-under-dist-shell -->
+### g-composed-route-drops-the-attr-tpl-effect-so-a-shell-nav-href-ships-as-a-literal-placeholder — a shell's reactive `href="${fn(@cell)}"` composes into every route document as the DEAD string `_scrml_attr_tpl_href_3`, at exit 0 with zero diagnostics
+
+<!-- @gap id=g-composed-route-drops-the-attr-tpl-effect sev=HIGH status=open locus=compiler/src/codegen(the shell/outlet COMPOSITION path — locate by the emitted marker STRING `data-scrml-attr-tpl-` and by which emitter attaches `_scrml_effect` to a route document vs the shell's own document; NOT yet narrowed to a file) prov=empirical:S410-peter-reproduced-by-compilation-on-028daeea-with-a-WORKING-CONTROL-in-the-same-build -->
+
+**Found while draining [[g-shell-subdir-asset-guard-pins-a-404-path]] — it is a third broken ref in
+the same emitted document that the filed entry does not mention.**
+
+A `<program>` shell containing `<nav><a href="${rolePath(@role)}">Dash</a></nav>` plus an `<outlet/>`
+emits, into the COMPOSED route document `dist/x.html`:
+
+```html
+<a href="_scrml_attr_tpl_href_3" data-scrml-attr-tpl-href="…">Dash</a>
+```
+
+…and `x.client.js` contains **no `_scrml_effect` and no mention of `attr-tpl` at all**. The placeholder
+ships with nothing to resolve it: the link is **dead in the browser**, showing a literal
+`_scrml_attr_tpl_href_3` as its href. Exit 0, zero errors, one unrelated `W-PROGRAM-SPA-INFERRED`.
+
+⚑ **THE CONTROL IS WHAT MAKES THIS A DEFECT RATHER THAN A DESIGN.** The *same build* emits the
+shell's OWN document `dist/shell/app.html` with the identical placeholder and marker — and there
+`shell/app.client.js` **does** carry `_scrml_effect` and does mention `attr-tpl`, so the placeholder
+is transient and resolves at hydration exactly as intended. **Same source, same compile, two
+documents: the own-document path wires the effect and the composed-route path does not.**
+
+| document | placeholder | `data-scrml-attr-tpl-href` | resolving `_scrml_effect` | outcome |
+|---|---|---|---|---|
+| `shell/app.html` (control) | yes | yes | **yes** | transient — correct |
+| `x.html` (composed route) | yes | yes | **NO** | ⛑ **dead link** |
+
+**Why HIGH:** it is silent, user-visible, and hits *navigation* — the shell's nav is by construction
+present on **every** composed route, so one reactive attribute template in a shell breaks the nav on
+the whole app. Nothing in the diagnostic stream mentions it.
+
+⚑ **Adjacent but NOT the same as the S212 family** ([[g-match-arm-drops-reactive-attr-class-effects]],
+resolved) — that was attr-tpl bindings inside a `<match>` ARM body; this is the shell→route
+COMPOSITION seam. Same shape of failure (marker emitted, effect not), different pass, which is worth
+saying out loud: this is the second time an attr-tpl marker has shipped without its effect, so the
+question worth asking before patching the crossing is whether *any* emitter that writes a
+`data-scrml-attr-tpl-` marker can be made to owe its effect by construction, rather than each
+composition path being taught separately.
+
+**Locus NOT established — this entry is the reproduction, not the diagnosis.** Deliberately not
+narrowed by guesswork.
+— `NEW S410-peter (found while draining the shell-404 guard; reproduced by compilation with a working control in the same build)`; **HIGH**; open
+
 ### G-SHELL-SUBDIR-ASSET-GUARD-PINS-A-404-PATH — the committed guard certifies a broken ref and will block the real fix — `NEW S401; MED; open`
 
 The guard #845 landed asserts `dist/x.html` references `app.css` / `app.client.js`. Those resolve to
 `dist/app.css` and `dist/app.client.js`, which **do not exist** — a shell entry in a subdir emits its
 assets at `dist/shell/`. So the test pins the wrong destination and goes RED when the remaining half of
 [[g-uptoroot-vs-distrel-anchor-mismatch]] is fixed correctly.
+
+⚑⚑ **ADDRESSED S410-peter — the false GREEN is gone; the emitter defect is untouched and still owed.**
+Re-reproduced by compilation on HEAD before editing anything: emitted tree is `shell/app.css`,
+`shell/app.client.js`, `shell/app.html`, `x.html`, `x.client.js`, `models/auth.client.js`,
+`scrml-runtime.*.js`, and resolving `dist/x.html`'s refs against disk gives **`app.css` → 404,
+`app.client.js` → 404** (the other three resolve).
+
+The two pinning assertions are **kept but re-commented** — they still pin the emitted *shape*, they
+just no longer claim the shape is correct — and the honest assertion is added as **`test.failing`**:
+every local ref must resolve on disk. ⚑ `test.failing` INVERTS, which is the point: it passes while
+the body throws and **fails the suite the moment the body starts passing**, so whoever fixes the
+emitter is told to remove `.failing` and the fix cannot land silently. Verified rather than assumed —
+a `test.failing` with a passing body reports *"this test is marked as failing but it passed. Remove
+`.failing` if tested behavior now works"*. A green test asserting a 404 was the worse of the two
+options; a red one would have blocked the gate.
+
+**Not resolved:** the emitter still anchors composed-route asset paths wrong. That half remains
+[[g-uptoroot-vs-distrel-anchor-mismatch]].
 
 **PA-VERIFIED both halves directly:** read the assertions at `:85-86`, and compiled a
 `shell/app.scrml` + `pages/x.scrml` set — the emitted tree contains `./shell/app.css` and
@@ -12293,7 +12762,7 @@ hand-off's bryan-lane queue rather than dropped as an inbox ping, per Peter's S3
 `style=` is folded; two author `style=` attributes still both emit, with no diagnostic — true without
 the flat `#{}` too.
 
-<!-- @gap id=g-api-reference-severity-whitelist-drops-runtime-and-test-codes sev=LOW status=open locus=scripts/generate-api-reference.js:240(the tableRe severity alternation admits only Error, Warning and Info, so any §34 row whose Severity cell reads Runtime or Test is dropped) prov=review:S401-peter-S239-pass-on-849-agent-REPRODUCED-and-enumerated-the-11-dropped-codes -->
+<!-- @gap id=g-api-reference-severity-whitelist-drops-runtime-and-test-codes sev=LOW status=resolved resolved-by=S410-peter locus=scripts/generate-api-reference.js:240(the tableRe severity alternation admits only Error, Warning and Info, so any §34 row whose Severity cell reads Runtime or Test is dropped) prov=review:S401-peter-S239-pass-on-849-agent-REPRODUCED-and-enumerated-the-11-dropped-codes -->
 ### G-API-REFERENCE-SEVERITY-WHITELIST-DROPS-RUNTIME-AND-TEST-CODES — the completeness claim is still false on a second axis — `NEW S401; LOW; open`
 
 #849 widened the §34 code-shape alternation (387 → 768 rows) but left the **severity** alternation

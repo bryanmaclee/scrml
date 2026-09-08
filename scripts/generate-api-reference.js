@@ -236,8 +236,16 @@ function extractErrorCodes() {
   // never match. That is required, not incidental: §34.0 says a retired row "must NOT enter any
   // denominator". Measured on SPEC.md: 817 candidate rows → 768 captured, 35 of the 49 excluded
   // being struck retirements.
+  // ⚑ S410 — the severity cell admits FIVE values, not three. `Runtime` and `Test`
+  // are real severities in the §34 catalog (measured on SPEC.md: 942 Error, 161
+  // Warning, 53 Info, 7 Runtime, 7 Test), and the old `(Error|Warning|Info)`
+  // alternation dropped all 14 of those rows SILENTLY, under a heading that claims
+  // to list every code. That is a different thing from the deliberate exclusion
+  // described above: a struck retirement is excluded BY DESIGN, whereas these rows
+  // are live catalog entries that simply had an unlisted severity spelling.
+  // g-api-reference-severity-whitelist-drops-runtime-and-test-codes.
   const tableRe =
-    /^\|\s*`?([EWI]-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)`?\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(Error|Warning|Info)\s*\|$/;
+    /^\|\s*`?([EWI]-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)`?\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(Error|Warning|Info|Runtime|Test)\s*\|$/;
   for (let i = start; i < end; i++) {
     const m = specLines[i].match(tableRe);
     if (m) {
