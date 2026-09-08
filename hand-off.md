@@ -115,7 +115,9 @@ open the arc by trying to reproduce them.
 
 ### 3. Two opener detectors nobody owns
 `type-system.ts:473` (levels 0+1) and `lint-w-interp-in-raw-content.js:51` (level-0 **for every
-sigil**) — the two survivors of `g-foreign-opener-grammar-hand-spelled-five-places` (HIGH). Both were
+sigil**) — the two survivors of `g-foreign-opener-grammar-hand-spelled-five-places` (~~HIGH~~ **MED**
+— ⚑ corrected S410-peter: the same PR that wrote this line downgraded the gap to `sev=MED` in
+`docs/known-gaps.md` on stated ground; the hand-off half was not updated). Both were
 outside either arc's file boundary.
 
 ### 4. Carried, unchanged
@@ -187,7 +189,14 @@ being posted.
 
 ## Gate at close
 Cloud `gate` **GREEN** on every PR this session. `tracking` RED — pre-existing dev-watcher class.
-Gaps **HIGH 101 · MED 224 · LOW 90 · Nominal 7**. Review floor **4 OWED** (all peter's lane).
+Gaps **HIGH 99 · MED 226 · LOW 90 · Nominal 7** *(at this PR's landing)*. Review floor **4 OWED**.
+⚑ **Corrected S410-peter.** This line shipped `HIGH 101 · MED 224` while the *same PR's* second commit
+set the `@generated:gap-counts` block in `docs/known-gaps.md` to `99 / 226`; `bun scripts/state.ts
+--check` confirms 99/226/90/7 was the correct regen, so the hand-off was the wrong half. The
+"(all peter's lane)" qualifier is also struck: of the four then-owed PRs, **#884 and #901 are
+bryan-authored**. **Current at S410: HIGH 100 · MED 227 · LOW 90 · Nominal 7** (+1/+1 from the two
+gaps this session filed and routed to bryan), and the review floor reads **0 OWED** — all four
+drained. Read `docs/known-gaps.md`'s generated block, never this line, for live counts.
 **Both adopter Direction issues CLOSED** — #509 after 23 days, #471 after 30.
 
 ⚑ **This wrap's PR is titled `wrap(s405):` deliberately, not left to `--fill`** — the branch form
