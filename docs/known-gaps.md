@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 101 |
-| MED | 228 |
-| LOW | 87 |
+| MED | 227 |
+| LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -3284,9 +3284,39 @@ duplicates, or narrow one row so the two triggers are genuinely disjoint (E-TYPE
 also claims `=== not` / `!== not`, which `E-EQ-004` may already own — worth checking before retiring).
 
 ### g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid — the `!= not` fix-hint names `is not not` where §42.2.2a says `is some` exists precisely to avoid it
-<!-- @gap id=g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid sev=LOW status=open -->
+<!-- @gap id=g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid sev=LOW status=resolved resolved-by=S410-peter -->
 
 > **RULED S305 — bundle with [[g-e-eq-001-message-names-types-not-the-operand]]** (same file, same golden baseline regen). See that entry for the reasoning.
+
+⚑⚑ **BOTH HALVES RESOLVED S410-peter — and the bundle's own premise had expired.** S305 bundled these
+because they shared *"the same golden baseline regen"*. That cost is already paid: `e-eq-001` is
+**landed on HEAD** (`describeOperand` at `gauntlet-phase3-eq-checks.js:650`, message at `:663`) and
+the golden already carries the provenance-rich form —
+``E-EQ-001: cannot compare `n` (`number`, inferred from its initializer at line 3) …``. So the
+`e-eq-002` half needed **no regen at all**: the baseline's only `E-EQ-002` row is the `==` branch.
+
+⚑⚑ **AND THE FILED DEFECT WAS THE SMALLER HALF — THERE ARE TWO EMIT SITES, AND THE ONE THAT ACTUALLY
+FIRES WAS SEMANTICALLY INVERTED.** The entry names `gauntlet-phase3-eq-checks.js` (the `is not not`
+double-negative hint). But `ast-builder.js:5337` emits `E-EQ-002` **first**, at parse time, and it
+hardcoded *"use `is not`"* for **both** operators:
+
+| source | means | old advice | correct |
+|---|---|---|---|
+| `x == not` | x is ABSENT | `is not` ✅ | `is not` |
+| `x != not` | x is PRESENT | **`is not`** ⛑ **inverse** | `is some` |
+
+So on the `!=` arm the diagnostic told the author to write **the opposite condition**. Found by
+writing the pin first: the new test failed with ``Received: …`!= not` … use `is not`…`` — neither the
+`is not not` the entry describes nor the `is some` expected — which is what exposed the second site.
+⚑ Note the **recovery** in that same block already had it right (`!=` → `is not not`), so the message
+and the recovery three lines apart contradicted each other.
+
+**Landed:** both messages now advise `is not` / `is some` by operator; the module docstring line
+corrected. Pinned by `compiler/tests/unit/e-eq-002-hint-is-some.test.js`, whose second case is a
+**regression guard on the `==` arm** — a one-sided test would let a careless fix invert it.
+⚑ The `ast-builder` **recovery string is deliberately unchanged**: `is not not` is semantically
+correct there and is a token sequence fed back into the parse, so swapping it is a behaviour change
+owing its own differential. This fix is diagnostic TEXT only — inert.
 
 **Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:585` — `const replacement = eqNode.op === "==" ? "is not" : "is not not";`
 
@@ -3300,7 +3330,7 @@ to replace. One-word fix (`"is not not"` → `"is some"`); the `==` branch's `is
 
 
 ### g-e-eq-001-message-names-types-not-the-operand — `E-EQ-001` reports the two TYPES but neither which operand carries which, nor where its type came from; the adopter paid ~15 bisect cycles for the difference
-<!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=open -->
+<!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=resolved resolved-by=S410-peter -->
 **⚑ TRIAGE S325-peter: the E-EQ-001 EMIT half appears LANDED** (`gauntlet-phase3-eq-checks.js:642` `describeOperand` names each operand + type provenance in the `:655` message). Kept `open` because RULED-S305 BUNDLED with `g-e-eq-002` behind one shared `e2e-render-map-baseline.json` regen; confirm e-eq-002 + the golden regen before closing.
 
 > **RULED S305 — BUNDLE with `g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid` into ONE message-quality arc.** Both live in `gauntlet-phase3-eq-checks.js`, and both require the SAME golden `e2e-render-map-baseline.json` regen (E-EQ-001 at `:2119`; E-EQ-002 appears twice). Doing them separately pays the regen twice and reviews the same golden file twice, for two edits a few lines apart. One arc, one regen, one review.

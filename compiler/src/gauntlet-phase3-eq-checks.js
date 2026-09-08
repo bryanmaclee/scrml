@@ -15,7 +15,7 @@
  *                  this walker catches if-condition occurrences from the
  *                  parsed exprNode tree.
  *
- *   E-EQ-002     — `== not` / `!= not`. Use `is not` / `is not not`. (§45)
+ *   E-EQ-002     — `== not` / `!= not`. Use `is not` / `is some`. (§45)
  *                  Covers if-condition paths that bypass collectExpr.
  *
  *   E-SYNTAX-042 — `null` / `undefined` keywords used in scrml source.
@@ -589,7 +589,15 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
   // E-EQ-002 — `== not` / `!= not`.
   const isNotLit = (o) => o.kind === "lit" && o.primType === "not";
   if (isNotLit(left) || isNotLit(right)) {
-    const replacement = eqNode.op === "==" ? "is not" : "is not not";
+    // ⚑ S410 — the `!=` arm used to advise `is not not`, which is legal scrml but is
+    // EXACTLY the double-negative the language provides `is some` to avoid.
+    // SPEC.md:24944, §45: "`is some` exists to avoid the double-negative
+    // `not (x is not)` in common presence checks." A diagnostic that hands the author
+    // the form the spec exists to discourage is teaching the wrong idiom at the one
+    // moment they are guaranteed to be reading.
+    // `x != not` means "x is present", and `is some` is the canonical spelling of that
+    // (§42.2.5: `is some` = value EXISTS). g-e-eq-002-hint-suggests-the-double-negative.
+    const replacement = eqNode.op === "==" ? "is not" : "is some";
     errors.push(new GauntletPhase3Error(
       "E-EQ-002",
       `E-EQ-002: \`${eqNode.op} not\` is not valid — use \`${replacement}\` to check for absence (§45).`,
