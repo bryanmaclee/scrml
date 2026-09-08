@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `e6b8fc77` — wrap(s405): four rulings, two security arcs, and one failure mode wearing seven costumes — **LOCAL-ONLY**
+- `2809ba78` — wrap(s405): four rulings, two security arcs, and one failure mode wearing seven costumes (#901) — **pushed**
 - `6bd29d3d` — wrap(s406): a host lockup investigated — the obvious cause measured and falsified (#889) — **pushed**
 - `d52f1722` — wrap(s404): a ruling in two messages, then a day of instruments being wrong — mine twice (#878) — **pushed**
 - `83f95592` — wrap(s397): the `~` axiom ruled as a conjunction, and the failures were claims not code (#835) — **pushed**
