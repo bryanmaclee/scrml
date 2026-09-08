@@ -66,7 +66,19 @@
  * stream by the api.js driver.
  */
 
-import { parseSchemaBlock, findNonLiteralSetItems, referencesHint } from "./schema-differ.js";
+// W-SCHEMA-NO-TABLES-DECLARED reuses the ONE raw-DDL recognizer rather than
+// re-deriving one here — see the fire site for why a third recognizer would be
+// self-defeating. It is imported from `schema-differ.js` and NOT from
+// `protect-analyzer.ts`, whose own line-631 comment records that the early PA
+// stage avoids pulling a codegen module: importing the recognizer from there
+// would drag `bun:sqlite` + `node:fs` into THIS stage, the mirror of the same
+// invariant. `schema-differ.js` imports only `sql-ident.ts`.
+import {
+  parseSchemaBlock,
+  findNonLiteralSetItems,
+  referencesHint,
+  harvestRawCreateTables,
+} from "./schema-differ.js";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -751,6 +763,58 @@ function checkSchemaDeclarations(ast, filePath, errors) {
       parsed = { tables: [] };
     }
     const tables = Array.isArray(parsed.tables) ? parsed.tables : [];
+
+    // W-SCHEMA-NO-TABLES-DECLARED — the block has content but declares NO table
+    // in EITHER recognized form, so it is inert. §14.8.10 makes a `tenant_id`
+    // COLUMN the declaration, so an unrecognized `<schema>` body yields an empty
+    // tenant-scoped set, `_tenantActive` false, and a tenant isolation floor
+    // that emits nothing — with, until this code existed, no diagnostic either,
+    // at exit 0. That exact composition shipped once (dpa-039: the raw-DDL form
+    // was taught to §14.8.9 and not to §14.8.10). This is the standing detector
+    // for the NEXT such divergence, not a patch for that one.
+    //
+    // ⚑ Recognition here is the UNION of both forms and reuses the SAME
+    // functions the floors use — `parseSchemaBlock` for the DSL and §14.8.9's
+    // `harvestRawCreateTables` for the raw DDL. A third recognizer HERE would
+    // reintroduce, in the detector itself, precisely the divergence it exists to
+    // catch: it would cry wolf on every raw-DDL `<schema>` in the corpus.
+    if (tables.length === 0) {
+      const rawTables = new Map();
+      harvestRawCreateTables(body, rawTables);
+      const fns = Array.isArray(parsed.fns) ? parsed.fns : [];
+      // A `${ schemaFor(T) }` (§41.15 Form-B) delegation body is a NON-TEXT
+      // child expanded by a later stage; `schemaBodyText` reads text children
+      // only, so such a block looks empty here. Every one of the 18 schemaFor
+      // `<schema>` blocks in the corpus reaches this point, and firing on them
+      // would be a false positive on all of them.
+      const hasNonTextChild = Array.isArray(node.children) &&
+        node.children.some((c) => c && c.kind && c.kind !== "text");
+      // Comments are content the author wrote and the compiler is right to
+      // ignore. A comment-only `<schema>` is quiet in all three syntaxes.
+      const substantive = body
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/--[^\n]*/g, " ")
+        .replace(/\/\/[^\n]*/g, " ")
+        .trim();
+      // A `fn`-only `<schema>` (§14.8.11.2 SECURITY DEFINER) declares no table
+      // BY CONSTRUCTION and is legitimate.
+      if (rawTables.size === 0 && fns.length === 0 && substantive.length > 0 && !hasNonTextChild) {
+        errors.push(new GauntletError(
+          "W-SCHEMA-NO-TABLES-DECLARED",
+          `W-SCHEMA-NO-TABLES-DECLARED: this \`<schema>\` block has content but declares no ` +
+          `table. A table is declared in one of exactly two forms: the declarative DSL ` +
+          `\`tableName { column: type }\`, or raw \`CREATE TABLE name (…)\` DDL. Content the ` +
+          `compiler recognizes as neither declares nothing, so this block is inert — and every ` +
+          `floor keyed on a \`<schema>\` table is silently off, including the §14.8.10 ` +
+          `tenant-row isolation floor, for which a \`tenant_id\` column's PRESENCE is the ` +
+          `declaration. Check for a typo in the table head (a stray \`:\` after the table name ` +
+          `is the common one — \`users: { … }\` is not a declaration; \`users { … }\` is). ` +
+          `(See SPEC §39.12, §14.8.10.)`,
+          span,
+          "warning",
+        ));
+      }
+    }
 
     for (const table of tables) {
       if (!table || typeof table.name !== "string") continue;

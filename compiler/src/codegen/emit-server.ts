@@ -27,7 +27,7 @@ import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
-import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, SERVER_PROTECT_HELPER, type ProtectContext } from "./protect-egress.ts";
+import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -1790,11 +1790,310 @@ export function generateServerJs(
     return e;
   };
 
-  // §14.8.9 fail-closed gate — E-PROTECT-004. Scan each server-fn SOURCE for a
-  // protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress (`_{}`
-  // / manual `Response` / `asIs`) where origin-keyed structural redaction cannot
-  // be guaranteed. The compiler never silently ships a protected column through
-  // a path it cannot redact. (Gated on protect-active; a `reveal` declassifies.)
+  // §12.5 / §14.8.9 — the OPAQUE-RESULT guard every client-facing server-fn exit
+  // emits, immediately after the author-body capture IIFE closes and BEFORE the
+  // redact-then-serialize envelope. It has TWO shapes and which one is emitted is
+  // decided by `_protectActive` alone:
+  //
+  //   protect INACTIVE -> PASSTHROUGH. `if (_scrml_result instanceof Response)
+  //     return _scrml_result;` — a body that already produced a `Response` OWNS
+  //     the response. Without it the envelope does
+  //     `new Response(JSON.stringify(<a Response>), { status: 200 })`, and
+  //     `JSON.stringify` of a `Response` is `"{}"` (no enumerable own props), so
+  //     an adopter's deliberate `403` is re-emitted as a **200 with an empty
+  //     body**. MEASURED on the wire at `8fa6854d` from the baseline-CSRF arm:
+  //     `200 / application/json / "{}"`, exit 0, no diagnostic. Fail-OPEN.
+  //
+  //   protect ACTIVE -> REFUSAL. The passthrough is exactly what the §14.8.9
+  //     floor must NOT do: a `Response` is a one-shot stream handle the redactor
+  //     cannot inspect, so passing it through ships an UNMEDIATED body out of an
+  //     app that declared `protect=` columns. Refuse what the monitor cannot
+  //     inspect. On this arm the author-constructed shape is ALSO a hard compile
+  //     error (`E-PROTECT-005` below), so this runtime limb only ever catches the
+  //     residue no syntactic scan can see: an aliased `Response`, an `await
+  //     fetch(...)` result, a `.clone()`, or a value returned from a callee the
+  //     emitted slice does not contain.
+  //
+  // ⛔ NOT the `handle()` middleware path. §40.3.5's blessed
+  // `new Response("Forbidden", {status:403})` lives in a `handle()` body, whose
+  // four `instanceof Response` sites are in the `_scrml_mw_*` emission above and
+  // are deliberately untouched — that path never runs `_egressRedact`.
+  //
+  // ⚠ TENANT (§14.8.10) IS DELIBERATELY UNCHANGED HERE. A tenant-active,
+  // protect-INACTIVE app still gets the passthrough, i.e. the same fail-open it
+  // has today. The tenant-side twin of this refusal is a separate arc; closing it
+  // here would silently change a floor this change was not scoped to.
+  // ⚠ KNOWN, DOCUMENTED GAP — THE A9-Ext-5 IDEMPOTENCY STORE DOES NOT COVER AN
+  // AUTHOR-OWNED RESPONSE, AND IT CANNOT WITH THE STORE'S CURRENT SHAPE.
+  // This guard returns EARLY, so on a non-monotone CPS batch (§19.9.6) whose body
+  // hands back its own `Response`, the `_scrml_idempotency_store(...)` call below
+  // never runs and a retry with the same `Idempotency-Key` RE-EXECUTES the body.
+  // Not a regression — the baseline-CSRF arm previously shipped `200 "{}"` for
+  // this shape, which was worse, and the non-CSRF arm has had the same gap since
+  // #452 — but it is a real limitation and it is recorded here rather than left
+  // for the next reader to rediscover.
+  //
+  // ⛔ "Just store on the passthrough branch too" is NOT a cheap fix, it is an
+  // UNSOUND one: `_scrml_idempotency_store` takes `_scrml_resp_body`, a STRING
+  // produced by `JSON.stringify`, and stores it against a hard-coded `200`.
+  // Capturing an author `Response` for replay would mean reading its body —
+  // consuming the stream and destroying the very response we are about to
+  // return — and would replay it under the wrong status and without its headers.
+  // Closing this properly needs a store that can hold a status + headers + a
+  // buffered body, which is an Ext-5 change, not an egress-guard change.
+  //
+  // ⚑ And it deliberately is NOT mentioned in a diagnostic, because no diagnostic
+  // reaches the affected population: the shape is a NON-protect app (the
+  // passthrough branch) and `E-PROTECT-005` fires only on protect apps. Saying it
+  // there would be saying it to the wrong audience.
+  //
+  // ⚠ SAME CLASS, SECOND INSTANCE, DELIBERATE: THE REFUSAL FIRES AFTER `COMMIT`,
+  // SO A REFUSED REQUEST KEEPS ITS SIDE EFFECTS. A §19.9.6 batch that INSERTs and
+  // then returns an aliased / `fetch`-derived / `.clone()`d Response — the residue
+  // the runtime limb exists for — commits, answers 500, and a client retry
+  // inserts again. Moving the REFUSAL branch above the COMMIT was considered and
+  // REJECTED: the author's body ran to completion successfully, and the refusal is
+  // about whether the compiler can safely REPORT the result, not about whether the
+  // work was valid. Rolling back on a reporting failure would discard committed,
+  // correct work — inventing silent data loss to solve a confidentiality problem
+  // §14.8.9 never asked about. The PASSTHROUGH branch belongs below the COMMIT for
+  // the ordinary reason (it is a success), and splitting the two branches across
+  // the COMMIT would make one guard mean two different things about durability.
+  // Documented rather than silently accepted; a durable-side-effects-on-5xx rule
+  // is a §8.9.2/§19.9.6 question, not an egress-guard one.
+  // ⛔ MARK A COMPILER-EMITTED `Response` THAT LANDS INSIDE A CAPTURE IIFE.
+  //
+  // The capture IIFE's value becomes `_scrml_result`, which the opaque-result
+  // guard inspects. Everything the AUTHOR writes there is author-owned by
+  // definition — but the compiler emits into that window too, and its own
+  // responses must not be refused as if an adopter had hand-built them.
+  //
+  // MEASURED, and it is why this exists: on the baseline-CSRF arm the §53.9.4
+  // `E-CONTRACT-001-RT` boundary check emits `return new Response(…, {status:400})`
+  // INSIDE the IIFE. Under `protect=` the guard saw a body-carrying Response and
+  // returned a 500 `ProtectOpaqueEgress` — so a predicate violation on a common
+  // shape (`id: number(>0 && <10000)`) reported the WRONG status, from the
+  // compiler's own code, with no build-time warning.
+  //
+  // ⚑ THE POPULATION IS MECHANICALLY DERIVED, NOT GUESSED. Exactly four emitters
+  // run between the IIFE opener and its close — `emitServerParamCheck`,
+  // `emitBroadcastInjection`, `emitLogicNode`, `emitExprField` — and of those
+  // exactly ONE emits a `Response` (`emitServerParamCheck`; the broadcast
+  // injection has none, and the other two lower AUTHOR code by definition). A
+  // conformance-level drift test re-derives that set from the emitted text, so a
+  // second compiler emitter appearing in this window fails a test rather than
+  // reaching an adopter.
+  //
+  // It THROWS rather than silently passing through when the shape it expects is
+  // absent: a silent no-op here is exactly how the two limbs drifted apart in the
+  // first place.
+  const _markMediatedResponses = (emitted: string[], what: string): string[] => {
+    const _opener = emitted.findIndex((l) => l.includes("return new Response("));
+    if (_opener === -1) {
+      throw new Error(
+        `emit-server: ${what} was expected to emit a compiler-owned \`return new Response(\` for ` +
+        `mediation marking and did not. If that emitter stopped producing a Response this call is ` +
+        `dead and should be removed; if it changed shape, the §14.8.9 runtime guard will refuse the ` +
+        `compiler's own response. Do not silence this by making the mark optional.`,
+      );
+    }
+    const _out = emitted.slice();
+    // `return new Response(<args>);` -> `return _scrml_protect_mediated(new Response(<args>));`
+    // The construction spans several lines, so the opener is wrapped and the
+    // matching final `);` of that statement is closed one paren deeper.
+    _out[_opener] = _out[_opener].replace("return new Response(", "return _scrml_protect_mediated(new Response(");
+    const _closer = _out.findIndex((l, i) => i > _opener && /\}\);\s*$/.test(l));
+    if (_closer === -1) {
+      throw new Error(`emit-server: ${what} — could not find the closing \`});\` of its Response construction.`);
+    }
+    _out[_closer] = _out[_closer].replace(/\}\);(\s*)$/, "}));$1");
+    return _out;
+  };
+
+  // §8.11 / §14.8.9 — the opaque-result guard for `/__mountHydrate`.
+  //
+  // ⚑ ITS LOADER VALUES ARE AUTHOR SERVER-FN RETURNS, NOT COMPILER-BUILT SQL.
+  // An earlier comment in `protect-egress.ts` claimed this sink and
+  // `/__serverLoad` both "feed on compiler-built SQL values, so no construction
+  // reaches it today". That is true of `/__serverLoad` and FALSE here:
+  // `_scrml_mh_v<i>` is whatever a `server @var`'s loader returned. MEASURED — a
+  // two-cell app whose loader returns `Response.redirect(...)` compiles at exit 0
+  // (only `W-PROTECT-005`) and the redact's refusal then throws OUT of the
+  // handler, so the ENTIRE hydration payload is lost, every unrelated cell with
+  // it, and page boot breaks. The three guarded sinks return a shaped 500; this
+  // one returned nothing at all.
+  //
+  // It refuses ANY `Response` cell value rather than reusing `_opaqueResultGuard`'s
+  // three-way test, and the difference is deliberate: a hydration cell is DATA
+  // being seeded into client state. A `Response` is never a valid value for one —
+  // not a redirect, not a 204 — so "does it carry a body" is not the question
+  // here. One refusal for the whole payload, because the payload is atomic: a
+  // partially-hydrated page is worse than a diagnosable failure.
+  //
+  // Gated on `_protectActive` because that is the only path where the redact runs
+  // at all, so a plain app stays byte-identical.
+  const _mountHydrateOpaqueGuard = (cellCount: number, indent: string): string[] => {
+    if (!_protectActive || cellCount === 0) return [];
+    const _cells = Array.from({ length: cellCount }, (_, i) => `_scrml_mh_v${i}`).join(", ");
+    return [
+      `${indent}// §14.8.9 — a hydration cell is DATA; a \`Response\` is never a valid value`,
+      `${indent}// for one. Refuse the whole payload with a shaped 500 rather than letting`,
+      `${indent}// the redact throw out of the handler and lose every unrelated cell.`,
+      `${indent}for (const _scrml_mh_cell of [${_cells}]) {`,
+      `${indent}  if (_scrml_mh_cell instanceof Response) return _scrml_protect_opaque_refusal();`,
+      `${indent}}`,
+    ];
+  };
+
+  const _opaqueResultGuard = (resultVar: string, indent: string): string[] => {
+    if (!_protectActive) {
+      return [`${indent}if (${resultVar} instanceof Response) return ${resultVar};`];
+    }
+    return [
+      `${indent}// §14.8.9 — PROVENANCE first, then shape. A response the COMPILER built`,
+      `${indent}// is already mediated; a null-body one carries no payload to mediate;`,
+      `${indent}// anything else is an author-owned body the floor cannot read (helper).`,
+      `${indent}if (${resultVar} instanceof Response) {`,
+      `${indent}  if (${resultVar}[Symbol.for("scrml.protect.mediated")]) return ${resultVar};`,
+      `${indent}  if (${resultVar}.body === null) return ${resultVar};`,
+      `${indent}  return _scrml_protect_opaque_refusal();`,
+      `${indent}}`,
+    ];
+  };
+
+  // §14.8.9 / E-PROTECT-005 — the author-constructed-`Response` gate. Runs on a
+  // `protect=` app only, over a slice of ALREADY-LOWERED server JS for ONE author
+  // body, and pushes a HARD error when that body constructs a `Response`.
+  //
+  // WHY THIS IS AN ERROR AND NOT A WARNING: the compiler owns the egress envelope
+  // and mediates it (`_scrml_protect_redact`). It cannot mediate a body the
+  // author serialized themselves — it cannot read a `Response` stream, and the
+  // §14.8.9 descriptor does not survive the `JSON.stringify` the author did.
+  // Fail-closed beats fail-open, and a compile error is the cheapest place in the
+  // lifecycle to be fail-closed. `reveal("col")` does NOT discharge it: reveal
+  // declassifies a COLUMN at a value the floor can still walk, and a
+  // hand-serialized Response is not walkable at all.
+  //
+  // ⚑ WHAT IT COSTS, STATED PRECISELY — the earlier framing ("you cannot
+  // hand-build a `Response`") was BOTH too broad and, as implemented, a
+  // build-break with no workaround. The real line is narrower and is the one an
+  // adopter can act on: **a `protect=` app keeps full control of STATUS and
+  // HEADERS; what it gives up is authoring the BODY.** Redirects, `204`s and
+  // `Response.error()` all still compile, because a null-body construction has
+  // no payload the floor could fail to inspect. Withholding body authorship is
+  // the intended hole and the argument for a future typed, mediatable return.
+  //
+  // ⛔ THE GATE IS FILE-SCOPED, NOT QUERY-SCOPED, AND THAT IS DELIBERATE. It
+  // fires on a body-carrying `Response` in ANY server body of a file that
+  // declares `protect=`, even one whose own SELECT projects every protected
+  // column out. Query-scoping it would make it a per-body CO-OCCURRENCE test —
+  // exactly the mechanism `E-PROTECT-004`'s `Response` limb was deleted for,
+  // because moving the query one function away defeats it (measured). The whole
+  // reason this gate is immune to extraction is that it keys on the CONSTRUCTION
+  // alone. The message says so, so an adopter who hits it on a function that
+  // touches no protected table knows it is scope-based by design, not a bug.
+  //
+  // Sound in the FIRING direction (acorn, code position, body-carrying only),
+  // incomplete in the not-firing direction (see
+  // `findAuthoredResponseConstruction`). The guarantee is `_opaqueResultGuard`'s
+  // refusal above, not this.
+  // ⚑ DEDUP KEY — ONE AUTHOR DEFECT, ONE DIAGNOSTIC. A server fn is lowered TWICE
+  // (once as its HTTP route handler, once as the in-process peer callable at
+  // `_calledPeerNames`), so without this a single hand-built body reported
+  // E-PROTECT-005 twice for the same source. Keyed on the fn's SPAN START rather
+  // than its name: the span is the author's actual site, and two same-named
+  // things in different scopes are two defects. Same reason — and the same shape
+  // — as the adjacent `preparedStmtErrors` sink, whose own comment says it
+  // dedupes precisely because a fn emitted on both paths would report twice.
+  //
+  // ⚑ AND THE KEY IS `span.start` + THE REPORTED NAME, NOT THE SPAN ALONE.
+  // A §61 `<endpoint>` ARM carries no distinguishing span of its own — every arm
+  // falls back to the enclosing `epDecl.span` — so a span-only key collapsed ALL
+  // arms of one endpoint into one entry: two offending arms produced ONE
+  // diagnostic naming only the first, and the adopter needed a rebuild
+  // round-trip per arm to find them. The reported name IS arm-distinguishing
+  // (`<Deny> arm of <endpoint POST /gate>`), while a server fn's name is
+  // identical on its route-handler and peer-callable emissions — which is the
+  // pair this dedup exists to collapse. So name+span separates what must be
+  // separated and still joins what must be joined.
+  const _seenProtectResponse = new Set<string>();
+  const _protectResponseGate = (
+    fnName: string,
+    loweredJs: string,
+    span: unknown,
+    sliceKind: ScanSliceKind,
+  ): void => {
+    if (!_protectActive) return;
+    const _hit = findAuthoredResponseConstruction(loweredJs, sliceKind);
+    if (!_hit) return;
+    const _spanStart = (span as { start?: number } | null | undefined)?.start;
+    const _dedupKey = `${typeof _spanStart === "number" ? _spanStart : "?"}::${fnName}`;
+    if (_seenProtectResponse.has(_dedupKey)) return;
+    _seenProtectResponse.add(_dedupKey);
+    if (_hit.kind === "null-body-static") {
+      // ⚑ W-PROTECT-005 — THE COMPILE/RUNTIME SEAM, REPORTED RATHER THAN LEFT TO
+      // BITE. `Response.redirect(...)` and `Response.error()` carry no body, so
+      // `E-PROTECT-005` firing on them would be wrong on its own rationale — and
+      // it did, on the first landing, build-breaking every `protect=` app that
+      // issues a redirect. But the RUNTIME guard still refuses them, because Bun
+      // gives them a 0-byte ReadableStream rather than a null body and a
+      // secret-carrying `new Response("s3cret", {status:302, headers:{Location}})`
+      // is indistinguishable from one at the exit (MEASURED). Permitting them
+      // silently would swap a loud build error for a 500 on the first request —
+      // a worse defect. So: it compiles, and it says so here.
+      errors.push(new CGError(
+        "W-PROTECT-005",
+        `W-PROTECT-005: server function \`${fnName}\` returns \`${_hit.spelling}\`, which carries no body, in a file ` +
+        `that declares \`protect=\` columns. It COMPILES — a payload-free response has nothing for the §14.8.9 floor ` +
+        `to fail to inspect — but the runtime egress floor will still refuse it with a 500, because at the exit it ` +
+        `cannot tell this apart from a body-carrying \`Response\` dressed the same way (same \`Location\` header, no ` +
+        `\`Content-Length\`, and reading the body to measure it would consume the stream). Resolution: write the ` +
+        `equivalent explicit null-body form, which the floor DOES recognize exactly and passes through untouched — ` +
+        `\`new Response(not, { status: 302, headers: { Location: "/where" } })\` for a redirect, ` +
+        `\`new Response(not, { status: 204 })\` for no-content. Or move this function into a file that declares no ` +
+        `\`protect=\` columns.`,
+        (span ?? {}) as any,
+        "warning",
+      ));
+      return;
+    }
+    errors.push(new CGError(
+      "E-PROTECT-005",
+      `E-PROTECT-005: server function \`${fnName}\` builds its own response BODY (\`${_hit.spelling}\`) in a file that ` +
+      `declares \`protect=\` columns. The §14.8.9 egress floor mediates the response the compiler builds — it reads ` +
+      `each value's protected-origin descriptor and strips what was not \`reveal\`-declassified. A hand-serialized ` +
+      `body is an opaque stream the floor cannot read, so a protected column cannot be proven absent from it, and the ` +
+      `compiler will not emit an envelope it cannot mediate. Resolution: return the VALUE (the compiler serializes ` +
+      `and redacts it for you); or move this function into a file that declares no \`protect=\` columns. ` +
+      `STATUS AND HEADERS ARE NOT RESTRICTED — \`new Response(not, { status, headers })\` carries no body and still ` +
+      `compiles, as does a \`handle()\` middleware body (§40.3), which is outside this egress path. ` +
+      `This check is FILE-SCOPED on purpose: it fires wherever the body is built, even if THIS function selects no ` +
+      `protected column, because keying it on the query instead would let you defeat it by moving the query into a ` +
+      `helper. And \`reveal("col")\` does NOT discharge it — reveal declassifies a column at a value the floor can ` +
+      `still walk, and a hand-serialized body is not walkable.`,
+      (span ?? {}) as any,
+      "error",
+    ));
+  };
+
+  // §14.8.9 conservative LINT — E-PROTECT-004. Scan each server-fn SOURCE for a
+  // protected-origin `?{}` co-occurring with a `_{}` foreign block (§23) or an
+  // `asIs` value (§14.1.1) in the SAME body, where origin-keyed structural
+  // redaction cannot be guaranteed.
+  //
+  // ⚑ TWO KINDS, NOT THREE, AND THE `Response` KIND WAS REMOVED ON PURPOSE
+  // (S405 arc A item A3). A source-text co-occurrence test is defeated by
+  // ordinary function extraction — measured: the same code with the query in a
+  // helper and the raw egress in the caller compiled CLEAN while the one-body
+  // form fired — so it cannot carry a confidentiality guarantee, and recognizing
+  // one more spelling of `Response` is a completeness fix with no done-condition.
+  // The `Response` kind is now enforced STRUCTURALLY instead: `E-PROTECT-005` at
+  // emission (`_protectResponseGate` above) and the runtime refusal at the sink
+  // (`_opaqueResultGuard` / `_scrml_protect_redact`). Do not re-add it here.
+  //
+  // Suppression is COLUMN-keyed (S405 item A4): a `reveal("col")` discharges this
+  // only for a query whose protected output columns it ALL names. It used to be
+  // existence-keyed, so `reveal("email")` silently declassified `passwordHash`.
   if (_protectActive) {
     const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
     if (_src) {
@@ -1809,13 +2108,26 @@ export function generateServerJs(
           const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
           if (_seenEProtect.has(_dedupKey)) continue;
           _seenEProtect.add(_dedupKey);
+          // NAME THE COLUMNS. They are the ALIAS-RESOLVED OUTPUT names, which the
+          // author often cannot read off their own SQL — `SELECT passwordHash AS h`
+          // needs `reveal("h")` — so a message that says "declassify every
+          // protected column" without listing them asks the adopter to guess at
+          // something the compiler has already computed.
+          const _needed = _leak.undischarged === "*"
+            ? "this query's column origins cannot be resolved statically, so the floor strips the row WHOLESALE and " +
+              "no finite set of `reveal(\"col\")` names can discharge it — project the protected columns out, or " +
+              "rewrite the query so its origins resolve"
+            : "declassify " + _leak.undischarged.map((c) => `\`reveal("${c}")\``).join(" and ") +
+              " at the value" +
+              (_leak.undischarged.length > 1 ? " (every one of them — a partial reveal does not discharge the gate)" : "");
           errors.push(new CGError(
             "E-PROTECT-004",
             `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
             `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
-            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: declassify ` +
-            `explicitly at the value with \`reveal("col")\`, project the protected column out of the SELECT, or return the ` +
-            `row through the normal compiler-emitted response (not a manual \`Response\` / \`_{}\` / \`asIs\`).`,
+            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: ${_needed}; ` +
+            `or project the protected columns out of the SELECT; or return the row through the normal compiler-emitted ` +
+            `response (not a \`_{}\` / \`asIs\`). Note the names are the query's OUTPUT column names after aliasing — ` +
+            `\`SELECT passwordHash AS h\` is declassified with \`reveal("h")\`.`,
             (_sp as any),
             "error",
           ));
@@ -3708,6 +4020,7 @@ export function generateServerJs(
         ...localMapSetOptsFor(fnNode),
       };
 
+      const _authorBodyStartSse = lines.length;
       for (const stmt of body) {
         const code = emitLogicNode(stmt, _serverFnOptsSSE);
         if (code) {
@@ -3716,6 +4029,16 @@ export function generateServerJs(
           }
         }
       }
+      // §14.8.9 / E-PROTECT-005 — a `server function*` generator's yielded frames
+      // are a client egress that runs through `_scrml_protect_redact` below, so
+      // its body is a member of the same population as a server-fn body. A
+      // yielded body-carrying `Response` is a compile error here; one that
+      // arrives as residue (alias / `fetch` / `.clone()`) is refused at runtime
+      // and — see the stream `catch` below — that refusal is OBSERVABLE, on both
+      // an `event: error` frame and a server log line. An earlier draft of this
+      // comment claimed the refusal was loud while the generic empty `catch` was
+      // in fact swallowing it whole.
+      _protectResponseGate(name, lines.slice(_authorBodyStartSse).join("\n"), fnNode.span, "statements");
 
       // g-currentuser-plain-handler-dangling (S322) — bind `@currentUser` for THIS
       // SSE handler if the generator body referenced it. Mirrors the non-SSE route
@@ -3766,6 +4089,27 @@ export function generateServerJs(
       lines.push(`        }`);
       lines.push(`      } catch (_scrml_err) {`);
       lines.push(`        // Stream error — close the controller`);
+      if (_protectActive) {
+        // ⚑ A CONFIDENTIALITY REFUSAL MUST NOT LOOK LIKE A CLEAN END-OF-STREAM.
+        // The `catch` above is deliberately empty for ordinary stream errors, and
+        // that swallowed the §14.8.9 refusal too: a protect-active generator
+        // yielding an aliased / `fetch`-derived `Response` — precisely the residue
+        // the runtime limb exists to catch — ended the stream with a 200, no frame
+        // and no log, indistinguishable from normal completion. The limb
+        // designated THE GUARANTEE cannot be the silent one.
+        //
+        // Recognized by the tag `_scrml_protect_redact` sets, never by matching
+        // the message text, and emitted ONLY when protect is active so a plain SSE
+        // app is byte-unchanged. Every other stream error keeps its prior behaviour.
+        lines.push(`        if (_scrml_err && _scrml_err.__scrml_protect_opaque) {`);
+        lines.push(`          // §14.8.9 — surface the refusal on BOTH channels: the client gets a`);
+        lines.push(`          // terminal \`error\` frame it can act on, the operator gets a log line.`);
+        lines.push(`          console.error("[scrml §14.8.9] " + _scrml_err.message);`);
+        lines.push(`          try {`);
+        lines.push(`            _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\n' + 'data: ' + JSON.stringify({ error: { kind: "ProtectOpaqueEgress", message: "the server refused a stream frame it cannot redact: a \`protect=\` column could not be proven absent (SPEC §14.8.9)" } }) + '\\n\\n'));`);
+        lines.push(`          } catch (_scrml_enqErr) { /* controller already closed — the log line still fired */ }`);
+        lines.push(`        }`);
+      }
       lines.push(`      } finally {`);
       lines.push(`        _scrml_ctrl.close();`);
       lines.push(`      }`);
@@ -4080,7 +4424,19 @@ export function generateServerJs(
           const _pParsed = parsePredicateAnnotation(_pAnnotation);
           if (_pParsed) {
             const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ");
-            for (const l of _pLines) lines.push(l);
+            // ⚑ GATED ON `_protectActive`. The mark only means anything to the
+            // §14.8.9 guard, which only exists on a protect path — but emitting
+            // it unconditionally referenced `_scrml_protect_mediated`, which
+            // satisfies the helper-injection gate at the bottom of this file and
+            // dragged the whole 127-line `SERVER_PROTECT_HELPER` into apps that
+            // declare no `protect=` column at all. MEASURED on a `protect=`-free
+            // app with one predicated param: the helper was ~66% of the emitted
+            // module and every function in it was dead. That gate's own comment
+            // promises a non-protect app is byte-unchanged; this keeps it true.
+            const _pOut = _protectActive
+              ? _markMediatedResponses(_pLines, "§53.9.4 E-CONTRACT-001-RT param check")
+              : _pLines;
+            for (const l of _pOut) lines.push(l);
           }
         }
       }
@@ -4143,6 +4499,18 @@ export function generateServerJs(
       };
 
       const body: any[] = fnNode.body ?? [];
+      // ⚑ THE E-PROTECT-005 SCAN WINDOW OPENS **HERE**, NOT AT THE IIFE, AND THE
+      // DIFFERENCE IS A BUILD-BREAKING FALSE POSITIVE. Between the IIFE opener and
+      // this point the compiler emits its OWN `new Response(...)`: the §53.9.4
+      // `E-CONTRACT-001-RT` boundary check (`emitServerParamCheck`,
+      // `emit-predicates.ts:250`) returns a 400 `Response` from inside the IIFE.
+      // With the window opened at the IIFE, EVERY `protect=` app with a predicated
+      // server-fn parameter fired E-PROTECT-005 on the compiler's own emission —
+      // REPRODUCED during this arc's adversarial pass on `auth="none"` +
+      // `protect=` + `id: number(>0 && <10000)`, which took the baseline-CSRF arm
+      // and failed the build with a confidentiality error about code the author
+      // never wrote. The window must contain ONLY author-lowered lines.
+      const _authorBodyStartCsrf = lines.length;
       // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
       // loop — for a multi-batch route it carries THIS batch's index set; for
       // the single-handler case it is `route.cpsSplit` verbatim.
@@ -4211,10 +4579,26 @@ export function generateServerJs(
       // drained once at the tail — see its declaration.)
       for (const e of _foreignCrossingErrors) errors.push(e);
 
+      // §14.8.9 / E-PROTECT-005 — scan THIS author body (protect-active only).
+      _protectResponseGate(name, lines.slice(_authorBodyStartCsrf).join("\n"), fnNode.span, "statements");
+
       lines.push(`  })();`);
       if (_envelope) {
         lines.push(`  await _scrml_sql.unsafe("COMMIT");`);
       }
+      // §12.5 — the OPAQUE-RESULT guard. THIS ARM HAD NONE UNTIL S405: an author
+      // `Response` fell straight into `JSON.stringify` below, and a deliberate 403
+      // came back `200 / application/json / "{}"` — MEASURED on the wire at
+      // `8fa6854d`, exit 0, no diagnostic. The `auth="required"` arm has carried
+      // the guard since #452; this arm is the same shape and was simply missed.
+      // Zero confidentiality delta on the passthrough branch — nothing was being
+      // protected here anyway; see `_opaqueResultGuard` for the protect branch.
+      //
+      // Placed AFTER the §8.9.2 COMMIT and BEFORE the redact: an author `Response`
+      // is still a SUCCESSFUL handler return (the body ran to completion), so the
+      // transaction commits exactly as it does for a plain value. Placing it above
+      // the COMMIT would silently leave the envelope open on this shape.
+      for (const l of _opaqueResultGuard("_scrml_result", "  ")) lines.push(l);
       // M-7C-D-12 Track 2 (§57 Wire Format): when the declared return type
       // is `T | not` (absence is a legitimate variant), wrap the success
       // result through `_scrml_wire_encode` so scrml-absence serializes as
@@ -4252,7 +4636,21 @@ export function generateServerJs(
       lines.push(`  });`);
       if (_envelope) {
         lines.push(`  } catch (_scrml_batch_err) {`);
-        lines.push(`    await _scrml_sql.unsafe("ROLLBACK");`);
+        // ⚑ THE ROLLBACK MUST NOT BE ABLE TO REPLACE THE ERROR IT IS CLEANING UP
+        // AFTER. This `try` spans PAST the `COMMIT` above — the egress guard and
+        // the §14.8.9 redact both run inside it — so a throw from the redact
+        // arrives here with the transaction ALREADY COMMITTED. A bare
+        // `unsafe("ROLLBACK")` then fails with "no transaction is active", and
+        // because that failure happens BEFORE `throw _scrml_batch_err`, the SQL
+        // error propagates and the original one is lost: an adopter refused for a
+        // confidentiality reason got a confusing SQL 500 instead of the §14.8.9
+        // message. Before S405 nothing on this path could throw after the COMMIT,
+        // so the masking was unreachable; the runtime refusal made it reachable.
+        // Swallowing a rollback failure is right in BOTH directions: if there is
+        // no transaction there is nothing to roll back, and if there is one and
+        // the rollback genuinely failed, the original error is still the one the
+        // operator needs to see first.
+        lines.push(`    try { await _scrml_sql.unsafe("ROLLBACK"); } catch (_scrml_rb_err) { /* already committed, or the connection is gone — never mask _scrml_batch_err */ }`);
         lines.push(`    throw _scrml_batch_err;`);
         lines.push(`  }`);
       }
@@ -4408,6 +4806,16 @@ export function generateServerJs(
       // the browser never got the sid.
       const _bodyIndentNonCsrf = "    ";
       lines.push(`  const _scrml_result = await (async () => {`);
+      // The E-PROTECT-005 scan window. It is tight HERE for a different reason
+      // than on the baseline-CSRF arm, and the difference is worth stating so a
+      // future edit does not "harmonize" the two: on THIS arm the compiler's own
+      // §53.9.4 `E-CONTRACT-001-RT` 400-`Response` is emitted at HANDLER scope,
+      // ABOVE the IIFE, so it is already outside the window. On the CSRF arm the
+      // same check is emitted INSIDE the IIFE, which is why that window has to
+      // open later — see the ⚑ note there. Opening this one at the IIFE is
+      // correct only as long as nothing compiler-emitted is added between here
+      // and the author-body loop below.
+      const _authorBodyStartNonCsrf = lines.length;
 
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
@@ -4473,6 +4881,9 @@ export function generateServerJs(
       // drained once at the tail — see its declaration.)
       for (const e of _foreignCrossingErrorsNonCsrf) errors.push(e);
 
+      // §14.8.9 / E-PROTECT-005 — scan THIS author body (protect-active only).
+      _protectResponseGate(name, lines.slice(_authorBodyStartNonCsrf).join("\n"), fnNode.span, "statements");
+
       // Close the capture IIFE and envelope `_scrml_result` as the handler's
       // `Response`. ONE exit for every non-baseline-CSRF shape — protect-active,
       // tenant-active, Ext-5 idempotent and the plain authed route all land here.
@@ -4485,28 +4896,31 @@ export function generateServerJs(
       // the ONE arm that was exercised by a test asserted a `Response`, and the
       // two that were not asserted a value.
       lines.push(`  })();`);
-      // A body that already produced a `Response` OWNS the response — pass it
-      // through untouched instead of enveloping it.
+      // The OPAQUE-RESULT guard (`_opaqueResultGuard`) — the ONE emitter for this
+      // shape, shared with the baseline-CSRF arm and `<endpoint>`. It is placed
+      // BEFORE the redact on both of its branches, for two different reasons:
       //
-      // Without this the envelope below does
-      // `new Response(JSON.stringify(<a Response>), { status: 200 })`.
-      // `JSON.stringify` of a `Response` is `"{}"` (no enumerable own props), so
-      // an adopter's deliberate `403`/`404`/redirect would be re-emitted as a
-      // 200 with an empty-object body — a DENY silently becoming a SUCCESS.
-      // MEASURED with the guard removed: the 403 came back 200.
-      // That is a fail-OPEN shape, which is the one kind this whole change
-      // exists to remove, so it is guarded even though no corpus source reaches
-      // it today (a plain body naming `Response` build-blocks on E-SCOPE-001).
-      // §14.8.9/§14.8.10 already model a manual-`Response` / `handle()` body as
-      // a live server-fn egress kind, so the shape is anticipated, not
-      // hypothetical.
+      //   passthrough branch (protect inactive) — a body that already produced a
+      //     `Response` OWNS the response. Without this the envelope below does
+      //     `new Response(JSON.stringify(<a Response>), { status: 200 })`, and
+      //     `JSON.stringify` of a `Response` is `"{}"`, so a deliberate
+      //     `403`/`404`/redirect comes back a 200 with an empty body — a DENY
+      //     silently becoming a SUCCESS. MEASURED, fail-OPEN. This branch is
+      //     REACHED from the corpus: `Response`/`Request`/`Headers` are in
+      //     `LOGIC_SCOPE_GLOBAL_ALLOWLIST` since #590, which unblocked adopter
+      //     #471's PDF/binary egress.
       //
-      // Placed BEFORE the redact deliberately: a `Response` is an opaque stream
-      // handle, not a row set — `_scrml_protect_redact` cannot inspect or strip
-      // it, so routing one through the redact would buy nothing and only risk
-      // mangling the handle. A body that hand-builds a `Response` is taking
-      // ownership of its own egress.
-      lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
+      //   refusal branch (protect ACTIVE) — routing the `Response` on would ship
+      //     an unmediated body out of an app that declared `protect=` columns.
+      //     `_scrml_protect_redact` cannot inspect a stream handle, so "pass it
+      //     through" and "prove no protected column is in it" are incompatible.
+      //     Refuse. The author-written form of this shape is already a compile
+      //     error (`E-PROTECT-005`); this catches the residue a syntactic scan
+      //     cannot see.
+      //
+      // Either way it sits ahead of `_egressRedact`, so the redact only ever sees
+      // a value it can actually walk.
+      for (const l of _opaqueResultGuard("_scrml_result", "  ")) lines.push(l);
       {
         // M-7C-D-12 Track 2 (§57 Wire Format): same `T | not` envelope-wrap
         // rule as the CSRF path above — apply only when the return type
@@ -4728,7 +5142,23 @@ export function generateServerJs(
         // named error above; no artifact is written).
         return [`// §61.10 multi-statement bare body not lowered — see E-ENDPOINT-MULTI-STATEMENT-ARM.`];
       }
+      // §14.8.9 / E-PROTECT-005 — an `<endpoint>` arm body is author-authored
+      // scrml lowered to ONE server value-expression, so it is a member of the
+      // same population as a server-fn body: scan it (protect-active only).
+      // Named by `<endpoint> METHOD path` rather than a fn name — an arm has no
+      // function identity for the adopter to search for.
+      {
+        const _vLabel = arm?.isWildcard ? "_" : (typeof arm?.variantName === "string" ? arm.variantName : "?");
+        const _epPath = typeof epDecl?.path === "string" ? epDecl.path : "?";
+        const _epMethod = typeof epDecl?.method === "string" ? epDecl.method : "?";
+        _protectResponseGate(`<${_vLabel}> arm of <endpoint ${_epMethod} ${_epPath}>`, expr, arm?.span ?? epDecl?.span, "expression");
+      }
       out.push(`const _scrml_result = await (${expr});`);
+      // §12.5 — the OPAQUE-RESULT guard. `<endpoint>` had NONE until S405: an arm
+      // whose value-expression evaluated to a `Response` fell into
+      // `JSON.stringify` below and shipped `200 / "{}"`, exactly as the
+      // baseline-CSRF arm did. Same emitter as both server-fn arms.
+      for (const l of _opaqueResultGuard("_scrml_result", "")) out.push(l);
       // §14.8.9 — the §61 `<endpoint>` JSON envelope is a client egress; redact
       // at the sink (the arm value's `?{}` was protect-tagged at lowering).
       if (_protectActive || _tenantActive) {
@@ -4970,6 +5400,15 @@ export function generateServerJs(
           for (const line of indentBodyLines(code, "  ")) _peerBodyLines.push(line);
         }
       }
+      // §14.8.9 / E-PROTECT-005 — a peer callable is the SAME author body as its
+      // route handler, emitted a second time for in-process calls. Scanning it
+      // here is what closes the EXTRACTION shape: a helper that builds the
+      // `Response` and a caller that returns it are two bodies, so the old
+      // per-body co-occurrence lint saw neither — but each body is scanned
+      // independently here, and the one holding the `Response` fires regardless
+      // of which body holds the query.
+      _protectResponseGate(_peerName, _peerBodyLines.join("\n"), _peerInfo.fnNode.span, "statements");
+
       lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
       lines.push(`async function ${_peerName}(${_peerInfo.paramNames.join(", ")}) {`);
       // F4 (documented limitation per upstream review): a server-mode `@cell`
@@ -5069,8 +5508,27 @@ export function generateServerJs(
       lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await Promise.all([`);
       for (const e of mhEntries) lines.push(`    Promise.resolve(${e.expr}),`);
       lines.push(`  ]);`);
+      for (const l of _mountHydrateOpaqueGuard(mhEntries.length, "  ")) lines.push(l);
       lines.push(`  return new Response(JSON.stringify({`);
-      mhEntries.forEach((e, i) => lines.push(`    ${JSON.stringify(e.name)}: _scrml_mh_v${i},`));
+      // §14.8.9 / §14.8.10 — REDACT AT THIS SINK. `/__mountHydrate` is a client
+      // egress: each `_scrml_mh_v<i>` is a `server @var` loader's result, which
+      // for a `?{}` loader is a PROTECT-TAGGED row set. `JSON.stringify` ignores
+      // the Symbol-keyed descriptor, so without this the protected column crossed
+      // the wire in cleartext on `POST /__mountHydrate` — REPRODUCED end-to-end by
+      // executing the emitted handler: `passwordHash` shipped in full while the
+      // SSR compose handler forty lines below redacted THE SAME TWO VALUES.
+      //
+      // ⚑ IT WAS MISSED BY THREE COMPLETENESS PROOFS THAT ALL ENUMERATED OVER THE
+      // REDACTOR (its call sites / SPEC's list of the boundaries it covers / the
+      // ways to bypass it). A sink that never adopted the redactor is outside all
+      // three frames AT ONCE, so their agreement measured nothing. The obligation
+      // is over the DATA, so the enumeration has to be over the SERIALIZER.
+      //
+      // Per-value rather than one call over the wrapper object, mirroring the SSR
+      // seed's `_scrml_ssr_state[<name>] = _egressRedact("_scrml_cv")` exactly —
+      // that composition is already proven for both floors. `_egressRedact` is
+      // the identity when neither floor is active, so a plain app is byte-unchanged.
+      mhEntries.forEach((e, i) => lines.push(`    ${JSON.stringify(e.name)}: ${_egressRedact(`_scrml_mh_v${i}`)},`));
       lines.push(`  }), {`);
       lines.push(`    status: 200,`);
       lines.push(`    headers: { "Content-Type": "application/json" },`);
@@ -5092,11 +5550,18 @@ export function generateServerJs(
           : `    (${e.authExpr}) ? Promise.resolve(${e.expr}) : Promise.resolve(null),`);
       }
       lines.push(`  ]);`);
+      for (const l of _mountHydrateOpaqueGuard(mhEntries.length, "  ")) lines.push(l);
       lines.push(`  const _scrml_mh_out = {};`);
+      // §14.8.9 / §14.8.10 — redact at the sink, same as the all-public arm above.
+      // The per-cell AUTH gate and the egress floor are ORTHOGONAL: auth decides
+      // WHETHER this request receives the cell at all, the floor decides WHICH
+      // COLUMNS of it may cross. An authorized cell still owes the column strip,
+      // so this arm needs the redact just as much as the public one.
       mhEntries.forEach((e, i) => {
+        const _mhVal = _egressRedact(`_scrml_mh_v${i}`);
         lines.push(e.authExpr === null
-          ? `  _scrml_mh_out[${JSON.stringify(e.name)}] = _scrml_mh_v${i};`
-          : `  if (${e.authExpr}) _scrml_mh_out[${JSON.stringify(e.name)}] = _scrml_mh_v${i};`);
+          ? `  _scrml_mh_out[${JSON.stringify(e.name)}] = ${_mhVal};`
+          : `  if (${e.authExpr}) _scrml_mh_out[${JSON.stringify(e.name)}] = ${_mhVal};`);
       });
       lines.push(`  return new Response(JSON.stringify(_scrml_mh_out), {`);
       lines.push(`    status: 200,`);

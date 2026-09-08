@@ -1,0 +1,15 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id: number(>0 && <10000)) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        return new Response(JSON.stringify(u))
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>

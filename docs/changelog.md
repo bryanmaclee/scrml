@@ -2,6 +2,44 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S405 — 2026-09-07/08 (bryan · ASUS-Vivobook)
+
+**Four rulings, two security arcs, and one failure mode wearing seven costumes.** Three sessions ran
+concurrently (S406/S408-peter on Windows; bryan's article session on the other machine).
+
+**Ruled by bryan:** dpa-038 CLOSED (duplicative; #509 answered after 23 days) · dpa-044 **Call 1**
+(unterminated delimiters become a diagnostic — build SPLIT, code-position limb only, markup-body limb
+gated on dpa-045) · **dpa-039 on four calls** (1a re-ratify dpa-030's conclusion + **strike its
+reasoning** · 2 take the bounded defect set · 3b the three-item pairing over the bare guard · 4a
+close) · and the arc-B **split** (land the tenant half, re-scope the migrate half).
+
+**Reopened:** S109 — *"s109 was a long time ago"* — banked as **dpa-045**, the S111 scope-(a) reopen,
+with a third pole S111 never costed: **(a′) the body IS an implicit template** (Lit's model; tags are
+the delimiters, zero author tax, zero migration). Round 1 complete, round 2 fired.
+
+**Landed:** #892 the free move (`'`/backtick lose their delimiter role — four rounds, five HIGHs) ·
+#895 the opener-grammar class + peter's S310 return leg · #896 arc A, the §14.8.9 protect egress
+floor (six rounds, two security fail-opens) · #900 arc B, the §14.8.10 tenant floor (three rounds, a
+live executed cross-tenant leak closed).
+
+**Both adopter Direction issues CLOSED** — #509 and #471, open 23 and 30 days.
+
+⚑ **The session's durable finding, unratified:** *an enumeration's method being sound says nothing
+about its AXIS being complete* — seven instances, including **three independent proofs of a sink
+population that all agreed and were all wrong**, because all three enumerated the MECHANISM while the
+obligation is over the DATA. *"Their agreement was one blind spot counted three times."*
+
+⚑ **Two of the four rulings' builds were only possible because a `free move` claim was falsified:**
+the apostrophe fix was scoped as ~35 LOC and took four rounds, because the string branches were doing
+**double duty** — also shielding four opener-blind flat scanners. Deleting them unmasked a
+pre-existing architectural gap.
+
+**PA misses:** a governing-sentence gate failure (quoted half a SPEC sentence whose other half says
+the opposite) · an under-specified preservation instruction that opened a security hole in a
+fail-closed redactor · an arc partition by FILE where the defect spanned the partition · an inherited
+advisory count repeated unverified · three delta-log sequence collisions, one from a rebase.
+
+
 ## S402 — 2026-09-05/06 (bryan · ASUS-Vivobook) — the first human-written scrml, and three measurements against "is this salvageable"
 
 Opened as an execution session and became an assessment. Mid-session bryan hand-wrote **~20 lines of
@@ -7171,6 +7209,193 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### 2026-09-08 (S410 — peter — the instruments all lied in the same direction)
+
+A drain session on the Windows clone, concurrent with a LIVE S409-bryan throughout (his lane: the
+`SPEC-INDEX.md` merge-conflict class + CI gate hardening, #905/#906/#907 — disjoint by construction).
+**Seven landings, every one gate-green**, plus `flogence#6` merged upstream.
+
+| PR | |
+|---|---|
+| #909 | review floor drained **4 → 0**; three filed causes corrected; 2 gaps routed to bryan |
+| #910 | two shipped correctness records that described the code as it was before #898 |
+| #911 | four MED/LOW drains — the boot session index was matching a different set than it reported |
+| #912 | the guard pinning a 404 stops pretending — **and the same build has a dead nav href** |
+| #913 | breaking the module under test makes the self-host smoke suite look *better* |
+| #914 | a test file was reporting **35 passes with zero assertions executed** |
+| #915 | the `E-EQ-002` hint told authors to write **the opposite condition** |
+
+**The through-line, and it is the finding of the session: every broken instrument failed toward
+GREEN.** Six of them, none of which ever read as worse than reality —
+
+1. a gate printing `FAIL` while the shell reported exit 0 (`tail`'s code read as the gate's);
+2. a PowerShell parse check that passed **vacuously** over 21 real errors (`[ref]$undeclared`);
+3. a dropped-set probe inflating a defect **27%** (`[0-9]+` backtracks and eats its own digit);
+4. a "fix" that improved the headline 3 fails → 1 **by breaking the module under test**;
+5. `browser-reactive-arrays.test.js` printing **35 pass / 0 assertions** for a file `master-list`
+   already recorded as *"Skipped"* — the document and the runner disagreed, and the runner is what CI
+   prints;
+6. `self-host-smoke.test.js` turning 12 real parity checks into silent no-ops on a null module.
+
+**The rule extracted and now demonstrated three times in-tree: a precondition guard OWES a
+precondition assertion.** Otherwise a harness disables itself and the only trace is the `expect()`
+count — a number nobody reads and no gate checks.
+
+**New defects found, both by reproducing something else:**
+- **HIGH** `g-composed-route-drops-the-attr-tpl-effect` — a shell's reactive nav `href` ships into
+  every composed route as the dead literal `_scrml_attr_tpl_href_3`. The control is what makes it a
+  defect: the *same build* wires the effect correctly in the shell's own document. A shell's nav is on
+  every route by construction, so one reactive attribute breaks navigation app-wide, at exit 0.
+- **HIGH** `g-tenant-floor-inert-for-a-two-qualifier-create-table` — §14.8.10 tenant isolation is
+  silently inert for `CREATE TABLE db.schema.table`; add any second table and even
+  `W-SCHEMA-NO-TABLES-DECLARED` is suppressed. #900 closed the instance, not the class. **Routed.**
+
+⚑ **The ledger caught the "obvious" fix TWICE**, both times because the entry BODY already recorded
+what the marker did not: the session-index widening S404 had warned would still drop every PR-flow
+wrap, and the `module-resolver` `fileURLToPath` swap S341 had already tried and reverted. **The marker
+is an index, not the record** — read the body before writing code against it.
+
+Also: the `E-EQ-002` fix landed only because the pin was written FIRST — the test failed with a
+message that was neither the old text nor the new one, exposing a **second emit site**
+(`ast-builder.js:5337`) whose advice was semantically *inverted* on the `!=` arm.
+
+Machine work: the S406 bun runaway-memory guards were rebuilt on this clone (`C:\Users\pjoli\bun-guard`),
+both **bite-tested**, `BunMemorySentinel` live. The S406 originals were on the other machine and
+unrecoverable. ⚑ My own cap guidance was mis-sized within hours and corrected: the suite exceeds
+**4 GB** commit here (killed with `MemoryExhaustion`) against S406's 2.433 GB on the 32 GB desktop.
+
+⚑⚑⚑ **AND THE GUARD PAID FOR ITSELF THE SAME DAY — THE S406 82 GB LOCKUP NOW HAS A NAMED CANDIDATE.**
+`g-self-host-tab-test-is-an-unbounded-memory-runaway` (**HIGH**). The sentinel caught it in flight
+*with the full command line* — the exact gap S406 could not close, because `Get-Process` cannot supply
+one:
+
+```
+[WARN] commit 6.532 GB (ws 6.016 GB), free 1.51 GB
+       CMDLINE: bun.exe test compiler/tests/self-host/tab.test.js
+[KILL] free RAM 0.31 GB < 1.5 GB while this process holds 8.69 GB
+```
+
+**6.53 → 8.69 GB in three seconds**, accelerating, no plateau — which reaches 82 GB in about two
+minutes on a 32 GB box. Narrowed by elimination, not guesswork: compiling `tab.scrml` (0.37 s, ~0 GB),
+importing the emitted `tab.js` (0.01 s, ~0 GB), and the sibling `ast`/`bpp`/`bs` files are **all
+clean** — it manifests only under the bun test runner and dies *before the first test result prints*.
+⚑ **S406's own table measured `bun test compiler/tests/` at 2.433 GB**, so the whole-tier number never
+surfaced it — the same "a zero over a path the population never exercises" shape as everything else
+this session, one level up. No evidence for bun or Windows being at fault; pre-existing, not
+introduced here. **Ruled by peter as the S411 opener; the bisection method is prescribed in the entry.**
+
+### 2026-09-07/08 (S408 — peter — seven arcs, and seven instruments that measured their own reach)
+
+A long throughput session on the Windows clone, successor to a LIVE S407-bryan throughout (his lane was
+articles + the dpa-039 security arcs; disjoint by construction). **Seven landings, every one gate-green.**
+
+| PR | |
+|---|---|
+| **#890** | the review floor drained, and #889's worktree record corrected — it said `6 → 5` with one stuck, actual was `6 → 4` with none |
+| **flogence#6** | **FSP `Initialize` becomes a self-handshake** (`fsp/2026-09`), implementing the S404 coherent-(A) ruling |
+| **#891** | **bun 1.4.0 → 1.4.2 accepted**, with the attribution that made it safe |
+| **#893** | **the parked library-mode arc lands** — after the PA pass found three regressions in it |
+| **#894** | the enum/const binding collision filed, with a fork and a recommendation |
+| **#897** | that collision given a **precise diagnostic** instead of "report a compiler bug" |
+| **#898** | span verification lifted to the other two splicers — **the SQL one fails CLOSED** |
+
+**The library-mode arc is the session's centre.** It had been parked since S403. Re-based onto current main
+and re-differentialled, it looked clean: 118-file population, 47 byte-identical, 71 changed, **0 newly-failing**.
+The S239 adversarial pass found **three regressions the differential could not see** — (1) a foreign-bearing fn
+had its body **nulled** (`emitLibraryFnMember` lowers at the CLIENT boundary; `emit-logic.ts` gates the real
+foreign emit on `boundary === "server"`), so the fn kept its signature, parsed, exported, and returned `null`;
+(2) a fifth layout-coupled assertion, whose retarget **narrows the block's own "byte-stable" claim** to
+call-shape stable; and (3) a `!{}` guarded expr that emitted **legal JavaScript which is always `false`** in a
+fn typed `-> int`, at exit 0 with zero diagnostics — where the base emitted invalid JS that fails LOUDLY.
+Turning a loud failure into a silent wrong answer is the one direction that widening must never move in.
+
+**⛑ The lesson, and it cost seven wrong probes: an instrument that reports zero is reporting on its own reach,
+not on the code.** The corpus differential scored the arc clean because the population contains no `_{}` and no
+`!{}` in a library fn. `RESTORED = 0` read as *the arc buys nothing* when the class battery said **3/14 → 13/14**
+— the zero measured the corpus's composition. A text scan for duplicate `const` fired on **11 modules that parse
+clean**. The AST replacement looked equally broken until the TEST was found wrong (`res.errors` is unit-wide,
+so an imported module's error was blamed on the input file). A forced `mode:"library"` returned **2937** library
+files out of 2574 scanned, against a true 118. And an API `compileScrml({write:false})` probe read as
+silent-wrong output where the CLI emit gate refuses the artifact loudly — which corrected a gap's severity
+downward mid-filing.
+
+**⛑ Three filed fix-directions needed re-deriving before implementation.** #893's own resolved-gap text recorded
+*"0 newly-failing"*; it had three. `g-library-fn-decl-span-unverified-splice` said *"lift the guard to all three
+splicers (cheap)"* — right for the async limb, and for the SQL limb it would have turned a **confidentiality
+boundary fail-open**, since that pass prunes server-only `?{}` fns OUT of the client-facing artifact. And the
+enum-collision gap's own severity, filed hours earlier in this same session, was too high. *A filed direction is
+a hypothesis with a citation — including one you filed yourself, an hour ago.*
+
+**Also:** bun 1.4.2's acceptance run showed **7 fails against a remembered 5**, which reads exactly like *the
+upgrade broke two tests*. It did not — a standalone 1.4.0 binary gave 5, and a repeat on 1.4.2 gave 5 with a
+byte-identical fail set. The two extras were 5s timeouts on the only tests that spawn `node --check` as a
+subprocess. Filed as its own gap: **a toolchain change is exactly the context where such a flake is
+mis-attributed**, because the version bump supplies a ready causal story for a number that moved on its own.
+
+**Gate at close:** full suite from the settled tree — **23,604 pass / 5 fail / 99 skip**, 23,718 tests across 1,304 files, 214 s, peak 2.04 GB under an 8 GB kernel cap. The 5 are the standing baseline (three self-host-smoke path-model + two session-secure). Cloud `gate` green on every PR this session; `tracking` red is the known non-required tier, independently re-verified as already red on main.
+
+Language-surface review on #893 recorded: **not a widening** (§7.5 and §14.10 already license the forms, so
+conformance restoration) but **`semantics-changed` declared** — 572 call sites move scrml `==` from JavaScript
+loose equality to §45 structural equality, verified independently against normal-mode output.
+
+
+### 2026-09-07 (S406 — peter — a host lockup investigated: the obvious cause measured and FALSIFIED)
+
+Booted `/boot` Profile A, then Peter reported his machine had locked up hard the previous day —
+unresponsive to input, three forced restarts. That became the session. **No compiler work landed;**
+the library-mode structural-routing arc is PARKED untouched.
+
+**The incident.** A single `bun.exe` reached **82 GB committed** on a 32 GB box (9 GB pagefile ⇒
+~41 GB commit limit). The System event log carries the whole cascade: Resource-Exhaustion 2004 →
+`disk` 51 paging errors → an `nvlddmkm` Event-153 storm every ~3s → total UI freeze → Kernel-Power 41
+/ 6008. Three hard resets, at 1:19, 2:16 and 4:23 PM on 2026-09-06.
+
+**⚑ The obvious cause was measured and DISPROVED — do not re-run the guess.** Every candidate was
+executed inside a Windows Job Object with a kernel-enforced commit cap and per-second sampling:
+
+| candidate | peak commit | scale |
+|---|---|---|
+| `bun test compiler/tests/` | **2.433 GB** | 31,420 tests / 1,451 files / 325s |
+| bulk compile, one process | **1.281 GB** | 805 files |
+| `bun run bench` | **0.835 GB** | 71 files |
+| `bun conformance/run.ts` | **1.037 GB** | full corpus |
+| `scrml dev` (watch server) | **0.473 GB** | 40 rebuilds |
+| `scrml serve` (hot compiler) | **0.535 GB** | 200 compilations |
+
+The suite's curve *falls* after t=187s (2.433 → 1.994 GB) as GC reclaims; both long-lived servers
+plateau. **Nothing in the normal toolchain can produce 82 GB**, so the culprit is atypical and remains
+UNIDENTIFIED. The GPU (drivers already updated — the `nvlddmkm` errors are a symptom of starvation),
+the disks (both `Healthy`; Event 51 is explicitly "during a paging operation") and the bun version
+(1.4.0 stable, above the `>=1.3.13` pin) were each cleared with the reason each looked guilty.
+
+**A bun bug report was prepared and correctly NOT filed.** Peter asked to route it upstream; bun's own
+`--help` documents the default test mode as letting *"files see each other's leftovers"*, and the
+measurement then cleared bun entirely — leaving *less* evidence of a defect than when the report was
+requested.
+
+**Delivered — and both guards were BITE-TESTED, the first design failing its own test.** A polling
+watchdog set to 2 GB let a 60 GB/s allocator reach **5.96 GB** before the kill landed (3× overshoot);
+the Job Object cap held the identical runaway to **1.977 GB against a 2 GB cap** (23 MB overshoot),
+because the kernel enforces it at allocation time and is rate-independent. bun has no heap-limit flag
+(only `--smol` and `--heap-prof*`), so an OS-level cap is the only hard ceiling available.
+
+- **`BunMemorySentinel`** — a logon scheduled task that logs every bun process's **full command line**
+  (via `Win32_Process`, which `Get-Process` cannot supply) and kills at 20 GB. This closes the
+  identification gap: a recurrence names itself. Ran the entire hunt, including the 325s full suite,
+  with zero false fires.
+- **A kernel-capped runner** for anything deliberately heavy, plus a 4-page incident report.
+
+**Landed:** #886 `chore(s406)` — archives the library-mode `BRIEF.md`, untracked since dispatch (the
+base §5 miss), and drains the inbox. Docs-only; `gate` PASS, `windows` PASS, `tracking` FAIL verified
+as already red on main's own latest run.
+
+**Cleanup:** `scratchpad/` deleted — 491 files / 13.8 MB of spent per-session probes (S373→S403),
+never gitignored so it was untracked noise at every boot. Five memories pointing into it were updated
+rather than left to rot. Worktrees swept 6 → 5 at wrap step 6b, then → **4** when the last
+zero-ahead worktree (`afce71a5…`, initially blocked by the tool classifier) was removed by hand at
+Peter's instruction; two agent branches retained carrying unlanded work (`a17aa532…` ahead=1,
+`a451e4f6…` the parked arc ahead=2), both re-verified at S408.
 
 ### 2026-09-06 (S404 — a ruling in two messages, then a day of instruments being wrong, mine included)
 

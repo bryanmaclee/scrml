@@ -1,6 +1,82 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — ⛔ **THIS MAP'S KEYED SURFACE IS *NON-EMPTY* FOR THE FIRST TIME IN SEVERAL WINDOWS. THIS IS NOT A ZERO-DIFF ADVANCE.** ━━━━━━━
+#
+# Command: `git diff --name-only 68cfac6d..e74f5423 -- compiler/src/auth-graph.ts
+# compiler/src/protect-analyzer.ts stdlib/auth stdlib/oauth compiler/src/commands/dev.js
+# compiler/src/codegen/egress-field-scan.ts` -> **`compiler/src/protect-analyzer.ts` (+56)**.
+# ⚠ **The last two passes advanced this row on a re-measured ZERO, with the standing warning that a
+# zero-diff surface is an UNCHANGED map and not a correct one. This window it moved.**
+#
+# **`protect-analyzer.ts` DELETED ITS OWN `CREATE_TABLE_RE`** and now imports `harvestCreateTables` /
+# `harvestRawCreateTables` from `compiler/src/schema-differ.js` (`:65-77`). ⚑ **THE IMPORT DIRECTION
+# IS AN INVARIANT WITH A STATED REASON, BOTH WAYS:** the recognizer lives in `schema-differ.js` (which
+# imports only `sql-ident.ts`) **so that a consumer is not forced to pull THIS module, and with it
+# `bun:sqlite` + `node:fs`, just to ask what counts as a table declaration** — the mirror of this
+# file's own `:631` note that the early PA stage avoids pulling a codegen module. ⚑ **The shared
+# recognizer also NORMALIZES AWAY a schema qualifier (`CREATE TABLE public.assets (…)`), which this
+# file used to miss entirely — and that matters HERE specifically because `resolveDb` REPLAYS these
+# statements into an in-memory SQLite shadow DB, where an unstripped `public.assets` throws and takes
+# the whole `<db>` block down with `E-PA-003`.**
+#
+# ⛔ **THE §14.8.9 SECTION BELOW ("Protected-field egress backstop") WAS TWO SENTENCES AND IS NOW A
+# THREE-LIMB STRUCTURE WITH THREE DIFFERENT STRENGTHS. THE OLD TEXT NAMED ONLY `protect-analyzer.ts`
+# (PAError) AND `egress-field-scan.ts` (`E-CG-001`) AND DID NOT MENTION `E-PROTECT-004` AT ALL** —
+# which, before this pass, had ZERO hits in every hand-authored map. See the rewritten section and
+# `domain.map.md`'s §14.8.9 section for the full treatment. In one table:
+#   | limb | code | mechanism | strength |
+#   |---|---|---|---|
+#   | 1 | `E-PROTECT-004` | per-body SOURCE-TEXT co-occurrence LINT (`_{}` / `asIs`) — `protect-egress.ts:449` | ⚠ **conservative, DEFEATED BY FUNCTION EXTRACTION, NOT a guarantee** |
+#   | 2 | `E-PROTECT-005` | HARD compile ERROR at EMISSION on an author-serialized response BODY — `emit-server.ts:2061` | **STRUCTURAL; extraction does not defeat it** |
+#   | 3 | runtime refusal | `_scrml_protect_redact` / `_scrml_protect_opaque_refusal()` — `protect-egress.ts:221+` | **`instanceof Response` is EXACT. THIS IS THE GUARANTEE.** |
+# **THE ADOPTER CONTRACT IN ONE SENTENCE: a `protect=` app keeps full control of STATUS and HEADERS
+# and gives up authoring the BODY.**
+#
+# ⛑ **NEW SEAM CONCEPT — THE MEDIATION MARK, AND IT IS AN AUTH-RELEVANT ONE BECAUSE IT IS WHAT STOPS
+# THE FLOOR FROM REFUSING THE COMPILER'S OWN 400s AND 403s.** `Symbol.for("scrml.protect.mediated")`
+# + `_scrml_protect_mediated(response)` (`protect-egress.ts:245`). The compile limb decided by
+# PROVENANCE, the runtime limb by SHAPE (`.body === null`); **every place they disagreed was a
+# defect** — `Response.redirect(...)` (author-owned, payload-free → `W-PROTECT-005`) and the §53.9.4
+# `E-CONTRACT-001-RT` 400 (compiler-owned, body-carrying → the guard turned our own 400 into a 500).
+# Marked at `emit-server.ts:1904`; read PROVENANCE-FIRST at `_opaqueResultGuard` (def `:1948`, the mediated read at `:1957`).
+#
+# ⛑ **`/__mountHydrate` IS NOW A REDACTING SINK (`emit-server.ts:5531` and `:5561`), AND IT NEVER
+# WAS BEFORE.** Each `_scrml_mh_v<i>` is an AUTHOR `server @var` loader result; `JSON.stringify`
+# ignores the Symbol-keyed descriptor, so `passwordHash` crossed the wire in cleartext on
+# `POST /__mountHydrate` **while the SSR compose handler forty lines below redacted the same two
+# values**. ⚠ `/__serverLoad` remains unguarded at the top level and that is **safe for a REASON**
+# (its values are compiler-built from a lowered `?{}`) — **do NOT extend that reason to
+# `/__mountHydrate`; a previous source comment did and it was false.**
+#
+# ⛔ **AND A SECOND SECURITY FLOOR JOINS THIS MAP'S SCOPE: §14.8.10 TENANT-ROW ISOLATION.** A
+# **raw-DDL `<schema>` + no `<db>`** app had a **silently INERT tenant floor at exit 0** — no
+# `_scrml_tenant_tag`, no `_scrml_tenant_redact`, no diagnostic — because §14.8.9 had been taught the
+# raw-DDL form and §14.8.10 had not. **Reproduced end-to-end: with ambient tenant `A`, the wire
+# carried `{"id":2,"name":"THEIRS","tenant_id":"B"}`.** Closed by the one shared recognizer plus
+# `W-SCHEMA-NO-TABLES-DECLARED` (`gauntlet-phase1-checks.js:803`) as the standing detector for the
+# next such divergence. Full treatment in `domain.map.md`.
+#
+# ⚑ **THE `_{}` FOREIGN-OPENER GRAMMAR IS A SECURITY CONCERN HERE, NOT A COSMETIC ONE: TWO OF THE
+# FIVE HAND-SPELLED SITES ARE SECURITY FLOORS.** §23.2 is `_` + ZERO-OR-MORE `=` + `{`. At this
+# watermark: `ast-builder.js:18392` FULL · `codegen/tenant-egress.ts:453` FULL (fixed #900) ·
+# `codegen/protect-egress.ts:497` FULL (fixed #896) · **`type-system.ts:473` levels 0+1 ONLY** ·
+# **`lint-w-interp-in-raw-content.js:51` level 0 only, for EVERY sigil**. ⚠ **`W-FOREIGN-001`
+# actively steers authors AWAY from level 0**, so the two partial detectors recognize exactly the
+# spelling the compiler discourages. Filed HIGH: `g-foreign-opener-grammar-hand-spelled-five-places`.
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -435,8 +511,98 @@ runs, not inside it**, which is what makes it depth-independent and is why the s
 did not have to re-derive it.
 
 
-## Protected-field egress backstop (§14.8.9, NOT stdlib — compiler-enforced)
-`<db src=... protect="col1,col2">` (or `authority=` collections) marks columns that must never reach the client bundle. Enforced by `compiler/src/protect-analyzer.ts` (PAError) at analysis time and `compiler/src/codegen/egress-field-scan.ts` (E-CG-001) as an acorn-EXACT, fail-closed backstop at emit time.
+## Protected-field egress backstop (§14.8.9, NOT stdlib — compiler-enforced) — ⛑ **REWRITTEN S405 (#896). IT IS THREE LIMBS, NOT ONE.**
+
+`<db src=... protect="col1,col2">` (or `authority=` collections) marks columns that must never reach
+the client bundle. **PA-stage analysis** is `compiler/src/protect-analyzer.ts` (PAError); the
+**acorn-EXACT, fail-closed emit-time backstop** on the CLIENT bundle is
+`compiler/src/codegen/egress-field-scan.ts` (`E-CG-001`). ⛔ **THE SERVER->CLIENT EGRESS FLOOR IS A
+SEPARATE, THREE-LIMB MECHANISM IN `compiler/src/codegen/protect-egress.ts`, AND THE THREE HAVE
+DELIBERATELY DIFFERENT STRENGTHS. THE MODULE DOCSTRING (`:37-51`) SAYS SO: *"Read the strengths; they
+are not interchangeable."***
+
+| limb | code | mechanism | site | strength |
+|---|---|---|---|---|
+| 1 | **`E-PROTECT-004`** | per-body **SOURCE-TEXT co-occurrence LINT** for `_{}` (§23) and `asIs` (§14.1.1) | `protect-egress.ts:449` (`detectProtectedRawEgress`) | ⚠ **CONSERVATIVE, DEFEATED BY FUNCTION EXTRACTION (measured), NOT A GUARANTEE** |
+| 2 | **`E-PROTECT-005`** | HARD compile **ERROR at EMISSION** on an author-serialized response **BODY** (§40) | raised `emit-server.ts:2061`; gate `_protectResponseGate` `:2020`; detector `findAuthoredResponseConstruction` `protect-egress.ts:754` | **STRUCTURAL — extraction does NOT defeat it.** ⚑ **FILE-scoped, not query-scoped, deliberately** |
+| 3 | **runtime refusal** | `_scrml_protect_redact` / `_scrml_protect_opaque_refusal()` | `SERVER_PROTECT_HELPER`, `protect-egress.ts:221+` | **`instanceof Response` is EXACT — no spelling problem, no extraction hole. THIS IS THE GUARANTEE.** |
+
+⚑ **THE UNIT OF ALL THREE IS THE BODY, NOT THE `Response`.** A null-body `Response` — a redirect, a
+`204`, `Response.error()` — carries no payload, so limbs 2 and 3 both permit it. **`W-PROTECT-005`
+covers the narrow seam where the compile limb can prove that and the runtime limb cannot** (Bun gives
+a redirect a 0-byte `ReadableStream` rather than a null body, and a secret-carrying
+`new Response("s3cret", {status:302, headers:{Location}})` is indistinguishable from one at the exit
+— MEASURED). **THE ADOPTER CONTRACT IN ONE SENTENCE: a `protect=` app keeps full control of STATUS
+and HEADERS and gives up authoring the BODY.**
+
+**THE MEDIATION MARK — the compile/runtime seam.** `const _SCRML_MEDIATED =
+Symbol.for("scrml.protect.mediated")` + `function _scrml_protect_mediated(response)`
+(`protect-egress.ts:245`). Both limbs were asking *is this `Response` AUTHOR-owned or
+COMPILER-owned?* — the compile gate by **PROVENANCE**, the runtime guard by **SHAPE**
+(`.body === null`). **Every disagreement was a defect:** `Response.redirect(...)` (author-owned,
+payload-free) and the §53.9.4 `E-CONTRACT-001-RT` 400 (compiler-owned, body-carrying — the guard
+turned the compiler's own 400 into a 500). Marked at `emit-server.ts:1904` (`_markMediatedResponses`
+`:1890`, which **THROWS at emit time** if the emitter it wraps stopped producing a `Response`); read
+**provenance-first** at `_opaqueResultGuard` (def `:1948`, the mediated read at `:1957`) and in the redactor. ⚠ Gated on
+`_protectActive` (`:4436`) — unconditional emission dragged the 127-line helper into `protect=`-free
+apps (~66% of the module, all dead). Mechanical seam test:
+`compiler/tests/integration/g-sql-row-protect-leak.test.js:628`.
+
+**SINKS — which ones guard a top-level `Response`, stated exactly.** Guarded: **both server-fn arms ·
+the §61 `<endpoint>` envelope · `/__mountHydrate`** (the last as of #896). **NOT guarded:
+`/__serverLoad`** — and that is **safe for a REASON, not by luck**: its `_scrml_rows` /
+`_scrml_result` / `_scrml_cv` are values the COMPILER built from a lowered `?{}`, so no author
+construction reaches it. ⛔ **DO NOT EXTEND THAT REASON TO `/__mountHydrate` — a previous source
+comment did, and it was FALSE.** Each `_scrml_mh_v<i>` is an AUTHOR `server @var` loader result;
+`JSON.stringify` ignores the Symbol-keyed descriptor, so `passwordHash` crossed the wire in cleartext
+on `POST /__mountHydrate` while the SSR compose handler forty lines below redacted the same two
+values. Fixed at `emit-server.ts:5531` / `:5561` per value via `_egressRedact`, plus
+`_mountHydrateOpaqueGuard` (`:1935`) on both arms — which refuses **ANY** `Response` cell value,
+deliberately not reusing the three-way test, because a hydration cell is DATA and a `Response` is
+never a valid value for one.
+
+⛔ **THE MISS IS THE REUSABLE LESSON: `/__mountHydrate` slipped past THREE independent completeness
+proofs that all enumerated over the REDACTOR** (its call sites / SPEC's list of the boundaries it
+covers / the ways to bypass it). **A sink that never ADOPTED the redactor is outside all three frames
+AT ONCE, so their agreement measured nothing. The obligation is over the DATA, so the enumeration has
+to be over the SERIALIZER.**
+
+**SOUNDNESS BOUND (§14.8.9 normative — DO NOT OVER-CLAIM).** Complete for explicit-column flows of
+statically-resolvable SQL, **by ORIGIN**. NOT covered: derived/implicit flows
+(`{ hasPw: row.pw != "" }` — a value of independent identity carries no descriptor), covert channels,
+and member-extraction into a re-keyed fresh literal (`{ secret: row.pw }`). Unresolvable dynamic SQL
+is stripped **WHOLESALE (fail-closed)**, never accept-unknown.
+
+⚑ **THE OPAQUE REFUSAL IS TAGGED, NOT JUST THROWN** — `_scrml_e.__scrml_protect_opaque = true` — so a
+caller can tell a confidentiality refusal apart from an ordinary failure. Without the tag, the §37 SSE
+stream wrapper's generic `catch` swallowed the refusal and ended the stream with a **silent 200**.
+
+## §14.8.10 — TENANT-ROW ISOLATION, and the day two adjacent security floors disagreed about what a `<schema>` IS (NEW section, S405, #900)
+
+⛔ **A raw-DDL `<schema>` + no-`<db>` app had a SILENTLY INERT tenant isolation floor at exit 0** — no
+`_scrml_tenant_tag`, no `_scrml_tenant_redact`, **no diagnostic** — because §14.8.9 had been taught the
+raw `CREATE TABLE` `<schema>` form and §14.8.10 had not. **Reproduced end-to-end: executed with
+ambient tenant `A`, the wire carried `{"id":2,"name":"THEIRS","tenant_id":"B"}` — a live cross-tenant
+isolation escape, executed, not theoretical.** ⚑ **The 4-app matrix isolates it to an INTERSECTION,
+which is sharper than "schema-only apps are inert":** DSL+no-`<db>` ACTIVE · **raw-DDL+no-`<db>`
+INERT** · raw-DDL+`<db>` ACTIVE · DSL+`<db>` ACTIVE.
+
+**A table is tenant-scoped iff its column list includes `tenant_id`** — §14.8.10: *"the column's
+presence is the declaration… There is no per-table opt-in attribute."* `buildTenantContext`
+(`codegen/tenant-egress.ts:127`) reads BOTH registries: the §14.8.9 ProtectContext's `schemaByTable`
+(every `<db>`-bound table) AND `extractDesiredSchema`'s `tables` (threaded from
+`emit-server.ts:1769`). ⚠ **`class TenantTableSet extends Set<string>` (`:84`) case-folds on EXACTLY
+`add` / `has` / `delete`** — a read that bypasses those three sees the FOLDED form and does not fold
+the probe.
+
+**FIXED BY ONE SHARED RECOGNIZER, NOT A SECOND BETTER ONE** — `compiler/src/schema-differ.js`
+(`parseSchemaBlock` `:31` · `harvestCreateTables` `:246` · `harvestRawCreateTableDecls` `:264` ·
+`harvestRawCreateTables` `:282` · `parseRawCreateTableColumns` `:348`), imported by
+`protect-analyzer.ts` (`:65-77`) and `gauntlet-phase1-checks.js` (`:69-80`).
+**`W-SCHEMA-NO-TABLES-DECLARED` (`gauntlet-phase1-checks.js:803`) is the STANDING DETECTOR for the
+next such divergence** — and its recognition is the UNION of both forms **using those same
+functions**, because a third recognizer inside the detector would reintroduce, in the detector, the
+divergence it exists to catch. Full treatment: `domain.map.md` §14.8.10 section.
 
 ## Historical: jwt-auth-bypass (2026-07-11, fixed, carried for context)
 `scrml:auth/jwt`'s exports were silently dropped at compile in a specific comment-shape case, so the async-export seed never saw them → misclassified sync → a server fn emitted `verifyJwt(...)` UNAWAITED → the always-truthy Promise defeated `if (!result.valid)` → accept-all auth bypass. Both parser root causes are fixed; the standing defense-in-depth is api.js's STDLIB-EXPORT-SEED (fails CLOSED on any unresolvable server-only `scrml:*` re-export — see dependencies.map.md). No auth-surface API change.
@@ -454,6 +620,7 @@ Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stor
 ## Tags
 #scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724
 #fourth-consecutive-zero-diff #anchors-carry-by-measurement
+#s405 #auth-surface-non-empty #protect-analyzer-deleted-its-regex #import-direction-invariant #e-pa-003-shadow-db #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005 #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #provenance-vs-shape #w-protect-005 #zero-byte-readablestream #mounthydrate-was-unguarded #serverload-safe-for-a-reason #enumerate-over-the-serializer #tagged-refusal #soundness-bound-by-origin #§14.8.10-tenant-floor #four-app-matrix #cross-tenant-escape-executed #tenanttableset #w-schema-no-tables-declared #foreign-opener-two-of-five-are-security-floors
 
 ## Links
 - [primary.map.md](./primary.map.md)

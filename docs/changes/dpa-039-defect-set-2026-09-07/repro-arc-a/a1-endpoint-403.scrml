@@ -1,0 +1,13 @@
+<program>
+
+type Op:enum = {
+  Deny
+  Allow
+}
+
+<endpoint path="/gate" method="POST" accepts=Op>
+  <Deny : new Response("forbidden", { status: 403, headers: { "Content-Type": "text/plain" } })>
+  <Allow : { ok: true }>
+</endpoint>
+
+</program>

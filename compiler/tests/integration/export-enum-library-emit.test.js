@@ -275,3 +275,71 @@ describe("export-enum-library-emit §8: R26 flogence delta-log.scrml", () => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// §9 — an enum runtime binding that COLLIDES with a hand-written const of the
+//      same name is named precisely, instead of surfacing as a compiler defect.
+//
+// Eight `compiler/native-parser/*.scrml` modules declare `type X:enum` AND a
+// hand-written `export const X = Object.freeze({…})`, labelled in-source as a
+// "mirror of the canonical enum's .Variant names" — written back when library
+// mode emitted no enum runtimes at all. Two top-level `const X` in one ES module
+// is a SyntaxError. It was already caught, but by the WRONG MESSENGER: the
+// §2.2.1 emit gate said "This is a compiler defect … Please report it", sending
+// the author off to file a compiler bug when the fix is to delete their own
+// now-superseded mirror.
+//
+// ⚑ THE NEGATIVE CASES ARE THE LOAD-BEARING ONES. Detecting this from the
+// emitted TEXT does not work: the whole-block path preserves source indentation,
+// so a module-level `const X` and a fn-local `const X` are indistinguishable by
+// leading whitespace — a text scan fired on ELEVEN modules that parse clean.
+// The check reads the AST's top-level statement list instead, where a fn-local
+// const does not appear at all.
+// ---------------------------------------------------------------------------
+describe("§9 enum runtime binding vs a hand-written const of the same name", () => {
+  test("COLLISION — names the binding, and says it is NOT a compiler defect", () => {
+    const filePath = join(TMP, "enum-collide.scrml");
+    writeFileSync(
+      filePath,
+      "${\n" +
+        "    export type Mode:enum = { On, Off }\n" +
+        "\n" +
+        "    // the hand-written mirror the compiler's enum rep now supersedes\n" +
+        '    export const Mode = Object.freeze({ On: "On", Off: "Off" })\n' +
+        "}\n",
+    );
+    const result = compileScrml({ inputFiles: [filePath], write: false, log: () => {} });
+    const hit = (result.errors || []).find(
+      (e) => e.code === "E-CG-ENUM-BINDING-COLLISION",
+    );
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain("Mode");
+    expect(hit.message).toContain("NOT a compiler defect");
+  });
+
+  test("NO COLLISION — a fn-LOCAL const of the same name must not fire", () => {
+    const filePath = join(TMP, "enum-local-shadow.scrml");
+    writeFileSync(
+      filePath,
+      "${\n" +
+        "    export type Mode:enum = { On, Off }\n" +
+        "\n" +
+        "    export fn pick(b: boolean) -> string {\n" +
+        '        const Mode = "shadowed locally, not a module binding"\n' +
+        "        return Mode\n" +
+        "    }\n" +
+        "}\n",
+    );
+    const result = compileScrml({ inputFiles: [filePath], write: false, log: () => {} });
+    const codes = (result.errors || []).map((e) => e.code);
+    expect(codes).not.toContain("E-CG-ENUM-BINDING-COLLISION");
+  });
+
+  test("NO COLLISION — an enum with no same-named const is untouched", () => {
+    const filePath = join(TMP, "enum-clean.scrml");
+    writeFileSync(filePath, "${\n    export type Mode:enum = { On, Off }\n}\n");
+    const result = compileScrml({ inputFiles: [filePath], write: false, log: () => {} });
+    const codes = (result.errors || []).map((e) => e.code);
+    expect(codes).not.toContain("E-CG-ENUM-BINDING-COLLISION");
+  });
+});

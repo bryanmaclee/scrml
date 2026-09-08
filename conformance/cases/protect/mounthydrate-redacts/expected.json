@@ -1,0 +1,13 @@
+{
+  "id": "protect-mounthydrate-redacts",
+  "description": "§8.11 / §14.8.9 — the synthetic `/__mountHydrate` route is a CLIENT EGRESS and redacts at its sink. Two `server @var` cells with `?{}` loaders coalesce into that route; the users loader is protect-tagged, so the emitted handler serializes `_scrml_protect_redact(_scrml_mh_v0)` rather than the raw value. I-PROTECT-STRIP-001 fires for the tagged SELECT.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "⚑ THIS CASE EXISTS BECAUSE THE SINK WAS MISSED BY THREE COMPLETENESS PROOFS AT ONCE. `/__mountHydrate` emitted `new Response(JSON.stringify({...}))` over the loader results with no redact, while the SSR compose handler forty lines below redacted THE SAME TWO VALUES — and `JSON.stringify` drops the Symbol-keyed §14.8.9 descriptor, so `passwordHash` crossed the wire in cleartext on `POST /__mountHydrate` (reproduced end-to-end by executing the emitted handler). All three proofs enumerated over the REDACTOR — its call sites, SPEC §14.8.9's list of boundaries it covers, and the ways to bypass it — and a sink that never adopted the redactor is outside all three frames simultaneously, so their agreement measured nothing. The obligation is over the DATA, so the enumeration has to be over the SERIALIZER. A corpus sweep would not have caught it either: the corpus contained no protect-active app with a mount-hydrate path, and corpus-zero is blast radius, not absence — which is why this case is now IN the corpus. ⚠ READ THIS CASE'S POWER HONESTLY: the defect was a SILENT data leak, so the codes half has NO discriminating power against the buggy emitter — this case passes on both sides of the fix. Its value here is corpus PRESENCE (the shape now exists and every future sweep sees it); the executable proof lives in `g-sql-row-protect-leak.test.js`, which lifts the emitted handler and asserts on the bytes that cross the wire. A case that cannot go red is not a regression test, and saying so is cheaper than someone later discovering it.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": ["E-PROTECT-005", "E-PROTECT-004", "W-PROTECT-005"],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}

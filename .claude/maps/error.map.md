@@ -1,6 +1,114 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **§34 CATALOG 815 -> 818 (+3), RE-EXECUTED.** ━━━━━━━
+#
+# ⛑ **RE-RUN, NOT CARRIED: `bun scripts/s34-census.ts` at `e74f5423` prints `818 rows (§34
+# 19750..20639, derived)`** (was `815`, range `19665..20551`). Buckets, all re-executed:
+# **`STRUCK 34 · PINNED 346 · IMPL-SITES 306 · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 · FALSE-CLAIM
+# 111`**; FALSE-CLAIM dispositions `BUILD-ARC 69 · HOME-NO-SHALL 26 · ORPHAN-INDEX 4 · NOMINAL-HOME
+# 12`. ⚠ **The census's `2013 source files` is its FILESYSTEM walk (2009 at S404 in this same
+# checkout) and is NOT a repo fact.**
+#
+# ⛑ **THE PREFIX-GREP SERIES, MEASURED AT *BOTH* ENDS AND SET-DIFFED ON THE CODE COLUMN (invariant
+# 71), NOT CARRIED:** `^| E-` **920 -> 921**; `^| W-` **179 -> 182**; `^| I-` **10 flat**; `^| H-`
+# **2 flat**. UNIQUE codes **783 -> 786**. **ADDED SET = exactly three: `E-PROTECT-005` ·
+# `W-PROTECT-005` · `W-SCHEMA-NO-TABLES-DECLARED`. REMOVED SET = EMPTY.**
+# ⚠ **A ROW COUNT IS NOT A CODE COUNT, AND THIS WINDOW SHOWS THE GAP CLEANLY.** `W-` moved **+3 for
+# +2 unique codes** because `W-SCHEMA-NO-TABLES-DECLARED` carries **two** rows — `SPEC.md:20451` (the
+# §34 catalog row, with the full rationale + trigger conjunction + corpus measurement) and `:23064`
+# (the summary-index row). That is the ORDINARY pattern here: `W-TIMEOUT-001`, `W-STORY-ON-TOP-LEVEL`,
+# `W-MATCH-003`, `W-LIFECYCLE-011..014` and `E-TYPE-081` each carry **three** rows, at both ends of
+# the window. **Do not "reconcile" a row count against a code count — they are different questions.**
+#
+# ⛔ **AND HERE IS THE FINDING THAT MATTERS MORE THAN ANY OF THOSE NUMBERS: TWO LIVE DIAGNOSTIC CODES
+# LANDED THIS WINDOW WITH *ZERO* MENTIONS ANYWHERE IN `compiler/SPEC.md`.** Not a missing §34 row —
+# `grep -c '<CODE>' compiler/SPEC.md` returns **0** for both:
+#   · **`E-CG-ENUM-BINDING-COLLISION`** — emitted `compiler/src/codegen/emit-library.ts:1153`
+#     (`finishLibraryModule` `:1142`, detector `enumBindingCollisions` `:1123` over
+#     `userTopLevelConstNames` `:1091`). Fires when an emitted §21.2 enum runtime rep
+#     (`const <Enum> = Object.freeze({…})`) collides with an author's own top-level `const` of the
+#     same name — two top-level `const X` is a JS SyntaxError. It exists to replace an unactionable
+#     "report a compiler bug" with the colliding NAME and the one-line fix. Landed #897 (`9f30472c`).
+#   · **`E-CG-SQL-FN-UNVERIFIABLE-SPAN`** — emitted `compiler/src/codegen/emit-library.ts:414`
+#     (`collectSqlFnRemovalRanges`). Landed #898 (`914f06f5`).
+# **CONSEQUENCE, STATED PLAINLY: the §34 census, the `^| E-` prefix grep and `SPEC-INDEX.md` ALL
+# READ NORMAL while two codes an adopter can hit have no documented home.** A catalog-derived count
+# measures the CATALOG. ⚑ **The counter-instrument already exists and this pass used it:
+# `error.generated.md` is derived from the EMITTERS, and both codes appear there** (`:49`, `:50`,
+# one emit site each) **the moment it is regenerated.** Filed as **N-S405-1** in
+# `non-compliance.report.md`. ⚠ **`error.generated.md` had been stamped `2026-09-06 16:32` and was
+# two source-days stale — which is exactly why neither code appeared in ANY map until this pass
+# re-ran `bun scripts/mapgen.ts --kind errors`.**
+#
+# ⛑ **THE THREE NEW CATALOGUED CODES, AND WHAT MAKES EACH ONE THE SEVERITY IT IS.**
+#   · **`E-PROTECT-005`** (Error) — `emit-server.ts:2061`, gate `_protectResponseGate` (`:2020`),
+#     detector `findAuthoredResponseConstruction` (`protect-egress.ts:754`). Fires when a server body
+#     in a `protect=`-declaring FILE constructs a **body-carrying** `Response`. **ERROR, not warning,
+#     because the compiler owns the egress envelope and cannot mediate a body the author serialized:
+#     it cannot read a `Response` stream, and the §14.8.9 descriptor does not survive the author's
+#     own `JSON.stringify`.** ⚑ **FILE-SCOPED, NOT QUERY-SCOPED, DELIBERATELY** — query-scoping would
+#     make it a per-body CO-OCCURRENCE test, exactly the mechanism `E-PROTECT-004`'s `Response` limb
+#     was deleted for (moving the query one function away defeats it, measured). Its immunity to
+#     extraction comes from keying on the CONSTRUCTION alone, and the message says so. ⚑ **DEDUP KEY
+#     IS `span.start` + THE REPORTED NAME, NOT THE SPAN ALONE** (`:2010`): a server fn is lowered
+#     TWICE (route handler + in-process peer callable) so a span-or-name-only key double-reports; but
+#     a §61 `<endpoint>` ARM carries no distinguishing span (every arm falls back to `epDecl.span`),
+#     so a span-ONLY key collapsed all arms into one diagnostic naming only the first. **Name+span
+#     separates what must be separated and still joins what must be joined.**
+#   · **`W-PROTECT-005`** (Warning) — same gate, `null-body-static` arm (`emit-server.ts:2045`).
+#     `Response.redirect(...)` / `Response.error()` carry no body, so `E-PROTECT-005` firing on them
+#     would be wrong **on its own rationale** — and it did, on the first landing, build-breaking every
+#     `protect=` app that issues a redirect. **But the RUNTIME guard still refuses them**, because Bun
+#     gives them a 0-byte `ReadableStream` rather than a null body and a secret-carrying
+#     `new Response("s3cret", {status:302, headers:{Location}})` is indistinguishable from one at the
+#     exit (MEASURED). **So it compiles, and it says so.** Permitting silently would swap a loud build
+#     error for a 500 on the first request. Resolution the message gives: write the explicit null-body
+#     form `new Response(not, { status: 302, headers: { Location: "/where" } })`, which the floor
+#     recognizes exactly and passes through.
+#   · **`W-SCHEMA-NO-TABLES-DECLARED`** (Warning) — `gauntlet-phase1-checks.js:803`, alongside
+#     `E-SCHEMA-004` / `W-SCHEMA-001`. **Warning not Error** because an unrecognized `<schema>` body
+#     is not PROVABLY a mistake (an index-only or `PRAGMA`-only body is unusual but coherent), a hard
+#     failure would break a currently-building corpus file with no deprecation window, and forbidding
+#     those forms outright is a language decision above the level of a defect fix. **Not Info because
+#     the consequence it names is a DISABLED SECURITY FLOOR.** Sibling in kind to
+#     `W-DBAUTH-MARKER-NEARMISS`. ⚑ **Its trigger is a FOUR-WAY conjunction on purpose — a cry-wolf
+#     gate gets bypassed and then deleted:** non-blank body after `--` / `/* */` / `//` stripping ·
+#     ZERO tables in EITHER recognized form · ZERO §14.8.11.2 SECURITY-DEFINER `fn`s · no non-text
+#     child (a `${ schemaFor(T) }` §41.15 Form-B body reads as empty here; firing on it would false-
+#     positive on all 18 in the corpus). **MEASURED on its first run over 2,555 corpus `.scrml`: 91
+#     carry a parsed `<schema>`, 18 are `schemaFor` delegations, and exactly ONE trips —
+#     `compiler/tests/commands/migrate-program-shape-fixtures/schema-anchor.scrml`, whose
+#     `users: { id: integer, name: text }` stray colon means it had been declaring nothing.** The code
+#     found a genuine defect in scrml's own corpus on its first run.
+#
+# ⚑ **`E-PROTECT-004` IS NOW EXPLICITLY LABELLED A LINT AT ITS OWN DEFINITION, AND THE MAP SHOULD NOT
+# RE-PROMOTE IT.** It is a per-body SOURCE-TEXT co-occurrence check for `_{}` (§23) and `asIs`
+# (§14.1.1) — **conservative, defeated by function extraction, NOT a guarantee.** The guarantee in
+# §14.8.9 is the RUNTIME refusal (`_scrml_protect_redact` / `_scrml_protect_opaque_refusal()`), where
+# `instanceof Response` is exact. `E-PROTECT-005` sits between them: structural, so extraction does
+# not defeat it, but still a compile-time gate. **Three limbs, three strengths, not interchangeable.**
+# ⚠ **`E-PROTECT-004` had ZERO hits in every hand-authored map before this pass** — it appeared only
+# in the mechanical `error.generated.md`.
+#
+# ⚑ **THE §34 CATALOG TOTAL (818) AND `error.generated.md`'s EMITTER-DERIVED TOTAL ANSWER DIFFERENT
+# QUESTIONS AND ARE *BOTH RIGHT*.** This window is the cleanest demonstration yet: three codes
+# entered the catalog and TWO MORE entered the emitters WITHOUT entering the catalog, so the two
+# series moved by different amounts for a reason that is a finding, not a discrepancy. **Never
+# "reconcile" them.**
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -1000,6 +1108,7 @@ once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for
 #scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13
 #e-cg-tilde-unresolved #tilde-accumulator #section-32 #fail-closed-floor #narrow-sink #two-drains #reset-once-per-run #process-level-not-filesystem-level #partial-span-position #resolvespanlinecol #spanfromestree-hardcodes-1-1 #cardinality-per-emission #e-tilde-001-zero-fire-sites #zero-producers #cause-traced #815-codes #pinned-344
 #e-type-031-three-positions #section-7-5-1-position-2 #e-contract-001 #e-contract-001-rt #classifypredicatezone #checkpredicateliteral #buckets-sum-to-total #dispositions-redistributed #catalog-flat-815 #range-moved-not-total
+#s405 #818-codes #catalog-19750-20639 #921-e-rows #182-w-rows #786-unique-codes #row-count-is-not-a-code-count #e-protect-004-is-a-lint #e-protect-005 #file-scoped-not-query-scoped #dedup-key-span-plus-name #endpoint-arm-shares-a-span #w-protect-005 #compile-runtime-seam #zero-byte-readablestream #w-schema-no-tables-declared #four-way-conjunction #cry-wolf-gate-gets-deleted #schema-anchor-fixture-declared-nothing #e-cg-enum-binding-collision #e-cg-sql-fn-unverifiable-span #code-with-no-spec-home #catalog-count-measures-the-catalog #emitter-derived-vs-catalog-derived #error-generated-regenerated
 
 ## Links
 - [primary.map.md](./primary.map.md)

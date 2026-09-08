@@ -1,13 +1,13 @@
 {
   "id": "protect-reveal-suppresses-e004",
-  "description": "§14.8.9 declassification — reveal(\"col\") is the sole admit path. Wrapping the protected row in u.reveal(\"passwordHash\") at a raw egress SUPPRESSES the E-PROTECT-004 fail-closed gate (the column is explicitly declassified-at-this-value). The strip machinery still engages (I-PROTECT-STRIP-001), but the reveal admits the named column past the sink.",
+  "description": "§14.8.9 declassification — reveal(\"col\") is the sole admit path. Wrapping the protected row in u.reveal(\"passwordHash\") at a raw egress (a `_={ … }=` foreign-code block, §23) SUPPRESSES the E-PROTECT-004 fail-closed gate: EVERY protected output column of that query is named by a reveal. The strip machinery still engages (I-PROTECT-STRIP-001), but the reveal admits the named column past the sink.",
   "language-version": "1.0",
   "spec": "§14.8.9",
   "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
-  "rationale": "§14.8.9: reveal(\"col\") stamps the column's provenance descriptor as declassified; the sink admits a protected-origin column only when its descriptor bears a reveal stamp. It is the ONLY re-admit path and is greppable in source and emitted handler — so the raw-egress gate that would otherwise fire E-PROTECT-004 is suppressed.",
+  "rationale": "§14.8.9: reveal(\"col\") stamps THE NAMED COLUMN's provenance descriptor as declassified; the sink admits a protected-origin column only when its descriptor bears a reveal stamp. It is the ONLY re-admit path and is greppable in source and emitted handler — so the raw-egress gate that would otherwise fire E-PROTECT-004 is suppressed. ⚑ Read this case WITH its adversarial twin `reveal-wrong-column-e004`, which reveals a DIFFERENT column and correctly still fires: the suppression is COLUMN-keyed, not existence-keyed, and this case alone cannot distinguish the two rules. The case previously used a manual `new Response(...)`; that shape is now E-PROTECT-005, which reveal deliberately does NOT discharge (a hand-serialized Response is not walkable by the floor at all), so the raw-egress limb is exercised here through the foreign block instead.",
   "expect": {
     "codes": [],
-    "notCodes": ["E-PROTECT-004"],
+    "notCodes": ["E-PROTECT-004", "E-PROTECT-005"],
     "severity": { "I-PROTECT-STRIP-001": "info" }
   }
 }

@@ -1,0 +1,14 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id: number(>0 && <10000)) {
+        let u = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return u
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

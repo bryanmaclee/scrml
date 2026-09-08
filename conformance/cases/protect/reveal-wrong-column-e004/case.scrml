@@ -1,0 +1,15 @@
+<program lang="js">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let payload = _={ JSON.stringify(u.reveal("email")) }=
+        return payload
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

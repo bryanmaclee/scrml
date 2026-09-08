@@ -1,4 +1,4 @@
-<program>
+<program lang="js">
   <schema>
     ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
   </schema>
@@ -6,7 +6,8 @@
     ${
       function getUser(id) {
         let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        return new Response(JSON.stringify(u))
+        let payload = _={ JSON.stringify(u) }=
+        return payload
       }
     }
   </db>

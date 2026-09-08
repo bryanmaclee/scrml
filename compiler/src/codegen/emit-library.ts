@@ -14,6 +14,12 @@ import { computeAsyncFnNames, computeNestedAsyncFnHolders, emitLibraryFnMember, 
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { setServerAsyncClassifier } from "./emit-expr.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
+// Runtime-helper SOURCES a structurally-emitted library member may reference.
+// A library `.js` is an importable ES module with NO client runtime attached, so
+// — exactly as `emit-tool.ts` does for a tool module — the helper DEFINITION has
+// to travel with the emit or the reference is a ReferenceError at import time.
+import { SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
+import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -29,6 +35,113 @@ type ASTNode = Record<string, unknown>;
 function withAsyncCombinators(moduleSrc: string): string {
   const block = asyncCombinatorHelperBlock(moduleSrc);
   return block ? moduleSrc + block : moduleSrc;
+}
+
+/**
+ * Runtime helpers a LIBRARY module may reference, keyed by call signature —
+ * the same on-demand table `emit-tool.ts` keeps (`TOOL_RUNTIME_HELPERS`), for
+ * the same reason: a library `.js` is a bare importable ES module with NO client
+ * runtime attached, so a `_scrml_*(…)` call the lowering emits is an
+ * un-resolvable free identifier unless its DEFINITION ships with the module.
+ *
+ * ⚑ This became load-bearing when the fn router was widened to route by default
+ * (see `emitControlFlowLibraryFns`). Under the old `match`-only opt-in almost
+ * nothing routed, so the structural lowering's `==` → `_scrml_structural_eq(…)`
+ * (SPEC §45, emitted for any operand pair not statically primitive) essentially
+ * never reached a library module. Measured at this landing, routing by default
+ * put an undefined `_scrml_structural_eq` reference into 28 corpus modules —
+ * output that PARSES and then throws on first call, which is strictly worse than
+ * the raw path's loud syntax error. Inlining the definition is what makes the
+ * widening safe; `unmetRuntimeHelperRefs` covers everything NOT in this table.
+ */
+const LIB_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
+  { sig: "_scrml_structural_eq(", src: SERVER_STRUCTURAL_EQ_HELPER },
+  { sig: "_scrml_log(", src: SERVER_LOG_HELPER },
+  { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
+];
+
+/**
+ * The `_scrml_*(…)` call references in `emitted` that this module can NOT
+ * satisfy — i.e. neither an inlinable `LIB_RUNTIME_HELPERS` entry nor an
+ * on-use async-combinator helper (`_scrml_<method>Async`, appended by
+ * `withAsyncCombinators`).
+ *
+ * ⚑ READ THE EMITTED BYTES, DO NOT RE-DERIVE THE PREDICATE. Asking "would this
+ * fn's lowering need a runtime helper?" from the AST means maintaining a second,
+ * silently-drifting copy of every lowering rule in emit-expr / emit-logic. The
+ * emitted text is the ground truth and it is already in hand. (Same discipline
+ * as `emitMultiScrutineeMatch`'s IIFE-header async scan.)
+ *
+ * The live case is a `@cell` read/write inside a library fn: the lowering emits
+ * `_scrml_reactive_get("x")` / `_scrml_reactive_set("x", …)`, which belong to the
+ * browser reactive runtime a library module does not have and cannot inline (a
+ * reactive cell is a live graph node, not a pure function). Such a fn stays on
+ * the raw path, where its `@x` leaks verbatim and fails LOUDLY — the honest
+ * outcome until a library-mode ruling on `@`-cells exists.
+ */
+/**
+ * Un-lowered scrml-only syntax left in an otherwise-accepted structural emit —
+ * the companion gate to `unmetRuntimeHelperRefs`, for constructs that need no
+ * runtime helper and so slip past it.
+ *
+ * ⚑ THE ONE THAT FORCED THIS: `!{ … }` (a guarded expression). Measured on
+ * `let v: int = !{ n }` in a match-free library fn:
+ *
+ *   base  `let v: int = !{ n }`   INVALID JS — fails loudly the moment it is imported
+ *   arc   `let v = !{n};`         VALID JS. `!` applied to an object literal, so it
+ *                                 evaluates to `false`, ALWAYS, in a fn typed `-> int`
+ *
+ * Both at exit 0 with ZERO diagnostics. The structural path re-prints the guard's
+ * inner text without lowering it, and `!{…}` happens to be syntactically legal
+ * JavaScript — which is exactly what makes it worse than the leak it replaced.
+ * Turning a LOUD failure into a SILENT WRONG ANSWER is the one direction this
+ * widening must never move in, and it is the same argument the
+ * `LIB_RUNTIME_HELPERS` comment above makes for `_scrml_structural_eq`; that
+ * guard simply cannot see a construct with no `_scrml_*` reference to catch.
+ *
+ * Read the EMITTED BYTES rather than the AST, for the reason
+ * `unmetRuntimeHelperRefs` states — and here additionally because a guarded-expr's
+ * node shape is not reliably visible where the router runs.
+ */
+function unloweredScrmlSyntax(emitted: string): string[] {
+  const found: string[] = [];
+  // `!{` — a guarded expression that did not lower. Legal JS, always falsy.
+  if (/!\s*\{/.test(emitted)) found.push("!{ } guarded expression");
+  // `_={` — foreign code that did not lower (belt-and-braces; the router already
+  // excludes foreign-bearing fns by AST, this catches any path that gets past it).
+  if (/_=\s*\{/.test(emitted)) found.push("_={ }= foreign block");
+  return found;
+}
+
+function unmetRuntimeHelperRefs(emitted: string): string[] {
+  const unmet = new Set<string>();
+  const re = /\b(_scrml_[A-Za-z0-9_$]*)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(emitted)) !== null) {
+    const name = m[1];
+    if (LIB_RUNTIME_HELPERS.some((h) => h.sig === `${name}(`)) continue;
+    if (/^_scrml_[a-zA-Z]+Async$/.test(name)) continue; // async-combinator footer
+    unmet.add(name);
+  }
+  return [...unmet];
+}
+
+/**
+ * Append the definition of every `LIB_RUNTIME_HELPERS` entry the module body
+ * actually references. On-use + per-helper: a module whose lowering emits none
+ * of them carries none of them, so a library file this landing does not touch
+ * stays byte-for-byte as it was. Mirrors `emit-tool.ts`'s
+ * `buildRuntimeHelperHeader`, and is placed as a FOOTER for the same reason
+ * `withAsyncCombinators` is — every entry is a `function` DECLARATION, which
+ * hoists to module scope, so trailing placement keeps user code first and the
+ * compiler runtime last without any resolution hazard.
+ */
+function withRuntimeHelpers(moduleSrc: string): string {
+  let out = moduleSrc;
+  for (const { sig, src } of LIB_RUNTIME_HELPERS) {
+    if (moduleSrc.includes(sig)) out += "\n" + src;
+  }
+  return out;
 }
 
 /** A span object with start/end offsets. */
@@ -216,6 +329,7 @@ function collectAsyncFnKeywordTargets(
 function collectSqlFnRemovalRanges(
   logicBody: unknown,
   sourceText: string,
+  unverifiableSqlSpans?: Array<{ name: string; span: Span }>,
 ): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
   if (!Array.isArray(logicBody)) return ranges;
@@ -230,13 +344,30 @@ function collectSqlFnRemovalRanges(
     const key = `${sp.start}:${sp.end}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    // Extend backward to swallow `export` + optional `pure`/`server` modifiers
-    // (§21.5.1). Anchored at end-of-lookback so only keywords immediately
-    // preceding the function-decl span are captured.
-    const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
-    const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
-    const prefixLen = m ? m[1].length : 0;
-    ranges.push({ start: sp.start - prefixLen, end: sp.end });
+    // ⚑ VERIFIED SPAN — AND THE FAILURE ACTION HERE IS INVERTED FROM THE OTHER
+    // TWO SPLICERS, WHICH IS WHY THE FILED RESIDUAL'S "lift it to all three" IS
+    // NOT QUITE RIGHT. For `emitControlFlowLibraryFns` and `emitAsyncLibraryFns`,
+    // an unverifiable span means "leave the fn on the raw path" — inert, and it
+    // fails loudly downstream. Here the removal is not an optimisation, it is a
+    // CONFIDENTIALITY BOUNDARY: this pass exists to prune a server-only `?{}` /
+    // transaction fn OUT of the importable, client-facing library `.js` (see this
+    // function's contract above). Silently skipping the splice would LEAVE the
+    // SQL body in that artifact — fail-OPEN, in the one place this file must fail
+    // closed.
+    //
+    // So an unverifiable span is recorded and raised as a hard error by the
+    // caller, rather than dropped. Reported, not pruned, not leaked.
+    const range = verifiedFnRemovalRange(n, sourceText);
+    if (!range) {
+      if (unverifiableSqlSpans) {
+        unverifiableSqlSpans.push({
+          name: typeof n.name === "string" ? n.name : "(anonymous)",
+          span: sp,
+        });
+      }
+      continue;
+    }
+    ranges.push(range);
   }
   return ranges;
 }
@@ -269,7 +400,26 @@ function pruneServerFnsAndLowerGuarded(
   // Merging them here BEFORE the guarded-expr lowering means a `!{}` inside an
   // async fn is SKIPPED (its span falls inside a removal) — emitLibraryFnMember
   // lowers it structurally instead, so it is not double-lowered here.
-  const removals = [...collectSqlFnRemovalRanges(logicBody, sourceText), ...extraRemovals];
+  // ⚑ A `?{}`/transaction fn whose span cannot be VERIFIED is a hard error, not a
+  // skipped splice — this pass is a confidentiality boundary (server SQL must not
+  // reach the importable client-facing `.js`), so it fails CLOSED. See
+  // `collectSqlFnRemovalRanges`.
+  const unverifiableSqlSpans: Array<{ name: string; span: Span }> = [];
+  const removals = [
+    ...collectSqlFnRemovalRanges(logicBody, sourceText, unverifiableSqlSpans),
+    ...extraRemovals,
+  ];
+  for (const { name, span } of unverifiableSqlSpans) {
+    errors.push(new CGError(
+      "E-CG-SQL-FN-UNVERIFIABLE-SPAN",
+      `E-CG-SQL-FN-UNVERIFIABLE-SPAN: the server-only SQL function \`${name}\` ` +
+        `carries a declaration span that cannot be verified against its own source ` +
+        `text, so it cannot be safely pruned from the importable library module. ` +
+        `Emitting anyway would leave its \`?{}\` body in a client-facing artifact, ` +
+        `so compilation stops instead (§44.7.1, W5b).`,
+      span,
+    ));
+  }
 
   const guarded: ASTNode[] = [];
   collectGuardedExprs(logicBody, guarded);
@@ -594,14 +744,20 @@ function emitAsyncLibraryFns(
   const outLines: string[] = [];
   try {
     for (const fn of toEmit) {
-      const sp = fn.span as Span | undefined;
-      if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
-      // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the
-      // decl span starts at `function`/`fn` (mirrors collectSqlFnRemovalRanges).
-      const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
-      const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
-      const prefixLen = m ? m[1].length : 0;
-      removals.push({ start: sp.start - prefixLen, end: sp.end });
+      // ⚑ VERIFIED SPAN (g-library-fn-decl-span-unverified-splice). A
+      // `function-decl` span is not reliable — measured on
+      // `compiler/native-parser/ast-expr.scrml`, every top-level `export fn`
+      // reports a start ~22 chars INSIDE its own parameter list and an end that
+      // overshoots into the next statement's comment. Splicing those offsets
+      // emits mangled text rather than either the raw copy or the structural
+      // emit, and it does so SILENTLY.
+      //
+      // Failure action here is FALL BACK TO RAW, matching
+      // `emitControlFlowLibraryFns`: the fn keeps its verbatim source text, which
+      // loses the async lowering and fails loudly rather than corrupting the file.
+      const range = verifiedFnRemovalRange(fn, sourceText);
+      if (!range) continue;
+      removals.push(range);
       outLines.push(
         emitLibraryFnMember(fn, {
           isExported: fn.fromExport === true,
@@ -626,32 +782,46 @@ function emitAsyncLibraryFns(
 }
 
 /**
- * §18 cross-mode parity (g-library-mode-match-expr-fails-codegen) — route every
- * library function-decl whose body contains a `match` expression that browser
- * mode LOWERS but the whole-block text path passes through RAW through the SAME
- * structured `emitLibraryFnMember` the async / server / tool paths use. The
- * whole-block slicer below emits fn bodies verbatim, so a `match` expression leaks
- * its raw scrml syntax into the importable `.js` — invalid JS that trips the
- * §2.2.1 E-CODEGEN-INVALID-LOGIC emit gate — exactly as a raw `!{}` / `?{}` would.
+ * §18 / §7.5 / §14.10 cross-mode parity — route library function-decls through
+ * the SAME structured `emitLibraryFnMember` the async / server / tool paths use,
+ * instead of letting the whole-block text slicer emit their bodies VERBATIM.
  * Mirrors `emitAsyncLibraryFns`: returns the source SPANS to prune (the caller
  * merges them into the prune pass so the verbatim copy is removed) plus the
  * structured JS to append.
  *
- * Selection is disjoint from the async / SQL routers by construction:
- *   - `alreadyRouted` names are the async / nested-async-holder fns emitted
- *     structurally above (their body already lowers the match) — skip them.
- *   - a `?{}` / transaction fn is pruned to `.server.js` by
- *     `collectSqlFnRemovalRanges` (its whole body, match included) — skip it.
- * What remains is a pure SYNC fn whose ONLY blocker to valid output is the
- * unlowered `match`, so `emitLibraryFnMember` with an empty async set (client
- * boundary) reproduces browser mode's client lowering byte-for-byte.
+ * ⚑ THE ROUTING POLARITY IS THE POINT, AND IT IS DELIBERATELY INVERTED FROM
+ * WHAT THIS FUNCTION USED TO DO. It used to route a fn only when its body held
+ * a `match` (`fnBodyContainsMatch`), i.e. one opt-in per construct someone
+ * happened to trip over. That made the file's history a splice-pass-per-
+ * construct: `!{}` guarded-expr, `_={}=` foreign, top-level `const = match`,
+ * SQL fns, `match` — each a separate discovery, each a separate patch, and each
+ * one leaving the NEXT scrml-only construct to leak verbatim into the importable
+ * `.js`. Two more members of that same class were open when this landed:
+ *   · a LOCAL type annotation — `let acc: int = …` (§7.5: *"Type annotations
+ *     appear on variable declarations, function parameters, and function return
+ *     types throughout scrml logic contexts"*). `cleanFnSignatures` strips the
+ *     SIGNATURE annotations only, so the local's `: int` shipped verbatim.
+ *   · bare/payload variant construction — `return .Ok(n)` (§14.10: *"A bare
+ *     variant reference SHALL be resolved by the compiler when the type at the
+ *     position can be inferred from … a function return type"*). `.Ok(n)`
+ *     shipped verbatim.
+ * Both are ALREADY LOWERED CORRECTLY by `emitLibraryFnMember` — the identical
+ * body with a dummy `match` bolted on compiled clean and emitted `let acc = n *
+ * 2;` / `return { variant: "Ok", data: { n: n } };`. The lowering was never
+ * missing; only the routing predicate was.
  *
- * Detection is by AST node kind (`match-expr`/`match-stmt`, or a `matchExpr`
- * attachment on an enclosing return/let/const), NOT by span-splicing the inner
- * node: the match-expr node's own span bleeds across the enclosing `return ` and
- * the fn's trailing brace, so re-emitting the WHOLE fn from the AST (which the
- * shared member emitter already does correctly) is the sound unit. `if`-expression
- * forms are deliberately NOT routed — see `fnBodyContainsMatch`.
+ * So the predicate is now "route UNLESS we must not", and every exclusion is
+ * named with its reason (`rawFallbackReason`). Selection stays disjoint from the
+ * async / SQL routers by construction:
+ *   - `alreadyRouted` names are the async / nested-async-holder fns emitted
+ *     structurally above — skip them.
+ *   - a `?{}` / transaction fn is pruned to `.server.js` by
+ *     `collectSqlFnRemovalRanges` (its whole body) — skip it.
+ *
+ * Detection is by AST node kind, NOT by span-splicing an inner node: an inner
+ * node's own span bleeds across the enclosing `return ` and the fn's trailing
+ * brace, so re-emitting the WHOLE fn from the AST (which the shared member
+ * emitter already does correctly) is the sound unit.
  */
 function emitControlFlowLibraryFns(
   logicBody: unknown,
@@ -666,60 +836,214 @@ function emitControlFlowLibraryFns(
     if (!node || node.kind !== "function-decl" || typeof node.name !== "string") continue;
     if (alreadyRouted.has(node.name)) continue;
     if (containsSqlOrTransaction(node)) continue;
-    if (!fnBodyContainsMatch(node)) continue;
-    const sp = node.span as Span | undefined;
-    if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
-    // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the decl
-    // span starts at `function`/`fn` (mirrors emitAsyncLibraryFns / collectSqlFnRemovalRanges).
-    const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
-    const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
-    const prefixLen = m ? m[1].length : 0;
-    removals.push({ start: sp.start - prefixLen, end: sp.end });
-    outLines.push(
-      emitLibraryFnMember(node, { isExported: node.fromExport === true, asyncFnNames: emptyAsync }),
-    );
+    if (rawFallbackReason(node) !== null) continue;
+    // ⚑ The span is VERIFIED against the source before it is spliced — see
+    // `verifiedFnRemovalRange`. An unverifiable span means we cannot excise the
+    // verbatim copy safely, so the fn stays on the raw path (inert) rather than
+    // shipping a corrupted splice.
+    const range = verifiedFnRemovalRange(node, sourceText);
+    if (!range) continue;
+    const emitted = emitLibraryFnMember(node, {
+      isExported: node.fromExport === true,
+      asyncFnNames: emptyAsync,
+    });
+    // ⚑ The LAST gate, and it reads the EMITTED BYTES rather than re-deriving a
+    // predicate: if the structural lowering reached for a runtime helper this
+    // module cannot ship (a `@cell` → `_scrml_reactive_get`, say), the emit
+    // would PARSE and then throw on first call. Discard it and leave the fn on
+    // the raw path, where the same construct fails loudly instead.
+    if (unmetRuntimeHelperRefs(emitted).length > 0) continue;
+    // ⚑ Companion gate: scrml-only syntax the structural path re-printed WITHOUT
+    // lowering, which needs no runtime helper and so is invisible to the check
+    // above. `!{ … }` is the live case and it is the worst possible shape —
+    // legal JavaScript that is always `false`. Fall back to raw, where the same
+    // construct fails loudly. See `unloweredScrmlSyntax`.
+    if (unloweredScrmlSyntax(emitted).length > 0) continue;
+    removals.push(range);
+    outLines.push(emitted);
   }
   return { removals, lines: outLines };
 }
 
 /**
- * True when a library fn body holds a `match` expression the whole-block text
- * path cannot lower — a bare `match`/`match-expr` node (statement position) or a
- * `matchExpr` attachment on an enclosing `return`/`let`/`const`. Walks the whole
- * body so a `match` nested inside a block-arm / inner helper is caught too;
- * routing the enclosing fn structurally lowers the nested one in the same pass.
+ * Compute the source range to excise for a routed library fn — INCLUDING its
+ * `export`/`pure`/`server` modifier prefix (§21.5.1, which sits BEFORE the
+ * function-decl span) — and return `null` when the AST span cannot be shown to
+ * cover exactly that function's own text.
  *
- * SCOPE (deliberate — match ONLY, not `if`): browser mode's `if`-expression-value
- * lowering is itself broken (an `if`-bound `let` compiles but the arm values
- * assign to fresh block-scoped temps, so the binding stays `null` at runtime — a
- * silent-wrong in BOTH modes, filed as g-if-expression-value-binding-lowers-null).
- * Routing an `if`-bearing fn here would trade library's loud
- * E-CODEGEN-INVALID-LOGIC for that silent-wrong — the dangerous direction — so
- * `if` stays raw-failing (loud, unchanged) until the shared lowering is fixed.
- * `match` lowers correctly in browser mode (verified byte- and run-identical), so
- * routing it is pure cross-mode parity.
+ * ⚑ THIS GUARD EXISTS BECAUSE `function-decl` SPANS ARE NOT RELIABLE, AND THE
+ * FAILURE IS SILENT TEXT CORRUPTION RATHER THAN A DIAGNOSTIC. Measured on
+ * `compiler/native-parser/ast-expr.scrml` at this landing: every top-level
+ * `export fn` there reports a span whose `start` is ~22 chars INSIDE its own
+ * parameter list and whose `end` overshoots its closing `}` into the FOLLOWING
+ * statement's comment (`makeIdent` → `start` at `n) {`, `end` inside
+ * `// makeNumberL`). Splicing on those offsets emits
+ * `export function makeIdent(name, spait — numeric literal.` — a mangled file
+ * that is neither the raw text nor the structural emit. The sibling
+ * `g-match-decl-span-overshoots-next-statement` note above records the same
+ * defect class for match/decl spans; this is the function-decl limb of it.
+ *
+ * The routing widening (route-by-default) is what makes the guard necessary:
+ * under the old `match`-only opt-in almost nothing in the corpus routed, so the
+ * bad spans were never exercised. Widening the router without verifying the span
+ * would have converted a leak into a corruption — strictly the worse direction.
+ *
+ * Verification is three cheap invariants over the candidate slice, ALL of which
+ * hold for a correctly-spanned declaration and all of which the measured bad
+ * spans fail:
+ *   1. it STARTS with this fn's own declaration head — an optional
+ *      `export`/`pure`/`server`/`async` modifier run, then `fn`/`function`,
+ *      then (allowing a generator `*`) this node's own NAME;
+ *   2. it ENDS at a `}`;
+ *   3. its braces BALANCE (equal `{` / `}` counts) — this catches an `end` that
+ *      overshoots to some LATER closing brace, which invariants 1 and 2 would
+ *      both accept.
+ * Invariant 3 is deliberately crude: a brace inside a string literal or comment
+ * can unbalance a legitimate fn. That mis-fires toward the RAW fallback, which
+ * is byte-identical to today's output — the safe direction — so a false
+ * rejection costs an unlowered construct, never a corrupted emit.
+ *
+ * ⚑ ALL THREE SPLICERS ARE NOW GUARDED (S408, #898) — but NOT the same way, and
+ * the difference is load-bearing. Call sites: `collectSqlFnRemovalRanges` (:360),
+ * `emitAsyncLibraryFns` (:758), `emitControlFlowLibraryFns` (:844).
+ *
+ *   - async + control-flow: an unverifiable span means LEAVE THE FN ON THE RAW
+ *     PATH. Inert, and it fails loudly downstream.
+ *   - SQL: an unverifiable span is a HARD ERROR, `E-CG-SQL-FN-UNVERIFIABLE-SPAN`.
+ *     `collectSqlFnRemovalRanges` is not an optimisation, it is a CONFIDENTIALITY
+ *     BOUNDARY — it prunes a server-only `?{}` / transaction fn OUT of the
+ *     importable, client-facing library `.js` (§44.7.1, W5b). Silently skipping
+ *     that splice would LEAVE the SQL body in that artifact: fail-OPEN, in the one
+ *     place this file must fail closed. Do NOT "unify" these two behaviours.
+ *
+ * ⚑ THE RESIDUAL IS THE HONEST HALF, and it is two things, not the one this
+ * comment used to claim:
+ *   1. The SQL error path is INERT AND THEREFORE UNEXERCISED — 118/118
+ *      byte-identical on the corpus, so it has never fired. A reproducer is owed
+ *      and is hard: a library file cannot carry a `<db src>` (markup makes the
+ *      file non-`pure-module`), which is why the population has zero SQL fns.
+ *   2. The REAL fix is still upstream and unowned here — the parser should not
+ *      emit a `function-decl` span that starts mid-parameter-list. Locus is
+ *      `ast-builder.js` / `compiler/native-parser`.
+ * See `g-library-fn-decl-span-unverified-splice` (still open for exactly those two).
+ *
+ * ⚑ This block previously said the async and SQL splicers "are NOT guarded here",
+ * which stopped being true at #898 and was caught by a maps non-compliance pass
+ * (N-S405-2) — in a file whose own comments are its correctness argument.
  */
-function fnBodyContainsMatch(fnNode: ASTNode): boolean {
-  let found = false;
+function verifiedFnRemovalRange(
+  node: ASTNode,
+  sourceText: string,
+): { start: number; end: number } | null {
+  const sp = node.span as Span | undefined;
+  if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") return null;
+  if (sp.end <= sp.start || sp.end > sourceText.length) return null;
+  const name = node.name as string;
+  // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the decl
+  // span starts at `function`/`fn` (mirrors emitAsyncLibraryFns / collectSqlFnRemovalRanges).
+  const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
+  const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
+  const start = sp.start - (m ? m[1].length : 0);
+  const slice = sourceText.slice(start, sp.end);
+  // (1) the slice opens with THIS fn's declaration head.
+  const head = new RegExp(
+    `^(?:export\\s+)?(?:pure\\s+)?(?:server\\s+)?(?:async\\s+)?(?:fn|function)\\s*\\*?\\s*${
+      name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }\\b`,
+  );
+  if (!head.test(slice)) return null;
+  // (2) the slice closes on the declaration's closing brace.
+  if (!slice.trimEnd().endsWith("}")) return null;
+  // (3) braces balance across the slice.
+  let depth = 0;
+  for (let i = 0; i < slice.length; i++) {
+    const c = slice[i];
+    if (c === "{") depth++;
+    else if (c === "}") depth--;
+    if (depth < 0) return null;
+  }
+  if (depth !== 0) return null;
+  return { start, end: sp.end };
+}
+
+/**
+ * The RAW-TEXT FALLBACK predicate — returns a stated REASON string when a
+ * library fn must stay on the whole-block verbatim path, or `null` when it
+ * routes structurally (the default).
+ *
+ * This is the inverse of the old `fnBodyContainsMatch` opt-in, and the inversion
+ * is the fix: an opt-in predicate has to be widened once per scrml construct
+ * anybody trips over, so every construct nobody has tripped over yet leaks
+ * verbatim into the importable `.js`. An opt-OUT predicate leaks only what is
+ * NAMED here, with the reason attached.
+ *
+ * ⚑ THE ONE STANDING EXCLUSION — `if`-EXPRESSION-VALUE FORMS (`node.ifExpr` on a
+ * `let`/`const` decl, lowered by emit-logic's `emitIfExprDecl`). Browser mode's
+ * `if`-expression-value lowering is itself broken: an `if`-bound `let` compiles,
+ * but the arm values assign to fresh block-scoped temps, so the binding stays
+ * `null` at runtime — a SILENT-WRONG in both modes. The verbatim path, by
+ * contrast, emits a plain JS `if` statement that is at least syntactically
+ * valid. Routing an `if`-bearing fn here would therefore trade a working-or-
+ * loudly-broken emit for a quietly-wrong one — the dangerous direction. It stays
+ * raw until the shared `emitIfExprDecl` lowering is fixed; that is a lowering
+ * fix, not a routing one.
+ *
+ * `match` lowers correctly in browser mode (byte- and run-identical), as do
+ * local type annotations, bare/payload variant construction, `is`/`given`
+ * operators, and struct literals — hence the default.
+ */
+function rawFallbackReason(fnNode: ASTNode): string | null {
+  let reason: string | null = null;
   const walk = (n: unknown): void => {
-    if (found || !n || typeof n !== "object") return;
+    if (reason !== null || !n || typeof n !== "object") return;
     if (Array.isArray(n)) {
       for (const c of n) walk(c);
       return;
     }
     const o = n as Record<string, unknown>;
-    const k = o.kind;
-    if (k === "match-expr" || k === "match-stmt" || o.matchExpr) {
-      found = true;
+    if (o.ifExpr) {
+      // g-if-expression-value-binding-lowers-null — see the block comment above.
+      reason = "if-expression-value binding (emitIfExprDecl lowers to null)";
       return;
     }
+    // ⚑ `_={ … }=` FOREIGN CODE — and this exclusion is the one that keeps the
+    // widening honest. `emitLibraryFnMember` lowers a fn body at the CLIENT
+    // boundary, and `emit-logic.ts` gates the real foreign emit on
+    // `opts.boundary === "server"` (:2148). Off the server boundary a
+    // `const x = _={ … }=` initializer becomes literally
+    //   `const x = null; // foreign-init for x — _{} runs server-side; …`
+    // so the function keeps its signature, PARSES, exports, and returns null —
+    // silent-wrong output, which is strictly worse than the raw path's honest
+    // verbatim copy. Measured: routing by default this way broke
+    // `standalone-tool-target.test.js` "Flag C" — a foreign-only library
+    // emitted `export function runOpen(…) { const out = null; return out; }`
+    // where the base emits `export async function runOpen`, so an importing
+    // §64 tool awaited a function that no longer does anything.
+    //
+    // ⚑ The corpus differential was BLIND to this: no library module in the
+    // 118-file population carries a `_{}` foreign init, so the population
+    // measured 0 regressions while a committed test failed. A zero over a path
+    // the population never exercises is not coverage.
+    //
+    // The RIGHT long-term answer is probably that a library module has no
+    // client/server split at all and should lower foreign at the server
+    // boundary — but "what boundary is a library module?" is a language
+    // question, not a codegen one, so it is routed rather than decided here.
+    // Falling back to raw is inert (byte-identical to today) and honest.
+    if (o.kind === "foreign" || o.foreignNode) {
+      reason = "`_={ … }=` foreign code (emit-logic nulls a foreign init off the server boundary)";
+      return;
+    }
+    // (A `!{ … }` guarded expression is caught AFTER emission instead — see
+    // `unloweredScrmlSyntax`. Its AST shape is not reliably visible at this point in
+    // the pipeline, and the emitted bytes are the ground truth anyway.)
     for (const key of Object.keys(o)) {
       const v = o[key];
       if (v && typeof v === "object") walk(v);
     }
   };
   walk(fnNode.body);
-  return found;
+  return reason;
 }
 
 /**
@@ -742,6 +1066,134 @@ function fnBodyContainsMatch(fnNode: ASTNode): boolean {
  * types, TS-erased) and are omitted here. Per §21.2 the exported enum resolves
  * "the same way as a non-exported type" — hence the shared-emitter reuse.
  */
+/**
+ * Names of top-level `const X` bindings that appear MORE THAN ONCE in an
+ * assembled library module, restricted to names the compiler itself emitted an
+ * enum runtime rep for.
+ *
+ * ⚑ WHY THIS EXISTS: a library file's enum type-decl emits a runtime binding
+ * `const X = Object.freeze({ … })` (§21.2). Eight `compiler/native-parser/*.scrml`
+ * modules ALSO hand-declare `export const X = Object.freeze({ … })`, labelled
+ * in-source as *"variant tags (mirror of the canonical enum's .Variant names)"* —
+ * written back when library mode emitted no enum runtimes at all. Two top-level
+ * `const X` in one ES module is a hard `SyntaxError`.
+ *
+ * The collision was already caught, but by the WRONG MESSENGER: the §2.2.1 CG
+ * emit gate refused the artifact with *"This is a compiler defect (codegen
+ * produced malformed output). Please report it."* That is not a compiler defect,
+ * and the author is told to file a compiler bug when the actionable fix is one
+ * line — delete the mirror the compiler now supersedes. Same shape
+ * `g-library-mode-cell-access-has-no-runtime` names for `@`-cells: a downstream
+ * error that blames codegen for a source-level violation.
+ *
+ * Read the ASSEMBLED BYTES rather than the AST, for the reason
+ * `unloweredScrmlSyntax` states — and here additionally because the emitted rep
+ * and the authored const arrive on two different paths (generated header vs.
+ * whole-block source text), so the module text is the only place both are
+ * visible at once.
+ *
+ * ⚑ THIS READS THE AST, NOT THE EMITTED BYTES — deliberately, and against this
+ * file's usual preference (`unmetRuntimeHelperRefs` / `unloweredScrmlSyntax`
+ * both read bytes). A text scan CANNOT do it: the whole-block path emits the
+ * source block with its original indentation, so a module-level `const X` and a
+ * function-local `const X` are indistinguishable by leading whitespace. Measured
+ * before this note was written — a `^[ \t]*(export )?const NAME =` scan fired on
+ * **11 modules that parse clean** (`lex.scrml`, `parse-ctx.scrml`,
+ * `parse-expr.scrml`, the seven `lex-in-*.scrml`, …), because each declares a
+ * local `const LexMode` inside a fn body. Shipping that would have turned eleven
+ * working builds into hard errors — the exact direction this diagnostic must
+ * never move in.
+ *
+ * The AST answers the real question directly: a top-level `export const X` is an
+ * `export-decl` with `exportKind === "const"` and `exportedName === X`, and a
+ * bare one is a `const-decl` with `name === X`. Nothing nested inside a fn body
+ * appears in a logic block's top-level statement list at all.
+ */
+function userTopLevelConstNames(fileAST: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  const blocks: ASTNode[] = [];
+  (function collect(list: unknown[]): void {
+    for (const n of list ?? []) {
+      if (!n || typeof n !== "object") continue;
+      const o = n as ASTNode;
+      if (o.kind === "logic" && Array.isArray(o.body)) blocks.push(o);
+      if (Array.isArray(o.children)) collect(o.children as unknown[]);
+    }
+  })(getNodes(fileAST) as unknown[]);
+
+  for (const b of blocks) {
+    for (const st of ((b.body ?? []) as ASTNode[])) {
+      if (!st || typeof st !== "object") continue;
+      if (
+        st.kind === "export-decl" && st.exportKind === "const" &&
+        typeof st.exportedName === "string"
+      ) {
+        names.add(st.exportedName as string);
+      } else if (
+        (st.kind === "const-decl" || st.kind === "let-decl") &&
+        typeof st.name === "string"
+      ) {
+        names.add(st.name as string);
+      }
+    }
+  }
+  return names;
+}
+
+/** Enum names the compiler binds that the author ALSO binds at module top level. */
+function enumBindingCollisions(
+  fileAST: Record<string, unknown>,
+  enumRepNames: string[],
+): string[] {
+  if (enumRepNames.length === 0) return [];
+  const userNames = userTopLevelConstNames(fileAST);
+  return enumRepNames.filter((n) => userNames.has(n));
+}
+
+/**
+ * Assemble the module text and, before handing it back, name any collision
+ * between an enum runtime binding the compiler emitted and a same-named `const`
+ * the author declared. See `enumBindingCollisions` for why this is worth a
+ * diagnostic of its own.
+ *
+ * The artifact is still returned — the §2.2.1 emit gate is what refuses to WRITE
+ * it. This only replaces an unactionable "report a compiler bug" with the name of
+ * the colliding binding and the one-line fix.
+ */
+function finishLibraryModule(
+  lines: string[],
+  enumRepNames: string[],
+  fileAST: Record<string, unknown>,
+  errors: CGError[],
+  filePath: string,
+): string {
+  const src = withRuntimeHelpers(withAsyncCombinators(lines.join("\n")));
+  if (enumRepNames.length > 0) {
+    for (const name of enumBindingCollisions(fileAST, enumRepNames)) {
+      errors.push(new CGError(
+        "E-CG-ENUM-BINDING-COLLISION",
+        `E-CG-ENUM-BINDING-COLLISION: enum \`${name}\` emits a runtime binding ` +
+          `\`const ${name} = Object.freeze({ … })\` (§21.2), which collides with a ` +
+          `\`const ${name}\` declared in this module — two top-level \`const ${name}\` ` +
+          `is a SyntaxError. This is NOT a compiler defect: remove the hand-written ` +
+          `\`const ${name}\`, which the compiler's enum rep now supersedes.`,
+        { file: filePath, start: 0, end: 0, line: 1, col: 1 } as unknown as Span,
+      ));
+    }
+  }
+  return src;
+}
+
+/** The identifier each emitted enum runtime rep line binds. */
+function enumRepBindingNames(repLines: string[]): string[] {
+  const names: string[] = [];
+  for (const line of repLines) {
+    const m = line.match(/^(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/);
+    if (m) names.push(m[1]);
+  }
+  return names;
+}
+
 function emitEnumRuntimeReps(fileAST: Record<string, unknown>): string[] {
   const inner = fileAST.ast as Record<string, unknown> | undefined;
   const typeDecls =
@@ -892,6 +1344,10 @@ export function generateLibraryJs(
   // exported) up front so a consumer's `import { X }` + `X.Variant(…)` / `match`
   // resolves at runtime. Struct/alias decls stay pure types (no runtime rep).
   const enumReps = emitEnumRuntimeReps(fileAST);
+  // Names the compiler binds here — carried to `finishLibraryModule` so a
+  // collision with an author-declared `const` of the same name is named
+  // precisely instead of surfacing as a generic malformed-output defect.
+  const enumRepNames = enumRepBindingNames(enumReps);
   if (enumReps.length > 0) {
     for (const repLine of enumReps) lines.push(repLine);
     lines.push("");
@@ -1243,7 +1699,7 @@ export function generateLibraryJs(
       }
     }
 
-    return withAsyncCombinators(lines.join("\n"));
+    return finishLibraryModule(lines, enumRepNames, fileAST, errors, filePath);
   }
 
   // ---------------------------------------------------------------------------
@@ -1314,5 +1770,5 @@ export function generateLibraryJs(
     }
   }
 
-  return withAsyncCombinators(lines.join("\n"));
+  return finishLibraryModule(lines, enumRepNames, fileAST, errors, filePath);
 }

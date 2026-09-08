@@ -1,0 +1,13 @@
+{
+  "id": "protect-reveal-wrong-column-e004",
+  "description": "§14.8.9 — declassification is COLUMN-keyed, not existence-keyed. `passwordHash` is the protected column; the body reveals `email`. That reveal declassifies nothing about `passwordHash`, so the raw-egress gate still fires E-PROTECT-004. The adversarial twin of `reveal-suppresses-e004`, which reveals the RIGHT column and is correctly silent.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: `reveal(\"col\")` stamps THE NAMED COLUMN's provenance descriptor as declassified-at-this-value — it is a per-column admit, not a per-body switch. Until S405 the gate's suppression tested only for the PRESENCE of a `.reveal(` anywhere in the body, so revealing any column disarmed the gate for every protected column in that body: `reveal(\"email\")` silently declassified `passwordHash`. This case pins the narrowed rule — the gate is discharged only when every protected OUTPUT column of the offending query is named by a reveal. It goes red against the pre-S405 emitter, which is what makes it a proof rather than a description.",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}

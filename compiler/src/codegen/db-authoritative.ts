@@ -32,7 +32,7 @@
  * P1-tail follow-on.)
  */
 
-import { parseSchemaBlock } from "../schema-differ.js";
+import { parseSchemaBlock, harvestRawCreateTableDecls } from "../schema-differ.js";
 import { DBAUTH_ROLE, DBAUTH_TENANT_GUC, DBAUTH_CAPS_GUC } from "../schema-differ.js";
 
 /**
@@ -93,6 +93,30 @@ export function appDeclaresDbAuthoritative(fileAST: unknown): boolean {
  * apply loop reconciles.
  *
  * @returns `{ tables }` in the same shape `parseSchemaBlock` yields.
+ *
+ * RAW-DDL `< schema>` (dpa-039 arc B, g-schema-block-raw-ddl). A `< schema>` body
+ * may carry raw `CREATE TABLE … (…)` SQL instead of the declarative
+ * `tableName { col: type }` DSL. `parseSchemaBlock` recognizes ONLY the DSL, so
+ * that spelling used to yield ZERO tables here — and because
+ * `codegen/emit-server.ts` feeds `extractDesiredSchema(fileAST).tables` to
+ * §14.8.10's `buildTenantContext`, a raw-DDL + no-`< db>` app got an EMPTY
+ * tenant set and a **silently inert tenant isolation floor at exit 0**: no
+ * `_scrml_tenant_tag`, no `_scrml_tenant_redact`, no diagnostic. §14.8.9 had
+ * already been taught the form (`harvestRawCreateTables`), so two adjacent
+ * security floors disagreed about what counts as a schema declaration. SPEC
+ * §14.8.10 settles it without qualifying the spelling: *"A table whose
+ * `< schema>` carries a `tenant_id` column IS tenant-scoped; the column's
+ * presence is the declaration."*
+ *
+ * Harvested tables are marked **`rawDdl: true`** and carry NAMES ONLY (see
+ * `parseRawCreateTableColumns`). That marker is load-bearing, not decorative:
+ * this function's other consumer is `scrml db-migrate`, which feeds `.tables`
+ * to `diffSchema` as compiler-OWNED desired state. A raw-DDL table's DDL is
+ * AUTHOR-owned and only partially recovered, so `diffSchema` skips `rawDdl`
+ * tables rather than emit a lossy `CREATE TABLE` — or, worse, `W-SCHEMA-002`
+ * DROP COLUMN against a live table for every constraint the partial read did
+ * not recover. Migrating a raw-DDL `< schema>` by REPLAYING the author's own
+ * statement is a real gap and is deliberately NOT closed here.
  */
 export function extractDesiredSchema(
   fileAST: unknown,
@@ -182,6 +206,35 @@ export function extractDesiredSchema(
       );
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Raw-DDL `< schema>` pass (g-schema-block-raw-ddl). Runs AFTER the whole
+  // declarative pass so a DSL-declared table ALWAYS wins over a raw one of the
+  // same name, whichever `< schema>` block each came from. Recognition is the
+  // §14.8.9 harvester verbatim — one recognizer, so the two floors cannot drift
+  // apart again.
+  // ---------------------------------------------------------------------
+  // ⚑ ONE PASS, DIRECT TO DECLARATIONS — no round trip through a stored
+  // statement string. The previous shape harvested statements into a Map, then
+  // re-found each one inside its `< schema>` body by `indexOf` to recover the
+  // columns the recognizer had clipped. That re-find COLLIDED with the qualifier
+  // normalization landing beside it: the stored statement said `assets`, the body
+  // said `public.assets`, `indexOf` returned -1, and the recovery silently never
+  // fired — reproducing the very defect it was added to close, on exactly the
+  // Postgres spelling the §14.8.11 tier targets. `harvestRawCreateTableDecls`
+  // reads the body from the original text at the match's own offset, so there is
+  // no string to re-find and nothing for a normalization to desynchronize.
+  const declaredLower = new Set([...seenNames].map((n) => n.toLowerCase()));
+  for (const body of bodies) {
+    for (const decl of harvestRawCreateTableDecls(body)) {
+      const key = decl.name.toLowerCase();
+      if (declaredLower.has(key)) continue;   // a DSL table, or an earlier raw one, wins
+      if (decl.columns.length === 0) continue;
+      declaredLower.add(key);
+      tables.push({ name: decl.name, columns: decl.columns, rawDdl: true });
+    }
+  }
+
   return { tables, fns, warnings };
 }
 
