@@ -1,3 +1,63 @@
+# scrml — Session 408 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** The S405 content below is bryan's, and he was **LIVE at S407**
+> throughout this session. The S401→S400 precedent is a wholesale `hand-off.md` rewrite eating a
+> collaborator's pickup section, so this section is prepended and nothing below it is touched.
+> Full S408 state: `../scrml-support/handOffs/active-sessions/S408-peter.md`.
+
+**Date:** 2026-09-07/08. Booted `/boot` Profile A onto `6bd29d3d`. **Seven arcs landed, all
+gate-green** — #890 · flogence#6 · #891 · #893 · #894 · #897 · #898. Mechanical detail lives in
+`docs/changelog.md` and delta-log `[2925]`–`[2928]`; this carries only what those cannot.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **The `!{}` guarded-expr lowering in library mode.** The sole residual of the class battery
+   (13/14). It is now **loud** — #893 makes it fall back to raw rather than emit `let v = !{n};`,
+   which is legal JS that is always `false` — but it is still unlowered. The obvious next in-lane target.
+2. **The owed reproducer for `E-CG-SQL-FN-UNVERIFIABLE-SPAN`** (#898). The guard is provably inert
+   (118/118 byte-identical) and therefore **UNEXERCISED** — its error path has never fired. A
+   bad-span SQL fn cannot be built as a library file today, because a `<db src>` is markup and that
+   makes the file non-`pure-module`. Two tests were attempted and dropped rather than shipped as guesswork.
+3. **The eight native-parser mirror consts** can now be deleted — #897 names the collision precisely.
+   That half is a source edit under `compiler/native-parser/`, a different owner's surface, so it is
+   named rather than done.
+4. **Dog-food an adopter app** — historically where fresh silent-wrong bugs come from, as opposed to
+   mining the ledger.
+
+## 🔭 DURABLE
+
+**An instrument that reports zero is reporting on its own reach, not on the code.** Seven probes were
+wrong before they were right this session, every one in that shape: a corpus differential blind to a
+construct its population lacks (it scored three regressions clean); a `RESTORED = 0` that measured the
+corpus's composition rather than the fix (the battery said 3/14 → 13/14); a text scan that could not
+tell a module-level `const` from a fn-local one (it would have hard-errored 11 working builds); a
+false-positive test that blamed an imported module's error on the input file, because `res.errors` is
+unit-wide; a forced `mode:"library"` that returned 2937 library files out of 2574 scanned against a
+true 118; and an API `compileScrml({write:false})` probe standing in for what actually ships, when the
+CLI emit gate refuses the artifact loudly. **Ask what a zero measured before reading it as coverage.**
+
+**A filed fix-direction is a hypothesis with a citation — including one you filed yourself an hour
+ago.** Three needed re-deriving this session. The sharpest, `g-library-fn-decl-span-unverified-splice`,
+said "lift the guard to all three splicers (cheap)"; doing that literally would have turned a
+confidentiality boundary **fail-open**, because the SQL splicer prunes server-only `?{}` fns *out of*
+the client-facing artifact.
+
+**Contended-file collision is real, and the fixer is sanctioned.** bryan and I both appended
+`[2915]`–`[2918]` to the delta-log and both appended to `docs/pr-reviews.md`; the pull conflicted.
+Resolved by **union** (both files are append-only) plus `bun scripts/delta-lint.ts --fix`, which
+renumbered **my** side — the correct side, since his were already pushed and checkpointed.
+
+## ⚑ MISS (mine, this wrap)
+
+**I truncated `hand-off.md` to 0 bytes.** A Python `open(path, "w")` truncates *before* the write, and
+my write threw on a lone-surrogate escape (`🔭` for 🔭). Caught immediately by reading the
+file back, restored with `git checkout --`, nothing lost — but only because the file was committed.
+**A generate-then-overwrite script must build the full string before it opens the target for writing,
+or write to a temp file and move it.** Three separate heredoc backslash-mangling failures earlier in
+the same session pushed me toward Python for file edits; this is that choice's own failure mode.
+
+---
+
 # scrml — Session 405 (bryan · ASUS-Vivobook) — WRAP
 
 **Date:** 2026-09-07/08. Booted `/boot` Profile A onto `4d057a58`. **Successor to a LIVE S403-peter;
