@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 99 |
-| MED | 226 |
+| HIGH | 100 |
+| MED | 227 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -60,18 +60,111 @@ by trying to reproduce them.**
 4. **The §14.8.11 grant loop iterated the unfiltered set** — `GRANT … ON "assets"` for a table the
    same plan refused to create → `relation does not exist` → whole migration rolled back.
 
-**Two recognizer defects travel with the landed tenant half and are owed here** (narrow,
-non-destructive, exit-0 inertness): `isTableLevelConstraint` eats a column named `key`/`index` whose
+**Two recognizer defects travel with the landed tenant half and are owed here** (~~narrow,
+non-destructive, exit-0 inertness~~ — ⚑ **see the S410 correction below; the second one is neither
+narrow nor non-destructive**): `isTableLevelConstraint` eats a column named `key`/`index` whose
 type carries non-numeric arguments (`key GEOMETRY(Point, 4326)`, `key ENUM('a','b')`); and three-part
 `CREATE TABLE db.schema.table (…)` matches nothing, so the tenant floor is inert for it and
 `W-SCHEMA-NO-TABLES-DECLARED` does not cover it (it fires only at zero tables *total*).
+
+⚑⚑ **SEVERITY CONTRADICTED BY EXECUTION — S410-peter. The three-part limb is a LIVE SILENTLY-INERT
+§14.8.10 SECURITY FLOOR, and it is split out below as its own HIGH. ROUTED TO BRYAN (security floor
++ §14.8.10 surface — not peter's to fix).**
+
+PA-reproduced by compilation on HEAD `2e570b7e`, raw-DDL `<schema>` with **no** `<db>`, every app
+carrying `tenant_id` and the same `SELECT id, name, tenant_id FROM assets` — **controls first, so the
+negative measures something:**
+
+| `CREATE TABLE …` spelling | tenant floor | `_scrml_tenant_tag` / `_redact` |
+|---|---|---|
+| `assets (…)` — **control** | **ACTIVE** | true / true |
+| `public.assets (…)` — **control** | **ACTIVE** | true / true |
+| `mydb.public.assets (…)` | **⛑ INERT** | false / false |
+| `mydb.public.assets (…)` **+ any second bare table** | **⛑ INERT** | false / false |
+
+**Root, read in source:** `compiler/src/schema-differ.js:188` `CREATE_TABLE_HEAD_RE` admits **exactly
+one** optional qualifier — `/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?(\w+)["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/gi`
+— so the two-qualifier spelling matches nothing, and backtracking cannot recover it (the un-qualified
+alternative needs `(` immediately after the first identifier, which `.public` defeats).
+
+⚑ **The fourth row is the sharp one and it is WORSE than the filing implies.** With a single qualified
+table you at least get `W-SCHEMA-NO-TABLES-DECLARED`. Add **any** second recognized table and that
+last hint is suppressed — the isolation floor is then inert with **no diagnostic of any kind**.
+
+**Why "non-destructive" is the wrong word:** this is byte-for-byte the failure mode
+`g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** for — a silently inert multi-tenant
+isolation floor — differing only in identifier spelling. #900 closed the *instance*; the *class* is
+open. The MED rating carries no stated ground for why the same silent inertness is MED here.
 ⚑ `like` is genuinely undecidable by a leading-word test and is correctly handled by the **grammar**
 (`LIKE` is reserved, so a column named `like` must be quoted) — **do not replace that with a heuristic.**
 
 **One stale comment in this arc's territory:** `schema-differ.js:307` still says *"`diffSchema`
 accordingly SKIPS `rawDdl` tables"*, which stopped being true when the decline moved to the
-consumer's boundary.
+consumer's boundary. ⚑ **S410-peter — the enumeration is one short, same axis:**
+`compiler/src/codegen/db-authoritative.ts:113-116` carries the same now-false statement
+(*"so `diffSchema` skips `rawDdl` tables rather than emit a lossy `CREATE TABLE`"*), in a file this
+arc edited. One axis, two instances, one enumerated.
 — `NEW S405-bryan (deferred half of the dpa-039 arc-B split; the four findings are pre-split measurements, not live defects)`; **MED**; open
+
+### g-tenant-floor-inert-for-a-two-qualifier-CREATE-TABLE — `db.schema.table` matches the harvest regex nowhere, so §14.8.10 is silently inert; a second table removes the last warning
+
+<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js:188(CREATE_TABLE_HEAD_RE — ONE optional qualifier only; locate by the regex CONST NAME, not the line)+compiler/src/codegen/tenant-egress.ts(buildTenantContext, the consumer that comes up empty) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE -->
+
+**ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
+
+The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
+(`e74f5423`); that flip is genuine and was independently reproduced-as-fixed. **But it closed the
+instance, not the class.** Full reproduction, controls, root cause and the diagnostic-suppression
+detail are recorded in the `g-migrate-consumer-not-raw-ddl-aware` entry above, where this limb was
+originally filed as MED "narrow, non-destructive" — a rating **execution contradicts**.
+
+One-line restatement: a raw-DDL `<schema>` with no `<db>` whose table is spelled
+`CREATE TABLE mydb.public.assets (…)` compiles with **no tenant tag and no redaction wired**, and if
+any second recognized table is present, **without `W-SCHEMA-NO-TABLES-DECLARED` either** — a
+multi-tenant isolation floor that is silently absent.
+
+⚑ **Fix direction is NOT obvious and is deliberately not prescribed here.** Widening the regex to
+`n` qualifiers is the tempting move, but the qualifier is normalized away downstream, so
+`a.assets` and `b.assets` would collapse to one key — the S405 arc already had two of its own fixes
+cancel each other on exactly this seam (#900 round 3). **Decide the identity model before the regex.**
+— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; open
+
+### g-7.5.2-has-no-row-for-annotated-plus-inference-defeated — the remedy the diagnostic itself recommends routes authors into an unspecified cell
+
+<!-- @gap id=g-7-5-2-no-row-for-annotated-plus-inference-defeated sev=MED status=open owner=bryan locus=compiler/src/type-system.ts:10831(the `!letAnnot &&` guard on the W-TYPE-031-UNPROVEN emit; locate by the CODE STRING)+compiler/SPEC.md-§7.5.2(the four-row split table) prov=review:S410-peter-pickup-1-re-derivation+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e -->
+
+**ROUTED TO BRYAN — §7.5.2 is a normative table with a missing row; what SHOULD happen in that cell
+is a language question.**
+
+§7.5.2's split table has four rows: `asIs` (silent), `unknown` (passes + `W-TYPE-031-UNPROVEN`),
+declared-type-and-it-fits (silent), and doesn't-fit (`E-TYPE-031`). **There is no row for
+`annotated` + `inference defeated`** — and that cell occurs.
+
+PA-reproduced on HEAD, browser mode, `fn calc(n: number) -> number`, the fn genuinely called so
+`W-DEAD-FUNCTION` cannot confound it:
+
+| declaration | result |
+|---|---|
+| `let v: number = "nope"` — **positive control** | `E-TYPE-031` ✔ harness reaches the checker |
+| `let v = !{ n }` (untyped) | **`W-TYPE-031-UNPROVEN`** — inference IS defeated on this node |
+| `let v: number = !{ n }` | **silent** — no error, no warning |
+
+The silence is deliberate: `type-system.ts:10831` guards the emit with `!letAnnot`. **The problem is
+what the warning's own text then tells the author:** *"To prove it, annotate the declaration —
+`name: <type> = …`."* Annotating proves nothing here — it binds `number` while the initializer is a
+`boolean`, and §7.5.1 position 1 fires only on syntactically-determined **literals**, so no check
+runs. The remedy converts an honest *"I could not type this"* into a silent assertion that it **is**
+a `number`.
+
+That is precisely the property §7.5.2 exists to remove — *"absence of a diagnostic and success were
+the same observation"* — reintroduced through the remedy the diagnostic recommends.
+
+⚑ **NOT filed as a silent-wrong-output bug.** §7.5.1 is explicit that *"a program that assigns a
+non-assignable value at those positions SHALL compile"*, and that `int` is **deliberately** outside
+the checked set. Two candidate HIGHs were chased off this and **both were killed on the governing
+SPEC text**. What remains is narrow and real: an uncrossed cell in the very matrix built to stop
+uncrossed cells (the S405 durable, one level down).
+— `NEW S410-peter (falling out of the PICKUP-1 re-derivation)`; **MED**; open
 
 ### g-two-shipped-error-codes-have-ZERO-mentions-in-SPEC-md — `E-CG-ENUM-BINDING-COLLISION` and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` emit from the compiler and appear nowhere in the normative catalog
 
@@ -319,7 +412,15 @@ own advocate as *the largest unpriced cost of its own proposal*; reproduced inde
 
 **Both halves are wrong at once:** the backslash is emitted as literal content (so the author's escape
 intent is visibly broken in the output) **and** the `${5}` interpolation fires anyway (so the escape
-did not escape). There is no way to render a literal `${` in a plain-markup body.
+did not escape). ~~There is no way to render a literal `${` in a plain-markup body.~~
+
+⚑ **OVER-CLAIM CORRECTED S410-peter — the defect and its HIGH stand; this sentence does not.** There
+**is** a way, and SPEC §4.17 documents it at `:1121` as the workaround the docs corpus already
+accumulated: `<p>Cost: &#36;{5}</p>` compiles at **exit 0 with ZERO diagnostics** and renders
+`Cost: ${5}`. (`$&#123;5}` does **not** work — `E-CTX-001` on the stray `}`.) The accurate claim is
+that the **ergonomic `\${` escape is absent and silently double-wrong**, not that the capability is
+missing. ⚑ The same over-claim is repeated verbatim in delta-log `[2899]` and is superseded there
+by a later entry rather than edited, per append-only.
 
 **§4.18.3 defines the `\${` escape ONLY for a display-text literal** — i.e. inside `"..."` in a
 code-default body. A free-text body has no escape catalog at all, and none is implemented. So this is
@@ -347,12 +448,30 @@ model, not of the proposal. Filing it separately so the ruling is not charged fo
 read as a tag opener.**
 
 **HTML5's tag-open state requires an ASCII alpha immediately after `<`**; a `<` followed by SPACE is
-text. scrml diverges. Note the divergence is partial and therefore confusing: `<3`, `<-` and `<=`
-are fine — it is specifically `<` + space + letter that opens a phantom tag.
+text. scrml diverges. ~~Note the divergence is partial and therefore confusing: `<3`, `<-` and `<=`
+are fine — it is specifically `<` + space + letter that opens a phantom tag.~~
 
-**SPEC is silent** — there is no `tag-open` production and no `U+003C` prose, so neither the current
-behaviour nor the HTML5 behaviour is written down. Reported at **17 corpus files** by dpa-045 round 1
+~~**SPEC is silent** — there is no `tag-open` production and no `U+003C` prose, so neither the current
+behaviour nor the HTML5 behaviour is written down.~~ Reported at **17 corpus files** by dpa-045 round 1
 (count RELAYED, not PA-re-measured).
+
+⚑⚑ **CORRECTED S410-peter — TWO struck claims, and the second one makes the implied fix DANGEROUS.**
+
+- **SPEC is NOT silent.** The behaviour is normative under a different name — the **deprecated
+  whitespace opener**. §4.3 (`SPEC.md:409`): *"P1: **both forms** (`<state-type>` and
+  `< state-type>`) compile. The space-after-`<` form emits `W-WHITESPACE-001`."* §4.6
+  (`SPEC.md:533`) worked-examples this exact confusion: *"the block splitter would see
+  `< MAX_ITEMS` (with a space) and **open a state block named `MAX_ITEMS`**."* `W-WHITESPACE-001`
+  is live (§15.15.5) and `E-WHITESPACE-001` is reserved (§63.7, removal **unscheduled**).
+  Verified live: `< div>hello</div>` compiles and emits `W-WHITESPACE-001`. The original search
+  looked for HTML5-shaped terms (`tag-open`, `U+003C`) and concluded silence from their absence.
+  ⚑ **Consequence for the fix:** adopting HTML5's alpha-after-`<` rule **would reject
+  `< engine>` / `< db>` / `< userBadge name(string)>`, which §4.3 says SHALL compile in P1.** The
+  only clean lever is the `E-WHITESPACE-001` deprecation endpoint — which is bryan's to schedule.
+- **The trigger is mis-stated.** It is `<` + **whitespace**, regardless of what follows — not
+  `<` + space + letter. Measured: `a < 3 then stop` → phantom `'<3>'`; `x <  9` → `'<9>'`;
+  `a < -b` → `'<-b>'`; `a < , b` and `a < = b` → an **empty-named** tag `'<>'`. (The first half
+  holds: `a <3 b`, `a <- b`, `a <= b` all compile clean and emit verbatim.)
 
 **Loud, not silent** — hence MED, not HIGH. But the diagnostic names a tag the author never wrote,
 which is the Class-D desync signature: *an invented entity name absent from source.*
@@ -368,13 +487,27 @@ which is the Class-D desync signature: *an invented entity name absent from sour
 <p>The ?{ syntax opens SQL.</p>
 ```
 → `error [E-CTX-003]: Unclosed 'p' — opened but never closed before end of file.` + a cascaded
-`E-CTX-003` for `div`. The `?{` opened a SQL context that consumed to EOF.
+`E-CTX-003` for `div`. ~~The `?{` opened a SQL context that consumed to EOF.~~
 
-⚑ **The documentation contradiction is the sharp half.** SPEC §4.17 cites **this exact sentence
-shape** as the motivating example for a class it declares FIXED — *"adopters no longer need
-entity-escapes"* — but the fix landed for `<pre>`/`<code>` raw-content elements only. **Ordinary
-prose in a `<p>` still cascades**, and the S108 record says otherwise, so a reader checking the spec
-concludes this works.
+⚑⚑ **CAUSE CORRECTED S410-peter — the symptom above reproduces, the stated CAUSE and SCOPE are both
+FALSE. Do not act on the struck text.**
+
+- **No SQL context is opened.** The consumer is the **orphan-brace tracker**, and only when no
+  matching `}` precedes EOF. PA-reproduced on HEAD: `<p>The ?{ syntax } opens SQL.</p>` compiles at
+  **exit 0 with ZERO errors** and emits verbatim; so does `<p>Use ?{ and } carefully.</p>`.
+- **The S108 gate DID land for plain-markup prose** — the "`<pre>`/`<code>` only" scope is wrong.
+  `compiler/src/block-splitter.js:3132-3157` states the mechanism and names the real residual:
+  *"the `{` hits the orphan-brace handler … As long as the author's prose closes the brace … the
+  orphan-brace machinery decrements back to zero. Unbalanced `?{` alone produces an `E-CTX-003`
+  unclosed-brace error."*
+- **The entry quoted half a sentence.** SPEC:1165's *"adopters no longer need entity-escapes"* is
+  verbatim, but the immediately preceding clause — *"the `{` is tracked as an orphan-brace and
+  **pairs with a matching `}` if present**"* — is exactly the qualifier that makes the cause wrong.
+
+**The residual that IS real, and it is narrower:** the promised unclosed-**brace** diagnostic never
+fires. What fires is `E-CTX-003` naming unclosed **elements** (`p`/`div`/`program`) — i.e. the
+diagnostic **mis-attributes to constructs the author closed correctly**. Anyone acting on the
+original text would go extend the `<pre>`/`<code>` gate to prose: **work already done.**
 
 **Composes with `g-no-unterminated-delimiter-diagnostic-exists-anywhere`** (dpa-044 Call 1, RULED
 S405): the `?{` here is an unterminated delimiter consuming to EOF, and the ruled diagnostic would at
