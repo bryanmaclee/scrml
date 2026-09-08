@@ -218,6 +218,30 @@ function parseProjectSchema(input) {
     if (!ast) continue;
     const extracted = extractDesiredSchema(ast);
     for (const t of extracted.tables) {
+      // ⚑ THE MIGRATE CONSUMER DECLINES RAW-DDL TABLES, AT ITS OWN BOUNDARY.
+      //
+      // `extractDesiredSchema` has TWO consumers with genuinely different needs.
+      // The §14.8.10 tenant floor (via `codegen/emit-server.ts`) needs every
+      // `< schema>`-declared table, including one written as raw `CREATE TABLE`
+      // DDL, because a `tenant_id` column's PRESENCE is the declaration and a
+      // table it cannot see gets a silently inert isolation floor. THIS consumer
+      // needs the opposite: it owns and REWRITES schema, and a raw table's DDL is
+      // author-owned and only partially recovered (constraints, defaults, foreign
+      // keys and `CHECK` bodies are not parsed).
+      //
+      // Every defect the migrate side of this arc produced traced to raw tables
+      // becoming visible HERE — a lossy `CREATE TABLE`, `DROP COLUMN` against
+      // unrecovered columns, a green "up to date" for a table that does not
+      // exist, and a `DROP TABLE` against a table the `< schema>` does declare.
+      // Declining them at this boundary makes all of that impossible BY
+      // CONSTRUCTION rather than by guards inside `diffSchema`, which is
+      // consequently byte-identical to its pre-arc behaviour.
+      //
+      // The consequence is deliberately the pre-arc one: a raw-DDL `< schema>` is
+      // invisible to `scrml db-migrate`, exactly as before this arc. Migrating it
+      // properly means REPLAYING the author's own statement rather than
+      // regenerating it, which is a separate re-scoped arc.
+      if (t.rawDdl) continue;
       if (!seenNames.has(t.name)) {
         seenNames.add(t.name);
         tables.push(t);

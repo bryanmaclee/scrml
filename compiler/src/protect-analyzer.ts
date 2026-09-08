@@ -62,7 +62,19 @@ import { Database } from "bun:sqlite";
 import { resolve, dirname } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
-import { parseSchemaBlock, generateCreateTable } from "./schema-differ.js";
+import {
+  parseSchemaBlock,
+  generateCreateTable,
+  // THE ONE `CREATE TABLE` RECOGNIZER, and it lives in schema-differ.js on
+  // purpose. Line 631 below records that this early PA stage deliberately does
+  // not pull a codegen module; the mirror of that invariant is that consumers
+  // of the recognizer must not be forced to pull THIS module (and with it
+  // `bun:sqlite` + `node:fs`) just to ask what counts as a table declaration.
+  // `schema-differ.js` is the `< schema>` parser and imports nothing but
+  // `sql-ident.ts`, so both security floors and the GCP1 checks read it freely.
+  harvestCreateTables,
+  harvestRawCreateTables,
+} from "./schema-differ.js";
 
 // ---------------------------------------------------------------------------
 // PA-internal types
@@ -384,16 +396,14 @@ class SchemaCache {
 // ---------------------------------------------------------------------------
 
 /**
- * Regex that matches CREATE TABLE (with or without IF NOT EXISTS) statements.
- * Captures:
- *   group 1 — table name (may be quoted with backtick, double-quote, or single-quote)
- *   group 2 — column definitions body (the content between the outer parens)
- *
- * Limitations: does not handle arbitrarily nested subexpressions. Sufficient
- * for the common case of a flat CREATE TABLE as written in ?{} blocks.
+ * The `CREATE TABLE` recognizer moved to `schema-differ.js` (dpa-039 arc B round 2)
+ * and is imported above. It now also accepts — and NORMALIZES AWAY — a schema
+ * qualifier (`CREATE TABLE public.assets (…)`), the ordinary Postgres spelling,
+ * which this file used to miss entirely. Normalizing matters here specifically:
+ * `resolveDb` REPLAYS these statements into an in-memory SQLite shadow DB, and an
+ * unstripped `public.assets` throws and takes the whole `< db>` block down with
+ * `E-PA-003`.
  */
-const CREATE_TABLE_RE =
-  /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`']?(\w+)["`']?\s*\(([^)]+(?:\([^)]*\)[^)]*)*)\)/gi;
 
 /**
  * Walk ALL AST nodes depth-first and collect CREATE TABLE statements from
@@ -426,13 +436,9 @@ function extractCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
     }
     const node = value as Record<string, unknown>;
     if (node.kind === "sql" && typeof node.query === "string") {
-      // Reset lastIndex before each exec to avoid stateful regex issues.
-      CREATE_TABLE_RE.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = CREATE_TABLE_RE.exec(node.query as string)) !== null) {
-        // Store the full match (the entire CREATE TABLE ... (...) substring).
-        result.set(m[1].toLowerCase(), m[0]);
-      }
+      // `overwrite: true` preserves this walker's long-standing last-wins
+      // behaviour across nodes (the raw-DDL `< schema>` harvest is first-wins).
+      harvestCreateTables(node.query as string, result, true);
     }
     for (const key of Object.keys(node)) {
       if (key === "span" || key.startsWith("_")) continue;
@@ -442,22 +448,6 @@ function extractCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
 
   visit(nodes, 0);
   return result;
-}
-
-/**
- * Harvest raw `CREATE TABLE … (…)` statements from a plain text string into
- * `out` (keyed by lowercased table name), reusing the same `CREATE_TABLE_RE`
- * the `?{}` SQL-node harvester uses. Only fills keys not already present, so a
- * higher-precedence source already in `out` always wins. Used for the raw-DDL
- * `< schema>` form (g-schema-block-raw-ddl).
- */
-function harvestRawCreateTables(text: string, out: Map<string, string>): void {
-  CREATE_TABLE_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = CREATE_TABLE_RE.exec(text)) !== null) {
-    const key = m[1].toLowerCase();
-    if (!out.has(key)) out.set(key, m[0]);
-  }
 }
 
 // ---------------------------------------------------------------------------

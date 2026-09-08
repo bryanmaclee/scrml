@@ -57,6 +57,43 @@ export interface TenantContext {
 }
 
 /**
+ * The tenant-scoped table set, with CASE-INSENSITIVE membership.
+ *
+ * ⚑ SQL TREATS `Assets` AND `assets` AS THE SAME TABLE; THIS FLOOR DID NOT, AND
+ * THE MISMATCH WAS A SILENT ESCAPE. Declaring `CREATE TABLE Assets (…, tenant_id
+ * TEXT)` (or the DSL `Assets { … }`) and then reading `SELECT … FROM assets`
+ * produced `const rows = await _scrml_sql`…`` — no tag, no redact, NO
+ * DIAGNOSTIC, exit 0 — because the declared name went into a case-SENSITIVE set
+ * and the lookup used the query's spelling. MEASURED in all four combinations
+ * (`Assets`/`assets`, `assets`/`ASSETS`, `ASSETS`/`Assets`) and in BOTH
+ * declaration forms; the DSL half predates the raw-DDL work and was inherited.
+ * `mentionsTenantTable` below was already case-INSENSITIVE, which is what the
+ * intent was.
+ *
+ * ⚑ WHY A SET SUBCLASS RATHER THAN LOWERCASING AT EACH LOOKUP. `has()` is called
+ * from FIVE sites, and TWO of them (`emit-server.ts:5155` and `:5401`) are in a
+ * file this change may not touch. Folding inside the container fixes every
+ * caller — present and future — at one point, and makes it impossible for a new
+ * call site to reintroduce the bug by forgetting to fold. Entries are stored
+ * lowercased; `has()` folds the probe. Callers keep the ORIGINAL casing of
+ * whatever they probed with, which matters: `resolveTenantScoping` returns
+ * `table` from `proj.fromTables`, and `rewriteSelectAddTenantId` uses it to find
+ * the alias in `proj.aliasMap` and to emit a `<alias>.tenant_id` qualifier that
+ * has to match the SQL text verbatim.
+ */
+class TenantTableSet extends Set<string> {
+  add(value: string): this {
+    return super.add(typeof value === "string" ? value.toLowerCase() : value);
+  }
+  has(value: string): boolean {
+    return super.has(typeof value === "string" ? value.toLowerCase() : value);
+  }
+  delete(value: string): boolean {
+    return super.delete(typeof value === "string" ? value.toLowerCase() : value);
+  }
+}
+
+/**
  * Build the TenantContext from BOTH table registries the compiler holds:
  *
  *  1. the §14.8.9 ProtectContext's `schemaByTable` (every `<db>`-bound table), and
@@ -91,7 +128,7 @@ export function buildTenantContext(
   protectCtx: ProtectContext,
   schemaTables?: Array<{ name?: unknown; columns?: unknown }>,
 ): TenantContext {
-  const tenantScopedTables = new Set<string>();
+  const tenantScopedTables = new TenantTableSet();
   for (const [table, cols] of protectCtx.schemaByTable) {
     if (cols.some((c) => c.toLowerCase() === TENANT_COLUMN)) tenantScopedTables.add(table);
   }
@@ -386,7 +423,34 @@ export function detectTenantRawEgress(
   if (!scopedQuery) return null;
   if (/\.\s*acrossTenants\s*\(/.test(fnSource)) return null;
   let egressKind: string | null = null;
-  if (/(^|[^A-Za-z0-9_$])_\{/.test(fnSource)) {
+  // §23.2 — the foreign opener is `_` + ZERO OR MORE `=` + `{`, closed by `}` +
+  // the same run of `=`. This test USED to be `_\{`, which is LEVEL 0 ONLY.
+  //
+  // ⚑ THAT IS BACKWARDS FROM WHICH SPELLINGS MATTER: `W-FOREIGN-001` actively
+  // steers authors AWAY from level 0, so the gate recognized exactly the
+  // spelling the compiler discourages and missed the ones it recommends.
+  //
+  // REPRODUCED end-to-end at exit 0 before the fix, and the consequence is a
+  // TENANT ISOLATION ESCAPE, not merely a missing diagnostic:
+  //
+  //   const rows = ?{`SELECT id, name, tenant_id FROM assets`}.all()
+  //   let wire   = _={ JSON.stringify(rows) }=
+  //   return wire
+  //
+  // emitted `const rows = _scrml_tenant_tag(await _scrml_sql`…`, "tenant_id",
+  // false); let wire = await (async () => { return (JSON.stringify(rows)); })();
+  // return wire;` — the foreign block flattens the TAGGED rows into a STRING, so
+  // `_scrml_tenant_redact` hits its `typeof value !== "object"` exit and returns
+  // it verbatim. EXECUTED: ambient tenant "A", output
+  // `[{"id":1,…,"tenant_id":"A"},{"id":2,"name":"THEIRS","tenant_id":"B"}]`.
+  // Levels 1, 2 and 3 all compiled with ZERO errors; level 0 correctly hard-failed.
+  //
+  // The pattern is the one already in-tree at `ast-builder.js:18392` — copied,
+  // not re-derived, because a third spelling of this predicate is how the first
+  // two drifted apart. Found by the arc-A sibling in `protect-egress.ts` (whose
+  // byte-identical twin is the column direction of the same hole) and handed
+  // across; reproduced HERE on its own terms before being fixed here.
+  if (/(?:^|[^A-Za-z0-9_$])_=*\{/.test(fnSource)) {
     egressKind = "a `_{}` foreign-code block (§23)";
   } else if (/\bnew\s+Response\b/.test(fnSource) || /\bResponse\s*\.\s*json\b/.test(fnSource)) {
     egressKind = "a manual `Response` / `handle()` body (§40)";
@@ -429,26 +493,63 @@ export const SERVER_TENANT_HELPER: string = [
   "  const _caps = (_cu && Array.isArray(_cu.caps)) ? _cu.caps : [];",
   "  return JSON.stringify(_caps);",
   "}",
+  "// THE TAG MUST STICK, AND SILENCE IS NOT PROOF THAT IT DID. Attaching the",
+  "// descriptor is a plain property write, and a plain property write to a FROZEN,",
+  "// SEALED or preventExtensions object is a SILENT no-op outside strict mode.",
+  "// MEASURED: a frozen row tagged with `tenant_id` kept no descriptor at all, the",
+  "// egress redact then found nothing to key on, and a row of tenant B was handed",
+  "// to a request whose ambient tenant was A — the same fail-OPEN the redact half",
+  "// closes below, one function earlier. So every write is VERIFIED and a failure",
+  "// REFUSES; the floor never reports a success it did not achieve.",
+  "//",
+  "// Not reachable from correct emission today (the tag wraps the RAW driver",
+  "// result of a `?{}` query, and no author code can run between the await and the",
+  "// tag), so this is defence in depth rather than a live leak — but the cost is a",
+  "// property read per row and the failure it prevents is silent cross-tenant",
+  "// disclosure.",
+  "function _scrml_tenant_refuse_untaggable() {",
+  "  throw new Error(",
+  "    \"E-TENANT-RAW-EGRESS (runtime): the \\u00a714.8.10 floor could not attach its \" +",
+  "    \"tenant descriptor to a query result row (the value is frozen, sealed or \" +",
+  "    \"non-extensible), so the egress redact would have no discriminator to key on \" +",
+  "    \"and a foreign tenant's row could not be stripped. Refusing to emit it.\",",
+  "  );",
+  "}",
+  "// BOTH FAILURE MODES, because the write fails DIFFERENTLY in the two JS modes",
+  "// and this helper runs in the strict one. The emitted `app.server.js` carries",
+  "// top-level `import`/`export`, so it is an ES module and therefore ALWAYS",
+  "// STRICT: a write to a non-extensible object THROWS a TypeError rather than",
+  "// no-opping. The verify-after-write below only ever fires in SLOPPY mode. Both",
+  "// paths must route to the same refusal, or the operator gets a bare",
+  "// `TypeError: Cannot add property` with none of the guidance.",
+  "function _scrml_tenant_mark(target, descriptor) {",
+  "  try {",
+  "    target[_SCRML_TENANT] = descriptor;",
+  "  } catch (_e) {",
+  "    _scrml_tenant_refuse_untaggable();   // strict mode: the write threw",
+  "  }",
+  "  if (target[_SCRML_TENANT] !== descriptor) _scrml_tenant_refuse_untaggable(); // sloppy mode: it no-opped",
+  "}",
   "function _scrml_tenant_tag(value, tenantCol, floorAdded) {",
   "  if (value == null || typeof value !== \"object\") return value;",
   "  if (Array.isArray(value)) {",
   "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) row[_SCRML_TENANT] = { tenantCol, floorAdded };",
+  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_tenant_mark(row, { tenantCol, floorAdded });",
   "    }",
   "    return value;",
   "  }",
-  "  value[_SCRML_TENANT] = { tenantCol, floorAdded };",
+  "  _scrml_tenant_mark(value, { tenantCol, floorAdded });",
   "  return value;",
   "}",
   "function _scrml_tenant_tag_all(value) {",
   "  if (value == null || typeof value !== \"object\") return value;",
   "  if (Array.isArray(value)) {",
   "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) row[_SCRML_TENANT] = { stripAll: true };",
+  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_tenant_mark(row, { stripAll: true });",
   "    }",
   "    return value;",
   "  }",
-  "  value[_SCRML_TENANT] = { stripAll: true };",
+  "  _scrml_tenant_mark(value, { stripAll: true });",
   "  return value;",
   "}",
   "function _scrml_tenant_strip_col(row, d) {",
@@ -461,14 +562,45 @@ export const SERVER_TENANT_HELPER: string = [
   "  if (_pd != null) out[_p] = _pd;",
   "  return out;",
   "}",
+  "// A HOST-OPAQUE carrier: a value whose contents the floor structurally cannot",
+  "// read (a streamed/binary body). Enumerated, not guessed — Response, Blob,",
+  "// ReadableStream, ArrayBuffer and any ArrayBuffer view (TypedArray/DataView).",
+  "// Each is guarded by a typeof check so the helper still runs on a host that",
+  "// does not define it.",
+  "function _scrml_tenant_opaque(v) {",
+  "  if (typeof Response !== \"undefined\" && v instanceof Response) return true;",
+  "  if (typeof Blob !== \"undefined\" && v instanceof Blob) return true;",
+  "  if (typeof ReadableStream !== \"undefined\" && v instanceof ReadableStream) return true;",
+  "  if (typeof ArrayBuffer !== \"undefined\" && (v instanceof ArrayBuffer || ArrayBuffer.isView(v))) return true;",
+  "  return false;",
+  "}",
+  "// REFUSE WHAT THE MONITOR CANNOT INSPECT. A value carrying the tenant",
+  "// descriptor is one the compiler asserted holds tenant-scoped rows. If it is",
+  "// also host-opaque, the floor can neither read its tenant_id nor strip a",
+  "// foreign row — so it must not cross the wire. Throwing (rather than dropping)",
+  "// is deliberate: this state is UNREACHABLE from correct emission — the tag is",
+  "// only ever applied to a lowered `?{}` result, which is rows or a scalar and",
+  "// never a stream — so reaching it means the §14.8.10 E-TENANT-RAW-EGRESS",
+  "// compile gate was bypassed by a value-flow the compiler did not model. A",
+  "// silent drop would present as an empty body and be indistinguishable from",
+  "// \"this tenant has no rows\"; the invariant breach has to be loud.",
+  "function _scrml_tenant_refuse_opaque() {",
+  "  throw new Error(",
+  "    \"E-TENANT-RAW-EGRESS (runtime): a tenant-scoped value reached the egress \" +",
+  "    \"sink inside a host-opaque carrier (Response / Blob / stream / buffer) that \" +",
+  "    \"the \\u00a714.8.10 floor cannot inspect. Refusing to emit it. Return the rows \" +",
+  "    \"through the normal compiler-emitted response, or mark the query \" +",
+  "    \".acrossTenants() for a deliberate cross-tenant read.\",",
+  "  );",
+  "}",
   "function _scrml_tenant_redact(value, tenantKey) {",
   "  if (value == null || typeof value !== \"object\") return value;",
-  "  if (typeof Response !== \"undefined\" && value instanceof Response) return value;",
   "  if (Array.isArray(value)) {",
   "    const out = [];",
   "    for (const el of value) {",
   "      const d = (el != null && typeof el === \"object\") ? el[_SCRML_TENANT] : null;",
   "      if (d) {",
+  "        if (_scrml_tenant_opaque(el)) _scrml_tenant_refuse_opaque();",
   "        if (d.stripAll) continue;",
   "        if (tenantKey == null) continue;",
   "        if (String(el[d.tenantCol]) !== String(tenantKey)) continue;",
@@ -481,11 +613,21 @@ export const SERVER_TENANT_HELPER: string = [
   "  }",
   "  const d = value[_SCRML_TENANT];",
   "  if (d) {",
+  "    // The descriptor is read BEFORE the opaque passthrough below, and that",
+  "    // ORDER is the whole fix: the passthrough used to run first, so a TAGGED",
+  "    // Response was handed to the client entirely uninspected — the one",
+  "    // fail-OPEN in this redactor.",
+  "    if (_scrml_tenant_opaque(value)) _scrml_tenant_refuse_opaque();",
   "    if (d.stripAll) return null;",
   "    if (tenantKey == null) return null;",
   "    if (String(value[d.tenantCol]) !== String(tenantKey)) return null;",
   "    return _scrml_tenant_strip_col(value, d);",
   "  }",
+  "  // UNtagged and opaque: not a tenant-scoped value, and rebuilding it as a",
+  "  // plain object would destroy it. Passed through unchanged — this is the",
+  "  // shipped binary/PDF egress path (§12.5), and it is deliberately NOT",
+  "  // touched by the refusal above.",
+  "  if (_scrml_tenant_opaque(value)) return value;",
   "  const out = {};",
   "  for (const k of Object.keys(value)) out[k] = _scrml_tenant_redact(value[k], tenantKey);",
   "  return out;",

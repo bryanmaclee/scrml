@@ -169,6 +169,65 @@ describe("§14.8.10 defect D — a <schema> tenant_id column IS the declaration"
   });
 });
 
+// A `<schema>`-only app in the OTHER spelling: raw `CREATE TABLE` DDL instead of
+// the declarative `tableName { col: type }` DSL. dpa-039 arc B: defect D was
+// fixed at S288 for the DSL spelling ONLY — `parseSchemaBlock` recognizes just
+// the DSL, so the raw form still yielded ZERO tables, `_tenantActive` was false,
+// and the tenant floor was silently inert at exit 0. §14.8.9 had already been
+// taught this spelling (`harvestRawCreateTables`), so the two adjacent floors
+// disagreed about what counts as a schema declaration.
+//
+// NO `db-authoritative` marker here, and that is structural rather than an
+// omission: the marker is read by `parseSchemaBlock` as a bareword trailing a
+// DSL table's closing `}`, so a raw-DDL table cannot carry one. This twin
+// therefore locks defect D (the tenant projection) only; the §14.8.11 principal
+// wrapper stays with the DSL app above.
+const RAW_DDL_SCHEMA_ONLY_APP = `<program db="postgres://localhost:5432/app">
+
+  <schema>
+    CREATE TABLE ledger_entries (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      amount REAL NOT NULL
+    )
+  </schema>
+
+  \${
+    function myEntries() {
+      const rows = ?{
+        select id, amount
+        from ledger_entries
+        where user_id = \${@currentUser.id}
+      }
+      return rows
+    }
+  }
+
+  <page>
+    <button onclick=myEntries()>Mine</button>
+  </page>
+
+</program>
+`;
+
+describe("§14.8.10 defect D, RAW-DDL spelling — the OTHER <schema> form declares too", () => {
+  const server = serverOf(compileApp(RAW_DDL_SCHEMA_ONLY_APP));
+
+  test("_scrml_current_user projects tenantId for a raw-DDL <schema>-only app", () => {
+    expect(server).toMatch(/tenantId: _s\.tenantId/);
+  });
+
+  test("the tenant floor is WIRED: tag at lowering, redact at the egress sink", () => {
+    expect(server).toContain("_scrml_tenant_redact");
+    expect(server).toContain("function _scrml_active_tenant");
+  });
+
+  test("the ambient-tenant resolver reads the SAME session scalar as the DSL app", () => {
+    expect(server).toMatch(/_cu \? \(_cu\.tenantId \?\? null\) : null/);
+  });
+});
+
 describe("control — an app with neither tenant_id nor @currentUser stays untouched", () => {
   const server = serverOf(compileApp(PLAIN_APP));
 
