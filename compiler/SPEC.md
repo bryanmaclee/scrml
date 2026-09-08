@@ -23061,7 +23061,7 @@ rule); §39.1 (`<schema>` opener forms).
 | W-SCHEMA-002 | Migration diff contains a destructive operation (DROP TABLE or DROP COLUMN) | Warning |
 | W-SCHEMA-003 | Types generated from `<schema>` desired state; database is out of sync | Warning |
 | W-SCHEMA-DESTRUCTIVE-DROP | `scrml db-migrate` refused a bare DROP TABLE (fence; re-run with `--allow-destructive`) — §14.8.11 M2 | Warning |
-| W-SCHEMA-NO-TABLES-DECLARED | A `<schema>` block has content but declares no table in either recognized form — so it is inert, and every floor keyed on a `<schema>` table (notably §14.8.10 tenant isolation) cannot engage | Warning |
+| W-SCHEMA-NO-TABLES-DECLARED | A `<schema>` block has content but declares no table in either recognized form — so it is inert, and every floor keyed on a `<schema>` table (notably §14.8.10 tenant isolation) cannot engage. *(Emitted at `compiler/src/gauntlet-phase1-checks.js` in the `<schema>` body checks, alongside E-SCHEMA-004 / W-SCHEMA-001; full rationale, trigger conjunction and corpus measurement in the §34 catalog row.)* | Warning |
 
 ---
 
