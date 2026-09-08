@@ -23,6 +23,10 @@
    importing the emitted `tab.js` (0.01 s, ~0 GB), and the sibling `ast`/`bpp`/`bs` files (all clean).
    It dies **before the first test result prints**, so it is in collection or `beforeAll`.
    Not bun and not Windows on the evidence; pre-existing, not introduced by S410.
+   ⚑ **Read §CI ARCHITECTURE at the foot of this section before starting — it is the SAME problem.**
+   `compiler/tests/self-host/` is run by **neither** CI job, by deliberate documented exclusion, so
+   this runaway rotted *because nothing was looking*. Peter ruled the CI findings banked to ride with
+   this: root-cause the runaway first, then close the two gating gaps recorded there.
 
 2. **Review floor reads 7 OWED** (#909–#915) — the floor's own recursion, all this session's. Per the
    established pattern (see the #890 marker) a drain PR's review **rides the NEXT landing**, otherwise
@@ -107,14 +111,74 @@ it; the runaway lives in one file that the tier-level number never surfaced.
 
 Cloud `gate` **GREEN** on all seven PRs; `windows` green; `tracking` RED — pre-existing, verified red
 on all four recent main runs. Local: `state.ts --check` 0 · `facts.ts --check` 0 · `delta-lint` PASS
-max `[2944]`. ⚑ **No clean local full-suite pass was obtained, and that is stated rather than papered
-over:** `compiler/tests/lsp/workspace-l2.test.js` fails 5 (**pre-existing** — verified identical
+max `[2944]`. `compiler/tests/lsp/workspace-l2.test.js` fails 5 (**pre-existing** — verified identical
 against main's `emit-expr.ts`), `giti-016` is a **timeout flake** (runtime swings 1.02–7.67 s on
 *identical* code, both sides), and the self-host tier is item 1 above.
+
+⚑⚑ **CORRECTED POST-WRAP — this section originally read "No clean local full-suite pass was obtained,
+and that is stated rather than papered over." That framing was WRONG, and it was mine.** There is no
+"full-suite pass" target in this project — deliberately, since **S253**. `ci.yml:29` records that the
+old CI ran `bun test compiler/tests/` (everything), went permanently red on known backlog, and was
+split. `bun test compiler/tests/` is therefore a **SUPERSET of what the project gates**, and running
+it locally is not a check the project makes. **I measured against a target that does not exist and
+reported the mismatch as a shortfall.** See §CI ARCHITECTURE below — the real gaps are different and
+sharper.
 
 **Worktrees NOT swept — none are this session's.** Four remain (`agent-a0742fe4795045e91`,
 `agent-a4e6b5f2562ae9eaa`, `onmount-c`, plus `scrml-pinned`); their work has not landed, so per the
 wrap discipline they are retained and surfaced rather than removed.
+
+## CI ARCHITECTURE — banked post-wrap, rides with the runaway next session
+
+**Peter asked how to ensure a clean full-suite pass. The honest answer is that the project already
+solved most of this, and the remaining gaps are not the ones I had been reporting.**
+
+**The architecture that exists** (`ci.yml`), and it is a good one:
+
+| job | contents | status |
+|---|---|---|
+| **`gate`** (BLOCKING) | unit + conformance · root-level parser/native · browser **name-set** gate · snippet · compile-floor · facts · SPEC-INDEX · delta-log · §34.0 | **green, and stays green** |
+| **`tracking`** (non-blocking) | types gate · **integration + lsp + commands** — labelled *"promotion candidates"* | **known-red** |
+
+`compiler/tests/self-host/` is in **NEITHER**, excluded on purpose (`ci.yml:23-27`): it needs a
+locally-built, gitignored dist that **cannot be rebuilt on a clean checkout**, because the self-host
+`.scrml` sources don't compile against the current compiler (`null` / `!==` / `try` — post-v1.0 work).
+
+⚑⚑ **THAT IS WHY THE RUNAWAY ROTTED.** `tab.test.js` lives in the one tier nothing executes. It did
+not survive *despite* the gate — it survived **because nothing was looking.** Pickup item 1 and this
+section are one problem, not two.
+
+**The mechanism is already proven here FOUR times** — `corpus-compile-floor.baseline.json` ·
+`scripts/browser-baseline.ts --check` · `compiler/tests/TYPES-BASELINE.json` · plus the
+facts / SPEC-INDEX / delta-log invariant gates. All **bidirectional**: fail on a NEW break *and* on a
+stale entry. The browser gate's own comment states the principle, and it is the load-bearing one:
+
+> *a permanently-red step is "useless in both directions at once" — a real regression is invisible
+> (red either way), and a failed step HALTS the job, so every step after it was skipped… verified,
+> not assumed.*
+
+**GAP 1 — `tracking` still has the exact disease the browser tier was cured of.** It is red *as a
+whole job*, so a genuine new regression in integration / lsp / commands is invisible — the same
+argument one level up. `workspace-l2`'s 5 failures sit there indefinitely because nothing
+distinguishes them from a new break. **Fix: a name-set baseline per tracking tier**, so it exits 0
+while the failure set is unchanged and 1 the moment a name joins or leaves. That is what makes
+promotion to `gate` possible at all.
+
+**GAP 2 — no baseline asserts that tests actually ASSERTED.** All four check names, counts or exit
+codes. `browser-reactive-arrays` would have passed every one of them while executing **zero**
+assertions. An `expect() calls` floor per tier is the cheap addition, and it is the only number that
+caught this session's vacuous passes (45→15 on self-host-smoke, 35→0 on reactive-arrays).
+
+**Sequence (ruled by peter — bank now, execute next session with the runaway):**
+1. Root-cause the `tab.test.js` runaway — a tier that kills the machine cannot be gated regardless.
+2. Name-set baselines for `tracking`'s tiers → they begin carrying information; promote each to
+   `gate` as it goes reproducibly green.
+3. Assertion-count floor alongside each baseline.
+4. Decide `self-host/`'s status EXPLICITLY — gated, or **quarantined with a gate asserting it is
+   still quarantined**. Right now it is neither, which is precisely how this happened.
+
+⚑ **Lane check owed before starting 2-4:** `ci.yml` is bryan's active surface (#907 is gate
+hardening). Coordinate or route rather than editing it under him.
 
 **Machine state:** the S406 bun guards are rebuilt on this clone at `C:\Users\pjoli\bun-guard`
 (`run-capped.ps1` kernel Job-Object cap · `bun-sentinel.ps1` · `README.md`), both **bite-tested**, and

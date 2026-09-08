@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 102 |
-| MED | 227 |
+| MED | 229 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1369,6 +1369,62 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 
 ### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; resolved by #473 (the fileURLToPath swap) — prose lagged the already-resolved marker; PA-reverified clean on Windows both modes S341-peter`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
+
+### g-tracking-job-is-red-as-a-whole-so-a-new-regression-in-it-is-invisible — the exact disease the browser tier was CURED of at S313, still live one level up, on the job that holds integration + lsp + commands
+
+<!-- @gap id=g-tracking-job-is-red-as-a-whole sev=MED status=open owner=bryan locus=.github/workflows/ci.yml(the `tracking` job — the "integration + lsp + commands" step and the types gate above it)+scripts/browser-baseline.ts(the PROVEN pattern to copy)+compiler/tests/TYPES-BASELINE.json(a second instance of it) prov=empirical:S410-peter-read-the-workflow-while-answering-how-to-get-a-clean-full-suite-pass -->
+
+**ROUTED TO BRYAN — `ci.yml` is his active surface (#907 is gate hardening). Filed, not fixed.**
+
+The `gate` job is blocking and green. The `tracking` job is non-blocking and **red as a whole**, and
+it carries `integration + lsp + commands` (labelled *"promotion candidates"*). Because the job is red
+wholesale, **a genuine NEW regression in any of those tiers is invisible** — indistinguishable from
+the standing backlog. `compiler/tests/lsp/workspace-l2.test.js` has 5 failures sitting there for
+exactly this reason.
+
+⚑ **This is not a new principle — the project already diagnosed and cured it one level down.** The
+browser tier had the identical shape until S313, and `ci.yml`'s own comment states it better than a
+filing can:
+
+> *a permanently-red step is "useless in both directions at once" — a real regression is invisible
+> (red either way), and a failed step **HALTS the job**, so every step after it was skipped… verified,
+> not assumed* (the within-node parity step reported `skipped` on run 30742472551 and had therefore
+> never run at all).
+
+**The fix is the pattern already proven FOUR times in this repo** — `browser-baseline.ts --check`,
+`corpus-compile-floor.baseline.json`, `TYPES-BASELINE.json`, and the facts / SPEC-INDEX / delta-log
+invariant gates. All **bidirectional**: fail on a NEW break *and* on a stale entry. Give each
+`tracking` tier a failure NAME-SET baseline so it exits 0 while the set is unchanged and 1 the moment
+a name joins or leaves. **That is the precondition for promoting a tier into `gate` at all** — which
+is what the "promotion candidates" label is already promising.
+
+**Done-condition:** a new regression introduced into `integration` / `lsp` / `commands` turns the
+step red; the standing backlog does not.
+— `NEW S410-peter (found reading ci.yml to answer "how do we ensure a clean full-suite pass")`; **MED**; open
+
+### g-no-baseline-asserts-that-tests-actually-asserted — every gate checks names, counts or exit codes; none checks that a single `expect()` ran, which is the only number that catches a self-disabled harness
+
+<!-- @gap id=g-no-baseline-asserts-that-tests-actually-asserted sev=MED status=open locus=scripts/browser-baseline.ts+compiler/tests/TYPES-BASELINE.json+scripts/corpus-compile-floor.ts(the three baselines that would each take an assertion-count floor)+.github/workflows/ci.yml(the per-tier steps that would carry it) prov=empirical:S410-peter-two-files-measured-45-to-15-and-35-to-0-assertions-while-the-pass-count-ROSE -->
+
+This repo has four bidirectional baselines and they are good ones — but **every single one asserts
+names, counts, or exit codes. None asserts that any test actually ASSERTED anything.**
+
+**Measured this session, twice, and in both cases the pass count moved in the FLATTERING direction:**
+
+| file | headline | `expect()` calls |
+|---|---|---|
+| `self-host-smoke.test.js`, module loads | 22 pass / **3 fail** | **45** |
+| …same file, module broken | 24 pass / **1 fail** | **15** |
+| `browser-reactive-arrays.test.js`, as found | **35 pass / 0 fail** | **0** |
+
+`browser-reactive-arrays` would have passed **every existing gate in this repo** — name-set, exit
+code, count — while running **zero assertions**, for a file `master-list.md:253` already recorded as
+*"Skipped"*. The assertion count was the only number that revealed it, and nothing reads it.
+
+**Done-condition:** each gated tier carries a minimum `expect()`-call floor alongside its name-set
+baseline; a tier whose assertion count collapses fails even if its pass/fail counts improve.
+⚑ Cheap by construction — bun already prints the number; the baselines already have a home for it.
+— `NEW S410-peter (the through-line of the session: every broken instrument failed toward GREEN)`; **MED**; open
 
 ### g-self-host-tab-test-is-an-unbounded-memory-runaway — `bun test compiler/tests/self-host/tab.test.js` grows ~720 MB/s with no plateau (6.53 → 8.69 GB in THREE SECONDS) and is the strongest candidate yet for the unidentified S406 82 GB machine lockup
 
