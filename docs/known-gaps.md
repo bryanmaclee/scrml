@@ -1370,6 +1370,46 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 ### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; resolved by #473 (the fileURLToPath swap) — prose lagged the already-resolved marker; PA-reverified clean on Windows both modes S341-peter`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
 
+### g-guarded-early-return-tests-report-vacuous-passes — the CLASS: a precondition guard with no assertion turns N tests into green ticks that assert nothing. `browser-reactive-arrays.test.js` was reporting **35 pass with ZERO assertions executed**
+
+<!-- @gap id=g-guarded-early-return-tests-report-vacuous-passes sev=MED status=resolved resolved-by=S410-peter locus=compiler/tests/browser/browser-reactive-arrays.test.js(the `_SKIP_REACTIVE_ARRAYS` + `distExists` seam)+compiler/tests/unit/emit-logic-s19-error-handling.test.js(the `runtimeClasses` extraction seam)+compiler/tests/browser/browser-todomvc.test.js(the CORRECT shape, copied) prov=empirical:S410-peter-swept-the-class-repo-wide-after-finding-the-self-host-smoke-instance-then-measured-each-file -->
+
+**Found by sweeping the CLASS after [[g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails]]
+turned up one instance.** The shape is `if (!precondition) return;` inside a test, with **no assertion
+anywhere that the precondition held**. When it fails the tests do not fail, do not skip, and do not
+report — they pass having asserted nothing.
+
+Repo-wide sweep of `^\s*if \(!\w+\) return;` in `compiler/tests/`:
+
+| file | guard | count | had a loud assertion? | state found |
+|---|---|---|---|---|
+| `browser-todomvc.test.js` | `!distExists` | 43 | ✅ **two** `expect(distExists)` | correct — fixture present, tests real |
+| `browser-reactive-arrays.test.js` | `!distExists` | 35 | ❌ **zero** | ⛑ **35 pass / 0 fail / ZERO assertions** |
+| `emit-logic-s19-error-handling.test.js` | `!runtimeClasses` | 12 | ❌ **zero** | passing for real, but the trap was latent |
+| `self-host-smoke.test.js` | `!scrmlModule` | 12 | ✅ one | the sibling entry above |
+
+⚑ **`browser-reactive-arrays` is the sharp one.** `const _SKIP_REACTIVE_ARRAYS = true` (a *legitimate*
+decision — the file hangs happy-dom; a real browser passes) forced `distExists` false, so all 35 tests
+early-returned and the runner printed **35 PASS**. `master-list.md:253` already records this file as
+*"Skipped"* — so **the document and the runner disagreed, and the runner is the one CI prints.** Anyone
+reading the suite output saw 35 passing reactive-array reconciliation tests that do not exist.
+
+**FIXED S410-peter:**
+- `browser-reactive-arrays.test.js` — its 7 `describe`s now route through
+  `describeMaybe = _SKIP_REACTIVE_ARRAYS ? describe.skip : describe`. Output went from
+  **35 pass / 0 fail** to **0 pass / 35 skip / 0 fail**. The decision is unchanged; only the honesty of
+  the report is. The per-test guards are left in place — unreachable while the flag is set, still
+  correct if it is ever cleared.
+- `emit-logic-s19-error-handling.test.js` — gains a `§0: harness precondition` test asserting the
+  extraction succeeded, modelled on `browser-todomvc`'s shape. ⚑ **Bite-tested rather than assumed:**
+  with a simulated extraction failure it goes **43 pass / 1 fail** and assertions drop 65 → 51; without
+  the guard the same breakage read **43 pass / 0 fail**.
+
+**The general rule this file now demonstrates in three places:** *a precondition guard owes a
+precondition assertion.* Otherwise the harness can disable itself and the only trace is the
+`expect() calls` count — a number nobody reads and no gate checks.
+— `NEW S410-peter (class sweep off the self-host-smoke instance)`; **MED**; resolved
+
 ### g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails — 12 tests early-return on a null module, so BREAKING the module under test reads as failures dropping 3 → 1
 
 <!-- @gap id=g-self-host-smoke-parity-tests-pass-vacuously-when-extraction-fails sev=MED status=open locus=compiler/tests/integration/self-host-smoke.test.js(the `const scrmlModule = extractScrmlLogic()` seam and every `if (!scrmlModule) return;` guard — locate by that guard STRING, there are 12) prov=empirical:S410-peter-measured-both-states-on-this-box-while-attempting-the-blocked-fileURLToPath-swap -->

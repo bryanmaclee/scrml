@@ -96,11 +96,36 @@ function extractRuntimeClasses() {
 }
 
 let runtimeClasses;
+let runtimeClassesError = null;
 try {
   runtimeClasses = extractRuntimeClasses();
 } catch (e) {
   runtimeClasses = null;
+  runtimeClassesError = e;
 }
+
+// ⚑ S410 — THE PRECONDITION MUST FAIL LOUDLY, because 12 tests below guard with
+// `if (!runtimeClasses) return;` and would otherwise pass HAVING ASSERTED NOTHING.
+// That shape is live elsewhere in this repo: `browser-reactive-arrays.test.js`
+// reported **35 pass / 0 fail with zero assertions executed** for exactly this
+// reason, and `self-host-smoke.test.js` turns 12 real parity checks into silent
+// no-ops the moment its module fails to load. The sibling `browser-todomvc.test.js`
+// has the correct shape and is the model copied here: assert the precondition once,
+// in its own test, so a broken harness is a RED, never a quieter green.
+// This is currently PASSING (extraction succeeds); the assertion exists so that a
+// future breakage cannot silently disable the 12 without anyone noticing.
+describe("emit-logic §19 §0: harness precondition", () => {
+  test("the runtime error classes were extracted (else the 12 guarded tests below are vacuous)", () => {
+    if (runtimeClassesError) {
+      throw new Error(
+        `extractRuntimeClasses() threw, so 12 tests in this file would silently ` +
+        `early-return and pass without asserting anything: ${runtimeClassesError.message}`,
+      );
+    }
+    expect(runtimeClasses).not.toBeNull();
+    expect(typeof runtimeClasses._ScrmlError).toBe("function");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // §1-§4: throw-stmt
