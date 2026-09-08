@@ -5334,15 +5334,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         pushPartSpan();
         continue;
       }
-      // E-EQ-002: `== not` and `!= not` — use `is not` instead (§45)
+      // E-EQ-002: `== not` and `!= not` (§45)
       // Recovery: rewrite `== not` → `is not`, `!= not` → `is not not` in the expression.
+      //
+      // ⚑ S410 — THE MESSAGE USED TO SAY `is not` FOR BOTH OPERATORS, which is the
+      // INVERSE of the author's intent on the `!=` arm: `x != not` asks "is x
+      // PRESENT?", and `is not` tests absence. So the diagnostic told the author to
+      // write the opposite condition. Note the RECOVERY directly below already got
+      // this right (`!=` → `is not not`), so the message and the recovery in this same
+      // block contradicted each other.
+      //
+      // The advised form is `is some`, not the double-negative: SPEC.md:24944 (§45) —
+      // "`is some` exists to avoid the double-negative `not (x is not)`" — and §42.2.5
+      // makes `is some` the canonical "value EXISTS" test.
+      //
+      // ⚑ The RECOVERY string is deliberately NOT changed. `is not not` is semantically
+      // correct there and it is a token sequence fed back into the parse, so swapping it
+      // is a behaviour change owing its own differential — this fix is diagnostic TEXT
+      // only, and stays inert. g-e-eq-002-hint-suggests-the-double-negative.
       if (tok.kind === "OPERATOR" && (tok.text === "==" || tok.text === "!=")) {
         const nextTok = peek(1);
         if (nextTok && nextTok.kind === "KEYWORD" && nextTok.text === "not") {
           const eqSpan = tokenSpan(tok, filePath);
+          const advised = tok.text === "==" ? "is not" : "is some";
           errors.push(new TABError(
             "E-EQ-002",
-            `E-EQ-002: \`${tok.text} not\` is not valid — use \`is not\` to check for absence (§45).`,
+            `E-EQ-002: \`${tok.text} not\` is not valid — use \`${advised}\` to check for absence (§45).`,
             eqSpan,
           ));
           // Consume both `==`/`!=` and `not`, emit recovered `is not` form

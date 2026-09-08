@@ -7210,6 +7210,81 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-08 (S410 — peter — the instruments all lied in the same direction)
+
+A drain session on the Windows clone, concurrent with a LIVE S409-bryan throughout (his lane: the
+`SPEC-INDEX.md` merge-conflict class + CI gate hardening, #905/#906/#907 — disjoint by construction).
+**Seven landings, every one gate-green**, plus `flogence#6` merged upstream.
+
+| PR | |
+|---|---|
+| #909 | review floor drained **4 → 0**; three filed causes corrected; 2 gaps routed to bryan |
+| #910 | two shipped correctness records that described the code as it was before #898 |
+| #911 | four MED/LOW drains — the boot session index was matching a different set than it reported |
+| #912 | the guard pinning a 404 stops pretending — **and the same build has a dead nav href** |
+| #913 | breaking the module under test makes the self-host smoke suite look *better* |
+| #914 | a test file was reporting **35 passes with zero assertions executed** |
+| #915 | the `E-EQ-002` hint told authors to write **the opposite condition** |
+
+**The through-line, and it is the finding of the session: every broken instrument failed toward
+GREEN.** Six of them, none of which ever read as worse than reality —
+
+1. a gate printing `FAIL` while the shell reported exit 0 (`tail`'s code read as the gate's);
+2. a PowerShell parse check that passed **vacuously** over 21 real errors (`[ref]$undeclared`);
+3. a dropped-set probe inflating a defect **27%** (`[0-9]+` backtracks and eats its own digit);
+4. a "fix" that improved the headline 3 fails → 1 **by breaking the module under test**;
+5. `browser-reactive-arrays.test.js` printing **35 pass / 0 assertions** for a file `master-list`
+   already recorded as *"Skipped"* — the document and the runner disagreed, and the runner is what CI
+   prints;
+6. `self-host-smoke.test.js` turning 12 real parity checks into silent no-ops on a null module.
+
+**The rule extracted and now demonstrated three times in-tree: a precondition guard OWES a
+precondition assertion.** Otherwise a harness disables itself and the only trace is the `expect()`
+count — a number nobody reads and no gate checks.
+
+**New defects found, both by reproducing something else:**
+- **HIGH** `g-composed-route-drops-the-attr-tpl-effect` — a shell's reactive nav `href` ships into
+  every composed route as the dead literal `_scrml_attr_tpl_href_3`. The control is what makes it a
+  defect: the *same build* wires the effect correctly in the shell's own document. A shell's nav is on
+  every route by construction, so one reactive attribute breaks navigation app-wide, at exit 0.
+- **HIGH** `g-tenant-floor-inert-for-a-two-qualifier-create-table` — §14.8.10 tenant isolation is
+  silently inert for `CREATE TABLE db.schema.table`; add any second table and even
+  `W-SCHEMA-NO-TABLES-DECLARED` is suppressed. #900 closed the instance, not the class. **Routed.**
+
+⚑ **The ledger caught the "obvious" fix TWICE**, both times because the entry BODY already recorded
+what the marker did not: the session-index widening S404 had warned would still drop every PR-flow
+wrap, and the `module-resolver` `fileURLToPath` swap S341 had already tried and reverted. **The marker
+is an index, not the record** — read the body before writing code against it.
+
+Also: the `E-EQ-002` fix landed only because the pin was written FIRST — the test failed with a
+message that was neither the old text nor the new one, exposing a **second emit site**
+(`ast-builder.js:5337`) whose advice was semantically *inverted* on the `!=` arm.
+
+Machine work: the S406 bun runaway-memory guards were rebuilt on this clone (`C:\Users\pjoli\bun-guard`),
+both **bite-tested**, `BunMemorySentinel` live. The S406 originals were on the other machine and
+unrecoverable. ⚑ My own cap guidance was mis-sized within hours and corrected: the suite exceeds
+**4 GB** commit here (killed with `MemoryExhaustion`) against S406's 2.433 GB on the 32 GB desktop.
+
+⚑⚑⚑ **AND THE GUARD PAID FOR ITSELF THE SAME DAY — THE S406 82 GB LOCKUP NOW HAS A NAMED CANDIDATE.**
+`g-self-host-tab-test-is-an-unbounded-memory-runaway` (**HIGH**). The sentinel caught it in flight
+*with the full command line* — the exact gap S406 could not close, because `Get-Process` cannot supply
+one:
+
+```
+[WARN] commit 6.532 GB (ws 6.016 GB), free 1.51 GB
+       CMDLINE: bun.exe test compiler/tests/self-host/tab.test.js
+[KILL] free RAM 0.31 GB < 1.5 GB while this process holds 8.69 GB
+```
+
+**6.53 → 8.69 GB in three seconds**, accelerating, no plateau — which reaches 82 GB in about two
+minutes on a 32 GB box. Narrowed by elimination, not guesswork: compiling `tab.scrml` (0.37 s, ~0 GB),
+importing the emitted `tab.js` (0.01 s, ~0 GB), and the sibling `ast`/`bpp`/`bs` files are **all
+clean** — it manifests only under the bun test runner and dies *before the first test result prints*.
+⚑ **S406's own table measured `bun test compiler/tests/` at 2.433 GB**, so the whole-tier number never
+surfaced it — the same "a zero over a path the population never exercises" shape as everything else
+this session, one level up. No evidence for bun or Windows being at fault; pre-existing, not
+introduced here. **Ruled by peter as the S411 opener; the bisection method is prescribed in the entry.**
+
 ### 2026-09-07/08 (S408 — peter — seven arcs, and seven instruments that measured their own reach)
 
 A long throughput session on the Windows clone, successor to a LIVE S407-bryan throughout (his lane was

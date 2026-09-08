@@ -35,6 +35,23 @@ import { resolve } from "path";
 // DOM. Real browser (Puppeteer) passes. Tracked in master-list.md known issues.
 const _SKIP_REACTIVE_ARRAYS = true;
 
+// ⚑ S410 — REPORT THE SKIP AS A SKIP. The flag above is a legitimate decision (the
+// file hangs happy-dom), but the MECHANISM was wrong: `distExists` was forced false
+// and every test then hit an `if (!distExists) return;` guard, so this file reported
+// **35 PASS / 0 fail with zero assertions executed** — 35 green ticks for coverage
+// that does not exist. `master-list.md:253` already records this file as "Skipped",
+// so the document and the runner disagreed, and the runner is the one CI prints.
+//
+// ⚑ The sibling `browser-todomvc.test.js` shows the correct shape for the same
+// guard: it asserts `expect(distExists).toBe(true)` in a dedicated block, so a
+// missing fixture FAILS LOUDLY there. This file had NO such assertion — grep for
+// `expect(distExists)` returns 0 hits — which is why nothing ever surfaced.
+//
+// Using `describe.skip` makes the 35 report as SKIPPED, which is what they are.
+// The per-test `if (!distExists) return;` guards below are left in place: they are
+// unreachable while this flag is set, and they remain correct if it is ever cleared.
+const describeMaybe = _SKIP_REACTIVE_ARRAYS ? describe.skip : describe;
+
 if (!_SKIP_REACTIVE_ARRAYS && !globalThis.document) GlobalRegistrator.register();
 
 const DIST = resolve(import.meta.dir, "../../../samples/compilation-tests/dist");
@@ -79,7 +96,7 @@ const distExists = !_SKIP_REACTIVE_ARRAYS && existsSync(resolve(DIST, `${SAMPLE}
 // §1: Initial reactive variable values
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §1: initial reactive variable values", () => {
+describeMaybe("reactive-arrays §1: initial reactive variable values", () => {
   test("@items starts as empty array", () => {
     if (!distExists) return;
     const api = loadSample();
@@ -105,7 +122,7 @@ describe("reactive-arrays §1: initial reactive variable values", () => {
 // §2: Initial DOM state
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §2: initial DOM state", () => {
+describeMaybe("reactive-arrays §2: initial DOM state", () => {
   test("#add-btn element exists", () => {
     if (!distExists) return;
     loadSample();
@@ -156,7 +173,7 @@ describe("reactive-arrays §2: initial DOM state", () => {
 // §3: Append via spread-replace updates reactive state
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §3: append via spread-replace updates @items state", () => {
+describeMaybe("reactive-arrays §3: append via spread-replace updates @items state", () => {
   test("clicking #add-btn once makes @items length 1", () => {
     if (!distExists) return;
     const api = loadSample();
@@ -223,7 +240,7 @@ describe("reactive-arrays §3: append via spread-replace updates @items state", 
 // §4: Remove via filter updates reactive state
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §4: remove via filter updates @items state", () => {
+describeMaybe("reactive-arrays §4: remove via filter updates @items state", () => {
   test("clicking #remove-btn on empty array leaves @items as empty array", () => {
     if (!distExists) return;
     const api = loadSample();
@@ -275,7 +292,7 @@ describe("reactive-arrays §4: remove via filter updates @items state", () => {
 // §5: Count display — reactive @items.length span
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §5: count display updates reactively", () => {
+describeMaybe("reactive-arrays §5: count display updates reactively", () => {
   test("#count text starts with 'Count:' initially", () => {
     if (!distExists) return;
     // Note: happy-dom may not render textContent=0 (the falsy number zero)
@@ -330,7 +347,7 @@ describe("reactive-arrays §5: count display updates reactively", () => {
 // Tests query document.body for .item elements.
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §6: for/lift DOM updates — reactive re-render", () => {
+describeMaybe("reactive-arrays §6: for/lift DOM updates — reactive re-render", () => {
   test("no .item elements exist before any add", () => {
     if (!distExists) return;
     loadSample();
@@ -427,7 +444,7 @@ describe("reactive-arrays §6: for/lift DOM updates — reactive re-render", () 
 // This is the core behavioral guarantee of keyed reconciliation.
 // ---------------------------------------------------------------------------
 
-describe("reactive-arrays §7: keyed reconciliation — DOM node identity preservation", () => {
+describeMaybe("reactive-arrays §7: keyed reconciliation — DOM node identity preservation", () => {
   test("adding an item preserves existing DOM nodes", () => {
     if (!distExists) return;
     const api = loadSample();
