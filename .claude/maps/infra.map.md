@@ -1,6 +1,34 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF. CURRENCY-VERIFIED, NOT RE-WALKED.** ━━━━━━━
+#
+# ⛑ **THE ZERO IS A COMMAND, RE-RUN AT WRITE TIME:** `git diff --name-only 68cfac6d..e74f5423 --
+# .github/ Dockerfile docker-compose.yml '*.tf' fly.toml render.yaml` -> **EMPTY**. Deployment
+# targets, cloud resources, Docker services and CI workflows are all byte-identical across the window.
+# ⚠ **A ZERO-DIFF SURFACE IS AN UNCHANGED MAP, NOT A CORRECT ONE** — the standing S391 `auth` lesson,
+# which bit `auth` the other way this window (its keyed surface went non-empty).
+#
+# ⚠ **ONE DEPLOYMENT-ADJACENT FACT DID CHANGE, IN CODEGEN RATHER THAN IN INFRA, AND IT AFFECTS WHAT A
+# DEPLOYED `protect=` APP DOES AT RUNTIME:** the §14.8.9 floor now REFUSES an author-serialized
+# response body it cannot inspect, returning a shaped **500** (`_scrml_protect_opaque_refusal()`) from
+# the guarded sinks — both server-fn arms, the §61 `<endpoint>` envelope, and (new) `/__mountHydrate`.
+# **An app that previously shipped a hand-built body from a `protect=`-declaring file now fails to
+# COMPILE (`E-PROTECT-005`) rather than reaching production at all**, so the runtime path is the
+# residual, not the primary. Detail in `auth.map.md` / `domain.map.md`.
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -164,6 +192,7 @@ Do not go looking for an App install.
 ## Tags
 #scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows #zero-infra-diff
 #zero-diff-window
+#s405 #infra-zero-diff #verified-empty-diff #protect-opaque-refusal-500 #e-protect-005-fails-at-compile-not-runtime #mounthydrate-guarded
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -30,15 +30,77 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 101 |
-| MED | 223 |
+| HIGH | 99 |
+| MED | 226 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
+### g-migrate-consumer-is-not-raw-DDL-aware-deferred-to-its-own-arc — `extractDesiredSchema` serves two consumers with different needs; the tenant floor learned raw DDL, the migrate/differ path deliberately did not
+
+<!-- @gap id=g-migrate-consumer-not-raw-ddl-aware sev=MED status=open locus=compiler/src/schema-differ.js(diffSchema + the §14.8.11 grant loop)+compiler/src/commands/db-migrate.js(the boundary decline, and printPlan's withheld-plan filter) prov=ruling:user-voice-scrml.md-S405-bryan-"split arc b, land the tenant half. re-scope the other half"+dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md -->
+
+**Deferred by ruling, not by omission.** Scope doc: `docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md`.
+
+⚑ **NOT LIVE ON MAIN.** The four findings below were measured against the *un-split* arc-B branch and
+**all four evaporated by construction** when the migrate consumer was made to decline raw tables at
+its own boundary. `diffSchema` is **902 code lines identical to `origin/main`**, verified. They are
+recorded as the design constraints a raw-DDL-aware migrate path must satisfy. **Do not open this arc
+by trying to reproduce them.**
+
+1. **Case folding** — raw-DDL names carried author casing into a case-SENSITIVE map, so
+   `CREATE TABLE Assets` + an `assets` row produced two contradictory warnings for one table and,
+   under `--allow-destructive`, `DROP TABLE IF EXISTS "assets";`. Postgres folds unquoted
+   identifiers; the differ did not. The tenant half's `TenantTableSet` (folds on `add` AND `has`) is
+   the shape to copy — fix it in the container, not per call site.
+2. **An empty plan and a suppressed plan are different states** — `printPlan` renders a withheld plan
+   as green `up to date — 0 statements`. The file's own prose already forbids that conflation.
+3. **The Postgres APPLY path printed no warnings at all** — dry-run and SQLite did. Silent on the one
+   path that mutates the database.
+4. **The §14.8.11 grant loop iterated the unfiltered set** — `GRANT … ON "assets"` for a table the
+   same plan refused to create → `relation does not exist` → whole migration rolled back.
+
+**Two recognizer defects travel with the landed tenant half and are owed here** (narrow,
+non-destructive, exit-0 inertness): `isTableLevelConstraint` eats a column named `key`/`index` whose
+type carries non-numeric arguments (`key GEOMETRY(Point, 4326)`, `key ENUM('a','b')`); and three-part
+`CREATE TABLE db.schema.table (…)` matches nothing, so the tenant floor is inert for it and
+`W-SCHEMA-NO-TABLES-DECLARED` does not cover it (it fires only at zero tables *total*).
+⚑ `like` is genuinely undecidable by a leading-word test and is correctly handled by the **grammar**
+(`LIKE` is reserved, so a column named `like` must be quoted) — **do not replace that with a heuristic.**
+
+**One stale comment in this arc's territory:** `schema-differ.js:307` still says *"`diffSchema`
+accordingly SKIPS `rawDdl` tables"*, which stopped being true when the decline moved to the
+consumer's boundary.
+— `NEW S405-bryan (deferred half of the dpa-039 arc-B split; the four findings are pre-split measurements, not live defects)`; **MED**; open
+
+### g-two-shipped-error-codes-have-ZERO-mentions-in-SPEC-md — `E-CG-ENUM-BINDING-COLLISION` and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` emit from the compiler and appear nowhere in the normative catalog
+
+<!-- @gap id=g-two-shipped-codes-absent-from-spec sev=MED status=open locus=compiler/src/codegen/emit-library.ts(both emitters; locate by code STRING, never by line)+searched:compiler/SPEC.md-grep-c-returns-0-for-both prov=review:S405-wrap-maps-non-compliance-N-S405-1+empirical:PA-verified-by-grep-at-e74f5423 -->
+
+**PA-VERIFIED at `e74f5423`:** `grep -c` returns **0** for BOTH codes in `compiler/SPEC.md`. Not a
+malformed §34 row — **zero mentions anywhere in the normative source.** Both ship and can fire
+(landed #897 / #898).
+
+⚑ **The gate that should have caught this could not, by construction.** `scripts/s34-census.ts
+--check-new` validates NEW or CHANGED §34 rows. **A code with no row at all presents as nothing to
+check** — the census, the prefix greps and SPEC-INDEX all read normal. That is the §8 hollow-gate
+shape: green because nothing is there, indistinguishable from green because it passed.
+
+**Two things owed, and they differ:** the §34 rows (peter's lane, #897/#898); and **a probe that
+compares emitted code strings against the catalog**, since the current gate can only see rows that
+already exist. The second is the generalizable half.
+— `NEW S405-bryan (surfaced by the wrap maps non-compliance pass; PA-verified by grep)`; **MED**; open
+
 ### g-the-foreign-opener-grammar-is-hand-spelled-in-five-places-at-three-levels-of-completeness — SPEC 23.2 defines `_` + ZERO OR MORE `=` + `{`, and no two detectors agree on how much of it to match
 
-<!-- @gap id=g-foreign-opener-grammar-hand-spelled-five-places sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts:389+compiler/src/type-system.ts:473+compiler/src/lint-w-interp-in-raw-content.js:51+compiler/src/codegen/protect-egress.ts+compiler/src/ast-builder.js:18392(the-one-correct-spelling) prov=empirical:PA-read-all-five-sites-on-main+review:S405-arc-A-and-arc-B-each-found-one-independently -->
+<!-- @gap id=g-foreign-opener-grammar-hand-spelled-five-places sev=MED status=open locus=compiler/src/codegen/tenant-egress.ts:389+compiler/src/type-system.ts:473+compiler/src/lint-w-interp-in-raw-content.js:51+compiler/src/codegen/protect-egress.ts+compiler/src/ast-builder.js:18392(the-one-correct-spelling) prov=empirical:PA-read-all-five-sites-on-main+review:S405-arc-A-and-arc-B-each-found-one-independently -->
+
+⚑⚑ **CORRECTED S405 — DOWNGRADED HIGH → MED, and the correction is the point.** This entry read as *five detectors at three levels, two of them security floors*. Re-resolved BY SYMBOL at `e74f5423` after the wrap maps pass challenged it:
+- **Both floors are FIXED and landed today** — `codegen/protect-egress.ts` (arc A, #896) and `codegen/tenant-egress.ts` (arc B, #900, now `:453`, full `_=*\{` grammar; **the `:389` locus above is stale**).
+- **`type-system.ts:473` is NOT a floor** — it sits in `describeEscapeHatch`, which builds a human-readable diagnostic string. A level-2 opener gets a less specific *description*, not an unchecked path.
+- **`lint-w-interp-in-raw-content.js:51` is a lint's inert-sigil list**, also not a floor.
+**What survives is real but smaller:** one normative grammar re-derived by hand at five sites, so a sixth is free to appear and nothing compares them. **A drift surface — not two open security holes**, which is what this entry claimed before it was challenged.
+
 
 **SPEC 23.2 defines the foreign-code opener as `_` followed by ZERO OR MORE `=` then `{`** — `_{`,
 `_={`, `_=={`, and so on. **Five sites hand-spell that grammar and only ONE is correct.**
@@ -80,7 +142,10 @@ both arcs' file boundaries** — they need an owner.
 
 ### g-tenant-floor-does-not-harvest-raw-DDL-so-the-protect-and-tenant-floors-disagree-on-what-a-schema-is — the §14.8.9 protect floor was TAUGHT the raw-DDL `<schema>` form; the §14.8.10 tenant floor was not, so a raw-DDL + no-`<db>` app gets a silently inert tenant floor
 
-<!-- @gap id=g-tenant-floor-does-not-harvest-raw-DDL sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts(buildTenantContext — both legs come up empty: the schemaByTable leg is built from per-`<db>` protectAnalysis.views, and the `<schema>` leg dies in parseSchemaBlock which recognizes ONLY the `tableName { col: type }` DSL at compiler/src/schema-differ.js:31; the sibling protect floor solves this with harvestRawCreateTables at compiler/src/protect-analyzer.ts:454, called :557 — the tenant floor has ZERO references to it) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-END-TO-END-at-0d8d7eac-by-a-4-app-matrix -->
+<!-- @gap id=g-tenant-floor-does-not-harvest-raw-DDL sev=HIGH status=resolved resolved-by=S405-arc-B-e74f5423 locus=compiler/src/codegen/tenant-egress.ts(buildTenantContext — both legs come up empty: the schemaByTable leg is built from per-`<db>` protectAnalysis.views, and the `<schema>` leg dies in parseSchemaBlock which recognizes ONLY the `tableName { col: type }` DSL at compiler/src/schema-differ.js:31; the sibling protect floor solves this with harvestRawCreateTables at compiler/src/protect-analyzer.ts:454, called :557 — the tenant floor has ZERO references to it) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-END-TO-END-at-0d8d7eac-by-a-4-app-matrix -->
+
+⚑ **RESOLVED S405** by arc B (#900, `e74f5423`) — the tenant leg harvests raw DDL through the ONE shared recognizer. ⚑ **This entry's own text went STALE the moment the fix landed, and a maps pass caught it rather than me:** it asserts *"the tenant floor has ZERO references to it"* — that count is now **4**. A state-claim inside a gap entry rots on landing and nothing flips it automatically.
+
 
 **REPRODUCED END-TO-END at `0d8d7eac`** by a dispatched agent; the load-bearing asymmetry
 PA-confirmed independently by symbol.

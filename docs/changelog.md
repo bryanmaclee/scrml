@@ -2,6 +2,44 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S405 — 2026-09-07/08 (bryan · ASUS-Vivobook)
+
+**Four rulings, two security arcs, and one failure mode wearing seven costumes.** Three sessions ran
+concurrently (S406/S408-peter on Windows; bryan's article session on the other machine).
+
+**Ruled by bryan:** dpa-038 CLOSED (duplicative; #509 answered after 23 days) · dpa-044 **Call 1**
+(unterminated delimiters become a diagnostic — build SPLIT, code-position limb only, markup-body limb
+gated on dpa-045) · **dpa-039 on four calls** (1a re-ratify dpa-030's conclusion + **strike its
+reasoning** · 2 take the bounded defect set · 3b the three-item pairing over the bare guard · 4a
+close) · and the arc-B **split** (land the tenant half, re-scope the migrate half).
+
+**Reopened:** S109 — *"s109 was a long time ago"* — banked as **dpa-045**, the S111 scope-(a) reopen,
+with a third pole S111 never costed: **(a′) the body IS an implicit template** (Lit's model; tags are
+the delimiters, zero author tax, zero migration). Round 1 complete, round 2 fired.
+
+**Landed:** #892 the free move (`'`/backtick lose their delimiter role — four rounds, five HIGHs) ·
+#895 the opener-grammar class + peter's S310 return leg · #896 arc A, the §14.8.9 protect egress
+floor (six rounds, two security fail-opens) · #900 arc B, the §14.8.10 tenant floor (three rounds, a
+live executed cross-tenant leak closed).
+
+**Both adopter Direction issues CLOSED** — #509 and #471, open 23 and 30 days.
+
+⚑ **The session's durable finding, unratified:** *an enumeration's method being sound says nothing
+about its AXIS being complete* — seven instances, including **three independent proofs of a sink
+population that all agreed and were all wrong**, because all three enumerated the MECHANISM while the
+obligation is over the DATA. *"Their agreement was one blind spot counted three times."*
+
+⚑ **Two of the four rulings' builds were only possible because a `free move` claim was falsified:**
+the apostrophe fix was scoped as ~35 LOC and took four rounds, because the string branches were doing
+**double duty** — also shielding four opener-blind flat scanners. Deleting them unmasked a
+pre-existing architectural gap.
+
+**PA misses:** a governing-sentence gate failure (quoted half a SPEC sentence whose other half says
+the opposite) · an under-specified preservation instruction that opened a security hole in a
+fail-closed redactor · an arc partition by FILE where the defect spanned the partition · an inherited
+advisory count repeated unverified · three delta-log sequence collisions, one from a rebase.
+
+
 ## S402 — 2026-09-05/06 (bryan · ASUS-Vivobook) — the first human-written scrml, and three measurements against "is this salvageable"
 
 Opened as an execution session and became an assessment. Mid-session bryan hand-wrote **~20 lines of

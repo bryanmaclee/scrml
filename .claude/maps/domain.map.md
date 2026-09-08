@@ -1,6 +1,26 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **`compiler/src/codegen/` IS THE BUSIEST SURFACE IN THE WINDOW: FIVE FILES.** ━━━━━━━
+#
+# `protect-egress.ts` +584 (now 821L, #896) · `emit-server.ts` +533 (now 7,027L, #896) ·
+# `emit-library.ts` +505/-70 (now 1,753L, **THREE** commits #893/#897/#898) · `tenant-egress.ts` +156
+# (now 649L, #900) · `db-authoritative.ts` +55 (now 540L, #900). Three NEW domain sections below:
+# **§14.8.9 as three limbs + the mediation mark** · **§14.8.10's one shared recognizer and
+# `extractDesiredSchema`'s two consumers** · **library-fn structural-by-default routing**.
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -116,6 +136,299 @@
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
+
+## §14.8.9 — THE PROTECT EGRESS FLOOR IS **THREE LIMBS OF DELIBERATELY DIFFERENT STRENGTH**, plus the Symbol-keyed MEDIATION MARK (NEW section, S405, #896 `b0c251f8`)
+
+⛔ **READ THE STRENGTHS; THEY ARE NOT INTERCHANGEABLE.** The module docstring says exactly that
+(`compiler/src/codegen/protect-egress.ts:37-51`), and the reason it says it is that the previous
+generation of this floor was restated in docs as a single guarantee it never was.
+
+| limb | code | mechanism | where | strength |
+|---|---|---|---|---|
+| 1 | **`E-PROTECT-004`** | per-body **SOURCE-TEXT co-occurrence LINT** for `_{}` (§23) and `asIs` (§14.1.1) | `protect-egress.ts:449` (`detectProtectedRawEgress`) | ⚠ **CONSERVATIVE, DEFEATED BY FUNCTION EXTRACTION, NOT A GUARANTEE** — labelled as such at its own definition |
+| 2 | **`E-PROTECT-005`** | HARD compile **ERROR at EMISSION** on an author-serialized response **BODY** (§40) | raised `emit-server.ts:2061`; gate `_protectResponseGate` `:2020`; detector `findAuthoredResponseConstruction` `protect-egress.ts:754` | **STRUCTURAL, not source-text — extraction does NOT defeat it.** Sound in the FIRING direction (acorn + code position + body-carrying only), incomplete in the not-firing direction |
+| 3 | **the RUNTIME refusal** | `_scrml_protect_redact` / `_scrml_protect_opaque_refusal()` | `SERVER_PROTECT_HELPER`, `protect-egress.ts:221+` | **`instanceof Response` is EXACT — no spelling problem, no extraction hole. THIS IS THE GUARANTEE. The other two are early warnings.** |
+
+⚑ **THE UNIT OF ALL THREE IS THE BODY, NOT THE `Response`.** A `Response` with a null body — a
+redirect, a `204`, `Response.error()` — carries no payload, so there is nothing for a `protect=`
+column to hide in and nothing for the floor to fail to inspect. Limbs 2 and 3 both permit it.
+**THE ADOPTER-FACING CONTRACT IS ONE SENTENCE: a `protect=` app keeps full control of STATUS and
+HEADERS and gives up authoring the BODY.** The earlier framing ("you cannot hand-build a
+`Response`") was BOTH too broad and, as implemented, a build-break with no workaround.
+
+### The mediation mark — the seam, and why it had to exist
+
+⛔ **BOTH LIMBS WERE ASKING THE SAME QUESTION WITH DIFFERENT PREDICATES.** *Is this `Response`
+AUTHOR-owned (unmediated) or COMPILER-owned (already mediated)?* The **compile-time** gate answered by
+**PROVENANCE** — it scans only the author-body window, so a compiler-emitted `Response` is excluded
+POSITIONALLY. The **runtime** guard answered by **SHAPE** (`.body === null`), which is a proxy for
+"carries a payload", **not** for "who built it". **Every place provenance and shape disagreed was a
+defect:**
+
+- `Response.redirect(...)` — author-owned but payload-free → the compile limb can prove it safe and
+  the runtime limb cannot. **That gap is what `W-PROTECT-005` reports** rather than leaves to bite.
+- the §53.9.4 `E-CONTRACT-001-RT` 400 — **compiler-owned but body-carrying**, so the guard turned the
+  compiler's own 400 into a 500.
+
+**THE MARK:** `const _SCRML_MEDIATED = Symbol.for("scrml.protect.mediated")` and
+`function _scrml_protect_mediated(response)` — `protect-egress.ts:245`, inside `SERVER_PROTECT_HELPER`.
+Symbol-keyed **for the same reason as the origin descriptor**: invisible to `JSON.stringify`, so
+marking a response never changes what ships.
+
+| stage | site | note |
+|---|---|---|
+| **MARK** | `emit-server.ts:1904`, helper `_markMediatedResponses` `:1890` | rewrites `return new Response(` → `return _scrml_protect_mediated(new Response(` and re-closes the statement one paren deeper |
+| **READ (server-fn / endpoint arms)** | `_opaqueResultGuard` `emit-server.ts:1948`, the read at `:1957` | emits `if (r[Symbol.for("scrml.protect.mediated")]) return r;` — **PROVENANCE first, shape second** |
+| **READ (value walk)** | `_scrml_protect_redact`, in `SERVER_PROTECT_HELPER` | `if (value[_SCRML_MEDIATED]) return value;` before the `.body === null` test |
+| **SEAM TEST** | `compiler/tests/integration/g-sql-row-protect-leak.test.js:628` | *"SEAM: every compiler-emitted Response inside a capture IIFE is mediation-marked"* — mechanical, over the emitted module, not a hand-listed case |
+
+⛔ **`_markMediatedResponses` THROWS AT EMIT TIME IF THE EMITTER IT WRAPS STOPPED PRODUCING A
+`Response` (`:1892-1898`), AND THE COMMENT FORBIDS THE OBVIOUS "FIX":** *"If that emitter stopped
+producing a Response this call is dead and should be removed; if it changed shape, the §14.8.9
+runtime guard will refuse the compiler's own response. **Do not silence this by making the mark
+optional.**"* ⚠ **IT IS GATED ON `_protectActive` (`:4436`)** — emitting the mark unconditionally
+referenced `_scrml_protect_mediated`, which satisfied the helper-injection gate and dragged the whole
+127-line `SERVER_PROTECT_HELPER` into apps declaring no `protect=` column at all. **MEASURED: ~66% of
+the emitted module, every function in it dead.** A `protect=`-free app must stay byte-unchanged.
+
+### `/__mountHydrate` gained redaction it never had — and the MISS is the reusable lesson
+
+`emit-server.ts:5531` (all-public arm) and `:5561` (gated arm) now redact per value via
+`_egressRedact`, mirroring the SSR seed's `_scrml_ssr_state[<name>] = _egressRedact("_scrml_cv")`
+composition exactly. Plus `_mountHydrateOpaqueGuard` (`:1935`) on BOTH arms, which refuses **ANY**
+`Response` cell value rather than reusing `_opaqueResultGuard`'s three-way test — deliberately: **a
+hydration cell is DATA being seeded into client state, and a `Response` is never a valid value for
+one**, so "does it carry a body" is not the question here. One refusal for the whole payload, because
+the payload is ATOMIC — a partially-hydrated page is worse than a diagnosable failure.
+
+⛔ **WHY IT WAS THERE AT ALL:** each `_scrml_mh_v<i>` is an **AUTHOR** `server @var` loader's result,
+which for a `?{}` loader is a protect-TAGGED row set. `JSON.stringify` ignores the Symbol-keyed
+descriptor, so `passwordHash` crossed the wire in cleartext on `POST /__mountHydrate` **while the SSR
+compose handler forty lines below redacted the same two values.** Reproduced end-to-end by executing
+the emitted handler.
+
+⛔ **AND THE PART WORTH GENERALIZING: IT WAS MISSED BY *THREE* COMPLETENESS PROOFS THAT ALL
+ENUMERATED OVER THE REDACTOR** — its call sites, SPEC's list of the boundaries it covers, and the
+ways to bypass it. **A sink that never ADOPTED the redactor is outside all three frames AT ONCE, so
+their agreement measured nothing. The obligation is over the DATA, so the enumeration has to be over
+the SERIALIZER.**
+
+⚠ **`/__serverLoad` IS *NOT* GUARDED AT THE TOP LEVEL AND THAT IS SAFE FOR A REASON, NOT BY LUCK** —
+its `_scrml_rows` / `_scrml_result` / `_scrml_cv` are values the COMPILER built from a lowered `?{}`,
+so no author construction reaches it. ⛔ **DO NOT EXTEND THAT REASON TO `/__mountHydrate`. A previous
+draft of the source comment did, and it was false** — the file's own note says *"The correctness of
+this file is carried by its comments; an over-claiming one is a defect in it."*
+
+⚑ **THE REDACTOR'S WALK IS UNCONDITIONAL; ONLY THE RECONSTRUCTION IS CONDITIONAL.** Rebuilding a
+fresh `{}` from `Object.keys` destroys any value whose JSON form is not its own enumerable keys (a
+`Date` has none, so a TIMESTAMP column serialized as `{}`). The first attempt at preserving those
+SHORT-CIRCUITED on a non-plain prototype and returned the object **without descending** — turning a
+cosmetic flaw into a fail-OPEN one (a tagged row inside any class-instance wrapper shipped
+`passwordHash` in cleartext, and the nested-`Response` limb was never reached). **"Do not rebuild"
+and "do not look" are different instructions, and inside a fail-closed floor only the first is ever
+safe.** So: always descend, decide how to RETURN afterwards — plain object → the rebuilt copy;
+non-plain and nothing changed → the ORIGINAL untouched; non-plain and something changed → rebuilt
+onto the same prototype.
+
+⚑ **THE OPAQUE REFUSAL IS TAGGED, NOT JUST THROWN** — `_scrml_e.__scrml_protect_opaque = true`. A
+caller that catches it must be able to tell a confidentiality refusal apart from an ordinary failure:
+the §37 SSE stream wrapper does exactly that, and without the tag its generic `catch` swallowed the
+refusal and ended the stream with a **silent 200**.
+
+Conformance: **10 case dirs under `conformance/cases/protect/`** (`e-protect-005-pos` / `-neg` ·
+`w-protect-005-null-body-static` · `mediated-response-passthrough` · `mounthydrate-redacts` ·
+`null-body-response-clean` · `endpoint-multikey-arm-response` · `raw-egress-e004` ·
+`reveal-suppresses-e004` · `reveal-wrong-column-e004`). Unit: `compiler/tests/unit/protect-response-scan.test.js`.
+
+## §14.8.10 — THE TENANT FLOOR LEARNS THE RAW-DDL `<schema>` FORM: **ONE SHARED RECOGNIZER**, and `extractDesiredSchema`'s **TWO CONSUMERS** (NEW section, S405, #900 `e74f5423`)
+
+⛔ **THE DEFECT CLASS: TWO ADJACENT SECURITY FLOORS DISAGREED ABOUT WHAT A SCHEMA *IS*.** §14.8.9 had
+been taught the raw-DDL `<schema>` form (`harvestRawCreateTables`); §14.8.10 had not. So a **raw-DDL
+`<schema>` + no `<db>` block** app — the ordinary shape for an app that lets scrml own its schema —
+got a **silently INERT tenant isolation floor at exit 0**: no `_scrml_tenant_tag`, no
+`_scrml_tenant_redact`, **and no diagnostic**. The 4-app matrix isolates it to an INTERSECTION, which
+is sharper than "schema-only apps are inert":
+
+| app | `<schema>` form | `<db>`? | tenant floor |
+|---|---|---|---|
+| A | DSL | no | ACTIVE |
+| B | **raw DDL** | **no** | ⛑ **INERT** |
+| C | raw DDL | yes | ACTIVE |
+| D | DSL | yes | ACTIVE |
+
+Reproduced end-to-end: executed with ambient tenant `A`, app B's wire carried
+`{"id":2,"name":"THEIRS","tenant_id":"B"}` — **a live cross-tenant isolation escape, executed, not
+theoretical.**
+
+### The fix is ONE recognizer, not a second better one
+
+**Home: `compiler/src/schema-differ.js`.** `parseSchemaBlock` (`:31`, the declarative
+`tableName { col: type }` DSL) · `harvestCreateTables` (`:246`) · `harvestRawCreateTableDecls`
+(`:264`) · `harvestRawCreateTables` (`:282`) · `parseRawCreateTableColumns` (`:348`).
+
+⛔ **THE LOCATION IS AN INVARIANT WITH A STATED REASON IN BOTH DIRECTIONS, NOT A CONVENIENCE.**
+`schema-differ.js` imports only `sql-ident.ts`, **so a consumer is not forced to pull
+`protect-analyzer.ts` — and with it `bun:sqlite` + `node:fs` — just to ask what counts as a table
+declaration.** That is the mirror of `protect-analyzer.ts:631`'s own long-standing note that the
+early PA stage deliberately does not pull a codegen module. Both files say so at their import site
+(`protect-analyzer.ts:65-77`, `gauntlet-phase1-checks.js:69-80`).
+
+⚑ **HARVESTING vs COLUMN-READING ARE DIFFERENT JOBS AND ONLY ONE IS CENTRALIZED.** *Finding* the
+`CREATE TABLE` statements stays in exactly one place (`harvestRawCreateTables` / the shared head
+regex), because two floors disagreeing about what counts as a table declaration IS the defect being
+closed. `parseRawCreateTableColumns` does the DIFFERENT job of reading columns out of a statement
+that recognizer already found, and **deliberately inherits that recognizer's boundary rather than
+improving on it.** ⚠ **The column read is NAMES ONLY, and the fail-direction is the reason:**
+§14.8.10 asks one question — does this table carry a `tenant_id` column? — answered by the NAME set.
+A partial constraint read would be strictly WORSE than none, because `diffSchema` would then treat
+the recovered-but-incomplete table as desired state and emit a LOSSY `CREATE TABLE`, or `W-SCHEMA-002`
+DROP COLUMN for every constraint-bearing column it failed to recover (**data loss**). Table-level
+constraint clauses are SKIPPED and **cannot hide a `tenant_id`**: `PRIMARY KEY (tenant_id, id)` /
+`FOREIGN KEY (tenant_id) REFERENCES …` / `CONSTRAINT … UNIQUE (tenant_id)` all NAME the column
+without DECLARING it, and treating them as declarations would make the floor emit a projection add
+against a column the table lacks — a hard SQL failure at runtime, not a safe over-fire.
+
+⚑ **THE `sourceText` RECOVERY PARAMETER IS GONE, AND ITS REMOVAL IS THE FIX RATHER THAN A
+SIMPLIFICATION.** It existed to re-find a CLIPPED statement inside its body and re-read the columns —
+and in the very next round it COLLIDED with the qualifier normalization added beside it: the stored
+statement said `assets`, the body said `public.assets`, `indexOf` returned -1, the recovery silently
+never fired, and the original defect came back **on exactly the Postgres spelling the §14.8.11 tier
+targets**. Two individually-correct fixes cancelling. Statements are no longer clipped AT ALL, so
+**one side of the seam is DELETED instead of both sides being patched.**
+
+⚑ **THE SHARED RECOGNIZER ALSO NORMALIZES AWAY A SCHEMA QUALIFIER (`CREATE TABLE public.assets (…)`)
+— AND THAT MATTERS SPECIFICALLY IN `protect-analyzer.ts`**, because `resolveDb` REPLAYS these
+statements into an in-memory SQLite shadow DB, where an unstripped `public.assets` throws and takes
+the whole `<db>` block down with `E-PA-003`. ⚠ `extractCreateTableStatements` passes `overwrite:
+true` to preserve its long-standing **LAST-wins** behaviour across nodes; the raw-DDL `<schema>`
+harvest is **FIRST-wins**. The two policies are deliberate and are not the same.
+
+### `extractDesiredSchema` has TWO consumers with genuinely different needs
+
+Producer: `compiler/src/codegen/db-authoritative.ts:121`. Raw-DDL tables are marked **`rawDdl: true`**
+and carry **names only**.
+
+| consumer | wants | why | site |
+|---|---|---|---|
+| **§14.8.10 TENANT floor** | **EVERY** `<schema>`-declared table, **including raw DDL** | a `tenant_id` column's PRESENCE *is* the declaration — *"There is no per-table opt-in attribute"* — so a table it cannot see is a silently inert floor | `emit-server.ts:1769` → `tenant-egress.ts:buildTenantContext` `:127` |
+| **`scrml db-migrate` / differ** | **NOT** raw-DDL tables | it OWNS and REWRITES schema, and a raw table's DDL is AUTHOR-owned and only PARTIALLY recovered | `commands/db-migrate.js:219`, declined at **`:244`** |
+
+⛔ **THE SPLIT IS AT THE CONSUMER, IN ONE LINE — `if (t.rawDdl) continue;` (`db-migrate.js:244`) —
+AND *NOT* INSIDE `diffSchema`.** Every defect the migrate side of this arc produced traced to raw
+tables becoming visible THERE: a lossy `CREATE TABLE`, `DROP COLUMN` against unrecovered columns, a
+green "up to date" for a table that does not exist, and a `DROP TABLE` against a table the
+`<schema>` DOES declare. **Declining at the boundary makes all four impossible BY CONSTRUCTION rather
+than by guards, and `diffSchema` is consequently BYTE-IDENTICAL to its pre-arc behaviour.**
+`schema-differ.js:1131-1137` states the split from the differ's side.
+
+⚠ **THE CONSEQUENCE IS DELIBERATELY THE PRE-ARC ONE: a raw-DDL `<schema>` is INVISIBLE to
+`scrml db-migrate`, exactly as before this arc.** Migrating it properly means **REPLAYING the
+author's own statement** rather than regenerating it. **DEFERRED ARC AT THAT SEAM:
+`docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md`.**
+
+### `TenantTableSet` case-folds on exactly three methods
+
+`class TenantTableSet extends Set<string>` — `compiler/src/codegen/tenant-egress.ts:84`. Overrides
+**`add` / `has` / `delete`** only, each lowercasing a string argument. Constructed at
+`buildTenantContext` (`:131`). ⚠ **A read that BYPASSES those three (`[...set]`, `forEach`,
+`entries`, `size`) sees the FOLDED form and does not fold the probe.** `TENANT_COLUMN` comparisons
+elsewhere in the file lowercase explicitly for the same reason.
+
+### `W-SCHEMA-NO-TABLES-DECLARED` — the standing detector for the NEXT divergence
+
+`compiler/src/gauntlet-phase1-checks.js:803`, alongside `E-SCHEMA-004` / `W-SCHEMA-001`.
+⛔ **ITS RECOGNITION IS THE UNION OF BOTH FORMS AND REUSES THE SAME FUNCTIONS THE FLOORS USE** —
+`parseSchemaBlock` for the DSL, §14.8.9's `harvestRawCreateTables` for raw DDL, **imported from
+`schema-differ.js` and deliberately NOT from `protect-analyzer.ts`**. *A third recognizer inside the
+detector would reintroduce, in the detector itself, precisely the divergence it exists to catch* —
+it would cry wolf on every raw-DDL `<schema>` in the corpus. ⚑ **Trigger is a FOUR-WAY conjunction on
+purpose, because a cry-wolf gate gets bypassed and then deleted:** text body non-blank after `--` /
+`/* */` / `//` stripping · ZERO tables in EITHER form · ZERO §14.8.11.2 SECURITY-DEFINER `fn`s · no
+non-text child. **MEASURED on its first run over 2,555 corpus `.scrml`: 91 carry a parsed `<schema>`,
+18 are `${ schemaFor(T) }` §41.15 Form-B delegations (all quiet by the non-text-child rule), and
+exactly ONE trips** — `compiler/tests/commands/migrate-program-shape-fixtures/schema-anchor.scrml`,
+whose `users: { id: integer, name: text }` stray colon is not a legal declaration in either form.
+**The code found a genuine defect in scrml's own corpus on its first run.**
+
+Tests: `compiler/tests/unit/tenant-floor-raw-ddl-schema.test.js` (incl. an explicit "THE SPLIT"
+describe block over the two consumers) · `compiler/tests/unit/tenant-egress.test.js` ·
+`compiler/tests/integration/schema-only-tenant-principal.test.js` ·
+`compiler/tests/conformance/conf-TENANT-FLOOR.test.js`.
+
+## §21.5 / §44.7.1 — LIBRARY-FN ROUTING IS NOW **STRUCTURAL BY DEFAULT** with named exclusions, and one splicer **FAILS CLOSED** (NEW section, S405, #893 `80f8d9eb` / #897 `9f30472c` / #898 `914f06f5`)
+
+⚑ **THIS FILE MOVED THE MOST BYTES IN THE S405 WINDOW (+505/-70 across THREE commits) AND IT WAS NOT
+NAMED IN THE 6c BRIEFING.** Recorded because a walk driven by the briefing alone would have missed it
+— the per-FILE-not-per-SUBJECT attribution rule, applied to a briefing rather than a commit subject.
+
+⛔ **THE POLARITY INVERSION *IS* THE FIX.** `rawFallbackReason` (`emit-library.ts:974`) returns a
+stated REASON string when a library fn must stay on the whole-block verbatim path, and `null` when it
+routes STRUCTURALLY — **the default**. The old opt-IN predicate (`fnBodyContainsMatch`) had to be
+widened once per scrml construct anybody tripped over, **so every construct nobody had tripped over
+yet leaked verbatim into the importable `.js`.** An opt-OUT predicate leaks only what is NAMED here,
+with the reason attached.
+
+**TWO standing exclusions, not one:**
+- **`ifExpr` decls** — browser-mode `if`-expression-value lowering (`emitIfExprDecl`) is itself
+  broken: an `if`-bound `let` compiles but the arm values assign to fresh block-scoped temps, so the
+  binding stays `null` at runtime — **a SILENT-WRONG in both modes.** The verbatim path at least
+  emits syntactically valid JS. **Routing it structurally would trade working-or-loudly-broken for
+  quietly-wrong — the dangerous direction.** It stays raw until `emitIfExprDecl` is fixed; that is a
+  LOWERING fix, not a routing one.
+- **foreign (`_{}`) bodies** — `emitLibraryFnMember` lowers at the CLIENT boundary and the real
+  foreign emit is gated on `opts.boundary === "server"`, so `const x = _={ … }=` became
+  `const x = null;`: the fn kept its signature, PARSED, exported, and **returned null**.
+
+**Two post-emit gates:** `unloweredScrmlSyntax` (`:106`) and `unmetRuntimeHelperRefs` (`:116`).
+⚠ **NEITHER EXISTING GATE COULD SEE THE FOREIGN OR `!{}` REGRESSIONS, AND NEITHER COULD THE CORPUS
+DIFFERENTIAL** — `unmetRuntimeHelperRefs` looks for `_scrml_*` references and neither construct has
+one, and the corpus population contains no `_{}` and no `!{}` in a library fn. **A zero over a path
+the population never exercises is not coverage.**
+
+⛔ **`verifiedFnRemovalRange` (`:913`) GUARDS ALL THREE SPAN SPLICERS, AND THEY DO NOT FAIL THE SAME
+WAY. THE DIFFERENCE IS THE WHOLE POINT.**
+
+| splicer | site | on an unverifiable span |
+|---|---|---|
+| `emitControlFlowLibraryFns` | `:844` | **fall back to RAW** — inert; the fn keeps its verbatim text and fails loudly downstream |
+| `emitAsyncLibraryFns` | `:758` | **fall back to RAW** — same reasoning |
+| `collectSqlFnRemovalRanges` | `:360` | ⛔ **FAILS CLOSED — `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:414`)** |
+
+**Why the SQL one is different:** that pass is not an optimisation, it is a **CONFIDENTIALITY
+BOUNDARY** — it exists to prune a server-only `?{}` / transaction fn OUT of the importable,
+client-facing library `.js` (§44.7.1). **Silently skipping the splice would LEAVE the SQL body in
+that artifact — fail-OPEN, in the one place this file must fail closed.**
+
+**The three verification invariants** over the candidate slice: (1) it STARTS with THIS fn's own
+declaration head (optional `export`/`pure`/`server`/`async` run, then `fn`/`function`, then this
+node's own NAME, allowing a generator `*`); (2) it ENDS at a `}`; (3) braces BALANCE. **Invariant 3
+is deliberately crude** — a brace inside a string literal or comment can unbalance a legitimate fn —
+because it mis-fires toward the RAW fallback, the safe direction: a false rejection costs an
+unlowered construct, never a corrupted emit.
+
+⚠ **THE UNDERLYING DEFECT IS UPSTREAM AND STILL OPEN** (`g-library-fn-decl-span-unverified-splice`,
+MED): `function-decl` spans are systematically wrong in some files — measured on
+`compiler/native-parser/ast-expr.scrml`, every top-level `export fn` reports a `start` ~22 chars
+INSIDE its own parameter list and an `end` overshooting into the FOLLOWING statement's comment.
+**Splicing those offsets emits mangled text — neither the raw copy nor the structural emit — SILENTLY.**
+The real fix is that the parser should not emit such a span; the locus is
+`ast-builder.js` / `compiler/native-parser`.
+
+⛔ **TWO CODES THIS FILE EMITS HAVE *ZERO* MENTIONS IN `compiler/SPEC.md`** — `grep -c` returns 0 for
+both: **`E-CG-ENUM-BINDING-COLLISION`** (`:1153`) and **`E-CG-SQL-FN-UNVERIFIABLE-SPAN`** (`:414`).
+Filed **N-S405-1**. The first fires when an emitted §21.2 enum runtime rep
+(`const <Enum> = Object.freeze({…})`) collides with an author's own top-level `const` of the same
+name — two top-level `const X` is a JS SyntaxError — and exists to replace an unactionable "report a
+compiler bug" with the colliding name and the one-line fix. Detector `enumBindingCollisions` (`:1123`)
+over `userTopLevelConstNames` (`:1091`), raised in `finishLibraryModule` (`:1142`). ⚠ **The artifact
+is still RETURNED; the §2.2.1 emit gate is what refuses to WRITE it.**
+
+⚠ **`verifiedFnRemovalRange`'s OWN DOCSTRING IS STALE AT `:906-911`** — it still says the async and
+SQL splicers *"are NOT guarded here"* while both now call it. Filed **N-S405-2**.
+
+Tests: `compiler/tests/integration/library-mode-structural-routing.test.js` ·
+`export-enum-library-emit.test.js` · `library-mode-bare-fn-no-trailing-newline.test.js` ·
+`colorless-async-combinators.test.js`.
 
 ## Core Concepts (by SPEC section)
 
@@ -2807,6 +3120,7 @@ A returned function-expression closure (`return function name(){…}`, GITI-038)
 #scrml #map #domain #asis-unknown-split #stdlib-client-registry #value-form-if #default-logic-lift #section-40-8 #silent-wrong #match-object-arm #reset-thenable #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions #40.3-request-onion #app-scope-not-per-route #e-mw-007 #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #38-transitions-to-stylesheet #headers-strict-binds-compiler-emissions #csp-default-src-self #ssr-seed-application-json #soft-nav-never-loads-target-stylesheet #app-wide-union #21.5-matched-pair-strip #trailing-newline-hid-it #library-mode-match-lowering #endpoint-400 #noarg-server-fn-empty-body #is-standard-html-render-element #asis-split-NOT-on-main #section-55 #synth-surface #collapse-matrix #ruling-gated #rollup-map-truthiness #declaration-form-premise #section-17-1-2-3 #fail-open #show-cond-absent #structural-if-row-template #spec-stale-table #e-state-block-statement-form #state-block-body-is-markup #§4-18-1 #§40-8-default-logic #schema-body-is-ddl #type-state-is-not-semantic #show-in-each-reactive #if-in-each-frozen #§16-6-snippet-arity #parse-snippet-body-nodes #render-bearing-live-fallback #glued-interp-lift-reconcile #s380-incremental #§16-6-1 #ast-scoped-snippet-substitution #g-string-prop-in-is-some #g-snippet-prop-in-is-some-guard #g-parametric-snippet-param-substitution #§51-3 #derived-cell-scrutinee #g-match-on-derived-cell-scrutinee-frozen #g-match-per-item-in-each-frozen #match-same-value-short-circuit #resolveonexpr #collectderivedvarnames
 #tilde-accumulator #section-32 #section-32-2-1 #section-17-6-2 #liftvar-vs-var #armbodystmts-is-a-set #identity-not-flag #zero-strip-sites #descendoutofarmbody-deleted #read-half-reverted #nodecontainstilderef-is-an-allocation-gate #conditional-reach #array-mode-cross-arm-leak #unruled-widening-declined #dpa-040
 #section-53-4-hole-named #predicate-zones-routed-to-primary #literal-type-only #codegen-zero-diff
+#s405 #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005-structural #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #scrml-protect-mediated #provenance-vs-shape #w-protect-005 #markmediatedresponses-throws #gated-on-protectactive #mounthydrate-redaction #enumerate-over-the-serializer #serverload-safe-for-a-reason #walk-unconditional-reconstruction-conditional #tagged-refusal-not-bare-throw #§14.8.10-tenant-floor #four-app-matrix #one-shared-recognizer #schema-differ-owns-it #import-direction-invariant #names-only-column-read #constraint-clauses-name-without-declaring #sourcetext-recovery-deleted #two-individually-correct-fixes-cancelling #extractdesiredschema-two-consumers #rawddl-marker #split-at-the-consumer #diffschema-byte-identical #deferred-migrate-arc #tenanttableset-three-methods #w-schema-no-tables-declared #union-recognition #cry-wolf-gate #§21.5-library-routing #opt-out-not-opt-in #rawfallbackreason #two-standing-exclusions #ifexpr-silent-wrong #verifiedfnremovalrange #sql-splicer-fails-closed #e-cg-sql-fn-unverifiable-span #e-cg-enum-binding-collision #zero-over-an-unexercised-path
 
 ## Links
 - [primary.map.md](./primary.map.md)

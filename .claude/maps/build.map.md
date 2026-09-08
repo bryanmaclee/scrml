@@ -1,6 +1,62 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF. CURRENCY-VERIFIED, NOT RE-WALKED.** ━━━━━━━
+#
+# ⛑ **THE ZERO IS A COMMAND, RE-RUN AT WRITE TIME, NOT A MEMORY:**
+# `git diff --name-only 68cfac6d..e74f5423 -- .github/ Dockerfile docker-compose.yml '*.tf' fly.toml
+# render.yaml` -> **EMPTY**, and `git diff --name-only 68cfac6d..e74f5423 -- package.json bun.lock`
+# -> **EMPTY**. So all three workflows are BYTE-IDENTICAL, every `scripts` entry in `package.json` is
+# unchanged, and the blocking `gate` job is still **14 total steps (12 `- name:` + 2 `- uses:`)** —
+# carried on a verified-empty diff rather than on recall.
+# ⚠ **A ZERO-DIFF SURFACE IS AN UNCHANGED MAP, NOT A CORRECT ONE.** This pass did not re-walk the
+# CI half; it re-measured the surface and found it empty.
+#
+# ⚑ **ONE THING THE `gate` COVERAGE STATEMENT SHOULD BE READ AGAINST THIS WINDOW.** `gate` runs
+# `unit` + `conformance` + root-level `*.test.js`, NOT `integration`, NOT `lsp`, NOT `commands`
+# (invariant 87). ⛑ **MEASURED FOR THIS WINDOW BY `git diff --name-status`, not estimated: 14 paths
+# under `compiler/tests` moved — 4 ADDED, 10 MODIFIED, and one of the 10 is a `.scrml` FIXTURE, so 13
+# `.test.js` files. Of those 13, SEVEN are `integration/`, five `unit/`, one `conformance/`. All seven
+# `integration/` files are OUTSIDE the blocking gate.** The 4 ADDED reconcile exactly with FACTS'
+# `test files` +4 (1,436 -> 1,440):
+# `integration/engine-statechild-prose-punctuation.test.js` ·
+# `integration/library-mode-structural-routing.test.js` · `unit/protect-response-scan.test.js` ·
+# `unit/tenant-floor-raw-ddl-schema.test.js`. ⚠ **The library-mode structural-routing arc — including
+# both new `E-CG-*` codes — is covered ONLY by `integration/` tests, so nothing in `gate` bites if it
+# regresses.** **That is not a new defect; it is the standing tier split, and this window is a clean
+# illustration of what it means in practice.** The top-level `conformance/` corpus IS gated even though no workflow names it, via
+# `compiler/tests/conformance/corpus-bridge.test.js` (invariant 88), and conformance grew 897 -> 905.
+#
+# ⚑ **`bun scripts/state.ts --check` WAS RUN THIS PASS AND ITS OUTPUT IS RECORDED RATHER THAN
+# SUMMARIZED.** BEFORE the write it printed `maps: 20 commits behind HEAD (watermark 68cfac6d, HEAD
+# e6b8fc77)  [WARN-only — not gated; project-mapper seam]`, plus
+# `digest: STALE — sources changed since stamp 9713d703 (primary.map.md, known-gaps.md, delta-log.md,
+# package.json) → PA distrusts + falls back  [WARN-only]`, and
+# `FAIL — stale/missing @generated section(s): @generated:recent-sessions (master-list.md)`.
+# ⚠ **AND IT STILL EXITED 0** — verified by reading the exit status, not assumed. **Nothing in the
+# toolchain fails on stale maps, and the one thing it DOES report as FAIL is non-gating.**
+# ⚠ **`mapsStaleness()` compares the watermark to LOCAL `HEAD`, so `maps: current` is NOT achievable
+# here without violating the MAP-STAMP RULE** — `HEAD` is the local unpushed `e6b8fc77` and stamping
+# a branch tip is the S326/S328/S331 orphaning hazard. The residual "1 commit behind" after this pass
+# is the correct terminal state, not a failed advance.
+#
+# ⛑ **RE-RUN *AFTER* THIS PASS'S WRITE — and that re-run, not the file content, is the check that
+# matters, because this step has crashed post-write before and left a stamp stale. It now prints
+# `maps: 1 commits behind HEAD (watermark e74f5423, HEAD e6b8fc77)`. **`watermark e74f5423` confirms
+# the new stamps were read back by an INDEPENDENT instrument.** Exit status re-read: **0**.**
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -990,6 +1046,7 @@ None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 ## Tags
 #scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows #ctx-ts-not-on-main #gate-13-steps
 #int-number-census #hand-run-instrument #not-gated #gate-flat-14-steps #ci-zero-diff
+#s405 #ci-zero-diff #gate-14-steps #verified-empty-diff #gate-excludes-integration #seven-of-fourteen-outside-the-gate #corpus-bridge-invariant-88 #905-conformance #state-ts-check-exits-0 #maps-staleness-vs-local-head #stamp-tracks-merge-base
 
 ## Links
 - [primary.map.md](./primary.map.md)
