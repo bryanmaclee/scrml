@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 101 |
+| HIGH | 102 |
 | MED | 227 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -1369,6 +1369,64 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 
 ### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; resolved by #473 (the fileURLToPath swap) — prose lagged the already-resolved marker; PA-reverified clean on Windows both modes S341-peter`
 <!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=resolved locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
+
+### g-self-host-tab-test-is-an-unbounded-memory-runaway — `bun test compiler/tests/self-host/tab.test.js` grows ~720 MB/s with no plateau (6.53 → 8.69 GB in THREE SECONDS) and is the strongest candidate yet for the unidentified S406 82 GB machine lockup
+
+<!-- @gap id=g-self-host-tab-test-is-an-unbounded-memory-runaway sev=HIGH status=open locus=compiler/tests/self-host/tab.test.js(526 lines; dies BEFORE the first test result, so the runaway is in module collection or the beforeAll — NOT yet bisected within the file) prov=empirical:S410-peter-caught-live-by-the-BunMemorySentinel-log-with-full-command-line-then-narrowed-by-elimination -->
+
+⚑⚑ **READ THIS BEFORE RUNNING IT.** The command below will consume the machine if unguarded. On this
+clone `BunMemorySentinel` kills it (which is why it exits **127** with **28 bytes** of output — it
+dies before the runner flushes anything). Elsewhere, wrap it:
+`powershell -File C:\Users\pjoli\bun-guard\run-capped.ps1 -CapGB 6 bun test compiler/tests/self-host/tab.test.js`
+
+**Caught in the act by the sentinel, with the full command line — the exact gap S406 could not close
+because `Get-Process` cannot supply one:**
+
+```
+13:44:15 [WARN] pid 11848 — commit 6.532 GB (ws 6.016 GB), free 1.51 GB
+                CMDLINE: bun.exe test compiler/tests/self-host/tab.test.js
+13:44:18 [KILL] pid 11848 — free RAM 0.31 GB < 1.5 GB while this process holds 8.69 GB
+```
+
+**6.53 → 8.69 GB in 3 seconds, accelerating, no plateau.** A directory-level sample gave the same
+shape: `1.44 → 3.15 → 4.78 GB` over 4.5 s. Three independent kills recorded at 4.2 / 5.0 / 5.3 GB
+earlier the same day.
+
+⚑ **WHY THIS IS PROBABLY THE S406 CULPRIT.** S406 lost a day to one `bun.exe` reaching **82 GB
+committed** on a 32 GB box (three forced restarts), and the culprit was **never identified**. At
+~720 MB/s this reaches 82 GB in **roughly two minutes**. S406's own candidate table measured
+`bun test compiler/tests/` at 2.433 GB — so the whole-tier run did NOT surface it, which is exactly
+why an isolated-file runaway could hide behind a green aggregate.
+**NOT PROVEN to be the same incident — but it is the first reproducible runaway with a name.**
+
+**ELIMINATED BY MEASUREMENT — the surface is much narrower than "the self-host tier":**
+
+| step | result |
+|---|---|
+| compile `tab.scrml` (library, `write:true`) | **0.37 s · 0 errors · ~0 GB** ✅ |
+| `import` the emitted `tab.js` (36,865 bytes) | **0.01 s · ~0 GB** ✅ |
+| compile `bs.scrml` (browser) | 0.3 s · ~0 GB ✅ |
+| `ast.test.js` · `bpp.test.js` · `bs.test.js` | all complete clean (bpp 34 pass) ✅ |
+| **`tab.test.js` under `bun test`** | ⛑ **runaway** |
+
+So it is **NOT** "compiling `tab.scrml` is expensive" and **NOT** the emitted module — both are clean
+standalone. It manifests only under the bun test runner, and the file dies **before the first test
+result prints**, which puts it in module collection or `beforeAll`.
+
+**Is it bun / Windows?** No evidence for either. This is unbounded JS allocation, not a path or
+filesystem behaviour, and S406 measured and cleared bun for the general case. Treat "bun's fault" as
+unsupported until something contradicts it.
+
+**Pre-existing, not introduced by S410:** this session's only `compiler/src` changes were
+comment- and message-text-only (`emit-library.ts` comments — zero non-comment lines changed;
+`ast-builder.js` / `gauntlet-phase3-eq-checks.js` diagnostic strings), and `exit=127` on this tier was
+separately observed with files reverted to main.
+
+**NEXT STEP (ruled by peter S410: "take care of it first thing next session"):** bisect *inside*
+`tab.test.js` — halve the file under `run-capped.ps1 -CapGB 6` until the allocating construct is
+named. Do NOT start from a hypothesis about which construct it is; the three most obvious candidates
+(the compile, the import, the sibling test files) are already eliminated above.
+— `NEW S410-peter (caught by the BunMemorySentinel installed the same session; narrowed by elimination, not yet root-caused)`; **HIGH**; open
 
 ### g-guarded-early-return-tests-report-vacuous-passes — the CLASS: a precondition guard with no assertion turns N tests into green ticks that assert nothing. `browser-reactive-arrays.test.js` was reporting **35 pass with ZERO assertions executed**
 
