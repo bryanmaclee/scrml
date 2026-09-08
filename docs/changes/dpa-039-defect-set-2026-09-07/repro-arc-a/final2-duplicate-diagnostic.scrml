@@ -1,0 +1,19 @@
+<program db="./app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+    ?{`CREATE TABLE audit (id INTEGER PRIMARY KEY, note TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users,audit">
+    ${
+      function leak(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        return new Response(JSON.stringify(u))
+      }
+      function callsIt(id) {
+        let a = ?{`SELECT * FROM audit WHERE id = ${id}`}.get()
+        return leak(id)
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

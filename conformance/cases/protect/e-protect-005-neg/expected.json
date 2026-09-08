@@ -1,0 +1,12 @@
+{
+  "id": "protect-e-protect-005-authored-response-neg",
+  "description": "§14.8.9 — the IDENTICAL server function, with the `protect=` attribute removed from the `<db>` block, fires no E-PROTECT-005 and compiles. The clean control for the authored-`Response` reject: the gate is scoped to apps that declare protected columns, and a plain app's hand-built `Response` is passed through untouched (§12.5), so a deliberate 403 still reaches the wire as a 403.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 applies only where a `protect=` column exists to protect. With no protected column the egress floor is inactive, `_egressRedact` is the identity, and the §12.5 `instanceof Response` passthrough owns the exit — so the SAME source that is a hard error one directory over is correct here. Pairing the two proves the gate discriminates on `protect=` and not on the `Response` alone; without this control an over-broad gate that rejected every hand-built Response would still look green.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROTECT-005", "E-PROTECT-004"]
+  }
+}

@@ -1,13 +1,13 @@
 {
   "id": "protect-raw-egress-e004",
-  "description": "§14.8.9 raw-egress fail-closed — a protected row reaching a compiler-unanalyzable egress (a manual `new Response(...)`) without reveal fires E-PROTECT-004 (error). The floor cannot prove redaction at an un-analyzable sink, so it fails closed rather than silently ship the protected column.",
+  "description": "§14.8.9 raw-egress fail-closed — a protected row reaching a compiler-unanalyzable egress (a `_={ … }=` foreign-code block, §23) without reveal fires E-PROTECT-004 (error). The floor cannot prove redaction at an un-analyzable sink, so it fails closed rather than silently ship the protected column.",
   "language-version": "1.0",
   "spec": "§14.8.9",
   "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
-  "rationale": "§14.8.9 closed-world precondition: an egress path the compiler cannot analyze (`_{}` foreign block, manual Response/handle body, asIs value) carrying a protected-origin column SHALL fail closed with E-PROTECT-004 — the confidentiality sibling of the read-site E-PROTECT-001, in the return-boundary direction. I-PROTECT-STRIP-001 co-fires (the SELECT * is tagged).",
+  "rationale": "§14.8.9 closed-world precondition: an egress path the compiler cannot analyze (`_{}` foreign block, `asIs` value) carrying a protected-origin column SHALL fail closed with E-PROTECT-004 — the confidentiality sibling of the read-site E-PROTECT-001, in the return-boundary direction. I-PROTECT-STRIP-001 co-fires (the SELECT * is tagged). ⚑ The block is written at LEVEL 1 (`_={ … }=`) on purpose. SPEC §23.2 defines the opener as `_` + zero or more `=` + `{`, and W-FOREIGN-001 steers authors AWAY from the level-0 `_{`; until S405 this gate's own predicate matched level 0 ONLY, so it recognized exactly the spelling the compiler discourages and missed every recommended one. This case therefore goes RED against the pre-S405 emitter and is a proof of the level-family fix, not a description of it. The case previously used a manual `new Response(...)`; that shape moved to E-PROTECT-005 (`e-protect-005-pos`) when the `Response` kind was promoted from this source-text lint to a structural emission-time gate.",
   "expect": {
     "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
-    "notCodes": [],
+    "notCodes": ["E-PROTECT-005"],
     "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
   }
 }

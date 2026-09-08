@@ -1,0 +1,13 @@
+{
+  "id": "protect-e-protect-005-authored-response-pos",
+  "description": "§14.8.9 — a server function in a `protect=` app that hand-builds its own `Response` fires E-PROTECT-005 (error). The compiler owns the egress envelope and mediates it (`_scrml_protect_redact` reads each value's protected-origin descriptor); it cannot mediate a body the author already serialized, because a `Response` is an opaque stream and the descriptor does not survive the author's own `JSON.stringify`. Fail-closed at compile time rather than fail-open on the wire.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 closed-world precondition: soundness rests on every construction being compiler-emitted and descriptor-preserving. An author-constructed `Response` breaks that precondition at the sink itself, so the compiler refuses to emit an envelope it cannot mediate. This is DELIBERATELY a hard error with NO escape hatch — `reveal(\"col\")` does not discharge it, because reveal declassifies a column at a value the floor can still walk and a hand-serialized Response is not walkable. The removed capability is the argument for a future typed, mediatable return. I-PROTECT-STRIP-001 co-fires (the SELECT * is tagged).",
+  "expect": {
+    "codes": ["E-PROTECT-005", "I-PROTECT-STRIP-001"],
+    "notCodes": ["E-PROTECT-004"],
+    "severity": { "E-PROTECT-005": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}

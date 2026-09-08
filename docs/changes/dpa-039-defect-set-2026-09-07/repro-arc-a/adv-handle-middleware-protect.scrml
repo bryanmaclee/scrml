@@ -1,0 +1,26 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return u
+      }
+    }
+  </db>
+  ${
+    function isAllowedIP(request) {
+      return true
+    }
+    function handle(request, resolve) {
+      if (!isAllowedIP(request)) {
+        return new Response("Forbidden", { status: 403 })
+      }
+      return resolve(request)
+    }
+  }
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>

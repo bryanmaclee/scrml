@@ -1,0 +1,18 @@
+<program db="./app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function goHome(id) {
+        let u = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return new Response(not, { status: 302, headers: { Location: "/home" } })
+      }
+      function noContent(id) {
+        let u = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return new Response(not, { status: 204 })
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

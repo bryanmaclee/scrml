@@ -1,15 +1,24 @@
-<program lang="js">
+<program db="./app.db">
   <schema>
     ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
   </schema>
   <db src="app.db" protect="passwordHash" tables="users">
     ${
-      function getUser(id) {
+      function loadUser(id) {
         let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let payload = _={ JSON.stringify(u) }=
-        return payload
+        return u
       }
     }
   </db>
-  <div><p>hi</p></div>
+
+type Op:enum = {
+  Fetch(id: int)
+  Deny
+}
+
+<endpoint path="/gate" method="POST" accepts=Op>
+  <Fetch(id) : loadUser(id)>
+  <Deny : Response.json({ error: "no" }, { status: 403 })>
+</endpoint>
+
 </program>
