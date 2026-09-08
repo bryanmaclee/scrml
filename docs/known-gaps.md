@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 100 |
 | MED | 227 |
-| LOW | 90 |
+| LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -865,6 +865,37 @@ Emitted verbatim: `function _scrml_bad_1(a, b) { return a * b; }` and `_scrml_lo
 
 ### g-recent-sessions-index-drops-named-session-wraps — `master-list.md`'s `@generated:recent-sessions` forensic index silently omits **every** wrap commit whose subject carries a contributor suffix, so a whole collaborator's sessions are invisible on a board that reads complete. **PA-CONFIRMED BY EXECUTION on `2ec2ce3a`**: `isSessionClose` (`scripts/state.ts:551-552`) tests `/\bwrap\(s\d+\)/i`, which requires the `)` to follow the digits immediately — `wrap(s390)` MATCHES, `wrap(s389-peter)` does NOT. Measured over the last 600 commits: **12 `wrap(sNNN)` seen, 5 `wrap(sNNN-name)` dropped**, and the index therefore jumps `wrap(s385)` → `wrap(s390)` with S386/S387/S388/S389 absent. ⚑ **The guard cannot see this, by construction.** `refuseDegenerateProjection` fires only on the ZERO-population path (`NO_SESSIONS_SENTINEL`), and its own doc comment records that this guard already went dead once for a different reason — so a **partial** drop is exactly the case it does not cover. A truncated enumeration reads identically to a complete one (base §8, the truncated probe). **This is NOT filed as a turnkey fix, because the fix direction is a question, not a defect:** widening the regex to `\bwrap\(s\d+[^)]*\)` makes one shared index carry both contributors' sessions, and it is not established that a shared index is what is wanted — a per-contributor index, or an explicit contributor column, may be the right shape. Whoever rules it owes a bite proof: the current matcher has never been shown to fail, which is why it has been wrong for at least five sessions with a green `--check` the whole time. — `NEW S391-bryan (found while regenerating the block during a wrap-6d gate failure; matcher behaviour proven by executing the regex against the real commit subjects, not by reading it)`; **MED**; open
 <!-- @gap id=g-recent-sessions-index-drops-named-session-wraps sev=MED status=open locus=scripts/state.ts:551-552(isSessionClose requires a close-paren immediately after the session digits, so a contributor-suffixed wrap subject never matches; recentSessions at :570 then never sees it and refuseDegenerateProjection at :430 only guards the zero-population case) prov=empirical:executed-the-matcher-against-real-commit-subjects-12-of-17-wrap-commits-matched-5-dropped-all-of-them-the-wrap-sNNN-name-form -->
+
+⚑⚑ **ALL FOUR MATCHING DEFECTS FIXED S410-peter — BUT THIS ENTRY STAYS `open` DELIBERATELY**, because
+the S391 note below reserves the *mechanism* question for bryan (a session anchor is a fact the wrap
+procedure KNOWS and could record as a trailer or tag, rather than being re-derived from prose — the
+S338 Rule 7 shape). Flipping this to `resolved` would erase a reserved ruling. **What is closed is
+the matching; what is open is whether matching is the right instrument at all.**
+
+Fixed in `scripts/state.ts`, and the S404 amendment's own bite proof is met — a test asserting a
+subject of **each** form (`compiler/tests/unit/state-session-close-suffix.test.js`, 21 cases):
+
+1. **contributor-suffixed** `wrap(sNNN<sep>who)` — ⚑ and the separator is **not just `-`**: real
+   subjects use `-`, `.`, a space and `·` (`wrap(S313.bryan)`, `wrap(S312 peter)`,
+   `wrap(S310·peter)`). A first S410 attempt allowed only `-` and **still dropped 19 of the 79**.
+2. **the PR-flow slash form** `wrap/sNNN (#PR)` — the amendment is right that this is the one that
+   matters most, and right that a paren-only widening misses it. Confirmed live: regenerating now
+   surfaces `069e86fd — wrap/s402 (#873)`, which the index had never shown.
+3. **`sessionNumOf`** carried the identical close-paren requirement and returned `null` for exactly
+   the subjects `isSessionClose` rejected — so the per-session dedup was dead for them too. **The two
+   halves failed together, which is why neither could reveal the other.**
+4. **the S391 FALSE POSITIVE** — `/\(s\d+\):\s*wrap\b/` admitted `maps(S391): wrap-6c refresh …`
+   because `\b` matches before the `-`. Now `wrap(?![-\w])`. Both directions of the same regex are
+   pinned, since the population it reported was *neither a subset nor a superset* of the real one.
+
+⚑ **THE FILED SIZE WAS WRONG, AND SO WAS THE FIRST RE-MEASUREMENT — measured, not relayed.** Over the
+last 600 commits: **100 paren-family wrap subjects, 21 matched, 79 dropped**, split **51 peter- + 28
+bryan-suffixed** — so this was never peter-lane blindness, it hit whoever used a suffix. Plus 3
+slash-form wraps outside that family entirely.
+⚑ And the obvious probe for the dropped set is itself broken, inflating the answer to 100:
+`wrap\(s[0-9]+[^)]` matches `wrap(s408)` because `[0-9]+` **backtracks** — it takes `40` and lets
+`[^)]` eat the `8`. The character after the digit run must be excluded as **both** `)` and a digit.
+That mis-measurement was made and caught during this fix, and is pinned in the test file.
 
 ⚑ **AMENDED S404-bryan — there is a SECOND dropped form, it is bigger than the filed one, and it bit LIVE this session.** The entry above names the contributor-suffix form (`wrap(sNNN-name)`). The matcher `/\bwrap\(s\d+\)/i` ALSO misses **`wrap/sNNN`** — the slash form, which is what **PR-flow itself produces**: the overlay's wrap step 7 says to commit onto a `wrap/sNNN` feature branch, and `gh pr create --fill` then titles the PR from the BRANCH name, so the squash-merge subject is `wrap/s402 (#873)` with no parenthesis anywhere. **Re-measured over the last 600 commits on `origin/main`, S404:** `wrap(sNNN)` **16** · `wrap(sNNN-name)` **9** · `wrap/sNNN` **3** — so the index sees **16 of 28 wrap merges and drops 12 (43%)**, against the original entry's 12-of-17.
 
@@ -10456,7 +10487,7 @@ Same class as the S280 README flagship that had never compiled and the S292 `orm
 Pre-existing (the try/catch is unchanged context in #530). Fix: a missing referenced runtime is a FAILURE (throw, naming the path), never a fallback to source; and at least one assertion that pins a runtime-version-bearing behaviour (a symbol or marker present only in the current runtime) so a stale runtime reads red. Same class as the S345 `read() → ""` shapes in the flagship test.
 
 ### g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive — the flagship-hos test's `mkdtempSync` output dir is never removed (215 dirs / 442 MB under `/tmp/scrml-flagship-hos-*` on this box today, ~2.1 MB × 115 files each; REGRESSION by #531 — the fixed path it replaced was `rmSync`'d per call), and #534's `e.name.endsWith("hos.html")` matches `echos.html` (a misleading loud failure for an unrelated page) — `NEW S346-bryan (S239 review-floor pass on #531 + #534, PA-verified); LOW; open`
-<!-- @gap id=g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive sev=LOW status=open locus=compiler/tests/browser/flagship-hos-engine-under-if.browser.test.js:50(mkdtempSync at module load, no afterAll rmSync)+:103(endsWith("hos.html")) prov=rationale:review-floor-on-531-534-fails-in-the-safe-direction-loud-not-silent-but-a-tmp-on-tmpfs-or-a-busy-shared-box-would-feel-the-leak -->
+<!-- @gap id=g-flagship-hos-harness-mkdtemp-leak-and-suffix-false-positive sev=LOW status=resolved resolved-by=S410-peter locus=compiler/tests/browser/flagship-hos-engine-under-if.browser.test.js:50(mkdtempSync at module load, no afterAll rmSync)+:103(endsWith("hos.html")) prov=rationale:review-floor-on-531-534-fails-in-the-safe-direction-loud-not-silent-but-a-tmp-on-tmpfs-or-a-busy-shared-box-would-feel-the-leak -->
 
 Also cosmetic from the same pass: on the loud-fail path `art` is never cached, so each of the 7 tests recompiles the whole app; `expect(errors).toEqual([])` in `boot()` is unreachable-dead post-#531. Fix: `afterAll(() => rmSync(OUT, {recursive:true, force:true}))`; basename match (`=== "hos.html"`) instead of suffix.
 
@@ -12123,7 +12154,7 @@ the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-pe
 > literal `1:1` unless its own formatter re-derives from the offset.
 
 ### g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards — the reasoning corrected at `emit-expr.ts:1281` survives verbatim at three other sites in the same file, two of them the stated safety argument for security guards — `NEW S397; LOW; open`
-<!-- @gap id=g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards sev=LOW status=open locus=compiler/src/codegen/emit-expr.ts:1382(the E-SESSION-VALUE placeholder) and :3795 and :3818(the two leak-guard comments) prov=empirical:PA-verified-at-c11db440-all-three-sites-grepped-and-read-and-the-premise-independently-disproved-twice-this-pass -->
+<!-- @gap id=g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards sev=LOW status=resolved resolved-by=S410-peter locus=compiler/src/codegen/emit-expr.ts:1382(the E-SESSION-VALUE placeholder) and :3795 and :3818(the two leak-guard comments) prov=empirical:PA-verified-at-c11db440-all-three-sites-grepped-and-read-and-the-premise-independently-disproved-twice-this-pass -->
 > **⚑ PA-VERIFIED AT THE FILING WATERMARK.** `emit-expr.ts:1281-1295` records that *"the build fails
 > on the error, so the placeholder never ships"* is FALSE, and names three other sites carrying it.
 > All three are present at `c11db440`: `:1382` (*"the build fails on the error, so it never ships"*),
@@ -12426,7 +12457,7 @@ hand-off's bryan-lane queue rather than dropped as an inbox ping, per Peter's S3
 `style=` is folded; two author `style=` attributes still both emit, with no diagnostic — true without
 the flat `#{}` too.
 
-<!-- @gap id=g-api-reference-severity-whitelist-drops-runtime-and-test-codes sev=LOW status=open locus=scripts/generate-api-reference.js:240(the tableRe severity alternation admits only Error, Warning and Info, so any §34 row whose Severity cell reads Runtime or Test is dropped) prov=review:S401-peter-S239-pass-on-849-agent-REPRODUCED-and-enumerated-the-11-dropped-codes -->
+<!-- @gap id=g-api-reference-severity-whitelist-drops-runtime-and-test-codes sev=LOW status=resolved resolved-by=S410-peter locus=scripts/generate-api-reference.js:240(the tableRe severity alternation admits only Error, Warning and Info, so any §34 row whose Severity cell reads Runtime or Test is dropped) prov=review:S401-peter-S239-pass-on-849-agent-REPRODUCED-and-enumerated-the-11-dropped-codes -->
 ### G-API-REFERENCE-SEVERITY-WHITELIST-DROPS-RUNTIME-AND-TEST-CODES — the completeness claim is still false on a second axis — `NEW S401; LOW; open`
 
 #849 widened the §34 code-shape alternation (387 → 768 rows) but left the **severity** alternation
