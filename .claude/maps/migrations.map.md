@@ -1,6 +1,75 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **NON-ZERO SURFACE: `schema-differ.js` (+396) AND `commands/db-migrate.js` (+24).** ━━━━━━━
+#
+# ⛔ **THE WHOLE MIGRATE HALF OF THE §14.8.10 ARC IS ONE LINE, AND ITS PLACEMENT IS THE DESIGN:**
+# **`if (t.rawDdl) continue;` — `compiler/src/commands/db-migrate.js:244`.**
+#
+# `extractDesiredSchema` (`codegen/db-authoritative.ts:121`) learned the raw-DDL `<schema>` form in
+# #900 — a `<schema>` body carrying raw `CREATE TABLE … (…)` SQL instead of the declarative
+# `tableName { col: type }` DSL. **It has TWO consumers with genuinely different needs:**
+#   · the **§14.8.10 tenant floor** (via `codegen/emit-server.ts:1769`) needs EVERY `<schema>`-declared
+#     table, raw DDL included — a `tenant_id` column's PRESENCE is the declaration — because a table it
+#     cannot see gets a **silently inert isolation floor at exit 0**;
+#   · **THIS command** needs the opposite: it OWNS and REWRITES schema, and a raw table's DDL is
+#     AUTHOR-owned and only **PARTIALLY recovered** (names only — no constraints, defaults, foreign
+#     keys or `CHECK` bodies).
+#
+# ⛑ **EVERY DEFECT THE MIGRATE SIDE OF THIS ARC PRODUCED TRACED TO RAW TABLES BECOMING VISIBLE HERE**
+# — a lossy `CREATE TABLE`; `W-SCHEMA-002` `DROP COLUMN` against unrecovered columns; a green "up to
+# date" for a table that does not exist; and a `DROP TABLE` against a table the `<schema>` DOES
+# declare. **Declining them at THIS boundary makes all four impossible BY CONSTRUCTION rather than by
+# guards inside `diffSchema`** — which is consequently **BYTE-IDENTICAL to its pre-arc behaviour.**
+# `schema-differ.js:1131-1137` states the split from the differ's side; `diffSchema` (`:1125`) SKIPS
+# `rawDdl` tables as a defence in depth, but the decision is made at the consumer.
+#
+# ⚠ **THE CONSEQUENCE IS DELIBERATELY THE PRE-ARC ONE: A RAW-DDL `<schema>` IS INVISIBLE TO
+# `scrml db-migrate`, EXACTLY AS BEFORE THIS ARC.** Migrating it properly means **REPLAYING the
+# author's own statement** rather than regenerating it — a separate, re-scoped arc.
+# **DEFERRED ARC AT THAT SEAM: `docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md`.**
+#
+# ⚑ **`schema-differ.js` IS NOW THE HOME OF *THE ONE* `CREATE TABLE` RECOGNIZER, AND THE LOCATION IS
+# AN INVARIANT WITH A STATED REASON.** `parseSchemaBlock` (`:31`) · `harvestCreateTables` (`:246`) ·
+# `harvestRawCreateTableDecls` (`:264`) · `harvestRawCreateTables` (`:282`) ·
+# `parseRawCreateTableColumns` (`:348`). It imports only `sql-ident.ts`, **so a consumer is not forced
+# to pull `protect-analyzer.ts` — and with it `bun:sqlite` + `node:fs` — just to ask what counts as a
+# table declaration.** `protect-analyzer.ts` DELETED its own `CREATE_TABLE_RE` and imports these
+# (`:65-77`); `gauntlet-phase1-checks.js` imports `harvestRawCreateTables` (`:69-80`).
+#
+# ⛑ **THE RECOGNIZER NOW ACCEPTS *AND NORMALIZES AWAY* A SCHEMA QUALIFIER (`CREATE TABLE
+# public.assets (…)`), THE ORDINARY POSTGRES SPELLING.** That matters to migration specifically:
+# `protect-analyzer.ts:resolveDb` REPLAYS these statements into an in-memory SQLite shadow DB, where
+# an unstripped `public.assets` throws and takes the whole `<db>` block down with `E-PA-003`.
+# ⚠ **`extractCreateTableStatements` passes `overwrite: true` (LAST-wins across nodes); the raw-DDL
+# `<schema>` harvest is FIRST-wins. The two policies are deliberate and are not the same.**
+#
+# ⚑ **`parseRawCreateTableColumns`'s `sourceText` RECOVERY PARAMETER IS GONE, AND THAT REMOVAL IS THE
+# FIX RATHER THAN A SIMPLIFICATION.** It re-found a CLIPPED statement inside its body to re-read the
+# columns — and it COLLIDED with the qualifier normalization added beside it: the stored statement said
+# `assets`, the body said `public.assets`, `indexOf` returned -1, the recovery silently never fired,
+# and the original defect came back on exactly the Postgres spelling §14.8.11 targets. **Two
+# individually-correct fixes cancelling.** Statements are no longer clipped at all, so **one side of
+# the seam is DELETED instead of both sides being patched.**
+#
+# ⚑ **NEW DIAGNOSTIC ADJACENT TO THIS SURFACE: `W-SCHEMA-NO-TABLES-DECLARED`**
+# (`gauntlet-phase1-checks.js:803`) — a `<schema>` block with content that declares no table in EITHER
+# recognized form. Measured on its first run over 2,555 corpus `.scrml`: exactly ONE trip —
+# `compiler/tests/commands/migrate-program-shape-fixtures/schema-anchor.scrml`, whose
+# `users: { id: integer, name: text }` stray colon means it had been declaring nothing.
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -368,6 +437,7 @@ inventory and `isEffectivelyImmutable`).
 ## Tags
 #scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage #schema-body-is-ddl #state-block-statement-form-adjacency
 #schema-differ-new-consumer #parseschemablock
+#s405 #rawddl-schema-invisible-to-db-migrate #if-t-rawddl-continue #split-at-the-consumer #diffschema-byte-identical #four-defects-impossible-by-construction #one-shared-recognizer #schema-differ-owns-it #import-direction-invariant #postgres-qualifier-normalized #e-pa-003-shadow-db #overwrite-last-wins-vs-first-wins #sourcetext-recovery-deleted #two-individually-correct-fixes-cancelling #w-schema-no-tables-declared #schema-anchor-fixture #deferred-migrate-arc
 
 ## Links
 - [primary.map.md](./primary.map.md)

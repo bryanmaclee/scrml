@@ -1,21 +1,522 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-07T04:30:36Z  commit: 68cfac6d
-# scan mode: INCREMENTAL_UPDATE (doc-population delta scan) — run as part of the S404 wrap-6c refresh
+# generated: 2026-09-08T05:00:00Z  commit: e74f5423
+# scan mode: INCREMENTAL_UPDATE (doc-population delta scan) — run as part of the S405 wrap-6c refresh
 #
-# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `68cfac6d`;
-# source diff `BASE..HEAD` -> EMPTY; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
-# Inbound: `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
-# ⛑ This pass ran in the MAIN checkout on branch `wrap/s404` with `HEAD` == `origin/main` == the
-# merge-base, and DOES NOT COMMIT ITSELF (the PA lands `.claude/maps/` under an explicit pathspec).
+# MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`;
+# source diff `BASE..HEAD` over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`
+# -> **EMPTY**; `git merge-base --is-ancestor e74f5423 origin/main` -> exit 0.
+# Inbound (invariant 48): `git merge-base --is-ancestor 68cfac6d e74f5423` -> exit 0.
+# ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a LOCAL, UNPUSHED,
+# **docs-only** wrap commit on `wrap/s405` (`git diff --name-only e74f5423..e6b8fc77 -- compiler/
+# scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> EMPTY; 7 doc files, one of them a NEW
+# `docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md`). **Two of the doc findings below were
+# therefore checked at BOTH `e74f5423` and `e6b8fc77` and hold at both** — stated because a reader
+# would otherwise reasonably suspect the wrap commit closed them.
+# This pass DOES NOT COMMIT ITSELF (the PA lands `.claude/maps/` under an explicit pathspec).
 #
-# ⛔ **THE S404 HEADLINE IS NOT A DOCUMENT. IT IS THIS MAP SET, AND THE FINDING IS STRUCTURAL RATHER
-# THAN A LIST OF STALE LINES: THE ROUTER CANNOT KEEP UP WITH THE SESSION THAT IS READING IT, AND
-# THREE PASSES OF THE AGREED MITIGATION HAVE NOT CHANGED THAT.** Filed below as **S1 (`router-lag`)**.
-# The dispatching brief for this pass named the same thing and asked that it be said rather than
-# papered over. It is said. See S1 before reading anything else in this report.
+# ⛔ **THE S405 HEADLINE IS THAT *TWO OF THE THREE NEW FINDINGS ARE IN SOURCE, NOT IN A DOCUMENT*, AND
+# THE THIRD IS A `known-gaps` ENTRY THAT SAYS `open` ABOUT A DEFECT THIS WINDOW FIXED.** The scanning
+# heuristics this report was built around — filename dates, "planned"/"TBD" prose, `docs/deep-dives/`
+# style locations — found **nothing new**: there are no `docs/deep-dives/`, `docs/adrs/`,
+# `docs/debates/`, `docs/gauntlets/` or `docs/research/` directories in this repo (checked, all five
+# `ls` to ENOENT), and the in-scope doc population is **FLAT at 110**. **Every finding this pass came
+# from cross-checking a claim against the code it names.** ⚑ **That is the durable lesson: in a repo
+# whose docs are this disciplined, the remaining non-compliance is not badly-NAMED files — it is
+# well-named files, and source comments, whose CLAIMS have gone false.**
+#
+# ⛔ **AND ONE FINDING IS ABOUT THIS REPORT ITSELF: the S404 pass published a scan population that was
+# WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
+# OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
+# failures.
 
-## Summary — S404 pass (this pass)
+## Summary — S405 pass (this pass)
+
+| | |
+|---|---|
+| Scan population (in-scope tracked `.md`) | **110** — `git -c core.quotePath=false ls-files '*.md'` minus `docs/changes/`, `spa-lists/`, `archive/`, `handOffs/`, `.claude/`. ⛔ **RE-EXECUTED, and the S404 pass's published `122 (+1)` DOES NOT REPRODUCE under that same definition — see M-S405-5.** FLAT: 110 at `68cfac6d`, 110 at `e74f5423` |
+| New / removed in-scope docs this window | **ZERO in each direction** (`comm -13` and `comm -23` over the two `ls-tree` sets are both empty) |
+| In-scope docs CHANGED this window | **8** — `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `docs/FACTS.md`, `docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `master-list.md` |
+| Non-compliant — **IN SOURCE** | **2 NEW** — **N-S405-1** (HIGH: two live diagnostic codes with ZERO SPEC presence) · **N-S405-2** (MED: a source docstring that contradicts the code beneath it) |
+| Non-compliant — **IN DOCS** | **2 NEW** — **N-S405-3** (MED-HIGH: a `known-gaps` entry marked `open` for a defect this window FIXED, **falsified by compiling the entry's own reproducer**) · **N-S405-4** (LOW: a `known-gaps` entry that contradicts itself about one of its own five loci) |
+| ⛔ Findings against the MAP SET itself | **2 NEW** — **M-S405-5** (a published figure wrong at its own watermark, self-contradicting) · **M-S405-6** (the four `@generated` maps were two source-days stale, which is why neither new `E-CG-*` code appeared in ANY map; **FIXED this pass by regenerating**) |
+| Corrected in the maps this pass | **3 rows across 2 files** carried a RESOLVED defect as OPEN, with a "DO NOT RE-ATTEMPT" warning attached — `primary.map.md` Task-Shape Routing + Key Facts, `structure.map.md`'s `engine-statechild-parser.ts` row. See **C-S405-A**, which is a CLASS finding, not a one-off |
+| Standing items RE-EXECUTED (not carried) | **N8** — still live and now **DOUBLY** stale, and its own replacement line was itself wrong · **N17** — still live and now points at a blank SPEC line · **U5** — still live, verbatim |
+| Uncertain — needs human review | **1 NEW (U-S405-1)** + carried U1, U2, U3, U5 |
+| `router-lag` (S1, S404, HIGH, STRUCTURAL) | ⚠ **STILL OPEN, AND THIS PASS APPLIED THE SAME MITIGATION THAT HAS NOW FAILED FOUR TIMES. Said plainly rather than quietly repeated — see S1-S405.** |
+
+## ⛔ N-S405-1. **NEW, HIGH — TWO LIVE DIAGNOSTIC CODES LANDED THIS WINDOW WITH *ZERO* MENTIONS IN `compiler/SPEC.md`. NOT A MISSING §34 ROW — ZERO MENTIONS IN THE FILE.**
+
+**Measured, both directions:**
+
+| code | emit site | `grep -c '<code>' compiler/SPEC.md` | `grep -c '^\| <code>' compiler/SPEC.md` | landed |
+|---|---|---|---|---|
+| `E-CG-ENUM-BINDING-COLLISION` | `compiler/src/codegen/emit-library.ts:1153` | **0** | **0** | #897 `9f30472c` |
+| `E-CG-SQL-FN-UNVERIFIABLE-SPAN` | `compiler/src/codegen/emit-library.ts:414` | **0** | **0** | #898 `914f06f5` |
+
+Contrast, same command, same window — the three codes that DID get a home:
+`E-PROTECT-005` → SPEC 5 mentions / 1 catalog row · `W-PROTECT-005` → 4 / 1 ·
+`W-SCHEMA-NO-TABLES-DECLARED` → 2 / 2.
+
+⛔ **THE CONSEQUENCE IS NOT "a doc gap". IT IS THAT EVERY INSTRUMENT THAT COUNTS DIAGNOSTIC CODES
+READS NORMAL WHILE TWO CODES AN ADOPTER CAN HIT HAVE NO DOCUMENTED HOME.** `bun scripts/s34-census.ts`
+derives from the §34 catalog (818 rows, +3 — it counted the three that landed, and could not see
+these two). The `^| E-` / `^| W-` prefix greps derive from SPEC rows (921 / 182). `SPEC-INDEX.md` is
+regenerated from SPEC. **A catalog-derived count measures the catalog.** An adopter who hits
+`E-CG-ENUM-BINDING-COLLISION` and greps SPEC for it gets nothing.
+
+⚑ **THE COUNTER-INSTRUMENT ALREADY EXISTS AND THIS PASS USED IT.** `.claude/maps/error.generated.md`
+is derived from the EMITTERS (`bun scripts/mapgen.ts --kind errors`), and both codes appear in it at
+`:49` and `:50` with one emit site each **the moment it is regenerated**. ⚠ **It had not been
+regenerated since `2026-09-06 16:32`, which is why neither code appeared in any map at all** — see
+M-S405-6.
+
+**Aggravating, and specific to `E-CG-ENUM-BINDING-COLLISION`:** the diagnostic exists precisely to
+replace an unactionable *"report a compiler bug"* with the colliding binding NAME and a one-line fix.
+**A code whose whole purpose is to be actionable, that an adopter cannot look up, is half-built.**
+
+**Suggested disposition:** add a §34 catalog row for each (they are `E-CG-*`, so the neighbourhood is
+the codegen block), or — if the intent was that these are internal invariant violations rather than
+adopter-facing diagnostics — say so in a row, because "absent from SPEC" and "deliberately internal"
+are indistinguishable from outside. ⚑ **The structural fix is a probe: a code pushed from
+`compiler/src` with no SPEC row should be a build-visible signal, not something a cartographer finds
+two commits later.** `error.generated.md` already computes one side of that comparison.
+
+## ⛔ N-S405-2. **NEW, MED — a SOURCE docstring states the opposite of the code directly beneath it, in a file whose own comments are its correctness argument.**
+
+`compiler/src/codegen/emit-library.ts:906-911`, the docstring on `verifiedFnRemovalRange`:
+
+> *"⚑ RESIDUAL, FILED not fixed: `emitAsyncLibraryFns` and `collectSqlFnRemovalRanges` splice on the
+> SAME unverified spans and are NOT guarded here."*
+
+**Measured at `e74f5423` — `grep -n 'verifiedFnRemovalRange' compiler/src/codegen/emit-library.ts`
+returns FOUR lines, and three of them are call sites:**
+
+| caller | line | behaviour on an unverifiable span |
+|---|---|---|
+| `collectSqlFnRemovalRanges` (`:329`) | **`:360`** | **FAILS CLOSED** — `E-CG-SQL-FN-UNVERIFIABLE-SPAN` at `:414` |
+| `emitAsyncLibraryFns` (`:666`) | **`:758`** | falls back to RAW |
+| `emitControlFlowLibraryFns` (`:826`) | **`:844`** | falls back to RAW |
+
+**Both named functions call it.** The guard was extended in #898 (`914f06f5`) and the docstring was
+not updated. ⚑ **`docs/known-gaps.md` KNOWS — `g-library-fn-decl-span-unverified-splice` carries a
+`⛑ S408 — THE OTHER TWO SPLICERS ARE NOW GUARDED` amendment.** So the drift is source-comment-only,
+which is the harder kind to catch: no doc-currency gate covers a docstring.
+
+⛔ **WHY THIS IS MED AND NOT LOW, IN THIS FILE SPECIFICALLY.** `emit-library.ts` is a
+CONFIDENTIALITY BOUNDARY — `collectSqlFnRemovalRanges` exists to prune a server-only `?{}` /
+transaction fn OUT of the importable, client-facing library `.js` (§44.7.1). The stale paragraph tells
+the next reader that this splicer is UNGUARDED, which invites exactly the "let me add the guard"
+change that would land a second, differently-shaped guard on a path that already fails closed. The
+sibling `protect-egress.ts` states the principle for this whole neighbourhood: *"The correctness of
+this file is carried by its comments; an over-claiming one is a defect in it."* **An UNDER-claiming
+one is too.**
+
+**Suggested disposition:** update the paragraph in place to record what the three splicers now do and
+WHY they differ (RAW-fallback vs fail-CLOSED), keeping the residual that survives — the upstream
+`function-decl` span defect in `ast-builder.js` / `compiler/native-parser`, which is the real fix.
+
+## ⛔ N-S405-3. **NEW, MED-HIGH — `docs/known-gaps.md` carries `g-tenant-floor-does-not-harvest-raw-DDL` as `status=open`, in the present tense, for a defect THIS WINDOW'S OWN STAMP COMMIT FIXED. FALSIFIED HERE BY COMPILING THE ENTRY'S OWN REPRODUCER.**
+
+The marker at `docs/known-gaps.md:120` reads `status=open` at **`e74f5423`** *and* at **`e6b8fc77`**
+(checked at both — the wrap commit touched `known-gaps.md` and did not close it). The stamp commit
+`e74f5423` is titled *"fix(§14.8.10): the tenant floor learns the raw-DDL `<schema>` form"*.
+
+⛔ **VERIFIED BY EXECUTION, NOT BY READING THE COMMIT SUBJECT.** The entry's own app-B shape — a
+raw-DDL `<schema>` declaring `tenant_id`, **no `<db>` block**, and a `SELECT id, name, tenant_id FROM
+assets` — was compiled at this watermark and the emitted `*.server.js` grepped:
+
+| symbol | entry's recorded count (app B) | measured at `e74f5423` |
+|---|---|---|
+| `_scrml_tenant_tag` | **0** | **2** |
+| `_scrml_tenant_redact` | **0** | **4** |
+| `_scrml_active_tenant` | **0** | **2** |
+| `tenantId` | **0** | **3** |
+
+Independently: `bun test compiler/tests/unit/tenant-floor-raw-ddl-schema.test.js` → **67 pass / 0
+fail**, and that suite carries an explicit "THE SPLIT" describe block over `extractDesiredSchema`'s
+two consumers.
+
+⛔ **AND TWO SPECIFIC CLAIMS INSIDE THE ENTRY ARE NOW FALSE, NOT MERELY OUT OF DATE:**
+1. *"**PA-verified:** `tenant-egress.ts` and `db-authoritative.ts` contain ZERO references to it."* —
+   at `e74f5423`, `grep -c 'harvestRawCreateTables\|harvestRawCreateTableDecls'
+   compiler/src/codegen/db-authoritative.ts` returns **4**. (`tenant-egress.ts` is still 0, but that
+   is now BY DESIGN: it receives the tables through `extractDesiredSchema`, which is the fix's shape.)
+2. The locus cites `harvestRawCreateTables` at *"`protect-analyzer.ts:454`, called `:557`"*. At
+   `e74f5423` the function no longer LIVES in that file at all — it is **imported** from
+   `schema-differ.js` (`protect-analyzer.ts:76`) and called at **`:547`**. `:454` is now inside an
+   unrelated docstring.
+
+⚑ **THE ENTRY'S DIAGNOSIS WAS RIGHT AND ITS PRESCRIPTION WAS FOLLOWED** — *"The fix is to teach the
+tenant leg the same harvester, not to reject the input"* is exactly what #900 did (via one shared
+recognizer in `schema-differ.js`). **This is a bookkeeping failure on a HIGH-severity security entry,
+which is the worst place for one: a reader triaging open HIGHs sees a live cross-tenant isolation
+escape that no longer exists, and either re-works it or discounts the whole HIGH list.**
+
+⚠ **ONE GENUINE RESIDUAL SURVIVES AND SHOULD BE SPLIT OUT RATHER THAN USED TO JUSTIFY `open`:** the
+entry's coverage note — *"`conf-TENANT-FLOOR.test.js`'s single app builder (`tenantApp`, `:32`) pairs
+a raw-DDL `<schema>` with a `<db>`, so the conformance gate drives the floor 100% from the `<db>`
+registry and never exercises the `<schema>` leg"* — is a coverage claim about a DIFFERENT artifact
+and this pass did **not** re-execute it. **Label it RELAYED-UNVERIFIED and re-check before acting.**
+
+**Suggested disposition:** flip to `status=resolved resolved-by=<the #900 SHA>`, rewrite the body into
+past tense with the measured before/after, correct the two false claims above, and split the
+conformance-coverage residual into its own LOW entry if it survives re-measurement.
+
+## ⚠ N-S405-4. **NEW, LOW — `g-foreign-opener-grammar-hand-spelled-five-places` CONTRADICTS ITSELF about one of its own five loci, in the same entry.**
+
+`docs/known-gaps.md:78` (the `@gap` marker) and `:86` (its table) both say:
+
+| its claim | measured at `e74f5423` |
+|---|---|
+| locus `compiler/src/codegen/tenant-egress.ts:389` | the site is now **`:453`** |
+| `` `codegen/tenant-egress.ts:389` \| level **0** only \| PA-read on main `` | **FULL grammar** — `/(?:^\|[^A-Za-z0-9_$])_=*\{/` |
+
+…while the SAME entry's body, ~30 lines lower, says *"**Two of the five are fixed** (arc A
+protect-egress, arc B tenant-egress)"*. **The prose knows; the marker and the table do not.**
+
+⚑ **ALL FIVE SITES RE-RESOLVED HERE *BY SYMBOL*, NOT BY A REMEMBERED LINE** — the dispatching brief
+for this pass asked for exactly that, and it was the right ask:
+
+| site | spelling at `e74f5423` | level | handle to anchor on |
+|---|---|---|---|
+| `ast-builder.js:18392` | `/(?:^\|[^A-Za-z0-9_$])_=*\{/` | **FULL** | the `_hasSigilBlock` re-split guard |
+| `codegen/tenant-egress.ts:453` | `/(?:^\|[^A-Za-z0-9_$])_=*\{/` | **FULL** (#900) | the `fnSource` foreign test |
+| `codegen/protect-egress.ts:497` | `/(^\|[^A-Za-z0-9_$])_=*\{/` | **FULL** (#896) | the `E-PROTECT-004` raw-egress test |
+| `type-system.ts:473` | `raw.startsWith("_={") \|\| raw.startsWith("_{")` | **levels 0+1 ONLY** | **`describeEscapeHatch`** (`:469`) |
+| `lint-w-interp-in-raw-content.js:51` | `INERT_SIGILS = ["?{","#{","!{","^{","_{"]` | **level 0 only, EVERY sigil** | **`INERT_SIGILS`** |
+
+⚑ **AND RE-RESOLVING THEM SURFACED SOMETHING THE ENTRY DOES NOT SAY: THE THREE "FIXED" SITES ARE
+THREE DIFFERENT *SPELLINGS* OF ONE GRAMMAR** (capturing vs non-capturing group). The hand-spelling has
+not stopped — only the LEVELS converged. **That strengthens the entry's own structural argument**
+(*"fixing the two remaining sites leaves the next author free to hand-spell a sixth"*) rather than
+weakening it, and it should be recorded, because a future reader comparing the three regexes could
+reasonably conclude a shared predicate already exists.
+
+**Suggested disposition:** correct the marker locus and the table row to `:453` / FULL, keep
+`status=open` (**it is correctly open** — two partial sites remain and the structural fix is not
+built), and add the three-spellings observation.
+
+## ⛔ M-S405-5. **NEW — a figure THIS REPORT published at S404 was WRONG AT ITS OWN WATERMARK, and contradicted the next row of its own table.**
+
+The S404 summary table publishes:
+
+> `| Scan population (in-scope tracked .md) | **122** (+1) — git ls-files '*.md' minus docs/changes/,
+> spa-lists/, archive/, handOffs/, .claude/ |`
+
+**RE-EXECUTED at three commits, under that exact definition:**
+
+| commit | measured |
+|---|---|
+| `499eecce` (S402 stamp) | **108** |
+| `68cfac6d` (S404 stamp — where `122` was published) | **110** |
+| `e74f5423` (this stamp) | **110** |
+
+**So the value was `110`, not `122`, and the delta was `+2`, not `+1`.**
+
+⛔ **AND IT WAS DETECTABLE WITHOUT ANY EXTERNAL ORACLE, WHICH IS THE POINT.** The very next row of the
+same table reads *"New in-scope TRACKED docs this window | **2** — both articles"*. **A population
+that gains 2 tracked docs and reports `+1` contradicts itself in adjacent rows.** That is precisely
+the internal-contradiction class this map set formalized at S376 (four figures contradicting another
+figure in the same file) and turned into a standing rule: **a figure that appears twice in one map set
+must be diffed against itself before it is carried.** It was not applied here, in the file that exists
+to enforce it.
+
+⚠ **A quoting hazard is worth recording alongside it, because it will bite the next re-measurement.**
+`git ls-files` QUOTES paths containing non-ASCII bytes, and this repo has `docs/changes/§13.2-*/` and
+`docs/changes/§36-*/` directories. A naive `| grep -v '^docs/changes/'` **does not filter them** — the
+line begins with a `"`. **Use `git -c core.quotePath=false ls-files`.** The first cut of this
+re-measurement produced a phantom "13 NEW in-scope docs" from exactly that.
+
+**Suggested disposition:** already corrected in this pass's summary table (`110`, flat). The durable
+fix is to state the population as a COMMAND rather than a number, as the `Derived-figure authority`
+section of `primary.map.md` does for the FACTS figures.
+
+## ⛑ M-S405-6. **NEW — the four `@generated` maps were TWO SOURCE-DAYS stale, and that is why neither new `E-CG-*` code appeared in ANY map. FIXED THIS PASS.**
+
+`structure.generated.md` · `error.generated.md` · `dependencies.generated.md` · `test.generated.md`
+were all stamped **`2026-09-06 16:32`**, i.e. before the entire S405 source window. They are
+`@generated` by `flogence/scripts/mapgen.ts` and **nothing in the scrml toolchain regenerates or gates
+them** — `bun scripts/state.ts --check` reports map staleness as WARN-only and does not look at these
+files at all.
+
+**Consequence, measured:** `E-CG-ENUM-BINDING-COLLISION` and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` had
+**zero occurrences across all 17 files in `.claude/maps/`** before this pass. **The one instrument
+that would have surfaced N-S405-1 was itself stale.**
+
+**Regenerated this pass**, all four:
+`bun scripts/mapgen.ts --kind {structure,errors,deps,tests} --root /home/bryan-maclee/scrmlMaster/scrml --write`
+→ `structure` 195 files / **1,513** exported symbols (was 1,505) · `errors` now carries both new codes
+(`:49`, `:50`) · `deps` **701** local import edges · `tests` **1,426** across 12 dirs.
+
+⚠ **`test.generated.md`'s `1,426` DISAGREES WITH `docs/FACTS.md`'s `1,440` AND BOTH ARE RIGHT.** The
+difference is **exactly the 14 ROOT-LEVEL `compiler/tests/*.test.js` files**: `mapgen.ts` keys its
+category table on the first SUBDIRECTORY, so a file directly in `compiler/tests/` lands in no
+category. `1,426 + 14 = 1,440`. **Recorded as a definition boundary, not reconciled.** (Third such
+boundary in this map set, alongside `find compiler/src -type f` = 197 vs FACTS' 195, and the
+repo-wide `*.test.js` = 1,441 vs 1,440 for `conformance/conformance-corpus.test.js`.)
+
+⛔ **AND THE FACT THAT MAKES THIS RECUR: THESE FOUR FILES ARE *UNTRACKED*, SO THIS PASS'S REGEN DOES
+NOT PROPAGATE.** `git check-ignore -v` puts all four under `.gitignore:3` (`.claude/`), and
+`git ls-files .claude/maps/` returns exactly the **13** curated maps — which are in git only because
+they were force-added. **So the regeneration above is a PER-CLONE, LOCAL artifact: the PA's
+`.claude/maps/` pathspec commit will carry the 13 hand-authored maps and NOT the four mechanical
+ones.** Every clone, and every future session in a fresh worktree, starts from whatever
+`*.generated.md` that clone happens to hold — or from none. ⚠ **That is why "regenerate them at wrap"
+has not stuck: there is nothing to make it stick to.** It also means N-S405-1's counter-instrument
+(`error.generated.md`, derived from the EMITTERS) is unavailable to anyone who has not run `mapgen`
+locally, which is the actual reason two SPEC-less codes went unnoticed.
+
+**Suggested disposition:** the generator is cheap (a tree-walk plus a regex pass). Three options, in
+increasing order of durability: (a) run it in `cloud-maps`; (b) have `scripts/state.ts --check`
+compare each `*.generated.md` mtime against the newest `compiler/src` mtime and WARN — **but note
+this is weak while the files are untracked, since a clone without them WARNs about nothing**; (c)
+force-add the four alongside the 13, so a stale one is visible as a DIFF rather than as an absence.
+**A stale mechanical map is worse than an absent one, because it is indistinguishable from a current
+one — and an ABSENT one is worse than either when it is the instrument that would have caught
+N-S405-1.**
+
+## ⛑ C-S405-A. **CLASS FINDING — three map rows carried a RESOLVED defect as OPEN, *with a "DO NOT RE-ATTEMPT" warning attached*. Corrected this pass.**
+
+`primary.map.md`'s Task-Shape Routing row on `<engine>` closer scans, its Key Facts bullet, and
+`structure.map.md`'s `engine-statechild-parser.ts` ownership row all said, at their own watermark:
+
+> *"NOT DONE, OPEN at this watermark: `engine-statechild-parser.ts:skipCommentOrString` (`:1363`)
+> still opens a string span on `'` / `"` / backtick… ⚠ **DO NOT RE-ATTEMPT THIS AS A SCAN TWEAK
+> WITHOUT READING WHAT IT COST** … the fix exists on unmerged `origin/fix/s402-engine-apostrophe2`
+> (`46bb46c9`)."*
+
+**Measured at `e74f5423`:** `g-engine-state-child-apostrophe-breaks-parse` is
+`status=resolved resolved-by=S405-free-move-071645ec-four-rounds`; the fix landed at `e523478b` (#892),
+an ancestor of `origin/main`; `skipCommentOrString` (now `:1472`) has **no** `"` / `'` / backtick
+branches. **Verified by EXECUTION, two-sided, on a real corpus sample:**
+`samples/compilation-tests/engine-modern-002-effects.scrml` with
+`<Success rule=.Idle><p>Thanks. We'll email you.</p></>` substituted for its empty `<Success>`
+compiles **byte-for-byte identically to the unmodified sample** — 1 warning, 3 ghost-pattern lints,
+**zero `E-ENGINE-STATE-CHILD-MISSING`**. Two further probes on the same sample
+(`<p title="glob /*.ts here">`, `<a href="//cdn.x/y">`) also compile identically.
+⚠ **`46bb46c9` is STILL not an ancestor of `origin/main` and is NOT what landed** — #892 is a
+different, later fix, so the row would also have sent a reader to the wrong branch.
+
+⛔ **THE CLASS, WHICH IS WHY THIS IS NOT JUST A DIFF: A MAP ROW THAT *FORBIDS* SOMETHING NEEDS THE
+SAME CURRENCY CHECK AS ONE THAT *PROMISES* SOMETHING, AND IT IS EASIER TO FORGET.** A stale "DONE"
+row makes an agent look for code that is not there — annoying, self-correcting in minutes. A stale
+"OPEN — DO NOT RE-ATTEMPT" row makes an agent **avoid the one surface that just received the most
+attention in the repo**, and it is self-REINFORCING: nobody checks a warning they are obeying.
+**Verification rule: re-execute a prohibition on the same schedule as a claim.** These three rows had
+survived one full pass in that state.
+
+## ⛔ S1-S405. **`router-lag` (S404, HIGH, STRUCTURAL) — STILL OPEN, and this pass applied the same mitigation that has now failed FOUR times. Recorded plainly rather than repeated quietly.**
+
+S404 filed this: Task-Shape Routing rows are written from the window that CLOSED, while the agents
+reading them work the window that is OPEN, so the router is one window behind BY CONSTRUCTION. The
+agreed mitigation — *"write a row for every surface the walked window touched"* — had failed at S397,
+S402 and S404.
+
+**This pass measured it again and it is unchanged, in both directions:**
+- **Coverage hole, reproduced by grep before writing:** `harvestRawCreateTables` returned **ZERO**
+  across all 17 files in `.claude/maps/`; `mountHydrate` **ZERO**; `E-PROTECT-004` appeared **only**
+  in the mechanical `error.generated.md` and in **no hand-authored map**. Those are the three central
+  nouns of two of this window's three arcs.
+- **Stale-row hole, the mirror image and newly measured this pass:** the surface that DID have a row —
+  the `<engine>` closer scan — had a row that was **wrong in the forbidding direction** (C-S405-A).
+
+⚠ **SO THE FAILURE IS NOW KNOWN TO BE TWO-SIDED, WHICH THE S404 FILING DID NOT SAY: the router is
+missing rows for the OPEN window *and* carrying false rows from the CLOSED one.** The second half is
+worse, because a missing row degrades to "no help" while a false prohibition degrades to "active
+misdirection".
+
+**This pass added four rows** (protect egress · tenant floor / schema recognition · the `_{}`
+foreign-opener grammar · library-mode emit) **and rewrote one.** ⚑ **That is the same mitigation, and
+by the structural argument it will again only help the session that no longer needs it.** It is done
+anyway because the rows are true and cheap; **it is not offered as a fix.**
+
+**What a dev agent should take from this, unchanged from S404 and now better evidenced:** read
+Task-Shape Routing as *"surfaces someone finished working, as of one window ago"*. For a LIVE surface,
+`docs/known-gaps.md` and `handOffs/delta-log.md` beat this map set — **with the caveat N-S405-3 and
+N-S405-4 establish: `known-gaps` markers themselves lag a same-session fix, so verify a `status=open`
+by execution before believing it.** There is no artifact in this repo that is reliably current on a
+surface being actively worked; the only reliable instrument is the compiler.
+
+## STANDING ITEMS — RE-EXECUTED AT `e74f5423` (verdicts are commands, not carry-forward)
+
+### N8 — `scripts/source-text-regex-census.ts` prints a baked `file:line`. ⛔ **STILL LIVE, NOW *DOUBLY* STALE — AND THE PRIOR PASS'S "VERIFIED" REPLACEMENT WAS ITSELF WRONG.**
+
+⚑ **This is the item the dispatching brief flagged for verification-rather-than-inheritance, and the
+brief was right to.**
+
+The script bakes `type-system.ts:26048` in **two** places — `:38` (a doc comment) and `:170` (a
+`console.log` reprinted on every run: *"see `postRe.test(t)` — the site of the confirmed defect at
+type-system.ts:26048"*).
+
+**Measured at `e74f5423`:**
+- `sed -n '26048p' compiler/src/type-system.ts` → `if (typeof node.text === "string") addFragment(node.text);` — **unrelated.**
+- The S391 report asserted the correct current line was **`:26346`**, described as verified.
+  `sed -n '26346p'` at this HEAD returns ` * (Landing 2 may extend if cross-fn lifecycle tracking proves desirable.)` — **a COMMENT.**
+- The guard the S391 note names (`if (start < s.length) parts.push(s.slice(start));`) is now at **`:26709`**.
+
+⛔ **AND THE STANDING FINDING CONTRADICTS ITSELF ABOUT WHICH SYMBOL `:26048` EVEN WAS.** At report
+line `:1839` it names the defect site as the `parts.push(s.slice(start))` guard; at `:2000` it says
+*"verified: `type-system.ts:26048` is `const postRe = new RegExp(...)`"*. **Two different symbols,
+same line, same report.** ⚠ **And it is no longer resolvable by symbol either without
+disambiguation: `grep -n 'const postRe' compiler/src/type-system.ts` returns THREE sites — `:27224`,
+`:28162`, `:28287` — with `postRe.test(tv)` at `:27225`, `:28163`, `:28288`.**
+
+⛔ **THE LESSON THIS ITEM NOW CARRIES IS STRONGER THAN "a baked line rots":** the REPLACEMENT line
+published by the pass that caught the rot **also rotted, inside two sessions**, and the same report
+recorded two different symbols for it. `compiler/SPEC.md`'s own `E-TYPE-031` §34 row states the
+general rule in as many words: *"a line number is the one part of a provenance note CI can never
+falsify: it rots silently and forever… Trust the symbol — and now the symbol is all there is."*
+**A cartographer's report is not exempt from the rule it publishes.**
+
+**Suggested disposition:** delete the `:N` from both sites and cite the SYMBOL, disambiguated —
+"`postRe.test(tv)` in `<enclosing function name>`". A baked citation inside an EXECUTABLE is worse
+than one in a doc: it is reprinted with authority on every run, and no doc-currency gate covers it.
+
+### N17 — `docs/PA-SCRML-REFERENCE.md` cites `SPEC §55.1 line 24295`. ⛔ **STILL LIVE, and the line is now BLANK.**
+
+Two sites: `:60` and `:131`, both *"`E-TYPE-031` per SPEC §55.1 line 24295"*.
+**Measured at `e74f5423`: `sed -n '24295p' compiler/SPEC.md` returns an EMPTY line**, and its
+neighbourhood (`24290-24300`) is **§41.14.6 form-error rendering** — a different section entirely.
+`grep -n '§55\.1' compiler/SPEC.md` puts the live §55.1 references at `:2137`, `:2146`, `:2160`,
+`:19872` (the `E-TYPE-031` §34 row) and `:22777`. **Same class as N8, in a doc rather than an
+executable.** Fix: cite `§55.1` alone, or the §34 row by CODE.
+
+### U5 — the article that says it is untracked. ⚠ **STILL LIVE, VERBATIM.**
+
+`docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md:4`: *"> *Previous versions* so a cut line can
+be pulled back. **Untracked and uncommitted.**"* — `git ls-files` returns the path (and its
+`-PUBLISH.md` sibling). Self-contradicting on its own first screen. **Uncertain rather than
+non-compliant** because it is plausibly a working note the author wants preserved verbatim; it needs
+one human sentence, not a cartographer's edit.
+
+### Location + name heuristics — **NOTHING NEW, and the negative result is recorded because it is load-bearing**
+
+- `docs/deep-dives/` · `docs/adrs/` · `docs/debates/` · `docs/gauntlets/` · `docs/research/` — **all
+  five `ls` to ENOENT.** The scrml repo does not carry the doc classes that belong in `scrml-support`.
+- Date-stamped filenames: `docs/audits/` (20 docs) and `docs/articles/` (20 docs) are the only
+  concentrations, both adjudicated in prior passes as legitimately-dated artifacts (an audit IS a
+  point-in-time measurement; an article IS dated by publication). **No new date-stamped file entered
+  the in-scope population this window** — the set-diff is empty in both directions.
+- `-draft-` / `-proposal-` / `-plan-` / `-rfc-` / `-ideas-` / `SPEC-AMENDMENTS` in a filename:
+  **zero matches** in the in-scope population.
+- Spec-draft heuristic (`spec-*` outside `SPEC.md` / `SPEC-INDEX.md` / `PIPELINE.md`): the only hits
+  are under `docs/audits/` (`spec-consolidation-inventory-*`, `spec-corroboration-canons-pipeline-*`,
+  `spec-feature-canon-coverage-*`), all previously adjudicated as audits, not draft specs.
+
+## UNCERTAIN — needs human review (S405)
+
+### U-S405-1. ⚠ **`parseRawCreateTableColumns` is an EXPORT whose only in-tree callers are its own tests — and the source says so itself. Is that a smell to act on, or a deliberate API shape?**
+
+`compiler/src/schema-differ.js:348`. Its own docstring (`:335-345`) states the situation without
+being asked:
+
+> *"⚑ **NO PRODUCTION CALLER AS OF THIS ROUND** — stated rather than left implicit.
+> `extractDesiredSchema` moved to `harvestRawCreateTableDecls`, so every in-tree caller of this
+> function is now a TEST. That is the inverse of a silently dead limb (a path no test enters) and a
+> milder smell, but it is still one: an export whose only consumer is its own suite rots. It is kept
+> as the single-statement entry point… Retiring it in favour of `harvestRawCreateTableDecls(sql)[0]`
+> is a clean follow-up, deliberately not bundled into a defect round."*
+
+**Why this is UNCERTAIN and not a finding:** the source is not hiding anything — it names the state,
+the reason, and the follow-up. **That is exemplary, and flagging it as non-compliance would punish
+the disciplined behaviour this report wants more of.** But it is also a real decay vector: the
+function's column read shares `columnsFromDdlBody` with the live harvest **today**, which is what
+keeps them from drifting; nothing enforces that, and a future edit could fork them with only a
+test-only consumer noticing.
+
+**What to check:** decide whether it is (a) a deliberate public single-statement API — in which case
+it wants an export-surface note so a future cartographer does not re-flag it — or (b) a follow-up to
+retire, in which case it wants a `known-gaps` LOW entry so it does not depend on someone re-reading
+this docstring. **Do not silently delete it: its tests are currently the only coverage of the
+single-statement path.**
+
+### Carried uncertains — U1, U2, U3 (not re-executed this pass)
+
+⚠ **Explicitly NOT re-executed, and labelled rather than silently carried.** This pass spent its
+verification budget on the six items above, all of which were reproduced by command or by compile.
+**Treat U1-U3 as RELAYED-UNVERIFIED at this watermark** and re-check before acting on any of them.
+
+## Docs scanned this window — the 8 changed in-scope docs
+
+| doc | verdict at `e74f5423` |
+|---|---|
+| `compiler/SPEC.md` (+89) | **COMPLIANT** as to what it contains — the §7.5.1/§53.4 amendment plus three new §34 rows. ⛔ **NON-COMPLIANT BY OMISSION: N-S405-1** — two codes the compiler emits have no row and no mention |
+| `compiler/SPEC-INDEX.md` (regenerated) | **COMPLIANT** — derived from SPEC; inherits N-S405-1's omission by construction, which is correct behaviour for a derived file |
+| `docs/FACTS.md` | **COMPLIANT and RE-EXECUTED** — all four figures re-derived independently and all four match (252,403/195 · 1,440 · 37,947 · 905) |
+| `docs/changelog.md` (+129, +38 in the wrap) | **COMPLIANT** — the per-window landing narrative, which is where S302 ruled it belongs |
+| `docs/known-gaps.md` (+413, +39 in the wrap) | ⛔ **NON-COMPLIANT — N-S405-3 (MED-HIGH) and N-S405-4 (LOW)** |
+| `docs/pr-reviews.md` (+14, +4) | **COMPLIANT** |
+| `hand-off.md` (rewritten) | **COMPLIANT** — session-scoped by design |
+| `master-list.md` (+4) | ⚠ **`@generated:recent-sessions` is STALE** — `bun scripts/state.ts --check` prints `FAIL — stale/missing @generated section(s)` for it. **Non-gating** (the command still exits 0). Fix is `bun scripts/state.ts --write`. Flagged, not counted as a doc-compliance finding: it is a generated-section currency failure, the same class as M-S405-6 |
+
+## Map currency at this stamp — S405
+
+⛑ **`bun scripts/state.ts --check` WAS EXECUTED THIS PASS AND ITS OUTPUT IS RECORDED VERBATIM RATHER
+THAN SUMMARIZED.** BEFORE the write:
+
+```
+maps: 20 commits behind HEAD (watermark 68cfac6d, HEAD e6b8fc77)  [WARN-only — not gated; project-mapper seam]
+digest: STALE — sources changed since stamp 9713d703 (primary.map.md, known-gaps.md, delta-log.md, package.json) → PA distrusts + falls back  [WARN-only — not gated; PA-start freshness guard]
+known-gaps heading/marker status: 0 drift  [WARN-only — not gated]
+FAIL — stale/missing @generated section(s): @generated:recent-sessions (master-list.md)
+```
+
+⚠ **AND IT EXITED 0. Verified by reading `$?`, not assumed.** Nothing in the toolchain fails on stale
+maps, and the one line that says `FAIL` is non-gating.
+
+⛑ **RE-RUN *AFTER* THIS PASS'S WRITE, AND THAT RE-RUN — NOT THE FILE CONTENT — IS THE CHECK THAT
+MATTERS, because this step has crashed post-write before and left the stamp stale.** It now prints:
+
+```
+maps: 1 commits behind HEAD (watermark e74f5423, HEAD e6b8fc77)  [WARN-only — not gated; project-mapper seam]
+```
+
+**`watermark e74f5423` confirms the new stamps were read back by an independent instrument**, and the
+`1` is the local unpushed docs-only wrap commit — **the CORRECT terminal state, not a failed
+advance.** Exit status re-read: **0**.
+
+
+⚠ **`maps: current` IS NOT ACHIEVABLE AT THIS WATERMARK WITHOUT VIOLATING THE MAP-STAMP RULE.**
+`mapsStaleness()` compares the watermark to LOCAL `HEAD`, and `HEAD` is `e6b8fc77` — a local, unpushed
+wrap commit on `wrap/s405`. Stamping it would stamp a branch tip that squash-merges onto `main` under
+a DIFFERENT SHA: the S326/S328/S331 orphaning hazard, which once left **three of five inherited stamps
+pointing at nothing**. The stamp was advanced to the furthest commit satisfying all three checks
+(`e74f5423`, `is-ancestor … origin/main` → exit 0) and **no further**. The residual "behind" reading
+is the CORRECT terminal state, not a failed advance.
+
+⚠ **HEAD MOVED DURING THIS PASS** — `e74f5423` → `e6b8fc77`, because the session wrap committed while
+the mapper was writing. The move was **verified docs-only** (`--name-only` over `compiler/ scripts/
+conformance/ stdlib/ lsp/ .github/ package.json` → EMPTY) rather than chased, and the two doc findings
+that could plausibly have been closed by it (N-S405-3, N-S405-4) were **re-checked at both SHAs**.
+
+## Tags
+#scrml #map #non-compliance #cleanup #report
+#s405 #findings-in-source-not-in-docs #e-cg-enum-binding-collision #e-cg-sql-fn-unverifiable-span #code-with-no-spec-home #catalog-count-measures-the-catalog #stale-docstring-in-source #verifiedfnremovalrange #g-tenant-floor-raw-ddl-still-open-but-fixed #falsified-by-compiling-the-entrys-own-reproducer #known-gaps-marker-lags-a-same-session-fix #foreign-opener-entry-contradicts-itself #three-spellings-of-one-grammar #anchor-by-symbol-not-by-line #scan-population-wrong-at-its-own-watermark #adjacent-rows-contradict #quotepath-false #generated-maps-two-days-stale #a-stale-mechanical-map-is-worse-than-an-absent-one #stale-open-row #a-prohibition-needs-the-same-currency-check-as-a-claim #router-lag-is-two-sided #n8-doubly-stale #replacement-line-also-rotted #two-symbols-one-line #n17-blank-spec-line #u5-untracked-claim-live #state-ts-exits-0 #head-moved-mid-pass #findings-rechecked-at-both-shas
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [structure.map.md](./structure.map.md)
+- [domain.map.md](./domain.map.md)
+- [error.map.md](./error.map.md)
+- [schema.map.md](./schema.map.md)
+- [auth.map.md](./auth.map.md)
+- [migrations.map.md](./migrations.map.md)
+- [dependencies.map.md](./dependencies.map.md)
+- [test.map.md](./test.map.md)
+- [build.map.md](./build.map.md)
+- [infra.map.md](./infra.map.md)
+- [config.map.md](./config.map.md)
+- [known-gaps.md](../../docs/known-gaps.md)
+- [changelog.md](../../docs/changelog.md)
+- [FACTS.md](../../docs/FACTS.md)
+- [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+- [hand-off.md](../../hand-off.md)
+
+---
+
+## Summary — S404 pass (PRIOR pass — carried for provenance)
 
 | | |
 |---|---|
@@ -190,7 +691,7 @@ checked and PASSES:** a grep cross-check of every backticked identifier in the 1
 # fresh worktree structurally cannot contain. **Both sides were answering a question neither had
 # asked: neither 2.0 MB nor 900K measures the 20 audit DOCUMENTS.** See N12.
 
-## Summary — S402 pass (this pass)
+## Summary — S402 pass (PRIOR pass — carried for provenance)
 
 | | |
 |---|---|

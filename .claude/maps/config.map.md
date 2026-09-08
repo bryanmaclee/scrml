@@ -1,6 +1,35 @@
 # config.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF, AND THE ZERO IS A GREP PLUS A FILE LIST.** ━━━━━━━
+#
+# ⛑ **COMMANDS, RE-RUN AT WRITE TIME:** `git diff --name-only 68cfac6d..e74f5423 -- package.json
+# bun.lock bunfig.toml tsconfig.json '*.toml'` -> **EMPTY**. `git diff --name-only 68cfac6d..e74f5423
+# -- '*.json'` returns **ten paths and every one is a `conformance/cases/protect/*/expected.json`
+# conformance fixture** — which carries expected DIAGNOSTICS, not a config key. **No environment
+# variable, feature flag, `compilerSettings` knob or config file changed in this window.**
+# ⚠ **A ZERO-DIFF SURFACE IS AN UNCHANGED MAP, NOT A CORRECT ONE.**
+#
+# ⚑ **ONE NEW COMPILE-TIME CONSTANT IN THE EMITTED SERVER IS WORTH KNOWING ABOUT HERE, BECAUSE IT
+# LOOKS LIKE CONFIG AND IS NOT: `Symbol.for("scrml.protect.mediated")`** — the §14.8.9 mediation mark
+# (`compiler/src/codegen/protect-egress.ts:245`, read at `emit-server.ts:1948`/`:1957`). It is a **registry
+# Symbol, not a setting**: nothing reads it from the environment, nothing can turn it off, and it is
+# emitted only when `_protectActive` (gated at `emit-server.ts:4436` precisely so a `protect=`-free
+# app stays byte-unchanged). Its sibling is `Symbol.for("scrml.protect.origin")`. **Neither belongs in
+# Environment Variables or Feature Flags; both are compile-time literals in the emitted runtime.**
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -180,6 +209,7 @@ No secret VALUE appears anywhere in this map set.
 ## Tags
 #scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56 #zero-env-diff
 #zero-env-delta-by-grep #argv-not-env
+#s405 #config-zero-diff #ten-json-paths-are-conformance-fixtures #scrml-protect-mediated-is-a-symbol-not-a-setting #scrml-protect-origin #compile-time-literal-not-config #gated-on-protectactive
 
 ## Links
 - [primary.map.md](./primary.map.md)

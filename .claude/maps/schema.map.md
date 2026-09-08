@@ -1,6 +1,56 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **`compiler/src/types/` IS `--name-only` EMPTY. NO AST TYPE MOVED.** ━━━━━━━
+#
+# Command: `git diff --name-only 68cfac6d..e74f5423 -- compiler/src/types/` -> **EMPTY**. So every
+# `ast.ts` shape in this map is carried on a VERIFIED-empty diff, including S404's `LitExpr`
+# `hasInterpolation` field. ⚠ A zero-diff surface is an UNCHANGED map, not a correct one.
+#
+# ⛑ **WHAT DID MOVE IS THE SCHEMA-*READING* SIDE, AND IT ADDS A FIELD TO A NON-`ast.ts` SHAPE.**
+# `extractDesiredSchema` (`compiler/src/codegen/db-authoritative.ts:121`) returns
+# `{ tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>; fns; warnings }`
+# — and as of #900 a table harvested from a **raw `CREATE TABLE … (…)` DDL `<schema>` body** carries
+# **`rawDdl: true`** and **COLUMN NAMES ONLY**.
+#
+# ⛔ **THAT MARKER IS LOAD-BEARING, NOT DECORATIVE, BECAUSE THIS ONE PRODUCER HAS TWO CONSUMERS WITH
+# OPPOSITE NEEDS:**
+#   · **§14.8.10 TENANT floor** (`emit-server.ts:1769` -> `tenant-egress.ts:buildTenantContext` `:127`)
+#     wants EVERY declared table INCLUDING raw DDL — a `tenant_id` column's PRESENCE *is* the
+#     declaration (§14.8.10: *"There is no per-table opt-in attribute"*), and a table it cannot see
+#     yields a silently INERT isolation floor at exit 0.
+#   · **`scrml db-migrate` / `diffSchema`** (`commands/db-migrate.js:219`) wants the OPPOSITE — it OWNS
+#     and REWRITES schema, and a raw table's DDL is AUTHOR-owned and only PARTIALLY recovered (no
+#     constraints, defaults, FKs or `CHECK` bodies). **It declines them at its OWN boundary in one
+#     line: `if (t.rawDdl) continue;` — `db-migrate.js:244`.**
+# **`diffSchema` is BYTE-IDENTICAL to its pre-arc behaviour as a result.** `schema-differ.js:1131-1137`
+# states the split from the differ's side. Deferred arc at that seam:
+# `docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md`.
+#
+# ⚑ **THE `<schema>` PARSE VOCABULARY, ALL IN `compiler/src/schema-differ.js` AT THIS WATERMARK:**
+# `parseSchemaBlock` (`:31`, the declarative `tableName { col: type }` DSL — the ONLY form it knows) ·
+# `harvestCreateTables` (`:246`) · `harvestRawCreateTableDecls` (`:264`, what `extractDesiredSchema`
+# consumes) · `harvestRawCreateTables` (`:282`) · `parseRawCreateTableColumns` (`:348`, single
+# statement; ⚠ **no production caller — every in-tree caller is a test**, and the file says so at
+# `:335-345` rather than leaving it implicit).
+#
+# ⚑ **`class TenantTableSet extends Set<string>` (`codegen/tenant-egress.ts:84`) IS A SHAPE WORTH
+# KNOWING: it overrides EXACTLY `add` / `has` / `delete` to lowercase a string argument.** A read that
+# bypasses those three (`[...set]`, `forEach`, `entries`, `size`) sees the FOLDED form and does not
+# fold the probe.
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -764,6 +814,7 @@ changed what the compiler can SAY, not what it accepts.
 #scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth
 #tildecontext-shape #liftvar-vs-var #armbodystmts-readonlyset #no-uniform-binder #es6-shorthand-defeats-field-regex #binding-is-raw-paren-text #parsebindinglist #types-dir-empty-is-not-a-currency-probe
 #litexpr-hasinterpolation #carried-not-inferred #raw-value-aliasing #literal-vs-literal-type-only #section-53-4 #section-7-5-1 #fieldtypeassignable #fieldtypeequals #section-14-8-8 #width-subtyping-only #primitives-by-name #int-vs-number #position-3-has-no-code #anchors-re-derived-by-symbol-grep
+#s405 #types-ast-zero-diff #extractdesiredschema #rawddl-marker #names-only #two-consumers-opposite-needs #split-at-the-consumer #diffschema-byte-identical #db-migrate-one-line-decline #parseschemablock-dsl-only #harvestrawcreatetabledecls #parserawcreatetablecolumns-no-production-caller #tenanttableset #case-folds-on-three-methods #deferred-migrate-arc
 
 ## Links
 - [primary.map.md](./primary.map.md)

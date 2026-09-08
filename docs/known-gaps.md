@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 101 |
-| MED | 224 |
+| HIGH | 99 |
+| MED | 226 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -73,9 +73,34 @@ accordingly SKIPS `rawDdl` tables"*, which stopped being true when the decline m
 consumer's boundary.
 — `NEW S405-bryan (deferred half of the dpa-039 arc-B split; the four findings are pre-split measurements, not live defects)`; **MED**; open
 
+### g-two-shipped-error-codes-have-ZERO-mentions-in-SPEC-md — `E-CG-ENUM-BINDING-COLLISION` and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` emit from the compiler and appear nowhere in the normative catalog
+
+<!-- @gap id=g-two-shipped-codes-absent-from-spec sev=MED status=open locus=compiler/src/codegen/emit-library.ts(both emitters; locate by code STRING, never by line)+searched:compiler/SPEC.md-grep-c-returns-0-for-both prov=review:S405-wrap-maps-non-compliance-N-S405-1+empirical:PA-verified-by-grep-at-e74f5423 -->
+
+**PA-VERIFIED at `e74f5423`:** `grep -c` returns **0** for BOTH codes in `compiler/SPEC.md`. Not a
+malformed §34 row — **zero mentions anywhere in the normative source.** Both ship and can fire
+(landed #897 / #898).
+
+⚑ **The gate that should have caught this could not, by construction.** `scripts/s34-census.ts
+--check-new` validates NEW or CHANGED §34 rows. **A code with no row at all presents as nothing to
+check** — the census, the prefix greps and SPEC-INDEX all read normal. That is the §8 hollow-gate
+shape: green because nothing is there, indistinguishable from green because it passed.
+
+**Two things owed, and they differ:** the §34 rows (peter's lane, #897/#898); and **a probe that
+compares emitted code strings against the catalog**, since the current gate can only see rows that
+already exist. The second is the generalizable half.
+— `NEW S405-bryan (surfaced by the wrap maps non-compliance pass; PA-verified by grep)`; **MED**; open
+
 ### g-the-foreign-opener-grammar-is-hand-spelled-in-five-places-at-three-levels-of-completeness — SPEC 23.2 defines `_` + ZERO OR MORE `=` + `{`, and no two detectors agree on how much of it to match
 
-<!-- @gap id=g-foreign-opener-grammar-hand-spelled-five-places sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts:389+compiler/src/type-system.ts:473+compiler/src/lint-w-interp-in-raw-content.js:51+compiler/src/codegen/protect-egress.ts+compiler/src/ast-builder.js:18392(the-one-correct-spelling) prov=empirical:PA-read-all-five-sites-on-main+review:S405-arc-A-and-arc-B-each-found-one-independently -->
+<!-- @gap id=g-foreign-opener-grammar-hand-spelled-five-places sev=MED status=open locus=compiler/src/codegen/tenant-egress.ts:389+compiler/src/type-system.ts:473+compiler/src/lint-w-interp-in-raw-content.js:51+compiler/src/codegen/protect-egress.ts+compiler/src/ast-builder.js:18392(the-one-correct-spelling) prov=empirical:PA-read-all-five-sites-on-main+review:S405-arc-A-and-arc-B-each-found-one-independently -->
+
+⚑⚑ **CORRECTED S405 — DOWNGRADED HIGH → MED, and the correction is the point.** This entry read as *five detectors at three levels, two of them security floors*. Re-resolved BY SYMBOL at `e74f5423` after the wrap maps pass challenged it:
+- **Both floors are FIXED and landed today** — `codegen/protect-egress.ts` (arc A, #896) and `codegen/tenant-egress.ts` (arc B, #900, now `:453`, full `_=*\{` grammar; **the `:389` locus above is stale**).
+- **`type-system.ts:473` is NOT a floor** — it sits in `describeEscapeHatch`, which builds a human-readable diagnostic string. A level-2 opener gets a less specific *description*, not an unchecked path.
+- **`lint-w-interp-in-raw-content.js:51` is a lint's inert-sigil list**, also not a floor.
+**What survives is real but smaller:** one normative grammar re-derived by hand at five sites, so a sixth is free to appear and nothing compares them. **A drift surface — not two open security holes**, which is what this entry claimed before it was challenged.
+
 
 **SPEC 23.2 defines the foreign-code opener as `_` followed by ZERO OR MORE `=` then `{`** — `_{`,
 `_={`, `_=={`, and so on. **Five sites hand-spell that grammar and only ONE is correct.**
@@ -117,7 +142,10 @@ both arcs' file boundaries** — they need an owner.
 
 ### g-tenant-floor-does-not-harvest-raw-DDL-so-the-protect-and-tenant-floors-disagree-on-what-a-schema-is — the §14.8.9 protect floor was TAUGHT the raw-DDL `<schema>` form; the §14.8.10 tenant floor was not, so a raw-DDL + no-`<db>` app gets a silently inert tenant floor
 
-<!-- @gap id=g-tenant-floor-does-not-harvest-raw-DDL sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts(buildTenantContext — both legs come up empty: the schemaByTable leg is built from per-`<db>` protectAnalysis.views, and the `<schema>` leg dies in parseSchemaBlock which recognizes ONLY the `tableName { col: type }` DSL at compiler/src/schema-differ.js:31; the sibling protect floor solves this with harvestRawCreateTables at compiler/src/protect-analyzer.ts:454, called :557 — the tenant floor has ZERO references to it) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-END-TO-END-at-0d8d7eac-by-a-4-app-matrix -->
+<!-- @gap id=g-tenant-floor-does-not-harvest-raw-DDL sev=HIGH status=resolved resolved-by=S405-arc-B-e74f5423 locus=compiler/src/codegen/tenant-egress.ts(buildTenantContext — both legs come up empty: the schemaByTable leg is built from per-`<db>` protectAnalysis.views, and the `<schema>` leg dies in parseSchemaBlock which recognizes ONLY the `tableName { col: type }` DSL at compiler/src/schema-differ.js:31; the sibling protect floor solves this with harvestRawCreateTables at compiler/src/protect-analyzer.ts:454, called :557 — the tenant floor has ZERO references to it) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-END-TO-END-at-0d8d7eac-by-a-4-app-matrix -->
+
+⚑ **RESOLVED S405** by arc B (#900, `e74f5423`) — the tenant leg harvests raw DDL through the ONE shared recognizer. ⚑ **This entry's own text went STALE the moment the fix landed, and a maps pass caught it rather than me:** it asserts *"the tenant floor has ZERO references to it"* — that count is now **4**. A state-claim inside a gap entry rots on landing and nothing flips it automatically.
+
 
 **REPRODUCED END-TO-END at `0d8d7eac`** by a dispatched agent; the load-bearing asymmetry
 PA-confirmed independently by symbol.

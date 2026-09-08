@@ -1,6 +1,81 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-07T04:30:36Z  commit: 68cfac6d
+# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
+# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
+# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
+# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
+# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
+# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
+# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
+# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
+# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
+# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
+#
+# ━━━━━━━ S405 wrap-6c — **1,436 -> 1,440 `.test.js`; CONFORMANCE 897 -> 905.** ━━━━━━━
+#
+# ⛑ **RE-EXECUTED, NOT CARRIED. `git ls-files 'compiler/tests/**.test.js' | wc -l` -> **1,440**,
+# reconciling EXACTLY with the CI-gated `docs/FACTS.md` (`test files | 1,440`).** A repo-wide
+# `git ls-files '*.test.js'` returns **1,441** — the extra is `conformance/conformance-corpus.test.js`,
+# which lives OUTSIDE `compiler/tests` and is the §62.2 corpus bridge (invariant 88). **Definition
+# boundary, not a stale figure.**
+#
+# ⛔ **AND A *THIRD* DEFINITION BOUNDARY IS NOW QUANTIFIED EXACTLY, SO NOBODY "RECONCILES" IT AGAIN.**
+# The `@generated` `test.generated.md` prints **1,426**. **The difference is EXACTLY the 14
+# ROOT-LEVEL `compiler/tests/*.test.js` files.** `flogence/scripts/mapgen.ts` keys its category table
+# on the first SUBDIRECTORY, so a file sitting directly in `compiler/tests/` lands in no category and
+# falls out of the total. Per-dir at this watermark: `unit 937 · integration 219 · conformance 133 ·
+# browser 103 · commands 17 · **ROOT 14** · lsp 11 · self-host 4 · e2e-render-map 2` = **1,440**.
+# **`1,426 + 14 = 1,440`. Record it; do not "fix" either instrument.**
+#
+# ⛑ **THE WINDOW'S TEST DELTA, MEASURED WITH `git diff --name-status` RATHER THAN `--name-only`,
+# BECAUSE THE TWO ANSWER DIFFERENT QUESTIONS: 14 paths under `compiler/tests` moved — **4 ADDED, 10
+# MODIFIED** — and one of the 10 is a `.scrml` FIXTURE, so **13 `.test.js` files were touched and only
+# 4 are new.** The 4 ADDED reconcile EXACTLY with FACTS' `test files` +4 (1,436 -> 1,440):
+# `integration/engine-statechild-prose-punctuation.test.js` ·
+# `integration/library-mode-structural-routing.test.js` · `unit/protect-response-scan.test.js` ·
+# `unit/tenant-floor-raw-ddl-schema.test.js`. ⚠ **A `--name-only` list would have read as "14 new
+# tests" and over-stated the arc by 3.5x.** By tier: **7 `integration/` · 5 `unit/` · 1
+# `conformance/`** — and `gate` runs `unit` + `conformance` + root only, so **all seven
+# `integration/` files are outside the blocking gate** (invariant 87). The files, by arc:
+#   · `integration/engine-statechild-prose-punctuation.test.js` — the §4.18.3 free move (#892). Its
+#     header carries the SPEC citations and, usefully, the *"already-broken upstream"* cases that PIN
+#     a pre-existing failure as UNCHANGED, so a future reader does not misread it as a regression.
+#   · `unit/engine-statechild-comment-opacity.test.js` (**MODIFIED, pre-existing**) — the `//` /
+#     `/*` / `<!--` opacity + the deliberately-asymmetric unterminated recovery.
+#   · `unit/protect-response-scan.test.js` + `integration/g-sql-row-protect-leak.test.js` (#896) —
+#     the latter carries the **MECHANICAL SEAM TEST** at `:628`: *"SEAM: every compiler-emitted
+#     Response inside a capture IIFE is mediation-marked"*, asserted over the whole emitted module
+#     rather than a hand-listed case set.
+#   · `unit/tenant-floor-raw-ddl-schema.test.js` · `unit/tenant-egress.test.js` ·
+#     `integration/schema-only-tenant-principal.test.js` · `conformance/conf-TENANT-FLOOR.test.js`
+#     (#900) — the first carries an explicit "THE SPLIT" describe block over `extractDesiredSchema`'s
+#     TWO consumers, which is the arc's load-bearing seam.
+#   · `integration/library-mode-structural-routing.test.js` · `export-enum-library-emit.test.js` ·
+#     `library-mode-bare-fn-no-trailing-newline.test.js` · `unit/colorless-async-combinators.test.js`
+#     · `integration/authed-server-fn-response-http.test.js` (#893/#897/#898).
+#   · `commands/migrate-program-shape-fixtures/schema-anchor.scrml` — a FIXTURE, edited because
+#     `W-SCHEMA-NO-TABLES-DECLARED` found a genuine defect in it on its first run (`users: { … }`
+#     with a stray colon declares nothing).
+#
+# ⛑ **CONFORMANCE: 897 -> 905 (+8), AND ALL EIGHT ARE IN ONE DIRECTORY — `conformance/cases/protect/`
+# (now 10 case dirs).** `conformance/cases` is still **54** category dirs: no new category. Raw
+# `find conformance/cases -name expected.json | wc -l` -> **905**, matching `docs/FACTS.md`.
+# The eight: `e-protect-005-pos` · `e-protect-005-neg` · `w-protect-005-null-body-static` ·
+# `mediated-response-passthrough` · `mounthydrate-redacts` · `null-body-response-clean` ·
+# `endpoint-multikey-arm-response` · `reveal-wrong-column-e004`. Two existing dirs were EDITED
+# (`raw-egress-e004`, `reveal-suppresses-e004`).
+#
+# ⚠ **THE ONE TEST-DESIGN LESSON WORTH CARRYING OUT OF THIS WINDOW: `unmetRuntimeHelperRefs` AND THE
+# CORPUS EMIT DIFFERENTIAL BOTH SCORED A CLEAN PASS ON TWO SILENT-WRONG LIBRARY-MODE REGRESSIONS,
+# BECAUSE THE CORPUS POPULATION CONTAINS NO `_{}` AND NO `!{}` IN A LIBRARY FN.** **A zero over a path
+# the population never exercises is not coverage.** The fix was a named exclusion plus an
+# emitted-BYTES gate (`unloweredScrmlSyntax`), not a wider differential.
+#
+# ⚑ **`test.generated.md` WAS REGENERATED THIS PASS** (`bun scripts/mapgen.ts --kind tests`) — it had
+# been stamped `2026-09-06 16:32`. It is `@generated`: do not hand-edit.
+#
 # generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
 # MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
@@ -791,6 +866,7 @@ tool is marked `HARD REQ n` at its site so a future editor can see what they wou
 #scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed
 #ctrl-025-028 #tilde-accumulator #codecounts-is-an-emission-property #neg-case-pins-cardinality #case-flipped-sides #integration-tier-is-not-gated #1425-tests #897-conformance
 #1436-tests #897-conformance-flat #normative-widening-zero-conformance-cases #template-literal-classification-suite #unit-pin-is-not-a-conformance-pin
+#s405 #1440-tests #905-conformance #54-category-dirs #root-level-test-files-14 #mapgen-keys-on-first-subdir #definition-boundary-not-stale-figure #conformance-corpus-bridge-outside #engine-statechild-prose-punctuation #already-broken-upstream-pinned #mechanical-seam-test #mediation-marked #the-split-describe-block #protect-case-dir-10 #zero-over-an-unexercised-path #unloweredscrmlsyntax #emitted-bytes-gate #test-generated-regenerated
 
 ## Links
 - [primary.map.md](./primary.map.md)
