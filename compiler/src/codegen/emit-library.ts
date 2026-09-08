@@ -1002,6 +1002,134 @@ function rawFallbackReason(fnNode: ASTNode): string | null {
  * types, TS-erased) and are omitted here. Per §21.2 the exported enum resolves
  * "the same way as a non-exported type" — hence the shared-emitter reuse.
  */
+/**
+ * Names of top-level `const X` bindings that appear MORE THAN ONCE in an
+ * assembled library module, restricted to names the compiler itself emitted an
+ * enum runtime rep for.
+ *
+ * ⚑ WHY THIS EXISTS: a library file's enum type-decl emits a runtime binding
+ * `const X = Object.freeze({ … })` (§21.2). Eight `compiler/native-parser/*.scrml`
+ * modules ALSO hand-declare `export const X = Object.freeze({ … })`, labelled
+ * in-source as *"variant tags (mirror of the canonical enum's .Variant names)"* —
+ * written back when library mode emitted no enum runtimes at all. Two top-level
+ * `const X` in one ES module is a hard `SyntaxError`.
+ *
+ * The collision was already caught, but by the WRONG MESSENGER: the §2.2.1 CG
+ * emit gate refused the artifact with *"This is a compiler defect (codegen
+ * produced malformed output). Please report it."* That is not a compiler defect,
+ * and the author is told to file a compiler bug when the actionable fix is one
+ * line — delete the mirror the compiler now supersedes. Same shape
+ * `g-library-mode-cell-access-has-no-runtime` names for `@`-cells: a downstream
+ * error that blames codegen for a source-level violation.
+ *
+ * Read the ASSEMBLED BYTES rather than the AST, for the reason
+ * `unloweredScrmlSyntax` states — and here additionally because the emitted rep
+ * and the authored const arrive on two different paths (generated header vs.
+ * whole-block source text), so the module text is the only place both are
+ * visible at once.
+ *
+ * ⚑ THIS READS THE AST, NOT THE EMITTED BYTES — deliberately, and against this
+ * file's usual preference (`unmetRuntimeHelperRefs` / `unloweredScrmlSyntax`
+ * both read bytes). A text scan CANNOT do it: the whole-block path emits the
+ * source block with its original indentation, so a module-level `const X` and a
+ * function-local `const X` are indistinguishable by leading whitespace. Measured
+ * before this note was written — a `^[ \t]*(export )?const NAME =` scan fired on
+ * **11 modules that parse clean** (`lex.scrml`, `parse-ctx.scrml`,
+ * `parse-expr.scrml`, the seven `lex-in-*.scrml`, …), because each declares a
+ * local `const LexMode` inside a fn body. Shipping that would have turned eleven
+ * working builds into hard errors — the exact direction this diagnostic must
+ * never move in.
+ *
+ * The AST answers the real question directly: a top-level `export const X` is an
+ * `export-decl` with `exportKind === "const"` and `exportedName === X`, and a
+ * bare one is a `const-decl` with `name === X`. Nothing nested inside a fn body
+ * appears in a logic block's top-level statement list at all.
+ */
+function userTopLevelConstNames(fileAST: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  const blocks: ASTNode[] = [];
+  (function collect(list: unknown[]): void {
+    for (const n of list ?? []) {
+      if (!n || typeof n !== "object") continue;
+      const o = n as ASTNode;
+      if (o.kind === "logic" && Array.isArray(o.body)) blocks.push(o);
+      if (Array.isArray(o.children)) collect(o.children as unknown[]);
+    }
+  })(getNodes(fileAST) as unknown[]);
+
+  for (const b of blocks) {
+    for (const st of ((b.body ?? []) as ASTNode[])) {
+      if (!st || typeof st !== "object") continue;
+      if (
+        st.kind === "export-decl" && st.exportKind === "const" &&
+        typeof st.exportedName === "string"
+      ) {
+        names.add(st.exportedName as string);
+      } else if (
+        (st.kind === "const-decl" || st.kind === "let-decl") &&
+        typeof st.name === "string"
+      ) {
+        names.add(st.name as string);
+      }
+    }
+  }
+  return names;
+}
+
+/** Enum names the compiler binds that the author ALSO binds at module top level. */
+function enumBindingCollisions(
+  fileAST: Record<string, unknown>,
+  enumRepNames: string[],
+): string[] {
+  if (enumRepNames.length === 0) return [];
+  const userNames = userTopLevelConstNames(fileAST);
+  return enumRepNames.filter((n) => userNames.has(n));
+}
+
+/**
+ * Assemble the module text and, before handing it back, name any collision
+ * between an enum runtime binding the compiler emitted and a same-named `const`
+ * the author declared. See `enumBindingCollisions` for why this is worth a
+ * diagnostic of its own.
+ *
+ * The artifact is still returned — the §2.2.1 emit gate is what refuses to WRITE
+ * it. This only replaces an unactionable "report a compiler bug" with the name of
+ * the colliding binding and the one-line fix.
+ */
+function finishLibraryModule(
+  lines: string[],
+  enumRepNames: string[],
+  fileAST: Record<string, unknown>,
+  errors: CGError[],
+  filePath: string,
+): string {
+  const src = withRuntimeHelpers(withAsyncCombinators(lines.join("\n")));
+  if (enumRepNames.length > 0) {
+    for (const name of enumBindingCollisions(fileAST, enumRepNames)) {
+      errors.push(new CGError(
+        "E-CG-ENUM-BINDING-COLLISION",
+        `E-CG-ENUM-BINDING-COLLISION: enum \`${name}\` emits a runtime binding ` +
+          `\`const ${name} = Object.freeze({ … })\` (§21.2), which collides with a ` +
+          `\`const ${name}\` declared in this module — two top-level \`const ${name}\` ` +
+          `is a SyntaxError. This is NOT a compiler defect: remove the hand-written ` +
+          `\`const ${name}\`, which the compiler's enum rep now supersedes.`,
+        { file: filePath, start: 0, end: 0, line: 1, col: 1 } as unknown as Span,
+      ));
+    }
+  }
+  return src;
+}
+
+/** The identifier each emitted enum runtime rep line binds. */
+function enumRepBindingNames(repLines: string[]): string[] {
+  const names: string[] = [];
+  for (const line of repLines) {
+    const m = line.match(/^(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/);
+    if (m) names.push(m[1]);
+  }
+  return names;
+}
+
 function emitEnumRuntimeReps(fileAST: Record<string, unknown>): string[] {
   const inner = fileAST.ast as Record<string, unknown> | undefined;
   const typeDecls =
@@ -1152,6 +1280,10 @@ export function generateLibraryJs(
   // exported) up front so a consumer's `import { X }` + `X.Variant(…)` / `match`
   // resolves at runtime. Struct/alias decls stay pure types (no runtime rep).
   const enumReps = emitEnumRuntimeReps(fileAST);
+  // Names the compiler binds here — carried to `finishLibraryModule` so a
+  // collision with an author-declared `const` of the same name is named
+  // precisely instead of surfacing as a generic malformed-output defect.
+  const enumRepNames = enumRepBindingNames(enumReps);
   if (enumReps.length > 0) {
     for (const repLine of enumReps) lines.push(repLine);
     lines.push("");
@@ -1503,7 +1635,7 @@ export function generateLibraryJs(
       }
     }
 
-    return withRuntimeHelpers(withAsyncCombinators(lines.join("\n")));
+    return finishLibraryModule(lines, enumRepNames, fileAST, errors, filePath);
   }
 
   // ---------------------------------------------------------------------------
@@ -1574,5 +1706,5 @@ export function generateLibraryJs(
     }
   }
 
-  return withRuntimeHelpers(withAsyncCombinators(lines.join("\n")));
+  return finishLibraryModule(lines, enumRepNames, fileAST, errors, filePath);
 }
