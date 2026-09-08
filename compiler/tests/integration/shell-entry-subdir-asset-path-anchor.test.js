@@ -17,7 +17,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 
@@ -81,9 +81,37 @@ describe("shell entry in a subdir — composed-route asset paths stay inside dis
     expect(refs.length).toBeGreaterThan(0);
     const escaping = refs.filter(escapesDist);
     expect(escaping).toEqual([]);
-    // The shell's own assets are reachable from the dist-root route (same dir).
+    // ⚑ S410 — these two assertions are PINNING A 404, and the comment they used to
+    // carry ("the shell's own assets are reachable from the dist-root route (same
+    // dir)") was simply false. The shell's assets emit at `dist/shell/`, so a bare
+    // `app.css` / `app.client.js` reference from `dist/x.html` resolves to
+    // `dist/app.css` — which does not exist. Measured on HEAD:
+    //     emitted: shell/app.css, shell/app.client.js, shell/app.html,
+    //              x.html, x.client.js, models/auth.client.js, scrml-runtime.*.js
+    //     dist/app.css       -> 404
+    //     dist/app.client.js -> 404
+    // The refs ARE emitted, so these two lines pass; they are kept because they still
+    // pin the emitted SHAPE, but they no longer pretend the shape is correct.
+    // g-shell-subdir-asset-guard-pins-a-404-path.
     expect(refs).toContain("app.css");
     expect(refs).toContain("app.client.js");
+  });
+
+  // ⚑ The honest assertion, marked `failing` so the gate stays green while the bug is
+  // recorded as a bug rather than as a passing test. `test.failing` INVERTS: it passes
+  // while the body throws, and it FAILS THE SUITE the moment the body starts passing —
+  // so whoever fixes the emitter is told to flip this to a plain `test`, and the fix
+  // cannot land silently. A green `test` asserting a 404 was the worse of the two.
+  test.failing("every asset ref in a composed route resolves on disk (g-uptoroot-vs-distrel-anchor-mismatch)", () => {
+    const dist = build("subdir-resolve", {
+      "shell/app.scrml": SHELL,
+      "models/auth.scrml": AUTH,
+      "pages/x.scrml": `<page>\n  <h1>Route X</h1>\n</page>\n`,
+    });
+    const refs = assetRefs(join(dist, "x.html"));
+    const local = refs.filter((r) => !/^(https?:|\/\/|#|mailto:|_scrml_attr_tpl)/.test(r));
+    const broken = local.filter((r) => !existsSync(join(dist, r)));
+    expect(broken).toEqual([]);
   });
 
   test("the shell's OWN document is unaffected (own-document path already correct)", () => {

@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 100 |
+| HIGH | 101 |
 | MED | 227 |
 | LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -12382,12 +12382,75 @@ untouched, `SELECT n AS active` NOT coerced, `SELECT active AS n` coerced under 
 **Test gap:** #842's five committed tests are **emit-only** and contain no JOIN/collision case at all.
 
 <!-- @gap id=g-shell-subdir-asset-guard-pins-a-404-path sev=MED status=open locus=compiler/tests/integration/shell-entry-subdir-asset-path-anchor.test.js:85-86(two toContain assertions on dist/x.html name app.css and app.client.js — both resolve to dist/app.css and dist/app.client.js, which do not exist; the shell assets emit at dist/shell/) prov=review:S401-peter-S239-pass-on-845-PA-CONFIRMED-BY-READING-the-assertions-and-BY-EXECUTION-that-the-assets-emit-under-dist-shell -->
+### g-composed-route-drops-the-attr-tpl-effect-so-a-shell-nav-href-ships-as-a-literal-placeholder — a shell's reactive `href="${fn(@cell)}"` composes into every route document as the DEAD string `_scrml_attr_tpl_href_3`, at exit 0 with zero diagnostics
+
+<!-- @gap id=g-composed-route-drops-the-attr-tpl-effect sev=HIGH status=open locus=compiler/src/codegen(the shell/outlet COMPOSITION path — locate by the emitted marker STRING `data-scrml-attr-tpl-` and by which emitter attaches `_scrml_effect` to a route document vs the shell's own document; NOT yet narrowed to a file) prov=empirical:S410-peter-reproduced-by-compilation-on-028daeea-with-a-WORKING-CONTROL-in-the-same-build -->
+
+**Found while draining [[g-shell-subdir-asset-guard-pins-a-404-path]] — it is a third broken ref in
+the same emitted document that the filed entry does not mention.**
+
+A `<program>` shell containing `<nav><a href="${rolePath(@role)}">Dash</a></nav>` plus an `<outlet/>`
+emits, into the COMPOSED route document `dist/x.html`:
+
+```html
+<a href="_scrml_attr_tpl_href_3" data-scrml-attr-tpl-href="…">Dash</a>
+```
+
+…and `x.client.js` contains **no `_scrml_effect` and no mention of `attr-tpl` at all**. The placeholder
+ships with nothing to resolve it: the link is **dead in the browser**, showing a literal
+`_scrml_attr_tpl_href_3` as its href. Exit 0, zero errors, one unrelated `W-PROGRAM-SPA-INFERRED`.
+
+⚑ **THE CONTROL IS WHAT MAKES THIS A DEFECT RATHER THAN A DESIGN.** The *same build* emits the
+shell's OWN document `dist/shell/app.html` with the identical placeholder and marker — and there
+`shell/app.client.js` **does** carry `_scrml_effect` and does mention `attr-tpl`, so the placeholder
+is transient and resolves at hydration exactly as intended. **Same source, same compile, two
+documents: the own-document path wires the effect and the composed-route path does not.**
+
+| document | placeholder | `data-scrml-attr-tpl-href` | resolving `_scrml_effect` | outcome |
+|---|---|---|---|---|
+| `shell/app.html` (control) | yes | yes | **yes** | transient — correct |
+| `x.html` (composed route) | yes | yes | **NO** | ⛑ **dead link** |
+
+**Why HIGH:** it is silent, user-visible, and hits *navigation* — the shell's nav is by construction
+present on **every** composed route, so one reactive attribute template in a shell breaks the nav on
+the whole app. Nothing in the diagnostic stream mentions it.
+
+⚑ **Adjacent but NOT the same as the S212 family** ([[g-match-arm-drops-reactive-attr-class-effects]],
+resolved) — that was attr-tpl bindings inside a `<match>` ARM body; this is the shell→route
+COMPOSITION seam. Same shape of failure (marker emitted, effect not), different pass, which is worth
+saying out loud: this is the second time an attr-tpl marker has shipped without its effect, so the
+question worth asking before patching the crossing is whether *any* emitter that writes a
+`data-scrml-attr-tpl-` marker can be made to owe its effect by construction, rather than each
+composition path being taught separately.
+
+**Locus NOT established — this entry is the reproduction, not the diagnosis.** Deliberately not
+narrowed by guesswork.
+— `NEW S410-peter (found while draining the shell-404 guard; reproduced by compilation with a working control in the same build)`; **HIGH**; open
+
 ### G-SHELL-SUBDIR-ASSET-GUARD-PINS-A-404-PATH — the committed guard certifies a broken ref and will block the real fix — `NEW S401; MED; open`
 
 The guard #845 landed asserts `dist/x.html` references `app.css` / `app.client.js`. Those resolve to
 `dist/app.css` and `dist/app.client.js`, which **do not exist** — a shell entry in a subdir emits its
 assets at `dist/shell/`. So the test pins the wrong destination and goes RED when the remaining half of
 [[g-uptoroot-vs-distrel-anchor-mismatch]] is fixed correctly.
+
+⚑⚑ **ADDRESSED S410-peter — the false GREEN is gone; the emitter defect is untouched and still owed.**
+Re-reproduced by compilation on HEAD before editing anything: emitted tree is `shell/app.css`,
+`shell/app.client.js`, `shell/app.html`, `x.html`, `x.client.js`, `models/auth.client.js`,
+`scrml-runtime.*.js`, and resolving `dist/x.html`'s refs against disk gives **`app.css` → 404,
+`app.client.js` → 404** (the other three resolve).
+
+The two pinning assertions are **kept but re-commented** — they still pin the emitted *shape*, they
+just no longer claim the shape is correct — and the honest assertion is added as **`test.failing`**:
+every local ref must resolve on disk. ⚑ `test.failing` INVERTS, which is the point: it passes while
+the body throws and **fails the suite the moment the body starts passing**, so whoever fixes the
+emitter is told to remove `.failing` and the fix cannot land silently. Verified rather than assumed —
+a `test.failing` with a passing body reports *"this test is marked as failing but it passed. Remove
+`.failing` if tested behavior now works"*. A green test asserting a 404 was the worse of the two
+options; a red one would have blocked the gate.
+
+**Not resolved:** the emitter still anchors composed-route asset paths wrong. That half remains
+[[g-uptoroot-vs-distrel-anchor-mismatch]].
 
 **PA-VERIFIED both halves directly:** read the assertions at `:85-86`, and compiled a
 `shell/app.scrml` + `pages/x.scrml` set — the emitted tree contains `./shell/app.css` and
