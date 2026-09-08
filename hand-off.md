@@ -1,3 +1,127 @@
+# scrml — Session 410 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the `---` is prior sessions' (S408 mine, S405
+> bryan's) and is untouched except two factual corrections inside S405 that are marked in place.
+> **S409-bryan was LIVE throughout** this session (his lane: the `SPEC-INDEX.md` conflict class +
+> CI-gate hardening, #905/#906/#907) — disjoint by construction, no collision.
+> Full mechanical detail: `docs/changelog.md` S410 block and delta-log `[2929]`–`[2944]`.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. ⚑⚑⚑ **THE S406 82 GB LOCKUP HAS A NAMED CANDIDATE — AND PETER RULED THIS THE OPENER.**
+   Verbatim: *"let's take care of it first thing next session."*
+   `g-self-host-tab-test-is-an-unbounded-memory-runaway` (**HIGH**).
+   **`bun test compiler/tests/self-host/tab.test.js` grows ~720 MB/s with no plateau** — the sentinel
+   logged `commit 6.532 GB` then `KILL … holds 8.69 GB` **three seconds later**. At that rate it
+   reaches 82 GB in ~2 minutes on a 32 GB box.
+   ⚑ **RUN IT GUARDED** — unguarded it consumes the machine:
+   `powershell -File C:\Users\pjoli\bun-guard\run-capped.ps1 -CapGB 6 bun test compiler/tests/self-host/tab.test.js`
+   ⚑ **The 127-exit / 28-byte signature is `BunMemorySentinel` killing it**, not a bun crash.
+   **Method is prescribed and it matters: bisect INSIDE the 526-line `tab.test.js`, halving under the
+   cap until the allocating construct is named. Do NOT start from a hypothesis** — the three obvious
+   candidates are already eliminated by measurement: the `tab.scrml` library compile (0.37 s, ~0 GB),
+   importing the emitted `tab.js` (0.01 s, ~0 GB), and the sibling `ast`/`bpp`/`bs` files (all clean).
+   It dies **before the first test result prints**, so it is in collection or `beforeAll`.
+   Not bun and not Windows on the evidence; pre-existing, not introduced by S410.
+
+2. **Review floor reads 7 OWED** (#909–#915) — the floor's own recursion, all this session's. Per the
+   established pattern (see the #890 marker) a drain PR's review **rides the NEXT landing**, otherwise
+   the floor regresses forever one PR at a time. Discharge these next session.
+
+3. **The triage shortlist is banked — do NOT re-triage.** Top remaining pick:
+   `g-semdiff-chunk-namespace-token-discovery-misses-every-non-engine-html-site` (MED, **fully inert**,
+   instrument-only). `semdiff.ts:686-694` discovers the chunk-hash token from only 3 structural sites;
+   four namespaced emission sites are missed — `emit-each.ts:581`, `emit-match.ts:1157`,
+   `emit-html.ts:3957` (entry says 3906 — **stale**), `emit-logic.ts:4157`. Done-condition: an
+   each-only / match-only / meta-only HTML artifact compiled at two paths canonicalizes byte-identical.
+   ⚑ A **rejection table** for ~14 other candidates is in the S410 delta/PRs — each killed on a quoted
+   entry-body blocker. That analysis is done; don't repeat it.
+
+4. **Two HIGHs routed to bryan, both with reproducers, neither mine to fix:**
+   `g-composed-route-drops-the-attr-tpl-effect` (a shell's reactive nav `href` ships dead into every
+   composed route; the control is that the *same build* wires it correctly in the shell's own
+   document) and `g-tenant-floor-inert-for-a-two-qualifier-create-table` (§14.8.10 silently inert for
+   `db.schema.table`; a second table suppresses even `W-SCHEMA-NO-TABLES-DECLARED`). Also
+   `g-7-5-2-no-row-for-annotated-plus-inference-defeated` (MED, spec-level).
+
+5. **Deliberately left open, do not "tidy":** `g-recent-sessions-index-drops-named-session-wraps` —
+   all four matching defects are FIXED, but the entry reserves the *mechanism* question for bryan (a
+   session anchor could be a structured trailer instead of a regex over prose, S338 Rule 7). Closing it
+   would erase a reserved ruling. Same for the `self-host-smoke` 12 vacuous guards: the recommendation
+   is `skip` not `return`, but it is test policy on a known cross-OS baseline and should ride whoever
+   unblocks `g-module-resolver-stdlib-root-uses-windows-fragile-url-pathname`.
+
+## WHAT LANDED
+
+**Seven PRs, every one gate-green** — #909 #910 #911 #912 #913 #914 #915 — plus **`flogence#6`
+merged** (it had been recorded as landed in four places while sitting OPEN with no gate ever run).
+Board moved **HIGH 99→102 · MED 226→227 · LOW 90→86**. Review floor drained **4→0**, then re-incurred
+its own 7. Full detail in the changelog block; counts are generated, read them there.
+
+## 🔭 DURABLE
+
+**Every broken instrument this session failed toward GREEN. Six of them, and not one ever read as
+worse than reality.** A gate printing `FAIL` while the shell said exit 0 (`tail`'s code, not the
+gate's) · a PowerShell parse check passing **vacuously** over 21 real errors · a probe inflating a
+defect **27%** because `[0-9]+` backtracks and eats its own digit · a "fix" improving the headline
+3 fails → 1 **by breaking the module under test** · a test file printing **35 pass / 0 assertions** ·
+12 parity checks silently no-oping on a null module. **If an instrument in this repo is wrong, the
+prior should be that it is flattering you.**
+
+**A precondition guard OWES a precondition assertion.** Now demonstrated three times in-tree. Without
+it a harness disables itself and the only trace is the `expect()` count — a number nobody reads and no
+gate checks. `browser-todomvc` had it right and was the model copied.
+
+**The marker is an INDEX, not the record — read the entry BODY before writing code against it.** The
+ledger caught the "obvious" fix **twice**: the session-index widening S404 had already warned would
+still drop every PR-flow wrap, and the `module-resolver` `fileURLToPath` swap S341 had already tried
+and reverted. Both times I had read the marker line and the `locus=`, measured the defect, and started
+implementing. That is the governing-sentence failure in a different costume.
+
+**Write the pin BEFORE the fix.** The `E-EQ-002` arc landed only because the test failed with a message
+that was neither the old text nor the new one — exposing a **second emit site** whose advice was
+semantically *inverted*. A fix written straight from the entry would have edited a site that never
+fires for that input and "verified" it against a test that was never wrong.
+
+**A green aggregate hides an isolated runaway.** S406 measured the whole tier at 2.433 GB and cleared
+it; the runaway lives in one file that the tier-level number never surfaced.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I recorded `flogence#6` as "landed, all gate-green" in four places while it was OPEN with an
+   empty `statusCheckRollup`.** A cross-repo PR's state was assumed from having *pushed* it rather than
+   read back. Merged and corrected this session — and the correction was written **before** landing the
+   PR that reported it, so my own fix would not ship a stale present-tense claim.
+2. **★★ Twice I started implementing from a marker without reading the entry body** (above). Cost:
+   one reverted `module-resolver` change and one nearly-wrong session-index fix.
+3. **★★ I mis-sized my own guard within hours of writing it.** `bun-guard/README.md` and its memory
+   both said `-CapGB 4`; the suite exceeds 4 GB here and was killed with `MemoryExhaustion`. Both
+   corrected to 8 GB. The guard behaved exactly as designed; the number was mine and it was stale.
+4. **★★ I misattributed a sentinel kill to a stale test baseline.** `exit=127` on the self-host tier
+   was the sentinel killing a runaway — hours after I installed the very log that said so. I called it
+   "pre-existing, not mine" (true) and stopped (wrong).
+5. **★ I nearly filed two HIGHs that §7.5.1 explicitly sanctions** — `int` is *deliberately* outside
+   the checked set. Killed on the governing SPEC text, but only because I read the whole section.
+
+## Gate at close
+
+Cloud `gate` **GREEN** on all seven PRs; `windows` green; `tracking` RED — pre-existing, verified red
+on all four recent main runs. Local: `state.ts --check` 0 · `facts.ts --check` 0 · `delta-lint` PASS
+max `[2944]`. ⚑ **No clean local full-suite pass was obtained, and that is stated rather than papered
+over:** `compiler/tests/lsp/workspace-l2.test.js` fails 5 (**pre-existing** — verified identical
+against main's `emit-expr.ts`), `giti-016` is a **timeout flake** (runtime swings 1.02–7.67 s on
+*identical* code, both sides), and the self-host tier is item 1 above.
+
+**Worktrees NOT swept — none are this session's.** Four remain (`agent-a0742fe4795045e91`,
+`agent-a4e6b5f2562ae9eaa`, `onmount-c`, plus `scrml-pinned`); their work has not landed, so per the
+wrap discipline they are retained and surfaced rather than removed.
+
+**Machine state:** the S406 bun guards are rebuilt on this clone at `C:\Users\pjoli\bun-guard`
+(`run-capped.ps1` kernel Job-Object cap · `bun-sentinel.ps1` · `README.md`), both **bite-tested**, and
+`BunMemorySentinel` is a live logon task. It earned its keep the same day — see pickup item 1.
+
+---
+
 # scrml — Session 408 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** The S405 content below is bryan's, and he was **LIVE at S407**
