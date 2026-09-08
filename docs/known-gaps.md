@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 100 |
-| MED | 223 |
+| HIGH | 101 |
+| MED | 225 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -12704,3 +12704,54 @@ A library file's enum type-decl emits a runtime binding `const X = Object.freeze
 Either way the eight sources should lose their now-redundant mirrors; that half is a source edit under `compiler/native-parser/`, a different owner's surface, so it is named here rather than done.
 — `NEW S408-peter (found while auditing the 18 still-invalid library modules from the #893 differential; severity CORRECTED DOWN mid-investigation once the CLI gate was actually checked — the first read, from an API probe, wrongly looked silent)`; **MED**; open
 <!-- @gap id=g-library-enum-runtime-collides-with-a-user-const-and-the-diagnostic-blames-codegen sev=MED status=open locus=compiler/src/codegen/emit-library.ts(the-21.2-enum-runtime-emit)+the-generic-CG-malformed-output-message prov=empirical:PA-parsed-every-emitted-libraryJs-over-the-118-file-population-at-80f8d9eb-8-modules-each-with-one-duplicated-identifier-and-CLI-exit-2-1-error-no-artifacts-written -->
+
+### g-nested-program-is-accepted-and-silently-flattened-into-the-parent — a nested `<program>` declares no execution context at all: no worker, no isolation, no diagnostic
+
+§43 titles nested `<program>` **"Universal Execution Context Boundary"** and specifies it as *"an independent execution context — a separate compilation unit with its own scope, lifecycle, and communication channel."* **It is none of those today, and nothing says so.**
+
+**PA-MEASURED by artifact at `22bc1c08`.** Source: a `<program title>` containing `<rate> = 0.08` and a nested `<program name="compute">` whose exported `withTax` reads `@rate`:
+
+- **Compiles clean — exit 0, ZERO diagnostics.** No nominal/unimplemented banner.
+- **No separate artifact.** Emitted set is `*.client.js` / `*.css` / `*.html` / runtime — there is no worker file and no `new Worker(` anywhere in the output.
+- **The nested body is inlined into the PARENT's client bundle**: `withTax_1(n) { … }` sits in `n3-shared-nothing.client.js`.
+- **It closes over the parent's cell**: the inlined body reads `_scrml_cs_reactive_get("rate")` — the parent's `@rate`, from inside what §43.3 says is a shared-nothing scope.
+
+⛑ **`E-PROG-003` is a normative SHALL that cannot fire, because there is no boundary for it to guard.** §43.3: *"A reference to a parent-scope name from inside a nested `<program>` SHALL be compile error E-PROG-003."* The measurement above IS that reference, and it compiles silently. Filing the missing diagnostic alone would be treating a symptom — the diagnostic is missing because the isolation it defends does not exist.
+
+⛑ **Same for `E-PROG-004`.** §43.5.1 says an unawaited cross-program call is an error; the call does not lower in either form (see [[g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml]]), so no call site reaches the check.
+
+**Why HIGH rather than "a Nominal feature not built yet":** the compiler does not REFUSE the construct, it ACCEPTS it and produces something structurally different from what was written, with no diagnostic. An adopter who nests a `<program>` to move work off the main thread gets code on the main thread, sharing the parent's state, and a green build. That is the S404 durable exactly — *you write ordinary code, the compiler accepts it, and it silently does the wrong thing.* A Nominal feature that fires `E-*-NOMINAL` (the §23.3/§23.4 fail-closed pattern) would be fine; silent flattening is not.
+
+**Fork (not decided here):** (a) fail-closed — recognize the nested form and fire a `NOMINAL` diagnostic until the contexts are built, mirroring §23.3's recognized-and-fail-closed banner; (b) build §43.2's four context types. (a) is the containment move and is cheap; (b) is the feature. **They are not alternatives — (a) should land regardless of when (b) does.**
+— `NEW S407-bryan (found while writing the "I am Jack's <program>" article — the piece's standard is that every code block compiles, so the nesting block was compiled and its ARTIFACTS inspected; reading §43 alone would have published the boundary as real)`; **HIGH**; open
+<!-- @gap id=g-nested-program-is-accepted-and-silently-flattened-into-the-parent sev=HIGH status=open locus=compiler/src/(nested-<program> handling — the construct parses and its body is emitted into the parent client bundle; no execution-context split, no Worker emission, and neither E-PROG-003 nor E-PROG-004 has a reachable fire site) prov=empirical:PA-compiled-a-nested-program-reading-the-parent-cell-at-22bc1c08-exit-0-zero-diagnostics-no-worker-artifact-withTax-inlined-into-the-parent-client-bundle-reading-_scrml_cs_reactive_get-rate -->
+
+### g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml — §43.5.1's worked example uses `await`, which §19.9.8 says the language does not have, making `E-PROG-004` unreachable
+
+§43.5.1 specifies cross-program RPC with this worked example:
+
+```scrml
+${ const result = await <#compute>.add(1, 2) }
+```
+
+**PA-verified at `22bc1c08` — that source does not compile.** It fires `E-AWAIT-NOT-IN-SCRML`: *"an `await` expression — scrml has no `await` keyword (§19.9.8)."* So SPEC's own example for the feature is invalid scrml, and **§43.5.1 contradicts §19.9.8.**
+
+The contradiction closes a loop: §43.5.1 also states *"Unawaited cross-program calls SHALL be compile error `E-PROG-004`."* If `await` cannot be written, every cross-program call is unawaited, so the rule as stated condemns the only expressible form. Removing the `await` does not help either — `<#compute>.add(1, 2)` bare fires `E-CODEGEN-INVALID-LOGIC`. **There is no working call syntax in either direction.**
+
+**Two things are owed and they are separable:** the SPEC example must be corrected to whatever the resolved-Promise surface actually is (§19.9.3 says the compiler resolves a host-boundary Promise with no source-level `await` — §43.5.1 predates that and was never revisited), and `E-PROG-004`'s wording needs re-deriving from the corrected form. Root cause of the unusability is [[g-nested-program-is-accepted-and-silently-flattened-into-the-parent]].
+— `NEW S407-bryan (found by compiling SPEC's own §43.5.1 worked example verbatim while drafting the <program> article)`; **MED**; open
+<!-- @gap id=g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml sev=MED status=open locus=compiler/SPEC.md(§43.5.1 worked example + the E-PROG-004 sentence, vs §19.9.8 no-await-keyword and §19.9.3 compiler-resolves-at-the-boundary) prov=empirical:PA-compiled-the-verbatim-43.5.1-example-at-22bc1c08-E-AWAIT-NOT-IN-SCRML-and-the-await-free-form-E-CODEGEN-INVALID-LOGIC -->
+
+### g-spec-13-5-names-e-match-not-exhaustive-for-a-missing-engine-state-child — a §13.5 narrative cross-ref contradicts §51.0.B's normative statement, and the implementation sides with §51.0.B
+
+`SPEC.md:7787` (§13.5, the engine-recipe cross-ref) states the gain as:
+
+> *"compile-time exhaustiveness over states (every state has UI; missing a `<Failed>` arm is `E-MATCH-NOT-EXHAUSTIVE`)"*
+
+**PA-verified by execution at `2c34a94c` — the code is wrong.** An `<engine for=Order>` missing a state-child fires **`E-ENGINE-STATE-CHILD-MISSING`** (naming §51.0.B + §51.0.F), which is what §51.0.B's own normative statement specifies. `E-MATCH-NOT-EXHAUSTIVE` is real but belongs to block-form `<match>` (§18.0.1) — verified separately on a `<match for=Order>` missing the same variant.
+
+So SPEC contradicts SPEC: a **narrative cross-ref** in §13.5 against a **normative statement** in §51.0.B, with the implementation siding with the normative one. Fix is a one-line correction at §13.5; §51.0.B and the compiler need no change.
+
+⛑ **Worth recording HOW this surfaced, because it is the general case.** A draft of the "I am Jack's `<engine>`" article was going to state the §13.5 code as fact — *SPEC said so.* It was caught only because the article series' standard is that every code block is compiled rather than read. **A derived-doc claim inside SPEC itself is still a derived claim** (Rule 4), and §13.5's cross-refs are prose about §51, not §51.
+— `NEW S407-bryan (caught by compiling an article code block instead of trusting the spec sentence about it)`; **MED**; open
+<!-- @gap id=g-spec-13-5-names-e-match-not-exhaustive-for-a-missing-engine-state-child sev=MED status=open locus=compiler/SPEC.md:7787(§13.5 engine-recipe cross-ref) vs compiler/SPEC.md(§51.0.B normative state-child statement) prov=empirical:PA-compiled-both-shapes-at-2c34a94c-engine-missing-state-child-fires-E-ENGINE-STATE-CHILD-MISSING-and-match-missing-arm-fires-E-MATCH-NOT-EXHAUSTIVE -->
