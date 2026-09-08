@@ -903,12 +903,33 @@ function emitControlFlowLibraryFns(
  * is byte-identical to today's output — the safe direction — so a false
  * rejection costs an unlowered construct, never a corrupted emit.
  *
- * ⚑ RESIDUAL, FILED not fixed: `emitAsyncLibraryFns` and
- * `collectSqlFnRemovalRanges` splice on the SAME unverified spans and are NOT
- * guarded here. They route far fewer fns (async / `?{}`-bearing only), so the
- * hazard is pre-existing and unchanged by this landing; widening the guard to
- * them changes output for files this change is otherwise inert on, which is a
- * separate measurement. See `g-library-fn-decl-span-unverified-splice`.
+ * ⚑ ALL THREE SPLICERS ARE NOW GUARDED (S408, #898) — but NOT the same way, and
+ * the difference is load-bearing. Call sites: `collectSqlFnRemovalRanges` (:360),
+ * `emitAsyncLibraryFns` (:758), `emitControlFlowLibraryFns` (:844).
+ *
+ *   - async + control-flow: an unverifiable span means LEAVE THE FN ON THE RAW
+ *     PATH. Inert, and it fails loudly downstream.
+ *   - SQL: an unverifiable span is a HARD ERROR, `E-CG-SQL-FN-UNVERIFIABLE-SPAN`.
+ *     `collectSqlFnRemovalRanges` is not an optimisation, it is a CONFIDENTIALITY
+ *     BOUNDARY — it prunes a server-only `?{}` / transaction fn OUT of the
+ *     importable, client-facing library `.js` (§44.7.1, W5b). Silently skipping
+ *     that splice would LEAVE the SQL body in that artifact: fail-OPEN, in the one
+ *     place this file must fail closed. Do NOT "unify" these two behaviours.
+ *
+ * ⚑ THE RESIDUAL IS THE HONEST HALF, and it is two things, not the one this
+ * comment used to claim:
+ *   1. The SQL error path is INERT AND THEREFORE UNEXERCISED — 118/118
+ *      byte-identical on the corpus, so it has never fired. A reproducer is owed
+ *      and is hard: a library file cannot carry a `<db src>` (markup makes the
+ *      file non-`pure-module`), which is why the population has zero SQL fns.
+ *   2. The REAL fix is still upstream and unowned here — the parser should not
+ *      emit a `function-decl` span that starts mid-parameter-list. Locus is
+ *      `ast-builder.js` / `compiler/native-parser`.
+ * See `g-library-fn-decl-span-unverified-splice` (still open for exactly those two).
+ *
+ * ⚑ This block previously said the async and SQL splicers "are NOT guarded here",
+ * which stopped being true at #898 and was caught by a maps non-compliance pass
+ * (N-S405-2) — in a file whose own comments are its correctness argument.
  */
 function verifiedFnRemovalRange(
   node: ASTNode,
