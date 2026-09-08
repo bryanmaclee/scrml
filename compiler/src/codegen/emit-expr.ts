@@ -1292,10 +1292,13 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
   // is deliberately NOT done here — it is filed as a gap, not smuggled in under a
   // diagnostic fix.
   //
-  // ⚑ The same "build fails, so it never ships" reasoning appears at three other sites
-  // in this file (the E-SESSION-VALUE placeholder and two leak-guard comments). It is
-  // wrong in all of them for this same reason. Filed; not edited here, because they are
-  // other codes' text.
+  // ⚑ The same "build fails, so it never ships" reasoning appeared at three other sites
+  // in this file (the E-SESSION-VALUE placeholder and two leak-guard comments). It was
+  // wrong in all of them for this same reason. ⚑ ALL THREE CORRECTED S410 — they now
+  // point back here rather than repeating the false guarantee. The underlying behaviour
+  // is unchanged and still filed as `g-cli-emits-artifacts-on-failed-compile`, which is
+  // direction-of-change and routed to bryan: gating writes on fatal CG errors would move
+  // every `E-CG-*` code, so it is not smuggled in under a comment fix.
   //
   // The placeholder is emitted as syntactically VALID JS on purpose: an unparseable one
   // would trip the §2.2.1 acorn emit gate and bury this precise diagnostic under a
@@ -1379,7 +1382,11 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
   // would emit a bare `session` reference → ReferenceError at request time. Restore
   // the "no bare `session` ever reaches emitted JS" invariant: record E-SESSION-VALUE
   // (drained into the live `errors` by generateServerJs) and emit a harmless
-  // placeholder (the build fails on the error, so it never ships). The shadow guard
+  // placeholder. ⚑ NOT "so it never ships" (corrected S410): fail-closed holds at the
+  // PROCESS level (non-zero exit), NOT at the filesystem level — `api.js` gates the
+  // write phase only on `emitGateFailed` (the §2.2.1 acorn gate), so a fatal CG error
+  // still writes the artifact. See the full reproduction at :1281 and
+  // `g-cli-emits-artifacts-on-failed-compile`. The shadow guard
   // (`_sessionShadowedInFile` file-scope OR `declaredNames` per-handler) means a
   // user-declared `session` binding is honored as an ordinary value, not flagged.
   if (
@@ -3792,7 +3799,11 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // classifier's `syncCallSink` (drained by emit-server → hard error
   // `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`) instead of leaking. The bare emission is
   // still returned so the artifact is well-formed for the diagnostic pass; the
-  // recorded ERROR is fatal, so that output never ships.
+  // recorded ERROR is fatal. ⚑ NOT "so that output never ships" (corrected S410):
+  // fail-closed holds at the PROCESS level (non-zero exit), NOT at the filesystem
+  // level — a fatal CG error still writes the artifact, because `api.js` gates the
+  // write phase only on `emitGateFailed`. See :1281 and
+  // `g-cli-emits-artifacts-on-failed-compile`.
   // Seam-A Gap 2/finding-4 — the auto-await now fires in CLIENT mode too: a client
   // fn calling a Promise-returning stdlib primitive BARE (`const r =
   // safeCallAsync(...)`, no `!{}`) is colored async by the stdlib seed, so its call
@@ -3815,7 +3826,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       // detector (the client path installs no module-level classifier, so pushing
       // to a stale `_serverAsyncClassifier.syncCallSink` would mis-report against
       // the next server file). Emit bare either way (well-formed artifact; the
-      // diagnostic is fatal so the leak never ships).
+      // diagnostic is fatal). ⚑ NOT "so the leak never ships" (corrected S410):
+      // fail-closed holds at the PROCESS level (non-zero exit), NOT at the filesystem
+      // level — the artifact IS written on a fatal CG error. See :1281 and
+      // `g-cli-emits-artifacts-on-failed-compile`.
       if (ctx.mode === "server") {
         _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: node.span });
       }
