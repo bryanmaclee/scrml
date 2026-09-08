@@ -86,9 +86,23 @@ export function parseRows(text: string): Row[] {
   for (const line of text.split(LINE)) {
     const m = line.match(/^\|\s*(dpa-\d+)\s*\|(.*)$/i);
     if (!m) continue;
+    // S409 — the rule cell is the LAST cell, not `cells[1]`.
+    //
+    // The queue is a 3-column table (`| id | status | rule |`), so a naive `split("|")` yields
+    // [status, rule, ""] and `cells[1]` is right — UNTIL a status cell quotes source containing a
+    // pipe. `dpa-040` quotes `name.startsWith("@") || name === "~"`; the `||` splits into two extra
+    // cells, `cells[1]` reads the EMPTY string between the pipes, and the row's ratification becomes
+    // invisible. Witnessed at S409: a ruling was written into the correct cell, `dpa-debt` kept
+    // reporting the item as ADVISORY, and the row LOOKED correct in every hand inspection — the
+    // ledger and the probe had stopped resolving to the same cell (pa-base §10).
+    //
+    // Taking the last non-empty cell is inert on all 44 well-formed rows (their last non-empty cell
+    // IS `cells[1]`) and corrective on the one that is not. It fails toward "advisory" either way,
+    // which is the safe direction for a debt probe.
     const cells = m[2].split("|");
     const statusCell = cells[0] ?? "";
-    const ruleCell = cells[1] ?? "";
+    const nonEmpty = cells.slice(1).filter((c) => c.trim() !== "");
+    const ruleCell = nonEmpty.length > 0 ? nonEmpty[nonEmpty.length - 1] : "";
     rows.push({ id: m[1].toLowerCase(), state: classify(statusCell, ruleCell), raw: statusCell.trim() });
   }
   return rows;
