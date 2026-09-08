@@ -31,10 +31,47 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 101 |
-| MED | 223 |
+| MED | 224 |
 | LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-migrate-consumer-is-not-raw-DDL-aware-deferred-to-its-own-arc — `extractDesiredSchema` serves two consumers with different needs; the tenant floor learned raw DDL, the migrate/differ path deliberately did not
+
+<!-- @gap id=g-migrate-consumer-not-raw-ddl-aware sev=MED status=open locus=compiler/src/schema-differ.js(diffSchema + the §14.8.11 grant loop)+compiler/src/commands/db-migrate.js(the boundary decline, and printPlan's withheld-plan filter) prov=ruling:user-voice-scrml.md-S405-bryan-"split arc b, land the tenant half. re-scope the other half"+dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md -->
+
+**Deferred by ruling, not by omission.** Scope doc: `docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md`.
+
+⚑ **NOT LIVE ON MAIN.** The four findings below were measured against the *un-split* arc-B branch and
+**all four evaporated by construction** when the migrate consumer was made to decline raw tables at
+its own boundary. `diffSchema` is **902 code lines identical to `origin/main`**, verified. They are
+recorded as the design constraints a raw-DDL-aware migrate path must satisfy. **Do not open this arc
+by trying to reproduce them.**
+
+1. **Case folding** — raw-DDL names carried author casing into a case-SENSITIVE map, so
+   `CREATE TABLE Assets` + an `assets` row produced two contradictory warnings for one table and,
+   under `--allow-destructive`, `DROP TABLE IF EXISTS "assets";`. Postgres folds unquoted
+   identifiers; the differ did not. The tenant half's `TenantTableSet` (folds on `add` AND `has`) is
+   the shape to copy — fix it in the container, not per call site.
+2. **An empty plan and a suppressed plan are different states** — `printPlan` renders a withheld plan
+   as green `up to date — 0 statements`. The file's own prose already forbids that conflation.
+3. **The Postgres APPLY path printed no warnings at all** — dry-run and SQLite did. Silent on the one
+   path that mutates the database.
+4. **The §14.8.11 grant loop iterated the unfiltered set** — `GRANT … ON "assets"` for a table the
+   same plan refused to create → `relation does not exist` → whole migration rolled back.
+
+**Two recognizer defects travel with the landed tenant half and are owed here** (narrow,
+non-destructive, exit-0 inertness): `isTableLevelConstraint` eats a column named `key`/`index` whose
+type carries non-numeric arguments (`key GEOMETRY(Point, 4326)`, `key ENUM('a','b')`); and three-part
+`CREATE TABLE db.schema.table (…)` matches nothing, so the tenant floor is inert for it and
+`W-SCHEMA-NO-TABLES-DECLARED` does not cover it (it fires only at zero tables *total*).
+⚑ `like` is genuinely undecidable by a leading-word test and is correctly handled by the **grammar**
+(`LIKE` is reserved, so a column named `like` must be quoted) — **do not replace that with a heuristic.**
+
+**One stale comment in this arc's territory:** `schema-differ.js:307` still says *"`diffSchema`
+accordingly SKIPS `rawDdl` tables"*, which stopped being true when the decline moved to the
+consumer's boundary.
+— `NEW S405-bryan (deferred half of the dpa-039 arc-B split; the four findings are pre-split measurements, not live defects)`; **MED**; open
 
 ### g-the-foreign-opener-grammar-is-hand-spelled-in-five-places-at-three-levels-of-completeness — SPEC 23.2 defines `_` + ZERO OR MORE `=` + `{`, and no two detectors agree on how much of it to match
 

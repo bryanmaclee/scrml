@@ -1,139 +1,134 @@
-# scrml — Session 404 (bryan · ASUS-Vivobook) — WRAP
+# scrml — Session 405 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-09-06. Booted `/boot` Profile A onto `069e86fd`. **Successor to a LIVE S403-peter.**
-**4 PRs landed** (#874 #875 #876 #877). Mechanical state — landings, counts, the session stream —
-is in `docs/changelog.md` and `handOffs/delta-log.md` ([2856]–[2875]); this file carries only what
-those cannot.
+**Date:** 2026-09-07/08. Booted `/boot` Profile A onto `4d057a58`. **Successor to a LIVE S403-peter;
+S406/S408-peter ran concurrently all session; bryan opened a THIRD session on the other machine.**
+Mechanical state — landings, counts, the session stream — is in `docs/changelog.md` and
+`handOffs/delta-log.md`. This file carries only what those cannot.
 
-**The framing: the session opened on a ruling and turned into a verification audit.** bryan ruled
-`int`/`number` in two messages. Everything after is instruments and gates being wrong — including
-mine, twice, and one of those is the sharpest miss on the board.
+**The framing: a "free move" that took four rounds, two security arcs that took six and three, and
+ONE failure mode wearing seven costumes.** Every substantive thing today was caught by an instrument
+rather than by reading — and several caught *me*.
 
 ---
 
-## ⚑⚑ LIVE SIBLING — read before touching anything
+## ⚑⚑ THE DURABLE FINDING — unratified, and the reason to read this file
 
-**`S403-peter` was LIVE all session and is not wrapped.** Different machine (Windows clone), his own
-lane. His in-flight arc: `docs/changes/library-mode-structural-routing-2026-09-06/`, worktree
-`agent-a451e4f6606fbf34e` @ `4f139aa1`, touching `compiler/src/codegen/emit-library.ts` (+297/−54).
-**The PA half is owed on HIS side** (S239 pass, the 71-changed-output verification, the full-suite
-gate, the language-surface review). I stayed disjoint from it all session and did not touch
-`emit-library.ts` or his worktree.
+> **An enumeration's method being sound says nothing about its AXIS being complete.**
 
-⚑ **Do NOT read this hand-off's silence about his arc as "nothing in flight."** The S401→S400
-precedent is on the board: a wholesale `hand-off.md` rewrite ate a collaborator's pickup section.
-This file is bryan-lane; peter's state lives in `../scrml-support/handOffs/active-sessions/S403-peter.md`.
+Seven instances today, each rigorous in method and wrong in axis:
+
+| # | the enumeration | the missing axis |
+|---|---|---|
+| 1 | four delimiter tokens, probed exhaustively | the helper recognized a **fifth** (`/*`) |
+| 2 | tokens × locations, all 20 cells run | the axis was **scan sites** (4 opener-blind loops) |
+| 3 | **three independent proofs** of a sink population, all agreeing | all three enumerated the **mechanism**; the obligation is over the **data** |
+| 4 | function-level analysis of in-class loops | the unit is the **loop** — 3 of 4 sit inside functions that also hold a *safe* loop |
+| 5 | one normative grammar (`_` + `=`\* + `{`) | **five hand-spellings** at three levels of completeness |
+| 6 | my own two-shape sibling probe | two probes are **members, not a population** |
+| 7 | a test matrix built to stop uncrossed cells | **had an uncrossed cell of its own** |
+
+⚑ **Arc A's version is the sharpest and belongs in `pa-base` if it goes anywhere:**
+
+> *"All three enumerated over the MECHANISM; the obligation is over the DATA. A sink that never
+> adopted the mechanism is outside all three frames at once, **so their agreement was one blind spot
+> counted three times.**"*
+
+**Three independent proofs agreeing is worth nothing if all three share an axis.** That is not the
+same claim as "verify your findings", and no existing rule in the contract says it.
 
 ---
 
 ## ⏭ NEXT-SESSION PICKUP
 
-### 1. ⚑⚑ TWO RULINGS OWED, both from this session's own findings
+### 1. Owed to bryan — the advisory queue, 6 items
+**dpa-037** (NaN — he explicitly declined: *"ok hold on I am not ratifying NaN! TBC"*) ·
+**dpa-040/041/042** (the `~` cluster — ONE root: `E-TILDE-001/002` have zero producers and have never
+fired; rule as one item, and 042's Call 4 is the only genuine fork) · **dpa-043** (axiom, ladder row 7,
+non-delegable; its Call 5 is a unanimous floor that costs nothing: *adjudicate `lift` vs `yield` in
+writing in the SPEC whatever you rule*) · **dpa-045** (round 2 fired, verdict pending).
 
-**(a) The `${`-in-a-top-level-template root — the biggest thing found today.**
-`g-splitblocks-consumes-dollar-brace-inside-a-top-level-template-truncating-the-string`, **HIGH**.
-```scrml
-<full>: string = `hello ${1 + 1} world`     // → "hello "   exit 0, ZERO diagnostics
-<full>: string = `${@first} ${@last}`       // → ""         exit 0, ZERO warnings
-```
-`splitBlocks` tracks back-ticks only under a `meta` frame, so at top level the `${` opens a logic
-block and the string is truncated there. ⚑ **There is NO working path**: nested inside `${}` the
-splitter keeps the template whole and codegen then fails to lower the `@` sigil →
-`E-CODEGEN-INVALID-LOGIC`. Top level lies, nested errors.
-**Why it is a RULING and not a fix:** §44.8 already requires the `?{` scanner to respect
-template-literal boundaries, added after *that* form produced silent data loss (*"Per S49,
-silent-bad-output is unacceptable"*). **Nothing governs `${`** — searched §3.1, §4.18, §7.4.2,
-§40.8, no governing sentence. Rule 4 outcome (2). The question is a §3.1 context-grid one: does a
-back-tick shield `${` in a top-level default-logic body, and what about back-ticks in markup prose?
-Corpus blast radius **0 real sites** (all 37 interpolated-template inits are indented) — blast
-radius, NOT demand evidence.
+### 2. The deferred migrate/differ arc
+`docs/changes/migrate-consumer-raw-ddl-2026-09-08/SCOPE.md` + gap
+`g-migrate-consumer-not-raw-ddl-aware`. ⚑ **Its four findings are PRE-SPLIT measurements and do NOT
+reproduce on main** — `diffSchema` is 902 code lines identical to `origin/main`, verified. Do not
+open the arc by trying to reproduce them.
 
-**(b) The `int`/`number` BUILD, now that the ruling exists.** Not a new decision — a build gated on
-its own measurement. Shape: bare `int` desugars to an implicit `number(integral)` so it enters the
-§53.4 predicated path (**PA-verified it does not today**: `type-system.ts:3111` gates on
-`indexOf("(") > 0`, so a bare annotation never becomes a `tPredicated` and never touches a zone),
-with `integral` kept INTERNAL — no new adopter-visible predicate, the §55.1 14-item catalog stays
-closed. **PA-decided sub-fork on fork-rule row 1 (limit beats widen); bryan may veto.**
-⚑ **The gate is an ARTIFACT differential, not a diagnostic one** — `f(x: number)` into an `int`
-parameter is `semantics-changed` (a boundary check appears where nothing is emitted today), and no
-diagnostic moves. And ⚑ **position 3 has ZERO implementation** — this is "write the argument
-assignability check", not "add a normalization"; see [2858].
+### 3. Two opener detectors nobody owns
+`type-system.ts:473` (levels 0+1) and `lint-w-interp-in-raw-content.js:51` (level-0 **for every
+sigil**) — the two survivors of `g-foreign-opener-grammar-hand-spelled-five-places` (HIGH). Both were
+outside either arc's file boundary.
 
-### 2. THE INSTRUMENT — re-run it, do not re-quote it
-`bun scripts/int-number-census.ts --summary` (`--json`, `--roots=`, `--selftest`; ⚑ the flag needs
-the `=`). Q3 5-root: **69 provable / 93 strict of 120 · 43 integral literals · 0 non-numeric**.
-Q4 reverse: **0 of 81**, a measurement not a floor. §7.5.1 has been corrected in place and now says
-so, naming the instrument.
-
-### 3. RULINGS OWED — carried, unchanged
-- **dpa-030…044** — fifteen items, ALL `COMPLETE (ADVISORY)`, all bryan-lane, awaiting ratification.
-- **The apostrophe restructure fork** (#862 OPEN / #865 DRAFT, held at five rounds). The inbound
-  `2026-09-03-from-peter-to-bryan-engine-state-child-apostrophe…` is still bryan-owed and unarchived
-  for that reason.
-- **The worktree sweep** — 48 sweepable, **36 branches carrying work that never reached main**.
-  ⚑ **86 worktrees remain after this session's 6b cleanup.** Dry run recorded S402; nothing removed.
-- The `/` route collision · the pre-CE alias-mount residual · `g-cli-emits-artifacts` tier.
-
-### 4. RULED THIS SESSION — do not re-open
-- **`int` is a REFINEMENT (subtype) of `number`.** Option (a). The §53.4 three-zone model decides
-  each site; the safe direction (`int` → `number`) never rejects.
-- **FSP `Initialize` = coherent-(A)** + the handshake-response-shape design insight, both ratified.
-  Return leg delivered to peter (#874); the build is his follow-on.
+### 4. Carried, unchanged
+The `${`-in-a-top-level-template ROOT (HIGH, ruling-gated — ⚑ **and dpa-045 round 1 measured it as
+Class C, NOT closed by the camp ruling; do NOT defer it on dpa-045**) · the worktree sweep (**96
+agent branches, 119 worktrees**) · `types-gate` RED on main with 12 pre-existing diagnostics ·
+thread-board reports **1 ERROR**, uninvestigated.
 
 ---
 
-## 🔭 DURABLE
+## 🔭 DURABLE — what the session actually established
 
-**Three findings this session, one shape:** a type alias voids the annotation that uses it · a
-top-level template silently truncates · argument types are unchecked. **You write ordinary code, the
-compiler accepts it, and it silently does the wrong thing.** bryan's S402 *"that was 100% of the
-sample of what I attempted with the type system"* was not bad luck — it is the shape of the surface.
+**A "free move" is a claim, not a category.** The apostrophe fix was scoped from a deliberation as
+*"~35 LOC, the exact S196 delta, cannot break the corpus, already licensed."* It took **four rounds
+and surfaced five HIGHs**, every one silent behaviour loss at exit 0. The deletion was right; the
+*free* was wrong. ⚑ **The root nobody had: the string branches were doing DOUBLE DUTY** — also
+shielding four opener-blind flat scanners from reading attribute interiors. That is why five prior
+rounds by another session could not land it either: any fix addressing only the lexing half was
+always going to break something else.
 
-**A NO-DIFFERENCES verdict over a path never taken is vacuous, not clean.** Two zeros this session
-proved it, both surfaced by an agent against its own work: the corpus artifact differential is
-BLIND to #877's HIGH fix (0 translations reached `translateTemplateLit` over 1920 sources), and
-`extractInitLiteral`'s population is 0 (278 calls, the only distinct argument is `""`). **Ask what
-a zero measured before reading it as coverage.**
+**A fix with no done-condition loses every scheduling contest it enters** (bryan-ratified, dpa-039
+call 2) — and it recurred *twice more* the same day at a lower level. Arc A: *"the crossings are
+GENERATED by the mismatch, so there is an unbounded supply."* Arc B: two of its own fixes cancelled,
+closed by **deleting one side of the seam** rather than patching both. **Prefer removing a coupling
+over patching a crossing** is the operational form.
 
-**A wrap PR is where a code-bearing change is least likely to be read.** #873 carried
-`type-system.ts` +170 inside an 85-file docs-and-maps diff, merged unreviewed, and was the LAST
-OWED review-floor item. The pass that found the defect ran only because the probe still named it.
+**A green suite is not evidence.** Arc A's dedup test read `1` with *and* without the fix and was
+caught only by disabling the fix to prove the bite. Arc B's narrow tenant suite passed after a
+destructive edit had deleted `actualMap` — because it no longer imported the file. Arc B's own new
+matrix asserted `cols[last]` and so stayed green on a bug that dropped `cols[0]`.
+
+**Corpus-zero concealed three live defects today** — no corpus app pairs a predicated param with a
+protect-free `<db>`; none pairs `protect=` with a mount-hydrate path; and odd-apostrophe prose *does
+not compile*, **so the corpus is BY CONSTRUCTION free of the cases that prove the heuristic bites.**
+That last one is dpa-045's own Call: **§4.18.2's frequency rationale is unmeasurable in principle on
+a green corpus**, which cuts against the model it is the foundation of.
+
+**Ratification is not verification.** dpa-028 was RATIFIED at S347 naming `chunks.json` as the
+precache source; it advertises 3 chunk URLs and writes 1, so the ratified recipe makes `install`
+fail and the cold boot fail completely. Caught only because the return leg was reproduced before
+being posted.
 
 ---
 
 ## ⚑ MISSES (mine)
 
-1. **★★★ I verified a COUNT and asserted a VALUE.** I filed a HIGH stating "a 22-character value now
-   inhabits a `<= 8` predicate unchecked." I had checked the guard count (base 2 → HEAD 0) and never
-   read the value. Both sides emit `""`; the base guards were **vacuous**. #873 had removed a guard
-   that was **masking** a worse pre-existing bug, and satisfying my own DONE-PROBE would have
-   restored the mask. A dispatched agent falsified it at the artifact level and was right.
-   **Verifying one observable does not verify the claim you build on it.**
-2. **★★ I briefed the arc's size wrong** — "`fieldTypeEquals` gets the normalization its siblings
-   have" implied position 3 exists with one gap. It has **zero implementation**; that pair is bounded
-   to §14.8.8 SQL-row width subtyping and reached from nowhere else.
-3. **★★ I mis-read bryan's own ruling.** He described (a) and I recorded (b); the clause that
-   discriminates ("int is a subtype of number") is (a)'s thesis while (b)'s text was "keep them
-   DISTINCT". I noticed the clause and then wrote that the two options "express the same truth".
-4. **★★ I relayed a reachability claim I had not verified** (component re-parse / meta-emit). The
-   agent tried three times to construct a reaching case, failed, and **declined to certify it**.
-5. **★ My cross-check greps were the wrong instrument, twice** — `\b` matches inside `int[]` (the
-   71-vs-74 gap), and 9 enum-payload "hits" were inside `//` comments. Both times the parsing
-   instrument was right and my regex was not.
-6. **★ `--roots` needs the `=`** and I passed it space-separated, silently measuring the whole tree.
-   The probe printed its own `scope:` line; I had grepped past it. Third instance of that trap here.
+1. **★★★ A governing-sentence gate failure.** The free-move brief cited `SPEC.md:1090`'s second half
+   as its licence. **The FIRST half of that same sentence says the opposite** — engine state-child
+   bodies ARE code-default. The agent caught it and found a stronger §4.18.3 licence. **Quoting half
+   a sentence whose other half contradicts you is exactly what the gate exists to make checkable.**
+2. **★★★ An under-specified instruction opened a security hole.** I told arc A *"preserve non-plain
+   values"* inside a fail-closed redactor without saying on which axis. It generalized *don't
+   rebuild* into *don't look*, and a tagged row inside any class instance leaked. **A preservation
+   instruction inside a security floor must state its axis.** The agent took more of the blame than
+   I assigned and was right to: an ambiguous instruction at a security boundary is a signal to
+   resolve it, not to pick a reading.
+3. **★★ I partitioned the arcs by FILE and the defect spanned the partition.** The `_{}` opener bug
+   sits in both `protect-egress` and `tenant-egress`, so **neither branch alone closed the class.**
+   The ingestion-disjoint invariant protects against *interference*, not against a defect whose
+   extent crosses the partition — and nothing in the contract catches that.
+4. **★★ I repeated an inherited count.** The S404 hand-off said 15 advisory dPA items; it is **8**
+   (dpa-030…036 were ratified between S347 and S365). I put 15 in the boot report before checking.
+5. **★ Three delta-log sequence collisions**, one of them after I printed the tail and appended from
+   a stale number anyway. The third came from a **rebase**, which is a new mechanism: the sequence is
+   not rebase-safe and `--fix` is explicitly blind to which side was published.
+6. **★ I mangled the dPA queue row twice** — wrote the status into the *id* cell (the item vanished
+   from the probe), then displaced verdict text into col 3 whose *"NOT RATIFIED"* matches
+   `classify()`'s `/\bRATIFIED\b/i`. Both caught by the probe's own count moving.
 
 ## Gate at close
-Cloud `gate` **GREEN** on every PR this session (#874 #875 #876 #877). `tracking` RED — pre-existing
-and filed (`g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only`, plus
-`g-types-check-red-on-main-with-12-pre-existing-diagnostics`, newly filed and independently
-re-confirmed twice). Local post-commit reported 54 browser failures each time — **triaged, not a
-regression**: docs-only diffs cannot move compiler behaviour, and after `bun run pretest` the flagged
-file passes 26/0 (the known stale-gitignored-fixture class).
-Gaps **HIGH 96 · MED 217 · LOW 90 · Nominal 7**. Review floor: see the wrap commit.
+Cloud `gate` **GREEN** on every PR this session. `tracking` RED — pre-existing dev-watcher class.
+Gaps **HIGH 101 · MED 224 · LOW 90 · Nominal 7**. Review floor **4 OWED** (all peter's lane).
+**Both adopter Direction issues CLOSED** — #509 after 23 days, #471 after 30.
 
-⚑ **This wrap's PR is deliberately titled `wrap(s404): …` and NOT left to `--fill`.** Left alone,
-`gh pr create --fill` titles from the branch (`wrap/s404`), producing a merge subject the
-recent-sessions matcher cannot see — the gap filed this session, which swallowed S402. Titling with
-the paren form is the one-word workaround until that gap is ruled; **do the same next wrap, or this
-session vanishes from the index too.**
+⚑ **This wrap's PR is titled `wrap(s405):` deliberately, not left to `--fill`** — the branch form
+produces a merge subject the recent-sessions matcher cannot see. Do the same next wrap.
