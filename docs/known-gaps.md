@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 102 |
-| MED | 229 |
-| LOW | 86 |
+| HIGH | 103 |
+| MED | 230 |
+| LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -13280,3 +13280,34 @@ A library file's enum type-decl emits a runtime binding `const X = Object.freeze
 Either way the eight sources should lose their now-redundant mirrors; that half is a source edit under `compiler/native-parser/`, a different owner's surface, so it is named here rather than done.
 — `NEW S408-peter (found while auditing the 18 still-invalid library modules from the #893 differential; severity CORRECTED DOWN mid-investigation once the CLI gate was actually checked — the first read, from an API probe, wrongly looked silent)`; **MED**; open
 <!-- @gap id=g-library-enum-runtime-collides-with-a-user-const-and-the-diagnostic-blames-codegen sev=MED status=open locus=compiler/src/codegen/emit-library.ts(the-21.2-enum-runtime-emit)+the-generic-CG-malformed-output-message prov=empirical:PA-parsed-every-emitted-libraryJs-over-the-118-file-population-at-80f8d9eb-8-modules-each-with-one-duplicated-identifier-and-CLI-exit-2-1-error-no-artifacts-written -->
+
+### g-space-separated-enum-variants-silently-drop-every-variant-after-the-first — `type X:enum = { A  B }` compiles clean at exit 0 and emits only `A`, and a green conformance case in the versioned language contract is built on the shape
+
+**PA-REPRODUCED BY EXECUTION** (S409, on `960043a7`). `${ type Phase:enum = { Idle  Active  Done } }` compiles with **exit 0 and no diagnostic**, and the emitted JS defines **only `Idle`** — `Active` and `Done` vanish. The comma-separated control (`{ Idle, Active, Done }`) correctly emits all three.
+
+**Root, and it is a two-site interaction.** `compiler/src/meta-checker.ts:2051` splits an enum body on `/[|,\n]/`, and its own comment names the sanctioned set: *"split on `|` AND `,` AND `\n` so the four declared variant-list shapes parse uniformly (brace+comma, brace+newline, brace+pipe, bare+pipe). Mirrors parseEnumBody in type-system.ts."* **Space is deliberately not a separator — it is not a SPEC-sanctioned form.** So `{ Idle  Active  Done }` survives as ONE part. `compiler/src/codegen/emit-bindings.ts:162` then does `clean.split(/[\s(]/)[0]` — takes the FIRST whitespace-delimited token — which is what turns "not a sanctioned form" into "silently emits the first variant" instead of a parse error.
+
+⚑ **AND A GREEN CONFORMANCE CASE IS BUILT ON IT.** `conformance/cases/server-fn/sse-generator-binding-seed-survives/case.scrml:2` declares `type Phase:enum = { Idle  Active }` and carries an `<Active>` arm at `:13`. `Phase.Active` is therefore `undefined` and that arm **can never fire** — yet the case **PASSES**, because it asserts only the pre-event seed (`#active count 0`, right for the wrong reason). All 905 cases pass. §62.2 makes the conformance corpus *the versioned language contract*, so the contract currently contains an assertion about a shape that cannot execute.
+
+**Fix direction:** an unsanctioned separator should be a parse ERROR, not a silent first-token take. Fixing the case is part of the landing — it must exercise `<Active>` or stop claiming to.
+
+— NEW S409-bryan (routed from dpa-043 as a side-finding, explicitly NOT part of that ruling; reproduced independently by the PA before filing)
+<!-- @gap id=g-space-separated-enum-variants-silently-drop-every-variant-after-the-first sev=HIGH status=open locus=compiler/src/codegen/emit-bindings.ts:162+compiler/src/meta-checker.ts:2051(the-sanctioned-separator-set)+conformance/cases/server-fn/sse-generator-binding-seed-survives/case.scrml:2(the-green-case-built-on-it) prov=dd:scrml-support/docs/debates/lazy-pull-yield-emit-primitive-dpa-043-2026-09-06.md -->
+
+### g-sse-stream-errors-are-swallowed-by-a-deliberately-empty-catch — giti-025 remains open for ORDINARY stream errors; only the §14.8.9 protect refusal was given a limb
+
+`compiler/src/codegen/emit-server.ts:4090` emits `} catch (_scrml_err) {` on the SSE stream body, and the in-source comment states the disposition verbatim: *"The `catch` above is **deliberately empty for ordinary stream errors**, and that swallowed the §14.8.9 refusal too."* A confidentiality-refusal limb was subsequently added for the protect-active case, so the §14.8.9 path is now observable — **but the ordinary-error path is unchanged**, which is the original giti-025 report.
+
+⚑ **NARROWER THAN FILED UPSTREAM.** dpa-043's side-finding says *"SSE errors still swallowed by an empty `catch` — giti-025 unfixed."* That is right about ordinary errors and would mislead a reader into thinking the protect refusal is also still swallowed; it is not. Recorded here at its true extent so the fix is not scoped against a stale description.
+
+— NEW S409-bryan (routed from dpa-043; extent CORRECTED against the source before filing)
+<!-- @gap id=g-sse-stream-errors-are-swallowed-by-a-deliberately-empty-catch sev=MED status=open locus=compiler/src/codegen/emit-server.ts:4090(the-stream-catch-and-its-own-comment) prov=adopter:giti-025 -->
+
+### g-w-lint-018-false-fires-on-the-sanctioned-generator-surface — the ghost-pattern lint warns twice on the one generator shape SPEC §13.6/§37 explicitly sanctions
+
+`W-LINT-018` (`compiler/src/lint-ghost-patterns.js`) fires **twice** on a `server function*` SSE generator — the exact surface §37 sanctions and §13.6 legalizes. A lint that warns on the sanctioned form trains authors to ignore it, which is the §8 cry-wolf shape at the diagnostic level rather than the gate level.
+
+⚑ **Note the interaction with dpa-043's ruling (option d, S409):** the grant is being narrowed to `server function*` + `_{}`, so after that lands this lint fires *only* on the surviving sanctioned surface — the false-positive rate goes to 100% of its fire sites unless it is fixed in the same window.
+
+— NEW S409-bryan (routed from dpa-043 as a side-finding; fire-count relayed from the dPA, NOT independently reproduced — verify before fixing)
+<!-- @gap id=g-w-lint-018-false-fires-on-the-sanctioned-generator-surface sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(the-W-LINT-018-rule) prov=dd:scrml-support/docs/debates/lazy-pull-yield-emit-primitive-dpa-043-2026-09-06.md -->
