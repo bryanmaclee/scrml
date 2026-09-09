@@ -688,7 +688,32 @@ export function canonicalizeChunkNamespaceToken(content: string): string {
   const tokens = new Set<string>();
   for (const m of content.matchAll(/\/\/ --- chunk cell scope \(([0-9a-z]{8})\) ---/g)) tokens.add(m[1]);
   for (const m of content.matchAll(/_{1,2}scrml_engine_([0-9a-z]{8})_/g)) tokens.add(m[1]);
-  for (const m of content.matchAll(/data-scrml-engine-mount="([0-9a-z]{8})_/g)) tokens.add(m[1]);
+  // ⚑ S411 — the three sites above are all ENGINE- or PROLOGUE-derived, so an HTML
+  // artifact for a program with no engine had NO discovery site at all and its
+  // path-derived token survived, making any moved or renamed file read
+  // false-behavioral. Discovery is per-ARTIFACT (`buildComparableCorpus` calls this on
+  // each artifact separately), which is what made it non-obvious: the CLIENT-JS artifact
+  // always carries the prologue banner, so only the HTML half was affected.
+  //
+  // The two patterns below discover on the FAMILY rather than the site. Every
+  // chunk-namespaced marker that reaches HTML is either a compiler-emitted
+  // `data-scrml-*` attribute or a `<!--scrml-*:…-->` comment, so this covers
+  // each / match / meta / engine mounts at once — and covers markers not yet written,
+  // instead of needing one regex per `nsId()` call site. There are 14 such call sites
+  // across 5 codegen files today (grep `nsId(`), and the ledger entry listed four.
+  //
+  // ⚑ DIRECTION MATTERS HERE. Under-discovery over-reports behavioral (noisy but safe);
+  // OVER-discovery would neutralize a real difference and report false-COSMETIC, which
+  // hides a regression. So both patterns are anchored on a literal compiler-emitted
+  // prefix — `data-scrml-` or `<!--scrml-` — which no user string literal carries
+  // incidentally. A bare token-shaped literal in adopter source is still never touched;
+  // that is pinned as a negative test.
+  // The `", "` alternative is the `setAttribute("data-scrml-each-mount", "each_<tok>_N")`
+  // form. A client-JS artifact always carries the prologue banner, so that artifact's
+  // token is already discoverable and this alternative is not load-bearing TODAY — it is
+  // here so discovery does not silently depend on the banner always being present.
+  for (const m of content.matchAll(/data-scrml-[a-z-]+(?:="|",\s*")(?:[A-Za-z_]*_)?([0-9a-z]{8})_/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/<!--\/?scrml-[a-z-]+:([0-9a-z]{8})_/g)) tokens.add(m[1]);
   let out = content;
   for (const tok of tokens) out = out.split(tok).join(NS_TOKEN_PLACEHOLDER);
   return out;

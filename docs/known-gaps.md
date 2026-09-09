@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 103 |
-| MED | 229 |
+| MED | 228 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -12519,7 +12519,37 @@ the [[g-corpus-differential-gate-blind-to-standing-breakage]] follow-on (S382-pe
 > pass, a spurious initialization node in the tree is worth knowing about before it is turned on.
 
 ### g-semdiff-chunk-namespace-token-discovery-misses-every-non-engine-html-site — the emit-identity instrument neutralizes the per-chunk hash only where an engine or the JS prologue reveals it, so an each/match/meta HTML artifact keeps a path-derived token and reads false-behavioral — `NEW S397; MED; open`
-<!-- @gap id=g-semdiff-chunk-namespace-token-discovery-misses-every-non-engine-html-site sev=MED status=open locus=compiler/src/semdiff.ts:686(canonicalizeChunkNamespaceToken — three discovery regexes: the chunk-cell-scope prologue banner, the engine-derived names, the engine mount attribute) called per-ARTIFACT from :733 prov=empirical:PA-verified-structurally-at-c11db440-the-three-discovery-sites-read-and-the-namespaced-emission-sites-grepped-in-codegen-the-847-of-1026-figure-is-dispatch-reported -->
+<!-- @gap id=g-semdiff-chunk-namespace-token-discovery-misses-every-non-engine-html-site sev=MED status=resolved locus=compiler/src/semdiff.ts(canonicalizeChunkNamespaceToken — discovery widened from three site-specific regexes to two FAMILY patterns) prov=empirical:S411-peter-two-path-compile-reproducer-with-an-engine-CONTROL-that-passes-plus-a-bite-proof-against-the-pre-S411-canonicalizer -->
+
+⚑ **RESOLVED S411.** Discovery now covers the two FAMILIES every chunk-namespaced HTML marker
+belongs to — a compiler-emitted `data-scrml-*` attribute, or a `<!--scrml-*:…-->` comment — rather
+than one regex per emission site. **That shape was chosen deliberately: the ledger listed "four
+further sites", and locating by symbol found `nsId(` at FOURTEEN call sites across FIVE codegen
+files, including `emit-ssr-render.ts`, which the entry never named at all.** A per-site fix would
+have been incomplete on the day it landed.
+
+**Done-condition, met by execution.** The same program compiled at two paths, HTML artifact through
+the real pipeline order (`canonicalizeSourceBasename` then the token pass): each-only **FALSE →
+TRUE**, match-only **FALSE → TRUE**, and the engine-bearing **CONTROL passes before and after**.
+The tokens still surviving afterwards are the §47 content-addressed runtime filenames, which are
+identical across paths by design and must not be touched.
+
+**Bite-proven, not assumed** (pa-base §8, the unproven gate): the four new pins were run against a
+local reimplementation of the pre-S411 three-regex canonicalizer — all four fail there and pass
+here, while the three regression pins pass on both. A fixture that passed under both would have
+been a vacuous pin and is reported as such by the probe.
+
+⚑ **THE DANGEROUS DIRECTION IS THE OTHER ONE, AND IT IS PINNED.** Under-discovery over-reports
+BEHAVIORAL — noisy, fails safe. OVER-discovery would neutralize a real difference and report
+false-COSMETIC, which HIDES a regression. So both new patterns are anchored on a literal
+compiler-emitted prefix, and two NEGATIVE tests pin that a token-shaped adopter literal and a
+non-scrml `data-*` attribute are left untouched.
+
+**Corrections to this entry's own body, all located by symbol rather than by a remembered line:**
+`emit-html.ts` is **:3957**, not the :3906 written below (the S410 pickup flagged this and was
+right); `emit-match.ts` is **:1156**, not :1157; and the site list was incomplete as described
+above. ⚑ **The `847 of 1,026` / ~17% under-neutralization figure was NOT re-measured at S411** — it
+remains dispatch-reported, and is carried as inherited rather than re-stamped.
 > ⚑ **THE REPORTED PATH WAS WRONG AND IS CORRECTED HERE: it is `compiler/src/semdiff.ts`, not
 > `scripts/semdiff.ts`** — there is no such file under `scripts/`. Flagged because this instrument's
 > location is exactly what a reader would trust the ledger for.
