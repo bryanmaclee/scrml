@@ -5356,10 +5356,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const nextTok = peek(1);
         if (nextTok && nextTok.kind === "KEYWORD" && nextTok.text === "not") {
           const eqSpan = tokenSpan(tok, filePath);
-          const advised = tok.text === "==" ? "is not" : "is some";
+          // ⚑ S411 — THE ADVICE AND ITS PURPOSE CLAUSE MUST MOVE TOGETHER. S410 made
+          // `advised` operator-dependent but left the trailing clause hardcoded to "to
+          // check for absence", so the `!=` arm shipped "use `is some` to check for
+          // absence" — and `is some` tests PRESENCE (§42.2.5). The message contradicted
+          // itself in one sentence, which is the same two-halves-disagree defect S410
+          // was fixing, relocated. Advice and purpose are now one string per operator so
+          // they cannot drift apart again.
+          const advice = tok.text === "=="
+            ? "`is not` to check for absence"
+            : "`is some` to check for presence";
           errors.push(new TABError(
             "E-EQ-002",
-            `E-EQ-002: \`${tok.text} not\` is not valid — use \`${advised}\` to check for absence (§45).`,
+            `E-EQ-002: \`${tok.text} not\` is not valid — use ${advice} (§45).`,
             eqSpan,
           ));
           // Consume both `==`/`!=` and `not`, emit recovered `is not` form

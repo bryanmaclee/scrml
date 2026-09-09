@@ -904,8 +904,14 @@ function emitControlFlowLibraryFns(
  * rejection costs an unlowered construct, never a corrupted emit.
  *
  * ⚑ ALL THREE SPLICERS ARE NOW GUARDED (S408, #898) — but NOT the same way, and
- * the difference is load-bearing. Call sites: `collectSqlFnRemovalRanges` (:360),
- * `emitAsyncLibraryFns` (:758), `emitControlFlowLibraryFns` (:844).
+ * the difference is load-bearing. Call sites, BY SYMBOL — `collectSqlFnRemovalRanges`,
+ * `emitAsyncLibraryFns`, `emitControlFlowLibraryFns` (grep `verifiedFnRemovalRange`).
+ *
+ * ⚑ S411 — the line numbers that were here (:360, :758, :844) are REMOVED, not updated.
+ * They were accurate when written; that is exactly the problem. A hand-maintained line
+ * number rots silently and nothing fails — the ground the S391 overlay correction gives
+ * for striking one rather than restoring it — and these bought nothing a grep for the
+ * symbol does not. Locate by symbol, never by a remembered line.
  *
  *   - async + control-flow: an unverifiable span means LEAVE THE FN ON THE RAW
  *     PATH. Inert, and it fails loudly downstream.
