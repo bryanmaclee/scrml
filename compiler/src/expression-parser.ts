@@ -1912,6 +1912,45 @@ function preprocessMapLiterals(s: string): string {
       continue;
     }
     if (c === '"' || c === "'" || c === "`") { inString = c; continue; }
+
+    // ⚑ S411 — SKIP REGEX-LITERAL AND COMMENT INTERIORS. A `:` inside a regex
+    // character class is an ORDINARY CHARACTER, but this scanner ran before the
+    // parse and saw only text, so `/[A-Za-z0-9_\-:@]/` satisfied the depth-1
+    // entry-colon test and was rewritten to `__scrml_map_lit__(…)` — emitting a
+    // syntactically valid regex that matches the literal text of that call and is
+    // therefore FALSE for every ordinary input. Silent-wrong at exit 0.
+    //
+    // That is what caused the S406 host lockup: `tab.scrml`'s `isAttrIdentPart`
+    // became always-false, so `tokenizeAttributes`' attribute-name scan never
+    // advanced `pos`, and the enclosing loop re-entered forever while pushing a
+    // token each pass — an unbounded allocator reaching ~82 GB.
+    // See `g-regex-char-class-colon-mislowered-as-map-literal`.
+    //
+    // This is the S338 Rule 7 class (don't ask the TEXT what the TREE knows) in
+    // its unavoidable form: this pass runs BEFORE acorn by construction, so it
+    // cannot consult a tree. The mitigation is the one already proven in this
+    // file — the GITI-017 twin at `maskIsOperators` tracks exactly these three
+    // spans with exactly these helpers, so this mirrors it rather than inventing
+    // a second regex-vs-division heuristic that could drift from it.
+    if (c === "/" && s[i + 1] === "/") {
+      let j = i + 2;
+      while (j < s.length && s[j] !== "\n") j++;
+      i = j - 1;                                          // loop `i++` steps onto the newline
+      continue;
+    }
+    if (c === "/" && s[i + 1] === "*") {
+      let j = i + 2;
+      while (j < s.length && !(s[j] === "*" && s[j + 1] === "/")) j++;
+      i = Math.min(j + 2, s.length) - 1;
+      continue;
+    }
+    if (c === "/" && regexAllowedAfter(s.slice(0, i))) {
+      const end = scanRegexLiteralEnd(s, i);
+      // Unterminated → the `/` was division after all; fall through and rescan as
+      // ordinary code, so a real map literal later on the line is still rewritten.
+      if (end !== -1) { i = end - 1; continue; }
+    }
+
     if (c !== "[") continue;
 
     const closeIdx = findMatchingBracket(s, i);
