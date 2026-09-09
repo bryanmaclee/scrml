@@ -1296,9 +1296,16 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
   // in this file (the E-SESSION-VALUE placeholder and two leak-guard comments). It was
   // wrong in all of them for this same reason. ⚑ ALL THREE CORRECTED S410 — they now
   // point back here rather than repeating the false guarantee. The underlying behaviour
-  // is unchanged and still filed as `g-cli-emits-artifacts-on-failed-compile`, which is
-  // direction-of-change and routed to bryan: gating writes on fatal CG errors would move
-  // every `E-CG-*` code, so it is not smuggled in under a comment fix.
+  // is unchanged and still filed as `g-cli-emits-artifacts-on-failed-compile`.
+  //
+  // ⚑ S411 — THIS USED TO SAY THE GAP IS "direction-of-change and routed to bryan", AND
+  // BOTH LIMBS ARE WRONG. The entry reads *"RULED S354 (b): compile to a temp dir, swap
+  // on success only"* — so it is already ruled, and the ruled shape is a FILESYSTEM
+  // change that moves no `E-CG-*` code at all. Per the lane contract a RULED item is not
+  // held for authority; only the build remains. So this comment was telling every later
+  // reader that a buildable item is blocked when it is merely unstarted. Still not
+  // smuggled in under a comment fix — it wants its own landing — but it is UNBLOCKED.
+  // (The marker is an index, not the record: read the entry body.)
   //
   // The placeholder is emitted as syntactically VALID JS on purpose: an unparseable one
   // would trip the §2.2.1 acorn emit gate and bury this precise diagnostic under a

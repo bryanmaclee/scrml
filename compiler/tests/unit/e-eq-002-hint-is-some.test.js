@@ -60,4 +60,36 @@ describe("E-EQ-002 hint (g-e-eq-002-hint-suggests-the-double-negative)", () => {
     // `== not` asks "is x absent?"; `is some` there would be exactly backwards.
     expect(d.message).not.toContain("is some");
   });
+
+  // ⚑ S411 — THE ASSERTIONS ABOVE ARE TOKEN CHECKS, AND A TOKEN CHECK CANNOT SEE A
+  // SENTENCE THAT CONTRADICTS ITSELF. They all passed while the `!=` arm shipped
+  // "use `is some` to check for absence" — the right form welded to the wrong purpose
+  // clause, because S410 varied `advised` and left the trailing text hardcoded.
+  // `toContain("is some")` is true of that string. So these two pin the WHOLE message.
+  //
+  // The coupling being pinned: `is some` tests PRESENCE (§42.2.5 — `""` IS some),
+  // `is not` tests ABSENCE. Advice and purpose must agree, and the only way a
+  // substring assertion catches that is if it spans both halves.
+  test("SENTENCE-LEVEL — the `!=` advice and its purpose clause agree (presence)", () => {
+    const d = eqDiag("${ let x = a != not }\n<div>hi</div>", "neq-not-sentence");
+    expect(d).not.toBeNull();
+    // ⚑ toContain, not toBe: this API path appends a " (line N, col N)" locator that
+    // the CLI formatter strips, so toBe over-pins on a suffix that is not the contract.
+    // The span still covers BOTH halves of the sentence, which is the whole point —
+    // that is what a bare toContain("is some") could not do.
+    expect(d.message).toContain(
+      "`!= not` is not valid — use `is some` to check for presence (§45).",
+    );
+    // The specific inversion that shipped: presence advice sold as an absence check.
+    expect(d.message).not.toContain("`is some` to check for absence");
+  });
+
+  test("SENTENCE-LEVEL — the `==` advice and its purpose clause agree (absence)", () => {
+    const d = eqDiag("${ let x = a == not }\n<div>hi</div>", "eq-not-sentence");
+    expect(d).not.toBeNull();
+    expect(d.message).toContain(
+      "`== not` is not valid — use `is not` to check for absence (§45).",
+    );
+    expect(d.message).not.toContain("`is not` to check for presence");
+  });
 });

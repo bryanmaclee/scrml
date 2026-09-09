@@ -591,16 +591,26 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
   if (isNotLit(left) || isNotLit(right)) {
     // ⚑ S410 — the `!=` arm used to advise `is not not`, which is legal scrml but is
     // EXACTLY the double-negative the language provides `is some` to avoid.
-    // SPEC.md:24944, §45: "`is some` exists to avoid the double-negative
-    // `not (x is not)` in common presence checks." A diagnostic that hands the author
+    // SPEC §42.2.2 (design note): "`is some` exists to avoid the double-negative
+    // `not (x is not)` in common presence checks."
+    // ⚑ S411 — this cited "SPEC.md:24944, §45". The LINE was right and the SECTION was
+    // wrong: 24944 falls inside §42 (24846-25264), not §45 (25477-25598). Cited by
+    // section now, since the section survives an edit above it and the line does not.
+    // A diagnostic that hands the author
     // the form the spec exists to discourage is teaching the wrong idiom at the one
     // moment they are guaranteed to be reading.
     // `x != not` means "x is present", and `is some` is the canonical spelling of that
     // (§42.2.5: `is some` = value EXISTS). g-e-eq-002-hint-suggests-the-double-negative.
-    const replacement = eqNode.op === "==" ? "is not" : "is some";
+    // ⚑ S411 — advice and purpose clause are ONE string per operator. S410 varied only
+    // the form and left "to check for absence" hardcoded, so the `!=` arm read "use
+    // `is some` to check for absence" while `is some` tests PRESENCE (§42.2.5). Keeping
+    // them in one literal is what stops the two halves drifting apart again.
+    const advice = eqNode.op === "=="
+      ? "`is not` to check for absence"
+      : "`is some` to check for presence";
     errors.push(new GauntletPhase3Error(
       "E-EQ-002",
-      `E-EQ-002: \`${eqNode.op} not\` is not valid — use \`${replacement}\` to check for absence (§45).`,
+      `E-EQ-002: \`${eqNode.op} not\` is not valid — use ${advice} (§45).`,
       span,
     ));
     return;

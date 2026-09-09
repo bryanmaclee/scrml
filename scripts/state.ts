@@ -588,7 +588,27 @@ const WRAP_SLASH = /\bwrap\/s(\d+)\b/i;
 // from the index (S391, observed in the generated diff). The false-POSITIVE half is
 // the reason this index reported a set that was neither a subset nor a superset of
 // the real one.
-const WRAP_ERA = /\(s(\d+)[^)]*\):\s*wrap(?![-\w])/i;
+// ⚑ S411 — `(?![-\w])` WAS NOT ENOUGH, and the survivor is a SPACE. It blocks the
+// `maps(S391): wrap-6c refresh` shape that motivated it, but `maps(S372): wrap 6c
+// refresh at 8b2e4053 (#707)` puts a SPACE between `wrap` and `6c`, which the negative
+// lookahead permits — so that routine maps commit was admitted as session s372's anchor,
+// and since the dedup below is first-seen-wins over a newest-first log it EVICTED the
+// real `wrap(S372-bryan) … (#706)` sitting one commit older. Latent only because the
+// window is 8 entries deep and s372 is out of range.
+//
+// MEASURED over the last 800 origin/main subjects before changing anything: EVERY
+// genuine era-form close is `…): wrap — …` (em dash, 15 of them, all `continuity(SNNN-
+// who):`). The only non-wrap hits are `wrap-6c` ×2 and `wrap 6c` ×1. So the
+// discriminator is not "what character touches `wrap`" but "is `wrap` the whole verb" —
+// require a dash-after-space, a colon, or end-of-subject. `wrap-6c` fails it (no space
+// before the dash) and `wrap 6c` fails it (`6` is not a dash), while every real close
+// passes.
+// ⚑ The dash class is [—–-] and the WHITESPACE before it is what carries the rule, not
+// the dash character. Keying on the em dash alone (all 15 real era closes use one) was
+// over-narrow and `state-session-close-suffix.test.js` caught it on `docs(s160): WRAP -
+// the era form`. Requiring `\s+` first is what still rejects `wrap-6c`, and requiring a
+// DASH is what rejects `wrap 6c` — the two halves reject the two false positives.
+const WRAP_ERA = /\(s(\d+)[^)]*\):\s*wrap(?=\s+[—–-]|\s*:|\s*$)/i;
 
 export function isSessionClose(subj: string): boolean {
   return WRAP_PAREN.test(subj) || WRAP_SLASH.test(subj) || WRAP_ERA.test(subj);
