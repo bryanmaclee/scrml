@@ -7210,6 +7210,87 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-09 (S411 — peter — the 82 GB lockup was a colon in a regex character class)
+
+A drain session on the Windows clone, concurrent with a LIVE S409-bryan throughout (his lane:
+`compiler/SPEC-INDEX.md` #905, `ci.yml` #907, and the dPA advisory drain #906/#918/#919/#920 —
+disjoint by construction, no collision). **Three landings, every one gate-green**, plus GitHub issue
+**#922** routed to bryan at high priority. Peter's sequence for the session was explicit: review floor
+first, then the sentinel log, then the bisect.
+
+| PR | |
+|---|---|
+| **#921** | review floor drained 9 → 0; two of my own S410 fixes carried the class they fixed |
+| **#923** | semdiff — a non-engine HTML artifact had no way to discover its own chunk token |
+| **#924** | **a colon in a regex character class is not a map literal — closes the S406 82 GB host lockup at its cause** |
+
+**The headline. The S406 lockup is root-caused and fixed, and it was neither bun nor Windows — it was
+our compiler.** The §59.3 map-literal recognizer (`preprocessMapLiterals`) runs as a source-text pass
+BEFORE acorn, so it cannot know it is inside a regex literal. A `:` in a regex **character class**
+satisfied its depth-1 entry-colon test, so `/[A-Za-z0-9_\-:@]/` was emitted as
+`/__scrml_map_lit__("[]", "A-Za-z0-9_\\-", "@")/` — syntactically valid JS, a valid regex, and **false
+for every ordinary input**, at exit 0 with zero diagnostics. That made `tab.scrml`'s `isAttrIdentPart`
+always-false, so `tokenizeAttributes`' attribute-name scan never advanced `pos` and the enclosing loop
+re-entered forever **pushing an `ATTR_NAME` token every pass** — unbounded allocation at ~720 MB/s,
+reaching 82 GB in about two minutes on a 32 GB box.
+
+The chain was established by execution at every hop: bisect the 526-line `tab.test.js` under
+`run-capped.ps1 -CapGB 6` → setup-only is CLEAN (which **falsified** the recorded "it is in collection
+or the `beforeAll`" locus) → both halves of the describe blocks reproduce → drop the test runner
+entirely and call the function directly → split **JS-original vs self-hosted**, where the JS side
+returns 5 tokens in 1 ms and the self-hosted side dies. A 12-line standalone reproducer then reproduced
+the codegen defect in 75 ms with two controls (remove the colon, or move it outside the class — both
+emit byte-correct).
+
+The fix skips regex-literal and comment interiors in that scanner, **mirroring the GITI-017 twin
+already in the same file** (`regexAllowedAfter` + `scanRegexLiteralEnd`) rather than inventing a second
+regex-vs-division heuristic that could drift from the first. Verified: the reproducer emits intact;
+`tokenizeAttributes('<div a>')` returns 3 tokens in **0 ms** where it was killed at the 6 GB cap after
+7.4 s; `tab.test.js` **runs to completion**; and the emit differential on `tab.scrml` shows **exactly
+ONE changed line**.
+
+**Direction-of-change was MEASURED, not assumed.** The class is `semantics-changed`, so a migration was
+owed: `scripts/corpus-emit-differential.ts` over **1,928 sources / 7,467 artifacts**, base `9c984a3f`
+vs head — **0 artifact content diffs · 0 newly failing · 0 newly passing · 0 diagnostic CODE changes ·
+0 syntax delta · 0 bare server-fn delta.** The 62 text-only diagnostic changes were each inspected and
+are the absolute checkout path inside the message, an artifact of comparing two checkouts at different
+depths. ⚑ The first differential returned `NOT A VALID COMPARISON` — the fix was still uncommitted so
+both sides reported the same revision — and was re-run after committing rather than read through.
+
+**Corpus exposure, measured before the fix was scoped:** all 2,553 tracked `.scrml` scanned; the source
+scan produced 3 candidates and **confirmation by emission reduced that to 1**, in
+`compiler/self-host/tab.scrml`. Zero in stdlib, samples, examples, conformance or any adopter app.
+
+**Also landed:**
+
+- **#921 — the review floor, 9 → 0.** All nine were my own S410 landings: 5 code-bearing, 4 pure-docs
+  (probed directly for the one class a gaps PR can carry — a false status flip — and clean by
+  construction). Code-bearing carve-out rate **0 of 5**. Two MEDs found, **both the very class the
+  reviewed PR existed to fix**: `E-EQ-002` shipped ``use `is some` to check for absence`` on the `!=`
+  arm while `is some` tests PRESENCE (the fix varied the advised FORM and left the PURPOSE CLAUSE
+  hardcoded); and `state.ts`'s `WRAP_ERA` still admitted `maps(S372): wrap 6c refresh` because
+  `(?![-\w])` blocks `wrap-6c` but not `wrap` SPACE `6c`, evicting the real `wrap(S372-bryan)` from the
+  session index. Both fixed and bite-proven, plus three LOW comment corrections — one of which
+  **unblocked work**, a comment claiming `g-cli-emits-artifacts-on-failed-compile` was "routed to
+  bryan" when the entry reads **RULED S354 (b)**.
+- **#923 — semdiff chunk-token discovery.** Discovery runs per-ARTIFACT off three sites that were all
+  engine- or prologue-derived, so an HTML artifact for a program with no engine had **no discovery site
+  at all**. Fixed on the FAMILY rather than the site — the ledger named "four further sites" while
+  locating by symbol found `nsId(` at **14 call sites across 5 files**, including `emit-ssr-render.ts`
+  which the entry never mentions. Done-condition met by execution: each-only and match-only go FALSE →
+  TRUE while the engine CONTROL passes before and after.
+
+**Filed, not folded in:** `g-selfhost-tokenizelogic-tdz-pos-before-initialization` (MED — unmasked once
+the runaway stopped hiding it; pre-existing by the one-line emit differential) and
+`g-map-literal-in-fn-body-does-not-lower-in-library-mode` (MED — found as a **false alarm on this
+session's own fix**, exonerated by an A/B showing byte-identical failure on `origin/main`).
+
+**Gate at close:** cloud `gate` GREEN on all three PRs and on main's last two pushes; `tracking` RED
+(pre-existing, whole-job). Local on merged main: conformance **905/905**, touched pins **42/0**,
+`delta-lint` PASS max `[2954]`, `facts --check` PASS, `state --check` PASS. Board **HIGH 103 → 101 ·
+MED 229 → 230 · LOW 86**. Issue **#922 deliberately left OPEN** for bryan's language-surface review —
+the fix is `semantics-changed`, and closing it would erase the stamp he still owes.
+
 ### 2026-09-08 (S410 — peter — the instruments all lied in the same direction)
 
 A drain session on the Windows clone, concurrent with a LIVE S409-bryan throughout (his lane: the
