@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 102 |
+| HIGH | 103 |
 | MED | 229 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -1426,9 +1426,93 @@ baseline; a tier whose assertion count collapses fails even if its pass/fail cou
 ⚑ Cheap by construction — bun already prints the number; the baselines already have a home for it.
 — `NEW S410-peter (the through-line of the session: every broken instrument failed toward GREEN)`; **MED**; open
 
+
+### g-regex-char-class-colon-mislowered-as-map-literal — a `:` inside a regex character class makes the compiler emit a §59 map literal instead of the regex, at exit 0 with no diagnostic — silent-wrong, and it is what caused the S406 82 GB machine lockup
+
+<!-- @gap id=g-regex-char-class-colon-mislowered-as-map-literal sev=HIGH status=open locus=compiler/src(the §59 map-literal recognizer — searched: the emitted marker is the string `__scrml_map_lit__`, grep that for the lowering site; NOT traced to a line, and the entry deliberately names no line number) prov=empirical:S411-peter-12-line-standalone-reproducer-compiled-in-75ms-plus-a-two-sibling-control -->
+
+**Reproducer — 12 lines, no test runner, no self-host, 75 ms:**
+
+```scrml
+${
+    export fn hasColonClass(c)     { return /[a-z:@]/.test(c) }
+    export fn noColonClass(c)      { return /[a-z@]/.test(c) }
+    export fn colonOutsideClass(c) { return /a:b/.test(c) }
+}
+```
+
+`bun compiler/bin/scrml.js compile rx.scrml --output-dir out` → **exit 0, zero diagnostics**, and:
+
+| source | emitted | verdict |
+|---|---|---|
+| `/[a-z:@]/` | `/__scrml_map_lit__("[]", "a-z", "@")/` | **MANGLED** |
+| `/[a-z@]/` | `/[a-z@]/` | intact |
+| `/a:b/` | `/a:b/` | intact |
+
+**The two controls are the argument.** Remove the colon and the emit is byte-correct; move the colon
+outside the character class and the emit is byte-correct. So the trigger is precisely **a `:` inside
+`[...]` within a regex literal**, and the §59 map-literal recognizer (SPEC §59.3, the
+"depth-1-entry-colon disambiguation") is reaching inside a regex literal, where a `:` is an ordinary
+character with no structural meaning.
+
+**Why this is HIGH and not cosmetic.** The emitted artifact is *syntactically valid JavaScript* and a
+*valid regex* — it just matches the literal text `__scrml_map_lit__(…)`, so it returns `false` for
+every ordinary input. There is no parse error, no lint, no runtime throw. This is `semantics-changed`
+per pa-base §8, the class the gates are weakest against, because only an artifact diff reveals it and
+no diagnostic moves.
+
+**Measured blast radius — it already cost a machine.** This is the root cause of
+[[g-self-host-tab-test-is-an-unbounded-memory-runaway]] and therefore the strongest candidate for the
+S406 **82 GB** lockup (a day lost, three forced hard resets). Chain, established by execution at S411
+rather than argued:
+
+1. `compiler/self-host/tab.scrml:189` — `fn isAttrIdentPart(c) { return /[A-Za-z0-9_\-:@]/.test(c) }`.
+2. Emits `/__scrml_map_lit__("[]", "A-Za-z0-9_\\-", "@")/` — so it is **false for every character**.
+   Its colon-free siblings `isCssIdentPart` and `isWhitespace` emit intact, which is the in-file control.
+3. `tokenizeAttributes`' attribute-name scan is
+   `while (pos < raw.length && isAttrIdentPart(raw[pos])) { name = name + raw[pos]; advance() }` —
+   with the predicate always false it consumes nothing and **`pos` never advances**.
+4. The enclosing `while (pos < raw.length)` re-enters the same branch forever and
+   **pushes an `ATTR_NAME` token on every pass** — unbounded allocation, no plateau, ~720 MB/s.
+
+**Minimal runtime reproducer:** `tokenizeAttributes('<div a>', 0, 1, 1, 'markup')` against the
+emitted `tab.js`. **Any attribute at all** triggers it; bare `<div>` and `<br/>` are clean, because
+they never reach the attribute branch. Quoting is irrelevant — `<div a>`, `<div a=b>` and
+`<div class="foo">` all run away, which falsifies the natural "it is the quoted string" guess.
+⚑ Attribution was confirmed **by side**: the JS original `compiler/src/tokenizer.js` returns 5 tokens
+in **1 ms** on the same input, so `compiler/src/tokenizer.js` is NOT implicated.
+
+⚑ **Run any repro of the runaway limb guarded** —
+`powershell -File C:\Users\pjoli\bun-guard\run-capped.ps1 -CapGB 6 bun <cmd>`. The codegen reproducer
+at the top is safe: it only compiles, it never calls the emitted predicate.
+
+**Corpus exposure is NOT yet measured** and should be before any fix is scoped — `[0-9:]`, `[\w:]`,
+`[a-zA-Z:]` and time/URL/namespace patterns are ordinary shapes an adopter writes. Counting them is
+owed; assumed-zero is not measured-zero (pa-base §8).
+
+**Direction-of-change, stated for the review floor:** a fix makes source that compiles today behave
+differently, so it is **`semantics-changed`** and owes a language-surface review under
+`pa-profile-pjoliver11.md` — even though "a regex literal is not a map literal" reads as an obvious
+implementation-defect repair. The reason it is not obviously mine to land unilaterally is that the fix
+touches the §59 map-literal recognizer's reach, which is design surface. **Routed to bryan for the
+ruling on scope; the build itself is small and need not wait on him once the direction is stamped.**
 ### g-self-host-tab-test-is-an-unbounded-memory-runaway — `bun test compiler/tests/self-host/tab.test.js` grows ~720 MB/s with no plateau (6.53 → 8.69 GB in THREE SECONDS) and is the strongest candidate yet for the unidentified S406 82 GB machine lockup
 
-<!-- @gap id=g-self-host-tab-test-is-an-unbounded-memory-runaway sev=HIGH status=open locus=compiler/tests/self-host/tab.test.js(526 lines; dies BEFORE the first test result, so the runaway is in module collection or the beforeAll — NOT yet bisected within the file) prov=empirical:S410-peter-caught-live-by-the-BunMemorySentinel-log-with-full-command-line-then-narrowed-by-elimination -->
+<!-- @gap id=g-self-host-tab-test-is-an-unbounded-memory-runaway sev=HIGH status=open locus=compiler/self-host/tab.scrml:189(isAttrIdentPart — ROOT-CAUSED S411; the test file is the VICTIM, not the site) prov=empirical:S411-peter-bisected-under-run-capped-then-attributed-by-side-and-confirmed-by-a-12-line-standalone-reproducer -->
+
+⚑⚑ **ROOT-CAUSED S411 — AND THE LOCUS RECORDED HERE WAS WRONG.** This entry read *"dies BEFORE the
+first test result, so the runaway is in module collection or the beforeAll — NOT yet bisected."*
+**The first half is an observation and the second half is an inference from it, and the inference is
+false.** A cut of the file down to imports + `beforeAll` + one trivial test runs in **0.6 s at exit
+0**. The absent output was never evidence of *where* it died — a killed process simply never flushes.
+**The real cause is a COMPILER CODEGEN DEFECT, not a test defect:**
+[[g-regex-char-class-colon-mislowered-as-map-literal]]. `tab.scrml`'s `isAttrIdentPart` is
+`/[A-Za-z0-9_\-:@]/`, the colon inside the character class makes the compiler emit a map literal
+instead of the regex, the predicate then returns false for every character, the attribute-name scan
+never advances `pos`, and the enclosing `while` re-enters the same branch forever **pushing an
+`ATTR_NAME` token every iteration** — which is the unbounded allocation. Minimal reproducer, no test
+runner needed: `tokenizeAttributes('<div a>', 0, 1, 1, 'markup')` on the emitted `tab.js`. Fixing the
+codegen defect closes this entry; nothing in `tab.test.js` needs to change.
 
 ⚑⚑ **READ THIS BEFORE RUNNING IT.** The command below will consume the machine if unguarded. On this
 clone `BunMemorySentinel` kills it (which is why it exits **127** with **28 bytes** of output — it
