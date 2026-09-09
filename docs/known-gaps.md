@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 103 |
-| MED | 228 |
+| HIGH | 101 |
+| MED | 230 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1427,9 +1427,99 @@ baseline; a tier whose assertion count collapses fails even if its pass/fail cou
 — `NEW S410-peter (the through-line of the session: every broken instrument failed toward GREEN)`; **MED**; open
 
 
+
+### g-selfhost-tokenizelogic-tdz-pos-before-initialization — the self-hosted `tokenizeLogic` throws `ReferenceError: Cannot access 'pos' before initialization`, unmasked once the S411 memory runaway was removed — `NEW S411; MED; open`
+
+<!-- @gap id=g-selfhost-tokenizelogic-tdz-pos-before-initialization sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic and its inner advance/readIdent/readString/readNumber closures — searched: the THROW is in the emitted tab.js at the `advance` closure reading `pos`; the emit line moves per compile so it is named by SYMBOL, not line) prov=empirical:S411-peter-surfaced-by-running-tab-test-js-to-completion-for-the-first-time -->
+
+**Every `tokenizeLogic parity` case fails identically:**
+
+```
+ReferenceError: Cannot access 'pos' before initialization.
+    at advance (…/tab.js)      ← `if (pos < content.length)`
+    at readIdent / readString / readBacktickString / readNumber
+    at tokenizeLogic
+```
+
+`tokenizeLogic` declares `let pos` and inner `function` closures (`advance`, `readIdent`, …) that
+capture it — the same shape `tokenizeAttributes` uses. The emitted JS calls into a closure while
+`pos` is still in its temporal dead zone, so the hoisted `function` reaches the `let` before its
+initializer has run.
+
+⚑ **PRE-EXISTING, AND THE PROOF IS A DIFFERENTIAL, NOT AN ARGUMENT.** This surfaced only because
+[[g-regex-char-class-colon-mislowered-as-map-literal]] was fixed: before that, the file died in
+`tokenizeAttributes` and never reached these cases. The emit differential across that fix shows
+**exactly ONE changed line** in `tab.js` (the mangled regex → the correct regex), so nothing about
+`tokenizeLogic`'s emitted code moved. It fails loudly (a `ReferenceError`, not silent-wrong), which
+is why MED rather than HIGH.
+
+**Scope note.** `compiler/tests/self-host/` is run by NEITHER CI job (`ci.yml:23-27`), so this is
+invisible to the gate — the same coverage hole that let the runaway rot. It should ride whatever
+disposition [[g-tracking-job-is-red-as-a-whole]] and the S410-banked "decide `self-host/`'s status
+EXPLICITLY" item settle on.
+
+### g-map-literal-in-fn-body-does-not-lower-in-library-mode — a §59 map literal inside a `fn` body compiles clean in `browser` mode but fails `E-CODEGEN-INVALID-LOGIC` under `mode:"library"` — `NEW S411; MED; open`
+
+<!-- @gap id=g-map-literal-in-fn-body-does-not-lower-in-library-mode sev=MED status=open locus=searched:compiler/src/codegen/emit-library.ts,compiler/src/expression-parser.ts — the failing artifact is named by the diagnostic itself (`artifact: <stem>.js`), but which library-mode splicer drops the map lowering was NOT traced prov=empirical:S411-peter-A-B-verified-identical-on-origin-main-and-on-the-regex-fix-branch -->
+
+**Reproducer:**
+
+```scrml
+${
+  export fn realMap() { let m = ["k": 1, "j": 2]; return m }
+}
+```
+
+| mode | result |
+|---|---|
+| `browser` | **0 errors** (one `W-TYPE-031-UNPROVEN`, which is the documented unproven-type nudge) |
+| `library` | **`E-CODEGEN-INVALID-LOGIC`** — "the compiler could not lower this construct to valid output" |
+
+The empty form `[:]` fails the same way. §59 places no library-mode restriction on map literals, and
+`<foreign lang="ts"/>` / library emit is the W5b in-process-db surface an adopter reaches for, so a
+value-native map being unusable there is a real hole rather than a curiosity.
+
+⚑ **FOUND AS A FALSE ALARM ON MY OWN FIX, AND THAT IS THE REASON IT IS FILED.** The S411
+regex-class-colon pin originally asserted these map cases in `library` mode as its "did I over-skip"
+negatives; they went red and read exactly like the fix breaking map lowering. A/B against
+`origin/main` showed **byte-identical failure on both sides**, so the fix was exonerated and the pin
+moved to `browser` mode — but the underlying failure is real and was not previously recorded.
 ### g-regex-char-class-colon-mislowered-as-map-literal — a `:` inside a regex character class makes the compiler emit a §59 map literal instead of the regex, at exit 0 with no diagnostic — silent-wrong, and it is what caused the S406 82 GB machine lockup
 
-<!-- @gap id=g-regex-char-class-colon-mislowered-as-map-literal sev=HIGH status=open locus=compiler/src(the §59 map-literal recognizer — searched: the emitted marker is the string `__scrml_map_lit__`, grep that for the lowering site; NOT traced to a line, and the entry deliberately names no line number) prov=empirical:S411-peter-12-line-standalone-reproducer-compiled-in-75ms-plus-a-two-sibling-control -->
+<!-- @gap id=g-regex-char-class-colon-mislowered-as-map-literal sev=HIGH status=resolved locus=compiler/src/expression-parser.ts(preprocessMapLiterals — now skips regex-literal and comment interiors) prov=empirical:S411-peter-fixed-and-verified-by-a-corpus-emit-differential-over-1928-sources-plus-the-runaway-itself-ceasing -->
+
+⚑ **RESOLVED S411 — and the S406 host lockup is closed with it.** `preprocessMapLiterals` now skips
+regex-literal and comment interiors, **mirroring the GITI-017 twin already in the same file**
+(`regexAllowedAfter` + `scanRegexLiteralEnd`) rather than inventing a second regex-vs-division
+heuristic that could drift from the first. This is Rule 7 in its unavoidable form: the pass runs
+BEFORE acorn by construction, so it cannot consult a tree — the mitigation is to track the three
+spans a lexer would.
+
+**Verified by execution, at each level:**
+1. The 12-line reproducer emits all three cases intact (`/[a-z:@]/`, and both controls unchanged).
+2. `tokenizeAttributes('<div a>')` on the emitted `tab.js` **RETURNS 3 tokens in 0 ms**, where it
+   was killed at the 6 GB cap after 7.4 s.
+3. `bun test compiler/tests/self-host/tab.test.js` **runs to completion** instead of consuming the
+   machine.
+4. Emit differential on `tab.scrml`: **exactly ONE line changed** — the mangled regex to the correct
+   one — everything else byte-identical, which is also what proves the residual failures in (3) are
+   pre-existing rather than introduced.
+
+**Direction-of-change, MEASURED not assumed.** The class is `semantics-changed`, so a migration was
+owed. `scripts/corpus-emit-differential.ts` over **1,928 sources / 7,467 artifacts**, base
+`9c984a3f` vs head: **0 artifact content diffs · 0 newly failing · 0 newly passing · 0 diagnostic
+CODE changes · 0 syntax delta · 0 bare server-fn delta.** The 62 reported text-only diagnostic
+changes were each inspected and are the absolute CHECKOUT PATH embedded in the message
+(`C:/s411base/…` vs the main checkout) — a harness artifact of comparing two checkouts at different
+depths, not a behavioural delta. ⚑ The first differential run came back **INCOMPARABLE** because the
+fix was still uncommitted and both sides reported the same revision; it was re-run after committing
+rather than read through.
+
+⚑ **A residual this fix UNMASKED, and it is not this gap's:** with the runaway gone, `tab.test.js`
+now reaches its `tokenizeLogic` cases and they fail with
+`ReferenceError: Cannot access 'pos' before initialization` — a TDZ defect in the self-hosted emit
+that the runaway had been hiding. The one-line emit differential is what establishes it as
+pre-existing. Filed separately rather than folded in here.
 
 **Reproducer — 12 lines, no test runner, no self-host, 75 ms:**
 
@@ -1498,7 +1588,20 @@ touches the §59 map-literal recognizer's reach, which is design surface. **Rout
 ruling on scope; the build itself is small and need not wait on him once the direction is stamped.**
 ### g-self-host-tab-test-is-an-unbounded-memory-runaway — `bun test compiler/tests/self-host/tab.test.js` grows ~720 MB/s with no plateau (6.53 → 8.69 GB in THREE SECONDS) and is the strongest candidate yet for the unidentified S406 82 GB machine lockup
 
-<!-- @gap id=g-self-host-tab-test-is-an-unbounded-memory-runaway sev=HIGH status=open locus=compiler/self-host/tab.scrml:189(isAttrIdentPart — ROOT-CAUSED S411; the test file is the VICTIM, not the site) prov=empirical:S411-peter-bisected-under-run-capped-then-attributed-by-side-and-confirmed-by-a-12-line-standalone-reproducer -->
+<!-- @gap id=g-self-host-tab-test-is-an-unbounded-memory-runaway sev=HIGH status=resolved locus=compiler/self-host/tab.scrml(isAttrIdentPart — the VICTIM; the SITE was compiler/src/expression-parser.ts) prov=empirical:S411-peter-root-caused-then-closed-by-fixing-the-codegen-defect-exactly-as-this-entry-predicted -->
+
+⚑ **RESOLVED S411 by fixing the CAUSE, not the symptom** —
+[[g-regex-char-class-colon-mislowered-as-map-literal]]. This entry predicted it: *"Fixing the codegen
+defect closes this entry; nothing in `tab.test.js` needs to change,"* and nothing did.
+`bun test compiler/tests/self-host/tab.test.js` now **runs to completion** under the 6 GB cap instead
+of being killed, and `tokenizeAttributes('<div a>')` returns 3 tokens in 0 ms.
+
+⚑ **The tier still has failures — they were MASKED by the runaway, not caused by the fix.** With the
+allocator gone the file reaches its `tokenizeLogic` cases, which fail
+`ReferenceError: Cannot access 'pos' before initialization`. The emit differential on `tab.scrml`
+shows **exactly one changed line** (the regex), so that TDZ defect is pre-existing by construction.
+Filed as [[g-selfhost-tokenizelogic-tdz-pos-before-initialization]]. **Closing this entry closes the
+MEMORY RUNAWAY and the S406 machine-lockup class; it does not claim the self-host tier is green.**
 
 ⚑⚑ **ROOT-CAUSED S411 — AND THE LOCUS RECORDED HERE WAS WRONG.** This entry read *"dies BEFORE the
 first test result, so the runaway is in module collection or the beforeAll — NOT yet bisected."*
