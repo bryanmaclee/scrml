@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `36c99dc9` — wrap(s411): the 82 GB lockup was a colon in a regex character class — found, fixed, and measured (#925) — **pushed**
 - `ae3d2bd5` — wrap(s410): seven landings, six instruments that all lied in the same direction, and a lockup that finally named itself (#916) — **pushed**
 - `2e570b7e` — wrap(s408): seven arcs, and seven instruments that measured their own reach (#904) — **pushed**
 - `2809ba78` — wrap(s405): four rulings, two security arcs, and one failure mode wearing seven costumes (#901) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `d52f1722` — wrap(s404): a ruling in two messages, then a day of instruments being wrong — mine twice (#878) — **pushed**
 - `069e86fd` — wrap/s402 (#873) — **pushed**
 - `819cec7f` — wrap(s401-peter): four boot probes read green while measuring nothing, and the review floor drained 13 to 0 (#850) — **pushed**
-- `1e620583` — wrap(S400-peter): 10-PR adopter-lane sweep — 7 fixes, 2 staleness resolves, 1 HIGH routed turnkey (#847) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
