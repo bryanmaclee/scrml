@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 102 |
-| MED | 231 |
+| MED | 230 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -122,9 +122,9 @@ Pin: `braceless-control-head-regex-literal.test.js` **29/0**, bite-proven (**14 
 Conformance **905/905**. Full unit tier **18,513 pass / 1 fail**, that one the known `GITI-035`
 `node --check` co-run canary which passes 12/0 in isolation.
 
-### g-while-braceless-body-rejects-a-regex-literal — `while (cond) /re/.test(x)` fails to compile, while the `if` and `for` forms of the same statement now work
+### g-while-braceless-body-hoisted-out-of-the-loop — a braceless `while`/`for` body is emitted AFTER the loop, leaving the loop empty: a silent infinite loop at exit 0, live in `stdlib/auth/jwt` — `NEW S412 (as a regex MED); CORRECTED to HIGH; RESOLVED S412`
 
-<!-- @gap id=g-while-braceless-body-rejects-a-regex-literal sev=MED status=open locus=compiler/src/ast-builder.js:8858+:13401(the two `while` parse sites collect the head with collectExpr("{") and have no braceless-body branch, unlike parseOneIfStmt which calls parseOneStatement) prov=empirical:S412-peter-residual-of-the-regex-arc-A/B-verified-broken-before-and-after -->
+<!-- @gap id=g-while-braceless-body-hoisted-out-of-the-loop sev=HIGH status=resolved locus=compiler/src/ast-builder.js(the three while parse sites + both for parse sites — each now has a braceless limb mirroring parseOneIfStmt, and the while heads use the paren-aware collectIfCondition) prov=empirical:S412-peter-found-when-an-A/B-run-HUNG-then-proven-by-emit-inspection-on-the-shipped-stdlib-auth-jwt-module -->
 
 **A residual of the S412 regex arc, filed rather than folded in.** That arc fixed the braceless `if`
 and `for` bodies; the `while` form still fails:
@@ -148,6 +148,67 @@ in the block-level loop) collect the head with `collectExpr("{")` and then have 
 `if (peek().text === "{")` branch — there is no braceless-body limb at all, unlike `parseOneIfStmt`,
 which calls `parseOneStatement()`. A `/…/` with no `{` anywhere on the line is the shape that makes
 that collector over-run. — `NEW S412-peter (surfaced by the regex arc; A/B-verified failing before and after, with a regex-free braceless-while control passing on both sides)`; **MED**; open
+⚑⚑ **CORRECTED AND RESOLVED S412 — THE PARAGRAPH ABOVE IS WRONG, AND IT WAS WRONG BECAUSE A PROBE OF
+MINE COULD NOT SEE NESTING.** Everything from *"Braceless `while` itself is FINE"* to the end of that
+paragraph is **struck**. It is left in place rather than deleted because the way it was reached is the
+lesson.
+
+**The real defect is not about regexes at all.** A braceless `while` **or `for`** body was emitted
+**after** the loop, leaving the loop body empty:
+
+```
+while (n < 3) n = n + 1     emitted     while (n < 3) {
+                                        }
+                                        n = n + 1;
+```
+
+Whenever the condition depends on the body — the ordinary case — **that is an infinite loop, at exit 0
+with zero diagnostics.** `for` has the same defect in a quieter form: its header self-increments so it
+terminates, but the body runs **once after** the loop instead of N times inside it. The regex failure
+was one downstream symptom of the same missing limb, not the defect.
+
+⚑ **LIVE IN THE SHIPPED STANDARD LIBRARY, verified against the real module.** `stdlib/auth/jwt.scrml`'s
+`base64urlDecode` pads with `while (s.length % 4) s += "="`, which emitted as an empty loop with the
+`s += "="` **dropped entirely** — so JWT base64url decoding **hangs** for any input whose length is not
+a multiple of 4. **13 live sites in the tracked corpus**: that one plus `compiler/self-host/bs.scrml`
+×9, `pa.scrml` ×2, `bpp.scrml` ×1.
+
+⚑ **HOW THE FALSE READING HAPPENED.** The retraction above rested on a probe that grepped the emitted
+JS for lines matching `/while|count/` and compared the matches. **That filter dropped the `}` lines**,
+so a hoisted-out body printed identically to a nested one. A correct reading of the parser — that
+there is no braceless limb, so the body cannot be in the loop — was **withdrawn as a false alarm on
+the strength of an instrument that structurally could not see the difference.** The same blind spot
+sat in the regex pin: `toContain` proves a regex SURVIVED, not where it landed, and it passed
+throughout. **A line filter cannot see nesting, and `toContain` cannot see placement.** Both are now
+asserted structurally, and the new pin asserts the **returned value of an executed loop**.
+
+**Cause.** All three `while` sites and both `for` sites had only `if (peek().text === "{")` and no
+braceless limb, while `parseOneIfStmt` has had `parseOneStatement()` all along — which is exactly why
+`if` was correct and these were not. The `while` sites additionally collected their head with
+`collectExpr("{")`, which, finding no `{`, vacuumed the body into the **condition**; they now use the
+paren-aware `collectIfCondition`, which already falls back to `collectExpr("{")` for the
+unparenthesized `while cond { … }` spelling, so that form is untouched.
+
+**Gate.** New pin `while-braceless-body-stays-in-the-loop.test.js` **10/0**, including four RUNTIME
+cases (a counting loop returns 3; the jwt padding shape returns `"abc="`; a labelled braceless
+`while`; and a mixed if+for case returning **21** where the old emit returned **11**). Controls cover
+braced, braced multi-statement, unparenthesized-head, labelled, and `if`/`for`.
+
+⚑ **Bite-proven by EMIT INSPECTION rather than execution, deliberately** — reverting and running would
+hang. Base `origin/main` emits `while (s.length % 4) { }` for the shipped jwt module; with the fix the
+body is inside.
+
+**Corpus differential** over 1,928 sources / 7,467 artifacts: **2 artifact content diffs**, both the
+`stdlib/auth/jwt` module (reached via two entry points), and the entire change in each is the single
+line `+ s += "=";` — the dropped statement restored. **0 newly failing · 0 newly passing · 0 syntax
+delta · 0 diagnostic code changes**, and all 62 text-only diffs classified as checkout-root artifacts
+with the lookup control passing. ⚑ **The 12 `compiler/self-host/` sites are NOT in that measurement** —
+the differential's roots are `examples,samples,conformance,stdlib,benchmarks`, so `compiler/self-host`
+contributes **0 sources**. That is the same coverage hole that let the S406 runaway rot, and it is
+stated rather than left to be inferred from a clean number. Conformance **905/905**; unit tier
+**18,553 pass / 1 fail** (the known `bug65` co-run canary, 12/0 isolated); self-host suites **139 pass
+/ 3 fail**, the same three known failures. — `CORRECTED + RESOLVED S412-peter (the regex framing was a symptom; the real defect is a silent infinite loop, found when an A/B run HUNG and the emit was then inspected instead of executed)`; **HIGH**; resolved
+
 
 
 ### g-semdiff-chunk-token-discovery-captures-author-controlled-attribute-values — the generalized `data-scrml-*` discovery pattern captures the attribute VALUE, and three of those attributes carry author/row data — `NEW S412; MED; RESOLVED S412`
