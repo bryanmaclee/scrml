@@ -86,13 +86,20 @@ describe("an inner function may mutate a captured binding (§5986, S412)", () =>
       `\${\n  export function outer() {\n    let col = 0\n    function setCol() { col = 7\n      return 0 }\n    let r = setCol()\n    return col + r\n  }\n}`,
       "silent-shadow",
     );
-    // ⚑ This case raises a PRE-EXISTING `E-MU-001` over-fire — it reports `col`
-    // "declared but never used" while `return col + r` plainly reads it. A/B-verified
-    // identical with the fix reverted, so it is not this change's doing, and the
-    // emitted module is correct and runs. Asserting zero diagnostics here would pin a
-    // defect this fix does not own. Filed as its own gap; the RUNTIME result is what
-    // this test is actually about.
-    expect(errors.map((e) => e.code)).toEqual(["E-MU-001"]);
+    // ⚑ This case USED to raise a pre-existing `E-MU-001` over-fire (`col` reported
+    // "declared but never used" while `return col + r` plainly reads it). It was filed
+    // as its own gap and pinned HERE as `["E-MU-001"]` rather than asserted clean,
+    // because pinning it clean would have pinned a defect that fix did not own.
+    //
+    // That gap is now RESOLVED (`g-e-mu-001-overfires-on-binding-mutated-from-inner-fn`):
+    // `type-system.ts` was withholding `parentBindings` from every inner-function body
+    // on the premise that "outer names cannot be reassigned from inside (E-FN-003
+    // enforces that)" — which SPEC.md:5986 makes true of `fn` and false of `function`.
+    // Same root as the emit-side defect this file pins, in a second consumer.
+    //
+    // ⚑ The pin BROKE LOUDLY when that landed, which is exactly what it was for: it had
+    // recorded the over-fire precisely enough that removing it could not pass silently.
+    expect(errors.map((e) => e.code)).toEqual([]);
     expect(becameDecl(js, "col")).toBe(false);
     const mod = await import(pathToFileURL(artifact).href);
     expect(mod.outer()).toBe(7);

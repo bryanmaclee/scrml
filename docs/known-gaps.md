@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 102 |
-| MED | 233 |
+| MED | 231 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -78,9 +78,9 @@ in-repo), which is why it has never surfaced. Filed MED rather than HIGH on that
 radius and the unusual construct (a discarded-result regex test) — **not** downgraded for being
 pre-existing. — `NEW S412-peter (found by S239-reviewing #924; every row above measured by execution, A/B against the pre-fix base, with the assignment-position and braced-body controls both passing)`; **MED**; open
 
-### g-semdiff-chunk-token-discovery-captures-author-controlled-attribute-values — the generalized `data-scrml-*` discovery pattern captures the attribute VALUE, and three of those attributes carry author/row data
+### g-semdiff-chunk-token-discovery-captures-author-controlled-attribute-values — the generalized `data-scrml-*` discovery pattern captures the attribute VALUE, and three of those attributes carry author/row data — `NEW S412; MED; RESOLVED S412`
 
-<!-- @gap id=g-semdiff-chunk-token-discovery-over-discovers sev=MED status=open locus=compiler/src/semdiff.ts(canonicalizeChunkNamespaceToken, the data-scrml-[a-z-]+ pattern added by #923) prov=review:docs/pr-reviews.md-S412-peter-#923+repro:5-of-6-ordinary-attribute-values-discovered-as-tokens -->
+<!-- @gap id=g-semdiff-chunk-token-discovery-over-discovers sev=MED status=resolved locus=compiler/src/semdiff.ts(canonicalizeChunkNamespaceToken — all four discovery patterns now require the leading `0` that nsId guarantees) prov=empirical:S412-peter-fixed-by-anchoring-on-the-TOKEN-shape-invariant-verified-over-200000-generated-tokens -->
 
 **Found during the S412 S239 review of #923.** That PR generalized chunk-token discovery from three
 fixed sites to a family pattern:
@@ -121,6 +121,33 @@ but the instrument's entire job is separating cosmetic from behavioral, and this
 unsafe answer on ordinary adopter data. Candidate fix: require the captured token to be
 compiler-shaped at the *value* level (the `nsId()` alphabet plus a structural suffix), or keep the
 family pattern but intersect it with tokens independently discovered from an engine/prologue site.
+
+⚑ **RESOLVED S412 — the anchor is now the TOKEN'S OWN SHAPE, not the attribute prefix.** The
+discriminator was available all along and is guaranteed by the generator: `fnv1a-hash.ts` emits
+lowercase base36 **zero-padded to exactly 8 chars**, and a u32 maximum (`4294967295`) is `1z141z3` —
+**seven** base36 digits. The pad is therefore always present and **every chunk token begins with
+`0`**. Verified by execution over **200,000 generated tokens**: all length 8, all leading `0`, zero
+counterexamples.
+
+All four discovery patterns now require `0[0-9a-z]{7}` instead of `[0-9a-z]{8}`, which keeps every
+genuine token and rejects `customer`, `userdata`, `rowabcde`, `sidebar1` — none of which begin with
+`0`.
+
+⚑ **THIS IS WHAT THE FUNCTION'S OWN DOC COMMENT ALREADY CLAIMED.** It reads *"not matched by a
+blanket `0[0-9a-z]{7}` sweep — so a user literal that merely looks token-shaped is never touched."*
+The invariant was documented and never encoded in the patterns; the fix makes the code match its own
+contract.
+
+**Residual, stated rather than papered over:** an author value that begins with `0`, is exactly 8
+base36 chars, sits in a `data-scrml-*` attribute AND is followed by `_` would still be captured. Far
+narrower than before, and the honest limit of a text-level canonicaliser — the prefix anchor still
+does its share.
+
+**Pinned** in `semdiff-chunk-token-discovery.test.js`: four author-value negatives (each with the
+same word in page TEXT, which is what made it bite), a two-artifacts-must-still-differ case for the
+false-COSMETIC direction, a positive for every discovery shape #923 added, and a guard on the
+**premise** — 5,000 generated hashes must match `/^0[0-9a-z]{7}$/`, so if the padding ever changes,
+discovery cannot silently stop working. Semdiff suites **60/0**.
 — `NEW S412-peter (found by S239-reviewing #923; the six rows measured by executing the landed pattern against realistic attribute values, and the two author-controlled emission sites read at their loci)`; **MED**; open
 
 ### g-migrate-consumer-is-not-raw-DDL-aware-deferred-to-its-own-arc — `extractDesiredSchema` serves two consumers with different needs; the tenant floor learned raw DDL, the migrate/differ path deliberately did not
@@ -1669,9 +1696,9 @@ rejected"*) **and emits `undefined` anyway instead of erroring.** That is a fail
 invariant, which §2.2.1 exists to prevent — filed HIGH on the silent-wrong, not on the likelihood of
 the name. — `NEW S412-peter (isolated by compiling the identical body under four different function names)`; **HIGH**; open
 
-### g-e-mu-001-overfires-on-a-binding-mutated-only-from-an-inner-fn — `E-MU-001` reports a variable "declared but never used" when a `return` statement plainly reads it
+### g-e-mu-001-overfires-on-a-binding-mutated-only-from-an-inner-fn — `E-MU-001` reports a variable "declared but never used" when a `return` statement plainly reads it — `NEW S412; MED; RESOLVED S412`
 
-<!-- @gap id=g-e-mu-001-overfires-on-binding-mutated-from-inner-fn sev=MED status=open locus=searched:the E-MU-001 must-use checker — the read in `return col + r` is not being counted when the binding is also assigned from an inner function prov=empirical:S412-peter-A-B-verified-identical-with-the-S412-const-decl-fix-reverted-so-pre-existing -->
+<!-- @gap id=g-e-mu-001-overfires-on-binding-mutated-from-inner-fn sev=MED status=resolved locus=compiler/src/type-system.ts(checkLinear case "function-decl" — parentBindings is now threaded for fnKind==="function" and still withheld for "fn") prov=empirical:S412-peter-root-caused-to-an-fn-only-rule-generalised-to-both-forms-SPEC-md-5986 -->
 
 ```scrml
 ${
@@ -1691,6 +1718,43 @@ fires `E-MU-001: Variable `col` was declared but never used before this scope cl
 that change's doing. It is recorded here because the S412 pin has to **assert this diagnostic**
 rather than assert a clean compile: pinning the case as diagnostic-free would pin a defect that fix
 does not own, and pinning it as `[]` would make the file red for someone else's bug. — `NEW S412-peter (found while writing the const-decl pin; A/B-verified pre-existing)`; **MED**; open
+
+⚑ **RESOLVED S412 — an `fn`-only rule had been generalised to both function forms.** `checkLinear`
+(`type-system.ts`, `case "function-decl"`) withheld `parentBindings` from **every** inner-function
+body, justified in place as *"function bodies are a closed scope; outer names cannot be reassigned
+from inside (E-FN-003 enforces that)."*
+
+**E-FN-003 enforces that for `fn` ONLY.** SPEC.md:5986 is explicit: *"Inner `function` declarations
+MAY mutate outer `let` bindings. Inner `fn` declarations are subject to the same purity constraints
+as top-level `fn` (§48) — they may read outer bindings but may not mutate them (E-FN-003)."*
+
+Without `parentBindings`, §48.3.3's reassignment-vs-declaration discriminator could not see that
+`col` was already bound outside, so `col = 7` registered a **fresh must-use entry scoped to the inner
+body** — which nothing there reads. `parentBindings` exists for exactly this (see its doc on
+`CheckLinearOpts`); it simply was not reaching this recursion.
+
+**Fixed** by threading it when `node.fnKind === "function"` and continuing to withhold it for `fn`,
+where the original "closed scope" reasoning genuinely holds and E-FN-003 is the diagnostic that
+should fire.
+
+⚑ **SAME ROOT AS [[g-selfhost-tokenizelogic-tdz-pos-before-initialization]], IN A SECOND CONSUMER.**
+Two independent places each re-derived *"what is bound in the enclosing scope?"* and each got the
+inner-function case wrong — and in both, the **justifying comment was the giveaway**, not the code.
+Worth remembering as a search heuristic: a confident comment explaining why a scope is closed is a
+good place to check whether the rule it cites is form-specific.
+
+**Bite-proven** in `e-mu-001-inner-fn-reassignment.test.js`: 6/0 with the fix, **2 of 6 fail**
+reverted, and the four controls hold on both sides — `fn` mutation still fires E-FN-003, a genuine
+must-use declaration inside an inner fn still fires E-MU-001 (the canonical `must-use-unread-pos`
+shape), the same declaration read in its own scope is clean, and the no-inner-fn case is unaffected.
+Conformance **905/905**, including `linear/must-use-unread-pos`, `must-use-unread-neg` and
+`lin-005-shadow-lin-*`.
+
+⚑ **This resolution broke the S412 pin in `inner-fn-assignment-to-captured-binding.test.js`, which is
+exactly what that pin was for.** It had asserted `["E-MU-001"]` rather than a clean compile,
+deliberately, because pinning the case clean would have pinned a defect that fix did not own. Removing
+the over-fire could therefore not pass silently; the pin was updated to `[]` in the same landing.
+
 
 ### g-map-literal-in-fn-body-does-not-lower-in-library-mode — a §59 map literal inside a `fn` body compiles clean in `browser` mode but fails `E-CODEGEN-INVALID-LOGIC` under `mode:"library"` — `NEW S411; MED; RESOLVED S412`
 

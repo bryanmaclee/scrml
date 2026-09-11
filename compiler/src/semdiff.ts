@@ -686,8 +686,8 @@ const NS_TOKEN_PLACEHOLDER = "__SCRML_NSTOK__";
 export function canonicalizeChunkNamespaceToken(content: string): string {
   if (!content) return content;
   const tokens = new Set<string>();
-  for (const m of content.matchAll(/\/\/ --- chunk cell scope \(([0-9a-z]{8})\) ---/g)) tokens.add(m[1]);
-  for (const m of content.matchAll(/_{1,2}scrml_engine_([0-9a-z]{8})_/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/\/\/ --- chunk cell scope \((0[0-9a-z]{7})\) ---/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/_{1,2}scrml_engine_(0[0-9a-z]{7})_/g)) tokens.add(m[1]);
   // ⚑ S411 — the three sites above are all ENGINE- or PROLOGUE-derived, so an HTML
   // artifact for a program with no engine had NO discovery site at all and its
   // path-derived token survived, making any moved or renamed file read
@@ -704,16 +704,44 @@ export function canonicalizeChunkNamespaceToken(content: string): string {
   //
   // ⚑ DIRECTION MATTERS HERE. Under-discovery over-reports behavioral (noisy but safe);
   // OVER-discovery would neutralize a real difference and report false-COSMETIC, which
-  // hides a regression. So both patterns are anchored on a literal compiler-emitted
-  // prefix — `data-scrml-` or `<!--scrml-` — which no user string literal carries
-  // incidentally. A bare token-shaped literal in adopter source is still never touched;
-  // that is pinned as a negative test.
+  // hides a regression.
+  //
+  // ⚑ S412 — THE ANCHOR IS THE TOKEN'S OWN SHAPE, NOT THE ATTRIBUTE PREFIX. The S411
+  // comment here argued these were safe because they are "anchored on a literal
+  // compiler-emitted prefix — `data-scrml-` or `<!--scrml-` — which no user string
+  // literal carries incidentally". That is true of the PREFIX and does not establish
+  // what it was used to establish, because the captured group is the attribute VALUE:
+  // `data-scrml-ref` carries the AUTHOR's ref name (emit-html.ts), `data-scrml-key`
+  // carries the ROW KEY from data (emit-ssr-render.ts), and `data-scrml-scope` is
+  // likewise author-facing. Measured on the S411 pattern, 5 of 6 ordinary values were
+  // captured: `data-scrml-key="customer_record_1"` discovered `customer`, and since a
+  // discovered token is replaced EVERYWHERE, every occurrence of the word "customer" in
+  // the artifact — page text included — was neutralized. False-COSMETIC, the direction
+  // this comment correctly names as the one that hides a regression.
+  //
+  // The discriminator is a property of the token VALUE, and `nsId` guarantees it:
+  // `fnv1a-hash.ts` emits lowercase base36 ZERO-PADDED TO EXACTLY 8 CHARS, and a u32
+  // maximum (`4294967295`) is `1z141z3` — SEVEN base36 digits. So the pad is always
+  // present and EVERY chunk token begins with `0`. Verified by execution over 200,000
+  // generated tokens: all length 8, all leading `0`, zero counterexamples. Requiring
+  // `0[0-9a-z]{7}` therefore keeps every genuine token and rejects `customer`,
+  // `userdata`, `rowabcde`, `sidebar1` — none of which begin with `0`.
+  //
+  // ⚑ This is what the doc comment above ALREADY claimed ("not matched by a blanket
+  // `0[0-9a-z]{7}` sweep"). The invariant was documented and never encoded in the
+  // patterns; this makes the code match its own contract.
+  //
+  // Residual, stated rather than papered over: an author value that begins with `0`,
+  // is exactly 8 base36 chars, sits in a `data-scrml-*` attribute AND is followed by
+  // `_` would still be captured. That is far narrower than before and is the honest
+  // limit of a text-level canonicaliser; the prefix anchor still does its share.
+  //
   // The `", "` alternative is the `setAttribute("data-scrml-each-mount", "each_<tok>_N")`
   // form. A client-JS artifact always carries the prologue banner, so that artifact's
   // token is already discoverable and this alternative is not load-bearing TODAY — it is
   // here so discovery does not silently depend on the banner always being present.
-  for (const m of content.matchAll(/data-scrml-[a-z-]+(?:="|",\s*")(?:[A-Za-z_]*_)?([0-9a-z]{8})_/g)) tokens.add(m[1]);
-  for (const m of content.matchAll(/<!--\/?scrml-[a-z-]+:([0-9a-z]{8})_/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/data-scrml-[a-z-]+(?:="|",\s*")(?:[A-Za-z_]*_)?(0[0-9a-z]{7})_/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/<!--\/?scrml-[a-z-]+:(0[0-9a-z]{7})_/g)) tokens.add(m[1]);
   let out = content;
   for (const tok of tokens) out = out.split(tok).join(NS_TOKEN_PLACEHOLDER);
   return out;

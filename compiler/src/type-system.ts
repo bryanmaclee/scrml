@@ -19289,8 +19289,34 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
             // Do NOT pass parentLinTracker — function bodies are a closed lin scope.
             // Outer lin vars cannot be consumed inside a function body (they would
             // need to be passed as parameters).
-            // Do NOT pass parentBindings — function bodies are a closed scope; outer
-            // names cannot be reassigned from inside (E-FN-003 enforces that).
+            //
+            // ⚑ S412 — `parentBindings` IS passed for a `function`, and is NOT for an
+            // `fn`. This line previously passed neither, justified as *"function bodies
+            // are a closed scope; outer names cannot be reassigned from inside (E-FN-003
+            // enforces that)"*. **E-FN-003 enforces that for `fn` ONLY.** SPEC.md:5986 is
+            // explicit: *"Inner `function` declarations MAY mutate outer `let` bindings.
+            // Inner `fn` declarations are subject to the same purity constraints as
+            // top-level `fn` (§48) — they may read outer bindings but may not mutate
+            // them (E-FN-003)."* The comment generalised an `fn`-only rule to both forms.
+            //
+            // The consequence was a false E-MU-001. Per §48.3.3 a `tilde-decl` whose name
+            // is already bound in an enclosing scope is a REASSIGNMENT, not a declaration
+            // — which is exactly what `parentBindings` is for (see its doc on
+            // `CheckLinearOpts`). Without it, `col = 7` inside an inner `function`
+            // registered a FRESH must-use entry scoped to that body, which nothing there
+            // reads, so the checker reported `col` "declared but never used" while the
+            // enclosing `return col + r` plainly read it.
+            //
+            // For `fn` the original reasoning genuinely holds — mutation IS forbidden and
+            // E-FN-003 is the diagnostic that should fire — so `fn` keeps the closed
+            // scope and the tilde-decl there stays a declaration.
+            //
+            // Same root as the S412 `emit-logic.ts` fix
+            // (g-selfhost-tokenizelogic-tdz-pos-before-initialization): two independent
+            // consumers each re-derived "what is bound in the enclosing scope?" and each
+            // got the inner-function case wrong. In both, the justifying COMMENT was the
+            // giveaway.
+            ...(node.fnKind === "function" ? { parentBindings: knownBindings } : {}),
           },
         );
         break;
