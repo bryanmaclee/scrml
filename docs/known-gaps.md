@@ -1545,9 +1545,9 @@ invisible to the gate — the same coverage hole that let the runaway rot. It sh
 disposition [[g-tracking-job-is-red-as-a-whole]] and the S410-banked "decide `self-host/`'s status
 EXPLICITLY" item settle on.
 
-### g-map-literal-in-fn-body-does-not-lower-in-library-mode — a §59 map literal inside a `fn` body compiles clean in `browser` mode but fails `E-CODEGEN-INVALID-LOGIC` under `mode:"library"` — `NEW S411; MED; open`
+### g-map-literal-in-fn-body-does-not-lower-in-library-mode — a §59 map literal inside a `fn` body compiles clean in `browser` mode but fails `E-CODEGEN-INVALID-LOGIC` under `mode:"library"` — `NEW S411; MED; RESOLVED S412`
 
-<!-- @gap id=g-map-literal-in-fn-body-does-not-lower-in-library-mode sev=MED status=open locus=searched:compiler/src/codegen/emit-library.ts,compiler/src/expression-parser.ts — the failing artifact is named by the diagnostic itself (`artifact: <stem>.js`), but which library-mode splicer drops the map lowering was NOT traced prov=empirical:S411-peter-A-B-verified-identical-on-origin-main-and-on-the-regex-fix-branch -->
+<!-- @gap id=g-map-literal-in-fn-body-does-not-lower-in-library-mode sev=MED status=resolved locus=searched:compiler/src/codegen/emit-library.ts,compiler/src/expression-parser.ts — the failing artifact is named by the diagnostic itself (`artifact: <stem>.js`), but which library-mode splicer drops the map lowering was NOT traced prov=empirical:S411-peter-A-B-verified-identical-on-origin-main-and-on-the-regex-fix-branch -->
 
 **Reproducer:**
 
@@ -1571,6 +1571,70 @@ regex-class-colon pin originally asserted these map cases in `library` mode as i
 negatives; they went red and read exactly like the fix breaking map lowering. A/B against
 `origin/main` showed **byte-identical failure on both sides**, so the fix was exonerated and the pin
 moved to `browser` mode — but the underlying failure is real and was not previously recorded.
+
+⚑ **RESOLVED S412 — and the lowering was never missing; the RUNTIME was.** Root-caused by
+instrumenting the fallback rather than by reading the code: printing the discard reason at the last
+gate of `emitControlFlowLibraryFns` returned `[libfallback] realMap UNMET:
+["_scrml_map_from_entries"]`. `emitLibraryFnMember` lowers the literal **correctly** to
+`_scrml_map_from_entries([["k", 1], ["j", 2]], false)`; `LIB_RUNTIME_HELPERS` carried only
+`_scrml_structural_eq` / `_scrml_log` / `_scrml_print`, so `unmetRuntimeHelperRefs` reported the map
+helper unmet, the emitted-bytes gate discarded the correct emit, and the fn fell back to the raw
+path — where the verbatim `["k": 1]` is not valid JS and trips the §2.2.1 emit gate. **This is the
+same class the file's own architecture comment names** (*"the lowering was never missing; only the
+routing predicate was"*), one member further along.
+
+**Fixed by reusing the proven mechanism, not a second copy.** `SERVER_VALUE_NATIVE_MAP_HELPER`
+already exists — a marker-delimited slice of `runtime-template.js` that `emit-server.ts` injects for
+exactly this problem (`g-value-native-map-set-server-runtime`), fail-loud if its markers move.
+`emit-library.ts` now injects the same slice, gated on the same `/_scrml_map_[a-z]/` reachability
+probe, so there is ONE source of truth that cannot drift from the client runtime. The provided-name
+set is **parsed out of the slice** rather than hand-listed, so a function added to the map runtime is
+covered with no edit here. The closure is 30 functions / ~512 lines (the HAMT), appended **once** as
+a family and **on-use** — a library module that lowers no map literal is byte-unchanged.
+
+⚑ **VERIFIED BY RUNNING IT, NOT BY COMPILING IT.** The emitted `.js` is imported and called:
+`realMap().__scrml_map === true` and `emptyMap().__scrml_map === true`. A green compile proves the
+module PARSES; only the call proves the runtime it references actually travelled with it. Pin:
+`compiler/tests/unit/library-mode-map-literal-runtime.test.js`, **bite-proven both ways** (4 of 8
+fail with the fix reverted; the 4 that stay green are the controls and negatives, which is what
+"no regression" looks like).
+
+⚑ **HALF-FIXED ON PURPOSE, AND THE OTHER HALF IS KEPT LOUD.** See
+[[g-library-mode-map-bracket-read-does-not-lower]] — shipping the runtime alone would have turned a
+loud failure into **silent-wrong** for any fn that bracket-reads a map. `rawFallbackReason`'s
+foreign-code exclusion already ruled that trade in this very file (*"silent-wrong output, which is
+strictly worse than the raw path's honest verbatim copy"*), so the same ruling is applied here.
+
+### g-library-mode-map-bracket-read-does-not-lower — §59.6's map bracket-READ lowering does not reach the library boundary, so `m["k"]` would emit a raw property access on a HAMT node and return `undefined`
+
+<!-- @gap id=g-library-mode-map-bracket-read-does-not-lower sev=MED status=open locus=compiler/src/codegen/emit-expr.ts(emitIndex — the §59.6 branch is gated on ctx.mode === "client" || "server")+compiler/src/codegen/emit-library.ts(containsIndexExpr — the guard holding the line meanwhile) prov=empirical:S412-peter-surfaced-by-RUNNING-the-emitted-module-while-fixing-g-map-literal-in-fn-body-does-not-lower-in-library-mode -->
+
+**Found by running the emitted module, not by reading it** — the map-literal fix above compiled
+clean and two of its three functions returned correct tagged maps, while `readBack()` returned
+`undefined`. The differential is unambiguous:
+
+| mode | emitted for `return m["k"]` | result |
+|---|---|---|
+| `browser` | `return _scrml_map_get(m, "k");` | `7` |
+| `library` | `return m["k"];` | **`undefined`** |
+
+`emitIndex` (`emit-expr.ts`) gates the §59.6 read lowering on
+`ctx.mode === "client" || ctx.mode === "server"`, so the library boundary never enters that branch
+and the bracket read survives as a raw JS property access. A HAMT node has no `"k"` property.
+
+⚑ **NOT LIVE, AND DELIBERATELY SO.** `emit-library.ts` now refuses to route a map-bearing fn that
+also contains an index expression (`containsIndexExpr`), so such a fn stays on the raw path and
+fails **loudly** exactly as it does today. Without that guard the map-runtime fix would have
+converted a loud `E-CODEGEN-INVALID-LOGIC` into a silently wrong `undefined` — the one direction
+`rawFallbackReason` has already ruled is worse than failing. The guard is consulted **only** for a
+map-bearing emit, every one of which falls back to raw today, so it cannot regress anything.
+
+**Why it is filed rather than fixed.** Widening `emitIndex` to the library boundary needs the same
+boundary-safety argument the existing branch makes for client/server — and that comment turns on
+which map names are safely threaded at each boundary. *"What boundary is a library module?"* is the
+question `rawFallbackReason`'s foreign-code exclusion already routed rather than decided, for the
+same reason. It is a language question, not a codegen one. — `NEW S412-peter (found by executing the artifact during the map-literal fix; both rows above measured, and the guard that keeps it loud is pinned in library-mode-map-literal-runtime.test.js)`; **MED**; open
+
 ### g-regex-char-class-colon-mislowered-as-map-literal — a `:` inside a regex character class makes the compiler emit a §59 map literal instead of the regex, at exit 0 with no diagnostic — silent-wrong, and it is what caused the S406 82 GB machine lockup
 
 <!-- @gap id=g-regex-char-class-colon-mislowered-as-map-literal sev=HIGH status=resolved locus=compiler/src/expression-parser.ts(preprocessMapLiterals — now skips regex-literal and comment interiors) prov=empirical:S411-peter-fixed-and-verified-by-a-corpus-emit-differential-over-1928-sources-plus-the-runaway-itself-ceasing -->
