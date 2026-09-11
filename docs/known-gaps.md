@@ -31,10 +31,97 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 101 |
-| MED | 230 |
+| MED | 232 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-unbraced-if-for-body-regex-literal-is-space-padded-and-escapes-dropped — a regex literal in an un-braced `if`/`for` body is rewritten into a DIFFERENT regex at exit 0; whitespace and `\` are significant there and the tokenizer's padding is not
+
+<!-- @gap id=g-unbraced-if-for-body-regex-padded-escapes-dropped sev=MED status=open locus=compiler/src/ast-builder.js(the BS-tokenizer space-padding reaching an un-braced single-statement if/for body)+compiler/src/codegen/emit-logic.ts(emit of that body) prov=review:docs/pr-reviews.md-S412-peter-#924+repro:A/B-verified-byte-identical-on-9c984a3f-and-6951baa5 -->
+
+**Found during the S412 S239 review of #924, and it is NOT #924's regression** — A/B on the same
+sources returns **byte-identical output on `9c984a3f` (the pre-#924 base) and on `6951baa5`**, so it
+is pre-existing and independent of the map-literal fix.
+
+A regex literal in the **un-braced single-statement body** of an `if` or `for` is emitted with
+whitespace inserted and backslash escapes dropped. **Whitespace and `\` are SIGNIFICANT inside a
+regex literal**, so the emitted regex has different semantics from the one the author wrote —
+**exit 0, zero diagnostics, silent-wrong.**
+
+Measured (sources written to disk and their bytes verified before compiling, `mode:"browser"`):
+
+| source | emitted | |
+|---|---|---|
+| `if (c) /a\sb/.test(c)`  | `/ a sb /.test(c)`   | ⚑ padded **and** `\` dropped |
+| `if (c) /[a-z]/.test(c)` | `/ [ a - z ] /`      | ⚑ now also matches a space |
+| `if (c) /a+b/.test(c)`   | `/ a + b /`          | ⚑ `+` now quantifies a space |
+| `for (…) /a\sb/.test(c)` | `/ a sb /`           | ⚑ same |
+
+**Controls, both PRESERVED — this is what makes it a defect and not a global emit property:**
+`let r = /a\sb/` (assignment position) and `if (c) { /a\sb/.test(c) }` (**braced** body) both emit
+the literal byte-exact. So **bracing the body is the workaround**, and the discriminator is the
+un-braced single-statement body, not the regex.
+
+⚑ **COUPLED TO #924 — READ THIS BEFORE FIXING EITHER.** `regexAllowedAfter`
+(`compiler/src/codegen/code-segments.ts:34`) does **not** fire after `)` or after `else`/`do`/
+`finally`, so `preprocessMapLiterals`' new #924 regex-skip guard does not fire in exactly these
+positions either (**6 of 14 real-regex contexts measured, see the #924 review marker**). Today that
+is latent, because this padding defect mangles the literal *first* and the map-literal recognizer no
+longer sees a `[…:…]` shape to rewrite — **verified: none of the 6 contexts emits `__scrml_map_lit__`
+on `6951baa5`, while the base `9c984a3f` does.** **Fixing this padding gap in isolation would
+UNMASK the #924 mislowering class in those positions.** Fix the `regexAllowedAfter` coverage in the
+same arc, or pin both directions.
+
+**Corpus exposure: 0 instances** (heuristic grep for a statement-position regex across all `.scrml`
+in-repo), which is why it has never surfaced. Filed MED rather than HIGH on that measured-zero blast
+radius and the unusual construct (a discarded-result regex test) — **not** downgraded for being
+pre-existing. — `NEW S412-peter (found by S239-reviewing #924; every row above measured by execution, A/B against the pre-fix base, with the assignment-position and braced-body controls both passing)`; **MED**; open
+
+### g-semdiff-chunk-token-discovery-captures-author-controlled-attribute-values — the generalized `data-scrml-*` discovery pattern captures the attribute VALUE, and three of those attributes carry author/row data
+
+<!-- @gap id=g-semdiff-chunk-token-discovery-over-discovers sev=MED status=open locus=compiler/src/semdiff.ts(canonicalizeChunkNamespaceToken, the data-scrml-[a-z-]+ pattern added by #923) prov=review:docs/pr-reviews.md-S412-peter-#923+repro:5-of-6-ordinary-attribute-values-discovered-as-tokens -->
+
+**Found during the S412 S239 review of #923.** That PR generalized chunk-token discovery from three
+fixed sites to a family pattern:
+
+    /data-scrml-[a-z-]+(?:="|",\s*")(?:[A-Za-z_]*_)?([0-9a-z]{8})_/g
+
+and its own source comment states the safety argument: *"both patterns are anchored on a literal
+compiler-emitted prefix — `data-scrml-` or `<!--scrml-` — which no user string literal carries
+incidentally."* ⚑ **The claim is true about the PREFIX and does not establish what it is used to
+establish, because the captured group is the attribute VALUE.** The retired third pattern
+(`data-scrml-engine-mount="([0-9a-z]{8})_`) was safe precisely because it pinned ONE attribute whose
+value is compiler-generated; widening the name to `[a-z-]+` admits attributes whose values are not.
+
+**At least three admitted attributes carry author- or data-controlled values:**
+`data-scrml-ref` (`emit-html.ts:3147` interpolates the author's ref name),
+`data-scrml-key` (`emit-ssr-render.ts:282` emits the row key from data), and `data-scrml-scope`.
+
+**Measured — 5 of 6 ordinary values are wrongly discovered as chunk tokens:**
+
+| attribute value | discovered token |
+|---|---|
+| `customer_record_1` | `customer` |
+| `userdata_7`        | `userdata` |
+| `rowabcde_12`       | `rowabcde` |
+| `sidebar1_main`     | `sidebar1` |
+| `abcdefgh_x`        | `abcdefgh` |
+| `my_listkey_2`      | *(correctly ignored)* |
+
+A discovered token is then applied as `content.split(tok).join(NS_TOKEN_PLACEHOLDER)` — a **global
+textual replace over the whole artifact** — so every occurrence of the string `customer` anywhere in
+the artifact is neutralized. **That is the false-COSMETIC direction, which the PR's own comment
+correctly names as the one that hides a regression** (*"OVER-discovery would neutralize a real
+difference and report false-COSMETIC, which hides a regression"*). The direction analysis was right;
+the anchor does not deliver it.
+
+**Bounded:** `semdiff` is a dev instrument, not shipped codegen, so no adopter program is affected —
+but the instrument's entire job is separating cosmetic from behavioral, and this biases it toward the
+unsafe answer on ordinary adopter data. Candidate fix: require the captured token to be
+compiler-shaped at the *value* level (the `nsId()` alphabet plus a structural suffix), or keep the
+family pattern but intersect it with tokens independently discovered from an engine/prologue site.
+— `NEW S412-peter (found by S239-reviewing #923; the six rows measured by executing the landed pattern against realistic attribute values, and the two author-controlled emission sites read at their loci)`; **MED**; open
 
 ### g-migrate-consumer-is-not-raw-DDL-aware-deferred-to-its-own-arc — `extractDesiredSchema` serves two consumers with different needs; the tenant floor learned raw DDL, the migrate/differ path deliberately did not
 
