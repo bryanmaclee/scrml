@@ -28,6 +28,25 @@ const REGEX_PERMISSIVE_KEYWORDS = new Set([
   "instanceof", "throw", "yield", "await",
 ]);
 
+/**
+ * §S412 — the keywords whose parenthesised HEAD is followed by a STATEMENT, so that a
+ * `/` after the closing `)` opens a REGEX rather than being division.
+ *
+ * ⚑ ONE DEFINITION, TWO CONSUMERS, AND THEY MUST NOT DRIFT. `regexAllowedAfter` below
+ * uses it to decide whether the §59 map-literal preprocessor may walk into a regex
+ * interior; `tokenizer.ts`'s `closesControlFlowHead` uses it to decide whether the regex
+ * survives TOKENIZATION at all. The same source construct is classified by both, and a
+ * disagreement is not a style problem — it reopens
+ * `g-regex-char-class-colon-mislowered-as-map-literal` (the S406 82 GB lockup) in exactly
+ * the contexts the other one newly admits.
+ *
+ * `catch` is included: `catch (e) /re/.test(e)` is a braceless catch body. `switch` is
+ * included for completeness even though its body is always braced.
+ */
+export const REGEX_AFTER_CLOSE_PAREN_KEYWORDS: ReadonlySet<string> = new Set([
+  "if", "for", "while", "switch", "catch",
+]);
+
 // Returns true if a `/` appearing immediately after `codeBefore` should be
 // interpreted as the opener of a regex literal (rather than as division).
 // `codeBefore` is the slice of source-text ending just before the `/`.
@@ -48,9 +67,45 @@ export function regexAllowedAfter(codeBefore: string): boolean {
     let j = i;
     while (j >= 0 && /[A-Za-z0-9_$]/.test(codeBefore[j])) j--;
     const token = codeBefore.slice(j + 1, i + 1);
+    // ⚑ S412 — `else` / `do` / `finally` introduce a STATEMENT, so a `/` after one
+    // opens a regex. They are not in `REGEX_PERMISSIVE_KEYWORDS` because that set is
+    // about EXPRESSION prefixes (`return /re/`, `typeof /re/`); these are the
+    // statement-position limb of the same question.
+    if (token === "else" || token === "do" || token === "finally") return true;
     return REGEX_PERMISSIVE_KEYWORDS.has(token);
   }
-  // After `)`, `]`, digit, `.` → division.
+  // ⚑ S412 — a `)` ends a value ONLY when it closes an expression. `(a + b) / 2` and
+  // `f(x) / 2` are division, but `if (c) /re/.test(c)` is a regex in statement
+  // position. Walk back to the matching `(` and ask what opened it — the same question
+  // `tokenizer.ts`'s `closesControlFlowHead` answers on tokens, against the SAME
+  // keyword set, so the two cannot disagree about which constructs count.
+  //
+  // ⚑ NOT CURRENTLY REACHABLE, AND RECORDED AS SUCH RATHER THAN CLAIMED AS A FIX.
+  // `g-unbraced-if-for-body-regex-padded-escapes-dropped` predicted that repairing the
+  // tokenizer would UNMASK the §59 mislowering here. Measured after that repair: it
+  // does not — by the time `preprocessMapLiterals` runs, the `if (…)` head has been
+  // stripped and the `/` is expression-initial, which the `i < 0` case above already
+  // admits. This limb is defence in depth for any caller that does hand over a prefix
+  // ending in a control-flow `)`, and it keeps the shared keyword set honest by giving
+  // it its second consumer.
+  if (lastCh === ")") {
+    let depth = 0;
+    for (let j = i; j >= 0; j--) {
+      const c = codeBefore[j];
+      if (c === ")") { depth++; continue; }
+      if (c !== "(") continue;
+      depth--;
+      if (depth !== 0) continue;
+      let k = j - 1;
+      while (k >= 0 && /\s/.test(codeBefore[k])) k--;
+      if (k < 0 || !/[A-Za-z0-9_$]/.test(codeBefore[k])) return false;
+      let w = k;
+      while (w >= 0 && /[A-Za-z0-9_$]/.test(codeBefore[w])) w--;
+      return REGEX_AFTER_CLOSE_PAREN_KEYWORDS.has(codeBefore.slice(w + 1, k + 1));
+    }
+    return false; // unbalanced → the conservative answer is division
+  }
+  // After `]`, digit, `.` → division.
   return false;
 }
 
