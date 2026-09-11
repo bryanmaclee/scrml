@@ -80,6 +80,19 @@ describe("a regex literal after a control-flow head survives intact (S412)", () 
     });
   }
 
+  // ⚑ CONTAINMENT IS NOT PLACEMENT, AND THAT GAP HID A SEPARATE DEFECT.
+  // The assertions above check only that the regex SURVIVES. They passed while the
+  // braceless body was being emitted AFTER the loop with the loop left empty —
+  // `g-while-braceless-body-hoisted-out-of-the-loop`, which `for` had too. A
+  // `toContain` on emitted source cannot see structure, so the body's POSITION is
+  // asserted separately here.
+  test("⚑ the braceless body is INSIDE the loop, not merely present", () => {
+    const { js, errors } = emit(forBody("/a\\sb/"), "for-body-placement");
+    expect(errors.map((e) => e.code)).toEqual([]);
+    expect(js).not.toMatch(/for\s*\([^)]*\)\s*\{\s*\}/);
+    expect(js).toMatch(/for \(let i = 0; i < 1; i = i \+ 1\) \{\s*\n\s*\/a\\sb\/\.test\(c\);/);
+  });
+
   test("CONTROL — a braced body was never affected and still is not", () => {
     const { js, errors } = emit(
       `\${\n  export function f(c) {\n    let h = false\n    if (c) { /a\\sb/.test(c) }\n    return h\n  }\n}`,

@@ -8828,6 +8828,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (peek().text === "{") {
         consume();
         body = parseRecursiveBody();
+      } else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
+        // ⚑ S412 — braceless `for` body, the sibling of the `while` limb above. Without
+        // it the body was emitted AFTER the loop with the loop left empty:
+        //     for (let i = 0; i < 2; i = i + 1) n = n + 10
+        //   emitted  for (let i = 0; i < 2; i = i + 1) { }
+        //            n = n + 10;
+        // Not a hang — the `for` header self-increments — but the body runs ONCE after
+        // the loop instead of N times inside it. Silent-wrong at exit 0.
+        // See `g-while-braceless-body-hoisted-out-of-the-loop`.
+        const singleStmt = parseOneStatement();
+        if (singleStmt) body = [singleStmt];
       }
       // Phase 4: detect C-style for-loop and parse parts individually
       const _cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
@@ -8857,11 +8868,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // WHILE: `while condition { body }`
     if (tok.kind === "KEYWORD" && tok.text === "while") {
       const startTok = consume();
-      const { expr: condition, span: condSpan } = collectExpr("{");
+      // ⚑ S412 — `collectIfCondition`, not `collectExpr("{")`, and then a BRACELESS
+      // body limb. `collectExpr("{")` stops at a `{`; a braceless `while` body has
+      // none, so the body was vacuumed into the CONDITION. That was invisible for an
+      // ordinary statement (`while (h) count = count + 1` re-parsed and emitted
+      // correctly anyway) and fatal for a regex: the head became
+      // `(h) /a\sb/.test(c)`, where the `/`…`/` reads as DIVISION and the bare `\s`
+      // reaches acorn as `Expecting Unicode escape sequence \uXXXX`.
+      // See `g-while-braceless-body-rejects-a-regex-literal`.
+      //
+      // `collectIfCondition` is paren-aware — it stops after closing the outermost
+      // `(` — and already falls back to `collectExpr("{")` for the unparenthesized
+      // `while cond { … }` form, so that spelling is untouched. This makes `while`
+      // agree with `parseOneIfStmt`, which has had both limbs all along.
+      const { expr: condition, span: condSpan } = collectIfCondition();
       let body = [];
       if (peek().text === "{") {
         consume();
         body = parseRecursiveBody();
+      } else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
+        const singleStmt = parseOneStatement();
+        if (singleStmt) body = [singleStmt];
       }
       return {
         id: ++counter.next,
@@ -13221,9 +13248,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let loopNode = null;
       if (loopTok.text === "while") {
         consume(); // consume `while`
-        const { expr: condition } = collectExpr("{");
+        // ⚑ S412 — the LABELLED limb of the same defect; kept in step with the other
+        // two `while` sites so a `label: while (c) stmt` does not regress into the
+        // condition-vacuuming behaviour they just lost.
+        const { expr: condition } = collectIfCondition();
         let body = [];
         if (peek().text === "{") { consume(); body = parseRecursiveBody(); }
+        else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
+          const singleStmt = parseOneStatement();
+          if (singleStmt) body = [singleStmt];
+        }
         loopNode = { id: ++counter.next, kind: "while-stmt", label: labelName, condition: condition.trim(), condExpr: safeParseExprToNode(condition.trim(), 0), body, span: spanOf(labelTok, peek()) };
       } else if (loopTok.text === "do") {
         consume(); // consume `do`
@@ -13368,6 +13402,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (peek().text === "{") {
         consume();
         body = parseRecursiveBody();
+      } else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
+        // ⚑ S412 — see the sibling `for` limb in `parseOneStatement`. Same defect,
+        // same fix: a braceless body was emitted after the loop, not inside it.
+        const singleStmt = parseOneStatement();
+        if (singleStmt) body = [singleStmt];
       }
       // Phase 4: detect C-style for-loop and parse parts individually
       const _cStyleMatch2 = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
@@ -13400,11 +13439,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // WHILE STATEMENT: `while condition { body }`
     if (tok.kind === "KEYWORD" && tok.text === "while") {
       const startTok = consume();
-      const { expr: condition } = collectExpr("{");
+      // ⚑ S412 — see the sibling in `parseOneStatement`. Same defect, same fix: a
+      // braceless body was vacuumed into the condition by `collectExpr("{")`.
+      const { expr: condition } = collectIfCondition();
       let body = [];
       if (peek().text === "{") {
         consume();
         body = parseRecursiveBody();
+      } else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
+        const singleStmt = parseOneStatement();
+        if (singleStmt) body = [singleStmt];
       }
       nodes.push({
         id: ++counter.next,
