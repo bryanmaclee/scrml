@@ -36,9 +36,9 @@
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
-### g-unbraced-if-for-body-regex-literal-is-space-padded-and-escapes-dropped — a regex literal in an un-braced `if`/`for` body is rewritten into a DIFFERENT regex at exit 0; whitespace and `\` are significant there and the tokenizer's padding is not
+### g-unbraced-if-for-body-regex-literal-is-space-padded-and-escapes-dropped — a regex literal in an un-braced `if`/`for` body is rewritten into a DIFFERENT regex at exit 0; whitespace and `\` are significant there and the tokenizer's padding is not — `NEW S412; MED; RESOLVED S412`
 
-<!-- @gap id=g-unbraced-if-for-body-regex-padded-escapes-dropped sev=MED status=open locus=compiler/src/ast-builder.js(the BS-tokenizer space-padding reaching an un-braced single-statement if/for body)+compiler/src/codegen/emit-logic.ts(emit of that body) prov=review:docs/pr-reviews.md-S412-peter-#924+repro:A/B-verified-byte-identical-on-9c984a3f-and-6951baa5 -->
+<!-- @gap id=g-unbraced-if-for-body-regex-padded-escapes-dropped sev=MED status=resolved locus=compiler/src/tokenizer.ts(isRegexContext + closesControlFlowHead)+compiler/src/codegen/code-segments.ts(regexAllowedAfter + the shared REGEX_AFTER_CLOSE_PAREN_KEYWORDS) prov=empirical:S412-peter-both-regex-vs-division-heuristics-treated-a-close-paren-as-unconditional-division -->
 
 **Found during the S412 S239 review of #924, and it is NOT #924's regression** — A/B on the same
 sources returns **byte-identical output on `9c984a3f` (the pre-#924 base) and on `6951baa5`**, so it
@@ -69,14 +69,86 @@ un-braced single-statement body, not the regex.
 positions either (**6 of 14 real-regex contexts measured, see the #924 review marker**). Today that
 is latent, because this padding defect mangles the literal *first* and the map-literal recognizer no
 longer sees a `[…:…]` shape to rewrite — **verified: none of the 6 contexts emits `__scrml_map_lit__`
-on `6951baa5`, while the base `9c984a3f` does.** **Fixing this padding gap in isolation would
-UNMASK the #924 mislowering class in those positions.** Fix the `regexAllowedAfter` coverage in the
-same arc, or pin both directions.
+on `6951baa5`, while the base `9c984a3f` does.** ⚑ **CORRECTED IN PLACE (S412, after the fix landed): THIS PREDICTION WAS WRONG.** It read *"fixing
+this padding gap in isolation would UNMASK the #924 mislowering class in those positions."* **It does
+not.** Measured after the tokenizer repair: `__scrml_map_lit__` appears in NONE of the six contexts.
+The reasoning was about TEXT PREFIXES and the pipeline does not hand `preprocessMapLiterals` the
+prefix I assumed — by the time that pass runs the `if (…)` head is stripped and the `/` is
+expression-initial, which `regexAllowedAfter` already admits via its `i < 0` start-of-input case.
+**The `regexAllowedAfter` coverage was widened anyway**, as defence in depth and to give the shared
+keyword set its second consumer — but it is recorded as closing a LATENT hazard, not a reachable
+defect, because I could not construct one. This is the same class as the S411 entry that recorded an
+INFERENCE from an observation as though it were the observation.
 
 **Corpus exposure: 0 instances** (heuristic grep for a statement-position regex across all `.scrml`
 in-repo), which is why it has never surfaced. Filed MED rather than HIGH on that measured-zero blast
 radius and the unusual construct (a discarded-result regex test) — **not** downgraded for being
 pre-existing. — `NEW S412-peter (found by S239-reviewing #924; every row above measured by execution, A/B against the pre-fix base, with the assignment-position and braced-body controls both passing)`; **MED**; open
+⚑ **RESOLVED S412 — and the locus filed above was a guess that measurement replaced.** It named
+`ast-builder.js`'s padding and `emit-logic.ts`'s emit. The actual cause is upstream of both: **a `)`
+ends a value only when it closes an EXPRESSION, and both of the compiler's independent
+regex-vs-division heuristics treated it as unconditional division.**
+
+| heuristic | verdict on `)` | consequence |
+|---|---|---|
+| `tokenizer.ts` `isRegexContext` | division | the `/` lexed as PUNCT, so the regex body lexed as ordinary code tokens |
+| `code-segments.ts` `regexAllowedAfter` | division (also misses `else`/`do`/`finally`) | `preprocessMapLiterals` may walk a regex interior |
+
+**The tokenizer's miss is the one that bit.** With the regex lexed as ordinary tokens, a **braceless**
+`if`/`for` body — which `parseOneIfStmt` rebuilds by re-joining tokens, unlike a braced body that
+keeps its source slice — came back space-padded with its escapes dropped. That is why bracing was the
+workaround: it never took the re-join path.
+
+**Both now walk back to the matching `(` and ask what opened it**, against **one shared keyword set**
+(`REGEX_AFTER_CLOSE_PAREN_KEYWORDS`, exported from `code-segments.ts`). The tokenizer can decide this
+properly because it has the token list; the text-level twin does the same walk over characters. They
+**must** agree — one decides whether the regex survives tokenization, the other whether the §59
+map-literal preprocessor may enter it — so a drift between them reopens
+[[g-regex-char-class-colon-mislowered-as-map-literal]], the S406 82 GB lockup. Sharing the set is what
+makes that contract real rather than a comment.
+
+**Measured.** `regexAllowedAfter` now fires in **14/14** real-regex contexts (was 8/14) and stays
+division in **12/12** division contexts — including the word-boundary traps `fif(x)`, `notif(x)`,
+`elsewhere`, `doThing`, where a naive keyword match would have flipped a real division into a regex.
+That is the harmful direction for this caller, so it is pinned.
+
+**Corpus differential** over 1,928 sources / 7,467 artifacts, base `ecc05234` vs head: **0 artifact
+content diffs · 0 newly failing · 0 newly passing · 0 syntax delta · 0 diagnostic code changes**, and
+all 62 text-only diffs classified as checkout-root/relative-depth artifacts with the lookup control
+passing. For a **tokenizer** change that inertness is the load-bearing result: no existing program has
+a regex after a control-flow `)`, and no division anywhere was reclassified.
+
+Pin: `braceless-control-head-regex-literal.test.js` **29/0**, bite-proven (**14 of 29** fail reverted).
+Conformance **905/905**. Full unit tier **18,513 pass / 1 fail**, that one the known `GITI-035`
+`node --check` co-run canary which passes 12/0 in isolation.
+
+### g-while-braceless-body-rejects-a-regex-literal — `while (cond) /re/.test(x)` fails to compile, while the `if` and `for` forms of the same statement now work
+
+<!-- @gap id=g-while-braceless-body-rejects-a-regex-literal sev=MED status=open locus=compiler/src/ast-builder.js:8858+:13401(the two `while` parse sites collect the head with collectExpr("{") and have no braceless-body branch, unlike parseOneIfStmt which calls parseOneStatement) prov=empirical:S412-peter-residual-of-the-regex-arc-A/B-verified-broken-before-and-after -->
+
+**A residual of the S412 regex arc, filed rather than folded in.** That arc fixed the braceless `if`
+and `for` bodies; the `while` form still fails:
+
+```scrml
+while (h) /a\sb/.test(c)      →  E-CODEGEN-INVALID-LOGIC ("Expecting Unicode escape sequence \uXXXX")
+```
+
+⚑ **NOT A REGRESSION, AND THE DIAGNOSTIC DID CHANGE — both stated.** The same source failed **before**
+the arc too, as `E-SCOPE-001`. Both are errors on a program that never compiled, so no working case
+regresses, but the arc did move which error fires and that is recorded rather than glossed.
+
+⚑ **Braceless `while` itself is FINE** — `while (h) count = count + 1` emits identically to its braced
+form (verified by execution, both before and after the arc). So the defect is specific to a **regex
+reaching the `while` head collector**, not to braceless `while` in general. I initially read the parse
+as *dropping* the braceless body and filed that as the cause; compiling it showed the body emitted
+correctly, and the reading was withdrawn before it reached this entry.
+
+**Where to look:** both `while` sites (`ast-builder.js:8858` inside `parseOneStatement`, and `:13401`
+in the block-level loop) collect the head with `collectExpr("{")` and then have only a
+`if (peek().text === "{")` branch — there is no braceless-body limb at all, unlike `parseOneIfStmt`,
+which calls `parseOneStatement()`. A `/…/` with no `{` anywhere on the line is the shape that makes
+that collector over-run. — `NEW S412-peter (surfaced by the regex arc; A/B-verified failing before and after, with a regex-free braceless-while control passing on both sides)`; **MED**; open
+
 
 ### g-semdiff-chunk-token-discovery-captures-author-controlled-attribute-values — the generalized `data-scrml-*` discovery pattern captures the attribute VALUE, and three of those attributes carry author/row data — `NEW S412; MED; RESOLVED S412`
 
