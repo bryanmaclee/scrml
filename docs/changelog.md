@@ -7210,6 +7210,59 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-10 (S412 — peter — three silent defects in the shipped stdlib, and five instruments that lied)
+
+A drain session on the Windows clone. **Six landings, every one gate-green**, all merged on Peter's
+standing merge-on-green. The sequence was his: review floor first, then the two MEDs the S411 pickup
+named, then "more MEDs", then the regex arc, then more.
+
+| PR | |
+|---|---|
+| **#928** | review floor drained 6 → 0 — five clean, one finding, and falsifying #924 turned up a different pre-existing bug |
+| **#929** | §59 map literal in a library fn body — the lowering was never missing, the **runtime** was |
+| **#930** | §5986 inner function may mutate a captured binding — it was emitting a `const` declaration |
+| **#931** | two MEDs whose root cause was a documented invariant the code never encoded |
+| **#932** | a `)` ends a value only when it closes an expression, not a control-flow head |
+| **#933** | a braceless `while`/`for` body was emitted **after** the loop, leaving the loop empty |
+
+**Board HIGH 101 → 102 · MED 230 → 230 · LOW 86** — seven gaps resolved, eight filed. A rising-then-flat
+count is the count staying honest, not the work standing still.
+
+**Three separate silent defects were live in the shipped standard library**, and none was found by
+reading code:
+
+- `stdlib/time`'s **`throttle` did not throttle and `debounce` did not debounce** (#930). Both build a
+  closure over an outer `let`; `inThrottle = true` inside the inner function emitted as
+  `const inThrottle = true`, so the outer binding was never set and the `if (!inThrottle)` guard always
+  passed. Found by the corpus differential, which contradicted a blast-radius I had reasoned out.
+- `stdlib/auth/jwt`'s **`base64urlDecode` hung** (#933). Its padding loop `while (s.length % 4) s += "="`
+  emitted as an empty loop with the `s += "="` dropped entirely — an infinite loop for any input whose
+  length is not a multiple of 4. Twelve more sites across `compiler/self-host/`.
+- `semdiff`'s chunk-token discovery **neutralised ordinary author data** (#931), replacing every
+  occurrence of a word like `customer` across a whole artifact — the false-COSMETIC direction, which
+  hides regressions in the instrument whose job is to catch them.
+
+**Two fixes were made by encoding a contract that was already written down beside the code** (#931).
+`semdiff`'s own doc comment already said tokens match `0[0-9a-z]{7}`; the patterns used `[0-9a-z]{8}`.
+`type-system.ts` withheld `parentBindings` from every inner function because *"E-FN-003 enforces that"* —
+which SPEC.md:5986 makes true of `fn` and false of `function`. In both, the justifying **comment** was
+the giveaway, not the code.
+
+**Five instruments lied this session, all in the flattering direction, and the fifth is the one that
+matters.** A probe indexing `manifest.sources` as an object when it is an array reported a clean
+"0 unexplained" by reading nothing. But the serious one: a check that "verified" a braceless loop body
+was correctly nested by grepping emitted JS for matching lines — **the filter dropped the `}` lines**, so
+a hoisted-out body printed identically to a nested one. It caused a **correct** reading of the parser to
+be withdrawn as a false alarm, and a much narrower MED filed in its place. What eventually caught it was
+an A/B run that **hung**; the right response to a hang was to stop executing and inspect the emit.
+A line filter cannot see nesting, and `toContain` cannot see placement.
+
+**Gate at close:** conformance **905/905**; unit tier **18,552 pass / 2 fail**, both `node --check` co-run
+canaries that pass **30/0 together in isolation** (≈5,030 ms co-run vs ~1 s alone); self-host suites
+**139 pass / 3 fail**, all three separately filed. Four corpus differentials ran over 1,928 sources /
+7,467 artifacts — two returned **0 content diffs** (including the tokenizer change, where inertness is
+the proof), one returned **4** and one **2**, every artifact inspected line by line.
+
 ### 2026-09-09 (S411 — peter — the 82 GB lockup was a colon in a regex character class)
 
 A drain session on the Windows clone, concurrent with a LIVE S409-bryan throughout (his lane:

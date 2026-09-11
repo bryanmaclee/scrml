@@ -1,3 +1,156 @@
+# scrml — Session 412 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S411/S410 mine,
+> S405 bryan's) and is untouched. **No LIVE sibling this session** — the three `status=LIVE` board
+> headers at boot (S403/S407/S409) were 59h stale and treated as such; bryan's surfaces (`ci.yml`,
+> `SPEC-INDEX.md`, the dPA queue) were never touched. Full mechanical detail: `docs/changelog.md`
+> S412 block and delta-log `[2957]`–`[2978]`.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Review floor reads 6 OWED** — #928 #929 #930 #931 #932 #933, every one this session's. Per the
+   established pattern (see the #890 marker) a drain PR's review **rides the NEXT landing**, otherwise
+   the floor regresses forever one PR at a time. Discharge these first. ⚑ **Give #933 a real pass:** it
+   corrected a MED I had mis-filed, and the correction rests on my own claim that a line-filter probe
+   misled me — that reasoning deserves an adversary.
+
+2. ⚑⚑ **DO NOT CLOSE ISSUE #922. Still open ON PURPOSE, still unstamped** (2 comments, no ruling). The
+   regex-class-colon fix landed at `6951baa5` and is `semantics-changed`, which
+   `pa-profile-pjoliver11.md` says owes bryan a **language-surface review**. Closing it erases the thing
+   he still has to stamp. **If he stamps it, close it then.**
+
+3. **The cheapest real work on the board is the HIGH I filed and did not take:**
+   `g-user-fn-named-reset-emits-undefined-at-call-site`. A user fn named exactly `reset` has its call
+   replaced by `/* C5: unexpected reset target shape; B22 should have rejected */ undefined` at exit 0.
+   **Isolated against `setCol` / `tare` / `clear`, which all compile fine**, so the trigger is the name.
+   The emitted comment shows the compiler KNOWS it is in an unexpected state and emits `undefined`
+   anyway — a fail-OPEN on an internal invariant, which is exactly what §2.2.1 exists to prevent. Grep
+   the literal string `B22 should have rejected` to find the site.
+
+4. **Two more MEDs with reproducers already written:**
+   - `g-tab-scrml-tokenizelogic-parity-token-count-mismatch` — 2 of the 3 remaining `tab.test.js`
+     failures are real token-count disagreements between `tab.scrml` and the JS original
+     (`punct chars`: expected 25, received 24). A **`tab.scrml` SOURCE** gap, not a compiler one.
+   - `g-library-mode-map-bracket-read-does-not-lower` — §59.6's read lowering is gated on
+     `ctx.mode === "client" || "server"`, so `m["k"]` at the library boundary emits a raw property
+     access on a HAMT node. ⚑ **Deliberately NOT taken:** widening `emitIndex` needs the same
+     boundary-safety argument the existing branch makes, and *"what boundary is a library module?"* is
+     the language question `rawFallbackReason` already routed rather than decided. **Route, don't
+     unilaterally fix.**
+
+5. ⚑ **THE SELF-HOST COVERAGE HOLE IS NOW DOUBLY CONFIRMED AND IT IS BRYAN'S SURFACE.**
+   `compiler/tests/self-host/` is run by NEITHER CI job — and this session found a second limb:
+   `compiler/self-host/` contributes **0 sources** to `corpus-emit-differential` (its roots are
+   `examples,samples,conformance,stdlib,benchmarks`). So the 12 braceless-loop sites in `bs.scrml` /
+   `pa.scrml` / `bpp.scrml` fixed by #933 were invisible to BOTH instruments. The S410 sequence still
+   stands: name-set baselines for `tracking` → an assertion-count floor → decide `self-host/`'s status
+   EXPLICITLY. ⚑ **All of it edits `ci.yml`, bryan's ACTIVE surface at the open #907. Coordinate or
+   route; do not take it under him.**
+
+6. **Standing from Peter, unchanged and reconfirmed all session:** merge on green without re-asking,
+   and surface `autoMode` blocks explicitly with the exact command rather than engineering around them.
+
+## WHAT LANDED
+
+**Six PRs, every one gate-green — #928 · #929 · #930 · #931 · #932 · #933.** Board **HIGH 101 → 102 ·
+MED 230 → 230 · LOW 86**; seven gaps resolved, eight filed. Counts are generated — read
+`docs/known-gaps.md`, never this line.
+
+⚑ **THE HEADLINE: three separate silent defects were live in the SHIPPED STANDARD LIBRARY, and not one
+was found by reading code.** `stdlib/time`'s **`throttle` did not throttle and `debounce` did not
+debounce** — `inThrottle = true` inside the inner closure emitted as `const inThrottle = true`, so the
+outer binding was never set and the guard always passed. `stdlib/auth/jwt`'s **`base64urlDecode` hung** —
+its padding loop emitted empty with `s += "="` dropped, an infinite loop for any input not a multiple of
+4 long. And `semdiff` **neutralised ordinary author data**, replacing every occurrence of a word like
+`customer` across a whole artifact.
+
+## 🔭 DURABLE
+
+**A confident comment explaining why something is safe is the best place to look for the bug.** Three
+of this session's six fixes were found that way. `semdiff`'s comment argued its patterns were safe
+because they are "anchored on a compiler-emitted prefix" — true of the prefix, and the captured group
+is the *value*. `type-system.ts` withheld `parentBindings` because *"E-FN-003 enforces that"* — true of
+`fn`, false of `function`. `emit-logic.ts` reset a scope because *"a function body has its own scope"* —
+true of its declarations, false of what it can see. **The comment states the premise out loud, which is
+what makes it checkable; the code never does.**
+
+**When the code and its own documentation disagree, the documentation is sometimes the correct half.**
+`semdiff`'s doc comment already said chunk tokens match `0[0-9a-z]{7}`; the patterns matched
+`[0-9a-z]{8}`. The fix was to make the code obey a contract already written beside it. Worth checking
+before designing a new discriminator.
+
+**A line filter cannot see nesting, and `toContain` cannot see placement.** Both blind spots were live
+simultaneously and cost a correct finding: a probe that grepped emitted JS for matching lines dropped
+the `}` lines, so a loop body emitted OUTSIDE the loop printed identically to one inside — and I
+withdrew a correct reading of the parser as a false alarm on the strength of it. **"Verified by
+execution" is worth nothing if the observable cannot distinguish the two cases.**
+
+**When a run HANGS, stop executing and inspect the artifact.** The braceless-loop defect was named in
+one look at the emit after a 600 s timeout. Execution is the strongest evidence right up until the
+program does not terminate, at which point it produces none at all.
+
+**Inertness is the load-bearing result for a lexer change.** The tokenizer fix (#932) returned **0
+artifact content diffs over 7,467 artifacts** — which is precisely the proof that no existing program
+had a regex after a control-flow `)` and that no division anywhere was reclassified. A change that
+*should* move nothing is verified by measuring that it moved nothing.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I talked myself out of a correct finding with a probe that structurally could not see the
+   answer.** I read the parser right — *"no braceless-body branch at all"* — then "verified" braceless ==
+   braced with a line filter that dropped the `}` lines, withdrew the reading as a false alarm, and filed
+   a much narrower regex MED **recording the withdrawal as though it were the careful move.** The real
+   defect was a silent infinite loop live in `stdlib/auth/jwt`. Corrected in place at `[2975]`–`[2976]`;
+   the struck paragraph is left in the entry because how it was reached is the lesson.
+2. **★★★ I wrote a bold, false prediction into a gap entry as a prescribed method for a future session.**
+   The padding entry said fixing it *"would UNMASK the #924 mislowering class"* and told the next PA to
+   fix both or pin both. It does not — measured. Same class as the S411 inference-as-observation, and it
+   had already propagated into a review marker. Corrected in place.
+3. **★★ I reasoned a blast radius instead of measuring it, and was wrong twice over.** I scoped the
+   const-decl defect to self-host from the entry's framing: wrong about the **mode** (browser and library
+   emit identically) and wrong about the **population** (it was in `stdlib/time`). **The corpus
+   differential corrected me, not the argument.**
+4. **★★ A probe reported a clean "0 unexplained" by reading nothing** — it indexed `manifest.sources` as
+   a path-keyed object when the tool's own code shows it is an array, so every lookup was `undefined` and
+   both sides coerced to `""`. Caught only by adding a **lookup control** that asserts each path resolves
+   before any comparison is trusted. Fifth consecutive session for the instrument-lies prior.
+5. **★ I filed a locus I had not traced, twice**, and measurement replaced both — the library map gap
+   (`searched:`, actually the runtime registry) and the padding gap (`ast-builder.js`, actually the two
+   regex-vs-division heuristics).
+6. **★ Two test expectations were wrong on first write** — I guessed `E-MU-001` was a general unused-
+   variable check (it is tilde-decl/must-use specific), and named a test helper `reset`, which collides
+   with a compiler construct. The second accidentally found a HIGH.
+
+## Gate at close
+
+Conformance **905/905** on merged main. Unit tier **18,552 pass / 2 fail** — both `node --check` co-run
+canaries (`giti-016`, `match-block-form-payload-binding`), which pass **30/0 together in isolation**
+(≈5,030 ms co-run vs ~1 s alone); root-caused as the documented Windows co-run spawn timeout, not called
+a flake. Self-host suites **139 pass / 3 fail**, all three separately filed. `delta-lint` PASS at max
+`[2978]`; `facts --check` PASS; `state --check` PASS. Cloud `gate` GREEN on all six PRs; `tracking` RED
+throughout — the filed whole-job pre-existing failure, and this session proved it independent by showing
+it fails on **#928, which is docs-only**.
+
+**Four corpus differentials** ran over 1,928 sources / 7,467 artifacts. Two returned **0 content diffs**
+(#929 inert; #932 the tokenizer, where inertness is the proof), one returned **4** (#930 — every one
+exactly `const X = …` → `X = …`), one returned **2** (#933 — both `stdlib/auth/jwt`, the entire change
+being `+ s += "=";`). Every changed artifact was diffed line by line, never inferred from byte counts.
+
+**Maps (wrap 6c) — NOT hand-run, deliberately.** `.claude/maps/primary.map.md` is at watermark
+`e74f5423`; the refresh is owned by the scheduled `cloud-maps` workflow, which ran green today at
+09:28 UTC — i.e. BEFORE this session's landings — so the next scheduled run picks them up. Same designed
+latency the `#903` review recorded: a wrap cannot contain its own squash SHA. Hand-running
+`project-mapper` here would race it for no gain.
+
+**Worktrees NOT swept — none are this session's.** Three remain (`agent-a0742fe4795045e91`,
+`agent-a4e6b5f2562ae9eaa`, `onmount-c`) plus the `scrml-pinned` app clone; their work has not landed, so
+per the wrap discipline they are retained and surfaced rather than removed. ⚑ The two temporary base
+worktrees cut for differentials (`C:/s412base2`, `C:/s412base3`) **were** removed; `C:/s412base` was
+removed earlier in the session.
+
+
+---
+
 # scrml — Session 411 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S410/S408 mine,
