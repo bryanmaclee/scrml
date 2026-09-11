@@ -55,6 +55,12 @@
 // scrml + JS keywords
 // ---------------------------------------------------------------------------
 //
+// §S412 — the control-flow heads after whose `)` a `/` opens a REGEX, not division.
+// Defined ONCE in code-segments.ts and imported here so the tokenizer's
+// `closesControlFlowHead` and codegen's `regexAllowedAfter` cannot disagree about
+// which constructs count. See that declaration for why a disagreement is a defect.
+import { REGEX_AFTER_CLOSE_PAREN_KEYWORDS } from "./codegen/code-segments.ts";
+
 // Exported (S229 ss54) so the `--emit-token-set` tooling pass can project the
 // canonical keyword vocabulary into `token-set.json` (token-set.ts). The set is
 // the single source of truth for what the tokenizer reserves; the emit is a
@@ -1549,6 +1555,41 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
    * REGEX, value keywords (true/false/null/undefined/this), `)`, `]`.
    * Everything else → regex context.
    */
+  /**
+   * §S412 — does the `)` at `closeIdx` close a CONTROL-FLOW HEAD (`if (…)`,
+   * `for (…)`, `while (…)`, `switch (…)`, `catch (…)`) rather than an expression?
+   *
+   * A control-flow head is followed by a STATEMENT, so a `/` after it opens a regex.
+   * An expression `)` — a call `f(x)` or a grouping `(a + b)` — produces a value, so a
+   * `/` after it is division. Walks back with depth counting, so a `for (i = 0; i < n;
+   * i++)` head or a nested `if ((a || b))` resolves to its own opener.
+   *
+   * ⚑ The keyword set is shared with the text-level twin in `code-segments.ts`
+   * (`REGEX_AFTER_CLOSE_PAREN_KEYWORDS`) so the two cannot drift on WHICH heads count.
+   * They must agree: this one decides whether the regex survives TOKENIZATION, and that
+   * one decides whether the §59 map-literal preprocessor walks into its interior.
+   * Disagreement reopens `g-regex-char-class-colon-mislowered-as-map-literal`.
+   */
+  function closesControlFlowHead(closeIdx: number): boolean {
+    let depth = 0;
+    for (let j = closeIdx; j >= 0; j--) {
+      const t = tokens[j];
+      if (t.kind !== 'PUNCT') continue;
+      if (t.text === ')') { depth++; continue; }
+      if (t.text !== '(') continue;
+      depth--;
+      if (depth !== 0) continue;
+      // `j` is the matching `(`. The token before it decides.
+      for (let k = j - 1; k >= 0; k--) {
+        const p = tokens[k];
+        if (p.kind === 'COMMENT') continue;
+        return p.kind === 'KEYWORD' && REGEX_AFTER_CLOSE_PAREN_KEYWORDS.has(p.text);
+      }
+      return false; // `(` at start of stream → a grouping, not a head
+    }
+    return false; // unbalanced → the conservative answer is division
+  }
+
   function isRegexContext() {
     // Walk backward, skipping comments, to find the preceding token.
     // Regex context: token is an operator/punctuation that cannot end a value
@@ -1582,7 +1623,29 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
       if (t.kind === 'REGEX') return false;
       if (t.kind === 'AT_IDENT') return false;
       if (t.kind === 'KEYWORD' && VALUE_KEYWORDS.has(t.text)) return false;
-      if (t.kind === 'PUNCT' && (t.text === ')' || t.text === ']')) return false;
+      // ⚑ S412 — A `)` ENDS A VALUE ONLY WHEN IT CLOSES AN EXPRESSION, NOT A
+      // CONTROL-FLOW HEAD. `(a + b) / 2` is division, but `if (c) /re/.test(c)` is a
+      // regex in statement position, and this branch returned `false` for both.
+      //
+      // The consequence was NOT a diagnostic. The `/` lexed as PUNCT, the regex body
+      // lexed as ordinary code tokens, and the braceless-if body — which is rebuilt by
+      // re-joining tokens, unlike a braced body that keeps its source slice — came back
+      // out SPACE-PADDED with its backslash escapes dropped:
+      //
+      //     if (c) /a\sb/.test(c)   emitted   / a sb /.test(c)      the `\s` class gone
+      //     if (c) /[a-z]/.test(c)  emitted   / [ a - z ] /         now matches a space
+      //     if (c) /a+b/.test(c)    emitted   / a + b /             `+` quantifies a space
+      //
+      // Whitespace and `\` are SIGNIFICANT inside a regex literal, so that is a
+      // different regex at exit 0 with zero diagnostics. See
+      // `g-unbraced-if-for-body-regex-padded-escapes-dropped`.
+      //
+      // We can decide this properly HERE, unlike the text-level twin in
+      // `code-segments.ts`, because the token list is available: walk back to the
+      // matching `(` and ask what opened it. A call `f(x) / 2` and a grouping
+      // `(a + b) / 2` both stay division — only a control-flow head yields a regex.
+      if (t.kind === 'PUNCT' && t.text === ')') return closesControlFlowHead(i);
+      if (t.kind === 'PUNCT' && t.text === ']') return false;
       // Regex context: explicit operator/punctuation whitelist
       if (t.kind === 'PUNCT' && REGEX_PUNCT.has(t.text)) return true;
       if (t.kind === 'OPERATOR') return true;  // => == != += etc.
