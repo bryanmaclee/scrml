@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 101 |
-| MED | 232 |
+| HIGH | 102 |
+| MED | 233 |
 | LOW | 86 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1515,9 +1515,9 @@ baseline; a tier whose assertion count collapses fails even if its pass/fail cou
 
 
 
-### g-selfhost-tokenizelogic-tdz-pos-before-initialization — the self-hosted `tokenizeLogic` throws `ReferenceError: Cannot access 'pos' before initialization`, unmasked once the S411 memory runaway was removed — `NEW S411; MED; open`
+### g-selfhost-tokenizelogic-tdz-pos-before-initialization — the self-hosted `tokenizeLogic` throws `ReferenceError: Cannot access 'pos' before initialization`, unmasked once the S411 memory runaway was removed — `NEW S411; MED; RESOLVED S412`
 
-<!-- @gap id=g-selfhost-tokenizelogic-tdz-pos-before-initialization sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic and its inner advance/readIdent/readString/readNumber closures — searched: the THROW is in the emitted tab.js at the `advance` closure reading `pos`; the emit line moves per compile so it is named by SYMBOL, not line) prov=empirical:S411-peter-surfaced-by-running-tab-test-js-to-completion-for-the-first-time -->
+<!-- @gap id=g-selfhost-tokenizelogic-tdz-pos-before-initialization sev=MED status=resolved locus=compiler/self-host/tab.scrml(tokenizeLogic and its inner advance/readIdent/readString/readNumber closures — searched: the THROW is in the emitted tab.js at the `advance` closure reading `pos`; the emit line moves per compile so it is named by SYMBOL, not line) prov=empirical:S411-peter-surfaced-by-running-tab-test-js-to-completion-for-the-first-time -->
 
 **Every `tokenizeLogic parity` case fails identically:**
 
@@ -1544,6 +1544,153 @@ is why MED rather than HIGH.
 invisible to the gate — the same coverage hole that let the runaway rot. It should ride whatever
 disposition [[g-tracking-job-is-red-as-a-whole]] and the S410-banked "decide `self-host/`'s status
 EXPLICITLY" item settle on.
+
+⚑ **RESOLVED S412 — and the diagnosis recorded above was the SYMPTOM, not the defect.** The entry
+read the failure off the stack trace (*"the emitted inner closures reach `let pos` in its temporal
+dead zone"*). True as far as it goes, and it points at the wrong thing. **The defect is one line, it
+is mode-independent, and it has a SILENT half the `ReferenceError` hides.**
+
+`emit-logic.ts`'s `case "function-decl"` built its child options with `declaredNames: new Set()` — a
+fresh **EMPTY** set — reasoning that *"a function body has its own scope for declared names."* That
+premise is half right and the wrong half is load-bearing: a function body owns its own
+**declarations**, but it does not lose sight of the bindings around it, because JS scoping is
+lexical and **nested**. `declaredNames` is exactly what decides whether a bare `x = expr` emits as
+an **assignment** (x is known) or a **declaration** (x is not) — so starting empty made every
+**captured** binding read as undeclared. **SPEC.md:5986 is normative that the program is legal:**
+*"Inner `function` declarations MAY mutate outer `let` bindings."*
+
+**Both halves were live, at exit 0 with zero diagnostics:**
+
+| source | emitted | |
+|---|---|---|
+| `pos = pos + 1` | `const pos = pos + 1;` | `ReferenceError` — reads its own TDZ |
+| `col = 1` | `const col = 1;` | ⚑ **SILENT** — shadows; the outer `col` never updates |
+
+**The silent half is the worse one, and a `ReferenceError`-shaped test cannot see it.**
+
+**Trigger matrix, measured** — the discriminator is *"captured, inside an inner function"*, and
+nesting depth is irrelevant:
+
+| shape | target | result |
+|---|---|---|
+| inner fn, nested in `if` | captured | ⚑ became a declaration |
+| inner fn, **top level** of the inner fn | captured | ⚑ became a declaration |
+| inner fn, nested in `while` | captured | ⚑ became a declaration |
+| no inner fn, nested in `if` | outer-local | ok |
+| no inner fn, top level | outer-local | ok |
+| inner fn, nested in `if` | **fn-local** | ok |
+
+⚑ **NOT a self-host or library-mode defect — the entry's scoping was too narrow.** `browser` and
+`library` emit **identically**, so every scrml program with an inner function that mutates a captured
+binding was affected.
+
+⚑ **AND IT WAS LIVE IN THE SHIPPED STANDARD LIBRARY.** The corpus differential's 4 changed artifacts
+include `stdlib/time/index.scrml`, where `debounce` and `throttle` are built exactly this way —
+`let timer = not` / `let inThrottle = false` in the outer fn, assigned from the inner
+`debounced` / `throttled` closure:
+
+```
+  const inThrottle = true;   →   inThrottle = true;
+  const timer = setTimeout(…) →   timer = setTimeout(…);
+```
+
+Before the fix the outer `inThrottle` was **never set**, so `throttle`'s `if (!inThrottle)` guard
+always passed — **`throttle` did not throttle** — and `debounce`'s outer `timer` stayed `not`, so the
+cancel-the-pending-timer path never fired: **`debounce` did not debounce.** Silent, at exit 0, in
+`scrml:time`.
+
+**Fixed** by seeding the child scope from the enclosing one — a **copy**, so inner declarations do
+not leak back out and shadowing still works.
+
+**Gate.** New pin `compiler/tests/unit/inner-fn-assignment-to-captured-binding.test.js` **9/0**,
+bite-proven (**5 of 9 fail** with the fix reverted). `compiler/tests/self-host/tab.test.js` goes
+**34 pass / 74 fail → 105 pass / 3 fail**. Conformance **905/905**. Corpus differential over 1,928
+sources / 7,467 artifacts: **4 artifact content diffs, every one inspected and every one exactly
+`const X = …` → `X = …`**, with **0 newly failing · 0 newly passing · 0 syntax delta · 0 diagnostic
+code changes**.
+
+**The 3 remaining `tab.test.js` failures are accounted for, not waved through:**
+`tokenizeCSS parity > pseudo selector` failed **identically before** the fix (A/B-verified
+pre-existing — the fix took the CSS half from 13 failures to 1), and the two `tokenizeLogic parity`
+cases are genuine token-count mismatches in `tab.scrml` that were **unreachable behind the TDZ
+throw**. Filed as [[g-tab-scrml-tokenizelogic-parity-token-count-mismatch]] rather than folded in.
+
+### g-tab-scrml-tokenizelogic-parity-token-count-mismatch — the self-hosted `tokenizeLogic` returns a different token COUNT than the JS original on two inputs, unmasked once the S412 const-decl defect was fixed
+
+<!-- @gap id=g-tab-scrml-tokenizelogic-parity-token-count-mismatch sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic — the punct-chars and tilde paths)+compiler/tests/self-host/tab.test.js(the two failing `tokenizeLogic parity` cases) prov=empirical:S412-peter-unmasked-by-the-inner-fn-const-decl-fix-not-caused-by-it -->
+
+**Unmasked, not caused.** Before [[g-selfhost-tokenizelogic-tdz-pos-before-initialization]] was
+fixed, every `tokenizeLogic` case threw a `ReferenceError` before reaching its assertion. With the
+throw gone, `tab.test.js` goes **34 pass / 74 fail → 105 pass / 3 fail**, and two of the three
+remaining are real parity mismatches that had never been observable:
+
+- `tokenizeLogic parity > punct chars` — **`expect(b.length).toBe(a.length)` → expected 25, received 24.**
+- `tokenizeLogic parity > tilde`
+
+The JS original (`compiler/src/tokenizer.js`) and the self-hosted `tab.scrml` disagree on the token
+count for these inputs. This is a **`tab.scrml` SOURCE parity gap, not a compiler defect** — the
+emitted code is now correct, and the two implementations genuinely differ.
+
+⚑ **Still invisible to CI:** `compiler/tests/self-host/` is run by NEITHER job, the same coverage
+hole that let the S406 runaway rot. Should ride the same disposition as
+[[g-tracking-job-is-red-as-a-whole]] and the S410-banked "decide `self-host/`'s status EXPLICITLY"
+item — `ci.yml` is bryan's active surface. — `NEW S412-peter (surfaced by fixing the const-decl defect; counts measured from the test's own assertion, and the third remaining failure was separately A/B-verified as pre-existing)`; **MED**; open
+
+### g-user-fn-named-reset-emits-undefined-at-its-call-site — a user function named exactly `reset` is miscompiled to `undefined` with an internal "B22 should have rejected" comment, at exit 0
+
+<!-- @gap id=g-user-fn-named-reset-emits-undefined-at-call-site sev=HIGH status=open locus=searched:compiler/src/codegen — the emitted marker is the literal string "C5: unexpected reset target shape; B22 should have rejected", which names the site prov=empirical:S412-peter-found-while-naming-a-test-helper-reset-then-isolated-against-tare-clear-and-setCol -->
+
+**Found by accident and confirmed by isolation.** A test helper happened to be named `reset`:
+
+```scrml
+${
+  export function outer() {
+    let c = 0
+    function reset() { c = 7
+      return 0 }
+    let r = reset()
+    return c + r
+  }
+}
+```
+
+emits, at **exit 0** (only an unrelated `E-MU-001`):
+
+```js
+  let r = /* C5: unexpected reset target shape; B22 should have rejected */ undefined;
+```
+
+The call is replaced by `undefined`. **Isolated against the obvious neighbours** — `setCol`, `tare`
+and `clear` all compile correctly — so the trigger is the NAME `reset` specifically, which collides
+with a compiler-recognised reset/tare construct.
+
+⚑ **The emitted comment says the compiler KNOWS it is in an unexpected state** (*"B22 should have
+rejected"*) **and emits `undefined` anyway instead of erroring.** That is a fail-OPEN on an internal
+invariant, which §2.2.1 exists to prevent — filed HIGH on the silent-wrong, not on the likelihood of
+the name. — `NEW S412-peter (isolated by compiling the identical body under four different function names)`; **HIGH**; open
+
+### g-e-mu-001-overfires-on-a-binding-mutated-only-from-an-inner-fn — `E-MU-001` reports a variable "declared but never used" when a `return` statement plainly reads it
+
+<!-- @gap id=g-e-mu-001-overfires-on-binding-mutated-from-inner-fn sev=MED status=open locus=searched:the E-MU-001 must-use checker — the read in `return col + r` is not being counted when the binding is also assigned from an inner function prov=empirical:S412-peter-A-B-verified-identical-with-the-S412-const-decl-fix-reverted-so-pre-existing -->
+
+```scrml
+${
+  export function outer() {
+    let col = 0
+    function setCol() { col = 7
+      return 0 }
+    let r = setCol()
+    return col + r          // ← `col` IS read, right here
+  }
+}
+```
+
+fires `E-MU-001: Variable `col` was declared but never used before this scope closes.`
+
+⚑ **PRE-EXISTING** — A/B-verified byte-identical with the S412 const-decl fix reverted, so it is not
+that change's doing. It is recorded here because the S412 pin has to **assert this diagnostic**
+rather than assert a clean compile: pinning the case as diagnostic-free would pin a defect that fix
+does not own, and pinning it as `[]` would make the file red for someone else's bug. — `NEW S412-peter (found while writing the const-decl pin; A/B-verified pre-existing)`; **MED**; open
 
 ### g-map-literal-in-fn-body-does-not-lower-in-library-mode — a §59 map literal inside a `fn` body compiles clean in `browser` mode but fails `E-CODEGEN-INVALID-LOGIC` under `mode:"library"` — `NEW S411; MED; RESOLVED S412`
 
