@@ -4209,7 +4209,31 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `insideFunctionBody` so init-thunk sidecar is suppressed for any
       // `@x = expr` reassignments (which are AST-shaped as state-decls but
       // are not declaration sites).
-      const fnOpts: EmitLogicOpts = { ...opts, declaredNames: new Set<string>(), insideFunctionBody: true };
+      //
+      // ⚑ S412 — SEEDED FROM THE ENCLOSING SCOPE, NOT EMPTY. A function body owns
+      // its own DECLARATIONS; it does not lose sight of the bindings around it —
+      // JS scoping is lexical and NESTED. `declaredNames` is what decides whether a
+      // bare `x = expr` is an ASSIGNMENT (x is known) or a DECLARATION (x is not),
+      // so starting empty made every CAPTURED binding read as undeclared and emitted
+      // `pos = pos + 1` as `const pos = pos + 1` — which shadows the outer binding
+      // and reads itself in its own TDZ.
+      //
+      // §5986 is normative that this program is legal: *"Inner `function`
+      // declarations MAY mutate outer `let` bindings."* The failure had BOTH halves —
+      // `pos = pos + 1` threw `ReferenceError: Cannot access 'pos' before
+      // initialization`, while a non-self-referencing `col = 1` became `const col = 1`
+      // and SILENTLY shadowed, so the outer `col` was simply never updated.
+      // See `g-inner-function-assignment-to-captured-binding-emits-const-decl`.
+      //
+      // A COPY, not the parent's set: names the inner body declares must not leak
+      // back out and make the enclosing scope think they are already bound. Shadowing
+      // still works — a local `let x` inside this body adds `x` to the child copy and
+      // emits as a declaration, exactly as before.
+      const fnOpts: EmitLogicOpts = {
+        ...opts,
+        declaredNames: new Set<string>(opts.declaredNames ?? []),
+        insideFunctionBody: true,
+      };
       const body: any[] = node.body ?? [];
 
       const bodyCodes = emitFnShortcutBody(body, fnOpts, node.fnKind, node.hasReturnType);
