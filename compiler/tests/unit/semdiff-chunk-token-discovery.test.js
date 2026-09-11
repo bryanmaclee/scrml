@@ -84,4 +84,63 @@ describe("canonicalizeChunkNamespaceToken — HTML artifact discovery (S411)", (
     const a = `<div data-build-id="01kueozx_7"></div>`;
     expect(canonicalizeChunkNamespaceToken(a)).toBe(a);
   });
+
+  // --- S412: the captured group is the attribute VALUE, and three attributes carry
+  // --- author/row data (g-semdiff-chunk-token-discovery-over-discovers) -------------
+  //
+  // The S411 family patterns anchored on the compiler-emitted PREFIX (`data-scrml-`),
+  // which is true of the prefix and does not constrain the VALUE. `data-scrml-ref`
+  // carries the author's ref name, `data-scrml-key` the row key from data, and
+  // `data-scrml-scope` is likewise author-facing — so ordinary values were discovered
+  // as chunk tokens and then replaced EVERYWHERE, page text included. That is the
+  // false-COSMETIC direction, which hides a regression.
+  //
+  // The real discriminator is a property of the token itself: `fnv1a-hash.ts` emits
+  // lowercase base36 zero-padded to exactly 8 chars, and a u32 maximum is `1z141z3` —
+  // seven digits — so EVERY chunk token begins with `0`.
+  describe("S412 — author-controlled attribute values are not chunk tokens", () => {
+    for (const [attr, value, word] of [
+      ["data-scrml-key", "customer_record_1", "customer"],
+      ["data-scrml-ref", "userdata_7", "userdata"],
+      ["data-scrml-scope", "sidebar1_main", "sidebar1"],
+      ["data-scrml-key", "rowabcde_12", "rowabcde"],
+    ]) {
+      test(`NEGATIVE — ${attr}="${value}" does not seed discovery`, () => {
+        // The word also appears in page TEXT, which is what made this bite: a
+        // discovered token is replaced across the whole artifact, not just the attr.
+        const html = `<div ${attr}="${value}">${word} says hello</div>`;
+        expect(canonicalizeChunkNamespaceToken(html)).toBe(html);
+      });
+    }
+
+    test("⚑ two artifacts differing ONLY in author data still compare DIFFERENT", () => {
+      // The false-COSMETIC failure in its load-bearing form: if both sides canonicalize
+      // to the same bytes, a real behavioural difference reads as cosmetic.
+      const a = `<div data-scrml-key="customer_record_1">customer</div>`;
+      const b = `<div data-scrml-key="supplier_record_1">supplier</div>`;
+      expect(canonicalizeChunkNamespaceToken(a)).not.toBe(canonicalizeChunkNamespaceToken(b));
+    });
+
+    test("POSITIVE — a GENUINE token (leading `0`) is still discovered in each shape", () => {
+      // The fix must not under-discover: every shape #923 added has to keep working.
+      const shapes = [
+        `<div data-scrml-each-mount="each_0a1b2c3d_0">rows</div>`,
+        `<!--scrml-each:0a1b2c3d_24--><!--/scrml-each:0a1b2c3d_24-->`,
+        `<div data-scrml-engine-mount="0zz9y8x7_phase"></div>`,
+        `<div data-scrml-match-mount="match_0a1b2c3d_3"></div>`,
+      ];
+      for (const s of shapes) {
+        expect(canonicalizeChunkNamespaceToken(s)).not.toBe(s);
+      }
+    });
+
+    test("the leading-`0` invariant this fix rests on actually holds", async () => {
+      // Guard the PREMISE, not just the behaviour: if `fnv1a-hash` ever stops
+      // zero-padding, the patterns above silently stop discovering real tokens.
+      const { fnv1aHash } = await import("../../src/codegen/fnv1a-hash.ts");
+      for (let i = 0; i < 5000; i++) {
+        expect(fnv1aHash(`chunk/${i}/some/path.scrml#${i * 7919}`)).toMatch(/^0[0-9a-z]{7}$/);
+      }
+    });
+  });
 });
