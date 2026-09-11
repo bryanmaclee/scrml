@@ -20,6 +20,13 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 // to travel with the emit or the reference is a ReferenceError at import time.
 import { SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+// §59 value-native map/set runtime — the SAME marker-delimited slice of
+// `runtime-template.js` that `emit-server.ts` injects (g-value-native-map-set-
+// server-runtime). Reused rather than re-listed: it is one source of truth that
+// cannot drift from the client runtime, and it already fails LOUD if its markers
+// move. See `MAP_RUNTIME_PROVIDED_NAMES` below for why it is not a
+// `LIB_RUNTIME_HELPERS` entry.
+import { SERVER_VALUE_NATIVE_MAP_HELPER } from "../runtime-template.js";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -59,6 +66,79 @@ const LIB_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   { sig: "_scrml_log(", src: SERVER_LOG_HELPER },
   { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
 ];
+
+/**
+ * §59 — the function names the value-native map/set runtime slice DEFINES.
+ *
+ * ⚑ WHY THIS IS NOT A `LIB_RUNTIME_HELPERS` ENTRY. That table is one `sig` to one
+ * `src`, and `withRuntimeHelpers` appends a `src` once per matching `sig`. The map
+ * runtime is ONE slice defining THIRTY mutually-recursive functions (the HAMT:
+ * `_scrml_map_*`, `_scrml_hamt_*`, `_scrml_fnv1a`, `_scrml_popcount`,
+ * `_scrml_value_canonical`), so registering it per-name would append the same 512
+ * lines once for every name the body happened to reference. It is therefore gated
+ * as a FAMILY, on the same `/_scrml_map_[a-z]/` reachability probe `emit-server.ts`
+ * uses, and appended exactly once.
+ *
+ * ⚑ THE NAME SET IS DERIVED FROM THE SLICE, NOT HAND-LISTED. A hand-maintained list
+ * is a second thing to keep in sync with `runtime-template.js`, and it would go
+ * stale silently — `unmetRuntimeHelperRefs` would report a name the slice actually
+ * provides, the fn would fall back to the raw path, and a construct that lowers
+ * correctly would ship as a verbatim scrml syntax error. Parsing the slice means a
+ * function ADDED to the map runtime is covered here with no edit.
+ */
+const MAP_RUNTIME_PROVIDED_NAMES: ReadonlySet<string> = new Set(
+  [...SERVER_VALUE_NATIVE_MAP_HELPER.matchAll(/^function (_scrml_[A-Za-z0-9_$]+)\s*\(/gm)].map(
+    (m) => m[1],
+  ),
+);
+
+/**
+ * Reachability probe for the map runtime, IDENTICAL to `emit-server.ts`'s.
+ * `_scrml_map_` with a trailing lowercase letter matches the `_scrml_map_<fn>`
+ * CALL surface but not the `__scrml_map` value TAG.
+ */
+const MAP_RUNTIME_REFERENCED = /_scrml_map_[a-z]/;
+
+/**
+ * Does this fn body contain a bracket-INDEX expression (`m[k]`)?
+ *
+ * ⚑ THIS EXISTS TO KEEP A HALF-FIX FROM BECOMING SILENT-WRONG, WHICH IS THE ONE
+ * OUTCOME THIS FILE HAS ALREADY RULED IS WORSE THAN FAILING. Shipping the map
+ * runtime (above) makes a map-bearing fn ROUTE where it used to fall back to raw.
+ * That is right for a fn that only CONSTRUCTS a map — verified by running the
+ * emitted module. But §59.6's bracket-READ lowering (`emitIndex`, emit-expr.ts)
+ * fires only on `ctx.mode === "client" || "server"`, so on the library path a map
+ * read emits a RAW property access:
+ *
+ *     browser:  return _scrml_map_get(m, "k");   → 7
+ *     library:  return m["k"];                   → undefined
+ *
+ * A HAMT node has no `"k"` property, so the fn would compile clean, export, and
+ * return `undefined` — **silent-wrong**, where today it fails LOUDLY as an
+ * unlowered verbatim map literal. `rawFallbackReason`'s foreign-code exclusion
+ * already ruled exactly this trade: *"silent-wrong output, which is strictly worse
+ * than the raw path's honest verbatim copy."* Same ruling, same reason.
+ *
+ * ⚑ NARROW BY CONSTRUCTION, so it cannot regress anything. It is consulted ONLY
+ * for a fn whose EMITTED body references the map runtime — and every such fn falls
+ * back to raw TODAY, because the helper was unmet. So a map-free fn is untouched, a
+ * map-constructing fn is newly fixed, and a map-READING fn stays byte-identical to
+ * its current output. Widening the §59.6 read lowering to the library boundary is
+ * the real fix and is filed separately: it needs the same boundary-safety argument
+ * `emitIndex` makes for client/server, which is a language question about what
+ * boundary a library module is — not a codegen one, and not decided here.
+ */
+function containsIndexExpr(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some(containsIndexExpr);
+  const o = node as Record<string, unknown>;
+  if (o.kind === "index") return true;
+  for (const key of Object.keys(o)) {
+    const v = o[key];
+    if (v && typeof v === "object" && containsIndexExpr(v)) return true;
+  }
+  return false;
+}
 
 /**
  * The `_scrml_*(…)` call references in `emitted` that this module can NOT
@@ -121,6 +201,10 @@ function unmetRuntimeHelperRefs(emitted: string): string[] {
     const name = m[1];
     if (LIB_RUNTIME_HELPERS.some((h) => h.sig === `${name}(`)) continue;
     if (/^_scrml_[a-zA-Z]+Async$/.test(name)) continue; // async-combinator footer
+    // §59 map/set runtime — appended as one family by `withRuntimeHelpers` when
+    // the assembled module references it, so every name the slice defines is MET.
+    if (MAP_RUNTIME_PROVIDED_NAMES.has(name)) continue;
+
     unmet.add(name);
   }
   return [...unmet];
@@ -141,6 +225,11 @@ function withRuntimeHelpers(moduleSrc: string): string {
   for (const { sig, src } of LIB_RUNTIME_HELPERS) {
     if (moduleSrc.includes(sig)) out += "\n" + src;
   }
+  // §59 value-native map/set — gated on the ORIGINAL `moduleSrc` for the same
+  // reason the loop above is: the slice defines `_scrml_map_*` functions itself,
+  // so probing `out` after appending would be self-satisfying. One append for the
+  // whole family; a module that lowers no map literal is byte-unchanged.
+  if (MAP_RUNTIME_REFERENCED.test(moduleSrc)) out += "\n" + SERVER_VALUE_NATIVE_MAP_HELPER;
   return out;
 }
 
@@ -853,6 +942,11 @@ function emitControlFlowLibraryFns(
     // would PARSE and then throw on first call. Discard it and leave the fn on
     // the raw path, where the same construct fails loudly instead.
     if (unmetRuntimeHelperRefs(emitted).length > 0) continue;
+    // ⚑ Companion to the map-runtime inline: a map-bearing fn that also bracket-
+    // READS stays on the raw path, because §59.6's read lowering does not reach the
+    // library boundary and the routed emit would silently return `undefined`.
+    // See `containsIndexExpr` for the full reasoning and why this cannot regress.
+    if (MAP_RUNTIME_REFERENCED.test(emitted) && containsIndexExpr(node.body)) continue;
     // ⚑ Companion gate: scrml-only syntax the structural path re-printed WITHOUT
     // lowering, which needs no runtime helper and so is invisible to the check
     // above. `!{ … }` is the live case and it is the worst possible shape —
