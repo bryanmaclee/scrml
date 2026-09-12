@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 103 |
-| MED | 231 |
+| MED | 232 |
 | LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -14023,3 +14023,24 @@ Either way the eight sources should lose their now-redundant mirrors; that half 
 
 — NEW S409-bryan (routed from dpa-043 as a side-finding; fire-count relayed from the dPA, NOT independently reproduced — verify before fixing)
 <!-- @gap id=g-w-lint-018-false-fires-on-the-sanctioned-generator-surface sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(the-W-LINT-018-rule) prov=dd:scrml-support/docs/debates/lazy-pull-yield-emit-primitive-dpa-043-2026-09-06.md -->
+
+### g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch — three self-host parity cases emit one token where the JS tokenizer emits two, and they are the baseline the new tier gate pins
+
+**PA-MEASURED at `fd69d1fc`**, running `bun test compiler/tests/self-host` both with and without `compiler/self-host/dist/` present — **identical failure name set either way**:
+
+```
+tokenizeLogic parity > tilde
+tokenizeLogic parity > punct chars
+tokenizeCSS parity > pseudo selector
+```
+
+All three are **token-count mismatches**, asserted at `compiler/tests/self-host/tab.test.js:72` in `assertSameTokens` (`expect(b.length).toBe(a.length)`) — measured `Expected: 2, Received: 1` on the `tilde` case. The self-hosted tokenizer emits ONE token where `compiler/src/tokenizer.js` emits two.
+
+⚑ **THIS IS THE RESIDUE OF A RESOLVED GAP, NOT A NEW SYMPTOM OF IT.** [[g-selfhost-tokenizelogic-tdz-pos-before-initialization]] is `status=resolved` (S412), and this run independently confirms that: **zero `ReferenceError` in the entire tier**, where previously *"every `tokenizeLogic parity` case fails identically"* with `Cannot access 'pos' before initialization`. S412's fix moved those two cases from a loud throw to a quiet parity mismatch. The TDZ is closed; what it was masking is this.
+
+⚑ **Why it is filed rather than left to the baseline.** S409 gates this tier on a failure NAME SET (`compiler/tests/self-host/FAILURE-BASELINE.json`), which records these three as known-failing. **A baseline is a control, not a defect ledger** — it asserts "no NEW failure" and says nothing about what the old ones are. Without this entry the three would be permanently green-by-baseline with no referent, which is the shape a name-set gate is most likely to rot into.
+
+**Not attempted here, deliberately.** The S409 arc's scope was the coverage disposition; fixing parity is its own arc with its own measurement. The useful next step is a token-by-token diff of the three cases against `compiler/src/tokenizer.js`, since `tokenizeAttributes` parity passes on the same closure shape.
+
+— NEW S409-bryan (measured while taking the self-host coverage disposition routed by S411-peter; the with/without-dist comparison is what establishes these are repo state, not environment state)
+<!-- @gap id=g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic+tokenizeCSS)+compiler/src/tokenizer.js(the-parity-oracle)+compiler/tests/self-host/tab.test.js:72(assertSameTokens-the-assertion-site) prov=empirical:S409-measured-by-running-the-tier-with-and-without-the-gitignored-dist-identical-name-set -->
