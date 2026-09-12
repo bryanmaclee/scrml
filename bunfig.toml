@@ -13,6 +13,8 @@ root = "compiler/tests/"
 # performs a legitimately multi-second operation (a whole-app compile, a self-host bootstrap)
 # declares its own budget at the site — `test(name, fn, { timeout })` /
 # `beforeAll(fn, { timeout })` — with a comment saying why. Do NOT re-add a key here to
-# widen the default silently: `scripts/browser-baseline.ts` gates on the browser tier's
-# failure NAME SET, and a timed-out test produces the same `(fail) <name>` marker as a
-# failed assertion.
+# widen the default silently: `scripts/tier-baseline.ts` gates on the browser AND self-host
+# tiers' failure NAME SETs, and a timed-out test produces the same `(fail) <name>` marker as
+# a failed assertion. (⛑ S409 — that script was `scripts/browser-baseline.ts` when this note
+# was written; renamed and parameterised by `--tier=<name>` when the self-host tier was
+# gated.)

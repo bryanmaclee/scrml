@@ -1,6 +1,6 @@
 // scripts/types-gate.ts — the TypeScript diagnostic NAME-SET gate. change-id: s365-types-gate
 //
-// THREE MODES (mirrors scripts/browser-baseline.ts / state.ts / facts.ts exactly — same flags,
+// THREE MODES (mirrors scripts/tier-baseline.ts / state.ts / facts.ts exactly — same flags,
 // same exit semantics):
 //   `bun scripts/types-gate.ts`         PRINT  — typecheck, report the current diagnostic set.
 //   `bun scripts/types-gate.ts --write` WRITE  — record the current NAME SET as the baseline.

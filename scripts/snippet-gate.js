@@ -106,7 +106,7 @@ const files = discover(corpus);
 // Zero discovered files is never a legitimate success. It means a declared root
 // was renamed away, the extension filter drifted, or an explicit path argument
 // was wrong — every one of which is a thing to hear about. Mirrors
-// scripts/browser-baseline.ts's refusal, which is the reference pattern here.
+// scripts/tier-baseline.ts's refusal, which is the reference pattern here.
 if (files.length === 0) {
   console.error("snippet-gate: NO .scrml FILES DISCOVERED — refusing to report success.");
   console.error("  A gate that compiled nothing has verified nothing (that is the hollow-gate shape).");
