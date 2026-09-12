@@ -160,7 +160,21 @@ jobs:
         run: bun scripts/corpus-compile-floor.ts --check
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
-      - name: SPEC-INDEX totals gate (the navigation map's own counts still match SPEC.md)
+      # S409 — an unresolved merge conflict reached `main` at e74f5423 (#900) and this job was GREEN.
+      # `compiler/SPEC-INDEX.md` carried three raw markers around 117 duplicated rows; it is a
+      # mandatory full-read at every Profile-A PA boot, so the next session read a doubled navigation
+      # table as truth. Nothing here looked at file well-formedness. Backlog at introduction: ZERO
+      # (swept across all 8,170 tracked files), which is the pa-base §8 condition for adding a gate.
+      - name: Conflict-marker gate (no unresolved merge markers on the trunk)
+        run: bun scripts/conflict-marker-gate.ts
+      # S409 — was "SPEC-INDEX totals gate". It checked ONLY the two numbers in the @generated totals
+      # block, so it passed on the #900 file while 117 rows were duplicated: working correctly,
+      # measuring what it was built to measure, and not an answer to "is this map well-formed".
+      # Now also gates every Sections row's range/size AND asserts the scan reached all 71 sections
+      # (a stray line ends the table scan, and a zero over a partial scan is a smaller measurement,
+      # not a pass — pa-base §8's truncated probe). Rationale for the change + the superseded
+      # decision it overturns are recorded in the script header per Rule 4b.
+      - name: SPEC-INDEX currency gate (totals + every row's range + full-scan coverage)
         run: bun run scripts/regen-spec-index.ts --check
       # SPEC §34.0 — a NEW catalog row must state where it fires, or honestly declare it does not yet.
       # DIFF-SCOPED: silent on the legacy corpus by construction (pa-base §8 — a gate that is instantly
