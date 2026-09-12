@@ -1,9 +1,34 @@
 import { readFileSync, writeFileSync } from "fs";
 
-// `--check` verifies the @generated totals block matches SPEC.md and exits non-zero if not,
-// without writing. The Sections-table line ranges are deliberately NOT gated: they drift by
-// design between amendments and a gate that cries wolf gets bypassed then deleted
-// (`pa-base v2.4` §8). The totals are a single derived fact that changes only with the commit.
+// `--check` verifies BOTH halves of the @generated surface against SPEC.md and exits non-zero if
+// either is stale, without writing: (1) the totals block, and (2) every Sections-table row's line
+// range and size.
+//
+// ⚑ S409 — (2) SUPERSEDES a recorded decision, named here per pa-base Rule 4b (cite the provenance
+// of the rule you are CHANGING, not only of your change). The struck text read:
+//
+//   "The Sections-table line ranges are deliberately NOT gated: they drift by design between
+//    amendments and a gate that cries wolf gets bypassed then deleted (`pa-base v2.4` §8)."
+//
+// That rationale rests on a premise REFUTED BY EXECUTION: appending one line to SPEC.md already
+// turns `--check` RED on the totals alone (`have 37,947 / want 37,948`), and its remedy is the same
+// single command that also refreshes every row. So the regen is ALREADY unconditional for any net
+// line-count change, and gating rows adds no new obligation in the common case — there is no extra
+// wolf to cry.
+//
+// What it DOES add is the case the totals structurally cannot see: a NET-ZERO edit (move a line
+// from §14 to §15, rewrite a paragraph at equal length) leaves `Total lines` identical while every
+// range below the edit shifts. A navigation map with wrong line numbers has failed at its only job,
+// silently. Witnessed at S409: §34–§65 were stale by 1–2 lines on `main` and nothing reported it,
+// alongside three conflict markers that this check would also have caught (side B's rows were
+// stale, so `updated > 0`).
+//
+// pa-base §8's cry-wolf rule is respected on its own terms — the backlog at introduction is ZERO
+// (the rows were regenerated in the same arc), which is the condition for adding a gate at all.
+//
+// provenance: rationale:the totals gate already forces an unconditional regen, measured by
+// execution, so row-gating is free in the common case and closes the net-zero-edit hole
+// supersedes: rationale:sections-table-ranges-drift-by-design-would-cry-wolf
 const CHECK = process.argv.includes("--check");
 
 const SPEC = readFileSync("compiler/SPEC.md", "utf8");
@@ -93,6 +118,14 @@ let inSectionsTable = false;
 let updated = 0;
 const missing: string[] = [];
 const out: string[] = [];
+// S409 — the COVERAGE half. `updated === 0` is only meaningful if the scan actually reached every
+// row; on its own it is pa-base §8's truncated probe, where a cut enumeration reads exactly like a
+// complete one. Line 125 exits the table on the first line not starting with "|", so ANY stray
+// line inside it — a blank, a note, a conflict marker — silently truncates the scan and everything
+// below is passed through unexamined. Measured on the #900 file: 14 of 71 rows examined, reported
+// as "all current". So track which section keys a row was actually seen for, and treat an
+// unmatched key as a failure in its own right rather than inferring completeness from a zero.
+const seenKeys = new Set<string>();
 
 for (const line of indexLines) {
   if (line.startsWith("| § | Section ")) { inSectionsTable = true; out.push(line); continue; }
@@ -114,6 +147,7 @@ for (const line of indexLines) {
     missing.push(`row key="${key}" name="${name}"`);
     out.push(line); continue;
   }
+  seenKeys.add(lookupKey);
   const newRange = `${r.start}-${r.end}`;
   const newLine = `| ${key} | ${name} | ${newRange} | ${r.size} | ${summary}`;
   if (newRange !== oldRange || String(r.size) !== oldSize) updated++;
@@ -153,7 +187,34 @@ if (CHECK) {
     );
     process.exit(1);
   }
-  console.log(`SPEC-INDEX totals OK — ${totalsBody}`);
+  // S409 — the row check. `updated` and `missing` were already computed above and then DISCARDED,
+  // so the drift this catches was in hand the whole time and nothing read it. See the header for
+  // the superseded rationale and the measurement that refuted it.
+  const unscanned = [...ranges.keys()].filter((k) => !seenKeys.has(k));
+  if (unscanned.length > 0) {
+    console.error(
+      `\nSPEC-INDEX row scan was TRUNCATED — only ${seenKeys.size} of ${ranges.size} sections were` +
+        ` reached by a table row.\n` +
+        `A zero stale-count over a partial scan is not a pass; it is a smaller measurement.\n` +
+        `Unreached: ${unscanned.slice(0, 12).join(", ")}${unscanned.length > 12 ? ` … +${unscanned.length - 12} more` : ""}\n` +
+        `Most likely a stray line inside the Sections table (a blank, a note, or an unresolved\n` +
+        `conflict marker) ended the scan early — the table must be contiguous "|" rows.`,
+    );
+    process.exit(1);
+  }
+  if (updated > 0 || missing.length > 0) {
+    console.error(
+      `\nSPEC-INDEX Sections rows are STALE — ${updated} row(s) whose line range or size no longer` +
+        ` matches SPEC.md${missing.length ? `, ${missing.length} row(s) with no matching section` : ""}.\n` +
+        `Run \`bun run scripts/regen-spec-index.ts\` and commit the result.`,
+    );
+    for (const m of missing) console.error(`  missing: ${m}`);
+    process.exit(1);
+  }
+  console.log(
+    `SPEC-INDEX OK — ${totalsBody}; ${seenKeys.size} of ${ranges.size} sections scanned,` +
+      ` 0 stale, 0 missing.`,
+  );
   process.exit(0);
 }
 
