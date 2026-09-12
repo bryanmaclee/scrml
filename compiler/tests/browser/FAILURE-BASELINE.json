@@ -1,5 +1,5 @@
 {
-  "_comment": "GENERATED — the browser tier's documented failure NAME SET. Regenerate with `bun scripts/browser-baseline.ts --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
+  "_comment": "GENERATED — the browser tier's documented failure NAME SET. Regenerate with `bun scripts/tier-baseline.ts --tier=browser --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
   "tier": "compiler/tests/browser",
   "recordedAt": "2026-08-02",
   "count": 48,

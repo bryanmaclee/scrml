@@ -1,0 +1,12 @@
+{
+  "_comment": "GENERATED — the self-host tier's documented failure NAME SET. Regenerate with `bun scripts/tier-baseline.ts --tier=self-host --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
+  "tier": "compiler/tests/self-host",
+  "recordedAt": "2026-09-12",
+  "count": 3,
+  "failures": [
+    "tokenizeCSS parity > pseudo selector",
+    "tokenizeLogic parity > punct chars",
+    "tokenizeLogic parity > tilde"
+  ],
+  "envExcluded": []
+}

@@ -1619,7 +1619,7 @@ Sibling of **g-request-is-some-in-value-bool-class-attr** (the named gap), shari
 
 ### g-tracking-job-is-red-as-a-whole-so-a-new-regression-in-it-is-invisible — the exact disease the browser tier was CURED of at S313, still live one level up, on the job that holds integration + lsp + commands
 
-<!-- @gap id=g-tracking-job-is-red-as-a-whole sev=MED status=open owner=bryan locus=.github/workflows/ci.yml(the `tracking` job — the "integration + lsp + commands" step and the types gate above it)+scripts/browser-baseline.ts(the PROVEN pattern to copy)+compiler/tests/TYPES-BASELINE.json(a second instance of it) prov=empirical:S410-peter-read-the-workflow-while-answering-how-to-get-a-clean-full-suite-pass -->
+<!-- @gap id=g-tracking-job-is-red-as-a-whole sev=MED status=open owner=bryan locus=.github/workflows/ci.yml(the `tracking` job — the "integration + lsp + commands" step and the types gate above it)+scripts/tier-baseline.ts(the PROVEN pattern to copy — S409 renamed it from browser-baseline.ts and made it `--tier=<name>` parameterised, so copying is now a registry entry)+compiler/tests/TYPES-BASELINE.json(a second instance of it) prov=empirical:S410-peter-read-the-workflow-while-answering-how-to-get-a-clean-full-suite-pass -->
 
 **ROUTED TO BRYAN — `ci.yml` is his active surface (#907 is gate hardening). Filed, not fixed.**
 
@@ -1638,7 +1638,7 @@ filing can:
 > not assumed* (the within-node parity step reported `skipped` on run 30742472551 and had therefore
 > never run at all).
 
-**The fix is the pattern already proven FOUR times in this repo** — `browser-baseline.ts --check`,
+**The fix is the pattern already proven FOUR times in this repo** — `tier-baseline.ts --check` (S409: renamed from `browser-baseline.ts`, now `--tier=<name>` parameterised and carrying BOTH `browser` and `self-host`),
 `corpus-compile-floor.baseline.json`, `TYPES-BASELINE.json`, and the facts / SPEC-INDEX / delta-log
 invariant gates. All **bidirectional**: fail on a NEW break *and* on a stale entry. Give each
 `tracking` tier a failure NAME-SET baseline so it exits 0 while the set is unchanged and 1 the moment
@@ -1651,7 +1651,9 @@ step red; the standing backlog does not.
 
 ### g-no-baseline-asserts-that-tests-actually-asserted — every gate checks names, counts or exit codes; none checks that a single `expect()` ran, which is the only number that catches a self-disabled harness
 
-<!-- @gap id=g-no-baseline-asserts-that-tests-actually-asserted sev=MED status=open locus=scripts/browser-baseline.ts+compiler/tests/TYPES-BASELINE.json+scripts/corpus-compile-floor.ts(the three baselines that would each take an assertion-count floor)+.github/workflows/ci.yml(the per-tier steps that would carry it) prov=empirical:S410-peter-two-files-measured-45-to-15-and-35-to-0-assertions-while-the-pass-count-ROSE -->
+<!-- @gap id=g-no-baseline-asserts-that-tests-actually-asserted sev=MED status=open locus=scripts/tier-baseline.ts(S409 rename of browser-baseline.ts; now carries TWO tiers, so a floor added here spans both)+compiler/tests/TYPES-BASELINE.json+scripts/corpus-compile-floor.ts(the three baselines that would each take an assertion-count floor)+.github/workflows/ci.yml(the per-tier steps that would carry it) prov=empirical:S410-peter-two-files-measured-45-to-15-and-35-to-0-assertions-while-the-pass-count-ROSE -->
+
+⛑ **S409 — THE EXPOSURE GAINED A SHARPER INSTANCE, RECORDED HERE RATHER THAN LEFT IMPLICIT AT THE CALL SITE.** The new BLOCKING `self-host` name-set gate (`.github/workflows/ci.yml`, `gate` job) asserts 3 failure names over a tier that is **122 SKIPPED of 264 at baseline**, and `bs.test.js` self-skips its entire 52-test block when `bs.scrml` fails to compile. So a regression converting PASSES into SKIPS leaves all 3 names intact and the blocking gate GREEN while coverage collapses — this gap's exact shape, now sitting inside a merge gate. **A one-off count floor was deliberately NOT bolted onto that step**, because this entry names three baselines a floor must span and a local patch would pre-empt that design; the step carries a comment stating its own limit instead.
 
 This repo has four bidirectional baselines and they are good ones — but **every single one asserts
 names, counts, or exit codes. None asserts that any test actually ASSERTED anything.**
@@ -3052,12 +3054,14 @@ GH #358. **Not new information — it was already recorded in prose and never fi
 
 **⚠ RE-CHARACTERISED S345-bryan (S342 arc audit, `handOffs/s342-arc-audit/g263.md`): the stated locus is WRONG.** The miss is not in `emitReferencedModuleExportConstLines` — it was in the `crossFileClientReads` seed, and the CLASS is wider than one emitter: a position-enumeration drift between two untyped walkers each carrying its own hardcoded ExprNode-field list (the dependency graph walked SIX fields, the #263 seed ELEVEN, and neither knew it was short). The g-263 convergence arc closes the drift at the substrate (one shared `expr-positions.ts` position table consumed by both walkers) — but that arc is UNLANDED (worktree tip `de0ff384` = tag `review/g263-r7`; a DO-NOT-LAND was recorded against it at S342), so on main this entry stays OPEN and the seed's field-enumeration drift, not the emitter symbol, is the search area — stated-by-audit, not re-traced. The residual gate blindness of the substrate itself is filed separately as `g-expr-positions-field-gate-blind-plus-hand-rolled-lists`.
 
-### g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion — three excluded test tiers still carry a documented failure baseline with NO mechanical assertion; a regression in them is invisible — `NEW S313-bryan; LOW; open (the measured residual of the Q6 browser-tier work)`
-<!-- @gap id=g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion sev=LOW status=open locus=scripts/browser-baseline.ts -->
+### g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion — `lsp` and `commands` still carry a documented failure baseline with NO mechanical assertion; a regression in them is invisible — `NEW S313-bryan; LOW; open — NARROWED S409 (self-host closed out of it; 2 of the 3 named tiers remain)`
+<!-- @gap id=g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion sev=LOW status=open locus=scripts/tier-baseline.ts(the TIERS registry — add an entry, then `--write`, then wire `--check`)+.github/workflows/ci.yml(the `tracking` step that runs lsp+commands today) -->
 
-Q6 (bryan, S310) closed the BROWSER tier: `scripts/browser-baseline.ts --check` asserts the failure NAME SET, exits 0 while the set is unchanged and 1 the moment a name joins or leaves it. **`lsp`, `commands` and `self-host` were named alongside `browser` in the same exclusion set** (`scripts/git-hooks/pre-push`, and the overlay's pre-commit exclusion list) and each carries its own documented baseline — none has an assertion. So for those three the original condition still holds exactly: always-failing is indistinguishable from newly-regressed.
+⛑ **S409 — NARROWED, NOT CLOSED, AND THE ID IS DELIBERATELY UNCHANGED** so this entry's history stays findable. **`self-host` IS NOW ASSERTED** and is out of scope for this gap: `bun scripts/tier-baseline.ts --tier=self-host --check` gates a 3-name baseline (`compiler/tests/self-host/FAILURE-BASELINE.json`) as a **BLOCKING step in the cloud `gate` job**. The script was renamed `browser-baseline.ts` -> `tier-baseline.ts` and parameterised by `--tier=<name>` over a registry, which is what makes the remaining extension a registry entry rather than a second script. **`lsp` and `commands` are untouched and still have no assertion — they run only in `tracking`, which is `continue-on-error: true`.** ⚠ The 2026-09-12 exclusion claim that kept self-host out (*"needs a locally-built, gitignored dist that CANNOT be rebuilt on a clean checkout"*) was measured FALSE for `compiler/tests/self-host`; do NOT reuse that reasoning for lsp/commands without measuring them too.
 
-Filed rather than silently scoped away — a fix that covers one of four named tiers and does not say so reads as full coverage (pa-base §8, "no silent caps"). LOW because the shape is proven and the extension is mechanical (the script is tier-parameterised in everything but a constant), not because the exposure is small.
+Q6 (bryan, S310) closed the BROWSER tier: `scripts/tier-baseline.ts --tier=browser --check` asserts the failure NAME SET, exits 0 while the set is unchanged and 1 the moment a name joins or leaves it. **`lsp`, `commands` and `self-host` were named alongside `browser` in the same exclusion set** (`scripts/git-hooks/pre-push`, and the overlay's pre-commit exclusion list) and each carries its own documented baseline. Self-host got its assertion at S409; **`lsp` and `commands` still have none**, so for those two the original condition holds exactly: always-failing is indistinguishable from newly-regressed.
+
+Filed rather than silently scoped away — a fix that covers some of four named tiers and does not say so reads as full coverage (pa-base §8, "no silent caps"). **Two of four are now covered (browser S313, self-host S409); two are not.** LOW because the shape is proven and the extension really is mechanical — as of S409 the script IS tier-parameterised (a `TierConfig` registry entry: test path, baseline path, duration note, env-exclusion list), so adding `lsp` is `--write` then a `--check` step — not because the exposure is small.
 
 **Do NOT extend by copy-paste before reading `FAIL_MARKER`'s comment.** The browser parser needed a non-line-anchored regex plus a cross-check against bun's own reported failure count, because bun interleaves `(fail)` markers into test output mid-line; the first cut silently under-counted by one and looked perfectly healthy. Any sibling tier that dumps large objects on failure will hit the same thing.
 
@@ -3765,8 +3769,10 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 and a bypassed gate gets deleted."* It is non-blocking, so the correct response is to ignore it; being
 correctly ignored is what would make a REAL regression invisible. Note the irony against S313, which
 promoted the browser tier into the blocking gate **precisely by** making it assertable as a NAME SET
-(`scripts/browser-baseline.ts --check`) because *"an exit code cannot express 'the same failures as
+(`scripts/tier-baseline.ts --check`, then named `browser-baseline.ts`) because *"an exit code cannot express 'the same failures as
 before'"*. **The instrument that solves this already exists and this hook does not use it.**
+
+⛑ **S409 — THIS HOOK IS ALSO THE ONLY THING THAT RAN `compiler/tests/self-host` BEFORE S409, AND THAT MADE ITS CRY-WOLF ACTIVELY EXPENSIVE.** `bun test compiler/tests/` includes the self-host tier, so the hook DID execute the directory in which #924's 82 GB tokenizer lockup lived — and reported it under a permanently-red "TEST REGRESSION DETECTED" that the browser tier's 48 baselined failures trigger on every compiler-touching commit. Coverage that is indistinguishable from noise is not coverage. **The drop-in now exists for BOTH tiers**: `bun scripts/tier-baseline.ts --tier=browser --check` and `--tier=self-host --check`. ⚠ Ordering caveat if the self-host one is wired here: running that tier WRITES `compiler/self-host/dist/` even on a FAILED compile, which satisfies the bare `existsSync` guards in `compiler/tests/integration/self-host-smoke.test.js`.
 
 **And it is the operational cause of the dispatch stalls.** The harness watches an agent's OUTPUT
 STREAM, not its process. pre-commit runs the fast subset (~2-4 min), then this hook re-runs the ENTIRE
@@ -3777,8 +3783,9 @@ them completely.
 
 **Fix direction (any one closes the cry-wolf; the first two are one line each):**
 - narrow the trigger to `^compiler/(src|tests)/`, matching its own stated intent;
-- replace the count assertion with `bun scripts/browser-baseline.ts --check` semantics — assert the
-  NAME SET, which is a condition a gate CAN carry (S313's ruling, already built);
+- replace the count assertion with `bun scripts/tier-baseline.ts --check` semantics — assert the
+  NAME SET, which is a condition a gate CAN carry (S313's ruling, already built, and as of S409
+  covering `--tier=browser` AND `--tier=self-host`);
 - or scope the run to the pre-commit subset, since the cloud `gate` is the authoritative full run
   (S253) and re-running it locally buys nothing but wall time.
 
@@ -12698,7 +12705,7 @@ example/benchmark apps = 37) must compile at exit 0 on HEAD. First run confirmed
 are BASELINED (`scripts/corpus-compile-floor.baseline.json`, one entry per program naming its gap: 09 →
 [[g-fail-variant-shorthand-rejected-by-ts-context]]); a NEW break fails, and a STALE baseline entry (its
 program now compiles, or is no longer enumerated) ALSO fails, so the baseline can only shrink to truth
-(the delta-lint/browser-baseline discipline — not a rotting allowlist). Anti-truncation: full enumeration
+(the delta-lint/tier-baseline discipline — not a rotting allowlist). Anti-truncation: full enumeration
 printed + a `MIN_PROGRAMS` floor (exit 2 on collapse). **REMAINING — and S382 verify-first RESHAPED it:**
 the floor covers should-all-compile PROGRAM roots. The other roots are NOT clean floor targets, contrary
 to the first framing: **`samples/` is NOT a should-compile corpus** (measured: 25+ of ~40 top-level samples

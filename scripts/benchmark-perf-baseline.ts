@@ -239,7 +239,7 @@ async function main() {
   // a check that passes on it.
   //
   // A baseline over zero corpora is never a legitimate recording. Mirrors
-  // scripts/browser-baseline.ts: "Refusing to record or compare an empty set."
+  // scripts/tier-baseline.ts: "Refusing to record or compare an empty set."
   const measured = Object.keys(results).length;
   if (measured === 0) {
     console.error("\n  MEASURED ZERO CORPORA — refusing to write a baseline.");

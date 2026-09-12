@@ -9,7 +9,11 @@
 #
 # THREE jobs:
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
-#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet.
+#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet
+#                + the failure-NAME-SET gates over the two tiers that carry a documented failure
+#                baseline: **browser** (since S313) and **self-host** (since S409 — the tier is
+#                dist-independent and runs in ~0.6s; see the KEY FINDING block below, which corrects
+#                the claim that used to exclude it).
 #                This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
 #                green in `tracking` (integration needs self-host-smoke relocated/dist-guarded first).
 #   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
@@ -25,6 +29,34 @@
 # sources don't compile against the current compiler: `null`/`!==`/`try` — the post-v1.0 self-host
 # migration, master-list B4). A trustworthy cloud gate can only include what's reproducibly green from
 # source; self-host + the M6.x within-node backlog + browser env-fails are tracked, not gated.
+#
+# ⛑ S409 — HALF OF THE PARAGRAPH DIRECTLY ABOVE IS FALSE, AND IT IS THE HALF THAT KEPT A WHOLE TEST
+# DIRECTORY OUT OF EVERY GATE FOR A YEAR. It is kept rather than deleted because it reads like a
+# measured finding and never was one: `compiler/tests/self-host` was named in the same breath as
+# `integration/self-host-smoke.test.js` and inherited that file's exclusion WITHOUT EVER BEING
+# MEASURED SEPARATELY.
+#
+# MEASURED, NOT ASSUMED — two independent ways, both at fd69d1fc:
+#   (a) `compiler/self-host/dist/` (14 files, gitignored) moved ENTIRELY out of the tree, tier re-run;
+#   (b) a fresh worktree, in which `dist/` (ignored at .gitignore:2) had never materialised at all.
+# Both readings: 139 pass · 122 skip · 3 fail · 264 tests across 4 files · under 0.6s, with an
+# IDENTICAL failure NAME SET. `compiler/tests/self-host` COMPILES ITS INPUTS AT TEST TIME, and
+# `bs.test.js` self-skips with an explicit message when `bs.scrml` fails to compile — it never reads a
+# built dist at all. The tier is DIST-INDEPENDENT and it is FAST.
+#
+# SO IT IS NOW FAILURE-NAME-SET GATED IN THE BLOCKING `gate` JOB, beside the browser one, against
+# `compiler/tests/self-host/FAILURE-BASELINE.json` — 3 token-count parity failures, ZERO
+# env-exclusions. WHY THAT IS WORTH A BLOCKING STEP RATHER THAN A TRACKING ONE: the #924 defect
+# rewrote the character class `/[A-Za-z0-9_\-:@]/` in `compiler/self-host/tab.scrml` into a map
+# literal, made `isAttrIdentPart` return false for EVERY character, and turned a tokenizer loop into an
+# unbounded allocator — an 82 GB host lockup that cost a day and three hard resets and sat
+# unattributed for sessions (fixed at 6951baa5). Nothing in any gated path executed that directory, so
+# it reached nobody's gate.
+#
+# WHAT SURVIVES OF THE S253 CLAIM: `integration/self-host-smoke.test.js`. That is a DIFFERENT file, it
+# was NOT measured here, and no claim is made about it in either direction — it stays in `tracking`
+# via the `integration` step. The `null`/`!==`/`try` migration (master-list B4) is likewise unaffected:
+# it is WHY `bs.scrml` fails to compile, and the tier's own 122 skips are the honest report of that.
 #
 # WHY (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the M6.x within-node
 # backlog + the un-rebuildable self-host dist. A gate red on known backlog can't be trusted to retire
@@ -102,6 +134,30 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    # ⛔ S409 — THE BLOCKING GATE HAD NO TIME BUDGET AT ALL, AND THE DEFECT CLASS IT WAS JUST HARDENED
+    # AGAINST IS ONE IT COULD NOT HAVE REPORTED. Before this line, no `timeout-minutes` existed
+    # anywhere in this file, so every job inherited GitHub's default of **360 minutes**.
+    #
+    # WHY THAT IS NOT ACADEMIC HERE. The defect that justifies the new self-host step (#924) is a
+    # SYNCHRONOUS unbounded loop — `isAttrIdentPart` returned false for every character and a
+    # tokenizer loop never advanced. bun's per-test timeout cannot preempt synchronous work, and the
+    # name-set script's own loud-failure paths do not fire either: `!ranOk` needs bun to EXIT, and the
+    # OOM route needs the loop to ALLOCATE. A non-allocating spin does neither. So a recurrence would
+    # have HUNG THIS GATE FOR SIX HOURS instead of reddening it — which fails the standard this repo
+    # states in `scripts/tier-baseline.ts` itself: *"A hung gate job is strictly worse than a failed
+    # one (pa-base §8 — a gate must be able to report)."* An unreported gate is a gate that cannot
+    # fail, and a gate that cannot fail is indistinguishable from one that never runs.
+    #
+    # WHY 20 AND NOT SOME OTHER NUMBER — measured, not guessed. The whole gate sequence was timed
+    # locally at S409, step by step: unit+conformance 85.9s · root glob 11.3s · gauntlet 0.4s ·
+    # browser name-set 24.0s · **self-host name-set 0.7s** · snippet-gate 32.0s · compile-floor 5.0s ·
+    # facts 0.2s · conflict-marker 0.1s · SPEC-INDEX 0.02s · delta-lint 0.03s = **160 s total**. CI
+    # adds checkout + setup-bun + `bun install` + `pretest` + the §34 census, on a runner materially
+    # slower than that machine; call it 10-13 min pessimistically. 20 gives ~1.5-2x headroom over the
+    # pessimistic case and ~7x over the measured core — loose enough that a slow runner never flaps it
+    # red, tight enough that a hang is a 20-minute signal instead of a 6-hour one.
+    # ⚠ Raise this if the gate genuinely grows; do NOT raise it to make a hang pass.
+    timeout-minutes: 20
     steps:
       # fetch-depth: 0 — the §34.0 row-provenance gate diffs against the PR base SHA, and a shallow
       # clone has no common ancestry, so merge-base fails and the gate cannot resolve what is NEW.
@@ -145,8 +201,72 @@ jobs:
       #
       # NOT added to pre-push: local environments vary far more than CI, and it was exactly a local
       # environment difference that made the first recorded baseline wrong.
+      #
+      # ⛑ S409: the script was `scripts/browser-baseline.ts` until this session. It is now
+      # `scripts/tier-baseline.ts --tier=<name>`, parameterised over a registry, defaulting to
+      # `browser`. This invocation is BEHAVIOUR-IDENTICAL — proven by running the pre-rename script
+      # and the post-rename one in the same environment and diffing the output (byte-identical, both
+      # exit 0). The rename is the point: a file called `browser-baseline.ts` is one nobody thinks to
+      # aim at a second tier, and the step directly below went unwritten for a year while this one
+      # sat here working.
       - name: Browser tier failure NAME-SET gate (S313 — a regression here now blocks)
-        run: bun scripts/browser-baseline.ts --check
+        run: bun scripts/tier-baseline.ts --tier=browser --check
+      # S409 (bryan RULED). NOTHING IN ANY GATED PATH EXECUTED `compiler/tests/self-host` — neither CI
+      # job ran it and no BLOCKING hook ran it. That is how #924 happened: a mangled character class in
+      # `compiler/self-host/tab.scrml` made `isAttrIdentPart` return false for every character and
+      # turned a tokenizer loop into an unbounded allocator (an 82 GB host lockup, a day lost, three
+      # hard resets, unattributed for sessions).
+      #
+      # ⚑ PRECISION, because the looser claim ("run by no hook") is FALSE and this file is in the
+      # business of not shipping reassuring comments: `.git/hooks/post-commit` DOES run
+      # `bun test compiler/tests/`, which includes self-host. It simply cannot gate anything — it runs
+      # AFTER the commit — and it greps `\d+ fail` to print "TEST REGRESSION DETECTED", which the
+      # browser tier's 48 baselined failures trigger on EVERY compiler-touching commit. A permanently
+      # red advisory is not coverage; it is the cry-wolf shape this mechanism replaces. Pointing that
+      # hook at `tier-baseline.ts --check` would make it carry information; not done here.
+      #
+      # BLOCKING rather than tracked, on three measured grounds — see the KEY FINDING block at the top
+      # of this file for the numbers:
+      #   · DIST-INDEPENDENT. The exclusion claim ("needs a locally-built, gitignored dist that CANNOT
+      #     be rebuilt on a clean checkout") is FALSE for this directory; it was measured with the dist
+      #     moved out AND in a checkout that never had it. Identical failure NAME SET both ways.
+      #   · FAST. Under 0.6s for 264 tests — it costs this job nothing.
+      #   · A KNOWN, SMALL BASELINE. 3 token-count parity failures, recorded by name, ZERO
+      #     env-exclusions. So the gate can carry a condition (`the same 3, no more, no fewer`) rather
+      #     than an exit code that is permanently 1.
+      #
+      # The 3 baselined failures are a SEPARATE arc and are deliberately not fixed here. A name joining
+      # OR leaving that set fails this step, which is the bidirectional property that keeps the
+      # baseline from going stale in silence.
+      #
+      # ⛔ WHAT THIS STEP DOES NOT ASSERT, SAID AT THE CALL SITE RATHER THAN LEFT IMPLICIT. It asserts
+      # the failure NAME SET and NOTHING ELSE — no floor on pass count, skip count, or assertions
+      # executed. That limit is sharpest exactly here: this tier is 122 SKIPPED of 264 at baseline,
+      # and `bs.test.js` self-skips its whole 52-test block when `bs.scrml` fails to compile. So a
+      # regression that converts PASSES into SKIPS leaves all 3 names intact and this step GREEN while
+      # coverage collapses. Tracked as `g-no-baseline-asserts-that-tests-actually-asserted`.
+      # ⚑ A count floor is deliberately NOT built here — that gap names the three baselines it would
+      # have to span, and bolting a one-off onto this step would pre-empt that design. The obligation
+      # discharged here is VISIBILITY: the next reader of this gate learns its limit from the gate.
+      #
+      # ⛑ AND THE TIER IS NOT SIDE-EFFECT-FREE — see the `self-host` registry entry in
+      # scripts/tier-baseline.ts for the measurement. Running it WRITES `compiler/self-host/dist/`
+      # (bs.css + bs.js) even though the compile FAILS, which satisfies the bare `existsSync` guards in
+      # `compiler/tests/integration/self-host-smoke.test.js:665`, flipping that block from SKIP to
+      # running against a failed-compile artifact. Harmless TODAY only because `integration` lives in
+      # the `tracking` job — a different runner, a different checkout. ⛔ THE STANDING PLAN AT THE TOP
+      # OF THIS FILE IS TO PROMOTE `integration` INTO `gate`. Whoever does that must order these two
+      # steps deliberately, or dist-guard the smoke test first. It is luck of layout, not a property.
+      - name: Self-host tier failure NAME-SET gate (S409 — the 82 GB lockup lived in an ungated directory)
+        # STEP-LEVEL BUDGET, TIGHTER THAN THE JOB'S, AND IT IS THE POINT OF THE STEP.
+        # Measured at 0.72s locally for 264 tests. 3 minutes is ~250x that — no slow runner flaps it —
+        # while still preempting the exact failure mode this step exists to catch: #924's SYNCHRONOUS
+        # non-advancing tokenizer loop, which bun's per-test timeout cannot interrupt and which the
+        # script's own `!ranOk` / OOM paths cannot see (one needs bun to exit, the other needs the loop
+        # to allocate). Without this, a recurrence consumes the whole job budget and reports nothing
+        # about WHERE it hung. With it, the failure names the step.
+        timeout-minutes: 3
+        run: bun scripts/tier-baseline.ts --tier=self-host --check
       - name: Snippet gate (every public-cited .scrml still compiles)
         run: bun scripts/snippet-gate.js
       # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
@@ -229,8 +349,13 @@ jobs:
       #
       # The name-set check exits 0 while the failure set is UNCHANGED and 1 the moment a name joins or
       # leaves it, so this step now carries information and the steps after it execute.
+      #
+      # ⛑ S409: renamed `scripts/browser-baseline.ts` -> `scripts/tier-baseline.ts --tier=browser`.
+      # Behaviour-identical (proven by diffing both scripts' output in the same environment); the flag
+      # is the whole change. Note this job does NOT build benchmarks/todomvc/dist, so unlike the `gate`
+      # copy the two env-exclusions are live here — the PASS line prints the skip-rate either way.
       - name: Browser tier — failure NAME-SET assertion (not exit code)
-        run: bun scripts/browser-baseline.ts --check
+        run: bun scripts/tier-baseline.ts --tier=browser --check
       # NOTE (label accuracy — g-ci-does-not-run-root-level-test-files): this step runs ONLY the
       # within-node parity file. The canary (parser-conformance-canary.test.js) is NOT run here — it
       # is gated in the BLOCKING `gate` job by the `*.test.js` root glob above ("Root-level

@@ -265,7 +265,7 @@ const check = args.includes("--check");
  *
  * A zero is never a legitimate value for any of these in a working checkout. Exit 2 — distinct from
  * 1 — because this is not "the facts are stale", it is "the instrument is not measuring the repo".
- * Mirrors scripts/browser-baseline.ts's refusal to record an empty set.
+ * Mirrors scripts/tier-baseline.ts's refusal to record an empty set.
  */
 function refuseDegenerateMeasurement(): void {
   const src = compilerSource();
