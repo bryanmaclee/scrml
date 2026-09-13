@@ -2,6 +2,73 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S414 — 2026-09-13 (peter · P-Tech1 Windows)
+
+**One ruled opener, four adversarial rounds, and a fix that reproduced the defect it was named after
+before the design was thrown away.** Two PRs landed — **#944** (review floor + gaps) and **#945** (the
+fix). Board **HIGH 104 → 107 · MED 236 → 236 · LOW 87 → 88**: four gaps filed, one resolved. Counts are
+generated — read `docs/known-gaps.md`, never this line.
+
+**The opener, ruled by peter post-S413-wrap:** `g-loop-branch-head-truncated-at-first-close-paren`.
+`collectIfCondition` stopped the instant the outermost `(` closed, so `while (n + 1) < 4 { n = n + 1 }`
+emitted `while (n + 1) { }` at **exit 0 with zero diagnostics** — a silent infinite loop whenever the
+condition depends on the body — and `if` truncated identically on both sides of #933. One defect, two
+arrival dates, one root, closed at the single collector.
+
+⚑ **THE FIX DIRECTION RECORDED IN THE GAP ENTRY WAS THE WRONG HALF OF A FORK.** The entry said *"collect
+the full condition expression"*. That is newly-**accepting**, and §50.2.1's productions, §49.2.1, and
+§50.2.3 in words — *"the outer parens are the while condition's **required** parens"* — already exclude
+the form. The governing-sentence gate is what caught it, one session after S413's ★★★ miss recorded
+exactly this failure on #933.
+
+⚑ **AND REJECT-AND-RECOVER FAILED THREE TIMES BEFORE BEING DELETED.** Cuts 1–3 mirrored S308's
+reject+recover. Each adversarial pass found the recovery scan eating or corrupting source: word-shaped
+statements swallowed; then punctuation-shaped bodies swallowed with `b++` / `b - n` / `b.ok`
+**invented**; then the scan stopping *inside the author's own condition* at the next operand's suffix,
+dropping the real braced body. The deciding measurement, against a true `origin/main`:
+
+```
+while (i) < n >> 1 { i = i + 1 }
+  BASE   while (i) { }      <- falsy, TERMINATES
+  FIX    while (i < n) { }  <- empty body, INFINITE LOOP
+```
+
+The fix reproduced the headline defect it is named after. **Round 4 deleted the recovery instead of
+patching it a fourth time** — the scan now never advances past the `)`, so the class is closed by
+construction. Measured base-vs-tip on errors *and* emit: 4/4 legal spellings byte-identical, both
+headline shapes same-emit-plus-diagnostic, and **a complete no-op inside exported declarations**, where
+cut 3 had been `semantics-changed` + newly-accepting and strictly worse than nothing.
+
+**Review floor 4 OWED → 0.** #940/#942/#943 carved out as ledger-only, each with a probe *and* a control.
+**#941 (mine) came back a finding:** its narrowing survived every attack, but it closed a gap over a
+population the fix does not reach — the gap's title names the **emitter**, never touched, which still
+throws `ReferenceError` at exit 0. The entry stays resolved for the half it was scoped to, with a banner
+pointing at the new HIGH.
+
+**Four gaps filed.** `g-declared-names-set-shared-across-blocks-emits-a-bare-assignment` (HIGH — every
+block emitter passes the same `Set` object, so a `let` in any block marks that name declared for the
+whole scope) · `g-export-reparse-swallows-ast-builder-parse-path-diagnostics` (HIGH — the entire lexical
+interior of any exported declaration; closing it is a **migration**, 22 of 2,552 files, ten shipped
+stdlib modules) · `g-inner-fn-lexical-binding-walk-is-quadratic` (MED, a regression #941 introduced) ·
+`g-closure-arm-still-hands-the-flat-binding-set-across-a-scope-boundary` (LOW, inert). Plus
+`g-bare-block-statement-is-silently-dropped` (**HIGH, live on main**) — a standalone `{ … }` block is
+deleted from the emit at exit 0; it is the delivery mechanism that made all three recovery holes silent
+rather than loud.
+
+**Owed to bryan, unchanged and now larger:** the §49.2.1 braceless-body fork; the must-use spec-citation
+ruling; his three #936 findings; the new `E-CONDITION-HEAD-UNPARENTHESIZED` code (minting a diagnostic
+decides what the language refuses, so it owes a language-surface review — landed with the stamp
+outstanding, per the S313 floor); and now the export-swallow migration and the bare-block ruling.
+
+**Gates:** cloud `gate` GREEN on both PRs; `windows` green; `tracking` RED — **proven pre-existing by
+name-set comparison against main's own run**, the identical five dev-watcher/hot-reload tests, which
+matters because #945 touches compiler source. Conformance **1638 / 0 fail / 30 skip / 7309 expect()**.
+`regen-spec-index --check` OK (71/71, 0 stale) · `facts --check` PASS · `state --check` PASS ·
+`delta-lint` PASS at max `[3022]`.
+
+**Maps (wrap 6c) — not hand-run, deliberately.** Owned by the scheduled `cloud-maps` workflow; a wrap
+cannot contain its own squash SHA.
+
 ## S405 — 2026-09-07/08 (bryan · ASUS-Vivobook)
 
 **Four rulings, two security arcs, and one failure mode wearing seven costumes.** Three sessions ran

@@ -1,3 +1,143 @@
+# scrml — Session 414 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S413/S412/S411/
+> S410 mine, S405 bryan's) and is untouched. **No LIVE sibling this session** — bryan's last activity
+> was 2026-09-12 20:49Z (#939); his surfaces (`ci.yml`, `dpa-debt.ts`, `regen-spec-index.ts`,
+> `SPEC-INDEX.md`, `dpa-queue.md`, the review lane in `pr-reviews.md`) were **read but never edited**.
+> His seven open PRs (#937/#938/#939 + #905/#906/#907/#918/#919/#920/#899) are CLAIMED, not lost.
+> Full mechanical detail: `docs/changelog.md` S414 block and delta-log `[3014]`–`[3022]`.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. ⚑⚑ **THE OPENER IS DRAINABLE AND IT IS THE EMITTER TWIN OF WHAT #941 CLOSED.**
+   `g-declared-names-set-shared-across-blocks-emits-a-bare-assignment` (**HIGH, LIVE**).
+   `emit-logic.ts:2060` picks DECLARATION vs BARE ASSIGNMENT off `opts.declaredNames`, and **every
+   block emitter passes the SAME `Set` object rather than a copy** (`emit-control-flow.ts:451`, `:627`,
+   `:1015`, `:1037`; only `function-decl` copies, at `emit-logic.ts:4234`). So a `let` in ANY block
+   marks that name declared for the whole enclosing scope, and a later out-of-scope write emits a bare
+   assignment: **exit 0, zero diagnostics, `ReferenceError` when run.** Needs NO inner function.
+   Rename CONTROL discriminates. ⚑ **Fix direction deliberately NOT prescribed** — copying the set per
+   block is the naive move and its migration population is UNMEASURED. Measure before narrowing.
+
+2. ⚑⚑ **STILL GATED ON BRYAN, AND THE LIST GREW. Do not build any of it.**
+   - §49.2.1 **braceless loop bodies** (the S413 fork, routed, unruled). Two gaps hang off it.
+   - **`g-bare-block-statement-is-silently-dropped`** (HIGH, NEW, live on main) — `i = i + 10;
+     { i = i + 1 }; return i` returns **10**; both controls return 11. Whether a standalone block is
+     legal at all is plausibly the same ruling as the braceless-body fork.
+   - **`g-export-reparse-swallows-ast-builder-parse-path-diagnostics`** (HIGH, NEW) — closing it is a
+     **MIGRATION**: 22 of 2,552 measurable files newly error (E-THROW ×17, E-TRY ×7, E-STMT ×1),
+     **ten of them shipped stdlib modules** plus the native parser's own `parse-markup.scrml`.
+   - The **must-use spec-citation** ruling (§48.3.3 is a mis-citation; no governing sentence exists).
+   - His **three #936 findings** (dpa-debt fails toward HIDING debt; the currency gate cannot see a
+     duplicated table; six "closed on merge" PRs are all still open).
+   - ⚑ **NEW:** `E-CONDITION-HEAD-UNPARENTHESIZED` (#945) mints a diagnostic, which decides what the
+     language refuses → owes a **language-surface review**. Landed with the stamp OUTSTANDING per the
+     S313 review-floor mechanism, exactly like #924/issue #922. Do not close that loop unilaterally.
+
+3. **Review floor reads 2 OWED — #944 and #945, both this session's.** Per the established pattern
+   (#890 marker) a drain PR's review **rides the NEXT landing**. Discharge first.
+
+4. **The other live HIGH, untouched this session and still the cheapest big one:**
+   `g-library-map-surface-unlowered-beyond-the-bracket-read` — `mapSetLoweringBoundaryOk` is off for
+   every non-client/server mode; #929's guard walks only `kind=index` and covers **1 of 8 shapes**.
+   `m.size` emits `return m.size;` against a HAMT node → `undefined` at exit 0. Reproducers written.
+
+5. ⚑ **DO NOT RE-ADD A RECOVERY SCAN TO `collectIfCondition`.** Three separate bounds were built and
+   all three ate or corrupted source; the ⛔ banner in `ast-builder.js` records all three by shape so
+   the next reader does not reinvent one. The scan stopping at the `)` is the invariant. If the
+   emitted artifact for an offending head looks wrong, that is FINE — the build is red.
+
+6. **Standing from Peter, unchanged:** merge on green without re-asking; surface `autoMode` blocks as
+   `⛔ BLOCKED BY autoMode — <exact command>` rather than engineering around them. Neither merge was
+   blocked this session.
+
+## WHAT LANDED
+
+**Two PRs, both gate-green — #944 · #945.** Board **HIGH 104 → 107 · MED 236 → 236 · LOW 87 → 88**;
+four gaps filed, one resolved. Counts are generated — read `docs/known-gaps.md`, never this line.
+
+Peter's ruled opener is **closed** (`g-loop-branch-head-truncated-at-first-close-paren`), and the
+review floor went **4 OWED → 0**.
+
+## 🔭 DURABLE
+
+**A fix can reproduce the exact defect it is named after, and only an A/B against a TRUE base shows
+it.** Cut 3's recovery turned `while (i) < n >> 1 { … }` from base's `while (i) { }` (falsy,
+terminates) into `while (i < n) { }` — an empty-bodied infinite loop. The headline symptom, caused by
+the fix. It was invisible to the test suite, to conformance, and to three rounds of my own reading.
+
+**When the same class recurs three times in the same code, delete the code rather than bound it
+again.** Rounds 1–3 each patched the recovery scan's stopping rule and each patch had a hole one
+token-kind wide. Round 4 removed the scan; the class is closed by construction because the collector
+never advances past the `)`. ⚑ **The tell was that every fix was a new predicate over the same
+ambiguity** — "is this token part of the condition or the start of the body?" is genuinely
+undecidable at that position, and three attempts to decide it were three attempts at the wrong
+question.
+
+**A bounded local repair and an open-ended scan are not the same precedent.** S308's
+`E-FOR-UNPARENTHESIZED-HEAD` recovers by consuming one known token and collecting one known operand.
+I cited it as licence for an unbounded scan. Same words, different mechanism — check what a precedent
+actually *does* before inheriting its shape.
+
+**Five of my own instruments failed this session, every one caught before it produced a claim** — a
+probe matching prose not markers; a control that fired nowhere; a `write:false`/`write:true` swap that
+flipped my own proof-of-reach; a base-vs-tip comparison whose "base" was the fix branch itself; and a
+commit message whose backticks the shell executed. **The prior holds: if an instrument here is wrong,
+assume it is flattering you.**
+
+**Three parties can each get an axis wrong in a different direction, and only a crossed matrix
+resolves it.** Two reviewers and I each named a different axis for the export swallow (the `<program>`
+shell, the function wrapper, the shell again) — every one of us had varied two things at once. The
+real answer is the whole lexical interior of any exported declaration.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I read the round-2 hole and let it go**, because the comment above it asserted the
+   fail-direction was *"stop early, never swallow source."* It was false. Fifth consecutive arc where
+   a confident safety comment sat on the bug — and the first where I was the one who believed it
+   rather than the one who caught it.
+2. **★★★ I cited S308 as licence for a design it does not license** (bounded repair vs open-ended
+   scan), which is what put three rounds of silent-data-loss defects into review in the first place.
+3. **★★ A mis-citation of mine reached a user-facing error string.** The brief cited §50.2.2 for
+   productions that live in §50.2.1. The agent propagated it faithfully into the §34 row and the
+   diagnostic text while getting it RIGHT in prose it wrote itself. Caught at the file-delta review.
+4. **★★ I cut the review branch off the FIX branch instead of off main**, so #944 carried the
+   pre-banner brief onto main with both wrong citations uncorrected. Fixed by rebasing so the banner
+   rides in with #945 — but it was on main in between.
+5. **★ Two of my prescribed fixes to the agent were wrong** and it measured rather than assumed: an
+   ASI/newline bound would not have caught the same-line case, and narrowing `is` to KEYWORD-only does
+   not work because the tokenizer classifies `is` context-free. Both corrections were right.
+
+## Gate at close
+
+Cloud `gate` **GREEN** on #944 and #945; `windows` green. `tracking` **RED — proven pre-existing by
+name-set comparison against main's own run at `1c42b0c7`**, the identical five dev-watcher/hot-reload
+tests. That comparison mattered here because #945 touches compiler source; #944 was docs-only.
+
+Local on merged main: conformance **1638 tests / 0 fail / 30 skip / 7309 expect()**; the three pinned
+loop-head files **86 pass / 0 fail / 140 expect()**; `regen-spec-index --check` OK (71/71, 0 stale);
+`facts --check` PASS; `state --check` PASS; `delta-lint` PASS at max `[3022]`. R26 on merged main:
+five offending shapes rejected, five controls clean.
+
+⚑ One pre-existing inconsistency surfaced by `state --check` and **not** fixed:
+`g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards` has
+`heading=open` but `marker=resolved`. Unrelated to this arc; noted rather than tidied.
+
+**Maps (wrap 6c) — NOT hand-run, deliberately.** Owned by the scheduled `cloud-maps` workflow; a wrap
+cannot contain its own squash SHA.
+
+**Worktrees — two removed, three retained.** This session's dispatch worktree landed via #945 and was
+removed (branch deleted, pruned), as was the temporary `C:/s414truebase` base worktree cut for the
+A/B. Three remain and **none is this session's**: `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`,
+`onmount-c`, plus the `scrml-pinned` app clone.
+
+**Inbox:** nothing inbound. The two outbound drops to bryan (S412's stdlib defects + self-host
+coverage hole; S413's §49.2.1 fork + his three #936 findings) remain unread by him and are
+deliberately left in place.
+
+
+---
+
 # scrml — Session 413 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S412/S411/S410

@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
-| MED | 237 |
+| MED | 236 |
 | LOW | 88 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -14129,9 +14129,9 @@ tilde-decl rule. Fixing this gap should not encode a rule the SPEC never states 
 
 ---
 
-### g-loop-branch-head-truncated-at-first-close-paren — an `if`/`while` head that starts with `(` and continues past it is truncated there, and the remainder *and the entire body* are silently dropped at exit 0 — `NEW S413; MED; LATENT (0 corpus sites); pre-existing in if, propagated to while by #933`
+### g-loop-branch-head-truncated-at-first-close-paren — an `if`/`while` head that starts with `(` and continues past it is truncated there, and the remainder *and the entire body* are silently dropped at exit 0 — `RESOLVED S414 (#945); MED; was LATENT (0 corpus sites); pre-existing in if, propagated to while by #933`
 
-<!-- @gap id=g-loop-branch-head-truncated-at-first-close-paren sev=MED status=open locus=compiler/src/ast-builder.js(collectIfCondition — it stops after closing the outermost paren; the three while sites reached it via the #933 swap from collectExpr) prov=review:S413-peter-adversarial-pass-on-#933-A/B-measured-against-the-parent-commit -->
+<!-- @gap id=g-loop-branch-head-truncated-at-first-close-paren sev=MED status=resolved resolved-by=S414-peter locus=compiler/src/ast-builder.js(collectIfCondition — it stops after closing the outermost paren; the three while sites reached it via the #933 swap from collectExpr) prov=review:S413-peter-adversarial-pass-on-#933-A/B-measured-against-the-parent-commit -->
 
 `collectIfCondition` stops after the outermost `(` closes. A head that is *fully* parenthesized or
 *fully* unparenthesized is fine; a head that **starts** with a paren and continues past it loses
@@ -14157,6 +14157,25 @@ operator-after-`)` shape. The grep was control-checked — it fires on two synth
 correctly ignores a braced head and a braceless body. **LATENT, not live** — which is also why no
 corpus differential could ever have caught it. ⚑ **Escalate to HIGH the moment a corpus program uses
 the shape**; the emit is a silent infinite loop.
+
+⛑ **RESOLVED S414 (#945) — AND THE FIX DIRECTION RECORDED BELOW WAS THE WRONG HALF OF A FORK.**
+`E-CONDITION-HEAD-UNPARENTHESIZED` now REJECTS the head; it does NOT collect past the `)`.
+§50.2.1's productions, §49.2.1, and §50.2.3 in words (*"the outer parens are the while
+condition's **required** parens"*) make the parens the condition's own delimiters, so
+`while (n + 1) < 4` is not a legal head — "make it work" would have been newly-ACCEPTING
+against a normative sentence that already excludes it.
+
+⛑ **Three adversarial rounds rejected a reject-AND-RECOVER design before it was deleted.**
+Each found the recovery scan eating or corrupting source: word-shaped statements swallowed;
+then punctuation-shaped bodies swallowed with `b++` / `b - n` / `b.ok` INVENTED; then the scan
+stopping INSIDE the author's own condition at the next operand's suffix, dropping the real
+braced body. The deciding measurement, against a true `origin/main`: `while (i) < n >> 1 {...}`
+emitted `while (i) { }` on base (falsy, TERMINATES) and `while (i < n) { }` with the fix (empty
+body, INFINITE LOOP) — **the fix reproduced the headline defect it is named after.** The
+recovery is gone; the scan cannot advance past the `)`, so the class is closed BY CONSTRUCTION
+rather than patched. R26-verified on merged main: five offending shapes rejected, five controls
+clean. The delivery mechanism that made those holes silent rather than loud is filed separately
+as [[g-bare-block-statement-is-silently-dropped]].
 
 **Fix direction:** collect the full condition expression rather than stopping at the first balanced
 `)`. Fixing it in `collectIfCondition` closes `if` and all three `while` sites at once — root, not
