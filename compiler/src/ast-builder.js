@@ -10565,6 +10565,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    *   `+` `-` — also unary prefixes, so they can legitimately begin a braceless body.
    *   `.` `(` `[` — member / call / index continuation, but each can also begin a stmt.
    *   `:`   — label and ternary-alternate.
+   *   `is`  — ⚑ WORD-SHAPED, AND THAT IS WHY IT IS OUT. Every other candidate is
+   *           PUNCT and can never be an identifier; `is` can be BOTH the §11 type-test
+   *           operator and an ordinary name. The lexer classifies it context-free as
+   *           KEYWORD with no demotion pass (only `match` has one), so NOTHING here can
+   *           distinguish `(x) is Foo` from a user's `if (n < 3) is(n)` — and a cut
+   *           that tried falsely rejected the latter and deleted the call. A member
+   *           that cannot fire correctly is worse than an absent one.
    */
   const CONDITION_HEAD_CONTINUATION_PUNCT = new Set([
     "<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?",
@@ -10575,18 +10582,61 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     "server", "for", "while", "do", "if", "return", "match", "partial", "switch",
     "try", "fail", "transaction", "throw", "continue", "break", "when", "given",
   ]);
+  /**
+   * ⚑ RECOVERY BOUND (MUST FIX 1). Tokens that can legitimately FOLLOW a value inside
+   * one expression. Anything else, arriving at depth 0 after a value-ending token, is
+   * the start of the NEXT thing (a braceless body, or the following statement) — two
+   * value-ish tokens cannot both belong to one expression, on the same line or not.
+   *
+   * This is a WHITELIST, so the fail-direction is "stop early", never "swallow source".
+   * An earlier cut bounded recovery only at `{` / `;` / a statement keyword, and since
+   * an IDENT stopped nothing, `if (a) && (b) n = 1` vacuumed `n = 1` AND the following
+   * `n = n + 5` into the condition, leaving `return n` to be captured as the braceless
+   * body — two statements silently deleted, on a program the baseline hard-rejected.
+   */
+  const CONDITION_HEAD_VALUE_ENDING_KEYWORDS = new Set(["true", "false", "this", "not"]);
+  function conditionHeadTokenEndsValue(tok) {
+    if (!tok) return false;
+    if (tok.kind === "IDENT" || tok.kind === "NUMBER" || tok.kind === "STRING" ||
+        tok.kind === "AT_IDENT" || tok.kind === "BLOCK_REF") return true;
+    if (tok.kind === "KEYWORD") return CONDITION_HEAD_VALUE_ENDING_KEYWORDS.has(tok.text);
+    if (tok.kind === "PUNCT") return tok.text === ")" || tok.text === "]" || tok.text === "}";
+    return false;
+  }
+  function conditionHeadTokenCanFollowValue(tok) {
+    if (!tok) return false;
+    // Operator-shaped tokens continue an expression; `{` and `;` are excluded by the
+    // explicit stops at the call site, and a depth-0 unmatched closer breaks earlier.
+    if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") return true;
+    // Word-form infix operators (§45.9 `or`/`and`) are IDENT-shaped but never start a
+    // statement — mirrors collectExpr's WORD_INFIX_OPERATORS carve-out.
+    if (tok.kind === "IDENT") return tok.text === "or" || tok.text === "and";
+    if (tok.kind === "KEYWORD") {
+      return tok.text === "is" || tok.text === "not" || tok.text === "in" ||
+             tok.text === "of" || tok.text === "as" || tok.text === "instanceof";
+    }
+    return false;
+  }
 
   /**
    * Does `tok`, sitting immediately after the head's closing `)`, continue the
    * condition expression rather than begin the body? See the set's banner.
+   *
+   * ⚑ PUNCT/OPERATOR ONLY — DO NOT ADD A WORD-SHAPED ARM. An earlier cut also matched
+   * a bare IDENT `is`, which re-opened, two lines below it, exactly the hazard the
+   * exclusion list above exists to close: `is` is the one continuation candidate that
+   * can also be an ordinary identifier, so `function f(is) { if (n < 3) is(n) }` — a
+   * program that compiled on base — was falsely rejected AND had its `is(n)` call
+   * deleted. `is` is not recoverable here at all: the lexer classifies it context-free
+   * as KEYWORD (`tokenizer.ts` KEYWORDS) with no demotion pass (only `match` has one),
+   * so a KEYWORD-only arm cannot tell the §11 type-test operator from a user's
+   * identifier either. It is therefore NOT in the set — see the banner.
    */
   function continuesConditionHead(tok) {
     if (!tok) return false;
     if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") {
       return CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text);
     }
-    // `is` — the §11 type-test operator; KEYWORD or IDENT depending on the lexer.
-    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "is") return true;
     return false;
   }
 
@@ -10612,6 +10662,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (not part of the condition) and a `;` / statement keyword ends the statement.
         if (tok.kind === "PUNCT" && (tok.text === "{" || tok.text === ";")) break;
         if (tok.kind === "KEYWORD" && CONDITION_HEAD_RECOVERY_STOP_KEYWORDS.has(tok.text)) break;
+        // ⚑ STATEMENT BOUNDARY — the bound that keeps recovery from eating source.
+        // `(b)` followed by `n` is two value-ish tokens in a row: `n` cannot continue
+        // the condition, so it starts the braceless body / the next statement. Stopping
+        // here leaves `parseOneIfStmt`'s braceless limb and the enclosing body loop to
+        // parse them, instead of the collector deleting them.
+        if (parts.length > 0 &&
+            conditionHeadTokenEndsValue(lastTok) &&
+            !conditionHeadTokenCanFollowValue(tok)) break;
       }
       // Track depth for all bracket types
       if (tok.kind === "PUNCT" && (tok.text === "(" || tok.text === "[" || tok.text === "{")) depth++;

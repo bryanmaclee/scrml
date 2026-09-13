@@ -31,12 +31,22 @@
  * code with no producer is this project's recurring failure — E-TILDE-001/002 sat dead
  * for the project's whole life behind passing unit tests.
  *
- * ⚑ SURFACING (pre-existing, NOT introduced here): a bare `${ ... }` file with no
- * `<program>` shell drops ast-builder logic-body errors from `result.errors` — the
- * shipped E-FOR-UNPARENTHESIZED-HEAD behaves identically there. The diagnostic cases
- * below therefore use the `<program>` shell, exactly as the S308 test does; the
- * RECOVERY and artifact cases use the library harness so the emitted JS can be read
- * back and executed.
+ * ⚑ SURFACING (pre-existing, NOT introduced here) — AND THE AXIS IS `export`, NOT THE
+ * `<program>` SHELL. An earlier revision of this banner claimed the shell was the axis;
+ * that attribution was WRONG. Measured across the full matrix:
+ *
+ *                 top-level     `function`     `export function`
+ *   bare `${}`      FIRES          FIRES           SILENT
+ *   `<program>`     FIRES          FIRES           SILENT
+ *
+ * An ast-builder parse-path diagnostic raised inside an `export`-ed declaration is
+ * swallowed by the `export` re-parse site and reaches neither `result.errors` nor
+ * `result.warnings`. It is NOT general — `E-EQ-004` surfaces from both `function` and
+ * `export function` — and it predates this change: the ratified S308
+ * E-FOR-UNPARENTHESIZED-HEAD is swallowed identically. The diagnostic cases below
+ * therefore avoid `export`; the RECOVERY and artifact cases use the library harness
+ * (which needs `export` to import the result back) and assert the EMITTED JS, which is
+ * correct either way.
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
@@ -172,6 +182,90 @@ describe("RECOVERY — the artifact is CORRECT even though the build errors", ()
     expect(js).toMatch(/while \(a && b\)/);
     expect(loopBodyIsEmpty(js)).toBe(false);
     expect((await import(pathToFileURL(artifact).href)).f(true)).toBe(3);
+  });
+});
+
+describe("⚑ RECOVERY MUST NOT EAT SOURCE — the statement-boundary bound", () => {
+  // An earlier cut bounded recovery only at `{` / `;` / a statement keyword. An IDENT
+  // stopped nothing and there was no value/operator alternation check, so the collector
+  // ran past the end of the statement: `if (a) && (b) n = 1` vacuumed `n = 1` AND the
+  // following `n = n + 5` into the condition, leaving `return n` to be captured as the
+  // braceless body. TWO STATEMENTS SILENTLY DELETED — on a program the baseline
+  // hard-rejected with E-CODEGEN-INVALID-LOGIC, so the fix had introduced a NEW
+  // silent-data-loss path. Dropping source text is never acceptable.
+  const EATER = "${\n  function f(a, b) {\n    let n = 0\n    if (a) && (b) n = 1\n    n = n + 5\n    return n\n  }\n}";
+
+  test("⚑ the statements AFTER a braceless recovered head all survive", () => {
+    const { js } = build(EATER, "no-eat");
+    // Every one of these was deleted by the unbounded scan.
+    expect(js).toMatch(/if \(a && b\) \{\s*\n\s*n = 1;/); // the braceless body, in the branch
+    expect(js).toContain("n = n + 5;");                   // the following statement
+    expect(js).toContain("return n;");                    // ...which was captured AS the body
+    // `return n` must be the function's tail, NOT the if-branch's only statement.
+    expect(js).not.toMatch(/if \(a && b\) \{\s*\n\s*return n;/);
+  });
+
+  test("⚑ ...and the diagnostic still fires on that same program", () => {
+    const r = compileProgram("${\n  function f(a, b) {\n    let n = 0\n    if (a) && (b) n = 1\n    n = n + 5\n    return n\n  }\n}\n<p>ok</>", "no-eat-diag");
+    expect(condErrors(r).length).toBe(1);
+  });
+
+  test("⚑ RUNTIME — the recovered braceless form computes the right answer", async () => {
+    // n = 0; if (a && b) n = 1; n = n + 5; return n  →  6 when both truthy, 5 otherwise.
+    const { artifact } = build(
+      "${\n  export function f(a, b) {\n    let n = 0\n    if (a) && (b) n = 1\n    n = n + 5\n    return n\n  }\n}",
+      "no-eat-runtime",
+    );
+    const mod = await import(pathToFileURL(artifact).href);
+    expect(mod.f(true, true)).toBe(6);
+    expect(mod.f(true, false)).toBe(5);
+  });
+
+  test("a BRACED recovered head keeps its trailing statements too (the twin)", () => {
+    const { js } = build(
+      "${\n  function f(a, b) {\n    let n = 0\n    if (a) && (b) { n = 1 }\n    n = n + 5\n    return n\n  }\n}",
+      "no-eat-braced",
+    );
+    expect(js).toMatch(/if \(a && b\) \{\s*\n\s*n = 1;/);
+    expect(js).toContain("n = n + 5;");
+    expect(js).toContain("return n;");
+  });
+});
+
+describe("⚑ `is` IS NOT A CONTINUATION — a user identifier named `is` must still work", () => {
+  // `is` was briefly in the continuation set, matched as KEYWORD-or-IDENT. It is the one
+  // candidate that can also be an ordinary name, which re-opened the exact hazard the
+  // PUNCT exclusion list exists to close: this program compiles on base, and the cut
+  // falsely rejected it AND DELETED the `is(n)` call.
+  //
+  // ⚑ A KEYWORD-ONLY ARM DOES NOT FIX IT — MEASURED. The lexer classifies `is`
+  // context-free as KEYWORD (tokenizer.ts KEYWORDS) and only `match` has a demotion
+  // pass, so a user's `is` identifier IS a KEYWORD token here. Restoring a KEYWORD-only
+  // arm reproduces this defect exactly. `is` is therefore absent from the set entirely.
+  const IS_PROG = "${\n  function f(is) {\n    let n = 0\n    if (n < 3) is(n)\n    return n\n  }\n}";
+
+  test("a parameter named `is`, called in a braceless body, is NOT rejected", () => {
+    const r = compileProgram(IS_PROG + "\n<p>ok</>", "ident-is");
+    expect(condErrors(r).length).toBe(0);
+    expect(codes(r)).not.toContain("E-EQ-005");
+  });
+
+  test("⚑ ...and the `is(n)` call is still EMITTED (it was being deleted)", () => {
+    const { js, errors } = build(IS_PROG, "ident-is-emit");
+    expect(errors.map((e) => e.code)).toEqual([]);
+    expect(js).toContain("is(n)");
+    expect(js).toMatch(/if \(n < 3\) \{\s*\n\s*is\(n\);/);
+  });
+
+  test("⚑ RUNTIME — the function named by the `is` parameter is actually called", async () => {
+    const { artifact } = build(
+      "${\n  export function f(is) {\n    let n = 0\n    if (n < 3) is(n)\n    return n\n  }\n}",
+      "ident-is-runtime",
+    );
+    let called = -1;
+    const mod = await import(pathToFileURL(artifact).href);
+    mod.f((v) => { called = v; });
+    expect(called).toBe(0);
   });
 });
 
