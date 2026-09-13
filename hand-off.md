@@ -51,6 +51,56 @@
    `⛔ BLOCKED BY autoMode — <exact command>` rather than engineering around them. Neither merge was
    blocked this session.
 
+
+## ⏭ POST-WRAP CONTINUATION — #947 landed after the S414 wrap
+
+Peter said *"go on recommend"* after the wrap, so PICKUP item 1 was taken in the same session and
+landed as **#947**. The pickup list below is superseded ONLY on item 1; items 2–6 stand.
+
+**`g-declared-names-set-shared-across-blocks-emits-a-bare-assignment` is RESOLVED.** Each block body
+now gets its own COPY of `declaredNames`. R26 on merged main: all four reproducer cases return
+`"abQ"`; two of them threw `ReferenceError` before.
+
+⛑ **The migration the entry demanded was measured, and it was free** — 0 artifact content diffs over
+1,928 sources / 7,467 artifacts. **Measured twice**: the first run covered a 9-site naive substitution,
+not the patch that landed, because the build found two further cases (the if/else limbs shared ONE
+`bodyOpts` object so they leaked into EACH OTHER; and `_emitIfStmtWithOpts` is a SECOND independent
+if/else emitter). ⚑ The first run also printed `0 artifact content diffs` UNDER a
+`NOT A VALID COMPARISON` banner — the S411 trap — because the patch was uncommitted so both sides were
+the same revision.
+
+⛑ **The S239 pass falsified the build's own direction claim**: `semantics-changed` AND
+**`newly-rejecting`**, not "no diagnostic delta". Two bare writes after a block go from exit 0 (then
+`ReferenceError` at runtime) to `E-CODEGEN-INVALID-LOGIC`. It owes a language-surface review; landed
+with the stamp outstanding.
+
+### NEW on the board — two siblings, both PA-reproduced on BOTH trees (pre-existing)
+- **HIGH `g-try-catch-finally-bodies-redeclare-every-assignment`** — `emitTryStmt` takes NO opts, so
+  the entire try/catch/finally interior is untracked and every bare write becomes a fresh `const`:
+  `let x = 1; try { x = 2 } catch (e) { x = 3 }; return x` **returns 1**, exit 0, silently wrong. The
+  same untracked mode holds in `emit-each` / `emit-channel` / `emit-match` / `emit-engine` /
+  `emit-lift` / `emitHoistedForStmt` (grep-verified; reachability unmeasured).
+- **MED `g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws`** — the `for` head
+  binding never enters `declaredNames`; the body emits `const i = i + 1` and throws
+  `Cannot access 'i' before initialization`.
+
+⛑ **Do NOT fix either by threading the Set in.** Declaration-by-bare-assignment is documented ONLY in
+a code comment (`emit-logic.ts` ~:2071–2079); SPEC §50 models `x = value` as assignment to an EXISTING
+binding, and `E-ASSIGN-001` says *"Declare `x` before …"*. The end-state is probably a scope
+diagnostic — a language question for bryan, not a codegen patch.
+
+### ⛑ OWED — `TYPES-BASELINE.json` is stale by one key, and I deliberately did not hand-fix it
+#947 renames one anonymous-argument type inside a pre-existing TS2345, which renames a baseline key.
+PA-confirmed by running the gate's own tsc on both trees: **241 = 241 diagnostics, 155 = 155 distinct
+keys, exactly one non-path delta.** `bun scripts/types-gate.ts --write` **cannot run on this Windows
+clone** (it resolves an extensionless `node_modules/.bin/tsc`; Windows ships `tsc.exe`). A hand-edit
+was attempted, verified to touch exactly one line, and then **REVERTED**: the committed baseline
+records `totalDiagnostics` **228** against this environment's **241**, each worktree ran its own
+`bun install`, and tsc's type-printer truncation (`... 29 more ...`) is version-sensitive — so a
+hand-written key could be **wrong in a new way**, which is harder to diagnose than a stale one.
+**Nothing is blocked:** the step is `continue-on-error: true` inside the non-blocking `tracking` job
+(`ci.yml:215`). **Run `bun scripts/types-gate.ts --write` on a clone where it runs.**
+
 ## WHAT LANDED
 
 **Two PRs, both gate-green — #944 · #945.** Board **HIGH 104 → 107 · MED 236 → 236 · LOW 87 → 88**;
