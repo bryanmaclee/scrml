@@ -18807,6 +18807,13 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
   }
   for (const n of preDeclaredLinNames) knownBindings.add(n);
   for (const n of paramNames) knownBindings.add(n);
+  // ⚑ S413 — SNAPSHOT TAKEN BEFORE `_collectScopeBindings` FLATTENS THE NESTED BLOCKS.
+  // This is the set that is genuinely in scope for THIS whole frame regardless of
+  // position: the enclosing function's own (already position-filtered) bindings, plus
+  // this function's parameters. `_lexicalBindingsAtInnerFunction` builds on it; see the
+  // long note at the `function-decl` recursion for why the flattened set must not cross
+  // a function boundary.
+  const frameEntryBindings = new Set<string>(knownBindings);
   function _collectScopeBindings(nodes: ASTNodeLike[]): void {
     if (!Array.isArray(nodes)) return;
     for (const stmt of nodes) {
@@ -18825,9 +18832,19 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
       }
       // Recurse into all child node arrays so names declared in nested blocks
       // (if/while/match/for branches) are visible to the tilde-decl reassignment
-      // discriminator. Nested-block let-decls are visible to tilde-decls in
-      // sibling/later positions because the live scope-chain checker (E-SCOPE-001)
-      // would already have rejected truly-out-of-scope references.
+      // discriminator.
+      //
+      // ⛔ S413 — THE SAFETY PREMISE THAT USED TO BE STATED HERE IS FALSE, AND THE
+      // CORRECTION IS LOAD-BEARING. It read: *"Nested-block let-decls are visible to
+      // tilde-decls in sibling/later positions because the live scope-chain checker
+      // (E-SCOPE-001) would already have rejected truly-out-of-scope references."*
+      // E-SCOPE-001 does NOT reject the CROSS-FUNCTION case — a bare `row = ""` inside
+      // an inner `function`, where the only `row` is a `let` block-scoped to a sibling
+      // `for` body, compiles at exit 0 and throws `ReferenceError: row is not defined`
+      // at runtime. This set is therefore OVER-BROAD by construction; it is tolerated
+      // WITHIN one frame (where the walk is inline and the pre-existing behaviour is
+      // load-bearing for the legacy corpus) and MUST NOT be handed across a function
+      // boundary — see `_lexicalBindingsAtInnerFunction` immediately below.
       if (Array.isArray(stmt.body)) _collectScopeBindings(stmt.body as ASTNodeLike[]);
       if (Array.isArray(stmt.then)) _collectScopeBindings(stmt.then as ASTNodeLike[]);
       if (Array.isArray(stmt.else)) _collectScopeBindings(stmt.else as ASTNodeLike[]);
@@ -18837,6 +18854,89 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
     }
   }
   _collectScopeBindings(body);
+
+  /**
+   * ⚑ S413 — THE SET HANDED TO AN INNER `function` IS BUILT FROM THE ANCESTOR CHAIN,
+   * NOT FROM THE FLATTENED `knownBindings`.
+   *
+   * Walks the path from this frame's `body` down to `target` and unions, at each block
+   * ON THAT PATH, only that block's OWN same-level declarations. A declaration in a
+   * SIBLING or otherwise non-enclosing nested block is never added, because it is not
+   * lexically in scope at `target`'s position.
+   *
+   * Position within a block is deliberately ignored (a `let` textually AFTER the inner
+   * function is still lexically bound in that block, and #931's reported shape relies
+   * on same-block visibility) — the axis narrowed here is NESTING, not ordering.
+   *
+   * ⛑ FAILS CLOSED. If `target` is not reachable (an AST shape whose child arrays this
+   * search does not name), the ancestor chain contributes NOTHING and the caller falls
+   * back to `frameEntryBindings`. A name missing from the set makes the `tilde-decl`
+   * register as a declaration, so `E-MU-001` still FIRES — loud, not silent. The
+   * opposite default (fall back to the flat set) is what produced the runtime
+   * `ReferenceError` this function exists to prevent.
+   *
+   * Descent is generic — every array-valued and node-valued own property, minus
+   * `function-decl`/`closure` subtrees (separate scopes) — rather than the fixed
+   * `body`/`then`/`else`/`consequent`/`alternate`/`children` key list used above. A
+   * fixed key list cannot see an `if-chain`'s `branches[].element` / `elseBranch`, and
+   * a miss there costs a false `E-MU-001`. Non-statement arrays on the path contribute
+   * no declaration names, so generic descent cannot ADD anything a keyed walk would not.
+   */
+  function _lexicalBindingsAtInnerFunction(target: ASTNodeLike): Set<string> {
+    const acc = new Set<string>(frameEntryBindings);
+    const seen = new WeakSet<object>();
+
+    function sameLevelDecls(nodes: ASTNodeLike[]): string[] {
+      const out: string[] = [];
+      for (const stmt of nodes) {
+        if (!stmt || typeof stmt !== "object") continue;
+        if (stmt.kind === "function-decl" || stmt.kind === "closure") continue;
+        const declName = (stmt.name as string | undefined) ?? undefined;
+        if (
+          declName &&
+          (stmt.kind === "let-decl" ||
+           stmt.kind === "const-decl" ||
+           stmt.kind === "lin-decl" ||
+           stmt.kind === "variable-decl")
+        ) {
+          out.push(declName);
+        }
+      }
+      return out;
+    }
+
+    // Returns true when `target` was found at or beneath `nodes`; on the way back out
+    // each enclosing block contributes its own same-level declarations.
+    function search(nodes: ASTNodeLike[]): boolean {
+      if (!Array.isArray(nodes)) return false;
+      for (const stmt of nodes) {
+        if (stmt === target) {
+          for (const n of sameLevelDecls(nodes)) acc.add(n);
+          return true;
+        }
+      }
+      for (const stmt of nodes) {
+        if (!stmt || typeof stmt !== "object") continue;
+        if (stmt.kind === "function-decl" || stmt.kind === "closure") continue;
+        if (seen.has(stmt as object)) continue;
+        seen.add(stmt as object);
+        for (const [key, value] of Object.entries(stmt as Record<string, unknown>)) {
+          if (key === "span" || key === "loc" || !value || typeof value !== "object") continue;
+          const found = Array.isArray(value)
+            ? search(value as ASTNodeLike[])
+            : search([value as ASTNodeLike]);
+          if (found) {
+            for (const n of sameLevelDecls(nodes)) acc.add(n);
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    search(body);
+    return acc;
+  }
 
   // Lin-A3: Per-iteration loop-local lin tracker. When non-null,
   // scanNodeExprNodesForLin first tries consuming against this tracker so
@@ -19316,7 +19416,41 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
             // consumers each re-derived "what is bound in the enclosing scope?" and each
             // got the inner-function case wrong. In both, the justifying COMMENT was the
             // giveaway.
-            ...(node.fnKind === "function" ? { parentBindings: knownBindings } : {}),
+            //
+            // ⛔ S413 — AND THE SET IS THE LEXICAL ONE, NOT `knownBindings`.
+            // #931 shipped `parentBindings: knownBindings`, and `knownBindings` is FLAT:
+            // `_collectScopeBindings` recurses into every nested block of this frame, so
+            // it carries names from blocks the inner function is lexically OUTSIDE of.
+            // Inside one frame that over-collection never crossed a scope the language
+            // enforces; handing it across a FUNCTION boundary does. The measured
+            // consequence (`g-must-use-suppressed-by-out-of-scope-name-collision`, HIGH):
+            //
+            //     export function render(rows) {
+            //       let out = ""
+            //       for (let i = 0; i < rows.length; i = i + 1) {
+            //         let row = rows[i]              // ← block-scoped to the `for` body
+            //         out = out + row
+            //       }
+            //       function tally() { row = ""      // ← a FRESH must-use, nothing reads it
+            //         return 1 }
+            //       let n = tally()
+            //       return out + n
+            //     }
+            //
+            // The flat set contains `row`, so `:18998` classified `row = ""` as a
+            // REASSIGNMENT, dropped the must-use entry, and the program compiled at
+            // exit 0 and threw `ReferenceError: row is not defined` when `render` ran.
+            // Renaming the block-local `row` to `other` — nothing else — restored the
+            // diagnostic, which is what identifies the NAME COLLISION as the mechanism.
+            //
+            // The fix LIMITS rather than widens: `_lexicalBindingsAtInnerFunction` walks
+            // the ancestor chain to this node and unions only the enclosing blocks' own
+            // declarations. It is a strict subset of `knownBindings`, and every one of
+            // #931's six pins puts the colliding binding at the same body level as the
+            // inner function, so all six stay green by construction.
+            ...(node.fnKind === "function"
+              ? { parentBindings: _lexicalBindingsAtInnerFunction(node) }
+              : {}),
           },
         );
         break;
