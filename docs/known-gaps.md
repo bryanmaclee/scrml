@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 105 |
+| HIGH | 104 |
 | MED | 236 |
 | LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -14043,9 +14043,21 @@ Either way the eight sources should lose their now-redundant mirrors; that half 
 — NEW S409-bryan (routed from dpa-043 as a side-finding; fire-count relayed from the dPA, NOT independently reproduced — verify before fixing)
 <!-- @gap id=g-w-lint-018-false-fires-on-the-sanctioned-generator-surface sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(the-W-LINT-018-rule) prov=dd:scrml-support/docs/debates/lazy-pull-yield-emit-primitive-dpa-043-2026-09-06.md -->
 
-### g-must-use-suppressed-by-out-of-scope-name-collision — a must-use declaration inside an inner `function` is silently dropped when any out-of-scope nested block elsewhere in the enclosing function declares the same name, so a module that throws `ReferenceError` on first call compiles at exit 0 — `NEW S413; HIGH; REGRESSION introduced by #931 (S412)`
+### g-must-use-suppressed-by-out-of-scope-name-collision — a must-use declaration inside an inner `function` is silently dropped when any out-of-scope nested block elsewhere in the enclosing function declares the same name, so a module that throws `ReferenceError` on first call compiles at exit 0 — `RESOLVED S413; HIGH; REGRESSION introduced by #931 (S412)`
 
-<!-- @gap id=g-must-use-suppressed-by-out-of-scope-name-collision sev=HIGH status=open locus=compiler/src/type-system.ts(the parentBindings seed added by #931, consumed at the knownBindings.has(tildeName) decision point; the over-broad set comes from _collectScopeBindings, which recurses into nested blocks) prov=review:S413-peter-adversarial-pass-on-#931-reproduced-by-execution-with-a-rename-control -->
+⛑ **RESOLVED S413.** The set handed across the inner-`function` boundary is now built from the
+ANCESTOR CHAIN (`_lexicalBindingsAtInnerFunction`) rather than from the flattened `knownBindings` —
+a strict subset, and it fails CLOSED (an unreachable target contributes nothing, so `E-MU-001` still
+fires). The FALSE safety premise the helper's own comment stated — *"the live scope-chain checker
+(E-SCOPE-001) would already have rejected truly-out-of-scope references"* — is corrected in place.
+Pinned two-sidedly on the NESTING axis by `compiler/tests/unit/e-mu-001-nested-block-name-collision.test.js`
+(7 tests; **5 pass / 2 FAIL on the pre-fix base**, 7/7 on the fix), which also imports and RUNS the
+accepted shapes because the defective emission was textually correct scrml→JS and only execution
+showed the `ReferenceError`. Direction-of-change **newly-rejecting**; migration MEASURED by compiling
+all **2,553** tracked `.scrml` on both sides and diffing the per-file diagnostic multiset —
+**0 changed**, with a positive control that did change (so the zero is not a dead harness).
+
+<!-- @gap id=g-must-use-suppressed-by-out-of-scope-name-collision sev=HIGH status=resolved resolved-by=S413-peter locus=compiler/src/type-system.ts(the parentBindings seed added by #931, consumed at the knownBindings.has(tildeName) decision point; the over-broad set comes from _collectScopeBindings, which recurses into nested blocks) prov=review:S413-peter-adversarial-pass-on-#931-reproduced-by-execution-with-a-rename-control -->
 
 **Introduced by #931 (`ecc05234`, S412).** That PR passed `parentBindings: knownBindings` into inner
 `function` bodies to stop an `E-MU-001` over-fire. The set it passes is built by
