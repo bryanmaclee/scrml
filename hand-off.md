@@ -31,7 +31,8 @@
    `g-do-while-braceless-body-becomes-the-condition` (adding a braceless `do` limb is the *accepting*
    half — building it would pre-empt the ruling).
 
-3. **NOT gated, and the cleanest real work on the board:**
+3. ⚑⚑ **THIS IS THE OPENER — PETER RULED IT POST-WRAP, verbatim: *"take the loop-head truncation fix
+   next session"*. It outranks items 4–7; start here, not with a fresh triage.**
    `g-loop-branch-head-truncated-at-first-close-paren` (MED, latent). `collectIfCondition` stops at the
    first balanced `)`, so `while (n + 1) < 4 { … }` loses the remainder **and the whole body** — a silent
    infinite loop. ⚑ **`if` has the identical bug and always has**, so fixing `collectIfCondition` closes
