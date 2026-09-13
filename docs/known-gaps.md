@@ -14369,10 +14369,24 @@ A diagnostic pushed from the ast-builder **parse path** inside an `export functi
 Two reviewers and the PA each guessed a different axis before anyone crossed the full matrix; each had
 varied two things at once.
 
-| | top-level | `function` | `export function` |
-|---|---|---|---|
-| bare `${}` | FIRES | FIRES | **SILENT** |
-| `<program>` | FIRES | FIRES | **SILENT** |
+| locus | does an ast-builder parse-path diagnostic reach `result.errors`? |
+|---|---|
+| top-level `${}` | FIRES |
+| plain `function` | FIRES |
+| `fn` | FIRES |
+| `server function` | FIRES |
+| **`export function`** | **SILENT** |
+| **`export fn`** | **SILENT** |
+| **`export server function`** | **SILENT** |
+| `export const g = () => …` | **SILENT** for this code — but the build is still RED via `E-CODEGEN-INVALID-LOGIC`, so not exit 0 |
+| **a plain `function` NESTED INSIDE an `export function`** | **SILENT** |
+
+⛑ **It is the ENTIRE LEXICAL INTERIOR of an exported declaration, not the exported function
+itself** — the nested-plain-`function` row is the one that matters, because that is where real
+library code puts its loops. The `<program>` shell makes NO difference in any row; an earlier
+revision of this entry recorded a 2x3 matrix keyed on the shell, which was wrong and is superseded
+here. Three separate parties guessed a different axis before the full matrix was crossed — each had
+varied two things at once.
 
 **CONTROL, and it is what proves this is narrow rather than general:** `E-EQ-004` (a different producer)
 fires in BOTH `function` and `export function`; S308's shipped `E-FOR-UNPARENTHESIZED-HEAD` shows the

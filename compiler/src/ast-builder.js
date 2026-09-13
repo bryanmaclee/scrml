@@ -10583,38 +10583,72 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     "try", "fail", "transaction", "throw", "continue", "break", "when", "given",
   ]);
   /**
-   * ⚑ RECOVERY BOUND (MUST FIX 1). Tokens that can legitimately FOLLOW a value inside
-   * one expression. Anything else, arriving at depth 0 after a value-ending token, is
-   * the start of the NEXT thing (a braceless body, or the following statement) — two
-   * value-ish tokens cannot both belong to one expression, on the same line or not.
+   * ⚑ RECOVERY BOUND. Once the scan is past the head's closing `)`, a token arriving at
+   * depth 0 after a VALUE-ENDING token continues the condition ONLY if it is an
+   * infix/postfix operator. Everything else starts the NEXT thing (the braceless body,
+   * or the following statement) and MUST stop the scan.
    *
-   * This is a WHITELIST, so the fail-direction is "stop early", never "swallow source".
-   * An earlier cut bounded recovery only at `{` / `;` / a statement keyword, and since
-   * an IDENT stopped nothing, `if (a) && (b) n = 1` vacuumed `n = 1` AND the following
-   * `n = n + 5` into the condition, leaving `return n` to be captured as the braceless
-   * body — two statements silently deleted, on a program the baseline hard-rejected.
+   * ⚑ THIS BOUND HAS BEEN WRONG TWICE, BOTH TIMES TOO PERMISSIVE, BOTH TIMES EATING
+   * SOURCE. Cut 1 stopped only at `{` / `;` / a statement keyword, so `if (a) && (b) n = 1`
+   * followed by `n = n + 5` vacuumed BOTH statements into the condition and captured the
+   * next `return n` as the body. Cut 2 added this predicate but blanket-accepted every
+   * PUNCT token, so it stopped only for WORD-shaped statement starts and every
+   * PUNCTUATION-starting body was still eaten — MEASURED, all at exit 0 with zero
+   * diagnostics, all hard-rejected by base:
+   *
+   *     if (a) && (b) (out = 7)   →  if (a && b(out = 7))   body absorbed as a CALL ARG
+   *     if (a) && (b) !flag       →  if (a && b)            body DELETED outright
+   *     if (a) && (b) ++n         →  if (a && b++)          body DELETED, `b++` INVENTED
+   *     if (a) && (b) -n          →  if (a && b - n)        body DELETED, `b - n` INVENTED
+   *     if (a) && (b) .ok         →  if (a && b.ok)         body DELETED, `b.ok` INVENTED
+   *
+   * The last three FABRICATE an operation the author never wrote, which is worse than
+   * dropping one. The regex body `while (h) /a\sb/.test(c)` survived cut 2 only BY
+   * ACCIDENT — `REGEX` is its own token kind and fell through to `return false`.
+   *
+   * So the continuation test is now EXACTLY `CONDITION_HEAD_CONTINUATION_PUNCT` — the
+   * same conservative operator set that is allowed to START a recovery. One set, one
+   * rule: recovery continues through exactly the operators that could have begun it.
+   * `(` `[` `!` `++` `--` `.` `-` `+` `,` `:` all STOP.
+   *
+   * ⚑ STOPPING EARLY IS SAFE BY CONSTRUCTION: it truncates the RECOVERED CONDITION and
+   * hands the remainder to the body parser, which already knows how to parse statements.
+   * Deleting or inventing source is not recoverable. When in doubt, stop — do NOT try to
+   * disambiguate call-vs-parenthesized-statement or infix-vs-unary `-`.
+   *
+   * A `(` reached while lastTok is an OPERATOR (`&& (b)`) never consults this predicate —
+   * the guard only applies after a value-ending token — so excluding `(` here does not
+   * disturb `while (a) && (b) { ... }`.
    */
-  const CONDITION_HEAD_VALUE_ENDING_KEYWORDS = new Set(["true", "false", "this", "not"]);
+  // ⚑ Kept in sync BY HAND with `VALUE_KEYWORDS` in `compiler/src/tokenizer.ts`
+  // (function-local there, so it cannot be imported). Erring toward MORE value-ending
+  // entries is the safe direction: every addition can only make the scan stop sooner.
+  // `not` (§42.1) is scrml's absence primitive and is value-producing; §42.6 forbids it
+  // in prefix position, so it never opens a statement.
+  const CONDITION_HEAD_VALUE_ENDING_KEYWORDS = new Set([
+    "true", "false", "null", "undefined", "this", "super", "not",
+  ]);
   function conditionHeadTokenEndsValue(tok) {
     if (!tok) return false;
     if (tok.kind === "IDENT" || tok.kind === "NUMBER" || tok.kind === "STRING" ||
-        tok.kind === "AT_IDENT" || tok.kind === "BLOCK_REF") return true;
+        tok.kind === "AT_IDENT" || tok.kind === "BLOCK_REF" || tok.kind === "REGEX") return true;
     if (tok.kind === "KEYWORD") return CONDITION_HEAD_VALUE_ENDING_KEYWORDS.has(tok.text);
     if (tok.kind === "PUNCT") return tok.text === ")" || tok.text === "]" || tok.text === "}";
     return false;
   }
   function conditionHeadTokenCanFollowValue(tok) {
     if (!tok) return false;
-    // Operator-shaped tokens continue an expression; `{` and `;` are excluded by the
-    // explicit stops at the call site, and a depth-0 unmatched closer breaks earlier.
-    if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") return true;
-    // Word-form infix operators (§45.9 `or`/`and`) are IDENT-shaped but never start a
+    // ⚑ The SAME conservative operator set that may start a recovery — NOT "any PUNCT".
+    if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") {
+      return CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text);
+    }
+    // Word-form infix operators (§45.9 `or`/`and`) are IDENT-shaped but can never start a
     // statement — mirrors collectExpr's WORD_INFIX_OPERATORS carve-out.
     if (tok.kind === "IDENT") return tok.text === "or" || tok.text === "and";
-    if (tok.kind === "KEYWORD") {
-      return tok.text === "is" || tok.text === "not" || tok.text === "in" ||
-             tok.text === "of" || tok.text === "as" || tok.text === "instanceof";
-    }
+    // Every KEYWORD stops. `is` in particular: the lexer classifies it context-free as
+    // KEYWORD, so `is(n)` — a call to a user's parameter named `is` — is indistinguishable
+    // from the §11 type-test operator here. That ambiguity already cost one false
+    // rejection with a deleted call; continuing through it would re-open the same hole.
     return false;
   }
 

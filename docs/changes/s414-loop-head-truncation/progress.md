@@ -158,3 +158,89 @@ section column and body, the §49.2.3 prose, and the test banner.
 - regen-spec-index --check OK · facts --check OK (FACTS.md regenerated) ·
   s34-census --check-new PASS · corpus-compile-floor PASS · conflict-marker PASS ·
   snippet-gate 110/110 · delta-lint PASS.
+
+## 2026-09-13 — ROUND 3 (the recovery bound was too permissive a SECOND time)
+
+⚑ META, carried from the coordinator and worth keeping: this bound has now been wrong
+TWICE, both times in the SAME direction — too permissive, eating source. Round 3
+therefore ends with a POPULATION COUNT ON THE BOUND ITSELF, not just a fix.
+
+### BLOCKING — `conditionHeadTokenCanFollowValue` accepted every PUNCT (fixed)
+Reproduced all five rows. All at exit 0 with zero diagnostics (the `export` re-parse
+hides the error), all hard-rejected by base:
+  `(out = 7)` → `if (a && b(out = 7))`  body absorbed as a CALL ARGUMENT
+  `!flag`     → `if (a && b)`           body DELETED outright
+  `++n`       → `if (a && b++)`         body DELETED, `b++` INVENTED
+  `-n`        → `if (a && b - n)`       body DELETED, `b - n` INVENTED
+  `.ok`       → `if (a && b.ok)`        body DELETED, `b.ok` INVENTED
+The last three FABRICATE an operation the author never wrote — worse than dropping one.
+The regex body survived cut 2 ONLY BY ACCIDENT (`REGEX` is its own token kind and fell
+through the PUNCT test); `REGEX` is now a value-ending kind so that is a rule, not luck.
+Fix: the continuation test is now EXACTLY `CONDITION_HEAD_CONTINUATION_PUNCT` — the same
+conservative set allowed to START a recovery. One set, one rule.
+⚑ The comment and §34 row both asserted "This is a WHITELIST, so the fail-direction is
+'stop early', never 'swallow source'." FALSIFIED; both rewritten.
+
+### ⚑ POPULATION COUNT ON THE NEW BOUND — 32 shapes enumerated, ZERO eaten
+Measured by executed return value (not a line filter), `function` variant for
+diagnostics + `export function` variant for runtime.
+CONTINUES THROUGH (14): `<` `<=` `>` `>=` `==` `!=` `===` `!==` `&&` `||` `??` `*` `%` `?`
+  — all keep the trailing statement; all return the correct value.
+STOPS AT (14): `(` `!` `++` `--` `-` `+` `.` `[` `/`(regex) `` ` ``(template) IDENT
+  call KEYWORD `is`-as-identifier — all keep body AND trailing statement.
+UNTOUCHED (4 controls, errors=[]): plain braceless body · regex braceless body ·
+  `if (a && b) { }` · `if ((a)) { }`.
+Every shape that PRODUCES AN ARTIFACT keeps its trailing statement. The two that do not
+(`.ok`, and the ternary `? 1 : 2` head) produce NO artifact and fail loudly — a hard
+reject, not data loss. ⚑ My first pass mislabelled those two as "EATEN" because the
+instrument conflated "no artifact" with "trailing missing"; corrected.
+⚑ ONE HONEST REGRESSION IN CAPABILITY, reported not hidden: `if (a) ? 1 : 2 { … }`
+produced a working artifact on cut 2 and now hard-rejects, because `:` is not in the
+set. The program is illegal either way (the diagnostic fires in both), no source is
+deleted or invented, and keeping one set is the more defensible invariant — so this was
+a deliberate choice, per "when in doubt, stop".
+Delta vs cut 2, 7 rows changed: `(` RTE→10 · `-` 0→3 · `[` 0→3 · `/` no-artifact→3 ·
+`.` wrong-artifact→rejected · `is` deleted-call→call-preserved · `?` artifact→rejected.
+All other 25 rows byte-identical.
+
+### ALSO BLOCKING — the §34 row overclaimed (fixed)
+The row's unconditional "Partitions into `result.errors`" and `newly-rejecting`
+classification are false inside an exported declaration. The row now carries the
+`export`-interior caveat and states that THERE the change is `semantics-changed` +
+`newly-accepting`; §49.2.3 gains a matching implementation-gap note.
+
+### ⚑ THE SWALLOW IS WIDER THAN EITHER MATRIX RECORDED — re-measured
+  FIRES : top-level · `function` · `fn` · `server function`
+  SILENT: `export function` · `export fn` · `export const g = () => …` ·
+          `export server function` · a plain `function` NESTED inside an `export function`
+(The `<program>` shell makes NO difference in any row.) So it is the whole lexical
+interior of any exported declaration — which is where real library code puts its loops.
+⚑ I found TWO CELLS BEYOND the two the coordinator named (`export const` arrow and
+`export server function`). Corrected in the test banner, the §34 row and here.
+Still NOT fixed: cost is the 22-of-2,553 migration measured in round 2.
+
+### NON-BLOCKING — value-ending set drift (addressed)
+`CONDITION_HEAD_VALUE_ENDING_KEYWORDS` gains `null`, `undefined`, `super`; `REGEX` added
+to the value-ending KINDS. The tokenizer's `VALUE_KEYWORDS` is function-local and cannot
+be imported, so the duplication is annotated with why. Erring toward MORE value-ending
+entries is the safe direction — every addition can only make the scan stop SOONER.
+
+### Re-verification
+- New test file: 30 → **39 tests, 39 pass** (9 added: 7 punctuation rows each asserting
+  body-text + trailing + no-invented-operator + executed value, the `.`-rejection, and a
+  word-shaped CONTROL that makes it a boundary rather than a guess).
+  ⚑ The `emitted` assertion is NOT redundant: `!flag` / `++n` have no observable effect
+  on the return value, so runtime alone could not tell a preserved body from a deleted
+  one — with value-only asserts the `!` row did NOT bite on cut 2 (7 fails); with the
+  emit assert it does (8 fails).
+- ⚑ FOUR-WAY BITE PROOF (file-copy swaps, no `git stash`):
+  vs BASE `origin/main` → 20 fail / 19 pass ·
+  vs CUT 1 `90b6e451`   → 14 fail / 25 pass ·
+  vs CUT 2 `5f7a22cc`   →  8 fail / 31 pass (exactly the 8 new punctuation assertions) ·
+  vs HEAD               → 39 / 39.
+- Three named files together: **79 pass / 0 fail**.
+- conformance **1608 pass / 30 skip / 0 fail** — unchanged from the branch-point baseline.
+- unit **18,599 pass / 17 skip / 1 fail (18,623 across 963 files)**; the 1 fail is the
+  known `node --check` co-run timeout (5021 ms) and passes in isolation (24/24).
+- regen-spec-index --check OK (SPEC 37,970→37,981) · facts --check OK · s34-census PASS ·
+  corpus-compile-floor PASS · conflict-marker PASS · snippet 110/110 · delta-lint PASS.

@@ -31,22 +31,36 @@
  * code with no producer is this project's recurring failure — E-TILDE-001/002 sat dead
  * for the project's whole life behind passing unit tests.
  *
- * ⚑ SURFACING (pre-existing, NOT introduced here) — AND THE AXIS IS `export`, NOT THE
- * `<program>` SHELL. An earlier revision of this banner claimed the shell was the axis;
- * that attribution was WRONG. Measured across the full matrix:
+ * ⚑ SURFACING (pre-existing, NOT introduced here) — THE AXIS IS `export`, AND IT COVERS
+ * THE WHOLE LEXICAL INTERIOR OF AN EXPORTED DECLARATION. An earlier revision of this
+ * banner blamed the `<program>` shell; that attribution was WRONG. A later one listed
+ * only `export function`; that was too NARROW. Measured, this revision:
  *
- *                 top-level     `function`     `export function`
- *   bare `${}`      FIRES          FIRES           SILENT
- *   `<program>`     FIRES          FIRES           SILENT
+ *   top-level ................................. FIRES
+ *   function .................................. FIRES
+ *   fn ........................................ FIRES
+ *   server function ........................... FIRES
+ *   export function ........................... SILENT
+ *   export fn ................................. SILENT
+ *   export const g = () => { ... } ............ SILENT
+ *   export server function .................... SILENT
+ *   function NESTED inside an export function . SILENT
  *
- * An ast-builder parse-path diagnostic raised inside an `export`-ed declaration is
- * swallowed by the `export` re-parse site and reaches neither `result.errors` nor
- * `result.warnings`. It is NOT general — `E-EQ-004` surfaces from both `function` and
- * `export function` — and it predates this change: the ratified S308
- * E-FOR-UNPARENTHESIZED-HEAD is swallowed identically. The diagnostic cases below
- * therefore avoid `export`; the RECOVERY and artifact cases use the library harness
- * (which needs `export` to import the result back) and assert the EMITTED JS, which is
- * correct either way.
+ * (The `<program>` shell makes no difference in any row — both file shapes behave the
+ * same.) An ast-builder parse-path diagnostic raised anywhere inside an `export`-ed
+ * declaration is swallowed by the `export` re-parse site and reaches neither
+ * `result.errors` nor `result.warnings`. That last row is the one that matters most:
+ * real library code puts its loops in helpers nested inside exported functions.
+ *
+ * It is NOT general — `E-EQ-004` surfaces from both `function` and `export function` —
+ * and it predates this change: the ratified S308 E-FOR-UNPARENTHESIZED-HEAD is
+ * swallowed identically. Measured cost of closing it: 22 of 2,553 corpus files would
+ * newly report an error, including ten shipped stdlib modules, so it is a migration
+ * needing a ruling and is deliberately NOT fixed here.
+ *
+ * The diagnostic cases below therefore avoid `export`; the RECOVERY and artifact cases
+ * use the library harness (which needs `export` to import the result back) and assert
+ * the EMITTED JS and the EXECUTED VALUE, which are correct either way.
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
@@ -219,6 +233,70 @@ describe("⚑ RECOVERY MUST NOT EAT SOURCE — the statement-boundary bound", ()
     const mod = await import(pathToFileURL(artifact).href);
     expect(mod.f(true, true)).toBe(6);
     expect(mod.f(true, false)).toBe(5);
+  });
+
+  // ⚑ PUNCTUATION-STARTING BODIES. The IDENT cases above passed while these were all
+  // broken, because the first bound stopped only for WORD-shaped statement starts and
+  // blanket-accepted every PUNCT token. Each row below was, at exit 0 with zero
+  // diagnostics (the `export` re-parse hides the error), one of:
+  //   `(out = 7)` absorbed as a CALL ARGUMENT — `if (a && b(out = 7))`
+  //   `!flag`     DELETED outright
+  //   `++n`       DELETED, and `b++` INVENTED in its place
+  //   `-n`        DELETED, and `b - n` INVENTED
+  //   `.ok`       DELETED, and `b.ok` INVENTED
+  // The invented ones are the worst of the set: they fabricate an operation the author
+  // never wrote. Asserted on the EXECUTED RETURN VALUE, not the emit.
+  //
+  // Shape: out=0; if (a) && (b) <BODY>; out = out + 3; return out
+  //   → 10 when the body assigns out=7, 3 when the body has no effect on out.
+  const PUNCT_BODY = (body) =>
+    `\${\n  export function f(a, b) {\n    let out = 0\n    let n = 1\n    let flag = true\n` +
+    `    if (a) && (b) ${body}\n    out = out + 3\n    return out\n  }\n}`;
+
+  // ⚑ `emitted` is NOT redundant with `expected`. A body like `!flag` or `++n` has no
+  // observable effect on the return value, so the runtime assertion alone CANNOT tell a
+  // preserved body from a deleted one — the previous cut deleted `!flag` outright and
+  // still returned 3. The emit assertion is what bites for those rows.
+  for (const [name, body, emitted, expected] of [
+    ["( — a parenthesized assignment, not a call argument", "(out = 7)", "out = 7;", 10],
+    ["! — a negation statement",                            "!flag",     "!flag;",    3],
+    ["++ — a pre-increment statement",                      "++n",       "++n;",      3],
+    ["-- — a pre-decrement statement",                      "--n",       "--n;",      3],
+    ["- — a unary minus, not an infix minus",               "-n",        "-n;",       3],
+    ["+ — a unary plus, not an infix plus",                 "+n",        "+n;",       3],
+    ["[ — an array-literal statement",                      "[1, 2]",    "[1, 2];",   3],
+  ]) {
+    test(`⚑ RUNTIME — a body starting with \`${body}\` survives (${name})`, async () => {
+      const { js, artifact } = build(PUNCT_BODY(body), "punct-" + body.replace(/\W/g, "_"));
+      expect(artifact).not.toBe(null);
+      // 1. The BODY TEXT must survive. This is the assertion that catches a deletion
+      //    whose absence the return value cannot see.
+      expect(js).toContain(emitted);
+      // 2. The trailing statement must survive — it was being eaten or bypassed.
+      expect(js).toContain("out = out + 3");
+      // 3. No operator may be INVENTED on `b`: the condition is exactly `a && b`.
+      //    The previous cut emitted `b(out = 7)`, `b++`, `b - n`, `b.ok`.
+      expect(js).toMatch(/if \(a && b\) \{/);
+      // 4. And the whole thing must actually RUN to the right answer.
+      const mod = await import(pathToFileURL(artifact).href);
+      expect(mod.f(true, true)).toBe(expected);
+    });
+  }
+
+  test("⚑ a `.`-starting body is REJECTED, not silently mis-emitted", () => {
+    // `.ok` cannot begin a statement in any language, so there is nothing to recover to.
+    // What matters is that it FAILS rather than emitting an invented `b.ok` — the
+    // previous cut compiled it at exit 0 and returned the wrong answer.
+    const { js } = build(PUNCT_BODY(".ok"), "punct-dot");
+    expect(js).not.toMatch(/b\.ok/);
+  });
+
+  test("⚑ CONTROL — the word-shaped body is handled identically (the boundary)", async () => {
+    // This is what makes the rows above a BOUNDARY rather than a guess: the same program
+    // with a word-shaped body was already correct, and must stay correct.
+    const { js, artifact } = build(PUNCT_BODY("out = 7"), "punct-control-word");
+    expect(js).toContain("out = out + 3");
+    expect((await import(pathToFileURL(artifact).href)).f(true, true)).toBe(10);
   });
 
   test("a BRACED recovered head keeps its trailing statements too (the twin)", () => {
