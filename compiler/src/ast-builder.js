@@ -10527,7 +10527,69 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * bodies from being absorbed into the condition by the STMT_KEYWORDS/ASI-NEWLINE rules.
    *
    * Falls back to `collectExpr("{")` for non-paren conditions.
+   *
+   * ⚑ S414 — E-CONDITION-HEAD-UNPARENTHESIZED. Stopping the instant the outermost
+   * `(` closes silently DROPPED everything after it, including the `{` and hence the
+   * whole body:
+   *
+   *     while (n + 1) < 4 { n = n + 1 }   emitted   while (n + 1) {
+   *                                                 }          ← silent infinite loop
+   *     if (n + 1) < 4 { n = 0 }          emitted   if (n + 1) {
+   *                                                 }          ← body silently dropped
+   *
+   * at exit 0 with zero diagnostics. `if` has used this collector all along; the three
+   * `while` sites inherited the same truncation when #933 switched them here from
+   * `collectExpr("{")` — one defect, two arrival dates, one root.
+   *
+   * SPEC §50.2.1 / §50.2.3 / §49.2.1 make the condition's outer parens REQUIRED and
+   * make them wrap the WHOLE condition (`while ((x = expr))` — "the outer parens are
+   * the while condition's required parens"). `while (n + 1) < 4` is therefore not a
+   * legal head, so the direction is REJECT, not accept: making it work would be a
+   * newly-accepting one-way door against a normative sentence that already excludes it.
+   * Mirrors `E-FOR-UNPARENTHESIZED-HEAD` (S308, §17.4a/§34): fire an Error AND RECOVER
+   * by collecting the rest of the condition, so the artifact is correct even though the
+   * build fails and downstream analysis does not cascade.
+   *
+   * provenance: spec:§50.2.3-the-outer-parens-are-the-while-condition's-required-parens
    */
+  /**
+   * ⚑ DELIBERATELY CONSERVATIVE — do NOT widen this set.
+   *
+   * A token here means "the condition expression continues past the closing `)`".
+   * Everything NOT here keeps today's exact behaviour (the `)` ends the head and what
+   * follows is the body). Excluded ON PURPOSE:
+   *   `/`   — load-bearing. `while (h) /a\sb/.test(c)` is a braceless body that STARTS
+   *           WITH A REGEX LITERAL, pinned by
+   *           `compiler/tests/unit/while-braceless-body-stays-in-the-loop.test.js`.
+   *           Treating `/` as a binary operator breaks it.
+   *   `+` `-` — also unary prefixes, so they can legitimately begin a braceless body.
+   *   `.` `(` `[` — member / call / index continuation, but each can also begin a stmt.
+   *   `:`   — label and ternary-alternate.
+   */
+  const CONDITION_HEAD_CONTINUATION_PUNCT = new Set([
+    "<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?",
+  ]);
+  // Statement starters that bound the recovery scan when the head is braceless.
+  const CONDITION_HEAD_RECOVERY_STOP_KEYWORDS = new Set([
+    "lift", "function", "fn", "const", "let", "import", "export", "use", "type",
+    "server", "for", "while", "do", "if", "return", "match", "partial", "switch",
+    "try", "fail", "transaction", "throw", "continue", "break", "when", "given",
+  ]);
+
+  /**
+   * Does `tok`, sitting immediately after the head's closing `)`, continue the
+   * condition expression rather than begin the body? See the set's banner.
+   */
+  function continuesConditionHead(tok) {
+    if (!tok) return false;
+    if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") {
+      return CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text);
+    }
+    // `is` — the §11 type-test operator; KEYWORD or IDENT depending on the lexer.
+    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "is") return true;
+    return false;
+  }
+
   function collectIfCondition() {
     if (peek().text !== "(") {
       return collectExpr("{");
@@ -10537,11 +10599,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const startTok = peek();
     let lastTok = startTok;
     let depth = 0;
+    // S414 — set once the outermost `(` has closed and E-CONDITION-HEAD-UNPARENTHESIZED
+    // has fired; the loop then keeps collecting the rest of the condition (RECOVERY).
+    let recovering = false;
 
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
       if (tok.kind === "COMMENT") { consume(); continue; }
+      if (recovering && depth === 0) {
+        // In recovery the outer parens are already closed, so a depth-0 `{` is the BODY
+        // (not part of the condition) and a `;` / statement keyword ends the statement.
+        if (tok.kind === "PUNCT" && (tok.text === "{" || tok.text === ";")) break;
+        if (tok.kind === "KEYWORD" && CONDITION_HEAD_RECOVERY_STOP_KEYWORDS.has(tok.text)) break;
+      }
       // Track depth for all bracket types
       if (tok.kind === "PUNCT" && (tok.text === "(" || tok.text === "[" || tok.text === "{")) depth++;
       if (tok.kind === "PUNCT" && (tok.text === ")" || tok.text === "]" || tok.text === "}")) {
@@ -10568,8 +10639,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
-      // After closing the outermost `(`, stop
-      if (depth === 0 && parts.length > 0) break;
+      // After closing the outermost `(`, stop — UNLESS what follows continues the
+      // condition expression rather than beginning the body (S414). In that case the
+      // head is illegally unparenthesized: reject it, then RECOVER by collecting the
+      // remainder so the emitted `if`/`while` is correct instead of an empty-bodied
+      // silent infinite loop.
+      if (depth === 0 && parts.length > 0 && !recovering) {
+        if (!continuesConditionHead(peek())) break;
+        errors.push(new TABError(
+          "E-CONDITION-HEAD-UNPARENTHESIZED",
+          "E-CONDITION-HEAD-UNPARENTHESIZED: an `if`/`while` condition's required " +
+          "parentheses must wrap the whole condition — `while ((n + 1) < 4)` or " +
+          "`while (n + 1 < 4)`, not `while (n + 1) < 4`. Everything after the closing " +
+          "`)` was being dropped, including the loop body. (SPEC §50.2.1, §50.2.3, §49.2.1)",
+          tokenSpan(startTok, filePath),
+        ));
+        recovering = true;
+      }
     }
     return {
       expr: joinWithNewlines(parts, partLines),
