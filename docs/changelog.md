@@ -7210,6 +7210,70 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-12/13 (S413 — peter — the review floor drained 9 to 0, and it convicted four of my own six PRs)
+
+A review session on the Windows clone. **Two landings, both gate-green** — #940 (the floor drain) and
+#941 (a HIGH the drain itself found). Peter's sequence, as at S411: clear the measured debt first, then
+take the recommendation.
+
+**The floor went 9 OWED → 0.** Six of the nine were code-bearing and got a full S239 adversarial pass
+(dispatched un-seeded, in parallel, so no agent inherited a hypothesis); three carved out with a
+*controlled* probe rather than a bare "no code paths" — #928's status-flip check was proven to have
+reach over its own diff, and #934's board figures were read from the generated block **as of that
+commit** rather than as of today, which is the exact verification S411 laundered and had to correct.
+**Five of the six code-bearing returned `finding`. Four were mine.**
+
+⚑ **The headline is a correction, not a landing: the S412 wrap's "three silent defects were live in the
+SHIPPED STANDARD LIBRARY" is FALSE**, and it had already propagated into two PR bodies, the changelog,
+the hand-off and the boot PICKUP. `scrml:auth` / `scrml:time` resolve to
+`compiler/runtime/stdlib/{auth,time}.js`, which declare themselves **hand-written** in their own headers
+and carry correct plain JS scrml never compiled — `auth.js:106` is `while (s.length % 4) s += "=";`.
+`bundleStdlibForRun` (`api.js:383`) copies from `STDLIB_RUNTIME_DIR = compiler/runtime/stdlib`, so
+`stdlib/**/index.scrml` are **source mirrors nothing imports**. **No adopter was affected.** The three
+compiler defects and their fixes are real; only the blast radius was wrong. Struck in place in both
+`known-gaps` entries, the changelog and the hand-off. Third instance of a reasoned-not-measured blast
+radius in this session family, and the one that travelled furthest.
+
+**What landed:**
+
+- **#940 — the floor drain.** Nine `@review` markers, seven gaps filed (board HIGH 103→105, MED
+  231→236), four in-place strikes of the false claim, and an outbound drop routing bryan's items.
+- **#941 — `g-must-use-suppressed-by-out-of-scope-name-collision` (HIGH), a regression #931 introduced
+  three days earlier.** A must-use `tilde-decl` in an inner `function` was silently dropped whenever any
+  **out-of-scope nested block** elsewhere in the frame declared the same name, so an ordinary render
+  loop compiled at **exit 0** and threw `ReferenceError` on first call. #931 had passed the **flat**
+  `knownBindings` across a function boundary; within one frame that over-collection never crossed a
+  scope the language enforces, because nested blocks are walked inline in the same `checkLinear` frame.
+  The fix walks the ancestor chain and unions only each enclosing block's own declarations — a strict
+  subset, and it **fails closed**. Migration measured by compiling all **2,553** tracked `.scrml` on
+  both sides and diffing per-file diagnostic multisets: **0 changed**, with a positive and a negative
+  control both firing.
+
+**Findings routed to bryan rather than fixed under him** (`ci.yml` / `scripts/` are his active surface,
+and he was live all session on #937/#938/#939):
+
+- ⚑ **A language-surface fork I should have routed before #933 landed.** §49.2.1 is explicit —
+  `loop-body ::= '{' loop-statement* '}'`, braces are **mandatory** — and no sentence anywhere licenses
+  a braceless body. The compiler accepted one anyway and miscompiled it, and #933 resolved that by
+  making the form **work** rather than by **rejecting** it. That is `pa-base` §8 verbatim, direction
+  `semantics-changed`, and it owed a language-surface review it never got.
+- **#936's two new CI gates are genuinely load-bearing** — bite-proven four ways each, including against
+  the real historical `e74f5423` artifact, and both confirmed to have actually executed in the blocking
+  job. But `dpa-debt.ts`'s last-non-empty-cell selection fails toward **`ratified`** — it *hides* debt,
+  and its own comment claims the safe direction; the currency gate cannot see a **duplicated** table
+  (#900's actual payload); and the six PRs the body says are "closed on merge" are **all still open**.
+
+**Instruments that lied, mine and others', all caught:** an agent's end-to-end reproducer that did not
+reproduce (its map literal used a bare unresolved key, so the case *and* its control failed on both
+sides — recorded as mechanism-confirmed / corpus-impact-unproven rather than inherited); a dispatch
+reporting conformance **906/906** where the true figure is **905/905**, caught only because the baseline
+was measured first rather than taken on trust; and my own tokenizer probe erroring into nothing, which
+is why the `finally` half of the #932 finding is recorded as unchecked.
+
+**Gate at close:** conformance **905/905** on merged main. Cloud `gate` GREEN on both PRs; `windows`
+green; `tracking` RED — pre-existing, and root-caused rather than called a flake: the identical five
+dev-watcher/hot-reload tests fail name-for-name on main's own last run.
+
 ### 2026-09-10 (S412 — peter — three silent defects in the shipped stdlib, and five instruments that lied)
 
 A drain session on the Windows clone. **Six landings, every one gate-green**, all merged on Peter's
