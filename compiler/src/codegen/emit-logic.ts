@@ -53,6 +53,41 @@ export function* _iterDestructureBindNames(p: any): Iterable<string> {
   }
 }
 
+/**
+ * S415 — a BLOCK body's own copy of `declaredNames`.
+ *
+ * ⚑ `g-declared-names-set-shared-across-blocks-emits-a-bare-assignment`. Every block
+ * emitter used to thread `opts.declaredNames` BY REFERENCE, and `let-decl`/`const-decl`
+ * ADD to it. So a `let` inside any block permanently marked that name "declared" for
+ * the enclosing scope, and a later write to the same name — in a scope where that
+ * binding is NOT visible — emitted a BARE ASSIGNMENT to a name that does not exist:
+ *
+ *     for (let i = 0; i < rows.length; i = i + 1) { let row = rows[i] ... }
+ *     row = "Q"      // emitted `row = "Q";` → ReferenceError at runtime, exit 0
+ *
+ * The set is what decides DECLARATION vs BARE ASSIGNMENT (the `tilde-decl` arm below
+ * branches on exactly `opts.declaredNames?.has(node.name)`), so leaking a block-local
+ * into it turns a declaration site into an assignment to nothing. Give each block body
+ * a COPY: it INHERITS the enclosing declarations and DISCARDS its own additions on
+ * exit — the block scoping JS `let` actually has, and what `function-decl` already
+ * does for function bodies (the S412 fix, ~:4234).
+ *
+ * ⚑ Two properties are load-bearing, and getting either wrong is worse than the bug:
+ *
+ *   1. A COPY, NOT A FRESH EMPTY SET. A name declared in an ENCLOSING scope must stay
+ *      visible inside a nested block, or an ordinary `acc = acc + 1` two blocks deep
+ *      stops being recognised as a rebind and emits `const acc = acc + 1` — which
+ *      shadows the outer binding and reads itself in its own TDZ.
+ *   2. `undefined` IS PRESERVED AS `undefined`. An absent set means "no tracking at
+ *      all" (top-level emission), which is a different mode from "an empty set".
+ *      `new Set(undefined)` is an empty Set and would silently change behaviour.
+ *
+ * Cost is O(names in scope) once per block — NOT per node, and nothing is re-walked.
+ */
+export function blockScopedDeclaredNames<T extends Set<string> | undefined | null>(names: T): T {
+  return (names == null ? names : new Set<string>(names)) as T;
+}
+
 function _wrapDeepReactive(rewrittenExpr: string, rawExpr: string, initExpr?: any): string {
   // Phase 4d: ExprNode-first — structural detection of deep-reactive-worthy values
   if (initExpr) {
@@ -188,6 +223,8 @@ export interface EmitLogicOpts {
   continueBehavior?: "continue" | "return";
   /** Track names declared by let-decl/const-decl so tilde-decl can detect reassignment. */
   declaredNames?: Set<string>;
+  // (see `blockScopedDeclaredNames` below — every BLOCK body gets its own copy of
+  // this set, so a block's `let` cannot leak out to the enclosing scope.)
   /**
    * §20.6 — the source span of the STATEMENT currently being emitted, set by
    * `emitLogicNode` before it descends into expression emission. The log()
@@ -4360,8 +4397,13 @@ function _emitIfStmtWithOpts(node: any, opts: EmitLogicOpts): string {
   const lines: string[] = [];
   const ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _makeExprCtx(opts));
   lines.push(`if (${ifCond}) {`);
+  // S415 — this is the tilde/continueBehavior route into if/else, and it bypasses
+  // `emitIfStmt` entirely, so it needs the same per-limb block scoping: each limb is
+  // its own block and must not leak its `let`s to the other limb or to the enclosing
+  // scope. (See `blockScopedDeclaredNames`.)
+  const thenOpts: EmitLogicOpts = { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) };
   for (const child of (node.consequent ?? node.body ?? [])) {
-    const code = emitLogicNode(child, opts);
+    const code = emitLogicNode(child, thenOpts);
     if (code) {
       for (const line of code.split("\n")) lines.push(`  ${line}`);
     }
@@ -4370,8 +4412,9 @@ function _emitIfStmtWithOpts(node: any, opts: EmitLogicOpts): string {
   if (node.alternate) {
     const alternate = Array.isArray(node.alternate) ? node.alternate : [node.alternate];
     lines.push("else {");
+    const elseOpts: EmitLogicOpts = { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) };
     for (const child of alternate) {
-      const code = emitLogicNode(child, opts);
+      const code = emitLogicNode(child, elseOpts);
       if (code) {
         for (const line of code.split("\n")) lines.push(`  ${line}`);
       }

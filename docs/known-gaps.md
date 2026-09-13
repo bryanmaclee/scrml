@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
-| MED | 236 |
+| MED | 237 |
 | LOW | 88 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -14334,9 +14334,9 @@ between two parsers over what a `/` means is the worst of the three options.
 
 ## §S414 — gaps filed S414 (2026-09-13, Peter; surfaced by the review floor and the loop-head arc's own S239 pass)
 
-### g-declared-names-set-shared-across-blocks-emits-a-bare-assignment — a `let` inside ANY block marks that name "declared" for the whole enclosing scope, so a later write to the same name emits a bare assignment and the module throws `ReferenceError` at exit 0 — `NEW S414; HIGH; LIVE; pre-existing, and it is the half #941 did NOT fix`
+### g-declared-names-set-shared-across-blocks-emits-a-bare-assignment — a `let` inside ANY block marks that name "declared" for the whole enclosing scope, so a later write to the same name emits a bare assignment and the module throws `ReferenceError` at exit 0 — `RESOLVED S415 (#947); HIGH; was LIVE; pre-existing, and it was the half #941 did NOT fix`
 
-<!-- @gap id=g-declared-names-set-shared-across-blocks-emits-a-bare-assignment sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts:2060(the tilde-decl branch reading opts.declaredNames; the set is threaded unchanged from emit-control-flow.ts:451,:627,:1015,:1037 — only function-decl copies it, at emit-logic.ts:4234) prov=review:S414-peter-adversarial-pass-on-#941-reproduced-by-execution-with-a-rename-control -->
+<!-- @gap id=g-declared-names-set-shared-across-blocks-emits-a-bare-assignment sev=HIGH status=resolved resolved-by=S415-peter locus=compiler/src/codegen/emit-logic.ts:2060(the tilde-decl branch reading opts.declaredNames; the set is threaded unchanged from emit-control-flow.ts:451,:627,:1015,:1037 — only function-decl copies it, at emit-logic.ts:4234) prov=review:S414-peter-adversarial-pass-on-#941-reproduced-by-execution-with-a-rename-control -->
 
 `emit-logic.ts:2060` decides between emitting a DECLARATION and emitting a BARE ASSIGNMENT by asking
 `opts.declaredNames?.has(node.name)`. That set is the emitter's exact twin of the type-system's flat
@@ -14372,6 +14372,23 @@ function is NOT required, which is the load-bearing detail (see the correction o
 ⚑ **THE DIAGNOSTIC THAT DOES FIRE ROUTES THE USER INTO THIS.** Where the must-use half still catches
 the write-only shape, `E-MU-001`'s message offers three remedies and the FIRST is *"use the value
 somewhere"* — following it produces exactly the program above. Only *"remove the declaration"* is safe.
+
+⛑ **RESOLVED S415 (#947).** Each block body now gets its own COPY of `declaredNames` — inherit
+enclosing declarations, discard the block's own — which is the block scoping `let` actually has, and
+what `function-decl` already did (`emit-logic.ts:4234`, the S412 fix). **The migration question this
+entry raised was MEASURED and came back free:** corpus differential over 1,928 sources / 7,467
+artifacts returned **0 artifact content diffs**, 0 newly-failing, 0 code-level diagnostic changes.
+Instrument reach is not assumed — the same tool returned 4 content diffs at S412 on #930, every one
+the `const X = …` → `X = …` shape this change produces.
+
+⛑ **Two cases the filing did not contain, found by the build:** the if/else limbs shared ONE
+`bodyOpts` object, so the limbs leaked into EACH OTHER rather than merely outward; and
+`_emitIfStmtWithOpts` is a SECOND, independent if/else emitter that bypasses `emitIfStmt` entirely.
+⛑ Direction is **semantics-changed AND newly-rejecting** — the S239 pass falsified the build's
+"no diagnostic delta" claim: two bare writes after a block go from exit 0 (then `ReferenceError` at
+runtime) to `E-CODEGEN-INVALID-LOGIC`. Siblings still open, both PA-reproduced:
+[[g-try-catch-finally-bodies-redeclare-every-assignment]] and
+[[g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws]].
 
 **Fix direction is NOT obvious and is deliberately not prescribed here:** copying the set per block is
 the naive fix and would move every legacy program that currently relies on the flat behaviour — the
@@ -14516,3 +14533,73 @@ statement became the braceless body — and the author's real braced block, now 
 dropped by this defect. Three consecutive review rounds of that arc were all delivered through this
 hole. The arc was resolved by removing the recovery scan entirely rather than by fixing this, which is
 tracked separately: see [[g-loop-branch-head-truncated-at-first-close-paren]].
+
+---
+
+## §S415 — gaps filed S415 (2026-09-13, Peter; surfaced by the S239 pass on the `declaredNames` block-scope fix)
+
+### g-try-catch-finally-bodies-redeclare-every-assignment — `try`/`catch`/`finally` bodies thread no `declaredNames`, so every bare write inside them becomes a fresh `const` and the outer variable is never updated — `NEW S415; HIGH; LIVE on main; pre-existing`
+
+<!-- @gap id=g-try-catch-finally-bodies-redeclare-every-assignment sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts:1074(emitTryStmt takes no opts at all; the three emitLogicBody calls at :1077/:1094/:1104 pass none, so declaredNames is undefined = "no tracking" for the whole try/catch/finally interior) prov=review:S415-peter-adversarial-pass-reproduced-by-execution-with-a-control -->
+
+`emitTryStmt` accepts **no opts**, so its three body emissions run with `declaredNames` undefined —
+"no tracking". Every bare assignment inside a `try` / `catch` / `finally` body is therefore emitted as
+a **fresh `const` declaration**, shadowing the outer binding, and the outer variable is never written.
+
+```scrml
+${
+  export function f() {
+    let x = 1
+    try { x = 2 } catch (e) { x = 3 }
+    return x
+  }
+}
+```
+
+emits, on **both** `origin/main` and the S415 branch:
+
+```js
+let x = 1;
+try { const x = 2; } catch (e) { const x = 3; }
+return x;
+```
+
+**`f()` returns `1`.** Exit 0, zero diagnostics, silently wrong.
+
+**PA-reproduced by execution on both trees**, so it is pre-existing and untouched by the S415
+block-scope fix. ⚑ This is **not** merely "differently broken" — it is a silent WRONG ANSWER, the same
+class as [[g-declared-names-set-shared-across-blocks-emits-a-bare-assignment]] but arriving from the
+opposite direction: that one leaked a name IN, this one never tracks any name at all.
+
+**Same untracked mode, verified by grep on the branch:** `emit-each.ts`, `emit-channel.ts`,
+`emit-match.ts`, `emit-engine.ts` and `emit-lift.js` contain **zero** `declaredNames` references, and
+`emitHoistedForStmt` (`emit-control-flow.ts:904`) has no such field in its opts type. Whether each of
+those is reachable with a bare write is unmeasured — the `try` case is the one reproduced.
+
+⚑ **Do NOT fix by simply threading the Set in.** The bare-write-declares-a-fresh-const convention is
+documented ONLY in a code comment (`emit-logic.ts` ~:2071–2079); SPEC §50 models `x = value` as
+assignment to an EXISTING binding, and `E-ASSIGN-001`'s own guidance says *"Declare `x` before …, then
+use a bare assignment expression."* Nothing in SPEC blesses declaration-by-bare-assignment. The
+end-state this class probably wants is a **scope diagnostic** on a bare write to a name not in scope —
+which is a language question, not a codegen patch.
+
+---
+
+### g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws — a write to the loop variable inside its own body emits `const i = i + 1` and throws `Cannot access 'i' before initialization` — `NEW S415; MED; LIVE on main; pre-existing`
+
+<!-- @gap id=g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws sev=MED status=open locus=searched:emit-control-flow.ts(emitForStmt/emitHoistedForStmt and the for-of limb) — the head binding is never added to declaredNames; the deciding add-site was NOT traced, so this locus is a recorded search prov=review:S415-peter-adversarial-pass-reproduced-by-execution -->
+
+The loop variable declared in a `for` head never enters `declaredNames`, so a write to it **inside the
+body** is emitted as a fresh `const` that shadows and self-references:
+
+```scrml
+for (let i = 0; i < 3; i = i + 1) { i = i + 1 }   // body emits `const i = i + 1;`
+for r in rows { r = r + "!" }                      // body emits `const r = r + "!";`
+```
+
+Both throw **`ReferenceError: Cannot access 'i' before initialization`** (respectively `'r'`) at
+runtime, at exit 0 with zero diagnostics. **PA-reproduced by execution; identical on `origin/main` and
+on the S415 branch**, so pre-existing.
+
+Sibling of the two entries above and squarely in the same family — the S415 fix's own headline example
+is a `for (let i = …)` loop, and the head binding is the one part of it still untracked.
