@@ -7228,8 +7228,21 @@ named, then "more MEDs", then the regex arc, then more.
 **Board HIGH 101 → 102 · MED 230 → 230 · LOW 86** — seven gaps resolved, eight filed. A rising-then-flat
 count is the count staying honest, not the work standing still.
 
-**Three separate silent defects were live in the shipped standard library**, and none was found by
+~~**Three separate silent defects were live in the shipped standard library**~~, and none was found by
 reading code:
+
+> ⚑⚑ **CORRECTED IN PLACE S413-peter — "in the shipped standard library" is FALSE.** The three defects
+> and their fixes are real; the **blast radius is not**. `scrml:auth` and `scrml:time` resolve to
+> `compiler/runtime/stdlib/{auth,time}.js`, which declare themselves **hand-written** in their own
+> headers and carry correct plain JS that scrml never compiled — `auth.js:106` is
+> `while (s.length % 4) s += "=";`. `bundleStdlibForRun` (`compiler/src/api.js:383`) copies from
+> `STDLIB_RUNTIME_DIR = compiler/runtime/stdlib`, so the `.scrml` files under `stdlib/` are **source
+> mirrors nothing imports**. **No adopter was affected.** The correct framing is *"three silent
+> compiler defects, found by compiling the stdlib source mirrors"* — which is still the session's real
+> result. The error was inferring *"it is under `stdlib/`, therefore it ships"* without reading the hop
+> that decides what ships: the third instance of the reasoned-not-measured blast radius in this session
+> family, and the one that propagated furthest. The self-host limb did not reproduce either — `bs.scrml`
+> emits a byte-identical artifact on both sides of #933.
 
 - `stdlib/time`'s **`throttle` did not throttle and `debounce` did not debounce** (#930). Both build a
   closure over an outer `let`; `inThrottle = true` inside the inner function emitted as
