@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 104 |
-| MED | 236 |
-| LOW | 87 |
+| HIGH | 106 |
+| MED | 237 |
+| LOW | 88 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -14057,6 +14057,24 @@ showed the `ReferenceError`. Direction-of-change **newly-rejecting**; migration 
 all **2,553** tracked `.scrml` on both sides and diffing the per-file diagnostic multiset —
 **0 changed**, with a positive control that did change (so the zero is not a dead harness).
 
+
+> ⛑⛑ **CORRECTED S414-peter — THIS RESOLVED ONLY HALF OF WHAT THE TITLE NAMES, AND THE OTHER HALF IS STILL LIVE.**
+> The entry stays `status=resolved` because the half it was SCOPED to — the must-use DISCRIMINATOR —
+> is genuinely fixed. What the title and headline actually describe (*"a module that throws
+> `ReferenceError` on first call compiles at exit 0"*) is the EMITTER, which #941 never touched.
+> PA-separated by execution on merged main:
+>
+> | half | on HEAD today |
+> |---|---|
+> | must-use **diagnostic** — inner fn writes `row`, never reads it | **`E-MU-001` fires** — fixed |
+> | **emitter** — same program, the write read back | **exit 0**, emits bare `row = "Q";`, **`ReferenceError` when run** |
+>
+> ⛑ And the emitter half needs **no inner function at all** — a `for` body plus a later write in the
+> same frame reproduces it — which also falsifies the safety comment #941 added at
+> `type-system.ts:18836` (*"tolerated WITHIN one frame"*). The rename CONTROL discriminates in both
+> cases. Filed as [[g-declared-names-set-shared-across-blocks-emits-a-bare-assignment]] (HIGH).
+> **Do not read this entry as evidence the `ReferenceError` class is closed.**
+
 <!-- @gap id=g-must-use-suppressed-by-out-of-scope-name-collision sev=HIGH status=resolved resolved-by=S413-peter locus=compiler/src/type-system.ts(the parentBindings seed added by #931, consumed at the knownBindings.has(tildeName) decision point; the over-broad set comes from _collectScopeBindings, which recurses into nested blocks) prov=review:S413-peter-adversarial-pass-on-#931-reproduced-by-execution-with-a-rename-control -->
 
 **Introduced by #931 (`ecc05234`, S412).** That PR passed `parentBindings: knownBindings` into inner
@@ -14292,3 +14310,130 @@ re-parse paths, so the divergence is reachable without opting in.
 **Fix or record:** either give the native lexer prev-token *identity* (not just kind) so it can make the
 same decision, or record the divergence explicitly as a known native-parser gap. Silent disagreement
 between two parsers over what a `/` means is the worst of the three options.
+
+---
+
+## §S414 — gaps filed S414 (2026-09-13, Peter; surfaced by the review floor and the loop-head arc's own S239 pass)
+
+### g-declared-names-set-shared-across-blocks-emits-a-bare-assignment — a `let` inside ANY block marks that name "declared" for the whole enclosing scope, so a later write to the same name emits a bare assignment and the module throws `ReferenceError` at exit 0 — `NEW S414; HIGH; LIVE; pre-existing, and it is the half #941 did NOT fix`
+
+<!-- @gap id=g-declared-names-set-shared-across-blocks-emits-a-bare-assignment sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts:2060(the tilde-decl branch reading opts.declaredNames; the set is threaded unchanged from emit-control-flow.ts:451,:627,:1015,:1037 — only function-decl copies it, at emit-logic.ts:4234) prov=review:S414-peter-adversarial-pass-on-#941-reproduced-by-execution-with-a-rename-control -->
+
+`emit-logic.ts:2060` decides between emitting a DECLARATION and emitting a BARE ASSIGNMENT by asking
+`opts.declaredNames?.has(node.name)`. That set is the emitter's exact twin of the type-system's flat
+`knownBindings`, and **every block emitter passes the SAME `Set` object rather than a copy** — `if`
+(`emit-control-flow.ts:451`), `for` (`:627`), `while` (`:1015`), `do…while` (`:1037`). Only
+`function-decl` copies it (`emit-logic.ts:4234`, the S412 fix). So a `let` inside any block permanently
+marks that name "declared" for the enclosing scope, and a later write to the same name — in a scope
+where that binding is NOT visible — emits a bare assignment to a name that does not exist.
+
+```scrml
+${
+  export function render(rows) {
+    let out = ""
+    for (let i = 0; i < rows.length; i = i + 1) {
+      let row = rows[i]          // block-local
+      out = out + row
+    }
+    row = "Q"                    // NOT in scope here
+    return out + row
+  }
+}
+```
+
+| | emitted | executed |
+|---|---|---|
+| as written | `row = "Q";` (bare) at **exit 0, zero diagnostics** | **`ReferenceError: row is not defined`** |
+| **CONTROL** — rename only the block-local | `const row = "Q";` | returns `"abQ"` |
+
+**PA-reproduced by execution, both with and without an intervening inner `function`** — the inner
+function is NOT required, which is the load-bearing detail (see the correction on
+[[g-must-use-suppressed-by-out-of-scope-name-collision]] below).
+
+⚑ **THE DIAGNOSTIC THAT DOES FIRE ROUTES THE USER INTO THIS.** Where the must-use half still catches
+the write-only shape, `E-MU-001`'s message offers three remedies and the FIRST is *"use the value
+somewhere"* — following it produces exactly the program above. Only *"remove the declaration"* is safe.
+
+**Fix direction is NOT obvious and is deliberately not prescribed here:** copying the set per block is
+the naive fix and would move every legacy program that currently relies on the flat behaviour — the
+population is unmeasured. Measure before narrowing (`pa-base` §8, the coverage-removal blind spot).
+
+---
+
+### g-export-reparse-swallows-ast-builder-parse-path-diagnostics — an `export function` body silently drops ast-builder parse-path errors, so at least two shipped Error codes never fire there — `NEW S414; HIGH; LIVE; pre-existing, and it makes E-FOR-UNPARENTHESIZED-HEAD half-invisible since S308`
+
+<!-- @gap id=g-export-reparse-swallows-ast-builder-parse-path-diagnostics sev=HIGH status=open locus=compiler/src/ast-builder.js(the export re-parse site, ~:12058 — _subErrors is collected and only E-FN-EQUALS-BODY is surfaced; the comment's premise that the outer parse re-reports the rest is FALSE for parse-path errors) prov=review:S414-peter-adversarial-pass-on-the-loop-head-arc-matrix-crossed-by-execution -->
+
+A diagnostic pushed from the ast-builder **parse path** inside an `export function` body never reaches
+`result.errors`. The axis is `export` — **not** the `<program>` shell, and not the function wrapper.
+Two reviewers and the PA each guessed a different axis before anyone crossed the full matrix; each had
+varied two things at once.
+
+| | top-level | `function` | `export function` |
+|---|---|---|---|
+| bare `${}` | FIRES | FIRES | **SILENT** |
+| `<program>` | FIRES | FIRES | **SILENT** |
+
+**CONTROL, and it is what proves this is narrow rather than general:** `E-EQ-004` (a different producer)
+fires in BOTH `function` and `export function`; S308's shipped `E-FOR-UNPARENTHESIZED-HEAD` shows the
+**identical** export-silencing. So the defect is specific to ast-builder parse-path errors, it predates
+the S414 loop-head work, and **`E-FOR-UNPARENTHESIZED-HEAD` has been half-invisible since it landed.**
+
+⚑ **CLOSING THIS IS A MIGRATION, NOT A FIX — it needs a ruling before anyone builds it.** Measured with
+a four-way control (two positives reporting NEWLY-REPORTS, two negatives reporting no-change):
+**22 of 2,552 measurable tracked `.scrml` would newly report an error.**
+
+| code | files |
+|---|---|
+| `E-THROW-NOT-IN-SCRML` | 17 |
+| `E-TRY-NOT-IN-SCRML` | 7 |
+| `E-STMT-MISSING-SEMICOLON` | 1 |
+
+The 22 include **ten shipped stdlib modules** (`auth/flows`, `auth/index`, `crypto/index`, `fs/index`,
+`test/index`, `compiler/meta-checker`, all four `oauth/*`), the native parser's
+`compiler/native-parser/parse-markup.scrml`, `dashboard/app`, and three `examples/23-trucking-dispatch`
+pages. A newly-rejecting change over a non-zero population is a separate ruling per `pa-base` §8.
+
+---
+
+### g-inner-fn-lexical-binding-walk-is-quadratic — `_lexicalBindingsAtInnerFunction` restarts a whole-frame generic walk per inner function with no memoization, so compile time blows up on nested inner functions — `NEW S414; MED; LIVE; a regression #941 introduced`
+
+<!-- @gap id=g-inner-fn-lexical-binding-walk-is-quadratic sev=MED status=open locus=compiler/src/type-system.ts(_lexicalBindingsAtInnerFunction — search(body) restarts from the frame top per call and `seen` is allocated per call, so nothing is shared across targets) prov=review:S414-peter-adversarial-pass-on-#941-A/B-measured-with-two-controls -->
+
+Called once per inner `function`, each call re-walks **every** object-valued property of the whole
+frame, expression trees included. PA-measured A/B, 600 `let` decls plus K inner functions nested three
+blocks deep, min of three runs after a warm-up:
+
+| shape | base `38217390` | HEAD | delta |
+|---|---|---|---|
+| **CONTROL** K=1 nested | 130 ms | 139 ms | **none** — so it is not frame size |
+| **CONTROL** K=300 **flat** | 210 ms | 242 ms | **none** — so the cliff needs the nested shape |
+| K=150 nested | 230 ms | 1 592 ms | 6.9× |
+| K=300 nested | 1 137 ms | 4 356 ms | 3.8× |
+
+Both controls show no delta, which is what makes the middle rows a measurement of the per-target walk
+rather than of the frame.
+
+⚑ **MAGNITUDES DELIBERATELY NOT INHERITED.** The review reported 4.5× / 15× and a "2×K → ~4× time"
+scaling; PA reproduced **neither magnitude** (6.9× / 3.8×, and 2.7× for 2×K). **Mechanism confirmed by
+execution; magnitudes recorded as unreproduced.** #941's own perf evidence — *"ast.scrml (3,792 lines)
+compiles in ~1.60 s on both sides"* — has **no reach on this axis**, because `ast.scrml` lacks the shape.
+
+**Fix direction:** build one `Map<node, Set<string>>` for the frame in a single pass instead of
+re-searching per target.
+
+---
+
+### g-closure-arm-still-hands-the-flat-binding-set-across-a-scope-boundary — the `case "closure"` arm passes `parentBindings: knownBindings`, the exact line #941's argument says must not exist — `NEW S414; LOW; INERT (no producer constructs closure nodes)`
+
+<!-- @gap id=g-closure-arm-still-hands-the-flat-binding-set-across-a-scope-boundary sev=LOW status=open locus=compiler/src/type-system.ts:19532(case "closure" — checkLinear(..., { parentBindings: knownBindings })) prov=review:S414-peter-adversarial-pass-on-#941-grep-and-AST-dump-verified-arm-is-unreachable -->
+
+#941 narrowed the flat binding set so it stops crossing a function boundary, and left the identical
+line one `case` arm below. **Currently inert:** no producer constructs `kind:"closure"` nodes — an AST
+dump of `let f = () => { row = "" }` lowers the arrow to an `escape-hatch` `initExpr`, with no `closure`
+statement node and no linear check of the body at all; the only other hits for the literal are comments
+in `expression-parser.ts`.
+
+Verified by grep + AST dump; **the leak itself is not execution-reproducible because the arm is
+unreachable.** Dead code, not a live defect — but it is the same defect waiting for whoever revives
+closure nodes, and it should be narrowed the same way or deleted.
