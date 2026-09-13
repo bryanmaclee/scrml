@@ -7,6 +7,13 @@
 
 ---
 
+> ⛑⛑ **CORRECTED AFTER DISPATCH — this brief cites §50.2.2 twice and that is WRONG.** The
+> `while-stmt` / `if-stmt-logic` productions live in **§50.2.1 "Grammar Productions"**; §50.2.2 is
+> "Operator Precedence and Associativity". The error is the dispatcher's, not the agent's — the agent
+> propagated it faithfully into the §34 row and the user-facing diagnostic text, where it was caught at
+> the file-delta review and fixed before landing. **The brief is left otherwise verbatim on purpose:** it
+> is the instruction record, and what was actually dispatched is the thing it exists to preserve.
+
 ## The defect, reproduced by execution on HEAD `2f03b3c6`
 
 `collectIfCondition()` stops the moment the outermost `(` closes:

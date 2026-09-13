@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 106 |
+| HIGH | 107 |
 | MED | 237 |
 | LOW | 88 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -14369,10 +14369,24 @@ A diagnostic pushed from the ast-builder **parse path** inside an `export functi
 Two reviewers and the PA each guessed a different axis before anyone crossed the full matrix; each had
 varied two things at once.
 
-| | top-level | `function` | `export function` |
-|---|---|---|---|
-| bare `${}` | FIRES | FIRES | **SILENT** |
-| `<program>` | FIRES | FIRES | **SILENT** |
+| locus | does an ast-builder parse-path diagnostic reach `result.errors`? |
+|---|---|
+| top-level `${}` | FIRES |
+| plain `function` | FIRES |
+| `fn` | FIRES |
+| `server function` | FIRES |
+| **`export function`** | **SILENT** |
+| **`export fn`** | **SILENT** |
+| **`export server function`** | **SILENT** |
+| `export const g = () => …` | **SILENT** for this code — but the build is still RED via `E-CODEGEN-INVALID-LOGIC`, so not exit 0 |
+| **a plain `function` NESTED INSIDE an `export function`** | **SILENT** |
+
+⛑ **It is the ENTIRE LEXICAL INTERIOR of an exported declaration, not the exported function
+itself** — the nested-plain-`function` row is the one that matters, because that is where real
+library code puts its loops. The `<program>` shell makes NO difference in any row; an earlier
+revision of this entry recorded a 2x3 matrix keyed on the shell, which was wrong and is superseded
+here. Three separate parties guessed a different axis before the full matrix was crossed — each had
+varied two things at once.
 
 **CONTROL, and it is what proves this is narrow rather than general:** `E-EQ-004` (a different producer)
 fires in BOTH `function` and `export function`; S308's shipped `E-FOR-UNPARENTHESIZED-HEAD` shows the
@@ -14437,3 +14451,49 @@ in `expression-parser.ts`.
 Verified by grep + AST dump; **the leak itself is not execution-reproducible because the arm is
 unreachable.** Dead code, not a live defect — but it is the same defect waiting for whoever revives
 closure nodes, and it should be narrowed the same way or deleted.
+
+---
+
+### g-bare-block-statement-is-silently-dropped — a standalone `{ … }` block statement is deleted from the emit at exit 0 with zero diagnostics — `NEW S414; HIGH; LIVE on main; pre-existing and independent of the S414 loop-head arc`
+
+<!-- @gap id=g-bare-block-statement-is-silently-dropped sev=HIGH status=open locus=searched:ast-builder.js(parseOneStatement/parseRecursiveBody),emit-logic.ts,emit-control-flow.ts — the drop was isolated by execution with two controls but the deciding site was NOT traced, so this locus is recorded as a SEARCH, not a claim prov=review:S414-peter-third-adversarial-pass-on-the-loop-head-arc-isolated-by-a-clean-control -->
+
+A bare block statement — `{ … }` used as a statement rather than as some construct's body — is
+**silently removed from the emitted JS**. No diagnostic, exit 0.
+
+```scrml
+${
+  export function f() {
+    let i = 0
+    i = i + 10
+    { i = i + 1 }     // ← silently deleted
+    return i
+  }
+}
+```
+
+| program | emitted | `f()` |
+|---|---|---|
+| as written | `let i = 0; i = i + 10; return i;` | **10** |
+| **CONTROL** — same statement, no braces | `… i = i + 1; …` | 11 |
+| **CONTROL** — same statement inside `if (i > 0)` | `… if (i > 0) { i = i + 1; } …` | 11 |
+
+**PA-reproduced by execution on `origin/main` `0b0d9790`** (a dedicated worktree, not the session's
+feature branch — an earlier run of this probe pointed at the working checkout and silently compared the
+fix against itself). Both controls return 11, so the probe demonstrably sees the statement when it is
+NOT wrapped in a bare block.
+
+⚑ **Whatever the language decides a bare block MEANS, silently dropping it is wrong in both
+directions.** If a standalone block is legal, its statements must execute; if it is not legal, it owes a
+diagnostic. §49.2.1 defines `loop-body ::= '{' loop-statement* '}'` for loop bodies only, and no section
+was found admitting or refusing a standalone block — so **this is plausibly a language question as well
+as a defect**, and the ruling belongs with the §49.2.1 braceless-body fork already routed to bryan
+rather than being resolved unilaterally.
+
+**Why it was found here, and why it matters beyond itself:** this is the DELIVERY MECHANISM that turned
+the S414 loop-head recovery scan's early stop into silent data loss rather than a loud failure. When the
+recovery stopped inside the author's condition, the remainder was handed to the body parser, whose first
+statement became the braceless body — and the author's real braced block, now standing alone, was
+dropped by this defect. Three consecutive review rounds of that arc were all delivered through this
+hole. The arc was resolved by removing the recovery scan entirely rather than by fixing this, which is
+tracked separately: see [[g-loop-branch-head-truncated-at-first-close-paren]].
