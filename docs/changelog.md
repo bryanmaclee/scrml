@@ -55,6 +55,25 @@ stdlib modules) · `g-inner-fn-lexical-binding-walk-is-quadratic` (MED, a regres
 deleted from the emit at exit 0; it is the delivery mechanism that made all three recovery holes silent
 rather than loud.
 
+**POST-WRAP CONTINUATION — #947.** Peter said *"go on recommend"* after the wrap, so PICKUP item 1
+was taken in the same session. **`g-declared-names-set-shared-across-blocks-emits-a-bare-assignment`
+RESOLVED** — the EMITTER twin of what #941 closed. Each block body now gets its own copy of
+`declaredNames`; R26 on merged main returns `"abQ"` on all four reproducer cases, two of which threw
+`ReferenceError` before. The migration the entry demanded was **measured and free** (0 artifact
+content diffs over 1,928 sources / 7,467 artifacts) — and measured **twice**, because the first run
+covered a naive 9-site substitution rather than the patch that landed, the build having found two
+further cases (if/else limbs sharing one `bodyOpts` object, and a second independent if/else emitter).
+⛑ The first differential also printed its zero **under a `NOT A VALID COMPARISON` banner** — the S411
+trap, both sides the same revision because the patch was uncommitted. ⛑ The S239 pass falsified the
+build's own direction claim: `semantics-changed` **AND `newly-rejecting`**. Two siblings filed, both
+PA-reproduced and pre-existing: **HIGH** `g-try-catch-finally-bodies-redeclare-every-assignment`
+(`try { x = 2 }` returns 1, silently wrong) and **MED**
+`g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws`. **Owed:**
+`TYPES-BASELINE.json` is stale by exactly one renamed key — confirmed by running the gate's own tsc on
+both trees — but `types-gate --write` cannot run on this Windows clone, and a hand-edit was made,
+verified, then **reverted** because a wrong key is worse than a stale one; the step is
+`continue-on-error` in the non-blocking `tracking` job, so nothing is blocked.
+
 **Owed to bryan, unchanged and now larger:** the §49.2.1 braceless-body fork; the must-use spec-citation
 ruling; his three #936 findings; the new `E-CONDITION-HEAD-UNPARENTHESIZED` code (minting a diagnostic
 decides what the language refuses, so it owes a language-surface review — landed with the stamp
