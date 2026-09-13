@@ -56,8 +56,16 @@
 MED 230 → 230 · LOW 86**; seven gaps resolved, eight filed. Counts are generated — read
 `docs/known-gaps.md`, never this line.
 
-⚑ **THE HEADLINE: three separate silent defects were live in the SHIPPED STANDARD LIBRARY, and not one
-was found by reading code.** `stdlib/time`'s **`throttle` did not throttle and `debounce` did not
+⚑ ~~**THE HEADLINE: three separate silent defects were live in the SHIPPED STANDARD LIBRARY**~~, ~~and~~ not one
+was found by reading code.
+
+> ⚑⚑ **CORRECTED S413-peter — "SHIPPED" IS FALSE.** The defects and fixes are real; the blast-radius
+> claim is not. `scrml:auth` / `scrml:time` resolve to the **hand-written** shims at
+> `compiler/runtime/stdlib/{auth,time}.js` (their own headers say so; `auth.js:106` carries the padding
+> loop as correct plain JS), and `bundleStdlibForRun` (`api.js:383`) copies from that directory — so the
+> `stdlib/**/index.scrml` files are source mirrors **nothing imports**. **No adopter was affected.**
+> Struck in place in `docs/known-gaps.md` (both entries) and `docs/changelog.md`. Third instance of the
+> reasoned-not-measured blast radius in this session family. `stdlib/time`'s **`throttle` did not throttle and `debounce` did not
 debounce** — `inThrottle = true` inside the inner closure emitted as `const inThrottle = true`, so the
 outer binding was never set and the guard always passed. `stdlib/auth/jwt`'s **`base64urlDecode` hung** —
 its padding loop emitted empty with `s += "="` dropped, an infinite loop for any input not a multiple of
