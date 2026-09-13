@@ -244,3 +244,113 @@ entries is the safe direction — every addition can only make the scan stop SOO
   known `node --check` co-run timeout (5021 ms) and passes in isolation (24/24).
 - regen-spec-index --check OK (SPEC 37,970→37,981) · facts --check OK · s34-census PASS ·
   corpus-compile-floor PASS · conflict-marker PASS · snippet 110/110 · delta-lint PASS.
+
+## 2026-09-13 — ROUND 4: the RECOVERY IS DELETED (design change, not another bound)
+
+Rebased onto `origin/main` `0b0d9790` first (docs-only, zero overlap, clean) so every
+measurement below is against the base the review used.
+
+### Reproduced, then accepted the ruling
+All five operand-suffix rows reproduced at `fefdc789`, plus one the review did not list:
+  `if (a) && b[0] { out = 7 }`   → `if (a && b) { [0]; }`   `out = 7` DELETED, exit 0
+  `if (a) && n - 1 { out = 7 }`  → `if (a && n) { -1; }`    DELETED, exit 0
+  `if (a) && g(1) { out = 7 }`   → `if (a && g) { 1; }`     DELETED, exit 0
+  `if (a) && b.k { out = 7 }`    → `if (a && b) { . k { out = 7 }; }` ⚑ LITERAL GARBAGE
+  `while (i) < n >> 1 { … }`     → `while (i < n) { }`  INFINITE LOOP
+                           base  → `while (i) { }`      terminates
+The bound asked "can this token follow a value" and had no notion of "is this OPERAND
+FINISHED", so it stopped INSIDE the author's own condition. The last row reproduces the
+exact headline defect this code is named after, on a program base did not hang on.
+
+### The change
+`recovering`, `conditionHeadTokenEndsValue`, `conditionHeadTokenCanFollowValue`,
+`CONDITION_HEAD_VALUE_ENDING_KEYWORDS`, `CONDITION_HEAD_RECOVERY_STOP_KEYWORDS` — all
+DELETED. `CONDITION_HEAD_CONTINUATION_PUNCT` kept: it is the trigger, and the trigger is
+correct and corpus-measured at 0. `collectIfCondition` fires the diagnostic and stops at
+the `)`, which is the pre-S414 parse. A ⛔ banner records all three withdrawn bounds so
+the next reader does not re-add one.
+
+### ⚑ EMIT-EQUALITY PROOF — 38 shapes, base vs tip
+  IDENTICAL (errors AND emit), 10 — every legal/control spelling. The change is
+    invisible to legal code.
+  SAME EMIT, new diagnostic only, 8 — incl. both headline shapes and `while (i) < n >> 1`.
+    Base emitted the truncated loop at exit 0; tip emits THE SAME loop with a RED build.
+    This is precisely "newly-rejecting": nothing about the output changed.
+  EMIT CHANGED, 20 — 19 of them base `E-CODEGEN-INVALID-LOGIC` + NO ARTIFACT → tip
+    `E-CONDITION-HEAD-UNPARENTHESIZED` + a junk artifact. ⚑ EXPLAINED, not hand-waved:
+    `api.js:2934` `hasPriorFatalError` deliberately SKIPS the generic emitted-JS validity
+    gate when a real error already exists, because firing "this is a compiler defect,
+    please report it" on top of the real error is (its words) "actively misleading". My
+    diagnostic IS that real error, so replacing the generic one is the documented intent.
+    Both builds are RED. ⚑ And emit-on-red is the ESTABLISHED pattern, measured: the
+    shipped S308 `E-FOR-UNPARENTHESIZED-HEAD` also writes an artifact on a red build.
+    (api.js's comment claims "no artifacts are written" on that path — measured FALSE for
+    both S308 and S414. Pre-existing doc/behaviour mismatch; noted, not fixed.)
+
+### ⚑ Inside an exported declaration the change is now a COMPLETE NO-OP
+Measured byte-identical to base in BOTH the error list and the emitted JS. Round 3 was
+`semantics-changed` + `newly-accepting` there and strictly WORSE than doing nothing
+(base `while (i) { }` terminates; round 3's `while (i < n) { }` hangs). The §34 row is
+corrected accordingly — it had claimed the semantics-changed classification.
+
+### Tests — 46 pass
+Recovery assertions rewritten as REJECTION assertions. The punctuation and
+operand-suffix cases are KEPT as regression pins for all three withdrawn rounds.
+⚑ The 15-case `REJECTED` table is a PIN, not a discriminator — every one of those also
+fired the diagnostic under the recovery cuts. What separates reject-only from
+reject-and-recover is what gets EMITTED, so there are 7 `NOT SILENTLY EMITTED`
+discriminators, ONE PER SHAPE (not a loop inside one test) so a partial regression names
+itself.
+⚑ I caught an error in my own first draft of those: I wrote round 2's shapes WITHOUT the
+parenthesized `(b)` that gave the invented operator something to attach to, so 4 of the 7
+could not fire at all. Found by running them against round 2 and seeing 1 fail where 4
+were expected. Corrected.
+
+### ⚑ FIVE-WAY BITE PROOF (file-copy swaps, no `git stash`)
+  vs BASE `origin/main` 0b0d9790 → 21 fail / 25 pass
+  vs ROUND 1 `90b6e451`          →  6 fail
+  vs ROUND 2 `5f7a22cc`          →  4 fail  (exactly the 4 invented-operator shapes)
+  vs ROUND 3 `fefdc789`          →  4 fail  (exactly the 4 operand-suffix shapes)
+  vs HEAD                        → 46 / 46
+Each round's own defects, and only those, fail against that round.
+
+### Verification
+- three named files together: 79 → **85 pass / 0 fail**
+- conformance **1608 pass / 30 skip / 0 fail** — unchanged from the branch-point baseline
+- unit **18,606 pass / 17 skip / 1 fail (18,630 across 963 files)**; the 1 is the known
+  `node --check` co-run timeout (5074 ms), passes in isolation (24/24)
+- regen-spec-index --check OK (SPEC 37,981→37,993) · facts --check OK · s34-census PASS ·
+  corpus-compile-floor PASS · conflict-marker PASS · snippet 110/110 · delta-lint PASS
+
+---
+
+## ⚑ TO FILE, NOT FIXED HERE — a bare `{ … }` block statement is silently dropped
+
+Independent of this arc and PRE-EXISTING. This is the delivery mechanism that turned
+"stop early" into silent DATA LOSS rather than a loud failure: when the recovery
+truncated a head and handed the remainder to the body parser, the author's real braced
+block was simply discarded.
+
+REPRODUCER — returns **10** on BOTH `origin/main` 0b0d9790 and this branch, `errors: []`,
+exit 0. The `{ i = i + 1 }` block is absent from the emitted JS entirely:
+
+```scrml
+${
+  export function f() {
+    let i = 0
+    i = i + 10
+    { i = i + 1 }
+    return i
+  }
+}
+```
+emits:
+```js
+export function f() {
+  let i = 0;
+  i = i + 10;
+  return i;
+}
+```
+
+Not fixed here (out of scope, and it is a parser-wide behaviour, not a loop-head one).

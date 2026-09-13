@@ -10546,9 +10546,38 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * the while condition's required parens"). `while (n + 1) < 4` is therefore not a
    * legal head, so the direction is REJECT, not accept: making it work would be a
    * newly-accepting one-way door against a normative sentence that already excludes it.
-   * Mirrors `E-FOR-UNPARENTHESIZED-HEAD` (S308, §17.4a/§34): fire an Error AND RECOVER
-   * by collecting the rest of the condition, so the artifact is correct even though the
-   * build fails and downstream analysis does not cascade.
+   *
+   * ⚑ REJECT ONLY — THERE IS NO RECOVERY HERE, AND THERE MUST NOT BE ONE.
+   * The collector fires the diagnostic and then stops at the closing `)` exactly as it
+   * did before S414. The scan NEVER advances past the `)`, so it cannot consume, delete,
+   * or invent source. Everything after the `)` is handed to the ordinary body parser.
+   *
+   * ⛔ DO NOT ADD A RECOVERY SCAN BACK. Three separate cuts tried, each bounded more
+   * tightly than the last, and each ate or corrupted source in a NEW shape:
+   *   1. bounded at `{` / `;` / statement keywords — an IDENT stopped nothing, so
+   *      `if (a) && (b) n = 1` + `n = n + 5` vacuumed BOTH statements and captured the
+   *      following `return n` as the body.
+   *   2. + a value/operator check that accepted ANY punct — so every punctuation-starting
+   *      body was eaten: `(out = 7)` absorbed as a call argument, `!flag` deleted, and
+   *      `++n` / `-n` / `.ok` deleted with `b++` / `b - n` / `b.ok` INVENTED.
+   *   3. + a conservative operator set — but the bound knows "can this token follow a
+   *      value", not "is this OPERAND FINISHED". After an accepted operator the scan eats
+   *      the operand's HEAD and stops at its SUFFIX, landing INSIDE the author's own
+   *      condition: `if (a) && b[0] { out = 7 }` emitted `if (a && b) { [0]; }` with
+   *      `out = 7` DELETED, and `while (i) < n >> 1 { i = i + 1 }` emitted
+   *      `while (i < n) { }` — AN INFINITE LOOP, on a program whose base emit
+   *      (`while (i) { }`) terminated. It reproduced the very defect this code is named
+   *      after, and made the exported-body case strictly WORSE than doing nothing.
+   *
+   * ⚑ Recovery bought a "correct artifact" for a build that FAILS — worthless where the
+   * diagnostic fires, and actively harmful in an exported body, where the diagnostic is
+   * swallowed (see the §34 row) so the corrupted artifact was all that remained.
+   *
+   * ⚑ On the `E-FOR-UNPARENTHESIZED-HEAD` (S308) precedent: its recovery is a BOUNDED
+   * LOCAL REPAIR — consume one `of`, collect the iterable. This one was an open-ended
+   * scan over arbitrary trailing tokens, which is a different thing. The precedent's
+   * principle is "do not cascade", and stopping at the `)` does not cascade: it is
+   * precisely what the parser did before this code existed.
    *
    * provenance: spec:§50.2.3-the-outer-parens-are-the-while-condition's-required-parens
    */
@@ -10576,81 +10605,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   const CONDITION_HEAD_CONTINUATION_PUNCT = new Set([
     "<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?",
   ]);
-  // Statement starters that bound the recovery scan when the head is braceless.
-  const CONDITION_HEAD_RECOVERY_STOP_KEYWORDS = new Set([
-    "lift", "function", "fn", "const", "let", "import", "export", "use", "type",
-    "server", "for", "while", "do", "if", "return", "match", "partial", "switch",
-    "try", "fail", "transaction", "throw", "continue", "break", "when", "given",
-  ]);
-  /**
-   * ⚑ RECOVERY BOUND. Once the scan is past the head's closing `)`, a token arriving at
-   * depth 0 after a VALUE-ENDING token continues the condition ONLY if it is an
-   * infix/postfix operator. Everything else starts the NEXT thing (the braceless body,
-   * or the following statement) and MUST stop the scan.
-   *
-   * ⚑ THIS BOUND HAS BEEN WRONG TWICE, BOTH TIMES TOO PERMISSIVE, BOTH TIMES EATING
-   * SOURCE. Cut 1 stopped only at `{` / `;` / a statement keyword, so `if (a) && (b) n = 1`
-   * followed by `n = n + 5` vacuumed BOTH statements into the condition and captured the
-   * next `return n` as the body. Cut 2 added this predicate but blanket-accepted every
-   * PUNCT token, so it stopped only for WORD-shaped statement starts and every
-   * PUNCTUATION-starting body was still eaten — MEASURED, all at exit 0 with zero
-   * diagnostics, all hard-rejected by base:
-   *
-   *     if (a) && (b) (out = 7)   →  if (a && b(out = 7))   body absorbed as a CALL ARG
-   *     if (a) && (b) !flag       →  if (a && b)            body DELETED outright
-   *     if (a) && (b) ++n         →  if (a && b++)          body DELETED, `b++` INVENTED
-   *     if (a) && (b) -n          →  if (a && b - n)        body DELETED, `b - n` INVENTED
-   *     if (a) && (b) .ok         →  if (a && b.ok)         body DELETED, `b.ok` INVENTED
-   *
-   * The last three FABRICATE an operation the author never wrote, which is worse than
-   * dropping one. The regex body `while (h) /a\sb/.test(c)` survived cut 2 only BY
-   * ACCIDENT — `REGEX` is its own token kind and fell through to `return false`.
-   *
-   * So the continuation test is now EXACTLY `CONDITION_HEAD_CONTINUATION_PUNCT` — the
-   * same conservative operator set that is allowed to START a recovery. One set, one
-   * rule: recovery continues through exactly the operators that could have begun it.
-   * `(` `[` `!` `++` `--` `.` `-` `+` `,` `:` all STOP.
-   *
-   * ⚑ STOPPING EARLY IS SAFE BY CONSTRUCTION: it truncates the RECOVERED CONDITION and
-   * hands the remainder to the body parser, which already knows how to parse statements.
-   * Deleting or inventing source is not recoverable. When in doubt, stop — do NOT try to
-   * disambiguate call-vs-parenthesized-statement or infix-vs-unary `-`.
-   *
-   * A `(` reached while lastTok is an OPERATOR (`&& (b)`) never consults this predicate —
-   * the guard only applies after a value-ending token — so excluding `(` here does not
-   * disturb `while (a) && (b) { ... }`.
-   */
-  // ⚑ Kept in sync BY HAND with `VALUE_KEYWORDS` in `compiler/src/tokenizer.ts`
-  // (function-local there, so it cannot be imported). Erring toward MORE value-ending
-  // entries is the safe direction: every addition can only make the scan stop sooner.
-  // `not` (§42.1) is scrml's absence primitive and is value-producing; §42.6 forbids it
-  // in prefix position, so it never opens a statement.
-  const CONDITION_HEAD_VALUE_ENDING_KEYWORDS = new Set([
-    "true", "false", "null", "undefined", "this", "super", "not",
-  ]);
-  function conditionHeadTokenEndsValue(tok) {
-    if (!tok) return false;
-    if (tok.kind === "IDENT" || tok.kind === "NUMBER" || tok.kind === "STRING" ||
-        tok.kind === "AT_IDENT" || tok.kind === "BLOCK_REF" || tok.kind === "REGEX") return true;
-    if (tok.kind === "KEYWORD") return CONDITION_HEAD_VALUE_ENDING_KEYWORDS.has(tok.text);
-    if (tok.kind === "PUNCT") return tok.text === ")" || tok.text === "]" || tok.text === "}";
-    return false;
-  }
-  function conditionHeadTokenCanFollowValue(tok) {
-    if (!tok) return false;
-    // ⚑ The SAME conservative operator set that may start a recovery — NOT "any PUNCT".
-    if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") {
-      return CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text);
-    }
-    // Word-form infix operators (§45.9 `or`/`and`) are IDENT-shaped but can never start a
-    // statement — mirrors collectExpr's WORD_INFIX_OPERATORS carve-out.
-    if (tok.kind === "IDENT") return tok.text === "or" || tok.text === "and";
-    // Every KEYWORD stops. `is` in particular: the lexer classifies it context-free as
-    // KEYWORD, so `is(n)` — a call to a user's parameter named `is` — is indistinguishable
-    // from the §11 type-test operator here. That ambiguity already cost one false
-    // rejection with a deleted call; continuing through it would re-open the same hole.
-    return false;
-  }
 
   /**
    * Does `tok`, sitting immediately after the head's closing `)`, continue the
@@ -10683,28 +10637,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const startTok = peek();
     let lastTok = startTok;
     let depth = 0;
-    // S414 — set once the outermost `(` has closed and E-CONDITION-HEAD-UNPARENTHESIZED
-    // has fired; the loop then keeps collecting the rest of the condition (RECOVERY).
-    let recovering = false;
 
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
       if (tok.kind === "COMMENT") { consume(); continue; }
-      if (recovering && depth === 0) {
-        // In recovery the outer parens are already closed, so a depth-0 `{` is the BODY
-        // (not part of the condition) and a `;` / statement keyword ends the statement.
-        if (tok.kind === "PUNCT" && (tok.text === "{" || tok.text === ";")) break;
-        if (tok.kind === "KEYWORD" && CONDITION_HEAD_RECOVERY_STOP_KEYWORDS.has(tok.text)) break;
-        // ⚑ STATEMENT BOUNDARY — the bound that keeps recovery from eating source.
-        // `(b)` followed by `n` is two value-ish tokens in a row: `n` cannot continue
-        // the condition, so it starts the braceless body / the next statement. Stopping
-        // here leaves `parseOneIfStmt`'s braceless limb and the enclosing body loop to
-        // parse them, instead of the collector deleting them.
-        if (parts.length > 0 &&
-            conditionHeadTokenEndsValue(lastTok) &&
-            !conditionHeadTokenCanFollowValue(tok)) break;
-      }
       // Track depth for all bracket types
       if (tok.kind === "PUNCT" && (tok.text === "(" || tok.text === "[" || tok.text === "{")) depth++;
       if (tok.kind === "PUNCT" && (tok.text === ")" || tok.text === "]" || tok.text === "}")) {
@@ -10731,22 +10668,25 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
-      // After closing the outermost `(`, stop — UNLESS what follows continues the
-      // condition expression rather than beginning the body (S414). In that case the
-      // head is illegally unparenthesized: reject it, then RECOVER by collecting the
-      // remainder so the emitted `if`/`while` is correct instead of an empty-bodied
-      // silent infinite loop.
-      if (depth === 0 && parts.length > 0 && !recovering) {
-        if (!continuesConditionHead(peek())) break;
-        errors.push(new TABError(
-          "E-CONDITION-HEAD-UNPARENTHESIZED",
-          "E-CONDITION-HEAD-UNPARENTHESIZED: an `if`/`while` condition's required " +
-          "parentheses must wrap the whole condition — `while ((n + 1) < 4)` or " +
-          "`while (n + 1 < 4)`, not `while (n + 1) < 4`. Everything after the closing " +
-          "`)` was being dropped, including the loop body. (SPEC §50.2.1, §50.2.3, §49.2.1)",
-          tokenSpan(startTok, filePath),
-        ));
-        recovering = true;
+      // After closing the outermost `(`, ALWAYS stop — the pre-S414 behaviour. When what
+      // follows is one of the continuation operators the head is illegally
+      // unparenthesized (SPEC §50.2.1/§50.2.3/§49.2.1), so REJECT it. There is
+      // deliberately no recovery: see the ⛔ banner above. The scan does not advance past
+      // the `)`, so the remainder is handed intact to the ordinary body parser and this
+      // collector can neither delete nor invent source.
+      if (depth === 0 && parts.length > 0) {
+        if (continuesConditionHead(peek())) {
+          errors.push(new TABError(
+            "E-CONDITION-HEAD-UNPARENTHESIZED",
+            "E-CONDITION-HEAD-UNPARENTHESIZED: an `if`/`while` condition's required " +
+            "parentheses must wrap the whole condition — `while ((n + 1) < 4)` or " +
+            "`while (n + 1 < 4)`, not `while (n + 1) < 4`. The build fails, so the " +
+            "emitted output for this head is not meaningful; fix the parentheses. " +
+            "(SPEC §50.2.1, §50.2.3, §49.2.1)",
+            tokenSpan(startTok, filePath),
+          ));
+        }
+        break;
       }
     }
     return {

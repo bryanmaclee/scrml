@@ -24,8 +24,20 @@
  * parens are the while condition's required parens". `while (n + 1) < 4` is therefore
  * not a legal head; the legal spellings are `while (n + 1 < 4)` and `while ((n + 1) < 4)`.
  * Making it work would be a newly-accepting one-way door against a normative sentence
- * that already excludes it. So this mirrors E-FOR-UNPARENTHESIZED-HEAD (S308): fire an
- * Error AND RECOVER, so no broken loop is emitted and downstream analysis does not cascade.
+ * that already excludes it.
+ *
+ * ⚑ REJECT ONLY — THE DIAGNOSTIC FIRES AND THE COLLECTOR STOPS AT THE `)`, exactly as it
+ * did before S414. There is NO recovery. The emitted output for an offending head is
+ * therefore NOT meaningful — the build fails, and a correct artifact for a failed build
+ * buys nothing. Three successively tighter recovery bounds were tried and each ate or
+ * corrupted source in a new shape; the fourth round deleted the whole path. See the
+ * `REJECT WITHOUT RECOVERY` describe below for the pins.
+ *
+ * (E-FOR-UNPARENTHESIZED-HEAD (S308) does recover, but its recovery is a BOUNDED LOCAL
+ * REPAIR — consume one `of`, collect the iterable. An open-ended scan over arbitrary
+ * trailing tokens is a different thing, and it proved unbounded three times. The
+ * precedent's principle is "do not cascade"; stopping at the `)` does not cascade,
+ * because it is precisely what the parser did before this code existed.)
  *
  * ⚑ THE DIAGNOSTIC IS ASSERTED ON REAL PARSED PROGRAMS, never on a hand-built AST. A
  * code with no producer is this project's recurring failure — E-TILDE-001/002 sat dead
@@ -58,9 +70,15 @@
  * newly report an error, including ten shipped stdlib modules, so it is a migration
  * needing a ruling and is deliberately NOT fixed here.
  *
- * The diagnostic cases below therefore avoid `export`; the RECOVERY and artifact cases
- * use the library harness (which needs `export` to import the result back) and assert
- * the EMITTED JS and the EXECUTED VALUE, which are correct either way.
+ * ⚑ In that exported region the diagnostic is swallowed EITHER WAY, which is a further
+ * reason recovery had to go rather than be tightened again: there it bought nothing, and
+ * round 3 made it strictly WORSE than doing nothing — base truncated
+ * `while (i) < n >> 1` to `while (i) { }`, which TERMINATES, while the recovery emitted
+ * `while (i < n) { }`, which HANGS, at exit 0.
+ *
+ * The diagnostic cases below therefore avoid `export`; the control cases use the library
+ * harness (which needs `export` to import the result back) and assert the EMITTED JS and
+ * the EXECUTED VALUE.
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
@@ -156,193 +174,133 @@ describe("E-CONDITION-HEAD-UNPARENTHESIZED — fires on a head that continues pa
   });
 });
 
-describe("RECOVERY — the artifact is CORRECT even though the build errors", () => {
-  test("⚑ the recovered `while` keeps its body and its full condition (program shell)", () => {
-    const r = compileProgram("${\n  let n = 0\n  while (n + 1) < 4 { n = n + 1 }\n}\n<p>ok</>", "recover-prog");
-    expect(condErrors(r).length).toBe(1);
-    const js = programJs(r);
-    // The whole condition survived — not truncated to `while (n + 1)`.
-    expect(js).toMatch(/while \(n \+ 1 < 4\)/);
-    expect(loopBodyIsEmpty(js)).toBe(false);
-  });
+/**
+ * ⚑ REGRESSION PINS FOR THREE REJECTED RECOVERY ATTEMPTS.
+ *
+ * S414 originally fired the diagnostic AND recovered — kept scanning past the closing
+ * `)` to rebuild the whole condition. Three successively tighter bounds were tried and
+ * each ate or corrupted source in a NEW shape, so the recovery was DELETED. These cases
+ * are kept as pins: every one of them must now be REJECTED, with nothing silently
+ * emitted in its place.
+ *
+ *   round 1 — bounded at `{` / `;` / statement keywords. An IDENT stopped nothing:
+ *             `if (a) && (b) n = 1` + `n = n + 5` ate BOTH and captured `return n`.
+ *   round 2 — + a value/operator check that accepted ANY punct, so every
+ *             punctuation-starting body was eaten, three of them with an INVENTED
+ *             operator (`b++`, `b - n`, `b.ok`).
+ *   round 3 — + a conservative operator set. But the bound knew "can this token follow
+ *             a value", not "is this OPERAND FINISHED": after an accepted operator the
+ *             scan ate the operand HEAD and stopped at its SUFFIX, landing INSIDE the
+ *             author's condition. `if (a) && b[0] { out = 7 }` emitted
+ *             `if (a && b) { [0]; }` with `out = 7` DELETED, and
+ *             `while (i) < n >> 1 { i = i + 1 }` emitted `while (i < n) { }` — AN
+ *             INFINITE LOOP, where base emitted `while (i) { }`, which terminates.
+ *             It reproduced the very defect this code is named after.
+ */
+describe("⚑ REJECT WITHOUT RECOVERY — offending heads fail the build, silently emitting nothing", () => {
+  // Every shape that one of the three recovery cuts mangled. `function` (not `export`),
+  // so the diagnostic is visible — see the export-swallow note in the banner.
+  const REJECTED = [
+    // round 3 — operand suffixes (the shapes that forced the deletion)
+    ["operand suffix `[0]`",     "if (a) && b[0] { out = 7 }"],
+    ["operand suffix `- 1`",     "if (a) && n - 1 { out = 7 }"],
+    ["operand suffix `(1)`",     "if (a) && g(1) { out = 7 }"],
+    ["operand suffix `>> 1`",    "while (i) < n >> 1 { i = i + 1 }"],
+    ["operand suffix `.k`",      "if (a) && b.k { out = 7 }"],
+    // round 2 — punctuation-starting braceless bodies
+    ["punct body `(out = 7)`",   "if (a) && (out = 7)"],
+    ["punct body `!flag`",       "if (a) && !flag"],
+    ["punct body `++n`",         "if (a) && ++n"],
+    ["punct body `--n`",         "if (a) && --n"],
+    ["punct body `-n`",          "if (a) && -n"],
+    ["punct body `+n`",          "if (a) && +n"],
+    ["punct body `[1, 2]`",      "if (a) && [1, 2]"],
+    // round 1 — a word-shaped braceless body with statements after it
+    ["braceless + trailing",     "if (a) && b out = 1"],
+    // the original headline shapes
+    ["`while (n) < 4 { … }`",    "while (n) < 4 { out = 7 }"],
+    ["`if (n) < 4 { … }`",       "if (n) < 4 { out = 7 }"],
+  ];
 
-  test("⚑ RUNTIME — the recovered loop actually terminates with the right value", async () => {
-    // Before the fix this emitted `while (n + 1) {}` — an infinite loop. Written so the
-    // defect returning fails by TIMEOUT rather than by assertion.
-    const { js, artifact } = build(
-      "${\n  export function f() {\n    let n = 0\n    while (n + 1) < 4 { n = n + 1 }\n    return n\n  }\n}",
-      "recover-runtime",
-    );
-    expect(loopBodyIsEmpty(js)).toBe(false);
-    expect(js).toMatch(/while \(n \+ 1 < 4\) \{\s*\n\s*n = n \+ 1;/);
-    expect((await import(pathToFileURL(artifact).href)).f()).toBe(3);
-  });
+  const REJ = (line) =>
+    `\${\n  function f(a, b, n, i, g, flag, out) {\n    let _ = 0\n    ${line}\n  }\n}\n<p>ok</>`;
 
-  test("the recovered `if` keeps its body and its full condition", async () => {
-    const { js, artifact } = build(
-      "${\n  export function f() {\n    let n = 9\n    if (n + 1) < 4 { n = 0 }\n    return n\n  }\n}",
-      "recover-if",
-    );
-    expect(js).toMatch(/if \(n \+ 1 < 4\) \{\s*\n\s*n = 0;/);
-    // 9 + 1 is not < 4, so the (now non-empty) branch must NOT be taken.
-    expect((await import(pathToFileURL(artifact).href)).f()).toBe(9);
-  });
-
-  test("the recovered `&&` head emits a real loop instead of no artifact at all", async () => {
-    const { js, artifact } = build(
-      "${\n  export function f(b) {\n    let a = 3\n    let n = 0\n    while (a) && (b) { a = a - 1\n      n = n + 1 }\n    return n\n  }\n}",
-      "recover-andand",
-    );
-    expect(js).toMatch(/while \(a && b\)/);
-    expect(loopBodyIsEmpty(js)).toBe(false);
-    expect((await import(pathToFileURL(artifact).href)).f(true)).toBe(3);
-  });
-});
-
-describe("⚑ RECOVERY MUST NOT EAT SOURCE — the statement-boundary bound", () => {
-  // An earlier cut bounded recovery only at `{` / `;` / a statement keyword. An IDENT
-  // stopped nothing and there was no value/operator alternation check, so the collector
-  // ran past the end of the statement: `if (a) && (b) n = 1` vacuumed `n = 1` AND the
-  // following `n = n + 5` into the condition, leaving `return n` to be captured as the
-  // braceless body. TWO STATEMENTS SILENTLY DELETED — on a program the baseline
-  // hard-rejected with E-CODEGEN-INVALID-LOGIC, so the fix had introduced a NEW
-  // silent-data-loss path. Dropping source text is never acceptable.
-  const EATER = "${\n  function f(a, b) {\n    let n = 0\n    if (a) && (b) n = 1\n    n = n + 5\n    return n\n  }\n}";
-
-  test("⚑ the statements AFTER a braceless recovered head all survive", () => {
-    const { js } = build(EATER, "no-eat");
-    // Every one of these was deleted by the unbounded scan.
-    expect(js).toMatch(/if \(a && b\) \{\s*\n\s*n = 1;/); // the braceless body, in the branch
-    expect(js).toContain("n = n + 5;");                   // the following statement
-    expect(js).toContain("return n;");                    // ...which was captured AS the body
-    // `return n` must be the function's tail, NOT the if-branch's only statement.
-    expect(js).not.toMatch(/if \(a && b\) \{\s*\n\s*return n;/);
-  });
-
-  test("⚑ ...and the diagnostic still fires on that same program", () => {
-    const r = compileProgram("${\n  function f(a, b) {\n    let n = 0\n    if (a) && (b) n = 1\n    n = n + 5\n    return n\n  }\n}\n<p>ok</>", "no-eat-diag");
-    expect(condErrors(r).length).toBe(1);
-  });
-
-  test("⚑ RUNTIME — the recovered braceless form computes the right answer", async () => {
-    // n = 0; if (a && b) n = 1; n = n + 5; return n  →  6 when both truthy, 5 otherwise.
-    const { artifact } = build(
-      "${\n  export function f(a, b) {\n    let n = 0\n    if (a) && (b) n = 1\n    n = n + 5\n    return n\n  }\n}",
-      "no-eat-runtime",
-    );
-    const mod = await import(pathToFileURL(artifact).href);
-    expect(mod.f(true, true)).toBe(6);
-    expect(mod.f(true, false)).toBe(5);
-  });
-
-  // ⚑ PUNCTUATION-STARTING BODIES. The IDENT cases above passed while these were all
-  // broken, because the first bound stopped only for WORD-shaped statement starts and
-  // blanket-accepted every PUNCT token. Each row below was, at exit 0 with zero
-  // diagnostics (the `export` re-parse hides the error), one of:
-  //   `(out = 7)` absorbed as a CALL ARGUMENT — `if (a && b(out = 7))`
-  //   `!flag`     DELETED outright
-  //   `++n`       DELETED, and `b++` INVENTED in its place
-  //   `-n`        DELETED, and `b - n` INVENTED
-  //   `.ok`       DELETED, and `b.ok` INVENTED
-  // The invented ones are the worst of the set: they fabricate an operation the author
-  // never wrote. Asserted on the EXECUTED RETURN VALUE, not the emit.
-  //
-  // Shape: out=0; if (a) && (b) <BODY>; out = out + 3; return out
-  //   → 10 when the body assigns out=7, 3 when the body has no effect on out.
-  const PUNCT_BODY = (body) =>
-    `\${\n  export function f(a, b) {\n    let out = 0\n    let n = 1\n    let flag = true\n` +
-    `    if (a) && (b) ${body}\n    out = out + 3\n    return out\n  }\n}`;
-
-  // ⚑ `emitted` is NOT redundant with `expected`. A body like `!flag` or `++n` has no
-  // observable effect on the return value, so the runtime assertion alone CANNOT tell a
-  // preserved body from a deleted one — the previous cut deleted `!flag` outright and
-  // still returned 3. The emit assertion is what bites for those rows.
-  for (const [name, body, emitted, expected] of [
-    ["( — a parenthesized assignment, not a call argument", "(out = 7)", "out = 7;", 10],
-    ["! — a negation statement",                            "!flag",     "!flag;",    3],
-    ["++ — a pre-increment statement",                      "++n",       "++n;",      3],
-    ["-- — a pre-decrement statement",                      "--n",       "--n;",      3],
-    ["- — a unary minus, not an infix minus",               "-n",        "-n;",       3],
-    ["+ — a unary plus, not an infix plus",                 "+n",        "+n;",       3],
-    ["[ — an array-literal statement",                      "[1, 2]",    "[1, 2];",   3],
-  ]) {
-    test(`⚑ RUNTIME — a body starting with \`${body}\` survives (${name})`, async () => {
-      const { js, artifact } = build(PUNCT_BODY(body), "punct-" + body.replace(/\W/g, "_"));
-      expect(artifact).not.toBe(null);
-      // 1. The BODY TEXT must survive. This is the assertion that catches a deletion
-      //    whose absence the return value cannot see.
-      expect(js).toContain(emitted);
-      // 2. The trailing statement must survive — it was being eaten or bypassed.
-      expect(js).toContain("out = out + 3");
-      // 3. No operator may be INVENTED on `b`: the condition is exactly `a && b`.
-      //    The previous cut emitted `b(out = 7)`, `b++`, `b - n`, `b.ok`.
-      expect(js).toMatch(/if \(a && b\) \{/);
-      // 4. And the whole thing must actually RUN to the right answer.
-      const mod = await import(pathToFileURL(artifact).href);
-      expect(mod.f(true, true)).toBe(expected);
+  for (const [name, line] of REJECTED) {
+    test(`REJECTED — ${name}`, () => {
+      const r = compileProgram(REJ(line), "rej-" + name.replace(/\W+/g, "_"));
+      // 1. The build is RED, and it is RED for the RIGHT reason: exactly one
+      //    E-CONDITION-HEAD-UNPARENTHESIZED naming the real problem.
+      expect(condErrors(r).length).toBe(1);
+      // 2. It is an Error, not a Warning — it must actually fail the build.
+      expect((r.warnings ?? []).filter((w) => (w.code ?? "") === CODE).length).toBe(0);
     });
   }
 
-  test("⚑ a `.`-starting body is REJECTED, not silently mis-emitted", () => {
-    // `.ok` cannot begin a statement in any language, so there is nothing to recover to.
-    // What matters is that it FAILS rather than emitting an invented `b.ok` — the
-    // previous cut compiled it at exit 0 and returned the wrong answer.
-    const { js } = build(PUNCT_BODY(".ok"), "punct-dot");
-    expect(js).not.toMatch(/b\.ok/);
-  });
+  // ⚑ THE DISCRIMINATORS. Every case in the table above ALSO fired the diagnostic under
+  // the recovery cuts, so those are regression pins, not discriminators — what separates
+  // reject-only from reject-and-recover is what gets EMITTED. One test per shape, so a
+  // partial regression names itself instead of hiding inside a loop.
+  for (const [name, line, forbidden, why] of [
+    ["operand suffix `[0]`",  "if (a) && b[0] { out = 7 }",       /if \(a && b\)/,
+     "round 3 emitted `if (a && b) { [0]; }` — `out = 7` deleted"],
+    ["operand suffix `- 1`",  "if (a) && n - 1 { out = 7 }",      /if \(a && n\)/,
+     "round 3 emitted `if (a && n) { -1; }` — `out = 7` deleted"],
+    ["operand suffix `>> 1`", "while (i) < n >> 1 { i = i + 1 }", /while \(i < n\)/,
+     "⚑ round 3 emitted `while (i < n) { }` — AN INFINITE LOOP; base emits `while (i) { }`, which terminates"],
+    ["operand suffix `.k`",   "if (a) && b.k { out = 7 }",        /if \(a && b\)/,
+     "round 3 emitted `if (a && b) { . k { out = 7 }; }` — literal garbage in the output"],
+    // ⚑ Round 2's shapes have a PARENTHESIZED `(b)` — that is what gave the invented
+    // operator something to attach to. Written without it these assertions cannot fire.
+    ["punct body `(b) ++n`",     "if (a) && (b) ++n",       /b\+\+/,
+     "round 2 INVENTED a post-increment `b++` the author never wrote"],
+    ["punct body `(b) -n`",      "if (a) && (b) -n",        /b - n/,
+     "round 2 INVENTED an infix subtraction `b - n`"],
+    ["punct body `(b) .ok`",     "if (a) && (b) .ok",       /b\.ok/,
+     "round 2 INVENTED a member access `b.ok`"],
+    ["punct body `(b) (out = 7)`","if (a) && (b) (out = 7)", /b\(out = 7\)/,
+     "round 2 absorbed the body as a CALL ARGUMENT `b(out = 7)`"],
+  ]) {
+    test(`⚑ NOT SILENTLY EMITTED — ${name} (${why})`, () => {
+      const { js } = build(
+        `\${\n  function f(a, b, n, i, out) {\n    let _ = 0\n    ${line}\n  }\n}`,
+        "noemit-" + name.replace(/\W+/g, "_"),
+      );
+      expect(js).not.toMatch(forbidden);
+    });
+  }
 
-  test("⚑ CONTROL — the word-shaped body is handled identically (the boundary)", async () => {
-    // This is what makes the rows above a BOUNDARY rather than a guess: the same program
-    // with a word-shaped body was already correct, and must stay correct.
-    const { js, artifact } = build(PUNCT_BODY("out = 7"), "punct-control-word");
-    expect(js).toContain("out = out + 3");
-    expect((await import(pathToFileURL(artifact).href)).f(true, true)).toBe(10);
-  });
-
-  test("a BRACED recovered head keeps its trailing statements too (the twin)", () => {
-    const { js } = build(
-      "${\n  function f(a, b) {\n    let n = 0\n    if (a) && (b) { n = 1 }\n    n = n + 5\n    return n\n  }\n}",
-      "no-eat-braced",
+  test("fires ONCE per offending head, not once per continuation token", () => {
+    const r = compileProgram(
+      "${\n  let a = 1\n  let b = 2\n  let n = 0\n  while (a) && (b) || (a) { n = n + 1 }\n}\n<p>ok</>",
+      "once-per-head",
     );
-    expect(js).toMatch(/if \(a && b\) \{\s*\n\s*n = 1;/);
-    expect(js).toContain("n = n + 5;");
-    expect(js).toContain("return n;");
+    expect(condErrors(r).length).toBe(1);
   });
-});
 
-describe("⚑ `is` IS NOT A CONTINUATION — a user identifier named `is` must still work", () => {
-  // `is` was briefly in the continuation set, matched as KEYWORD-or-IDENT. It is the one
-  // candidate that can also be an ordinary name, which re-opened the exact hazard the
-  // PUNCT exclusion list exists to close: this program compiles on base, and the cut
-  // falsely rejected it AND DELETED the `is(n)` call.
-  //
-  // ⚑ A KEYWORD-ONLY ARM DOES NOT FIX IT — MEASURED. The lexer classifies `is`
-  // context-free as KEYWORD (tokenizer.ts KEYWORDS) and only `match` has a demotion
-  // pass, so a user's `is` identifier IS a KEYWORD token here. Restoring a KEYWORD-only
-  // arm reproduces this defect exactly. `is` is therefore absent from the set entirely.
-  const IS_PROG = "${\n  function f(is) {\n    let n = 0\n    if (n < 3) is(n)\n    return n\n  }\n}";
+  test("⚑ the headline `while` head is REJECTED, where base shipped it silently", () => {
+    // Base emitted `while (n + 1) { }` at exit 0 — an infinite loop whenever the
+    // condition depends on the body. The emit is UNCHANGED (that is the design: no
+    // recovery), but the build is now red, so it cannot ship.
+    const r = compileProgram("${\n  let n = 0\n  while (n + 1) < 4 { n = n + 1 }\n}\n<p>ok</>", "headline-while");
+    expect(condErrors(r).length).toBe(1);
+  });
 
-  test("a parameter named `is`, called in a braceless body, is NOT rejected", () => {
-    const r = compileProgram(IS_PROG + "\n<p>ok</>", "ident-is");
+  test("⚑ a user identifier named `is` is still NOT rejected (round-2 pin)", () => {
+    // `is` was briefly a continuation candidate; it is the only word-shaped one, and the
+    // lexer classifies it context-free as KEYWORD, so it could not be told apart from a
+    // user's parameter. This program compiles on base and must keep compiling.
+    const r = compileProgram("${\n  function f(is) {\n    let n = 0\n    if (n < 3) is(n)\n    return n\n  }\n}\n<p>ok</>", "ident-is");
     expect(condErrors(r).length).toBe(0);
     expect(codes(r)).not.toContain("E-EQ-005");
   });
 
-  test("⚑ ...and the `is(n)` call is still EMITTED (it was being deleted)", () => {
-    const { js, errors } = build(IS_PROG, "ident-is-emit");
-    expect(errors.map((e) => e.code)).toEqual([]);
-    expect(js).toContain("is(n)");
-    expect(js).toMatch(/if \(n < 3\) \{\s*\n\s*is\(n\);/);
-  });
-
-  test("⚑ RUNTIME — the function named by the `is` parameter is actually called", async () => {
+  test("⚑ RUNTIME — and the `is(n)` call is still emitted and actually called", async () => {
     const { artifact } = build(
       "${\n  export function f(is) {\n    let n = 0\n    if (n < 3) is(n)\n    return n\n  }\n}",
       "ident-is-runtime",
     );
     let called = -1;
-    const mod = await import(pathToFileURL(artifact).href);
-    mod.f((v) => { called = v; });
+    (await import(pathToFileURL(artifact).href)).f((v) => { called = v; });
     expect(called).toBe(0);
   });
 });
