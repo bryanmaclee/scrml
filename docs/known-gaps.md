@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 108 |
-| MED | 240 |
-| LOW | 90 |
+| HIGH | 107 |
+| MED | 242 |
+| LOW | 91 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -14245,7 +14245,7 @@ S378 note both record braceless control flow as a **known open hole** whose inte
 
 ### g-library-map-surface-unlowered-beyond-the-bracket-read — at the library boundary the whole §59 method surface is unlowered, and #929's guard catches one of eight shapes, so `.size` and a match-arm bracket read now compile at exit 0 and evaluate to `undefined` — `NEW S413; HIGH; re-scopes g-library-mode-map-bracket-read-does-not-lower, whose title and NOT-LIVE assertion are both falsified`
 
-<!-- @gap id=g-library-map-surface-unlowered-beyond-the-bracket-read sev=HIGH status=open locus=compiler/src/codegen/emit-expr.ts(mapSetLoweringBoundaryOk returns false for any mode that is not client or server, so every §59 lowering is off at the library boundary) + compiler/src/codegen/emit-library.ts(containsIndexExpr, the guard, walks only kind=index and cannot see raw-string match arms) prov=review:S413-peter-adversarial-pass-on-#929-reproduced-by-execution-with-an-if-chain-control -->
+<!-- @gap id=g-library-map-surface-unlowered-beyond-the-bracket-read sev=HIGH status=resolved resolved-by=S415-peter locus=compiler/src/codegen/emit-expr.ts(mapSetLoweringBoundaryOk returns false for any mode that is not client or server, so every §59 lowering is off at the library boundary) + compiler/src/codegen/emit-library.ts(containsIndexExpr, the guard, walks only kind=index and cannot see raw-string match arms) prov=review:S413-peter-adversarial-pass-on-#929-reproduced-by-execution-with-an-if-chain-control -->
 
 #929 shipped the §59 runtime into library-mode output and kept the *unlowered* half loud with a
 `containsIndexExpr` AST walk. The walk is gated on `kind === "index"`; the boundary failure is
@@ -14794,3 +14794,65 @@ The safer spelling is fine and should stay; the **claim** is unsupported. ⚑ Re
 safety comment sitting on an untrue premise is this project's most reliable bug-finder — now five
 consecutive arcs — and because the comment would otherwise teach the next reader a constraint that does
 not exist.
+
+---
+
+## §S415b — the g-library residuals (2026-09-13, Peter; filed with the fix, all measured)
+
+> **What the fix closed:** `.size` and the whole method vocabulary, straight-line **and inside a `match` arm**, at BOTH library routers (the control-flow splicer and the previously-unguarded async splicer), now take the raw path and refuse loudly instead of shipping a HAMT node read verbatim. **What it did NOT do:** make library mode actually *lower* the §59 surface. That remains the real fix and it is still a language question routed to bryan — see `g-library-mode-map-bracket-read-does-not-lower`.
+
+### g-library-shadowed-inner-binding-is-a-false-rejection — a map name re-bound by an inner arrow parameter makes the guard refuse a valid program — `NEW S415; MED; INTRODUCED by the S415 fix, deliberately accepted; owes a language-surface review`
+
+<!-- @gap id=g-library-shadowed-inner-binding-is-a-false-rejection sev=MED status=open locus=compiler/src/codegen/emit-library.ts(unloweredMapSurfaceReads — the receiver-scoped byte scan keys on a NAME and cannot see that an inner arrow parameter re-binds it) prov=review:S415-peter-re-review-round-2-measured-base-vs-head-by-execution -->
+
+```scrml
+export fn probe(xs) { let m = ["k": 7]; return xs.map((m) => m.size) }
+```
+
+ran and returned `[3]` at `9eb9eb24`; it is **refused** (`E-CODEGEN-INVALID-LOGIC`, whole module) after
+the S415 fix. The scan sees the token `m` bound to a map earlier in the emitted text and cannot tell
+that the arrow parameter shadows it.
+
+⚑ **This is a cost the fix knowingly accepts, and the reasoning is recorded rather than the outcome
+alone.** Dropping a name from the receiver set whenever it is re-bound anywhere in the fn would
+**un-guard a real top-level `m.size` in that same fn** — trading a rare false REJECTION for a rare
+silent WRONG ANSWER, which is the direction this file has already ruled against. Closing it properly
+needs SCOPE, not text.
+
+**Owes a language-surface review** — newly-rejecting over a population that previously compiled and ran
+correctly. Landed with the stamp OUTSTANDING per the S313 review-floor mechanism.
+
+---
+
+### g-library-map-size-on-an-alias-peer-or-parameter-receiver-is-silently-undefined — the `.size` FORM on a receiver the emit does not bind to a map constructor still ships `undefined` — `NEW S415; MED; pre-existing, NOT closed by the S415 fix`
+
+<!-- @gap id=g-library-map-size-on-an-alias-peer-or-parameter-receiver-is-silently-undefined sev=MED status=open locus=compiler/src/codegen/emit-library.ts(unloweredMapSurfaceReads derives its receiver set from `let <n> = _scrml_map_*` in the emitted text, so a map reaching a local by any other route is invisible) prov=review:S415-peter-re-review-round-2-three-shapes-measured-by-execution -->
+
+Three receivers the byte scan cannot classify, all **pre-existing and unchanged** by the S415 fix:
+an **alias** (`let n = m; n.size`), a **peer call** (`let q = mk(); q.size`), and a **parameter**
+(`fn probe(m) { m.size }`). All three compile at exit 0 and evaluate to **`undefined`** where §59.6
+says *"`.size → int` is the entry count"*.
+
+⚑ **Read the FORM distinction carefully — collapsing it is what cost a review round.** For the
+**bracket** form (`n["k"]`) on an alias, the base compiler REFUSED and the fix preserves that refusal.
+For the **`.size`** form, base shipped `undefined` and still does. An earlier revision of the fix
+asserted the whole receiver class was "already silent-wrong at base"; that was true of `.size` and
+FALSE of the bracket form, and the residual tests wrote `return n.size` where `return n["k"]` would
+have caught it. Closing this needs the receiver's TYPE, not a body walk or a text scan.
+
+---
+
+### g-library-aliased-bracket-read-inside-a-match-arm-escapes-both-guard-limbs — the intersection of the two blind spots — `NEW S415; LOW; pre-existing`
+
+<!-- @gap id=g-library-aliased-bracket-read-inside-a-match-arm-escapes-both-guard-limbs sev=LOW status=open locus=compiler/src/codegen/emit-library.ts(limb 1 is an AST walk and a match arm is carried as a STRING; limb 2 is name-scoped and an alias is not in the receiver set) prov=review:S415-peter-re-review-round-2-pinned-as-a-characterization-after-an-asserted-refusal-failed -->
+
+An **aliased** map bracket-read **inside a `match` arm** escapes both limbs of the S415 guard: limb 1
+(receiver-blind) is an AST walk and the arm is a re-parsed **string** with no AST node; limb 2
+(byte-level) is name-scoped and an alias is not in the derived receiver set. Pre-existing; the fix
+neither closes nor worsens it.
+
+Closing it would need a third policy — a receiver-blind BYTE scan — which was ruled out deliberately:
+two successive rounds of adding one more policy each produced a new defect in the opposite direction
+(round 1 receiver-blind → false rejections; round 2 receiver-scoped → false acceptances). ⚑ The fix
+author initially asserted this shape as a refusal, the test FAILED, and the assertion was corrected to
+match the measurement rather than reaching for another bound. Pinned as a characterization test.
