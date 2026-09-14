@@ -1,3 +1,191 @@
+# scrml — Session 415 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S414/S413/S412/
+> S411/S410 mine, S405 bryan's) and is untouched.
+>
+> ⚑⚑ **CORRECTED AT WRAP — BRYAN WAS A LIVE SIBLING AFTER ALL, and my boot-time read was stale.** At
+> boot his newest activity read 2026-09-12 20:49Z (#939) and I recorded "no LIVE sibling". **He was
+> active concurrently:** he pushed `board(s409): WRAPPED` to scrml-support at **22:38Z** (my own
+> support push was REJECTED on it and rebased cleanly — disjoint files) and opened **two new PRs,
+> #950 (dpa-045 round-2) and #951 (wrap(s409)), at 04:32Z / 04:37Z.** He landed NOTHING on scrml
+> `main` during the session, so nothing I measured was affected.
+>
+> ⚑ **COLLISION SURFACE FOR WHOEVER MERGES SECOND:** his **#951 is a WRAP PR** and will touch
+> `hand-off.md`, `docs/changelog.md` and `handOffs/delta-log.md` — the same continuity files as this
+> wrap. Branch protection (`strict:true`) forces the second PR to rebase, which is the sanctioned
+> serialization, so **resolve by UNION** (all three are append-only) and re-run
+> `bun scripts/delta-lint.ts --fix` if the sequence collides — the S408 precedent, where `--fix`
+> correctly renumbered MY side because his were already pushed.
+>
+> His surfaces (`ci.yml`, `dpa-debt.ts`, `regen-spec-index.ts`, `SPEC-INDEX.md`, `dpa-queue.md`, the
+> review lane in `pr-reviews.md`) were **never touched** by me. His open PRs — now
+> **#950/#951** plus #937/#938/#939 and #899/#905/#906/#907/#918/#919/#920 — are CLAIMED, not lost. Full mechanical detail: `docs/changelog.md` S415 block and delta-log `[3028]`–`[3036]`.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Review floor reads 2 OWED — #949 and #952, both this session's.** Per the #890 marker a drain
+   PR's review **rides the NEXT landing**. Discharge first; this is the established opener and it has
+   returned a real finding on every one of the last four sessions.
+
+2. ⚑⚑ **THE ROOT UNDER THE WHOLE `declaredNames` FAMILY IS NOW NAMED, AND IT IS BRYAN'S. DO NOT BUILD
+   ANY OF IT.** `g-e-assign-003-has-zero-producers-so-a-write-to-an-undeclared-name-runs-silently`
+   (HIGH). SPEC §50.9 (`:27867`) says in a **SHALL** that an assignment-expression lvalue must be
+   declared and that an undeclared one **is `E-ASSIGN-003`**; there is a §34 row (`:20059`) and a
+   dedicated §50.8.4 subsection (`:28008`) with the message text. **`grep -rl 'E-ASSIGN-003'` over
+   `compiler/src/` + `compiler/native-parser/` returns 0 files** — reach controls fire (`W-ASSIGN-001`
+   = 1, `E-SCOPE-001` = 22). The emitter's declaration-by-bare-assignment behaviour is documented ONLY
+   in a code comment (`emit-logic.ts` ~:2071–2079). **So the family below is one question — which of
+   the two is the language — not four codegen patches.** Routed to bryan in
+   `handOffs/incoming/2026-09-13-2330-from-S415-peter-to-bryan-…`.
+   Hanging off it, all filed, none fixed by threading the Set in:
+   `g-try-catch-finally-bodies-redeclare-every-assignment` (HIGH) ·
+   `g-match-arm-bodies-share-one-declarednames-set…` (MED) ·
+   `g-loop-head-binding-is-not-tracked…` (MED).
+   ⚑ **And #947's tests PIN the non-conformant side** (`"abQ"` across four programs whose SPEC-correct
+   outcome is a diagnostic). Do not "fix" the tests either — that is the same ruling.
+
+3. ⚑⚑ **THE REST OF THE BRYAN-GATED LIST, unchanged plus two new.** Do not build any of it.
+   - §49.2.1 **braceless loop bodies** (the S413 fork, routed, still unruled). Two gaps hang off it,
+     and `g-do-while-head-continuation-is-accepted-while-the-while-form-is-now-rejected` (LOW, NEW) is
+     plausibly the same ruling.
+   - `g-bare-block-statement-is-silently-dropped` (HIGH) · `g-export-reparse-swallows-ast-builder-parse-path-diagnostics`
+     (HIGH — closing it is a **MIGRATION**, 22 of 2,552 files newly error, ten of them shipped stdlib).
+   - The **must-use spec-citation** ruling (§48.3.3 is a mis-citation; no governing sentence exists).
+   - His **three #936 findings** (dpa-debt fails toward HIDING debt; the currency gate cannot see a
+     duplicated table; six "closed on merge" PRs are all still open).
+   - `E-CONDITION-HEAD-UNPARENTHESIZED` (#945) — **still OUTSTANDING**, carried from S414.
+   - ⚑ **NEW:** `g-library-shadowed-inner-binding-is-a-false-rejection` (MED) — #952 knowingly
+     refuses a program that previously ran. Landed with the stamp OUTSTANDING.
+   - ⚑ **NEW:** the §59 **library-mode lowering widening** — #952 restored the fail-closed guard but
+     did NOT make library mode lower the surface. `containsIndexExpr`'s own comment routes that to him
+     verbatim as *"a language question about what boundary a library module is."* It stays routed.
+
+4. **THE CHEAPEST DRAINABLE ITEM ON THE BOARD, and it closes a live silent infinite loop:**
+   `g-condition-head-continuation-set-misses-every-merged-shift-run-token` (MED).
+   `continuesConditionHead` tests **exact token-TEXT equality** against a 14-member set whose only
+   angle members are `<` `<=` `>` `>=`, and **the lexer merges angle runs into ONE token**, so `>>`
+   `>>>` `>>=` `<<` `<<=` escape. `while (n + 1) >> 2 { … }` compiles at exit 0, drops the body, and
+   loops forever — the exact symptom #945 is named after, surviving its own fix. PA-reproduced with a
+   firing `< 2` control. ⚑ **Third instance of the lexer-merge class here** (memory
+   `scrml-lexer-merges-gt-runs-single-token` carries all three and both failure shapes). The five
+   spellings are strictly BINARY — none can begin a statement — so unlike `<` (markup), `/` (regex) or
+   `+`/`-` (unary prefix) they carry **no false-rejection risk**. Measure the population before
+   landing anyway; it mints nothing but it widens what an existing diagnostic refuses, so it owes a
+   surface review like #945 itself.
+
+5. **Other live work, untouched this session:**
+   `g-emit-if-stmt-with-opts-is-never-reached-and-its-half-of-the-947-fix-is-unpinned` (MED — 0 calls
+   over 961 corpus sources with the control firing at 72; either find the reaching shape and pin it,
+   or establish it is unreachable and delete it) · the two pre-existing `.size`/bracket residuals under
+   #952 (both need the receiver's TYPE, not a walk or a scan).
+
+6. ⚑ **DO NOT RE-ADD A RECOVERY SCAN TO `collectIfCondition`.** Carried verbatim from S414: three
+   separate bounds were built and all three ate or corrupted source; the ⛔ banner in `ast-builder.js`
+   records all three by shape. The scan stopping at the `)` is the invariant.
+
+7. **⛑ STILL OWED and not fixable here:** `bun scripts/types-gate.ts --write` on a clone where it
+   runs. This Windows clone has no extensionless `node_modules/.bin/tsc` (verified: `tsc.exe` +
+   `tsc.bunx` only). Nothing is blocked — the step is `continue-on-error: true` inside the
+   non-blocking `tracking` job, PA-verified this session.
+
+8. **Standing from Peter, unchanged:** merge on green without re-asking; surface `autoMode` blocks as
+   `⛔ BLOCKED BY autoMode — <exact command>` rather than engineering around them. One block fired
+   this session (`gh pr merge 949`) and he cleared it with *"merge when green"*.
+
+## WHAT LANDED
+
+**Two PRs, both gate-green — #949 · #952.** Board **HIGH 107 → 107 · MED 237 → 242 · LOW 88 → 91**
+(one HIGH resolved, one HIGH filed; nine gaps filed total). Counts are generated — read
+`docs/known-gaps.md`, never this line. Review floor drained **5 → 0**, then re-incurred its own 2.
+
+## 🔭 DURABLE
+
+**When two rounds of a fix each produce a defect in the OPPOSITE direction, the shape is wrong, not
+the bound.** `g-library` round 1 was receiver-BLIND → it refused valid programs. Round 2 was
+receiver-SCOPED → it un-refused a class the base compiler caught, shipping `undefined` from a loud
+refusal. The root was one policy over two different kinds of thing: **`[` is a syntactic FORM** (blind
+is correct, and is what base did) while **`.size` and the method names are IDENTIFIERS** (scoping is
+mandatory or they collide with ordinary struct fields). Splitting the axis made both right. The
+S414 sibling rule — *when the same class recurs three times, delete the code rather than bound it
+again* — has a companion: **when the error keeps flipping sides, split the axis.**
+
+**A mutant cannot kill a behaviour the suite never expresses.** Round 2's suite survived SEVEN mutants
+and still shipped a HIGH, because every residual test wrote `return n.size` where `return n["k"]`
+would have failed, and the comment asserted the whole receiver class was "already silent-wrong at
+base" — true of `.size`, **false of the bracket form**, which base refused. That is a COVERAGE gap, not
+a strength gap, and mutation testing is structurally blind to it. **Collapsing a per-FORM distinction
+in a comment is what hid it.**
+
+**An adversarial pass on your own pipeline earns its keep twice over.** The first pass on #945/#947
+found a MED and a HIGH in my own landings; the pass on the g-library fix found a regression the fix
+introduced; the re-review found a second one the FIX ROUND introduced. Every round that skipped
+straight to landing would have shipped something. **The review that found a defect is the argument for
+running the next one, not evidence the process is working well enough to stop.**
+
+**Reading a locus is not reading its mechanism.** I told Peter the "what boundary is a library module"
+question was moot because the map literal already lowers there. The fact was right; the inference was
+too fast. Reading `emit-library.ts:949` showed the literal lowers only for fns the guard lets through,
+so the routing stood and the real finding was that the guard's detection axis was one node kind wide.
+**I had the guard's own comment in hand and summarized from the fact instead of the mechanism.**
+
+## ⚑ MISSES (mine)
+
+1. **★★★ The gap entry warned me about match arms and I did not carry it into the brief.** The
+   `g-library` entry says outright that arms are `rawArms: string[]` and *"an AST walk cannot see
+   it"*, naming it the same class as the S392 `if-chain` finding. I read that entry, quoted other
+   parts of it, and still dispatched an AST-walk fix. The reviewer rediscovered it from scratch —
+   13 of 14 shapes escaping — and it falsified the fix's central claim.
+2. **★★★ I told Peter the boundary question was moot on an inference I had not checked** (above).
+   Corrected in the next message, but it had already shaped the dispatch.
+3. **★★ I described the measured matrix as "8 silent-wrong shapes."** Only `.size` is silent-wrong;
+   the methods throw `TypeError` at call time — **the gap entry had it right and I overstated it**.
+   The build agent caught me. It weakens the fix's value from "closes silent-wrong" to mostly
+   "loud-late → loud-early", and Peter got the corrected version.
+4. **★★ My fix-round brief contained a requirement that was wrong on the facts.** I asked for peer-call
+   and parameter bracket receivers to REFUSE, believing base refused them; base refused only the
+   ALIAS. Meeting it literally would have refused every `xs[0]` in every map-free library fn. The agent
+   declined with a measurement and was right to.
+5. **★ A heredoc with six long marker lines failed to parse and wrote nothing** — caught by checking
+   the line count before and after, exactly as the S413 entry says to. Re-done via a file write. Second
+   session running for this failure mode; **build the string in a file, then append.**
+6. **★ I read a truncated gate banner and nearly took it as a pass.** `facts --check` prints a banner
+   line that survives `tail` while the verdict does not; re-running with an explicit exit-code check
+   showed **exit 1**. Separate the exit status from the output — the contract says so and I had just
+   briefed two agents on it.
+
+## Gate at close
+
+Cloud `gate` **GREEN** on #949 and #952; `windows` green. `tracking` **RED — proven pre-existing by
+NAME-SET comparison**: the five dev-watcher/hot-reload names are identical in **both** directions
+against #949's own run, which was docs-only and therefore free of compiler-source influence. That
+comparison mattered because #952 touches compiler source.
+
+Local on merged main (`8ef61bbf`): conformance **905/905**; the new unit file **78 tests / 0 fail /
+150 expect()**; `delta-lint` PASS at max `[3036]`; `state --check`, `facts --check` and
+`regen-spec-index --check` all **exit 0** (facts needed a regen — the source change moved the LOC
+figures). R26 on merged main: `.size`, match-arm `.size` and the async bracket read all REFUSE;
+`o.m.size`, the struct-field collision and construct-only all COMPILE and return correct values.
+
+**Maps (wrap 6c) — NOT hand-run, deliberately.** Owned by the scheduled `cloud-maps` workflow; a wrap
+cannot contain its own squash SHA. ⚑ **One map finding worth acting on:** both S239 reviewers reported
+`primary.map.md` **not load-bearing** (it self-declares `router-lag`), but the g-library build agent
+found `domain.map.md` **WAS** load-bearing twice — its §21.5/§44.7.1 and §59/§52 sections named
+`rawFallbackReason`'s ruled trade and `mapSetLoweringBoundaryOk`'s Part A safety argument. Line
+references had drifted; symbol names were exact. **The ROUTER is the broken part, not the maps.**
+
+**Worktrees — three removed, four retained.** This session's dispatch worktree landed via #952 and was
+removed (branch deleted, pruned), as were the two base worktrees cut for the review A/Bs
+(`C:/s415base945`, `C:/s415base947`). Four remain and **none is this session's**:
+`agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c`, plus the `scrml-pinned` app clone.
+
+**Inbox:** nothing inbound. **Three** outbound drops to bryan now sit unread — S412's (stdlib
+source-mirror correction + the self-host coverage hole), S413's (the §49.2.1 fork + his three #936
+findings), and **S415's new one** (the `E-ASSIGN-003` ruling + two owed language-surface reviews +
+the unchanged §59 routing). All three deliberately left in place.
+
+
+---
+
 # scrml — Session 414 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S413/S412/S411/
