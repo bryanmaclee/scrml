@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `ccb5e022` — wrap(s414): the ruled opener took four rounds, and the fix reproduced the defect it was named after (#946) — **pushed**
+- `9eb9eb24` — wrap(s414b): the post-wrap continuation — #947, and a baseline I chose not to hand-fix (#948) — **pushed**
 - `c439f929` — wrap(s413): the review floor drained 9 to 0, and it convicted four of my own six PRs (#942) — **pushed**
 - `b9440511` — wrap(s412): three silent defects in the shipped stdlib, and five instruments that lied (#934) — **pushed**
 - `36c99dc9` — wrap(s411): the 82 GB lockup was a colon in a regex character class — found, fixed, and measured (#925) — **pushed**

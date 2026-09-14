@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 107 |
-| MED | 237 |
-| LOW | 88 |
+| HIGH | 108 |
+| MED | 240 |
+| LOW | 90 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -14603,3 +14603,194 @@ on the S415 branch**, so pre-existing.
 
 Sibling of the two entries above and squarely in the same family — the S415 fix's own headline example
 is a `for (let i = …)` loop, and the head binding is the one part of it still untracked.
+
+---
+
+## §S415 — gaps filed S415 (2026-09-13, Peter; every one surfaced by the review-floor drain of #944–#948)
+
+### g-e-assign-003-has-zero-producers-so-a-write-to-an-undeclared-name-runs-silently — SPEC §50.9 says a write to an undeclared identifier SHALL be `E-ASSIGN-003`; the code has a §34 row, a dedicated §50.8.4 subsection with message text, and **no producer anywhere in the compiler** — `NEW S415; HIGH; ROUTED TO BRYAN, do not build`
+
+<!-- @gap id=g-e-assign-003-has-zero-producers-so-a-write-to-an-undeclared-name-runs-silently sev=HIGH status=open locus=searched:compiler/src/,compiler/native-parser/(grep for E-ASSIGN-003 returns 0 files; CONTROL W-ASSIGN-001 returns 1 and E-SCOPE-001 returns 22, so the grep has reach over this code family) prov=review:S415-peter-adversarial-pass-on-947-PA-verified-by-reading-the-governing-sentence-whole-and-by-a-controlled-grep -->
+
+**The governing sentence, quoted whole** (`compiler/SPEC.md:27867`, §50.9):
+
+> *"Assignment-as-expression does not introduce new scope. It assigns to the lvalue's existing binding.
+> The lvalue SHALL be declared (via `let`, `const`, `lin`, `@`, or function parameter) before it is used
+> as an assignment-expression target. Using an undeclared identifier on the left-hand side of an
+> assignment expression is E-ASSIGN-003."*
+
+The code is fully specified: a §34 catalog row (`SPEC.md:20059`), a dedicated **§50.8.4** subsection
+(`:28008`) carrying the exact message text. **It has zero producers.** `grep -rl E-ASSIGN-003` over
+`compiler/src/` + `compiler/native-parser/` returns **0 files**; the reach CONTROLS return
+`W-ASSIGN-001` = 1 file and `E-SCOPE-001` = 22, so the zero is a measurement and not a broken grep. The
+whole `E-ASSIGN-00x` family measures 0 — this is family-wide and pre-existing, not introduced by #947.
+
+⚑ **Why this is the ROOT of the sibling entries and not a seventh item beside them.** The emitter's
+declaration-by-bare-assignment behaviour — a write to a name with no binding in scope emits a fresh
+`const` and runs — is documented **only in a code comment** (`emit-logic.ts` ~:2071–2079). SPEC says the
+opposite, in a SHALL, with a named code. So every entry in the `declaredNames` family is really a
+question about **which of the two is the language**, and that is not a codegen patch.
+
+⚑ **AND #947 NOW PINS THE NON-CONFORMANT SIDE.** `compiler/tests/unit/declared-names-block-scope.test.js`
+asserts `expect(mod.render(["a","b"])).toBe("abQ")` across four tests — i.e. it pins *runs silently* as
+correct for four programs whose SPEC-correct outcome is a diagnostic. The fix itself is right (each block
+body getting its own copy is exactly the scoping `let` has); what is unratified is the **acceptance** it
+leaves behind.
+
+**Same shape as `E-TILDE-001/002`**, which sat dead for the project's whole life behind passing unit
+tests until S409 — and whose ruling's own highest-leverage recommendation was a `-neg` gate requiring
+every Error code to have a conformance case that actually produces it.
+
+**ROUTED TO BRYAN — do not build either direction.** Making the compiler fire `E-ASSIGN-003` is
+newly-rejecting over an unmeasured population; deleting the SPEC text is a language change. Both are his.
+
+---
+
+### g-match-arm-bodies-share-one-declarednames-set-so-a-sibling-arm-emits-a-bare-assignment — every arm of a `match` is emitted through one `opts` object, so a `let` in one arm marks the name declared for all the others — `NEW S415; MED; pre-existing, identical on both trees`
+
+<!-- @gap id=g-match-arm-bodies-share-one-declarednames-set-so-a-sibling-arm-emits-a-bare-assignment sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts:2451(emitLogicBody(arm.structuredBody, opts) — the one opts object, hence one declaredNames Set, threaded through every arm) prov=review:S415-peter-adversarial-pass-on-947-PA-reproduced-by-execution-with-an-if-else-control -->
+
+This is the **exact sibling-limb leak #947 fixed for `if`/`else`** ("the if/else limbs shared ONE
+`bodyOpts` object so they leaked into EACH OTHER"), one file away from that edit, in the same class the
+PR enumerated — and it was neither fixed nor filed. #947 filed two siblings (try/catch, loop head) and
+missed this third.
+
+```scrml
+match p {
+  .A :> { let row = "a"; out = out + row }
+  .B :> { row = "b";     out = out + row }
+}
+```
+
+emits, at **exit 0 with zero diagnostics**:
+
+```js
+if (_scrml_match_1 === "A") { let row = "a";; out = out + row; }
+else if (_scrml_match_1 === "B") { row = "b";; out = out + row; }
+```
+
+**PA-reproduced BY EXECUTION** — importing the emitted library module, `pick("A")` returns `"a"` and
+`pick("B")` throws **`ReferenceError: row is not defined`**.
+
+⚑ **CONTROL — the identical shape in `if`/`else` emits `const row = "b"` and is correct**, which is
+precisely the limb #947 fixed. The two constructs now diverge on the same source shape, which is what
+isolates the defect to the match emitter rather than to the shared helper.
+
+**Pre-existing, not a regression:** the emitted artifact is byte-identical on `ccb5e022` (the #947
+parent) and on merged main; the reviewer's own A/B control (`p0-for`) does differ across those trees, so
+the comparison had reach.
+
+⚑ **Do NOT close this by threading the Set in** — see the `E-ASSIGN-003` entry above; the end-state is a
+ruling, not a patch. What is safely separable is the **divergence** between `match` and `if`/`else`,
+which is a defect on any reading of the ruling.
+
+**Adjacent sites READ BUT NOT REPRODUCED (reasoned only, recorded as such):**
+`emit-control-flow.ts:990` (the SQL-N+1-hoisted `for`-of body) passes **no** `declaredNames` at all while
+its two sibling for-body sites at `:632`/`:807` did get the fix; `emit-logic.ts:708` and
+`emit-engine.ts:972`/`:983`/`:1996` thread the set by reference.
+
+---
+
+### g-condition-head-continuation-set-misses-every-merged-shift-run-token — `>>` `>>>` `>>=` `<<` `<<=` after a condition's `)` escape `E-CONDITION-HEAD-UNPARENTHESIZED` because the lexer merges them into ONE token, so the silent body drop #945 closed survives in five spellings — `NEW S415; MED`
+
+<!-- @gap id=g-condition-head-continuation-set-misses-every-merged-shift-run-token sev=MED status=open locus=compiler/src/ast-builder.js(continuesConditionHead — CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text) is exact token-TEXT equality against a 14-member set whose only angle members are the single-char and -equals forms) prov=review:S415-peter-adversarial-pass-on-945-PA-reproduced-by-execution-with-a-firing-control -->
+
+`continuesConditionHead()` decides whether a head continues past its `)` by testing **exact token-text
+equality** against a 14-member set whose only `<`/`>` members are `<`, `<=`, `>`, `>=`. **The lexer
+merges `>`/`<` runs into a single token**, so `>>`, `>>>`, `>>=`, `<<` and `<<=` arrive as one token
+that is not in the set, the predicate returns false, and the collector takes the unmodified pre-#945
+path: stop at the `)`, drop the remainder **including the `{` and the whole body**.
+
+```scrml
+while (n + 1) >> 2 { n = n + 1 }     // exit 0, zero diagnostics
+```
+
+emits `while (n + 1) {` / `}` — body gone, condition always truthy, **silent infinite loop**. That is the
+full headline symptom #945 is named after. **PA-reproduced by execution.**
+⚑ **CONTROL:** the identical fixture with `< 2` instead of `>> 2` fires
+`E-CONDITION-HEAD-UNPARENTHESIZED` on the same tree, so the guard fires at all and the escape is
+isolated to the merged run.
+
+**This is a MISS, not a disclosed exclusion.** The code banner and the §34 row both enumerate their
+exclusions by name (`/`, `+`, `-`, `.`, `(`, `[`, `:`, `is`), each with a stated rationale; the shift
+runs appear in neither, nor in this ledger. The new normative sentence #945 added at **§49.2.3**
+(*"The compiler SHALL reject such a head"*) is therefore not satisfied, and §49.2.3's own
+IMPLEMENTATION-GAP paragraph names only the `export` region.
+⚑ Sharpest detail: #945's own round-3 commit message uses `while (i) < n >> 1` as its deciding
+counter-example — `>>` was in hand the whole time and was only ever handled as a *suffix* behind a `<`
+trigger, never as the trigger itself.
+
+⚑ **THIRD INSTANCE OF THE LEXER-MERGE CLASS ON THIS PROJECT.** Any check that compares a whole token's
+text against a single-char `>` or `<` is latently wrong; count bracket CHARS, or enumerate the merged
+spellings. The fix here is the five spellings — all strictly binary, none can begin a statement, so
+unlike `<` (markup) or `/` (regex) or `+`/`-` (unary prefix) they carry no false-rejection risk. Verify
+that claim with a population count before landing it.
+
+**Also on this diagnostic, folded here rather than filed separately (message quality, same locus):** a
+braceless markup body — `if (@items) <p>yes</>` — is newly rejected with a message telling the author to
+parenthesize a condition that is *already* fully parenthesized, because the `<` is read as less-than.
+**Not a regression** (the base silently DROPPED the markup; `lift <p>…</>` is inert on both sides), so
+this is a silent-to-loud improvement with wrong wording, not a capability loss.
+
+---
+
+### g-emit-if-stmt-with-opts-is-never-reached-and-its-half-of-the-947-fix-is-unpinned — the second if/else emitter took the fix on reasoning alone; it has zero callers over the corpus and no test bites it — `NEW S415; MED; not proven dead, only unexercised`
+
+<!-- @gap id=g-emit-if-stmt-with-opts-is-never-reached-and-its-half-of-the-947-fix-is-unpinned sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:4404,:4415(the _emitIfStmtWithOpts copies) + compiler/src/codegen/emit-logic.ts:2945(the dispatch, gated on opts.tildeContext or opts.continueBehavior) prov=review:S415-peter-adversarial-pass-on-947-instrumented-reachability-count-with-a-firing-control -->
+
+#947's commit message flags `_emitIfStmtWithOpts` as a ⚑ discovery — *"a SECOND, independent if/else
+emitter that bypasses `emitIfStmt` entirely"* — and applies the same per-block copy there. Two
+measurements say that half landed on reasoning alone:
+
+- **Mutation:** reverting only `:4404`/`:4415` back to `opts` leaves
+  `compiler/tests/unit/declared-names-block-scope.test.js` at **10 pass / 0 fail**. Nothing pins it.
+- **Instrumented reachability** over 961 corpus sources (`conformance/cases` + `compiler/tests/fixtures`):
+  `_emitIfStmtWithOpts` receives **0 calls**. ⚑ **CONTROL FIRES:** `_emitIfStmtInner` receives **72**
+  calls in the same run, so the instrument has reach.
+
+**It is NOT proven dead — only unexercised.** The dispatch is gated on
+`opts.tildeContext || opts.continueBehavior`; the reviewer could not construct a source reaching it and
+says so. Either find the reaching shape and pin it, or establish it is unreachable and delete it — an
+emitter nothing calls is the `E-TILDE-001/002` shape one level down.
+
+---
+
+### g-do-while-head-continuation-is-accepted-while-the-while-form-is-now-rejected — `do { … } while (n) < 4` compiles and emits correct code, against the general SHALL #945 added — `NEW S415; LOW; spec/impl inconsistency, no data loss`
+
+<!-- @gap id=g-do-while-head-continuation-is-accepted-while-the-while-form-is-now-rejected sev=LOW status=open locus=compiler/src/ast-builder.js:13383(the do-while site uses collectExpr, not collectIfCondition, so it collects the whole condition) prov=review:S415-peter-adversarial-pass-on-945-PA-reproduced-by-execution -->
+
+`do { n = n + 1 } while (n) < 4` compiles at **exit 0** and emits `} while (n < 4);` — **correct code**,
+no diagnostic. **PA-reproduced by execution.** The do-while parse site uses `collectExpr()` rather than
+`collectIfCondition()`, so it collects the full condition and the truncation never arises.
+
+§49.2.1 gives `do-while-stmt ::= … 'while' '(' expression ')'` the **same paren structure** as
+`while-stmt`, and the §49.2.3 SHALL #945 added is written generally. Net: `while (n) < 4 { }` is now an
+error while `do { } while (n) < 4` is accepted and works.
+
+No data loss on either side — this is a consistency question, not a defect in the emitted output.
+⚑ Plausibly the same ruling as the §49.2.1 **braceless loop body** fork already routed to bryan and
+still unruled; do not resolve it independently of that.
+
+---
+
+### g-block-scoped-declared-names-undefined-preservation-invariant-is-inert — the helper's docstring names a load-bearing invariant that a mutation proves has no effect — `NEW S415; LOW; documentation defect`
+
+<!-- @gap id=g-block-scoped-declared-names-undefined-preservation-invariant-is-inert sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(blockScopedDeclaredNames — the docstring's invariant 2) prov=review:S415-peter-adversarial-pass-on-947-mutation-proven-inert -->
+
+`blockScopedDeclaredNames`' docstring asserts: *"`undefined` IS PRESERVED AS `undefined` … `new
+Set(undefined)` is an empty Set and would silently change behaviour."*
+
+**Mutation-proven false as stated.** Rewriting the helper as `new Set<string>(names ?? [])` — precisely
+the spelling the comment says changes behaviour — leaves the targeted suite at **10/10**, the `p0-for`
+artifact **byte-identical**, and both direction probes unchanged.
+
+Mechanism: `emitLogicBody` (`emit-logic.ts:5563`) does
+`const declaredNames = opts.declaredNames ?? new Set<string>();` one line in, performing that exact
+conversion itself — so the preservation is inert at every `emitLogicBody` call site. It could only
+matter at the one site that bypasses `emitLogicBody`, which is the site the entry above shows is never
+reached.
+
+The safer spelling is fine and should stay; the **claim** is unsupported. ⚑ Recorded because a confident
+safety comment sitting on an untrue premise is this project's most reliable bug-finder — now five
+consecutive arcs — and because the comment would otherwise teach the next reader a constraint that does
+not exist.
