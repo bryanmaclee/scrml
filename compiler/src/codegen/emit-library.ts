@@ -100,33 +100,50 @@ const MAP_RUNTIME_PROVIDED_NAMES: ReadonlySet<string> = new Set(
 const MAP_RUNTIME_REFERENCED = /_scrml_map_[a-z]/;
 
 /**
- * Does this fn body contain a bracket-INDEX expression (`m[k]`)?
+ * §59 map/set SURFACE vocabulary — every method name whose lowering lives behind
+ * `mapSetLoweringBoundaryOk` in emit-expr.ts and therefore does NOT fire at the
+ * library boundary. Kept in one place so the guard below reads as a vocabulary
+ * check rather than a scattered name list.
  *
- * ⚑ THIS EXISTS TO KEEP A HALF-FIX FROM BECOMING SILENT-WRONG, WHICH IS THE ONE
- * OUTCOME THIS FILE HAS ALREADY RULED IS WORSE THAN FAILING. Shipping the map
- * runtime (above) makes a map-bearing fn ROUTE where it used to fall back to raw.
- * That is right for a fn that only CONSTRUCTS a map — verified by running the
- * emitted module. But §59.6's bracket-READ lowering (`emitIndex`, emit-expr.ts)
- * fires only on `ctx.mode === "client" || "server"`, so on the library path a map
- * read emits a RAW property access:
+ * ⚑ MIRRORS TWO TABLES IN `emit-expr.ts` AND MUST BE READ AS A BACKSTOP, NOT A
+ * SECOND SOURCE OF TRUTH. The map half is `MAP_METHOD_HELPERS`' key set (§59.7/
+ * §59.8); the set-native half is the `emitCall` set branch's switch (§59.12:
+ * `.add` / `.elements` / `.union` / `.intersect` / `.difference`). Drift here is
+ * SAFE IN ONE DIRECTION ONLY: a name missing from this set means a shape escapes
+ * the guard and ships silent-wrong, which is the outcome the guard exists to
+ * prevent — so when the emit-expr surface grows, grow this set with it. A name
+ * that is here but no longer in emit-expr merely costs a raw fallback.
+ */
+const MAP_SET_SURFACE_METHODS = new Set<string>([
+  // Map surface — MAP_METHOD_HELPERS (emit-expr.ts). `.size` is a MEMBER, not a
+  // call, and is matched separately below.
+  "get", "has", "getOr", "insert", "remove", "update", "insertAll",
+  "keys", "values", "entries", "sorted", "sortedBy",
+  // Set-native surface — the emit-expr `emitCall` set branch (§59.12). `.has` /
+  // `.remove` ride the map table above.
+  "add", "elements", "union", "intersect", "difference",
+]);
+
+/**
+ * LIMB 1 of the guard — the BRACKET read, detected RECEIVER-BLIND on the AST.
+ * This is base `9eb9eb24`'s `containsIndexExpr`, restored unchanged.
  *
- *     browser:  return _scrml_map_get(m, "k");   → 7
- *     library:  return m["k"];                   → undefined
+ * ⛔ THE AXIS IS SPLIT ON PURPOSE, AND THE SPLIT IS THE WHOLE LESSON OF THREE
+ * ROUNDS. `[` is a syntactic FORM; `.size` and the method names are ORDINARY
+ * IDENTIFIERS. One policy over both halves fails in one direction or the other,
+ * and it did, twice:
+ *   · receiver-BLIND over both -> false REJECTIONS. `it.size` on a struct,
+ *     `o.get(…)` on an object: nine valid programs refused whole-module.
+ *   · receiver-SCOPED over both -> false ACCEPTANCES. `let n = m; return n["k"]`
+ *     was REFUSED at base and shipped `return n["k"]` -> `undefined`. A silent
+ *     wrong answer, newly introduced, where §59.6 requires 7.
+ * So: blind for the bracket (its false-rejection cost is base's own accepted
+ * precedent — `xs[0]` beside a map literal has always fallen back), scoped for
+ * the identifiers (their false-rejection cost is NOT acceptable, because they
+ * collide with ordinary field and method names).
  *
- * A HAMT node has no `"k"` property, so the fn would compile clean, export, and
- * return `undefined` — **silent-wrong**, where today it fails LOUDLY as an
- * unlowered verbatim map literal. `rawFallbackReason`'s foreign-code exclusion
- * already ruled exactly this trade: *"silent-wrong output, which is strictly worse
- * than the raw path's honest verbatim copy."* Same ruling, same reason.
- *
- * ⚑ NARROW BY CONSTRUCTION, so it cannot regress anything. It is consulted ONLY
- * for a fn whose EMITTED body references the map runtime — and every such fn falls
- * back to raw TODAY, because the helper was unmet. So a map-free fn is untouched, a
- * map-constructing fn is newly fixed, and a map-READING fn stays byte-identical to
- * its current output. Widening the §59.6 read lowering to the library boundary is
- * the real fix and is filed separately: it needs the same boundary-safety argument
- * `emitIndex` makes for client/server, which is a language question about what
- * boundary a library module is — not a codegen one, and not decided here.
+ * ⚠ DO NOT "UNIFY" THESE TWO LIMBS. Each previous round did exactly that and
+ * produced a new defect in the opposite direction.
  */
 function containsIndexExpr(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
@@ -138,6 +155,199 @@ function containsIndexExpr(node: unknown): boolean {
     if (v && typeof v === "object" && containsIndexExpr(v)) return true;
   }
   return false;
+}
+
+/**
+ * LIMB 2 — the `.size` MEMBER and the METHOD vocabulary, detected RECEIVER-SCOPED
+ * on the EMITTED BYTES. Plus a bracket read on a NAMED map receiver, which exists
+ * only to reach the one place limb 1 structurally cannot see (below).
+ *
+ * ⚑ THIS EXISTS TO KEEP A HALF-FIX FROM BECOMING SILENT-WRONG, WHICH IS THE ONE
+ * OUTCOME THIS FILE HAS ALREADY RULED IS WORSE THAN FAILING. Shipping the map
+ * runtime (above) makes a map-bearing fn ROUTE where it used to fall back to raw.
+ * That is right for a fn that only CONSTRUCTS a map — verified by running the
+ * emitted module. But EVERY §59 read/method lowering in emit-expr.ts sits behind
+ * `mapSetLoweringBoundaryOk`, which returns `true` for `client`, a bare-ident
+ * receiver for `server`, and **`false` for every other mode including `library`**.
+ * So on the library path the whole read surface emits VERBATIM:
+ *
+ *     browser:  return _scrml_map_get(m, "k");   → 7
+ *     library:  return m["k"];                   → undefined
+ *
+ * `rawFallbackReason`'s foreign-code exclusion already ruled exactly this trade:
+ * *"silent-wrong output, which is strictly worse than the raw path's honest
+ * verbatim copy."* Same ruling, same reason.
+ *
+ * ⛑ THE DETECTION AXIS WAS ORIGINALLY `index` ALONE (`containsIndexExpr`), AND
+ * THAT WAS A COVERAGE GAP IN A FAIL-CLOSED GUARD — measured by execution in
+ * library mode at `9eb9eb24`, compiling each probe and RUNNING the emitted module:
+ *
+ *     m["k"]                → REFUSED E-CODEGEN-INVALID-LOGIC  (the only shape caught)
+ *     m.size                → exit 0, returns `undefined`      ← SILENT-WRONG
+ *     m.get/getOr/has/insert/remove/update/insertAll/
+ *       keys/values/entries/sorted/sortedBy, s.add/s.elements
+ *                           → exit 0, then TypeError at CALL time
+ *
+ * So `.size` produced precisely the outcome the guard was built to prevent, and
+ * the method calls shipped an importable artifact that throws on first use. Both
+ * now fall back to raw, where the unlowered verbatim map literal is not valid JS
+ * and the §2.2.1 emit gate refuses the artifact at COMPILE time instead.
+ *
+ * ⛔ READ THE EMITTED BYTES, DO NOT WALK THE AST — AND BOTH HALVES OF THAT WERE
+ * LEARNED THE EXPENSIVE WAY. An earlier cut of this guard walked `fn.body` for an
+ * `index` node, a `.size` member, or a call whose callee property was in the table
+ * above. It was RECEIVER-BLIND, and that was not a tolerable trade at this width:
+ *
+ *   · `index` is a syntactic FORM, but `.size` / `.get` / `.add` / `.keys` /
+ *     `.update` are ordinary IDENTIFIERS. `type Item:struct = { size: int }` plus
+ *     `it.size` in a fn that merely happens to also build a map was refused —
+ *     a VALID program, executed correctly at `9eb9eb24`, and the refusal is
+ *     whole-MODULE (a clean sibling in the same invocation is withheld too) while
+ *     the diagnostic tells its author to report a compiler defect. Nine such
+ *     programs were measured refused.
+ *   · The walk could not see the live escape anyway. A NON-VARIANT `match` arm
+ *     result is carried as a STRING (`emit-logic.ts`, `child.expr ?? child.header`)
+ *     and re-parsed at emit time, so the arm's expression is not a node under
+ *     `fn.body` at all. 13 of 14 shapes inside a `match` arm walked straight past
+ *     the AST guard — in the splicer that exists FOR `match`.
+ *
+ * Both are answered by the same move, and it is this file's own documented
+ * discipline (`unmetRuntimeHelperRefs`, `unloweredScrmlSyntax`): read the emitted
+ * text. The emit NAMES its map locals — `let m = _scrml_map_from_entries(…)` — so
+ * the receiver set is available WITHOUT re-deriving emit-expr's `mapCellBareName`
+ * classifier, and the match-arm escape is present in the bytes (token-spaced,
+ * `return m . size;`) even though it is absent from the tree.
+ *
+ * ⚑ THE SCAN IS SCOPED TO THOSE RECEIVERS AND NOTHING ELSE. `it.size` on a struct,
+ * `o.get(…)` on a plain object, `xs[0]` on an array are all invisible to it,
+ * because none of those names is bound to a map constructor in this emitted body.
+ *
+ * ⚠ THE RESIDUALS OF LIMB 2, AND THE DISTINCTION THAT MATTERS — measured at base
+ * `9eb9eb24` and at head, by compiling AND RUNNING each. An earlier revision of
+ * this comment claimed all of these "were ALREADY silent-wrong before any of
+ * this". That was TRUE for `.size` and FALSE for the bracket form, and the
+ * conflation is exactly what hid a regression: the residual tests wrote
+ * `return n.size` where `return n["k"]` would have caught it.
+ *
+ *   receiver not bound here, `.size` form   base: `undefined`   head: `undefined`
+ *     (parameter `fn f(m) { m.size }`, peer `let q = mk(); q.size`,
+ *      alias `let n = m; n.size`)          -> pre-existing, NOT a regression
+ *   alias, BRACKET form `let n = m; n["k"]` base: REFUSED       head: REFUSED
+ *     -> limb 1 catches it. Scoping it was the regression; blind is correct.
+ *   parameter / peer, BRACKET form          base: `undefined`   head: `undefined`
+ *     -> ALSO pre-existing. Base's guard is gated on the map runtime appearing in
+ *        THIS fn's emit, and such a fn lowers no literal of its own, so base never
+ *        consulted the guard either. Verified by execution, not inferred.
+ *
+ * Closing the `.size` residuals needs the receiver's TYPE. That is the same
+ * language question `emitIndex`'s boundary argument raises, and it is filed
+ * separately: widening the §59 read lowering to the library boundary is the real
+ * fix, not a wider guard.
+ *
+ * ⚠ ONE KNOWN FALSE REJECTION REMAINS, AND IT IS A SHADOWING QUESTION TEXT CANNOT
+ * ANSWER. If an INNER binding re-uses a map local's name — `let m = ["k": 7]`
+ * beside `xs.map((m) => m.size)`, where the lambda's `m` is not the map — the scan
+ * cannot tell the two apart and refuses. It is pinned as a characterization test.
+ * Resolving it needs SCOPE, and the cheap text approximations all fail the wrong
+ * way: dropping the name whenever it is re-bound anywhere would silently un-guard
+ * a real top-level `m.size` in the same fn, trading a rare false rejection for a
+ * rare WRONG ANSWER — the one direction this file has ruled against. Left refusing
+ * deliberately, not overlooked.
+ *
+ * ⚑ SHAPES MEASURED CAUGHT THAT LOOK LIKE THEY SHOULD ESCAPE, recorded so nobody
+ * "fixes" them twice: a PARENTHESISED receiver (`(m)["k"]`) emits without the
+ * parens, and an ANONYMOUS receiver (`["k": 7].size`) is reached by the
+ * balanced-paren scan below.
+ */
+function unloweredMapSurfaceReads(emitted: string): string[] {
+  if (!MAP_RUNTIME_REFERENCED.test(emitted)) return [];
+  // Blank string/template literal CONTENT before scanning, so a `.size` inside a
+  // user's string can never cost a valid program its structural route. Blanking
+  // cannot hide a real read: a read is code, never literal content.
+  const scan = blankStringLiteralContent(emitted);
+
+  const found: string[] = [];
+  const methods = [...MAP_SET_SURFACE_METHODS].join("|");
+
+  // (1) Names this body BINDS to a map/set runtime constructor. Sets ride the map
+  // runtime too (`let s = _scrml_map_from_entries([], false)`), so one probe covers
+  // both.
+  //
+  // ⚑ THE CONSTRUCTOR MUST BE THE WHOLE INITIALIZER HEAD, NOT MERELY PRESENT IN IT.
+  // An earlier cut scanned `[^;\n]*?_scrml_map_[a-z]`, which conferred map-hood
+  // whenever the runtime appeared ANYWHERE in the initializer — including as an
+  // ARGUMENT. `let z = f(["k": 7])` made `z` a "map", and `z.size` (a correct
+  // program at base) was refused.
+  const bindRe = /(?:let|const|var)\s+([A-Za-z_$][\w$]*)\s*=\s*_scrml_map_[a-z]/g;
+  const names = new Set<string>();
+  for (let m = bindRe.exec(scan); m !== null; m = bindRe.exec(scan)) names.add(m[1]);
+
+  // ⚑ `(?<![.\w$])`, NOT `\b`. A leading `\b` matches after a DOT, so a body that
+  // merely contains a local named `m` made `o.m.size` fire — scoped to a TOKEN
+  // rather than to a RECEIVER, refusing a program that is correct at base.
+  const LEFT = "(?<![.\\w$])";
+  for (const name of names) {
+    const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // `\s*` around every token is load-bearing: a re-parsed match-arm emits
+    // token-spaced (`m . size`, `m [ "k" ]`, `m . getOr ( … )`).
+    if (new RegExp(`${LEFT}${n}\\s*\\.\\s*size\\b`).test(scan)) found.push(`${name}.size`);
+    if (new RegExp(`${LEFT}${n}\\s*\\.\\s*(?:${methods})\\s*\\(`).test(scan)) found.push(`${name}.<method>()`);
+    // The bracket read on a NAMED map receiver. Limb 1 (`containsIndexExpr`) is the
+    // authority on brackets and is receiver-blind; this exists ONLY to reach the
+    // place limb 1 structurally cannot — a non-variant `match` arm, whose result is
+    // carried as a STRING and re-parsed at emit time, so it is no AST node at all.
+    // Being name-scoped it cannot add a false rejection: the name IS a map here.
+    if (new RegExp(`${LEFT}${n}\\s*\\[`).test(scan)) found.push(`${name}[…]`);
+  }
+
+  // (2) The ANONYMOUS receiver — a read taken straight off the constructor call,
+  // `["k": 7].size`, which binds no name. Walk each map-runtime call to its
+  // matching `)` and look at what immediately follows.
+  const callRe = /_scrml_map_[a-z][\w$]*\s*\(/g;
+  for (let m = callRe.exec(scan); m !== null; m = callRe.exec(scan)) {
+    let depth = 0;
+    let i = m.index + m[0].length - 1;
+    for (; i < scan.length; i++) {
+      if (scan[i] === "(") depth++;
+      else if (scan[i] === ")" && --depth === 0) break;
+    }
+    if (i >= scan.length) continue; // unbalanced — leave it to the syntax gates
+    const tail = scan.slice(i + 1, i + 48);
+    if (new RegExp(`^\\s*\\.\\s*size\\b`).test(tail)) found.push("<map literal>.size");
+    else if (new RegExp(`^\\s*\\.\\s*(?:${methods})\\s*\\(`).test(tail)) found.push("<map literal>.<method>()");
+    else if (/^\s*\[/.test(tail)) found.push("<map literal>[…]");
+  }
+
+  return [...new Set(found)];
+}
+
+/**
+ * Replace the CONTENT of every string / template literal in `src` with spaces,
+ * preserving length and every other byte, so a text scan cannot read literal
+ * content as code. Same intent as emit-expr's `_stripStringLiteralsForAwaitScan`.
+ */
+function blankStringLiteralContent(src: string): string {
+  const out = src.split("");
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === "\\") { out[i] = " "; i++; if (i < src.length) out[i] = " "; i++; continue; }
+        // A newline ends an unterminated single/double-quoted literal; do not run
+        // away to EOF blanking real code.
+        if (quote !== "`" && (src[i] === "\n" || src[i] === "\r")) break;
+        out[i] = " ";
+        i++;
+      }
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return out.join("");
 }
 
 /**
@@ -846,19 +1056,45 @@ function emitAsyncLibraryFns(
       // loses the async lowering and fails loudly rather than corrupting the file.
       const range = verifiedFnRemovalRange(fn, sourceText);
       if (!range) continue;
+      // ⚑ Snapshot the two diagnostic sinks this emit can append to, so a
+      // DISCARDED emit (the map-surface gate below) leaves no diagnostic behind.
+      // An error raised while lowering a body we then throw away would be a
+      // phantom: the fn ships its verbatim source, and the construct the error
+      // describes never reaches the artifact through this path.
+      const foreignMark = foreignCrossingErrors.length;
+      const preparedMark = preparedStmtErrors.length;
+      const emitted = emitLibraryFnMember(fn, {
+        isExported: fn.fromExport === true,
+        asyncFnNames,
+        foreignCrossingErrors,
+        preparedStmtErrors,
+        // GITI-038 — a nested-async-closure holder that is NOT itself async: emit
+        // its body server-side (nested await legal) but keep its OWN signature sync.
+        nonAsyncReemit:
+          !asyncFnNames.has(fn.name as string) && nestedAsyncHolders.has(fn.name as string),
+      });
+      // ⚑ THE SAME MAP-SURFACE GATE `emitControlFlowLibraryFns` APPLIES, AND IT WAS
+      // MISSING HERE. This splicer routes on ASYNC-ness alone — it consults neither
+      // `unmetRuntimeHelperRefs` nor the map guard — so an async library fn reading a
+      // map escaped the guard entirely. Measured at `9eb9eb24`: `import { safeCallAsync }
+      // from "scrml:host"` plus `let m = ["k": 7]; let r = safeCallAsync(…); return m["k"]`
+      // compiled exit 0 and emitted `return m["k"];` — i.e. even the BRACKET READ, the
+      // one shape the guard was built for, shipped silent-wrong when the fn was async.
+      // Falling back to raw is this splicer's own established failure action (see the
+      // unverifiable-span case above): the fn keeps its verbatim text, loses the async
+      // lowering, and fails LOUDLY — the verbatim map literal is not valid JS, so the
+      // §2.2.1 emit gate refuses the artifact. Both limbs, same split as the
+      // control-flow splicer: receiver-blind for the bracket, scoped for the names.
+      if (
+        (MAP_RUNTIME_REFERENCED.test(emitted) && containsIndexExpr(fn.body)) ||
+        unloweredMapSurfaceReads(emitted).length > 0
+      ) {
+        foreignCrossingErrors.length = foreignMark;
+        preparedStmtErrors.length = preparedMark;
+        continue;
+      }
       removals.push(range);
-      outLines.push(
-        emitLibraryFnMember(fn, {
-          isExported: fn.fromExport === true,
-          asyncFnNames,
-          foreignCrossingErrors,
-          preparedStmtErrors,
-          // GITI-038 — a nested-async-closure holder that is NOT itself async: emit
-          // its body server-side (nested await legal) but keep its OWN signature sync.
-          nonAsyncReemit:
-            !asyncFnNames.has(fn.name as string) && nestedAsyncHolders.has(fn.name as string),
-        }),
-      );
+      outLines.push(emitted);
     }
   } finally {
     setServerAsyncClassifier(prevClassifier);
@@ -942,11 +1178,18 @@ function emitControlFlowLibraryFns(
     // would PARSE and then throw on first call. Discard it and leave the fn on
     // the raw path, where the same construct fails loudly instead.
     if (unmetRuntimeHelperRefs(emitted).length > 0) continue;
-    // ⚑ Companion to the map-runtime inline: a map-bearing fn that also bracket-
-    // READS stays on the raw path, because §59.6's read lowering does not reach the
-    // library boundary and the routed emit would silently return `undefined`.
-    // See `containsIndexExpr` for the full reasoning and why this cannot regress.
+    // ⚑ Companion to the map-runtime inline: a fn that BUILDS a map and then READS
+    // it stays on the raw path, because NO §59 read/method lowering reaches the
+    // library boundary (they all sit behind `mapSetLoweringBoundaryOk`, which is
+    // false for `library`) and the routed emit would return `undefined` (`.size`,
+    // `m[k]`) or throw on first call (every method).
+    //
+    // TWO LIMBS, AND THEY USE DIFFERENT POLICIES ON PURPOSE — see the comments on
+    // each. Limb 1: the bracket form, receiver-BLIND on the AST, byte-identical to
+    // base `9eb9eb24`. Limb 2: `.size` and the method vocabulary, receiver-SCOPED
+    // on the emitted bytes, because those are ordinary identifiers.
     if (MAP_RUNTIME_REFERENCED.test(emitted) && containsIndexExpr(node.body)) continue;
+    if (unloweredMapSurfaceReads(emitted).length > 0) continue;
     // ⚑ Companion gate: scrml-only syntax the structural path re-printed WITHOUT
     // lowering, which needs no runtime helper and so is invisible to the check
     // above. `!{ … }` is the live case and it is the worst possible shape —
