@@ -69,7 +69,7 @@ bun run compiler/src/cli.js compile samples/compilation-tests/ >/dev/null 2>&1 |
 #    CAN go red for a real regression and green otherwise — which is the whole point.
 #
 #    S313 UPDATE — the premise above ("an exit-code gate cannot express 'the same names as
-#    before'") is now only half true. `bun scripts/browser-baseline.ts --check` expresses
+#    before'") is now only half true. `bun scripts/tier-baseline.ts --check` expresses
 #    exactly that for the BROWSER tier: it exits 0 while the failure NAME SET is unchanged
 #    and 1 the moment a name joins or leaves it, so the tier is assertable without being
 #    structurally unpassable. It runs in CI `tracking` today. Adding it HERE, or requiring
@@ -77,6 +77,25 @@ bun run compiler/src/cli.js compile samples/compilation-tests/ >/dev/null 2>&1 |
 #    NOT taken unilaterally, because promoting a whole always-red job is the cry-wolf
 #    retrofit S302 explicitly ruled out. lsp / commands / self-host still have no name-set
 #    assertion; extending the same shape to them is mechanical once this is proven in anger.
+#
+#    S409 UPDATE — TWO CORRECTIONS TO THE PARAGRAPH ABOVE, both of which it now gets wrong.
+#    (1) The script is `scripts/tier-baseline.ts` (renamed from `browser-baseline.ts` and
+#        parameterised by `--tier=<name>`; both `--tier=x` and `--tier x` resolve).
+#    (2) "lsp / commands / self-host still have no name-set assertion" is FALSE for
+#        SELF-HOST as of S409: `--tier=self-host --check` asserts a 3-name baseline
+#        (compiler/tests/self-host/FAILURE-BASELINE.json) and it is a BLOCKING step in the
+#        cloud `gate`. The promotion bryan declined to take unilaterally at S313 he RULED
+#        at S409 — for browser (S313) and self-host (S409) both. lsp / commands remain
+#        unasserted and are the honest remainder of that sentence.
+#    ⚠ STILL NOT ADDED HERE, and the S313 reason is unchanged and still right: local
+#    environments vary far more than CI, and it was exactly a local environment difference
+#    that made the first recorded browser baseline wrong. ⚠ AND A SECOND REASON THAT IS
+#    SPECIFIC TO SELF-HOST: running that tier WRITES `compiler/self-host/dist/` (bs.css +
+#    bs.js) even when the compile FAILS, which satisfies the bare `existsSync` guards in
+#    compiler/tests/integration/self-host-smoke.test.js — a file THIS hook runs in the very
+#    next breath. Wiring it in above the suite would flip that block from SKIP to running
+#    against a failed-compile artifact, silently. See the `self-host` registry entry in
+#    scripts/tier-baseline.ts for the measurement.
 if [ "$RUN_SUITE" = "1" ]; then
 echo "--- Running test suite (unit + integration + conformance) ---"
 # `set -e` is active: a bare `VAR=$(failing-cmd)` aborts the script HERE, before any of the

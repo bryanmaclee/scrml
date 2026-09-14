@@ -43,7 +43,7 @@
  * (pa-base §8; the CI file says the same at its delta-lint step). So a KNOWN, tracked, standing
  * failure is BASELINED — `scripts/corpus-compile-floor.baseline.json`, one entry per broken program
  * naming the gap it is tracked under. Baselined programs do not fail the floor; a NEW breakage does.
- * This is the same discipline as `delta-lint` (`delta-log-dupes.baseline.json`) and `browser-baseline`.
+ * This is the same discipline as `delta-lint` (`delta-log-dupes.baseline.json`) and `tier-baseline`.
  * It is NOT an allowlist that rots: the floor ALSO fails when a baselined program starts compiling
  * again, or is no longer enumerated — a stale baseline entry is a gate failure, so the baseline can
  * only shrink to truth. Add an entry only for a genuinely-tracked bug (a filed gap); remove it the

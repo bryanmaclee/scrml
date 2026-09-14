@@ -1,11 +1,26 @@
-// scripts/browser-baseline.ts — Q6 of the S310 queue. change-id: browser-failure-name-set-baseline
+// scripts/tier-baseline.ts — Q6 of the S310 queue. change-id: browser-failure-name-set-baseline
+//
+// ⛑ RENAMED S409 from `scripts/browser-baseline.ts`. The mechanism was never browser-specific; only
+// its three constants were. It is now parameterised by `--tier=<name>` over a registry (see TIERS
+// below) and defaults to `browser`, so every pre-S409 invocation shape still resolves. The rename is
+// the point: a file called `browser-baseline.ts` is one nobody thinks to point at a second tier, and
+// a second tier went ungated for a year while this file sat next to it. Everything below this banner
+// is the original S313 rationale, preserved verbatim — it is the recorded reasoning for the whole
+// name-set approach, including its author's honest account of getting the first baseline wrong.
 //
 // THREE MODES (mirrors scripts/state.ts + scripts/facts.ts exactly — same flags, same exit semantics):
-//   `bun scripts/browser-baseline.ts`         PRINT  — run the tier, report the current failure set.
-//   `bun scripts/browser-baseline.ts --write` WRITE  — record the current failure NAME SET as the
+//   `bun scripts/tier-baseline.ts`         PRINT  — run the tier, report the current failure set.
+//   `bun scripts/tier-baseline.ts --write` WRITE  — record the current failure NAME SET as the
 //                                                      baseline. Idempotent.
-//   `bun scripts/browser-baseline.ts --check` CHECK  — run the tier, diff the name set against the
+// ⛑ S409 precision on "Idempotent": the asserted content — `failures`, and therefore `count` — is.
+// `recordedAt` is NOT: it defaults to today (see main()), so re-running `--write` on an unchanged
+// tier rewrites that one metadata line. That is the intended meaning of the field, and it is never
+// read by `--check`. Said plainly here because "Idempotent" unqualified is the kind of claim a later
+// reader checks by `git diff` and concludes the script is broken.
+//   `bun scripts/tier-baseline.ts --check` CHECK  — run the tier, diff the name set against the
 //                                                      baseline; exit 1 on ANY difference.
+// Each takes an optional `--tier=<name>` (default `browser`); an unknown name is a hard error that
+// prints the registry rather than silently measuring nothing.
 //
 // WHY THIS EXISTS (S313, closing bryan's Q6).
 // The browser tier carries a DOCUMENTED FAILURE BASELINE (~48). Because an exit code cannot express
@@ -38,10 +53,34 @@
 // SCOPE. This asserts the browser tier ONLY. lsp / commands / self-host carry their own baselines and
 // are out of scope here; extending to them is mechanical once this shape is proven in anger.
 //
+// ⛑ S409 — THE SCOPE PARAGRAPH DIRECTLY ABOVE WAS FALSE FROM THE DAY IT WAS WRITTEN, AND THE FALSE
+// HALF IS THE REASSURING HALF. "lsp / commands / self-host carry their own baselines" was never
+// true: `compiler/tests/browser/FAILURE-BASELINE.json` was the ONLY baseline file in the repo and
+// this was the ONLY baseline script. A reader auditing "is the self-host tier covered?" would read
+// that sentence and conclude yes. It is preserved above rather than deleted because the failure mode
+// — a scope note that describes an intended world as an existing one — is worth leaving legible.
+//
+// WHAT IS ACTUALLY TRUE AT S409, measured rather than assumed:
+//   · `browser`   — asserted here, gated in the BLOCKING `gate` job since S313, and ALSO reported in
+//                   `tracking`. 48 names, 2 env-exclusions.
+//   · `self-host` — asserted here as of S409, gated in the BLOCKING `gate` job, 3 names, ZERO
+//                   env-exclusions. See the registry entry for the measurement.
+//   · `lsp` / `commands` — STILL have no baseline and are STILL not asserted by anything. They run
+//                   in `tracking`, which is `continue-on-error: true`. Adding them is a registry
+//                   entry plus a `--write`; it has NOT been done, and this sentence says so instead
+//                   of implying otherwise.
+//
 // PROMOTION IS NOT TAKEN HERE. Wiring this into the blocking `gate` is a separate, operator-level
 // call: per the S302 lesson, promoting the whole `tracking` job wholesale would be exactly the
 // cry-wolf retrofit. This lands as a step in `tracking` that reports honestly; whether `gate` should
 // require it is bryan's.
+//
+// ⛑ S409 — AND THE PROMOTION PARAGRAPH ABOVE IS A RECORD OF THE POSITION AT AUTHORING TIME, NOT THE
+// CURRENT STATE. Read it as dated. bryan ruled promote for `browser` at S313 (it has been a BLOCKING
+// `gate` step since) and ruled promote for `self-host` at S409. Both rulings are operator-level and
+// both are recorded at their call sites in `.github/workflows/ci.yml`. The paragraph stays because
+// the REASONING in it — do not promote a whole continue-on-error job wholesale — is still the rule
+// that governs the next tier somebody wants to add.
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
@@ -51,8 +90,6 @@ import { createInterface } from "readline";
 import { PassThrough } from "stream";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BASELINE_PATH = join(REPO_ROOT, "compiler/tests/browser/FAILURE-BASELINE.json");
-const TIER = "compiler/tests/browser";
 
 // A `(fail)` marker, minus the trailing `[12.34ms]` timing (timings are non-deterministic).
 //
@@ -99,7 +136,12 @@ interface Baseline {
 // So it is (a) named per-entry with a reason, (b) COUNTED on every run — the skip-rate is printed
 // beside the asserted count so growth is visible, and (c) deliberately not pattern-based: adding an
 // entry costs a line of justification, which is the friction that keeps it small.
-const ENV_EXCLUDED: EnvExclusion[] = [
+//
+// ⛑ S409 — THE LIST IS NOW PER-TIER (it moved verbatim into the `browser` registry entry below) AND
+// THE PER-TIER SPLIT IS PART OF THE GUARD, NOT BOOKKEEPING. A single shared list would let one
+// tier's justified exemption silently suppress a same-named failure in another, and the printed
+// skip-rate — the detection mechanism — would stop being a ratio over the tier it names.
+const BROWSER_ENV_EXCLUDED: EnvExclusion[] = [
   {
     name: "TodoMVC §0: SKIP — dist not compiled > benchmarks/todomvc/dist/app.html must exist",
     reason:
@@ -112,7 +154,166 @@ const ENV_EXCLUDED: EnvExclusion[] = [
   },
 ];
 
-async function runTier(): Promise<{
+interface TierConfig {
+  /** The path handed to `bun test`. Also the `tier` field written into the baseline artifact. */
+  testPath: string;
+  /** Where this tier's recorded name set lives, relative to the repo root. */
+  baselinePath: string;
+  /** Printed while the tier runs. Tiers differ by ~50x in wall time; a wrong note reads as a hang. */
+  durationNote: string;
+  /** See BROWSER_ENV_EXCLUDED's comment. An empty list is a MEASUREMENT, not an omission. */
+  envExcluded: EnvExclusion[];
+}
+
+// THE TIER REGISTRY — the only tier-specific state in this file.
+//
+// ⛑ S409. Before this, `TIER` / `BASELINE_PATH` / `ENV_EXCLUDED` were three module-level constants
+// and the tier was baked in. The internals — the streaming line-filter, FAIL_MARKER, the parser's
+// own oracle, `failureReason`, the bidirectional diff — were ALREADY generic and needed no change;
+// `Baseline` already carried a `tier` field. So the honest cost of the second tier was a registry,
+// not a second copy of the script. A hand-spelled `self-host-baseline.ts` would have forked every
+// scar above into two files that drift.
+//
+// ⛔ ADDING A TIER IS NOT FREE AND THE ORDER MATTERS: record the baseline with `--write` FIRST, read
+// the recorded names, and only then wire a `--check` into CI. Wiring first gives you a MISSING-file
+// hard error at best and, if someone "fixes" that by writing an empty set, the hollow gate this
+// script exists to prevent.
+const TIERS: Record<string, TierConfig> = {
+  browser: {
+    testPath: "compiler/tests/browser",
+    baselinePath: "compiler/tests/browser/FAILURE-BASELINE.json",
+    durationNote: "this tier is slow; ~20-30s",
+    envExcluded: BROWSER_ENV_EXCLUDED,
+  },
+  "self-host": {
+    testPath: "compiler/tests/self-host",
+    baselinePath: "compiler/tests/self-host/FAILURE-BASELINE.json",
+    durationNote: "~0.6s",
+    // ZERO ENV-EXCLUSIONS, AND THAT IS A MEASUREMENT.
+    //
+    // The stated reason this tier was excluded from every gate — that it "needs a locally-built,
+    // gitignored dist that CANNOT be rebuilt on a clean checkout" — is FALSE for
+    // `compiler/tests/self-host`, and was measured two ways at S409 rather than argued:
+    //   (a) `compiler/self-host/dist/` (14 files) moved entirely out of the tree, tier re-run;
+    //   (b) a fresh worktree, where `dist/` (.gitignore:2) had never materialised at all.
+    // Both readings: 139 pass · 122 skip · 3 fail · 264 tests across 4 files · <0.6s, with an
+    // IDENTICAL failure name set. The tests compile their inputs at test time, and `bs.test.js`
+    // self-skips with an explicit message when `bs.scrml` fails to compile. Nothing here READS
+    // environment state, so there is nothing to exempt — and an empty list is recorded explicitly so
+    // the next reader knows it was checked rather than skipped.
+    //
+    // ⛔ BUT THE TIER IS NOT SIDE-EFFECT-FREE, AND THE FIRST CUT OF THIS COMMENT SAID IT WAS.
+    // It read "Nothing here reads environment state, so there is nothing to exempt" and stopped
+    // there — READING was the half that got checked; WRITING is the half that bites. Measured, by
+    // execution: delete `compiler/self-host/dist/`, run `bun test compiler/tests/self-host/bs.test.js`
+    // alone, and it reports *"self-host parity SKIPPED — bs.scrml compile failed"*, skips all 52 …
+    // AND STILL WRITES `bs.css` + `bs.js` into `compiler/self-host/dist/`. `compileScrml({write:true})`
+    // emits even when the compile reports errors. So THE TIER MANUFACTURES THE VERY ARTIFACT ITS OWN
+    // EXCLUSION CLAIM WAS BUILT AROUND — and manufactures it from a FAILED compile.
+    //
+    // ⛔ THE CROSS-TIER HAZARD, STATED SO THE NEXT PERSON WIRING THESE INTO ONE JOB SEES IT.
+    // `compiler/tests/integration/self-host-smoke.test.js` gates its whole §B block on a bare
+    // `existsSync(<root>/compiler/self-host/dist/bs.js)` (`:665`, and again at `:669` `:673` `:679`
+    // `:699` `:711`). Those guards exist BECAUSE the artifact is gitignored and a clean checkout
+    // cannot have it — their contract is "skip when absent". Running THIS tier first satisfies the
+    // guard, so the smoke tests flip from SKIP to RUNNING AGAINST AN ARTIFACT PRODUCED BY A FAILED
+    // COMPILE, with no diagnostic anywhere saying so.
+    // ⚑ It is safe in CI TODAY ONLY BY LUCK OF LAYOUT, NOT BY ANY PROPERTY: the self-host gate runs
+    // in `gate` and `integration` runs in `tracking`, which is a DIFFERENT JOB and therefore a
+    // different checkout. Put them in one job — the standing "promote integration into gate" plan at
+    // the top of ci.yml would do exactly that — and the hazard is live.
+    // ⚑ AND THE OBVIOUS LOCAL PROBE FOR IT LIES: `self-host-smoke.test.js` resolves its dist path
+    // from `findMainProjectRoot()` (`:34`), which parses `git worktree list` and takes the MAIN
+    // working tree — so deleting the dist inside a WORKTREE changes nothing it reads. Measure this
+    // one in a single-checkout layout or you will measure a different artifact than the obligation.
+    // Fixing `bs.test.js` not to emit on a failed compile is a separate arc and is NOT done here.
+    //
+    // WHY THE TIER IS GATED AT ALL (S409): a defect that rewrote the character class
+    // `/[A-Za-z0-9_\-:@]/` into a map literal lived in `compiler/self-host/tab.scrml`, made
+    // `isAttrIdentPart` return false for EVERY character, and turned a tokenizer loop into an
+    // unbounded allocator — an 82 GB host lockup that cost a day and three hard resets and sat
+    // unattributed for sessions (fixed at 6951baa5, #924). NOTHING IN ANY GATED PATH EXECUTED THIS
+    // DIRECTORY, so it reached nobody's gate. ⚑ PRECISION, because the looser form of that sentence
+    // ("run by no hook") is FALSE and this file exists to stop reassuring comments: `.git/hooks/
+    // post-commit` DOES run `bun test compiler/tests/`, self-host included. It just cannot gate
+    // anything — it runs AFTER the commit — and it greps `\d+ fail` to print "TEST REGRESSION
+    // DETECTED", which the browser tier's 48 baselined failures trigger on EVERY compiler-touching
+    // commit. Permanently-red advisory output is not coverage; it is the cry-wolf shape this whole
+    // mechanism replaces. That is the whole argument.
+    envExcluded: [],
+  },
+};
+
+const DEFAULT_TIER = "browser";
+
+/**
+ * Resolve the tier against the registry. BOTH spellings are accepted: `--tier=<name>` and
+ * `--tier <name>`.
+ *
+ * FAILS LOUD on an unknown name rather than falling back to the default. A typo'd tier that silently
+ * measured `browser` would report PASS while asserting nothing about the tier the caller named — the
+ * wrong-referent mode (a probe that resolves to a different artifact than the obligation measures
+ * nothing), which is the same class as everything else this file guards against.
+ *
+ * ⛔ THE SPACE FORM IS HANDLED BECAUSE ITS ABSENCE WAS A LIVE DEFECT IN THE GATE, CAUGHT BY AN
+ * ADVERSARIAL PASS ON THIS FILE'S FIRST CUT — AND IT WAS THE EXACT DEFECT THE DOC COMMENT ABOVE
+ * CLAIMED TO PREVENT. The first cut matched only `a.startsWith("--tier=")`, so
+ * `bun scripts/tier-baseline.ts --tier self-host --check` fell through to DEFAULT_TIER and printed,
+ * verbatim:
+ *
+ *     PASS — browser failure name set matches the baseline (48 asserted, 0 of 2 env-excluded observed).
+ *
+ * Exit 0. Asserting nothing about self-host. REPORTING SUCCESS. A gate that answers a question you
+ * did not ask, in the affirmative, is worse than no gate — and this one shipped inside the arc whose
+ * whole purpose was to close that class. Two sides to the fix, and both are load-bearing:
+ *   (a) the space form RESOLVES, so the natural spelling does what the caller meant; and
+ *   (b) a `--tier` with no value — last token, or followed by another flag — is a HARD ERROR rather
+ *       than a silent default. `--tier --check` must never quietly measure `browser`, and it must
+ *       never swallow `--check` as a tier name either (which would then also silently downgrade the
+ *       run from CHECK to PRINT, i.e. exit 0 forever: one typo, two hollow-gate modes).
+ * The FIRST matching spelling wins, so the resolution is deterministic if both appear.
+ */
+function resolveTier(): { name: string; cfg: TierConfig } {
+  const argv = process.argv;
+  let name = DEFAULT_TIER;
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--tier=")) {
+      name = a.slice("--tier=".length);
+      break;
+    }
+    if (a === "--tier") {
+      const next = argv[i + 1];
+      // A flag-looking successor is NOT a tier name. Treating it as one is how `--tier --check`
+      // would have become "measure the tier literally named `--check`" — which then fails the
+      // registry lookup below, but only by luck of that name not existing. Rejecting here makes it
+      // deliberate rather than incidental.
+      if (next === undefined || next.startsWith("-")) {
+        console.error(`\n  MISSING TIER NAME — \`--tier\` was given with no value.`);
+        console.error(`  Known tiers: ${Object.keys(TIERS).join(" · ")}`);
+        console.error(`  Write either \`--tier=<name>\` or \`--tier <name>\`.`);
+        console.error(`  Refusing to run: falling back to the default here would assert the WRONG`);
+        console.error(`  tier and report PASS while doing it.\n`);
+        process.exit(1);
+      }
+      name = next;
+      break;
+    }
+  }
+
+  const cfg = TIERS[name];
+  if (!cfg) {
+    console.error(`\n  UNKNOWN TIER — \`${name}\` is not in the registry.`);
+    console.error(`  Known tiers: ${Object.keys(TIERS).join(" · ")}`);
+    console.error(`  Refusing to run: a mistyped tier that fell back to the default would report`);
+    console.error(`  PASS while asserting nothing about the tier you named.\n`);
+    process.exit(1);
+  }
+  return { name, cfg };
+}
+
+async function runTier(cfg: TierConfig): Promise<{
   names: string[];
   ranOk: boolean;
   raw: string;
@@ -133,7 +334,7 @@ async function runTier(): Promise<{
   // DROPPING the multi-thousand-line object dumps that are the 155 MB bulk. `raw` below is therefore
   // the FILTERED text (tens of KB), and every downstream computation (names / ranOk / reported /
   // parseOk / failureReason / the `!ranOk` tail) runs on it byte-identically to the buffered version.
-  const child = spawn("bun", ["test", TIER], { cwd: REPO_ROOT });
+  const child = spawn("bun", ["test", cfg.testPath], { cwd: REPO_ROOT });
 
   // Merge stdout + stderr into ONE ordered line sequence. The tier writes ~all of its payload (markers,
   // error blocks, dumps, AND the `N pass/skip/fail` summary) to STDERR; stdout is ~181 bytes. Both
@@ -280,32 +481,37 @@ function failureReason(raw: string, name: string): string[] {
   return out;
 }
 
-function readBaseline(): Baseline {
-  if (!existsSync(BASELINE_PATH)) {
-    console.error(`\n  MISSING — ${BASELINE_PATH} does not exist.`);
-    console.error(`  Record it with: bun scripts/browser-baseline.ts --write\n`);
+function readBaseline(tierName: string, cfg: TierConfig): Baseline {
+  const path = join(REPO_ROOT, cfg.baselinePath);
+  if (!existsSync(path)) {
+    console.error(`\n  MISSING — ${path} does not exist.`);
+    console.error(`  Record it with: bun scripts/tier-baseline.ts --tier=${tierName} --write\n`);
     process.exit(1);
   }
-  return JSON.parse(readFileSync(BASELINE_PATH, "utf8")) as Baseline;
+  return JSON.parse(readFileSync(path, "utf8")) as Baseline;
 }
 
-function writeBaseline(names: string[], stamp: string): void {
+function writeBaseline(tierName: string, cfg: TierConfig, names: string[], stamp: string): string {
+  const path = join(REPO_ROOT, cfg.baselinePath);
   const payload: Baseline = {
     _comment:
-      "GENERATED — the browser tier's documented failure NAME SET. Regenerate with " +
-      "`bun scripts/browser-baseline.ts --write`; verify with `--check`. Timings and counts are " +
+      `GENERATED — the ${tierName} tier's documented failure NAME SET. Regenerate with ` +
+      `\`bun scripts/tier-baseline.ts --tier=${tierName} --write\`; verify with \`--check\`. Timings and counts are ` +
       "deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as " +
       "much a failure as one joining it: prune it in the same commit that fixes the test.",
-    tier: TIER,
+    tier: cfg.testPath,
     recordedAt: stamp,
     count: names.length,
     failures: names,
-    envExcluded: ENV_EXCLUDED,
+    envExcluded: cfg.envExcluded,
   };
-  writeFileSync(BASELINE_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return path;
 }
 
 async function main(): Promise<void> {
+  const { name: tierName, cfg } = resolveTier();
+
   const mode = process.argv.includes("--check")
     ? "check"
     : process.argv.includes("--write")
@@ -313,10 +519,21 @@ async function main(): Promise<void> {
       : "print";
 
   // A calendar stamp is metadata, never an input to the comparison — `--check` reads `failures` only.
-  const stamp = process.argv.find((a) => a.startsWith("--stamp="))?.slice("--stamp=".length) ?? "";
+  //
+  // ⛑ S409 FIX ROUND — THE DEFAULT USED TO BE `""`, AND THAT MADE EVERY SHIPPED INSTRUCTION IN THIS
+  // REPO WRONG. The baseline artifacts' own `_comment` says "Regenerate with `... --write`", and so
+  // do the MISSING hint in readBaseline() and the STALE-BASELINE prune hint below. Following any of
+  // them LITERALLY blanked `recordedAt`, silently, in the very file whose job is to be a trustworthy
+  // record — so the instruction the artifact gives you degraded the artifact. Defaulting to today
+  // makes the shipped instruction correct as written, which is the right direction to fix it: an
+  // instruction nobody can follow without a flag they were not told about is the defect, not the
+  // user. `--stamp=<YYYY-MM-DD>` still overrides, for back-dating a re-record.
+  const stamp =
+    process.argv.find((a) => a.startsWith("--stamp="))?.slice("--stamp=".length) ??
+    new Date().toISOString().slice(0, 10);
 
-  console.log(`\n  Running ${TIER} … (this tier is slow; ~20-30s)\n`);
-  const { names, ranOk, raw, reported, parsed, parseOk } = await runTier();
+  console.log(`\n  Running ${cfg.testPath} … (${cfg.durationNote})\n`);
+  const { names, ranOk, raw, reported, parsed, parseOk } = await runTier(cfg);
 
   if (!parseOk) {
     console.error(`  PARSER DISAGREES WITH THE HARNESS — bun reports ${reported} failure(s), this`);
@@ -336,21 +553,21 @@ async function main(): Promise<void> {
   }
 
   if (mode === "print") {
-    console.log(`  ${names.length} failing test(s) in ${TIER}:\n`);
+    console.log(`  ${names.length} failing test(s) in ${cfg.testPath}:\n`);
     for (const n of names) console.log(`    ${n}`);
     console.log(`\n  (write them with --write; gate with --check)\n`);
     return;
   }
 
   if (mode === "write") {
-    writeBaseline(names, stamp);
-    console.log(`  recorded ${names.length} failure name(s) → ${BASELINE_PATH}\n`);
+    const path = writeBaseline(tierName, cfg, names, stamp);
+    console.log(`  recorded ${names.length} failure name(s) → ${path}\n`);
     console.log("--write: done.\n");
     return;
   }
 
-  const baseline = readBaseline();
-  const excluded = new Set(ENV_EXCLUDED.map((e) => e.name));
+  const baseline = readBaseline(tierName, cfg);
+  const excluded = new Set(cfg.envExcluded.map((e) => e.name));
 
   // Filter BOTH sides. Excluding only the observed side would make the comparison direction-dependent.
   const known = new Set(baseline.failures.filter((n) => !excluded.has(n)));
@@ -363,8 +580,8 @@ async function main(): Promise<void> {
 
   if (added.length === 0 && fixed.length === 0) {
     console.log(
-      `  PASS — browser failure name set matches the baseline ` +
-        `(${observed.length} asserted, ${skipped} of ${ENV_EXCLUDED.length} env-excluded observed).\n`,
+      `  PASS — ${tierName} failure name set matches the baseline ` +
+        `(${observed.length} asserted, ${skipped} of ${cfg.envExcluded.length} env-excluded observed).\n`,
     );
     // The skip-rate is printed on every PASS, not buried: an escape hatch that grows silently is the
     // pa-base §8 absorbed-hatch mode, and detection of it is a RATIO, not an inspection.
@@ -381,7 +598,7 @@ async function main(): Promise<void> {
       for (const l of failureReason(raw, n)) console.error(`        │ ${l}`);
     }
     console.error(
-      "\n  This is a REGRESSION. The browser tier's count alone would not have shown it.\n" +
+      `\n  This is a REGRESSION. The ${tierName} tier's count alone would not have shown it.\n` +
         "  Fix the regression, or — if the failure is genuinely environmental and accepted —\n" +
         "  re-record with `--write` and say why in the commit message.",
     );
@@ -391,7 +608,7 @@ async function main(): Promise<void> {
     console.error(`\n  STALE BASELINE — ${fixed.length} baseline entr(y/ies) now PASS:\n`);
     for (const n of fixed) console.error(`    - ${n}`);
     console.error(
-      "\n  Prune them: `bun scripts/browser-baseline.ts --write`. A baseline nobody prunes\n" +
+      `\n  Prune them: \`bun scripts/tier-baseline.ts --tier=${tierName} --write\`. A baseline nobody prunes\n` +
         "  re-acquires the blind spot it was built to remove.",
     );
   }

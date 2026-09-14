@@ -413,7 +413,7 @@ function runWrite(): number {
  * that the population emptied. Same for the session index. Exit 2, distinct from the staleness
  * exit 1: this is "the instrument is not reading the ledger", not "the ledger moved on".
  *
- * Sibling of the guard in scripts/facts.ts; both mirror scripts/browser-baseline.ts's refusal.
+ * Sibling of the guard in scripts/facts.ts; both mirror scripts/tier-baseline.ts's refusal.
  */
 function refuseDegenerateProjection(): void {
   const problems: string[] = [];
