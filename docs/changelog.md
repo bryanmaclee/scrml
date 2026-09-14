@@ -7296,6 +7296,77 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-13 (S415 — peter — the floor drained 5 to 0, and a fix shipped a defect in the opposite direction twice before the axis split)
+
+A Windows-clone session in two arcs, both landed gate-green: **#949** (the review-floor drain) and
+**#952** (the `g-library` HIGH). Peter's sequence, unchanged since S411 — clear the measured debt
+first, then take the recommendation.
+
+**The review floor went 5 OWED → 0.** Three carve-outs (#944 · #946 · #948) and two full S239
+adversarial passes (#945 · #947), the latter dispatched **un-seeded and in parallel off pre-cut base
+worktrees at each PR's parent**, so neither reviewer inherited a hypothesis or raced the other's
+install. **Both returned findings.** Every carve-out ran three probe axes each proven to fire before
+its zero was believed — including a synthetic PROSE negative, which is the exact false positive the
+S414 probe shipped before it was scoped to the marker shape. The debt probe's own independent
+classifier agreed: the code-bearing carve-out rate held at 3/208.
+
+**The root the floor turned up, and it is a ruling, not a patch.** `E-ASSIGN-003` is specified in a
+SHALL at §50.9, has a §34 catalog row and a dedicated §50.8.4 subsection with message text — and
+**zero producers**; `grep` over `compiler/src/` + `native-parser/` returns 0 files with reach controls
+firing at `W-ASSIGN-001` = 1 and `E-SCOPE-001` = 22. The emitter's declaration-by-bare-assignment
+behaviour is documented only in a code comment while SPEC says the opposite, so the whole
+`declaredNames` family — try/catch, match arms, loop-head bindings — is really one question about
+which of the two is the language. **#947's new tests now pin the non-conformant side.** Routed to
+bryan; none of the family fixed by threading the Set in. Same shape as `E-TILDE-001/002`.
+
+**The `g-library` arc took three build rounds and two adversarial passes, and each of the first two
+fixes shipped a defect in the opposite direction from the one it closed.** In library mode the map
+LITERAL lowers to a real HAMT node (`emitMapLit` has no mode gate at all) while every READ against it
+emitted verbatim — `.size` shipped `undefined` at exit 0, confirmed by importing and running the
+emitted module against §59.6's *"`.size → int` is the entry count"*, which carries no mode condition.
+Round 1 made the guard's vocabulary receiver-BLIND and it refused **valid** programs (a struct field
+named `.size` took down the whole invocation). Round 2 made it receiver-SCOPED and it **un-refused** a
+bracket class the base compiler had caught, shipping `undefined` from a loud refusal. **The root was
+one policy applied to two different kinds of thing:** `[` is a syntactic FORM, where receiver-blind is
+correct and is exactly what base did; `.size` and the method names are IDENTIFIERS, where scoping is
+mandatory or they collide with ordinary struct fields. Round 3 split the axis and both limbs are
+documented as un-unifiable, with the three-round history as the reason.
+
+**Also closed on the way:** `emitAsyncLibraryFns` had **no map guard at all**, so a bracket read inside
+an async library fn shipped `undefined` — a shape previously believed caught, reproduced by execution.
+The widening that would make library mode genuinely *lower* the §59 surface stays routed to bryan,
+exactly as `containsIndexExpr`'s own comment routes it.
+
+**Why round 2's own suite could not have caught its regression** — sharper than "weak test": every
+residual test wrote `return n.size` where `return n["k"]` would have failed, and the comment asserted
+the whole receiver class was already silent-wrong at base, true of `.size` and false of the bracket
+form. Seven mutants ran and **all seven were killed**; the hole survived because it was a COVERAGE gap,
+not a strength gap. **A mutant cannot kill a behaviour the suite never expresses.**
+
+Landings:
+
+- **#949** — review floor 5 → 0. Three carve-outs with controlled three-axis probes; two un-seeded
+  S239 passes, both returning findings. Six gaps filed: the `E-ASSIGN-003` root (HIGH, routed), a
+  match-arm `declaredNames` leak that is the exact class #947 enumerated and missed (MED), five merged
+  shift-run spellings escaping #945's new diagnostic so the silent infinite loop survives (MED, and the
+  third instance of the lexer-merge class here), an unreached-and-unpinned second if/else emitter
+  (MED), and two LOWs. #946's status flip verified by execution and A/B rather than asserted; its board
+  figures checked against the generated block.
+- **#952** — `g-library-map-surface-unlowered-beyond-the-bracket-read` (HIGH) RESOLVED. Direction
+  **newly-rejecting only** — round 2's volunteered `xs[0]` un-refusal is gone, so no one-way door
+  ships. Mutation 0 fail / 78 pass with limb-1 removal now killed; corpus differential 0 newly failing
+  / 0 diagnostic code changes / 0 artifact content diffs over 1,928 sources and 7,467 artifacts,
+  controls first. Three residuals filed, one of them a false rejection the fix knowingly introduces and
+  which owes bryan a language-surface review.
+
+**Gate at close.** Cloud `gate` GREEN on both PRs; `windows` green; `tracking` RED and **proven
+pre-existing by name-set comparison** — the five dev-watcher/hot-reload names are identical in both
+directions against #949's own run, which was docs-only and therefore free of compiler-source influence.
+Local on merged main: conformance **905/905**; the new unit file **78 tests / 0 fail / 150 expect()**;
+`delta-lint` PASS at max `[3036]`; `state --check`, `facts --check` and `regen-spec-index --check` all
+exit 0. R26 on merged main: the headline shapes refuse, the false-rejection cases compile and return
+correct values.
+
 ### 2026-09-12/13 (S413 — peter — the review floor drained 9 to 0, and it convicted four of my own six PRs)
 
 A review session on the Windows clone. **Two landings, both gate-green** — #940 (the floor drain) and
