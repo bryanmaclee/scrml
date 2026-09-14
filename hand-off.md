@@ -1,3 +1,353 @@
+# scrml — Session 414 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S413/S412/S411/
+> S410 mine, S405 bryan's) and is untouched. **No LIVE sibling this session** — bryan's last activity
+> was 2026-09-12 20:49Z (#939); his surfaces (`ci.yml`, `dpa-debt.ts`, `regen-spec-index.ts`,
+> `SPEC-INDEX.md`, `dpa-queue.md`, the review lane in `pr-reviews.md`) were **read but never edited**.
+> His seven open PRs (#937/#938/#939 + #905/#906/#907/#918/#919/#920/#899) are CLAIMED, not lost.
+> Full mechanical detail: `docs/changelog.md` S414 block and delta-log `[3014]`–`[3022]`.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. ⚑⚑ **THE OPENER IS DRAINABLE AND IT IS THE EMITTER TWIN OF WHAT #941 CLOSED.**
+   `g-declared-names-set-shared-across-blocks-emits-a-bare-assignment` (**HIGH, LIVE**).
+   `emit-logic.ts:2060` picks DECLARATION vs BARE ASSIGNMENT off `opts.declaredNames`, and **every
+   block emitter passes the SAME `Set` object rather than a copy** (`emit-control-flow.ts:451`, `:627`,
+   `:1015`, `:1037`; only `function-decl` copies, at `emit-logic.ts:4234`). So a `let` in ANY block
+   marks that name declared for the whole enclosing scope, and a later out-of-scope write emits a bare
+   assignment: **exit 0, zero diagnostics, `ReferenceError` when run.** Needs NO inner function.
+   Rename CONTROL discriminates. ⚑ **Fix direction deliberately NOT prescribed** — copying the set per
+   block is the naive move and its migration population is UNMEASURED. Measure before narrowing.
+
+2. ⚑⚑ **STILL GATED ON BRYAN, AND THE LIST GREW. Do not build any of it.**
+   - §49.2.1 **braceless loop bodies** (the S413 fork, routed, unruled). Two gaps hang off it.
+   - **`g-bare-block-statement-is-silently-dropped`** (HIGH, NEW, live on main) — `i = i + 10;
+     { i = i + 1 }; return i` returns **10**; both controls return 11. Whether a standalone block is
+     legal at all is plausibly the same ruling as the braceless-body fork.
+   - **`g-export-reparse-swallows-ast-builder-parse-path-diagnostics`** (HIGH, NEW) — closing it is a
+     **MIGRATION**: 22 of 2,552 measurable files newly error (E-THROW ×17, E-TRY ×7, E-STMT ×1),
+     **ten of them shipped stdlib modules** plus the native parser's own `parse-markup.scrml`.
+   - The **must-use spec-citation** ruling (§48.3.3 is a mis-citation; no governing sentence exists).
+   - His **three #936 findings** (dpa-debt fails toward HIDING debt; the currency gate cannot see a
+     duplicated table; six "closed on merge" PRs are all still open).
+   - ⚑ **NEW:** `E-CONDITION-HEAD-UNPARENTHESIZED` (#945) mints a diagnostic, which decides what the
+     language refuses → owes a **language-surface review**. Landed with the stamp OUTSTANDING per the
+     S313 review-floor mechanism, exactly like #924/issue #922. Do not close that loop unilaterally.
+
+3. **Review floor reads 2 OWED — #944 and #945, both this session's.** Per the established pattern
+   (#890 marker) a drain PR's review **rides the NEXT landing**. Discharge first.
+
+4. **The other live HIGH, untouched this session and still the cheapest big one:**
+   `g-library-map-surface-unlowered-beyond-the-bracket-read` — `mapSetLoweringBoundaryOk` is off for
+   every non-client/server mode; #929's guard walks only `kind=index` and covers **1 of 8 shapes**.
+   `m.size` emits `return m.size;` against a HAMT node → `undefined` at exit 0. Reproducers written.
+
+5. ⚑ **DO NOT RE-ADD A RECOVERY SCAN TO `collectIfCondition`.** Three separate bounds were built and
+   all three ate or corrupted source; the ⛔ banner in `ast-builder.js` records all three by shape so
+   the next reader does not reinvent one. The scan stopping at the `)` is the invariant. If the
+   emitted artifact for an offending head looks wrong, that is FINE — the build is red.
+
+6. **Standing from Peter, unchanged:** merge on green without re-asking; surface `autoMode` blocks as
+   `⛔ BLOCKED BY autoMode — <exact command>` rather than engineering around them. Neither merge was
+   blocked this session.
+
+
+## ⏭ POST-WRAP CONTINUATION — #947 landed after the S414 wrap
+
+Peter said *"go on recommend"* after the wrap, so PICKUP item 1 was taken in the same session and
+landed as **#947**. The pickup list below is superseded ONLY on item 1; items 2–6 stand.
+
+**`g-declared-names-set-shared-across-blocks-emits-a-bare-assignment` is RESOLVED.** Each block body
+now gets its own COPY of `declaredNames`. R26 on merged main: all four reproducer cases return
+`"abQ"`; two of them threw `ReferenceError` before.
+
+⛑ **The migration the entry demanded was measured, and it was free** — 0 artifact content diffs over
+1,928 sources / 7,467 artifacts. **Measured twice**: the first run covered a 9-site naive substitution,
+not the patch that landed, because the build found two further cases (the if/else limbs shared ONE
+`bodyOpts` object so they leaked into EACH OTHER; and `_emitIfStmtWithOpts` is a SECOND independent
+if/else emitter). ⚑ The first run also printed `0 artifact content diffs` UNDER a
+`NOT A VALID COMPARISON` banner — the S411 trap — because the patch was uncommitted so both sides were
+the same revision.
+
+⛑ **The S239 pass falsified the build's own direction claim**: `semantics-changed` AND
+**`newly-rejecting`**, not "no diagnostic delta". Two bare writes after a block go from exit 0 (then
+`ReferenceError` at runtime) to `E-CODEGEN-INVALID-LOGIC`. It owes a language-surface review; landed
+with the stamp outstanding.
+
+### NEW on the board — two siblings, both PA-reproduced on BOTH trees (pre-existing)
+- **HIGH `g-try-catch-finally-bodies-redeclare-every-assignment`** — `emitTryStmt` takes NO opts, so
+  the entire try/catch/finally interior is untracked and every bare write becomes a fresh `const`:
+  `let x = 1; try { x = 2 } catch (e) { x = 3 }; return x` **returns 1**, exit 0, silently wrong. The
+  same untracked mode holds in `emit-each` / `emit-channel` / `emit-match` / `emit-engine` /
+  `emit-lift` / `emitHoistedForStmt` (grep-verified; reachability unmeasured).
+- **MED `g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws`** — the `for` head
+  binding never enters `declaredNames`; the body emits `const i = i + 1` and throws
+  `Cannot access 'i' before initialization`.
+
+⛑ **Do NOT fix either by threading the Set in.** Declaration-by-bare-assignment is documented ONLY in
+a code comment (`emit-logic.ts` ~:2071–2079); SPEC §50 models `x = value` as assignment to an EXISTING
+binding, and `E-ASSIGN-001` says *"Declare `x` before …"*. The end-state is probably a scope
+diagnostic — a language question for bryan, not a codegen patch.
+
+### ⛑ OWED — `TYPES-BASELINE.json` is stale by one key, and I deliberately did not hand-fix it
+#947 renames one anonymous-argument type inside a pre-existing TS2345, which renames a baseline key.
+PA-confirmed by running the gate's own tsc on both trees: **241 = 241 diagnostics, 155 = 155 distinct
+keys, exactly one non-path delta.** `bun scripts/types-gate.ts --write` **cannot run on this Windows
+clone** (it resolves an extensionless `node_modules/.bin/tsc`; Windows ships `tsc.exe`). A hand-edit
+was attempted, verified to touch exactly one line, and then **REVERTED**: the committed baseline
+records `totalDiagnostics` **228** against this environment's **241**, each worktree ran its own
+`bun install`, and tsc's type-printer truncation (`... 29 more ...`) is version-sensitive — so a
+hand-written key could be **wrong in a new way**, which is harder to diagnose than a stale one.
+**Nothing is blocked:** the step is `continue-on-error: true` inside the non-blocking `tracking` job
+(`ci.yml:215`). **Run `bun scripts/types-gate.ts --write` on a clone where it runs.**
+
+## WHAT LANDED
+
+**Two PRs, both gate-green — #944 · #945.** Board **HIGH 104 → 107 · MED 236 → 236 · LOW 87 → 88**;
+four gaps filed, one resolved. Counts are generated — read `docs/known-gaps.md`, never this line.
+
+Peter's ruled opener is **closed** (`g-loop-branch-head-truncated-at-first-close-paren`), and the
+review floor went **4 OWED → 0**.
+
+## 🔭 DURABLE
+
+**A fix can reproduce the exact defect it is named after, and only an A/B against a TRUE base shows
+it.** Cut 3's recovery turned `while (i) < n >> 1 { … }` from base's `while (i) { }` (falsy,
+terminates) into `while (i < n) { }` — an empty-bodied infinite loop. The headline symptom, caused by
+the fix. It was invisible to the test suite, to conformance, and to three rounds of my own reading.
+
+**When the same class recurs three times in the same code, delete the code rather than bound it
+again.** Rounds 1–3 each patched the recovery scan's stopping rule and each patch had a hole one
+token-kind wide. Round 4 removed the scan; the class is closed by construction because the collector
+never advances past the `)`. ⚑ **The tell was that every fix was a new predicate over the same
+ambiguity** — "is this token part of the condition or the start of the body?" is genuinely
+undecidable at that position, and three attempts to decide it were three attempts at the wrong
+question.
+
+**A bounded local repair and an open-ended scan are not the same precedent.** S308's
+`E-FOR-UNPARENTHESIZED-HEAD` recovers by consuming one known token and collecting one known operand.
+I cited it as licence for an unbounded scan. Same words, different mechanism — check what a precedent
+actually *does* before inheriting its shape.
+
+**Five of my own instruments failed this session, every one caught before it produced a claim** — a
+probe matching prose not markers; a control that fired nowhere; a `write:false`/`write:true` swap that
+flipped my own proof-of-reach; a base-vs-tip comparison whose "base" was the fix branch itself; and a
+commit message whose backticks the shell executed. **The prior holds: if an instrument here is wrong,
+assume it is flattering you.**
+
+**Three parties can each get an axis wrong in a different direction, and only a crossed matrix
+resolves it.** Two reviewers and I each named a different axis for the export swallow (the `<program>`
+shell, the function wrapper, the shell again) — every one of us had varied two things at once. The
+real answer is the whole lexical interior of any exported declaration.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I read the round-2 hole and let it go**, because the comment above it asserted the
+   fail-direction was *"stop early, never swallow source."* It was false. Fifth consecutive arc where
+   a confident safety comment sat on the bug — and the first where I was the one who believed it
+   rather than the one who caught it.
+2. **★★★ I cited S308 as licence for a design it does not license** (bounded repair vs open-ended
+   scan), which is what put three rounds of silent-data-loss defects into review in the first place.
+3. **★★ A mis-citation of mine reached a user-facing error string.** The brief cited §50.2.2 for
+   productions that live in §50.2.1. The agent propagated it faithfully into the §34 row and the
+   diagnostic text while getting it RIGHT in prose it wrote itself. Caught at the file-delta review.
+4. **★★ I cut the review branch off the FIX branch instead of off main**, so #944 carried the
+   pre-banner brief onto main with both wrong citations uncorrected. Fixed by rebasing so the banner
+   rides in with #945 — but it was on main in between.
+5. **★ Two of my prescribed fixes to the agent were wrong** and it measured rather than assumed: an
+   ASI/newline bound would not have caught the same-line case, and narrowing `is` to KEYWORD-only does
+   not work because the tokenizer classifies `is` context-free. Both corrections were right.
+
+## Gate at close
+
+Cloud `gate` **GREEN** on #944 and #945; `windows` green. `tracking` **RED — proven pre-existing by
+name-set comparison against main's own run at `1c42b0c7`**, the identical five dev-watcher/hot-reload
+tests. That comparison mattered here because #945 touches compiler source; #944 was docs-only.
+
+Local on merged main: conformance **1638 tests / 0 fail / 30 skip / 7309 expect()**; the three pinned
+loop-head files **86 pass / 0 fail / 140 expect()**; `regen-spec-index --check` OK (71/71, 0 stale);
+`facts --check` PASS; `state --check` PASS; `delta-lint` PASS at max `[3022]`. R26 on merged main:
+five offending shapes rejected, five controls clean.
+
+⚑ One pre-existing inconsistency surfaced by `state --check` and **not** fixed:
+`g-three-emit-expr-comments-still-claim-a-failed-build-never-ships-including-two-leak-guards` has
+`heading=open` but `marker=resolved`. Unrelated to this arc; noted rather than tidied.
+
+**Maps (wrap 6c) — NOT hand-run, deliberately.** Owned by the scheduled `cloud-maps` workflow; a wrap
+cannot contain its own squash SHA.
+
+**Worktrees — two removed, three retained.** This session's dispatch worktree landed via #945 and was
+removed (branch deleted, pruned), as was the temporary `C:/s414truebase` base worktree cut for the
+A/B. Three remain and **none is this session's**: `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`,
+`onmount-c`, plus the `scrml-pinned` app clone.
+
+**Inbox:** nothing inbound. The two outbound drops to bryan (S412's stdlib defects + self-host
+coverage hole; S413's §49.2.1 fork + his three #936 findings) remain unread by him and are
+deliberately left in place.
+
+
+---
+
+# scrml — Session 413 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S412/S411/S410
+> mine, S405 bryan's) and is untouched **except** the S412 headline, which is struck in place because
+> it is false — see PICKUP item 1. **bryan's S409 was LIVE throughout this session** (three PRs today:
+> #937 14:54Z · #938 15:07Z · #939 20:49Z); his surfaces — `.github/workflows/ci.yml`,
+> `scripts/dpa-debt.ts`, `scripts/regen-spec-index.ts`, `compiler/SPEC-INDEX.md`, `handOffs/dpa-queue.md`
+> — were **read and reviewed but never edited**. Full mechanical detail: `docs/changelog.md` S413 block
+> and delta-log `[3002]`–`[3012]`.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. ⚑⚑ **THE S412 HEADLINE WAS FALSE AND IS NOW STRUCK — do not re-assert it, and do not "restore" it.**
+   *"Three silent defects were live in the SHIPPED STANDARD LIBRARY"* is wrong. `scrml:auth` /
+   `scrml:time` resolve to `compiler/runtime/stdlib/{auth,time}.js`, which say **hand-written** in their
+   own headers and carry correct plain JS scrml never compiled (`auth.js:106` is
+   `while (s.length % 4) s += "=";`); `bundleStdlibForRun` (`api.js:383`) copies from that directory, so
+   `stdlib/**/index.scrml` are **source mirrors nothing imports**. **No adopter was affected.** The
+   compiler defects and their fixes are real — only the blast radius was wrong. Struck in both
+   `known-gaps` entries, the changelog and the S412 section below. Memory written
+   (`stdlib-scrml-sources-are-mirrors-shims-are-what-ships`).
+
+2. ⚑⚑ **BRYAN OWES A RULING AND THE BUILD IS GATED ON IT — §49.2.1 braceless loop bodies.**
+   Routed in `handOffs/incoming/2026-09-12-2300-from-S413-peter-to-bryan-…`. **Governing sentence:**
+   `loop-body ::= '{' loop-statement* '}'` — **braces are mandatory** for `while`/`do…while`, and no
+   sentence anywhere in SPEC.md licenses a braceless body. The compiler accepted one anyway and
+   miscompiled it; **#933 (mine) resolved that by making the form WORK rather than by REJECTING it** —
+   `pa-base` §8 verbatim, direction `semantics-changed`, owed a language-surface review it never got.
+   ⚑ **DO NOT build either half until he rules.** Two gaps hang off it:
+   `g-braceless-loop-body-is-accepted-against-the-normative-grammar` (the fork itself) and
+   `g-do-while-braceless-body-becomes-the-condition` (adding a braceless `do` limb is the *accepting*
+   half — building it would pre-empt the ruling).
+
+3. ⚑⚑ **THIS IS THE OPENER — PETER RULED IT POST-WRAP, verbatim: *"take the loop-head truncation fix
+   next session"*. It outranks items 4–7; start here, not with a fresh triage.**
+   `g-loop-branch-head-truncated-at-first-close-paren` (MED, latent). `collectIfCondition` stops at the
+   first balanced `)`, so `while (n + 1) < 4 { … }` loses the remainder **and the whole body** — a silent
+   infinite loop. ⚑ **`if` has the identical bug and always has**, so fixing `collectIfCondition` closes
+   `if` and all three `while` sites at once — **root, not position**. Population measured with a control:
+   **0 of 2,553 tracked `.scrml`**, so it is latent and there is no migration to negotiate. This is a
+   plain parse defect, not a language question — the §49.2.1 fork above is about the *body*, this is
+   about the *head*.
+
+4. **The other live HIGH from the drain, reproducers already written:**
+   `g-library-map-surface-unlowered-beyond-the-bracket-read`. `mapSetLoweringBoundaryOk` is off for every
+   non-client/server mode, so the whole §59 method surface is unlowered at the library boundary while
+   #929's guard walks only `kind=index` — it covers **1 of 8 shapes**. `m.size` emits `return m.size;`
+   against a HAMT node → **`undefined`** at exit 0; a bracket read **inside a `match` arm** escapes too,
+   because arms are carried as **`rawArms: string[]`** and an AST walk cannot see a string. ⚑ CONTROL:
+   the same read in an `if`/`else` chain **is** still refused. **Same class as the S392 `if-chain`
+   finding** — the memory is updated with this logic-tree sibling.
+
+5. **Routed to bryan, his surface, do not take under him.** #936's two new CI gates are **real** —
+   bite-proven four ways each including against the genuine `e74f5423` artifact. Three findings:
+   ⚑ `dpa-debt.ts`'s last-non-empty-cell selection **fails toward `ratified`**, i.e. it *hides* debt,
+   and its own comment claims the safe direction (a `NOT RATIFIED` row vanishes from the owed count);
+   the currency gate cannot see a **duplicated** table, which is #900's actual payload; and the six PRs
+   the body says are *"closed on merge"* (#905/#906/#907/#918/#919/#920, plus #885) are **all still
+   open**, carrying commits already on main.
+
+6. **Review floor reads 2 OWED — #940 and #941, both this session's.** Per the established pattern a
+   drain PR's review **rides the NEXT landing**; discharge them first, exactly as this session did with
+   S412's six.
+
+7. **A second ruling for bryan, small but real:** there is **no governing sentence anywhere in SPEC.md**
+   for the must-use scoping rule (searched §34, §35.1–§35.7, §48.3, §50.3.1 and grepped all 37,947
+   lines), and the in-code citations of **§48.3.3** at `type-system.ts:18799` and `:18990` are a
+   **mis-citation** — that section is `E-FN-003 — Outer-Scope Variable Mutation` and carries no
+   `tilde-decl` rule. #941 deliberately left both in place; correcting a spec citation is a ruling.
+
+8. **Standing from Peter, unchanged:** merge on green without re-asking, and surface `autoMode` blocks
+   as `⛔ BLOCKED BY autoMode — <exact command>` rather than engineering around them. Both merges this
+   session were cleared that way in one word.
+
+## WHAT LANDED
+
+**Two PRs, both gate-green — #940 · #941.** Board **HIGH 103 → 104 · MED 231 → 236 · LOW 87**; one gap
+resolved, seven filed. Counts are generated — read `docs/known-gaps.md`, never this line.
+
+**The review floor went 9 OWED → 0.** Six of the nine were code-bearing and got a full S239 pass,
+dispatched **un-seeded and in parallel** so no agent inherited a hypothesis. **Five of the six returned
+`finding` — four of them mine.** #941 then fixed the sharpest one the same session.
+
+## 🔭 DURABLE
+
+**A confident safety comment is the best place to look for the bug — three consecutive arcs now.** S412
+found three defects that way; this session's #941 found a fourth *in the fix for one of them*.
+`_collectScopeBindings` justified flattening nested-block declarations with *"E-SCOPE-001 would already
+have rejected truly-out-of-scope references."* It does not reject the cross-function case, and the
+reproducer proves it. **The comment states the premise out loud, which is what makes it checkable; the
+code never does.**
+
+**"It lives under `stdlib/`" is not "it ships."** The hop that decides what an adopter receives is
+`bundleStdlibForRun`, and nothing in the source tree announces it. Before writing *"live in the shipped
+X"* about anything, trace the hop and name it. Reasoning a blast radius instead of measuring it is now
+at three instances in this session family and it is the most expensive recurring error I make.
+
+**Capture your own baseline before you accept an agent's number.** The #941 dispatch reported
+conformance **906/906**; the true figure is **905/905** and its branch adds no conformance case. I only
+caught it because I measured the baseline myself before dispatching. A number in a report is a claim.
+
+**An adversarial finding is a claim too — including the ones that are right about the mechanism.** The
+#932 review's *mechanism* held perfectly under direct execution with two controls; its *end-to-end
+reproducer* did not reproduce at all, because the reproducer's map literal used a bare unresolved key so
+the case and its control failed identically on both sides. Recorded as mechanism-confirmed /
+corpus-impact-unproven rather than inherited whole. **Verify the load-bearing half, and record which
+half you verified.**
+
+**A carve-out still owes a controlled probe.** Three of the nine were docs-only, and each one's probe was
+proven to have reach over its own diff (#928's status-flip check found 0 `status=resolved` +lines *and*
+2 `@gap id=` +lines, so the zero measured something). A carve-out asserted from "no code paths" is the
+absorbed-escape-hatch shape.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I shipped a false blast-radius claim into five artifacts.** Covered at PICKUP 1. The defects were
+   real, which is exactly what made the framing feel safe to write.
+2. **★★★ I resolved a language-surface fork without routing it** (#933, PICKUP 2) — and I resolved it in
+   the *accepting* direction, which is the one-way door. The governing sentence was one grep away and I
+   did not run it until I reviewed my own PR a session later.
+3. **★★ Four of my own six S412 PRs came back with findings**, two of them live regressions (#931's
+   `ReferenceError` at exit 0, #929's `undefined` at exit 0). The S239 pass caught them — a session late.
+   The floor works; my pre-land discipline on those six did not.
+4. **★ My tokenizer probe errored into nothing** while checking the `finally` half of the #932 finding,
+   so that half is recorded as **unchecked** rather than cleared. A broken instrument is not evidence.
+5. **★ A heredoc with nine long marker lines failed to parse and wrote nothing.** Caught by checking the
+   line count before and after rather than trusting the absence of an error; re-done via a file write.
+
+## Gate at close
+
+Conformance **905/905** on merged main — measured on the pre-fix baseline *and* after, which is how the
+dispatch's 906 was caught. Unit tier **18,584 tests / 1 fail**: `6nz-f4-textarea-rcdata-interp.test.js`
+§3, which passes **15/0 in 3.78 s in isolation** against 5,034 ms for that one test in the 962-file
+co-run — the documented `node --check` subprocess-spawn contention canary, root-caused rather than
+called a flake. Integration contributes **5 fails**, the pre-existing dev-watcher/hot-reload class:
+⚑ **the identical five test names fail on main's own last CI run**, which is how I established the
+`tracking` RED was not mine on a PR that touches compiler source. `delta-lint` PASS at max `[3012]`;
+`state --check` PASS; `facts --check` PASS. Cloud `gate` GREEN on both PRs; `windows` green.
+
+**Maps (wrap 6c) — NOT hand-run, deliberately.** `.claude/maps/primary.map.md` is at watermark
+`e74f5423`; the refresh is owned by the scheduled `cloud-maps` workflow. Same designed latency #903
+recorded: a wrap cannot contain its own squash SHA. ⚑ **One map finding worth acting on:** the dispatch
+reported that the map set contains **zero** references to `must-use` / `E-MU-001` / `tilde-decl`, and its
+nearest row asserts *"`TildeTracker`/`MustUseTracker`/`checkLinear` run exclusively against synthetic
+ASTs and have never seen a parsed program"* — **falsified for `tilde-decl` at this HEAD**, since the
+rename control fires a real `E-MU-001` from a parsed program. The maps were not edited.
+
+**Worktrees — one removed, three retained.** The #941 dispatch's worktree landed and was removed
+(branch deleted, pruned). Three remain and **none is this session's**: `agent-a0742fe4795045e91`,
+`agent-a4e6b5f2562ae9eaa`, `onmount-c`, plus the `scrml-pinned` app clone. Their work has not landed, so
+per the wrap discipline they are retained and surfaced rather than removed.
+
+**Inbox:** the S411 drop (regex-class-colon language-surface review) is **discharged** — bryan stamped it
+at #937 and closed issue #922 — so it moved to `read/`. Two outbound drops remain unread by him and are
+deliberately left in place: S412's (stdlib defects + the self-host coverage hole) and S413's (the
+§49.2.1 fork + his three #936 findings).
+
+
+---
+
 # scrml — Session 412 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S411/S410 mine,
@@ -56,8 +406,16 @@
 MED 230 → 230 · LOW 86**; seven gaps resolved, eight filed. Counts are generated — read
 `docs/known-gaps.md`, never this line.
 
-⚑ **THE HEADLINE: three separate silent defects were live in the SHIPPED STANDARD LIBRARY, and not one
-was found by reading code.** `stdlib/time`'s **`throttle` did not throttle and `debounce` did not
+⚑ ~~**THE HEADLINE: three separate silent defects were live in the SHIPPED STANDARD LIBRARY**~~, ~~and~~ not one
+was found by reading code.
+
+> ⚑⚑ **CORRECTED S413-peter — "SHIPPED" IS FALSE.** The defects and fixes are real; the blast-radius
+> claim is not. `scrml:auth` / `scrml:time` resolve to the **hand-written** shims at
+> `compiler/runtime/stdlib/{auth,time}.js` (their own headers say so; `auth.js:106` carries the padding
+> loop as correct plain JS), and `bundleStdlibForRun` (`api.js:383`) copies from that directory — so the
+> `stdlib/**/index.scrml` files are source mirrors **nothing imports**. **No adopter was affected.**
+> Struck in place in `docs/known-gaps.md` (both entries) and `docs/changelog.md`. Third instance of the
+> reasoned-not-measured blast radius in this session family. `stdlib/time`'s **`throttle` did not throttle and `debounce` did not
 debounce** — `inThrottle = true` inside the inner closure emitted as `const inThrottle = true`, so the
 outer binding was never set and the guard always passed. `stdlib/auth/jwt`'s **`base64urlDecode` hung** —
 its padding loop emitted empty with `s += "="` dropped, an infinite loop for any input not a multiple of

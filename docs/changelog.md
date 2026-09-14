@@ -2,6 +2,92 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S414 — 2026-09-13 (peter · P-Tech1 Windows)
+
+**One ruled opener, four adversarial rounds, and a fix that reproduced the defect it was named after
+before the design was thrown away.** Two PRs landed — **#944** (review floor + gaps) and **#945** (the
+fix). Board **HIGH 104 → 107 · MED 236 → 236 · LOW 87 → 88**: four gaps filed, one resolved. Counts are
+generated — read `docs/known-gaps.md`, never this line.
+
+**The opener, ruled by peter post-S413-wrap:** `g-loop-branch-head-truncated-at-first-close-paren`.
+`collectIfCondition` stopped the instant the outermost `(` closed, so `while (n + 1) < 4 { n = n + 1 }`
+emitted `while (n + 1) { }` at **exit 0 with zero diagnostics** — a silent infinite loop whenever the
+condition depends on the body — and `if` truncated identically on both sides of #933. One defect, two
+arrival dates, one root, closed at the single collector.
+
+⚑ **THE FIX DIRECTION RECORDED IN THE GAP ENTRY WAS THE WRONG HALF OF A FORK.** The entry said *"collect
+the full condition expression"*. That is newly-**accepting**, and §50.2.1's productions, §49.2.1, and
+§50.2.3 in words — *"the outer parens are the while condition's **required** parens"* — already exclude
+the form. The governing-sentence gate is what caught it, one session after S413's ★★★ miss recorded
+exactly this failure on #933.
+
+⚑ **AND REJECT-AND-RECOVER FAILED THREE TIMES BEFORE BEING DELETED.** Cuts 1–3 mirrored S308's
+reject+recover. Each adversarial pass found the recovery scan eating or corrupting source: word-shaped
+statements swallowed; then punctuation-shaped bodies swallowed with `b++` / `b - n` / `b.ok`
+**invented**; then the scan stopping *inside the author's own condition* at the next operand's suffix,
+dropping the real braced body. The deciding measurement, against a true `origin/main`:
+
+```
+while (i) < n >> 1 { i = i + 1 }
+  BASE   while (i) { }      <- falsy, TERMINATES
+  FIX    while (i < n) { }  <- empty body, INFINITE LOOP
+```
+
+The fix reproduced the headline defect it is named after. **Round 4 deleted the recovery instead of
+patching it a fourth time** — the scan now never advances past the `)`, so the class is closed by
+construction. Measured base-vs-tip on errors *and* emit: 4/4 legal spellings byte-identical, both
+headline shapes same-emit-plus-diagnostic, and **a complete no-op inside exported declarations**, where
+cut 3 had been `semantics-changed` + newly-accepting and strictly worse than nothing.
+
+**Review floor 4 OWED → 0.** #940/#942/#943 carved out as ledger-only, each with a probe *and* a control.
+**#941 (mine) came back a finding:** its narrowing survived every attack, but it closed a gap over a
+population the fix does not reach — the gap's title names the **emitter**, never touched, which still
+throws `ReferenceError` at exit 0. The entry stays resolved for the half it was scoped to, with a banner
+pointing at the new HIGH.
+
+**Four gaps filed.** `g-declared-names-set-shared-across-blocks-emits-a-bare-assignment` (HIGH — every
+block emitter passes the same `Set` object, so a `let` in any block marks that name declared for the
+whole scope) · `g-export-reparse-swallows-ast-builder-parse-path-diagnostics` (HIGH — the entire lexical
+interior of any exported declaration; closing it is a **migration**, 22 of 2,552 files, ten shipped
+stdlib modules) · `g-inner-fn-lexical-binding-walk-is-quadratic` (MED, a regression #941 introduced) ·
+`g-closure-arm-still-hands-the-flat-binding-set-across-a-scope-boundary` (LOW, inert). Plus
+`g-bare-block-statement-is-silently-dropped` (**HIGH, live on main**) — a standalone `{ … }` block is
+deleted from the emit at exit 0; it is the delivery mechanism that made all three recovery holes silent
+rather than loud.
+
+**POST-WRAP CONTINUATION — #947.** Peter said *"go on recommend"* after the wrap, so PICKUP item 1
+was taken in the same session. **`g-declared-names-set-shared-across-blocks-emits-a-bare-assignment`
+RESOLVED** — the EMITTER twin of what #941 closed. Each block body now gets its own copy of
+`declaredNames`; R26 on merged main returns `"abQ"` on all four reproducer cases, two of which threw
+`ReferenceError` before. The migration the entry demanded was **measured and free** (0 artifact
+content diffs over 1,928 sources / 7,467 artifacts) — and measured **twice**, because the first run
+covered a naive 9-site substitution rather than the patch that landed, the build having found two
+further cases (if/else limbs sharing one `bodyOpts` object, and a second independent if/else emitter).
+⛑ The first differential also printed its zero **under a `NOT A VALID COMPARISON` banner** — the S411
+trap, both sides the same revision because the patch was uncommitted. ⛑ The S239 pass falsified the
+build's own direction claim: `semantics-changed` **AND `newly-rejecting`**. Two siblings filed, both
+PA-reproduced and pre-existing: **HIGH** `g-try-catch-finally-bodies-redeclare-every-assignment`
+(`try { x = 2 }` returns 1, silently wrong) and **MED**
+`g-loop-head-binding-is-not-tracked-so-writing-the-loop-variable-throws`. **Owed:**
+`TYPES-BASELINE.json` is stale by exactly one renamed key — confirmed by running the gate's own tsc on
+both trees — but `types-gate --write` cannot run on this Windows clone, and a hand-edit was made,
+verified, then **reverted** because a wrong key is worse than a stale one; the step is
+`continue-on-error` in the non-blocking `tracking` job, so nothing is blocked.
+
+**Owed to bryan, unchanged and now larger:** the §49.2.1 braceless-body fork; the must-use spec-citation
+ruling; his three #936 findings; the new `E-CONDITION-HEAD-UNPARENTHESIZED` code (minting a diagnostic
+decides what the language refuses, so it owes a language-surface review — landed with the stamp
+outstanding, per the S313 floor); and now the export-swallow migration and the bare-block ruling.
+
+**Gates:** cloud `gate` GREEN on both PRs; `windows` green; `tracking` RED — **proven pre-existing by
+name-set comparison against main's own run**, the identical five dev-watcher/hot-reload tests, which
+matters because #945 touches compiler source. Conformance **1638 / 0 fail / 30 skip / 7309 expect()**.
+`regen-spec-index --check` OK (71/71, 0 stale) · `facts --check` PASS · `state --check` PASS ·
+`delta-lint` PASS at max `[3022]`.
+
+**Maps (wrap 6c) — not hand-run, deliberately.** Owned by the scheduled `cloud-maps` workflow; a wrap
+cannot contain its own squash SHA.
+
 ## S405 — 2026-09-07/08 (bryan · ASUS-Vivobook)
 
 **Four rulings, two security arcs, and one failure mode wearing seven costumes.** Three sessions ran
@@ -7210,6 +7296,70 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-12/13 (S413 — peter — the review floor drained 9 to 0, and it convicted four of my own six PRs)
+
+A review session on the Windows clone. **Two landings, both gate-green** — #940 (the floor drain) and
+#941 (a HIGH the drain itself found). Peter's sequence, as at S411: clear the measured debt first, then
+take the recommendation.
+
+**The floor went 9 OWED → 0.** Six of the nine were code-bearing and got a full S239 adversarial pass
+(dispatched un-seeded, in parallel, so no agent inherited a hypothesis); three carved out with a
+*controlled* probe rather than a bare "no code paths" — #928's status-flip check was proven to have
+reach over its own diff, and #934's board figures were read from the generated block **as of that
+commit** rather than as of today, which is the exact verification S411 laundered and had to correct.
+**Five of the six code-bearing returned `finding`. Four were mine.**
+
+⚑ **The headline is a correction, not a landing: the S412 wrap's "three silent defects were live in the
+SHIPPED STANDARD LIBRARY" is FALSE**, and it had already propagated into two PR bodies, the changelog,
+the hand-off and the boot PICKUP. `scrml:auth` / `scrml:time` resolve to
+`compiler/runtime/stdlib/{auth,time}.js`, which declare themselves **hand-written** in their own headers
+and carry correct plain JS scrml never compiled — `auth.js:106` is `while (s.length % 4) s += "=";`.
+`bundleStdlibForRun` (`api.js:383`) copies from `STDLIB_RUNTIME_DIR = compiler/runtime/stdlib`, so
+`stdlib/**/index.scrml` are **source mirrors nothing imports**. **No adopter was affected.** The three
+compiler defects and their fixes are real; only the blast radius was wrong. Struck in place in both
+`known-gaps` entries, the changelog and the hand-off. Third instance of a reasoned-not-measured blast
+radius in this session family, and the one that travelled furthest.
+
+**What landed:**
+
+- **#940 — the floor drain.** Nine `@review` markers, seven gaps filed (board HIGH 103→105, MED
+  231→236), four in-place strikes of the false claim, and an outbound drop routing bryan's items.
+- **#941 — `g-must-use-suppressed-by-out-of-scope-name-collision` (HIGH), a regression #931 introduced
+  three days earlier.** A must-use `tilde-decl` in an inner `function` was silently dropped whenever any
+  **out-of-scope nested block** elsewhere in the frame declared the same name, so an ordinary render
+  loop compiled at **exit 0** and threw `ReferenceError` on first call. #931 had passed the **flat**
+  `knownBindings` across a function boundary; within one frame that over-collection never crossed a
+  scope the language enforces, because nested blocks are walked inline in the same `checkLinear` frame.
+  The fix walks the ancestor chain and unions only each enclosing block's own declarations — a strict
+  subset, and it **fails closed**. Migration measured by compiling all **2,553** tracked `.scrml` on
+  both sides and diffing per-file diagnostic multisets: **0 changed**, with a positive and a negative
+  control both firing.
+
+**Findings routed to bryan rather than fixed under him** (`ci.yml` / `scripts/` are his active surface,
+and he was live all session on #937/#938/#939):
+
+- ⚑ **A language-surface fork I should have routed before #933 landed.** §49.2.1 is explicit —
+  `loop-body ::= '{' loop-statement* '}'`, braces are **mandatory** — and no sentence anywhere licenses
+  a braceless body. The compiler accepted one anyway and miscompiled it, and #933 resolved that by
+  making the form **work** rather than by **rejecting** it. That is `pa-base` §8 verbatim, direction
+  `semantics-changed`, and it owed a language-surface review it never got.
+- **#936's two new CI gates are genuinely load-bearing** — bite-proven four ways each, including against
+  the real historical `e74f5423` artifact, and both confirmed to have actually executed in the blocking
+  job. But `dpa-debt.ts`'s last-non-empty-cell selection fails toward **`ratified`** — it *hides* debt,
+  and its own comment claims the safe direction; the currency gate cannot see a **duplicated** table
+  (#900's actual payload); and the six PRs the body says are "closed on merge" are **all still open**.
+
+**Instruments that lied, mine and others', all caught:** an agent's end-to-end reproducer that did not
+reproduce (its map literal used a bare unresolved key, so the case *and* its control failed on both
+sides — recorded as mechanism-confirmed / corpus-impact-unproven rather than inherited); a dispatch
+reporting conformance **906/906** where the true figure is **905/905**, caught only because the baseline
+was measured first rather than taken on trust; and my own tokenizer probe erroring into nothing, which
+is why the `finally` half of the #932 finding is recorded as unchecked.
+
+**Gate at close:** conformance **905/905** on merged main. Cloud `gate` GREEN on both PRs; `windows`
+green; `tracking` RED — pre-existing, and root-caused rather than called a flake: the identical five
+dev-watcher/hot-reload tests fail name-for-name on main's own last run.
+
 ### 2026-09-10 (S412 — peter — three silent defects in the shipped stdlib, and five instruments that lied)
 
 A drain session on the Windows clone. **Six landings, every one gate-green**, all merged on Peter's
@@ -7228,8 +7378,21 @@ named, then "more MEDs", then the regex arc, then more.
 **Board HIGH 101 → 102 · MED 230 → 230 · LOW 86** — seven gaps resolved, eight filed. A rising-then-flat
 count is the count staying honest, not the work standing still.
 
-**Three separate silent defects were live in the shipped standard library**, and none was found by
+~~**Three separate silent defects were live in the shipped standard library**~~, and none was found by
 reading code:
+
+> ⚑⚑ **CORRECTED IN PLACE S413-peter — "in the shipped standard library" is FALSE.** The three defects
+> and their fixes are real; the **blast radius is not**. `scrml:auth` and `scrml:time` resolve to
+> `compiler/runtime/stdlib/{auth,time}.js`, which declare themselves **hand-written** in their own
+> headers and carry correct plain JS that scrml never compiled — `auth.js:106` is
+> `while (s.length % 4) s += "=";`. `bundleStdlibForRun` (`compiler/src/api.js:383`) copies from
+> `STDLIB_RUNTIME_DIR = compiler/runtime/stdlib`, so the `.scrml` files under `stdlib/` are **source
+> mirrors nothing imports**. **No adopter was affected.** The correct framing is *"three silent
+> compiler defects, found by compiling the stdlib source mirrors"* — which is still the session's real
+> result. The error was inferring *"it is under `stdlib/`, therefore it ships"* without reading the hop
+> that decides what ships: the third instance of the reasoned-not-measured blast radius in this session
+> family, and the one that propagated furthest. The self-host limb did not reproduce either — `bs.scrml`
+> emits a byte-identical artifact on both sides of #933.
 
 - `stdlib/time`'s **`throttle` did not throttle and `debounce` did not debounce** (#930). Both build a
   closure over an outer `let`; `inThrottle = true` inside the inner function emitted as

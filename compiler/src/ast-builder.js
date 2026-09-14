@@ -10527,7 +10527,107 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * bodies from being absorbed into the condition by the STMT_KEYWORDS/ASI-NEWLINE rules.
    *
    * Falls back to `collectExpr("{")` for non-paren conditions.
+   *
+   * ⚑ S414 — E-CONDITION-HEAD-UNPARENTHESIZED. Stopping the instant the outermost
+   * `(` closes silently DROPPED everything after it, including the `{` and hence the
+   * whole body:
+   *
+   *     while (n + 1) < 4 { n = n + 1 }   emitted   while (n + 1) {
+   *                                                 }          ← silent infinite loop
+   *     if (n + 1) < 4 { n = 0 }          emitted   if (n + 1) {
+   *                                                 }          ← body silently dropped
+   *
+   * at exit 0 with zero diagnostics. `if` has used this collector all along; the three
+   * `while` sites inherited the same truncation when #933 switched them here from
+   * `collectExpr("{")` — one defect, two arrival dates, one root.
+   *
+   * SPEC §50.2.1 / §50.2.3 / §49.2.1 make the condition's outer parens REQUIRED and
+   * make them wrap the WHOLE condition (`while ((x = expr))` — "the outer parens are
+   * the while condition's required parens"). `while (n + 1) < 4` is therefore not a
+   * legal head, so the direction is REJECT, not accept: making it work would be a
+   * newly-accepting one-way door against a normative sentence that already excludes it.
+   *
+   * ⚑ REJECT ONLY — THERE IS NO RECOVERY HERE, AND THERE MUST NOT BE ONE.
+   * The collector fires the diagnostic and then stops at the closing `)` exactly as it
+   * did before S414. The scan NEVER advances past the `)`, so it cannot consume, delete,
+   * or invent source. Everything after the `)` is handed to the ordinary body parser.
+   *
+   * ⛔ DO NOT ADD A RECOVERY SCAN BACK. Three separate cuts tried, each bounded more
+   * tightly than the last, and each ate or corrupted source in a NEW shape:
+   *   1. bounded at `{` / `;` / statement keywords — an IDENT stopped nothing, so
+   *      `if (a) && (b) n = 1` + `n = n + 5` vacuumed BOTH statements and captured the
+   *      following `return n` as the body.
+   *   2. + a value/operator check that accepted ANY punct — so every punctuation-starting
+   *      body was eaten: `(out = 7)` absorbed as a call argument, `!flag` deleted, and
+   *      `++n` / `-n` / `.ok` deleted with `b++` / `b - n` / `b.ok` INVENTED.
+   *   3. + a conservative operator set — but the bound knows "can this token follow a
+   *      value", not "is this OPERAND FINISHED". After an accepted operator the scan eats
+   *      the operand's HEAD and stops at its SUFFIX, landing INSIDE the author's own
+   *      condition: `if (a) && b[0] { out = 7 }` emitted `if (a && b) { [0]; }` with
+   *      `out = 7` DELETED, and `while (i) < n >> 1 { i = i + 1 }` emitted
+   *      `while (i < n) { }` — AN INFINITE LOOP, on a program whose base emit
+   *      (`while (i) { }`) terminated. It reproduced the very defect this code is named
+   *      after, and made the exported-body case strictly WORSE than doing nothing.
+   *
+   * ⚑ Recovery bought a "correct artifact" for a build that FAILS — worthless where the
+   * diagnostic fires, and actively harmful in an exported body, where the diagnostic is
+   * swallowed (see the §34 row) so the corrupted artifact was all that remained.
+   *
+   * ⚑ On the `E-FOR-UNPARENTHESIZED-HEAD` (S308) precedent: its recovery is a BOUNDED
+   * LOCAL REPAIR — consume one `of`, collect the iterable. This one was an open-ended
+   * scan over arbitrary trailing tokens, which is a different thing. The precedent's
+   * principle is "do not cascade", and stopping at the `)` does not cascade: it is
+   * precisely what the parser did before this code existed.
+   *
+   * provenance: spec:§50.2.3-the-outer-parens-are-the-while-condition's-required-parens
    */
+  /**
+   * ⚑ DELIBERATELY CONSERVATIVE — do NOT widen this set.
+   *
+   * A token here means "the condition expression continues past the closing `)`".
+   * Everything NOT here keeps today's exact behaviour (the `)` ends the head and what
+   * follows is the body). Excluded ON PURPOSE:
+   *   `/`   — load-bearing. `while (h) /a\sb/.test(c)` is a braceless body that STARTS
+   *           WITH A REGEX LITERAL, pinned by
+   *           `compiler/tests/unit/while-braceless-body-stays-in-the-loop.test.js`.
+   *           Treating `/` as a binary operator breaks it.
+   *   `+` `-` — also unary prefixes, so they can legitimately begin a braceless body.
+   *   `.` `(` `[` — member / call / index continuation, but each can also begin a stmt.
+   *   `:`   — label and ternary-alternate.
+   *   `is`  — ⚑ WORD-SHAPED, AND THAT IS WHY IT IS OUT. Every other candidate is
+   *           PUNCT and can never be an identifier; `is` can be BOTH the §11 type-test
+   *           operator and an ordinary name. The lexer classifies it context-free as
+   *           KEYWORD with no demotion pass (only `match` has one), so NOTHING here can
+   *           distinguish `(x) is Foo` from a user's `if (n < 3) is(n)` — and a cut
+   *           that tried falsely rejected the latter and deleted the call. A member
+   *           that cannot fire correctly is worse than an absent one.
+   */
+  const CONDITION_HEAD_CONTINUATION_PUNCT = new Set([
+    "<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?",
+  ]);
+
+  /**
+   * Does `tok`, sitting immediately after the head's closing `)`, continue the
+   * condition expression rather than begin the body? See the set's banner.
+   *
+   * ⚑ PUNCT/OPERATOR ONLY — DO NOT ADD A WORD-SHAPED ARM. An earlier cut also matched
+   * a bare IDENT `is`, which re-opened, two lines below it, exactly the hazard the
+   * exclusion list above exists to close: `is` is the one continuation candidate that
+   * can also be an ordinary identifier, so `function f(is) { if (n < 3) is(n) }` — a
+   * program that compiled on base — was falsely rejected AND had its `is(n)` call
+   * deleted. `is` is not recoverable here at all: the lexer classifies it context-free
+   * as KEYWORD (`tokenizer.ts` KEYWORDS) with no demotion pass (only `match` has one),
+   * so a KEYWORD-only arm cannot tell the §11 type-test operator from a user's
+   * identifier either. It is therefore NOT in the set — see the banner.
+   */
+  function continuesConditionHead(tok) {
+    if (!tok) return false;
+    if (tok.kind === "PUNCT" || tok.kind === "OP" || tok.kind === "OPERATOR") {
+      return CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text);
+    }
+    return false;
+  }
+
   function collectIfCondition() {
     if (peek().text !== "(") {
       return collectExpr("{");
@@ -10568,8 +10668,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
-      // After closing the outermost `(`, stop
-      if (depth === 0 && parts.length > 0) break;
+      // After closing the outermost `(`, ALWAYS stop — the pre-S414 behaviour. When what
+      // follows is one of the continuation operators the head is illegally
+      // unparenthesized (SPEC §50.2.1/§50.2.3/§49.2.1), so REJECT it. There is
+      // deliberately no recovery: see the ⛔ banner above. The scan does not advance past
+      // the `)`, so the remainder is handed intact to the ordinary body parser and this
+      // collector can neither delete nor invent source.
+      if (depth === 0 && parts.length > 0) {
+        if (continuesConditionHead(peek())) {
+          errors.push(new TABError(
+            "E-CONDITION-HEAD-UNPARENTHESIZED",
+            "E-CONDITION-HEAD-UNPARENTHESIZED: an `if`/`while` condition's required " +
+            "parentheses must wrap the whole condition — `while ((n + 1) < 4)` or " +
+            "`while (n + 1 < 4)`, not `while (n + 1) < 4`. The build fails, so the " +
+            "emitted output for this head is not meaningful; fix the parentheses. " +
+            "(SPEC §50.2.1, §50.2.3, §49.2.1)",
+            tokenSpan(startTok, filePath),
+          ));
+        }
+        break;
+      }
     }
     return {
       expr: joinWithNewlines(parts, partLines),

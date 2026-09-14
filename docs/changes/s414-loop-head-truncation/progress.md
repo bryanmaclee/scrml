@@ -1,0 +1,356 @@
+# s414-loop-head-truncation — progress
+
+## 2026-09-13T15:55:17Z — start
+Worktree: /c/Users/pjoli/Documents/GitHub/scrml/.claude/worktrees/agent-a6bfe61870b03ff5a
+Base: origin/main 2f03b3c6 (clean, merge-base == origin/main)
+bun install OK (puppeteer chrome download fails pre-existing; PUPPETEER_SKIP_DOWNLOAD=true clean)
+Next: measure conformance baseline BEFORE change; reproduce the three defect cases.
+
+## 2026-09-13 — repro + fix landed in ast-builder
+- Conformance baseline MEASURED BEFORE any change: `bun test compiler/tests/conformance/`
+  → **1608 pass / 30 skip / 0 fail, 1638 tests across 133 files**. The brief's "905/905"
+  does not match anything this suite prints; reporting the measured figure.
+- Reproduced all three defect cases on 2f03b3c6 exactly as briefed (silent exit-0 empty
+  loop for `while`/`if`; E-CODEGEN-INVALID-LOGIC for the `&&` shape).
+- Corpus population: **0 hits across 2,553 tracked `.scrml` files** — confirms the
+  dispatcher. Control: the scanner HIT on 5 synthetic positives (`<`, `&&`, `is`, `??`,
+  the `if` half) and no-hit on 10 negatives incl. the regex-body and double-parens forms.
+- LOCUS HELD: `collectIfCondition()`'s `if (depth === 0 && parts.length > 0) break;`.
+- Fix: `continuesConditionHead()` + a `recovering` flag; fires
+  E-CONDITION-HEAD-UNPARENTHESIZED once, then keeps collecting to a depth-0 `{`/`;`/
+  statement keyword. All three defect cases now emit a CORRECT loop; all 10 controls
+  byte-identical to HEAD.
+- ⚑ SURFACING NOTE (pre-existing, out of scope): a bare-`${…}` file with no `<program>`
+  shell DROPS ast-builder logic-body errors from `result.errors` — the shipped
+  E-FOR-UNPARENTHESIZED-HEAD behaves identically there. The diagnostic fires and
+  partitions into `result.errors` under a `<program>` shell in every mode.
+- Next: tests, then SPEC §34/§49/§50 + SPEC-INDEX regen.
+
+## 2026-09-13 — tests + SPEC + full verification
+- `compiler/tests/unit/loop-head-truncated-at-first-close-paren.test.js` — 23 tests, 23 pass.
+  ⚑ BITE PROVEN: run against the pre-fix collector (working file swapped via a scratchpad
+  copy — NO `git stash`), **8 fail / 15 pass** — every diagnostic and recovery case fails
+  pre-fix, every control passes pre-fix. The code has a real producer.
+- Diagnostic cases use the `<program>` shell (the shape in which ast-builder logic-body
+  errors reach `result.errors`); recovery/artifact cases use the library harness.
+- SPEC: §34 catalog row (styled on the E-FOR-UNPARENTHESIZED-HEAD row), §49.2.3 normative
+  note, §50.2.3 corollary + cross-reference, `provenance:` marker at both sections.
+- Regen gates: `regen-spec-index.ts --check` OK · `facts.ts --check` OK (FACTS.md
+  regenerated: SPEC lines 37,947→37,970; compiler/src 253,027→253,113; test files
+  1,450→1,451) · `s34-census.ts --check-new` PASS (1 new row, provenance resolves).
+  `state.ts --write` touched only master-list.md's recent-sessions rollup with UNRELATED
+  s413 drift — REVERTED to keep this change focused (ci.yml does not gate state.ts).
+
+### Verification
+- conformance: **1608 pass / 30 skip / 0 fail (1638 across 133 files)** — IDENTICAL before
+  and after. (`docs/FACTS.md` "conformance cases | 905" is the CASE-DIRECTORY count and is
+  also unchanged; it is not a test pass/fail figure.)
+- unit: **18,583 pass / 17 skip / 1 fail (18,607 across 963 files)**. The 1 fail is the
+  known Windows-local flake and is ROOT-CAUSED, not waved off: it is a DIFFERENT test on
+  each run (`giti-035-sse-generator-seed-clobber` then `giti-016-match-identifier-contextual`),
+  each failing at exactly ~5053 ms — bun's 5 s per-test timeout on an
+  `execSync("node --check …")` subprocess under 963-file concurrency. Both pass in
+  ISOLATION (12/12 and 24/24).
+- corpus-compile-floor --check PASS (1 tracked baselined failure, pre-existing,
+  E-ERROR-009/examples/09) · conflict-marker-gate PASS (8188 files) · snippet-gate
+  110/110 · delta-lint PASS.
+- types-gate --check cannot run on this Windows clone: it resolves
+  `node_modules/.bin/tsc` with no extension and Windows ships `tsc.exe`/`tsc.bunx`.
+  Pre-existing environment limitation; this change touches no `.ts` file, so the gate is
+  unaffected by construction.
+- ⚑ `E-DG-002` appears in `warnings` for the defect programs — it fires IDENTICALLY on the
+  legal control (`while (n + 1 < 4)`), so it is incidental to the probe program shape, not
+  introduced here. Measured, not assumed.
+
+### Deferred
+- The bare-`${…}` (no `<program>` shell) file shape drops ast-builder logic-body errors
+  from `result.errors`. PRE-EXISTING and not this gap: the shipped
+  E-FOR-UNPARENTHESIZED-HEAD is dropped there too (measured). Worth its own gap entry.
+- master-list.md's `state.ts` recent-sessions rollup is stale by one s413 entry.
+
+## 2026-09-13 — FIX ROUND (adversarial review found three; two fixed, one measured)
+
+Both must-fixes reproduced here by execution before touching anything.
+
+### MUST FIX 1 — recovery was DELETING source (fixed)
+`if (a) && (b) n = 1` + `n = n + 5` + `return n` emitted
+`function f(a,b){ let n=0; if (a && b) { return n; } }` — `n = 1` and `n = n + 5` GONE,
+`return n` captured as the braceless body. The baseline HARD-REJECTED that program
+(E-CODEGEN-INVALID-LOGIC), so the first cut introduced a NEW silent-data-loss path.
+Root: recovery stopped only at `{` / `;` / a statement keyword — an IDENT stopped
+nothing and there was no ASI/alternation check.
+Fix: recovery is now bounded by "two value-ish tokens cannot both belong to one
+expression" — `conditionHeadTokenEndsValue` + `conditionHeadTokenCanFollowValue`
+(a WHITELIST, so the fail-direction is stop-early, never swallow-source). It is
+STRONGER than a pure newline/ASI rule, which would not have caught this: `n = 1` is
+on the SAME LINE as `(b)`.
+After: `if (a && b) { n = 1 } n = n + 5; return n;` — every statement survives, the
+diagnostic still fires, and the compiler's "statement boundary not detected" console
+print no longer triggers on this path. (⚑ That print is a bare `console` write in
+neither `result.errors` nor `result.warnings` — a detector no probe can read. NOT
+fixed here; flagged.)
+
+### MUST FIX 2 — `is` falsely rejected a user identifier (fixed by REMOVAL)
+`function f(is) { if (n < 3) is(n) }` compiles on base; the first cut fired
+E-CONDITION-HEAD-UNPARENTHESIZED + E-EQ-005 and DELETED the `is(n)` call.
+⚑ THE SUGGESTED NARROWING TO A KEYWORD-ONLY ARM DOES NOT WORK — MEASURED, not assumed.
+I restored a KEYWORD-only arm with a tracer: it FIRED on `is(n)` and reproduced the
+defect exactly. The lexer classifies `is` context-free as KEYWORD (`tokenizer.ts`
+KEYWORDS) and only `match` has a demotion pass, so a user's `is` identifier IS a
+KEYWORD token. Per the coordinator's own instruction for that outcome, `is` is REMOVED
+from the continuation set entirely. The set is now all-PUNCT, which is the invariant.
+
+### MEASURE-DO-NOT-FIX — the `export` re-parse swallow
+Site: `ast-builder.js` ~:12058 — `_subErrors` from the `export function` synth re-parse
+are collected but only `E-FN-EQUALS-BODY` is surfaced; the comment's premise ("the
+outer parse re-reports them") is FALSE for ast-builder parse-path errors.
+Matrix INDEPENDENTLY RE-MEASURED here (not taken on trust) — the axis is `export`,
+NOT the `<program>` shell; my original test banner said the shell and was WRONG, now
+corrected in the banner:
+                top-level   function   export function
+  bare `${}`      FIRES       FIRES      SILENT
+  `<program>`     FIRES       FIRES      SILENT
+The shipped S308 `E-FOR-UNPARENTHESIZED-HEAD` is swallowed identically.
+
+**ANSWER — if those errors surfaced, 22 of 2,553 tracked `.scrml` files would NEWLY
+report an error** (1 file, `samples/gauntlet-s19-phase4/nested-comments.scrml`, throws
+today and was skipped; so 22 of 2,552 measurable). Codes:
+  - 17 files  E-THROW-NOT-IN-SCRML
+  -  7 files  E-TRY-NOT-IN-SCRML
+  -  1 file   E-STMT-MISSING-SEMICOLON
+⚑ **NOT FREE — this is a MIGRATION needing a ruling.** The 22 include TEN SHIPPED
+STDLIB MODULES (`stdlib/auth/flows`, `auth/index`, `crypto/index`, `fs/index`,
+`test/index`, `compiler/meta-checker`, `oauth/{discord,github,google,microsoft}`) and
+the native parser `compiler/native-parser/parse-markup.scrml`, plus `dashboard/app`
+and three `examples/23-trucking-dispatch` pages. Neither
+E-CONDITION-HEAD-UNPARENTHESIZED nor E-FOR-UNPARENTHESIZED-HEAD appears in the corpus
+— consistent with the zero-population finding.
+**Method:** the re-parse site was TEMPORARILY instrumented to record swallowed
+`_subErrors` on a side channel; a file "newly reports" when the swallowed set contains
+a code its reported set lacks. Instrumentation REVERTED; `grep S414_PROBE` = 0 and the
+tree is clean. The export path is UNCHANGED in this round.
+**CONTROL (proves the instrument can fire):** 2 positives — an `export function`
+carrying E-CONDITION-HEAD-UNPARENTHESIZED, and one carrying the shipped
+E-FOR-UNPARENTHESIZED-HEAD — both reported NEWLY-REPORTS. 2 negatives — the same body
+NOT exported (already reported → no new code) and a clean `export function` (nothing
+swallowed) — both reported no-change.
+
+### Also corrected
+§50.2.2 → §50.2.1 everywhere it reached (§50.2.2 is Operator Precedence; the grammar
+productions are §50.2.1), INCLUDING the user-facing error string, the §34 row's
+section column and body, the §49.2.3 prose, and the test banner.
+
+### Re-verification
+- New test file: 23 → **30 tests, 30 pass** (7 added: 4 no-eat incl. a runtime, 3 `is`).
+- ⚑ THREE-WAY BITE PROOF (file-copy swaps, NO `git stash`):
+  - vs BASE `origin/main`      → **12 fail / 18 pass** (all original defect+recovery
+    cases, plus the no-eat cases — that program has no artifact on base).
+  - vs THE BROKEN CUT `90b6e451` → **5 fail / 25 pass** — exactly the two new
+    regressions (statement-eating ×2, `is` ×3). The other no-eat tests pass there,
+    correctly: the broken cut did fire the diagnostic and did handle the braced twin.
+  - vs HEAD                     → 30 / 30.
+- `while-braceless-body-stays-in-the-loop.test.js` + `braceless-control-head-regex-literal.test.js`
+  + the new file together: **70 pass / 0 fail**.
+- conformance: **1608 pass / 30 skip / 0 fail** — unchanged from the branch-point baseline.
+- unit: **18,589 pass / 17 skip / 2 fail (18,614 across 963 files)**. Both fails are the
+  known `node --check` co-run timeout class (5041 ms / 5070 ms); both pass in ISOLATION
+  (24/24 together). Different files fail on different runs — not deterministic.
+- regen-spec-index --check OK · facts --check OK (FACTS.md regenerated) ·
+  s34-census --check-new PASS · corpus-compile-floor PASS · conflict-marker PASS ·
+  snippet-gate 110/110 · delta-lint PASS.
+
+## 2026-09-13 — ROUND 3 (the recovery bound was too permissive a SECOND time)
+
+⚑ META, carried from the coordinator and worth keeping: this bound has now been wrong
+TWICE, both times in the SAME direction — too permissive, eating source. Round 3
+therefore ends with a POPULATION COUNT ON THE BOUND ITSELF, not just a fix.
+
+### BLOCKING — `conditionHeadTokenCanFollowValue` accepted every PUNCT (fixed)
+Reproduced all five rows. All at exit 0 with zero diagnostics (the `export` re-parse
+hides the error), all hard-rejected by base:
+  `(out = 7)` → `if (a && b(out = 7))`  body absorbed as a CALL ARGUMENT
+  `!flag`     → `if (a && b)`           body DELETED outright
+  `++n`       → `if (a && b++)`         body DELETED, `b++` INVENTED
+  `-n`        → `if (a && b - n)`       body DELETED, `b - n` INVENTED
+  `.ok`       → `if (a && b.ok)`        body DELETED, `b.ok` INVENTED
+The last three FABRICATE an operation the author never wrote — worse than dropping one.
+The regex body survived cut 2 ONLY BY ACCIDENT (`REGEX` is its own token kind and fell
+through the PUNCT test); `REGEX` is now a value-ending kind so that is a rule, not luck.
+Fix: the continuation test is now EXACTLY `CONDITION_HEAD_CONTINUATION_PUNCT` — the same
+conservative set allowed to START a recovery. One set, one rule.
+⚑ The comment and §34 row both asserted "This is a WHITELIST, so the fail-direction is
+'stop early', never 'swallow source'." FALSIFIED; both rewritten.
+
+### ⚑ POPULATION COUNT ON THE NEW BOUND — 32 shapes enumerated, ZERO eaten
+Measured by executed return value (not a line filter), `function` variant for
+diagnostics + `export function` variant for runtime.
+CONTINUES THROUGH (14): `<` `<=` `>` `>=` `==` `!=` `===` `!==` `&&` `||` `??` `*` `%` `?`
+  — all keep the trailing statement; all return the correct value.
+STOPS AT (14): `(` `!` `++` `--` `-` `+` `.` `[` `/`(regex) `` ` ``(template) IDENT
+  call KEYWORD `is`-as-identifier — all keep body AND trailing statement.
+UNTOUCHED (4 controls, errors=[]): plain braceless body · regex braceless body ·
+  `if (a && b) { }` · `if ((a)) { }`.
+Every shape that PRODUCES AN ARTIFACT keeps its trailing statement. The two that do not
+(`.ok`, and the ternary `? 1 : 2` head) produce NO artifact and fail loudly — a hard
+reject, not data loss. ⚑ My first pass mislabelled those two as "EATEN" because the
+instrument conflated "no artifact" with "trailing missing"; corrected.
+⚑ ONE HONEST REGRESSION IN CAPABILITY, reported not hidden: `if (a) ? 1 : 2 { … }`
+produced a working artifact on cut 2 and now hard-rejects, because `:` is not in the
+set. The program is illegal either way (the diagnostic fires in both), no source is
+deleted or invented, and keeping one set is the more defensible invariant — so this was
+a deliberate choice, per "when in doubt, stop".
+Delta vs cut 2, 7 rows changed: `(` RTE→10 · `-` 0→3 · `[` 0→3 · `/` no-artifact→3 ·
+`.` wrong-artifact→rejected · `is` deleted-call→call-preserved · `?` artifact→rejected.
+All other 25 rows byte-identical.
+
+### ALSO BLOCKING — the §34 row overclaimed (fixed)
+The row's unconditional "Partitions into `result.errors`" and `newly-rejecting`
+classification are false inside an exported declaration. The row now carries the
+`export`-interior caveat and states that THERE the change is `semantics-changed` +
+`newly-accepting`; §49.2.3 gains a matching implementation-gap note.
+
+### ⚑ THE SWALLOW IS WIDER THAN EITHER MATRIX RECORDED — re-measured
+  FIRES : top-level · `function` · `fn` · `server function`
+  SILENT: `export function` · `export fn` · `export const g = () => …` ·
+          `export server function` · a plain `function` NESTED inside an `export function`
+(The `<program>` shell makes NO difference in any row.) So it is the whole lexical
+interior of any exported declaration — which is where real library code puts its loops.
+⚑ I found TWO CELLS BEYOND the two the coordinator named (`export const` arrow and
+`export server function`). Corrected in the test banner, the §34 row and here.
+Still NOT fixed: cost is the 22-of-2,553 migration measured in round 2.
+
+### NON-BLOCKING — value-ending set drift (addressed)
+`CONDITION_HEAD_VALUE_ENDING_KEYWORDS` gains `null`, `undefined`, `super`; `REGEX` added
+to the value-ending KINDS. The tokenizer's `VALUE_KEYWORDS` is function-local and cannot
+be imported, so the duplication is annotated with why. Erring toward MORE value-ending
+entries is the safe direction — every addition can only make the scan stop SOONER.
+
+### Re-verification
+- New test file: 30 → **39 tests, 39 pass** (9 added: 7 punctuation rows each asserting
+  body-text + trailing + no-invented-operator + executed value, the `.`-rejection, and a
+  word-shaped CONTROL that makes it a boundary rather than a guess).
+  ⚑ The `emitted` assertion is NOT redundant: `!flag` / `++n` have no observable effect
+  on the return value, so runtime alone could not tell a preserved body from a deleted
+  one — with value-only asserts the `!` row did NOT bite on cut 2 (7 fails); with the
+  emit assert it does (8 fails).
+- ⚑ FOUR-WAY BITE PROOF (file-copy swaps, no `git stash`):
+  vs BASE `origin/main` → 20 fail / 19 pass ·
+  vs CUT 1 `90b6e451`   → 14 fail / 25 pass ·
+  vs CUT 2 `5f7a22cc`   →  8 fail / 31 pass (exactly the 8 new punctuation assertions) ·
+  vs HEAD               → 39 / 39.
+- Three named files together: **79 pass / 0 fail**.
+- conformance **1608 pass / 30 skip / 0 fail** — unchanged from the branch-point baseline.
+- unit **18,599 pass / 17 skip / 1 fail (18,623 across 963 files)**; the 1 fail is the
+  known `node --check` co-run timeout (5021 ms) and passes in isolation (24/24).
+- regen-spec-index --check OK (SPEC 37,970→37,981) · facts --check OK · s34-census PASS ·
+  corpus-compile-floor PASS · conflict-marker PASS · snippet 110/110 · delta-lint PASS.
+
+## 2026-09-13 — ROUND 4: the RECOVERY IS DELETED (design change, not another bound)
+
+Rebased onto `origin/main` `0b0d9790` first (docs-only, zero overlap, clean) so every
+measurement below is against the base the review used.
+
+### Reproduced, then accepted the ruling
+All five operand-suffix rows reproduced at `fefdc789`, plus one the review did not list:
+  `if (a) && b[0] { out = 7 }`   → `if (a && b) { [0]; }`   `out = 7` DELETED, exit 0
+  `if (a) && n - 1 { out = 7 }`  → `if (a && n) { -1; }`    DELETED, exit 0
+  `if (a) && g(1) { out = 7 }`   → `if (a && g) { 1; }`     DELETED, exit 0
+  `if (a) && b.k { out = 7 }`    → `if (a && b) { . k { out = 7 }; }` ⚑ LITERAL GARBAGE
+  `while (i) < n >> 1 { … }`     → `while (i < n) { }`  INFINITE LOOP
+                           base  → `while (i) { }`      terminates
+The bound asked "can this token follow a value" and had no notion of "is this OPERAND
+FINISHED", so it stopped INSIDE the author's own condition. The last row reproduces the
+exact headline defect this code is named after, on a program base did not hang on.
+
+### The change
+`recovering`, `conditionHeadTokenEndsValue`, `conditionHeadTokenCanFollowValue`,
+`CONDITION_HEAD_VALUE_ENDING_KEYWORDS`, `CONDITION_HEAD_RECOVERY_STOP_KEYWORDS` — all
+DELETED. `CONDITION_HEAD_CONTINUATION_PUNCT` kept: it is the trigger, and the trigger is
+correct and corpus-measured at 0. `collectIfCondition` fires the diagnostic and stops at
+the `)`, which is the pre-S414 parse. A ⛔ banner records all three withdrawn bounds so
+the next reader does not re-add one.
+
+### ⚑ EMIT-EQUALITY PROOF — 38 shapes, base vs tip
+  IDENTICAL (errors AND emit), 10 — every legal/control spelling. The change is
+    invisible to legal code.
+  SAME EMIT, new diagnostic only, 8 — incl. both headline shapes and `while (i) < n >> 1`.
+    Base emitted the truncated loop at exit 0; tip emits THE SAME loop with a RED build.
+    This is precisely "newly-rejecting": nothing about the output changed.
+  EMIT CHANGED, 20 — 19 of them base `E-CODEGEN-INVALID-LOGIC` + NO ARTIFACT → tip
+    `E-CONDITION-HEAD-UNPARENTHESIZED` + a junk artifact. ⚑ EXPLAINED, not hand-waved:
+    `api.js:2934` `hasPriorFatalError` deliberately SKIPS the generic emitted-JS validity
+    gate when a real error already exists, because firing "this is a compiler defect,
+    please report it" on top of the real error is (its words) "actively misleading". My
+    diagnostic IS that real error, so replacing the generic one is the documented intent.
+    Both builds are RED. ⚑ And emit-on-red is the ESTABLISHED pattern, measured: the
+    shipped S308 `E-FOR-UNPARENTHESIZED-HEAD` also writes an artifact on a red build.
+    (api.js's comment claims "no artifacts are written" on that path — measured FALSE for
+    both S308 and S414. Pre-existing doc/behaviour mismatch; noted, not fixed.)
+
+### ⚑ Inside an exported declaration the change is now a COMPLETE NO-OP
+Measured byte-identical to base in BOTH the error list and the emitted JS. Round 3 was
+`semantics-changed` + `newly-accepting` there and strictly WORSE than doing nothing
+(base `while (i) { }` terminates; round 3's `while (i < n) { }` hangs). The §34 row is
+corrected accordingly — it had claimed the semantics-changed classification.
+
+### Tests — 46 pass
+Recovery assertions rewritten as REJECTION assertions. The punctuation and
+operand-suffix cases are KEPT as regression pins for all three withdrawn rounds.
+⚑ The 15-case `REJECTED` table is a PIN, not a discriminator — every one of those also
+fired the diagnostic under the recovery cuts. What separates reject-only from
+reject-and-recover is what gets EMITTED, so there are 7 `NOT SILENTLY EMITTED`
+discriminators, ONE PER SHAPE (not a loop inside one test) so a partial regression names
+itself.
+⚑ I caught an error in my own first draft of those: I wrote round 2's shapes WITHOUT the
+parenthesized `(b)` that gave the invented operator something to attach to, so 4 of the 7
+could not fire at all. Found by running them against round 2 and seeing 1 fail where 4
+were expected. Corrected.
+
+### ⚑ FIVE-WAY BITE PROOF (file-copy swaps, no `git stash`)
+  vs BASE `origin/main` 0b0d9790 → 21 fail / 25 pass
+  vs ROUND 1 `90b6e451`          →  6 fail
+  vs ROUND 2 `5f7a22cc`          →  4 fail  (exactly the 4 invented-operator shapes)
+  vs ROUND 3 `fefdc789`          →  4 fail  (exactly the 4 operand-suffix shapes)
+  vs HEAD                        → 46 / 46
+Each round's own defects, and only those, fail against that round.
+
+### Verification
+- three named files together: 79 → **85 pass / 0 fail**
+- conformance **1608 pass / 30 skip / 0 fail** — unchanged from the branch-point baseline
+- unit **18,606 pass / 17 skip / 1 fail (18,630 across 963 files)**; the 1 is the known
+  `node --check` co-run timeout (5074 ms), passes in isolation (24/24)
+- regen-spec-index --check OK (SPEC 37,981→37,993) · facts --check OK · s34-census PASS ·
+  corpus-compile-floor PASS · conflict-marker PASS · snippet 110/110 · delta-lint PASS
+
+---
+
+## ⚑ TO FILE, NOT FIXED HERE — a bare `{ … }` block statement is silently dropped
+
+Independent of this arc and PRE-EXISTING. This is the delivery mechanism that turned
+"stop early" into silent DATA LOSS rather than a loud failure: when the recovery
+truncated a head and handed the remainder to the body parser, the author's real braced
+block was simply discarded.
+
+REPRODUCER — returns **10** on BOTH `origin/main` 0b0d9790 and this branch, `errors: []`,
+exit 0. The `{ i = i + 1 }` block is absent from the emitted JS entirely:
+
+```scrml
+${
+  export function f() {
+    let i = 0
+    i = i + 10
+    { i = i + 1 }
+    return i
+  }
+}
+```
+emits:
+```js
+export function f() {
+  let i = 0;
+  i = i + 10;
+  return i;
+}
+```
+
+Not fixed here (out of scope, and it is a parser-wide behaviour, not a loop-head one).
