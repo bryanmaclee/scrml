@@ -404,8 +404,31 @@ function classifyRole(relPath: string): "entry" | "auxiliary-module" {
  * nothing else — keeps the comparison about the COMPILER'S BEHAVIOUR while leaving every genuine
  * text change visible.
  *
- * The emitted ARTIFACTS were separately verified to contain no absolute-path leak, so artifacts are
- * compared byte-exact with no normalization at all. Only the console streams are normalized.
+ * Artifacts are compared byte-exact with no normalization at all. Only the console streams are
+ * normalized.
+ *
+ * ⚠ S416 — THE CLAIM THAT USED TO STAND HERE WAS FALSE, AND IT IS THE TRUST-DESTROYING KIND.
+ * It read: *"The emitted ARTIFACTS were separately verified to contain no absolute-path leak, so
+ * artifacts are compared byte-exact with no normalization at all."* The artifacts DO carry a
+ * path-derived token. `// --- chunk cell scope (<token>) ---` is an 8-char base36 FNV-1a of the
+ * source path, and `chunkNamespaceToken` (compiler/src/codegen/chunk-namespace.ts) hashes the
+ * PROJECT-ROOT-RELATIVE path — falling back to the ABSOLUTE path when the walk finds no root
+ * marker. The markers are `scrml.toml` and `.git`.
+ *
+ * So byte-exact comparison is sound EXACTLY WHEN BOTH SIDES RESOLVE A PROJECT ROOT, and not
+ * otherwise. Measured S416 by calling the token function directly:
+ *
+ *     both rooted, same rel path, different absolute roots  →  01w51kr6 == 01w51kr6   IDENTICAL
+ *     neither rooted (a `git archive` extract: no .git,
+ *       no scrml.toml), different absolute paths            →  019ycgsj != 01ir929c   DIFFER
+ *
+ * ⛑ Two ordinary git checkouts, and a `git worktree`, each carry `.git` — so the common case is
+ * comparable and the historical report of *"~1009 false differences between any two checkouts"* is
+ * NARROWER than it was filed: it needs a ROOTLESS side. An extracted tarball or `git archive` is
+ * rootless, and the usage block above tells you to point `--compiler-root` at "a scrml checkout",
+ * which is how you get there. **This tool does not yet detect that configuration** — filed as
+ * `g-corpus-emit-differential-does-not-detect-a-rootless-compiler-root`. Until it does: if a side
+ * has no `.git`/`scrml.toml`, treat artifact differences as UNMEASURED, not as evidence.
  */
 function normalizeStream(text: string, compilerRoot: string, workRoot: string): string {
   let out = text;
