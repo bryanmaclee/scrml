@@ -147,3 +147,73 @@ describe("detector-validation — the three S202 acceptance-bug shapes fire", ()
     expect(cell.smells).not.toContain("S-RAW-INTERP");
   });
 });
+
+// =============================================================================
+// D6 — S-EMPTY-WITH-DATA. ADDED S416.
+//
+// ⚠ THIS DETECTOR HAD NO VALIDATION TEST AND HAD NEVER FIRED. Across the whole
+// 438-cell standing baseline, `S-EMPTY-WITH-DATA` appears ZERO times — and a
+// detector that has never fired and is never exercised is indistinguishable from
+// a broken one. That mattered here because S416 gave it a consequence: its result
+// now resolves to `renders-empty-with-data`, which is NOT in `GREEN_STATES`,
+// where previously it collapsed into the green `renders-empty`. Wiring a red
+// state to an unproven detector would just move the hollow gate, so this proves
+// D6 fires, and proves the unseeded case stays green.
+//
+// `runDetectors` is a pure function of the observation, so both directions are
+// asserted directly — no mount needed beyond a happy-dom document.
+// =============================================================================
+describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green", () => {
+  // Same happy-dom lifecycle as the suite above — `document` is a registered global,
+  // not an ambient one, so each describe needs its own registration.
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  test("D6 fires (S-EMPTY-WITH-DATA) and resolves to renders-empty-with-data", () => {
+    document.documentElement.innerHTML = "<body><main id=\"root\"></main></body>";
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: [],
+      document,
+      seeded: true,
+    });
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.detail.emptyWithData).toBe(true);
+    // The state is the point: before S416 this returned "renders-empty", which
+    // e2e-render-map.test.js counts as GREEN.
+    expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  test("the SAME empty DOM with NO seed stays renders-empty (the valid <empty> fallback)", () => {
+    document.documentElement.innerHTML = "<body><main id=\"root\"></main></body>";
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: [],
+      document,
+      seeded: false,
+    });
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-empty");
+  });
+
+  test("a seeded render with CONTENT is unaffected — renders-clean", () => {
+    document.documentElement.innerHTML =
+      "<body><main id=\"root\"><ul><li>Ada</li><li>Alan</li></ul></main></body>";
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: [],
+      document,
+      seeded: true,
+    });
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+  });
+});

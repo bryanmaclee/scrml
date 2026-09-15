@@ -244,7 +244,16 @@ export function runDetectors(obs) {
     return { state: "smell-detected-wrong", smells, detail };
   }
   if (smells.includes("S-EMPTY-WITH-DATA")) {
-    return { state: "renders-empty", smells, detail };
+    // ⛑ S416 — SEEDED-AND-EMPTY IS NOT THE SAME ANSWER AS EMPTY, AND IT USED TO
+    // COLLAPSE INTO IT. Both branches returned `renders-empty`, which
+    // `e2e-render-map.test.js` counts as GREEN — so D6, the detector written to
+    // catch the board-bug class (data was seeded, the loop body reached nothing,
+    // the page came back blank), FIRED and then had its answer scored as a pass.
+    // The gate was not wrong, it just was not answering its own question: the
+    // §8 hollow-gate shape. A distinct state keeps the unseeded case green — an
+    // empty render with no data IS a valid `<empty>` fallback — while making the
+    // seeded case a real red.
+    return { state: "renders-empty-with-data", smells, detail };
   }
   // No smell, no throw, no compile error. If the body is empty WITHOUT a seed,
   // that's a valid empty/partial render (records as renders-empty, NOT a fail).
@@ -254,12 +263,36 @@ export function runDetectors(obs) {
   return { state: "renders-clean", smells, detail };
 }
 
-/** The set of states the harness can record (for baseline schema validation). */
+/**
+ * The states `runDetectors` can return.
+ *
+ * ⚠ S416 — THIS WAS A DEAD EXPORT FOR ITS WHOLE LIFE. Its comment said "for
+ * baseline schema validation" and `grep -rn RENDER_STATES compiler/ scripts/`
+ * returned exactly one hit: this definition. Nothing imported it, and the §1
+ * schema test asserted only `typeof cell.state === "string"` — so the baseline
+ * could carry any string at all and did: a `HARNESS-TIMEOUT` cell
+ * (`samples/gauntlet-r18/rails-dev.scrml#empty`, MOUNT-HANG, subprocess killed
+ * at 20s) sat in it against no vocabulary. A named vocabulary that nothing
+ * checks is not a gate; it is a comment. It is wired into §1 now.
+ */
 export const RENDER_STATES = [
   "fails-compile",
   "compiles-but-throws",
   "smell-detected-wrong",
   "needs-server",
   "renders-empty",
+  "renders-empty-with-data",
   "renders-clean",
 ];
+
+/**
+ * States the HARNESS records when it could not obtain a render at all. These are
+ * deliberate and must never be suppressed (DD §"DO NOT SUPPRESS ANY ERROR
+ * CLASS") — they are emitted by `generate-baseline.js` / `observe-one.js`, not by
+ * `runDetectors`, which is why they are a separate list rather than members of
+ * `RENDER_STATES`.
+ */
+export const HARNESS_STATES = ["HARNESS-TIMEOUT", "HARNESS-ERROR"];
+
+/** Every state a baseline cell may legally carry. */
+export const ALL_BASELINE_STATES = [...RENDER_STATES, ...HARNESS_STATES];

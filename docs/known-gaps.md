@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
-| MED | 243 |
+| MED | 245 |
 | LOW | 92 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4980,12 +4980,113 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 
 ### g-e2e-render-map-classifies-renders-empty-as-green — ⭐ the e2e tier DOES mount the corpus and read the DOM — and it classifies `renders-empty` as **GREEN**, with no partial-emptiness detector, so a flagship whose every card is empty records `renders-clean` — `NEW S372-bryan (surfaced by the render-slot trace; PA-VERIFIED by reading the classifier); MED; open`
 <!-- @gap id=g-e2e-render-map-classifies-renders-empty-as-green sev=MED status=open locus=compiler/tests/e2e-render-map/e2e-render-map.test.js:44(`const GREEN_STATES = new Set(["renders-clean", "renders-empty", "needs-server"])`) + compiler/tests/e2e-render-map/render-detectors.js:249-254(the terminal branch asks only `if (bodyText.trim() === "")` → renders-empty, else renders-clean — there is no PARTIAL-emptiness detector, so a page with any surviving text reads clean) prov=rationale:S372-review-of-the-render-slot-trace-the-why-it-survived-line-in-the-sibling-gap-was-FALSE-something-does-look-at-the-DOM-and-calls-it-green -->
+
+> **⛑ PARTIALLY RESOLVED S416-peter — THE CLASSIFICATION HALF IS FIXED; THE HEADLINE'S SECOND CLAUSE
+> IS WHY THIS STAYS OPEN.** Two things were true in this entry and only one is fixed.
+>
+> **Fixed — and the mechanism was sharper than filed.** The entry says there is "no partial-emptiness
+> detector". There IS a detector for the TOTAL-emptiness-with-data case: **D6 / `S-EMPTY-WITH-DATA`**
+> (`render-detectors.js:203-208`), which fires on `obs.seeded && bodyText.trim() === ""` — exactly the
+> board-bug shape. It then `return`ed `renders-empty`, **which is in `GREEN_STATES`**. So the harness
+> *detected* the bug class and *scored it as a pass*: not a missing detector, a **discarded** one. D6 now
+> resolves to a distinct `renders-empty-with-data`, deliberately absent from `GREEN_STATES`, while the
+> UNSEEDED empty render stays green (it is a valid `<empty>` fallback — keeping those apart is the point).
+> Baseline churn **zero**: `S-EMPTY-WITH-DATA` occurs in **0 of 438** cells today, so this is a latent
+> correctness fix, not a reclassification of live cells.
+>
+> ⚠ **D6 had never fired and had no validation test** — and a detector that has never fired is
+> indistinguishable from a broken one, which matters a great deal once it is given a RED consequence.
+> Three cases added to `detector-validation.test.js` proving it fires, that the unseeded case stays
+> `renders-empty`, and that a seeded render WITH content is still `renders-clean`. Red-before-green
+> **1 fail → 0**, with both control cases passing in either state.
+>
+> **STILL OPEN — the second clause, which is the bigger half.** Partial emptiness remains invisible:
+> the terminal branch is `bodyText.trim() === ""` or nothing, so a flagship that renders its chrome and
+> **zero cards** has a non-empty body and classifies `renders-clean`. D6 only ever catches TOTAL
+> emptiness. Closing that needs per-cell expected-content, which is the "decision, not just a patch"
+> this entry already names — unchanged and not attempted here.
+>
+> ⛑ **Two further defects found in the same instrument and FIXED here.** (1) **`RENDER_STATES` was a
+> dead export for its whole life** — its own comment said "for baseline schema validation" and
+> `grep -rn RENDER_STATES compiler/ scripts/` returned exactly ONE hit, its definition. The §1 schema
+> test asserted only `typeof cell.state === "string"`, so the baseline could carry any string and did:
+> a `HARNESS-TIMEOUT` cell (`samples/gauntlet-r18/rails-dev.scrml#empty`, MOUNT-HANG, subprocess killed
+> at 20s) sat against no vocabulary at all. `RENDER_STATES` + a new `HARNESS_STATES` are now wired into
+> §1 as `ALL_BASELINE_STATES`. (2) The with-data **reach** is now asserted rather than assumed — see
+> [[g-e2e-render-map-with-data-coverage-is-four-of-438]].
+
 > **⚑ S372-bryan: PA-VERIFIED by reading the classifier, and it CORRECTS a line I had let stand.** The [[g-render-snippet-slot-renders-empty]] entry said *"nothing loads the artifact and looks at the DOM."* **That is false.** `compiler/tests/e2e-render-map/` mounts the corpus, observed the empty renders, and recorded them as **passing**:
 > - `e2e-render-map.test.js:44` — `GREEN_STATES` **includes `renders-empty`**.
 > - `render-detectors.js:249-254` — the terminal branch is `if (bodyText.trim() === "") return renders-empty` else `renders-clean`. **There is no partial-emptiness detector**, so the flagship — whose cards are empty but whose page still has other text — records `renders-clean`. Its own in-source comment says the quiet part: *"that's a valid empty/partial render (records as renders-empty, NOT a fail)."*
 > **This is the §8 hollow-gate shape, and it is the interesting variety:** the gate is not broken and its answer is not wrong — *"the body is non-empty"* is TRUE. It is simply **not an answer to the question being asked**, which is *"did the content the source asked for actually render?"*
 > ⚑ **Operational consequence for the render-slot fix dispatch: its regression test CANNOT be an e2e-render-map cell** — the cell was green before the defect and would be green after a non-fix. It needs a test that asserts the *specific* slot content. Also recorded by the trace: the four `samples/compilation-tests/` snippet files are **not** in the `bun run pretest` dist set, so no browser test reads them either.
 > **Fix direction — a decision, not just a patch.** Either add a partial-emptiness / expected-content detector, or split `renders-empty` out of `GREEN_STATES` and baseline the current population as known-debt. ⚑ Per pa-base §8, **the second option owes a population count BEFORE it lands** (how many cells go red for reasons no change caused) — a gate that turns instantly red over an existing backlog is the cry-wolf shape that gets bypassed and then deleted.
+
+
+
+### g-e2e-render-map-tier-runs-in-no-ci-job-at-all — the only tier that MOUNTS the corpus and reads the DOM is referenced by no workflow, no package script and no git hook, so nothing it classifies has ever gated anything — `NEW S416-peter (found while fixing the tier's classifier — checked whether the fix would be exercised in CI); MED; open`
+<!-- @gap id=g-e2e-render-map-tier-runs-in-no-ci-job-at-all sev=MED status=open locus=.github/workflows/ci.yml(gate=tests/unit+conformance+tests/*.test.js;tracking=tests/integration+lsp+commands;windows=unit+conformance—none-name-tests/e2e-render-map)+package.json+scripts/git-hooks prov=empirical:PA-grepped-S416-e2e-render-map-returns-zero-hits-across-.github-package.json-and-scripts/git-hooks -->
+
+`compiler/tests/e2e-render-map/` is the tier the sibling entries call *"⭐ the e2e tier DOES mount the
+corpus and read the DOM"* — the only place in the tree where a corpus app is actually rendered and
+inspected. **No CI job runs it.**
+
+| job | what it runs |
+|---|---|
+| `gate` (blocking) | `compiler/tests/unit compiler/tests/conformance`, `compiler/tests/*.test.js` |
+| `tracking` (non-required) | `compiler/tests/integration compiler/tests/lsp compiler/tests/commands` |
+| `windows` | `compiler/tests/unit compiler/tests/conformance` |
+| within-node | `compiler/tests/parser-conformance-within-node.test.js` |
+
+`compiler/tests/e2e-render-map/` is in none of them, and `grep -rln e2e-render-map .github/` returns
+**zero hits**; so do `package.json` and `scripts/git-hooks/`. It runs only when a human types the path.
+
+⚠ **This is the ceiling on every other finding filed against this tier.** Whether a cell is classified
+green or red, whether `renders-empty` is in `GREEN_STATES`, whether the delta-gate is WARN-only — none of
+it gates anything, because the tier is never invoked. The §8 hollow-gate family reached from its furthest
+end: not a gate that answers the wrong question, a gate that is never asked one. Companions:
+[[g-tracking-job-red-on-main-and-nobody-reads-it]] (a job that runs and is not read) and this (a tier that
+is not run).
+
+**Not a "just add it to CI" fix, which is why it is filed rather than done.** Measured locally S416, the
+full tier is **~21 s** for 12 tests, and §2's own comment explains it observes through subprocess isolation
+because *"several corpus apps leave dangling async work after mount"* — and the standing baseline already
+carries a `HARNESS-TIMEOUT` cell (`samples/gauntlet-r18/rails-dev.scrml#empty`, subprocess killed at 20 s).
+So adding it blind risks importing a timing-sensitive tier into a blocking job. The honest sequence is the
+one [[g-tracking-job-red-on-main-and-nobody-reads-it]] already reached for `tracking`: decide the tier's
+home (a non-blocking job first), stabilise, THEN promote — and that is a decision, not a patch.
+
+### g-e2e-render-map-with-data-coverage-is-four-of-438 — the detector class that finds the board bug can only run on SEEDED cells, and seeding is a hand-maintained 4-entry map, so 99.1% of the corpus is observed only in the state the DD itself calls "looks green" — `NEW S416-peter (measured while splitting D6 out of GREEN_STATES); MED; open`
+<!-- @gap id=g-e2e-render-map-with-data-coverage-is-four-of-438 sev=MED status=open locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS—four-entries)+render-detectors.js:206(D6-gated-on-obs.seeded) prov=empirical:PA-counted-S416-from-e2e-render-map-baseline.json-438-cells-4-populated -->
+
+`seed-fixtures.js` states the premise of this whole tier in its own header: *"an app with a `<db>`/`<each>`
+that renders the `<empty>` fallback from an EMPTY cell is a VALID partial render (looks green) — the board
+bug class lives ONLY in the POPULATED render."* D6 is gated on `obs.seeded` precisely for that reason.
+
+**Counted from the standing baseline (S416): 438 cells, of which 4 are `#populated`.** `POPULATED_SEEDS`
+has four entries. So the with-data half of the gate reaches **0.9%** of the corpus, and the other 434 cells
+are observed ONLY in the seed-empty state the header calls "looks green".
+
+| | count |
+|---|---|
+| baseline cells | 438 |
+| `#populated` (seeded) cells | **4** |
+| cells carrying `S-EMPTY-WITH-DATA` | **0** |
+| `renders-clean` | 259 |
+
+⚠ **This is not a defect in any cell — it is the gate's REACH, and reach that nothing asserts is reach
+that silently rots.** It is the same shape as the classification bug above, one level up: the tier's answer
+for 99% of the corpus is *"the empty-seed render did not crash"*, which is TRUE and is not an answer to the
+question the tier is named for.
+
+**Held for now:** a coverage RATCHET is landed in `e2e-render-map.test.js` — it pins the populated-cell
+floor at 4 and prints `with-data coverage: 4 populated of 438 cells (0.9%)` in the suite output, so the
+figure is visible and cannot quietly drop. That stops the rot; it does not raise the number.
+
+**Fix direction** — raising it is real work, not a patch: every seeded app needs a fixture matching the
+SEED-SHAPE INVARIANT (S203) in `seed-fixtures.js`, and a seed missing a rendered field produces a FALSE
+`S-NULLISH-TEXT` that looks like a codegen bug. So this is a per-app authoring task with a known trap, and
+it should be sized as such rather than dispatched as "add seeds".
 
 ### g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime — ⭐⭐ a lift-path `<each>` emits client calls to `_scrml_reconcile_list` that the SHIPPED runtime chunk does not define → `ReferenceError`, dead page, exit 0 — **and one instance is a SHIPPED CONFORMANCE CASE that the 886/886 suite passes** — `NEW S371-bryan (agent-surfaced, PA-CONFIRMED by executing the shipped artifact); HIGH; open`
 <!-- @gap id=g-each-lift-path-client-calls-reconcile-list-absent-from-shipped-runtime sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(the chunk-detect walker does not reach every carrier of a lift-path `<each>`, so the `reconciliation` runtime chunk is pruned while the client still calls into it; a `{kind:"markup-value", node}` expr leaf from ast-builder.js:4105 is one such carrier the walker never routes back into walkNodes) prov=rationale:S371-PA-executed-the-SHIPPED-runtime-chunk-not-the-full-SCRML_RUNTIME-template-conformance-cases-each-ternary-markup-giti033-3-call-sites-0-definitions-ReferenceError-dead-page -->
