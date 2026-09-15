@@ -1,3 +1,191 @@
+# scrml — Session 416 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S415/S414/S413/
+> S412/S411/S410 mine, S405 bryan's) and is untouched.
+>
+> ⚑ **SIBLING STATE: bryan not live during this session, but his wrap PR is still open.** His newest
+> activity is **2026-09-14T04:37Z** (#951), ~23h before this wrap; he landed nothing on scrml `main`
+> and nothing measured here was affected. **#951 is a WRAP PR and will touch `hand-off.md`,
+> `docs/changelog.md` and `handOffs/delta-log.md` — the same three files as this wrap.** Branch
+> protection (`strict:true`) forces the second PR to rebase, which is the sanctioned serialization:
+> **resolve by UNION** (all three are append-only) and re-run `bun scripts/delta-lint.ts --fix` if the
+> sequence collides. His open PRs — #950/#951, #937/#938/#939, #899/#905/#906/#907/#918/#919/#920 —
+> are CLAIMED, not lost.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Review floor reads 5 OWED, and all five are THIS session's own landings** — #955, #956, #957,
+   #958, #959. Per the #890 marker a drain PR's review rides the NEXT landing, so this is the
+   rolling floor working as designed, not debt I left. **Discharge it first**: it is the established
+   opener and it has returned a real finding on every one of the last five sessions, including this
+   one (#952's blanking claim, and the `E-ASSIGN-003` root under a whole gap family before that).
+   ⚑ Note for the drain: **#956 is the only code-bearing PR in the set** — the other four are
+   docs/instrument-only and are carve-outs by path, so the code-bearing carve-out rate stays the
+   health signal.
+
+2. ⚑⚑ **STILL BRYAN'S, UNCHANGED, DO NOT BUILD ANY OF IT.** The `E-ASSIGN-003` zero-producer root
+   (SPEC §50.9 SHALL at `:27867`, §34 row `:20059`, §50.8.4 at `:28008`, plus `:28048` and `:28187`
+   that the routing note never cited) and the whole `declaredNames` family hanging off it
+   (`g-try-catch-finally-bodies-redeclare-every-assignment` HIGH ·
+   `g-match-arm-bodies-share-one-declarednames-set` MED · `g-loop-head-binding-is-not-tracked` MED),
+   with #947's tests pinning the non-conformant side. Also unchanged: §49.2.1 braceless loop bodies ·
+   `g-bare-block-statement-is-silently-dropped` (HIGH) ·
+   `g-export-reparse-swallows-ast-builder-parse-path-diagnostics` (HIGH, a 22-file migration) · the
+   must-use spec-citation mis-citation · his three #936 findings ·
+   `g-library-shadowed-inner-binding-is-a-false-rejection` (MED) · the §59 library-mode lowering
+   widening.
+   ⚑ **NEW THIS SESSION AND OWED TO HIM:** `E-CONDITION-HEAD-UNPARENTHESIZED` (#945) is still
+   OUTSTANDING, and **#956 widened its enforcement set** — newly-rejecting, so it owes a
+   language-surface review. **If he rules the diagnostic away, #956's widening goes with it.**
+   Outbound drop written this session:
+   `handOffs/incoming/2026-09-14-2340-from-S416-peter-to-bryan-*.md`.
+
+3. **THE SESSION'S FINDING, AND IT IS THE REASON THE MED COUNT WENT UP:** four separate instruments
+   turned out to *exist, read as done in the ledger, and never be consulted.* This is now a named
+   class, and the next instrument arc should open by asking "is it invoked?" before "is it correct?":
+   - **`g-emit-differential-hardening-never-reached-main` (MED, NEW)** — the landing gate cited as
+     evidence in compiler PRs (including #956 this session) is missing **HARD REQ 8, 9, 9.1, 10, 11**
+     and ~1,250 LOC; `reverify`/`FLAKE_DEMOTION_RULE` **0 on main / 63 on the branch**. Branch
+     `origin/worktree-agent-ab7336c5da32f10ed` is 415 commits behind with 11 not in main — **a PORT,
+     not a merge**, and its own arc.
+   - **`g-e2e-render-map-tier-runs-in-no-ci-job-at-all` (MED, NEW)** — the only tier that mounts the
+     corpus and reads the DOM is in **no** workflow, package script or hook. Everything else filed
+     against that tier sits under this ceiling.
+   - **`g-e2e-render-map-with-data-coverage-is-four-of-438` (MED, NEW)** — the detector class that
+     finds the board bug can only run on **4 of 438** cells.
+   - **`g-corpus-emit-differential-does-not-detect-a-rootless-compiler-root` (MED, NEW)** — split out
+     when the "any two checkouts" framing was narrowed to "needs a rootless side".
+
+4. **THE CHEAPEST REAL ITEM LEFT, and it is genuinely bounded:** make `scripts/boot.ts` importable —
+   **0 `export`s, no `import.meta.main` guard, ~115 lines of top-level execution from `:325`** (sync,
+   probes, printing, `process.exit`), so importing it runs the whole boot digest. That is the ONLY
+   reason its `@ledger` parser (`:173`) is the unpinned fifth in
+   `compiler/tests/unit/marker-parser-pins.test.js`. Wrap-the-tail restructure, mechanical, **verify
+   by diffing `bun scripts/boot.ts` output before/after**. Deliberately not folded into #959 because a
+   mistake there is paid at every future boot.
+
+5. ⛔ **DO NOT WIDEN THE FOUR SURVIVING `[^>]` MARKER REGEXES** (`state.ts:248`, `boot.ts:173`,
+   `corpus-zero-debt.ts:145`, flograph `NODE_RE`). Measured this session: **live miss count ZERO**
+   (the only 2 misses in `known-gaps.md` are prose lines documenting the marker format), and widening
+   `flograph` would admit documentation **templates** (`<!-- @node id=<kebab-id> kind=<kind> -->`) as
+   real graph nodes — the same shape as one of S378's five reverted rounds. Both facts are now pinned
+   as tests. The harness exists; the widening still needs a reason, and there isn't one yet.
+
+6. ⛔ **DO NOT RE-ADD A RECOVERY SCAN TO `collectIfCondition`.** Carried verbatim from S414/S415:
+   three separate bounds were built and all three ate or corrupted source; the ⛔ banner in
+   `ast-builder.js` records all three by shape. The scan stopping at the `)` is the invariant.
+
+7. **Other live work, untouched:** `g-emit-if-stmt-with-opts-is-never-reached` (MED) · the two
+   pre-existing `.size`/bracket residuals under #952 (both need the receiver's TYPE) ·
+   `g-unsigned-right-shift-does-not-lower` (LOW, NEW — `>>>` is unusable anywhere in a scrml
+   expression; fails LOUDLY so nothing silent ships) · the partial-emptiness half of
+   `g-e2e-render-map-classifies-renders-empty-as-green`, which needs per-cell expected-content.
+
+8. **⛑ STILL OWED and not fixable here:** `bun scripts/types-gate.ts --write` on a clone where it
+   runs. This Windows clone has no extensionless `node_modules/.bin/tsc`. Nothing is blocked — the
+   step is `continue-on-error: true` inside the non-blocking `tracking` job.
+
+9. **Standing from Peter, unchanged:** merge on green without re-asking; surface `autoMode` blocks as
+   `⛔ BLOCKED BY autoMode — <exact command>` rather than engineering around them. One block fired
+   this session (`gh pr merge 955`) and he cleared it with *"merge"*.
+
+## WHAT LANDED
+
+Five PRs, all gate-green, all merged and re-verified on the merged trunk.
+
+- **#955 `review(s416)`** — the review floor drained 4 → 0.
+- **#956 `fix(§50.2.3)`** — five merged angle runs escaped `E-CONDITION-HEAD-UNPARENTHESIZED`.
+- **#957 `fix(differential)`** — the landing gate had no test surface on main, and the ledger said it did.
+- **#958 `fix(e2e-render-map)`** — the gate detected the board-bug class and scored it as a pass.
+- **#959 `fix(instruments)`** — the five marker parsers get their import-and-pin harness.
+
+## 🔭 DURABLE
+
+**The class this session found, stated once: an instrument that EXISTS and is never CONSULTED reads
+identically to one that works.** Four independent instances, none of which looked broken:
+
+- a test rig the ledger recorded as landed, which lived only on an unmerged agent branch;
+- a detector (`S-EMPTY-WITH-DATA`) that fires correctly and has its answer classified GREEN;
+- a `RENDER_STATES` vocabulary whose own comment says "for baseline schema validation", with exactly
+  one occurrence in the repo — its definition;
+- a whole tier that no CI job runs.
+
+The diagnostic question is **"is it invoked?"**, and it is cheaper than checking correctness. Three of
+the four were found by asking it almost by accident — #958's CI finding came from wondering whether my
+own fix would be exercised.
+
+**The corollary that cost the most to learn: a green test can be the bug.** `detector-validation`'s G4
+(*"a DETERMINISM run never demotes"*) PASSED on main and was dropped anyway — it passed against a
+script with no demotion machinery to exercise. Keeping it would have overstated coverage with a test
+that cannot fail. **Check what a green test would have to do to go red.**
+
+**And the method that made #959 worth landing: prove the harness bites.** The gap's stated blocker was
+that a test for those scripts *"tests a reimplementation and passes with the fix reverted."* So the
+harness was verified by mutation — revert both landed fixes, confirm 3 red / 8 green with the
+survivors being exactly the controls. Without that step it would have been another instrument nobody
+can trust.
+
+## ⚑ MISSES (mine)
+
+- **I reported "the fold didn't re-trigger the gate" one step too early on #958.** `gh pr checks`
+  returned "no checks reported" while the run was still QUEUED; the fold had worked. Corrected in the
+  next turn. **The lesson is the check, not the claim**: `gh pr checks` races a queued run — confirm
+  against `gh run list --branch <b>` before concluding a trigger failed.
+- **My first #952 escape probe used `export fn`, which hit a different known gap** (the export
+  re-parse swallow) and made the in-set control look broken too. The repro was only decisive once I
+  re-ran it non-exported. A probe that fails for a second, unrelated reason reads exactly like a
+  confirmed hypothesis.
+- **Two heredoc quoting failures and one Python escape bug** cost round-trips; the escape bug silently
+  applied NO mutation and produced a green run I nearly believed. Caught because the mutation was
+  *supposed* to go red — the expectation is what saved it.
+
+## Gate at close
+
+- **Cloud gate GREEN on all five PRs** (`gate` + `windows` pass on each). `tracking` red on every one
+  and **proven pre-existing each time by name-set comparison against main's own run** — the identical
+  5-name dev-watcher wait-budget cluster, homed at
+  `g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only`. Never assumed; re-measured per PR.
+- **Local on merged main:** `marker-parser-pins` 11/0 · `condition-head-merged-shift-runs` 29/0 ·
+  e2e-render-map tier 12/0 · `corpus-emit-differential-exit-codes` 7/0 · the seven condition-head
+  sibling suites 137/0.
+- **Full local `unit + conformance` (the blocking gate's own targets) on merged main: 20,341 pass ·
+  47 skip · 6 todo · 2 fail**, 1,100 files, ~411 s. ⚠ **The fail count is NOT stable — two identical
+  back-to-back runs returned 3 and then 2**, which is the flake signature, and the named cases are
+  `CONF-W5B-IN-PROCESS-DB-LIBRARY` and the corpus-bridge `print/tool-println-clean-stdout` — both
+  tool/stdout runtime cases. **W5B PASSES STANDALONE (1/0, 437 ms)**, so this is the co-run flake this
+  clone is known for, not a regression: the cloud gate runs the IDENTICAL targets and was GREEN on all
+  five PRs. ⛑ Stated as measured rather than filed under "known baseline" — I verified ONE of the two
+  standalone, not both, and the second needs the corpus bridge to run in isolation.
+- **Corpus emit-differential** (#956): 1,928 sources / 7,467 artifacts — 0 newly failing, 0 newly
+  passing, **0 diagnostic-CODE changes, 0 artifact content diffs**, 0 syntax delta.
+- `delta-lint` PASS at max `[3060]`; `facts --check` and `state --check` both PASS.
+- **Board: HIGH 107 · MED 245 · LOW 92.** MED rose 4 across the session (4 filed, 1 resolved, 3
+  partially). ⚑ That is the count getting HONEST: five previously-filed entries pointed at code that
+  does not exist on `main`, and are now corrected in place.
+
+**Maps — NOT regenerated, and the reason is measured, not a skip.** The watermark is `e74f5423`, which
+was **already stale before this session** (`g-nav-maps-have-no-scheduled-refresh`, MED, open — the
+`cloud-maps` Stage-2 mapper leg was removed at S310 as a cost decision, so nothing refreshes
+`.claude/maps/` on a schedule; the daily cron runs only the deterministic `@generated` rollup, which is
+why #954 landed as a single `recent-sessions` line under a commit titled *"scheduled nav-map +
+@generated regen"*). **This session added no navigable structure**: the whole `compiler/src` delta is
++39 lines in `ast-builder.js` — a comment block plus five `Set` members — with no new, moved or deleted
+symbol; the two new files are TESTS. A mapper run here would refresh 100+ commits of unrelated drift
+under a wrap that did not cause it.
+
+**Worktrees — four retained, none this session's.** `.claude/worktrees/agent-a0742fe4795045e91`,
+`.claude/worktrees/agent-a4e6b5f2562ae9eaa`, `.claude/worktrees/onmount-c` (`feat/onmount-c-build`) and
+the sibling `scrml-pinned` (`app-pinned` @ `8f3c5b74`). The one worktree I created — the corpus
+differential's base side at `/c/wt-fp/s416base` — was removed and pruned when #956's differential
+finished. ⚠ `onmount-c` is the S322 build that stopped before its PR pending bryan's language-surface
+review; it is RETAINED deliberately.
+
+**Outbound:** one drop written to bryan this session —
+`handOffs/incoming/2026-09-14-2340-from-S416-peter-to-bryan-a-diagnostic-set-widened-under-an-unruled-code-and-a-gate-whose-hardening-never-landed.md`.
+**Four outbound drops to bryan now sit unread** (S412, S413, S415, S416).
+
+---
+
 # scrml — Session 415 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S414/S413/S412/
