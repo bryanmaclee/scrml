@@ -10601,9 +10601,48 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    *           distinguish `(x) is Foo` from a user's `if (n < 3) is(n)` — and a cut
    *           that tried falsely rejected the latter and deleted the call. A member
    *           that cannot fire correctly is worse than an absent one.
+   *
+   * ⛑ READ THE EXCLUSION LIST AS ONE TEST, NOT A LIST OF NAMES: *can this token also
+   * BEGIN A BRACELESS BODY?* Every entry above is out for that reason and no other. That
+   * is what makes the MERGED SHIFT RUNS admissible below while "do not widen" still
+   * governs — they are strictly BINARY infix, so no statement can start with one, and
+   * admitting them cannot cost a valid program its body. A future widening earns its
+   * place by passing that test, not by resembling something already here.
+   *
+   * ⛑ S416 — WHY THE FIVE SHIFT SPELLINGS ARE LISTED SEPARATELY AND EXPLICITLY.
+   * The match below is exact token-TEXT equality, and THE LEXER MERGES AN ANGLE RUN INTO
+   * A SINGLE TOKEN. So `<` `<=` `>` `>=` — which look like they cover the angle family —
+   * match only the one- and two-character spellings, and `>>` `>>>` `<<` `>>=` `<<=` each
+   * arrive as ONE token that equals none of them. Measured on `f98510f8`, library mode,
+   * in a NON-exported fn:
+   *
+   *     while (n + 1) <  2 { t = t + 1 }   E-CONDITION-HEAD-UNPARENTHESIZED, build fails
+   *     while (n + 1) >> 2 { t = t + 1 }   exit 0, ZERO diagnostics, emitting
+   *                                            while (n + 1) {
+   *                                            }
+   *
+   * — the body dropped and the loop non-terminating: the exact defect this diagnostic is
+   * named after, surviving its own fix. ⚑ THIRD INSTANCE OF THE LEXER-MERGE CLASS; any
+   * check comparing a whole token's TEXT to a single-char `>` or `<` has the same hole.
+   * Population measured at 0 of 2,553 tracked `.scrml` under a deliberately OVER-BROAD
+   * pattern (which returned 6 benign hits on the single-char control, so it reaches), so
+   * this is newly-rejecting over an empty corpus. Pinned by
+   * `compiler/tests/unit/condition-head-merged-shift-runs.test.js`, which also re-asserts
+   * the exclusions above so a later cut cannot widen by category.
+   *
+   * ⚠ THIS DOES NOT REACH AN EXPORTED FN, AND THAT IS NOT THIS SET'S BUG TO FIX. The
+   * `export` re-parse swallows ast-builder parse-path diagnostics
+   * (`g-export-reparse-swallows-ast-builder-parse-path-diagnostics`, HIGH, open), so in an
+   * exported body EVERY spelling — the single-char controls included — still reaches the
+   * artifact as a silent empty loop. That is the swallow, not the set; it is filed, and
+   * closing it is a migration. Do not "fix" it here.
    */
   const CONDITION_HEAD_CONTINUATION_PUNCT = new Set([
     "<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?",
+    // ⛑ S416 — MERGED ANGLE RUNS. The lexer emits each of these as ONE token, so none of
+    // them equals the single-char `<` / `>` members above. Strictly binary infix: no
+    // statement can begin with one, so listing them adds no false-rejection risk.
+    ">>", ">>>", "<<", ">>=", "<<=",
   ]);
 
   /**
