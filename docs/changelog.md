@@ -7296,6 +7296,85 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-14 (S416 — peter — five landings, and four instruments that existed, read as done, and were never consulted)
+
+A Windows-clone session in five arcs, all landed gate-green: **#955** (the review-floor drain),
+**#956** (a compiler fix), and **#957 / #958 / #959** (three instrument arcs). Peter's sequence,
+unchanged since S411 — clear the measured debt first, then take the recommendation; mid-session he
+redirected the remainder to *"some MEDs and LOWs away from Bryan"*, and the three instrument arcs are
+what that produced.
+
+**The review floor went 4 OWED → 0**, and the one code-bearing PR in the set held. `#952`'s
+`blankStringLiteralContent` carries the comment *"a read is code, never literal content"* — false for
+template literals, whose `${…}` interpolations are code, and exactly the sentence a fail-closed guard
+dies on. Compiled a string-embedded map read in **all three modes**: library, client and server emit
+the byte-identical plain double-quoted string, so a scrml code-position string interpolates in no mode
+and there is no divergence to hide. **Hypothesis falsified, not confirmed.** The vocabulary-mirror axis
+enumerated every `mapSetLoweringBoundaryOk` call site rather than trusting the banner — **two of the
+five are negative guards**, and the guard mirrors the three real lowering sites exactly. `#949`'s
+`E-ASSIGN-003` zero-producer claim was re-measured independently and came back **understated**: two
+further normative loci (`:28048`, `:28187`) also carry it, so the SPEC side of the contradiction routed
+to bryan is broader than the routing note said.
+
+**#956 — five merged angle runs escaped `E-CONDITION-HEAD-UNPARENTHESIZED`.** `continuesConditionHead`
+tests exact token-TEXT equality and the lexer merges an angle run into ONE token, so `>>` `>>>` `<<`
+`>>=` `<<=` each arrived as a single token equal to none of the set's four angle members. In a
+non-exported fn, `while (n + 1) >> 2 { … }` compiled at exit 0 with zero diagnostics emitting
+`while (n + 1) { }` — body dropped, loop non-terminating: **the exact defect the diagnostic is named
+after, surviving its own fix**, and the third instance of the lexer-merge class. The locus banner says
+*"DELIBERATELY CONSERVATIVE — do NOT widen this set"*, so the widening was earned rather than taken:
+every excluded name is excluded for one reason — the token can also BEGIN a braceless body — and the
+five added spellings are strictly binary infix. Population **0 of 2,553** under a deliberately
+over-broad pattern whose control returned 6 benign hits; corpus differential over 1,928 sources /
+7,467 artifacts returned **0 newly failing, 0 diagnostic-code changes, 0 artifact content diffs**.
+⚠ Scope stated honestly: the fix reaches a **non-exported** fn only — in an exported body the
+`export` re-parse swallow still ships the silent empty loop for *every* spelling, which is
+`g-export-reparse-swallows-ast-builder-parse-path-diagnostics` (HIGH, bryan-gated), not this set's bug.
+Also filed: `g-unsigned-right-shift-does-not-lower` (LOW) — `>>>` is unusable anywhere in a scrml
+expression, failing loudly.
+
+**The session's real finding, across #957–#959: four instruments that exist, read as done in the
+ledger, and are never consulted.** None of them looked broken.
+
+- **#957** — the standing pre-land gate for codegen changes had **no test surface on `main`**, while
+  the ledger recorded it as tested. The 16-case exit-code rig lived only on an unmerged agent branch,
+  and behind it **HARD REQ 8, 9, 9.1, 10, 11 and ~1,250 LOC** of hardening (`reverify` /
+  `FLAKE_DEMOTION_RULE` **0 on main / 63 on the branch**). Three further gap entries name symbols with
+  zero occurrences on main — the S248 no-op-dispatch class. The rig is recovered and landed with the
+  **7 cases main actually implements**, plus a Windows fix: it called `symlinkSync(…, "dir")`, which
+  needs elevation on win32, so it threw EPERM in `beforeAll` and **took the whole file down — it had
+  never run on a Windows clone at all**. A false docstring claim ("no absolute-path leak") is corrected
+  with a measurement that also **narrowed** two MEDs: the path-derived chunk token is
+  project-root-**relative**, so two ordinary checkouts are comparable and only a **rootless** side
+  (a `git archive` extract) diverges.
+- **#958** — the e2e render tier *detected* the board-bug class and **scored it as a pass**.
+  `S-EMPTY-WITH-DATA` fires on seeded-and-empty — exactly the shape — and then returned
+  `renders-empty`, which is in `GREEN_STATES`. Not a missing detector; a **discarded** one. It now
+  resolves to `renders-empty-with-data`, absent from the green set, with the unseeded case still green.
+  `RENDER_STATES` turned out to be a **dead export for its whole life** — its comment says "for
+  baseline schema validation" and it had exactly one occurrence in the repo, its definition — which is
+  how a `HARNESS-TIMEOUT` cell came to sit in the baseline against no vocabulary. ⚑ And the ceiling
+  over all of it: **no CI job runs the tier at all.**
+- **#959** — the five `<!-- @marker -->` parsers got the **import-and-pin harness** their gap names as
+  the structural blocker, in `compiler/tests/unit/` so it runs in the **blocking** gate. Four of five
+  were already importable behind an `import.meta.main` guard. **Proven by mutation** — revert both
+  landed regex fixes, both killed, 3 red / 8 green with the survivors being exactly the controls.
+  ⛔ Nothing was widened: live miss count measured **zero**, and widening `flograph` would admit
+  documentation templates as real graph nodes.
+
+⚑ **The corollary worth carrying: a green test can be the bug.** `detector-validation`'s G4 passed on
+main and was dropped anyway — it passed against a script with no demotion machinery to exercise, so it
+was a green that cannot fail. Keeping it would have overstated coverage by one case.
+
+**Gate at close.** Cloud gate GREEN on all five PRs; `tracking` red on each and proven pre-existing
+every time by name-set comparison against main's own run (the identical 5-name dev-watcher
+wait-budget cluster). Local on merged main: `marker-parser-pins` 11/0 · `condition-head-merged-shift-runs`
+29/0 · e2e-render-map tier 12/0 · `corpus-emit-differential-exit-codes` 7/0 · the seven condition-head
+sibling suites 137/0. `delta-lint` PASS at max `[3060]`; `facts --check` and `state --check` both PASS.
+**Board: HIGH 107 · MED 245 · LOW 92** — MED rose 4, which is the count getting honest: five
+previously-filed entries pointed at code that does not exist on `main`, and are corrected in place.
+
+
 ### 2026-09-13 (S415 — peter — the floor drained 5 to 0, and a fix shipped a defect in the opposite direction twice before the axis split)
 
 A Windows-clone session in two arcs, both landed gate-green: **#949** (the review-floor drain) and
