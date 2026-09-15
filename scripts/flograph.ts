@@ -78,7 +78,11 @@ export type Edge = { from: string; type: string; target: string; verified: boole
 
 // ── Parse ────────────────────────────────────────────────────────────────────
 const GAP_RE = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(\S+)\s*-->/;
-const NODE_RE = /<!--\s*@node\s+([^>]*?)-->/;
+// ⛑ S416 — exported so `compiler/tests/unit/marker-parser-pins.test.js` can pin the REAL
+// regex rather than a copy. The pin harness exists because a test that RE-DECLARES one of
+// these five marker regexes passes with the fix reverted (the mutant survives), which is the
+// structural blocker `g-marker-parsers-share-an-untested-regex-class` names.
+export const NODE_RE = /<!--\s*@node\s+([^>]*?)-->/;
 const LINK_RE = /\[\[([^\]]+)\]\]/g;
 
 function attrs(s: string): Record<string, string> {

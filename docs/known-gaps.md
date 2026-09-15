@@ -1320,6 +1320,53 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 ### g-marker-parsers-share-an-untested-regex-class — the repo has **five** `<!-- @marker … -->` attribute-bag parsers (`review-debt.ts` `@review`, `state.ts` `@gap` ×2, `boot.ts` `@ledger`, `corpus-zero-debt.ts` `@corpus-zero`, `flograph.ts` `@node`/`@gap`) and **no shared parser and no test harness for any of them**. Every one hand-rolls a regex over the same shape, and the class has now produced defects in four separate sessions (S299, S307, S334, S358, S378). ⚑ **S378 attempted to converge them inside a focused fix and that attempt is the evidence this needs its own arc:** across five adversarial rounds the sibling widenings produced a defect in EVERY round — a greedy form capturing the LAST `status=`, then a lazy form capturing the FIRST (beaten by a `prov=rationale:…status=…` narrative, the house style), an over-broad placeholder guard that ERASED a self-reported violation by matching a narrative `note=`, a prefix-only guard that admits `path=user-voice-<who>.md`, and a `\bstatus=` scan that reads a hyphen-adjacent narrative value. **The sibling changes were REVERTED out of #721 entirely rather than landed unverified** — `docs/pr-reviews.md` `@review pr=721` records the reasoning. The blocker is structural, not effort: these scripts have no import-and-pin harness, so a "test" written for them tests a reimplementation and passes with the fix reverted (MUTATION-PROVED at S378: all three sibling fixes reverted, 34/34 + 20/20 still green). **The arc:** one shared marker-bag parser, exported, with pins that import it — the shape `state.ts`'s `gapMarkersFrom` already has and the other four lack. Fixing `g-flograph-gap-re-drops-281-of-818-gap-markers` belongs inside it — `NEW S378-bryan (the five-round #721 review, and the honest scope line on why the collateral was reverted); MED; open`
 <!-- @gap id=g-marker-parsers-share-an-untested-regex-class sev=MED status=open locus=searched:scripts/review-debt.ts,scripts/state.ts,scripts/boot.ts,scripts/corpus-zero-debt.ts,scripts/flograph.ts prov=empirical:S378-five-adversarial-rounds-each-found-a-defect-in-the-hand-rolled-sibling-guards-and-the-pins-written-for-them-were-mutation-proved-hollow -->
 
+> **⛑ THE STATED BLOCKER IS REMOVED FOR 4 OF 5 — S416-peter. Still OPEN: the convergence itself is
+> not done, and `boot.ts` is still not importable.** This entry names the blocker precisely and
+> structurally: *"these scripts have no import-and-pin harness, so a test written for them tests a
+> reimplementation and passes with the fix reverted."* That is now false for four of the five.
+>
+> **Landed: `compiler/tests/unit/marker-parser-pins.test.js`** — 11 cases, in `compiler/tests/unit/`
+> so it runs in the **BLOCKING** `gate` job rather than a tier nothing invokes. Every assertion imports
+> the REAL exported symbol: `parseLedger` (review-debt), `parseGapMarkers` + `headingMarkerDrift`
+> (state), `parseMarkers` (corpus-zero-debt), and `NODE_RE` (flograph, newly exported for this).
+> Four of five were already `export`ed behind an `if (import.meta.main)` guard, so importing them runs
+> no tool — the harness was reachable all along and nobody had reached for it.
+>
+> ⛑ **PROVEN TO BITE, which is the only thing that distinguishes this from the worthless version.**
+> Mutation: revert `review-debt`'s `[^\n]*?` → `[^>]*?` and `state`'s `[\s\S]*?` → `[^>]*?`.
+> **Both mutants killed — 3 fails, 8 pass**, and the 8 survivors are the controls and characterization
+> cases, correctly unaffected. ⚠ The review-debt mutant killed TWO cases, and the second is the
+> interesting one: the ONE-MARKER-PER-LINE case went red because under `[^>]` an unclosed marker spans
+> the newline and **swallows its successor** — which is exactly why S378 chose `[^\n]` over `[\s\S]`,
+> now pinned rather than merely commented.
+>
+> **⚠ NOTHING WAS WIDENED, DELIBERATELY — and the two reasons are measurements, not caution.**
+>
+> **(1) The surviving siblings are LATENT, not live.** Four `[^>]` sites remain (`state.ts:248`,
+> `boot.ts:173`, `corpus-zero-debt.ts:145`, `flograph` `NODE_RE`). Scanned against the files each parser
+> actually reads: `docs/known-gaps.md` has 1000 `@gap` markers, 24 with a `>` in the body, of which
+> **2** are invisible to the `state.ts:248` status scan — and **both of those are PROSE lines
+> documenting the marker format** (L3845 narrates `<!-- @gap … -->`; L3848 is the
+> `id=<stable-id> sev=<HIGH|MED|LOW|NOMINAL>` template). The three live `@ledger` markers contain no
+> `>`; `docs/deep-dives` + `docs/debates` contain zero `@corpus-zero` markers with one. **Live miss
+> count: ZERO.**
+>
+> **(2) Widening would REGRESS `flograph`, and the accidental exclusion is load-bearing.**
+> `flograph --with-support` reads `scrml-support/docs/deep-dives/*.md`, which carry marker TEMPLATES —
+> `<!-- @node id=<kebab-id> kind=<kind> status=<status> -->`. `[^>]` excludes them by accident; `[^\n]`
+> would admit documentation as real graph nodes. That is the same shape as S378's over-broad
+> placeholder guard, and it is now pinned as a test so a future widening has to answer for it rather
+> than inherit it.
+>
+> **⛑ WHAT REMAINS, NAMED EXACTLY SO IT CAN BE DISPATCHED.** (a) `scripts/boot.ts` is the one parser
+> still unreachable: **0 `export`s and no `import.meta.main` guard**, with ~115 lines of top-level
+> execution from `:325` (sync, probes, printing, `process.exit`), so importing it RUNS THE BOOT DIGEST.
+> Making it importable is a wrap-the-tail restructure of the session-start gate — mechanical, verifiable
+> by output diff, and deliberately not folded into this arc. Its `@ledger` parser (`:173`) is the
+> unpinned fifth. (b) The convergence itself — one shared parser — is still the arc this entry was
+> filed for; it now has the net S378 did not have.
+
+
 <!-- ⚑ S378-bryan filing batch — 1 instrument defect found at boot by the probe disagreeing with the ledger it reads (PA-reproduced by execution, RESOLVED same session) -->
 
 ### g-threads-executes-prose-done-probes-with-side-effects — `scripts/threads.ts` EXECUTES every `DONE-PROBE:` line as shell, so a PROSE probe does not merely fail to evaluate — it can WRITE. `docs/changes/spec-17-6-value-form-amendment-2026-08-24/BRIEF.md:7` read *"grep -c \"value-form\" compiler/SPEC.md **returns > 0** AND the three repros below…"*; the shell parsed `> 0` as a redirect and wrote grep's output into a file literally named `0` in the repo root (`compiler/SPEC.md:0`, 19 bytes) **on every boot**. ⚑ The evidence had already been seen and mis-diagnosed: the S375 misses list records *"`git add -A` swept a stray `./0` into a commit and a pushed PR"* and filed it as a pathspec-discipline failure. It was not a stray — a tracked instrument created it every session and nobody asked which one. S376 repaired three prose DONE-PROBEs that merely failed to EVALUATE (the board showed ERROR); this is the FOURTH and the first with a SIDE EFFECT, which is strictly worse: a probe that cannot run is visible, a probe that quietly writes to the working tree is not — `NEW S378-bryan (isolated by execution after the stray file recurred); MED; RESOLVED S378-bryan (DONE-PROBE replaced with the runnable assertion the arc actually makes, `grep -q 'value-form' compiler/SPEC.md`; SPEC.md has ZERO occurrences so the thread still reads OPEN, now for a real reason; the three repros stay prose BELOW the probe line). Verified: no stray file after the fix, a repo-root scan finds no other probe-created files, and the board is unchanged at 54 tracked / 8 open / 46 done. RESIDUAL, deliberately not fixed here: `threads.ts` has no guard against a DONE-PROBE with side effects at all — this fixed the one instance, not the class. A structural fix would run probes read-only (a restricted shell, or refusing a probe containing an unquoted redirect). Filed as the honest scope line rather than widened silently.`
