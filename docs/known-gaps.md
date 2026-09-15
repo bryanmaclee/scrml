@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
-| MED | 241 |
+| MED | 243 |
 | LOW | 92 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1485,20 +1485,117 @@ Pre-existing silent miscompile on main (`3ebaa01e`), reproduced at compile level
 ### g-emit-differential-mass-phantom-exceeds-reverify-cap — a MASS phantom event (hundreds of compiles killed at once) exceeds `--reverify-limit`, so the whole delta is reported UNVERIFIED — `NEW S345-bryan (S342 arc audit, harness.md); LOW; open (BY DESIGN — the honest floor, not coverage)`
 <!-- @gap id=g-emit-differential-mass-phantom-exceeds-reverify-cap sev=LOW status=open locus=scripts/corpus-emit-differential.ts(DEFAULT_REVERIFY_LIMIT) prov=rationale:all-or-nothing-reverify-cap-reports-mass-phantom-event-unverified -->
 
+> **⛑ CORRECTED S416-peter — THE MACHINERY THIS ENTRY NAMES IS NOT ON `main`.** Measured by symbol
+> count against `origin/worktree-agent-ab7336c5da32f10ed`: main's `scripts/corpus-emit-differential.ts`
+> carries **HARD REQ 2, 3, 4, 5, 7** (1,549 LOC); the branch carries **2, 3, 4, 5, 7, 8, 9, 9.1, 10, 11**
+> (2,802 LOC). `reverify`/`FLAKE_DEMOTION_RULE` **0 on main / 63 on branch**; `corpusCleanliness` 0/15;
+> `resolveNamespaceAnchor` 0/2; `anchorMismatches` 0/2; `sourceDifferences` 0/4. **So this gap's locus
+> does not exist on `main`** — it describes a refinement to code that was never merged. This is the
+> S248 no-op-dispatch class: a session planning from this entry would build against absent code.
+> Do NOT dispatch it until [[g-emit-differential-hardening-never-reached-main]] lands.
+
+
 HARD REQ 9 re-verification declines all-or-nothing above `--reverify-limit` (default 300), because a partial re-verification that reads like a complete one is the truncated-probe shape. A MASS phantom event — hundreds of compiles killed at once — therefore exceeds the cap and the delta is reported UNVERIFIED, with a banner saying so; that is the honest floor, not coverage. Stated in-source at `DEFAULT_REVERIFY_LIMIT` per the arc record. Per the S342 arc audit (handOffs/s342-arc-audit/harness.md §7): the re-verification machinery lives on the unlanded differential-harness arc branch (`worktree-agent-ab7336c5da32f10ed` @ `d14d3a9b`, pushed) — main carries no re-verification stage at all — so this by-design residual attaches to the instrument as the arc ships it; filed now so the residual is on the ledger when the arc lands.
+
+
+### g-emit-differential-hardening-never-reached-main — five HARD REQs and ~1,250 lines of the landing gate's hardening, plus its entire test rig, sit on an unmerged agent branch while `main` uses the unhardened tool as PR evidence — `NEW S416-peter (found by running the rig the ledger said had landed); MED; open`
+<!-- @gap id=g-emit-differential-hardening-never-reached-main sev=MED status=open locus=scripts/corpus-emit-differential.ts(main=1549-LOC-HARD-REQ-2,3,4,5,7)-vs-origin/worktree-agent-ab7336c5da32f10ed(2802-LOC-HARD-REQ-2,3,4,5,7,8,9,9.1,10,11) prov=empirical:PA-measured-S416-by-symbol-count-and-by-executing-the-recovered-rig-against-main -->
+
+`scripts/corpus-emit-differential.ts` is the standing pre-land gate for codegen changes — it is the
+evidence cited in compiler PRs, including this session's own #956. Three adversarial S239 rounds were
+spent hardening it, and **that hardening is not on `main`.**
+
+| | `main` | `origin/worktree-agent-ab7336c5da32f10ed` |
+|---|---|---|
+| HARD REQ | 2, 3, 4, 5, 7 | 2, 3, 4, 5, 7, **8, 9, 9.1, 10, 11** |
+| LOC | 1,549 | 2,802 |
+| `reverify` / `FLAKE_DEMOTION_RULE` | **0** | 63 |
+| `corpusCleanliness` | **0** | 15 |
+| `resolveNamespaceAnchor` | **0** | 2 |
+| `anchorMismatches` / `sourceDifferences` | **0 / 0** | 2 / 4 |
+
+So `main`'s gate cannot tell you that an enumerated source was **untracked** (HARD REQ 11) or
+**modified** (F2) between captures, cannot check the **chunk-namespace anchor** (HARD REQ 8), and has
+no **re-verification** layer at all — the layer whose governing rule, written on that branch, is
+*"a difference that does not reproduce is an `errored`, NOT a flake; discarding one requires an
+AFFIRMATIVE POSITIVE SIGNAL."* The branch is **415 commits behind `main`** with **11 commits** not in it,
+so this is a port, not a merge.
+
+⚠ **The ledger recorded the opposite.** Three entries are filed against this absent machinery as
+though it were live, and a fourth asserted the exit-code rig had landed. All four are corrected in place.
+This is one measured instance of the standing *"96 agent branches carry work that never reached main"*
+observation — and the most consequential kind, because the unmerged work is a **gate**.
+
+**Not attempted here**: porting 1,250 lines across 415 commits of drift is its own arc and should be
+dispatched deliberately, not folded into a ledger correction.
+
+### g-corpus-emit-differential-does-not-detect-a-rootless-compiler-root — the differential never checks whether a `--compiler-root` resolves a project-root marker, so the one configuration that makes artifact comparison meaningless is invisible to it — `NEW S416-peter (split from the path-derived-chunk-id entry when that was narrowed); MED; open`
+<!-- @gap id=g-corpus-emit-differential-does-not-detect-a-rootless-compiler-root sev=MED status=open locus=scripts/corpus-emit-differential.ts(no-scrml.toml/.git-probe-anywhere;-manifest-records-compilerRoot-but-not-whether-it-resolves-a-project-root) prov=empirical:PA-measured-S416-chunkNamespaceToken-identical-under-two-roots-and-divergent-with-none -->
+
+Artifact bytes carry `// --- chunk cell scope (<token>) ---`, an FNV-1a of the **project-root-relative**
+source path that degrades to the **absolute** path when no `scrml.toml` / `.git` is found. Comparison is
+therefore sound exactly when **both sides resolve a project root** — and grepping the tool for
+`scrml.toml` or `projectRoot` returns **nothing**: it has no notion of a project root at all.
+A rootless side (a `git archive` extract, an unpacked tarball) yields a full artifact-difference list that
+is pure noise, and the usage block invites exactly that by saying to point `--compiler-root` at
+"a scrml checkout".
+
+**Fix direction** (instrument-side only, no codegen change): resolve the marker at capture, record it in
+the manifest, and at `diff` raise a FINDING naming the chunk-scope token when either side is rootless and
+the two roots differ. The docstring now states the invariant (fixed S416); the machine check is what is
+missing. ⚠ Do **not** "fix" this by normalizing the token out of the comparison — that would hide a real
+chunk-namespacing regression, which is the failure the token exists to expose.
 
 ### g-emit-differential-unit-tests-over-pure-helpers-missing — the pure helpers (`anchorMismatches`, `sourceDifferences`, `artifactKey`, `parseArgs`, the porcelain parse) have no unit tests, and the exit-code rig structurally cannot reach them — `NEW S345-bryan (S342 arc audit, harness.md; rewords the arc's stale no-test-surface draft); MED; open`
 <!-- @gap id=g-emit-differential-unit-tests-over-pure-helpers-missing sev=MED status=open locus=scripts/corpus-emit-differential.ts prov=rationale:exit-code-rig-asserts-branch-selection-only-pure-helpers-and-porcelain-parse-unasserted -->
+
+> **⛑ CORRECTED S416-peter — THE PREMISE WAS FALSE: THE EXIT-CODE RIG NEVER LANDED.** This entry
+> reworded an earlier one as STALE on the grounds that *"round 3 added
+> `compiler/tests/integration/corpus-emit-differential-exit-codes.test.js` (16 asserted exit codes)"*.
+> **That file was not on `main`** — `git ls-files` returned nothing and `git cat-file -e main:…` failed;
+> it existed only on `origin/worktree-agent-ab7336c5da32f10ed`. So the true state was worse than filed:
+> the standing pre-land gate for every codegen change had **no test surface at all**, while the ledger
+> recorded it as tested. **PARTIALLY RESOLVED S416-peter:** the rig is recovered and landed with the
+> **7 cases main's script actually implements** (self-diff exit 0, same-revision refusal, unknown-revision
+> refusal, vacuous-run refusal, stale-schemaVersion refusal, and two argument-strictness cases), plus a
+> Windows fix — it called `symlinkSync(…, "dir")`, which needs elevation on win32, threw EPERM in
+> `beforeAll` and took the whole file down, so it had never run on a Windows clone at all. Nine cases
+> assert the unlanded hardening and are DROPPED rather than skipped (a permanently-skipped case is a
+> hollow gate); the file header lists them by name for mechanical restoration. ⚠ One of the nine, G4
+> (*"a DETERMINISM run never demotes"*), **passed on main and was still dropped** — it passed against a
+> script with no demotion machinery to exercise, so keeping it would have overstated coverage by a
+> green that cannot fail. The ORIGINAL gap — no unit tests over the pure helpers — remains **open**.
+
 
 Reworded from the arc's drafted `g-emit-differential-has-no-test-surface` entry, which is STALE as written: round 3 added `compiler/tests/integration/corpus-emit-differential-exit-codes.test.js` (16 asserted exit codes over mutated manifest pairs) on the arc branch, so "nothing in `compiler/tests/` references this script" no longer holds there — though on main, where the rig has not landed, the script still has no test surface at all. The still-open half is unit coverage of the pure helpers: `anchorMismatches`, `sourceDifferences`, `artifactKey`, `parseArgs`, and the porcelain parse in `measureCorpusCleanliness`. Per the S342 arc audit (handOffs/s342-arc-audit/harness.md §4), the rig is a branch-selection rig and bypasses `measureCorpusCleanliness`'s porcelain parser entirely — its corpus-cleanliness cases write `corpusCleanliness.untracked`/`.modified` directly into the manifest JSON, so the two porcelain defects those cases are named after (the F2 leading-space class and G5's C-quoted `café.scrml` class) would still pass the rig; that unreached class is exactly what the unit half exists to hold.
 
 ### g-emit-differential-anchor-models-input-not-unit — `resolveNamespaceAnchor` walks from the entry dir while the compiler anchors on the compile UNIT's common ancestor — silently disarms the HARD REQ 8 anchor guard once the corpus gains a nested marker plus a cross-directory import — `NEW S345-bryan (S342 arc audit, harness.md); MED; open (LATENT — unreachable in today's corpus)`
 <!-- @gap id=g-emit-differential-anchor-models-input-not-unit sev=MED status=open locus=scripts/corpus-emit-differential.ts(resolveNamespaceAnchor) prov=rationale:anchor-model-walks-entry-dir-compiler-walks-compile-unit-common-ancestor -->
 
+> **⛑ CORRECTED S416-peter — THE MACHINERY THIS ENTRY NAMES IS NOT ON `main`.** Measured by symbol
+> count against `origin/worktree-agent-ab7336c5da32f10ed`: main's `scripts/corpus-emit-differential.ts`
+> carries **HARD REQ 2, 3, 4, 5, 7** (1,549 LOC); the branch carries **2, 3, 4, 5, 7, 8, 9, 9.1, 10, 11**
+> (2,802 LOC). `reverify`/`FLAKE_DEMOTION_RULE` **0 on main / 63 on branch**; `corpusCleanliness` 0/15;
+> `resolveNamespaceAnchor` 0/2; `anchorMismatches` 0/2; `sourceDifferences` 0/4. **So this gap's locus
+> does not exist on `main`** — it describes a refinement to code that was never merged. This is the
+> S248 no-op-dispatch class: a session planning from this entry would build against absent code.
+> Do NOT dispatch it until [[g-emit-differential-hardening-never-reached-main]] lands.
+
+
 `resolveNamespaceAnchor` walks from `dirname(entrySource)`; the compiler walks from `computeOutputBaseDir(cgSourcePaths)` — the common ancestor of every file in the compile UNIT. One input is not one unit: an import pulls a second file in, and the arc's probe importing `../lib/m.scrml` made the compiler anchor on the common ancestor (`fnv1a("pages/case.scrml")`) while the model anchored on the entry dir (`fnv1a("case.scrml")`). Cannot fire until a corpus root contains BOTH a nested `scrml.toml`/`.git` AND a cross-directory `.scrml` import; then it disarms HARD REQ 8 silently, by comparing two prefixes equal to each other and wrong about the compiler (the arc's F3, corrected in documentation only). Per the S342 arc audit (handOffs/s342-arc-audit/harness.md §7): the anchor machinery is the arc's fix for the already-filed `g-corpus-emit-differential-path-derived-chunk-id-false-diffs` (DEFECT 1) and lives on the unlanded arc branch (`worktree-agent-ab7336c5da32f10ed` @ `d14d3a9b`, pushed). Remediation per the arc: resolve each source's compile unit, or have the harness ask the compiler for the token directly.
 
 ### g-emit-differential-no-reverify-in-single-checkout — HARD REQ 9.1 declines re-verification on a shared compiler root, so the phantom filter is unavailable in the canonical single-checkout workflow — `NEW S345-bryan (S342 arc audit, harness.md); LOW; open (BY DESIGN — decline-vs-refuse is a live unruled fork)`
 <!-- @gap id=g-emit-differential-no-reverify-in-single-checkout sev=LOW status=open locus=scripts/corpus-emit-differential.ts(HARD-REQ-9.1) prov=rationale:reverify-declines-on-shared-compiler-root-the-canonical-single-checkout-workflow -->
+
+> **⛑ CORRECTED S416-peter — THE MACHINERY THIS ENTRY NAMES IS NOT ON `main`.** Measured by symbol
+> count against `origin/worktree-agent-ab7336c5da32f10ed`: main's `scripts/corpus-emit-differential.ts`
+> carries **HARD REQ 2, 3, 4, 5, 7** (1,549 LOC); the branch carries **2, 3, 4, 5, 7, 8, 9, 9.1, 10, 11**
+> (2,802 LOC). `reverify`/`FLAKE_DEMOTION_RULE` **0 on main / 63 on branch**; `corpusCleanliness` 0/15;
+> `resolveNamespaceAnchor` 0/2; `anchorMismatches` 0/2; `sourceDifferences` 0/4. **So this gap's locus
+> does not exist on `main`** — it describes a refinement to code that was never merged. This is the
+> S248 no-op-dispatch class: a session planning from this entry would build against absent code.
+> Do NOT dispatch it until [[g-emit-differential-hardening-never-reached-main]] lands.
+
 
 HARD REQ 9.1 declines re-verification whenever both sides name the same compiler root — which is the canonical single-checkout workflow — so the phantom filter is unavailable exactly where the workflow is most convenient. Declining returns the run to reporting differences as measured (exit 1) with a banner stating the delta went unchecked. Per the S342 arc audit (handOffs/s342-arc-audit/harness.md §7/§8): BY DESIGN — the arc chose decline over the reviewer's recommended exit-2 refusal with a stated reason (refusing would refuse a valid comparison, the same defect class as A1-FP), and DECLINE-vs-REFUSE on a shared root remains a live design fork nobody has ruled on, marked in-source as the one place to change if hard refusal is preferred. The machinery is on the unlanded arc branch (`worktree-agent-ab7336c5da32f10ed` @ `d14d3a9b`, pushed); main has no re-verification stage at all. Remediation per the arc: materialise each revision into a temp tree (`git archive` plus a project-root marker, since DEFECT 1 — filed as `g-corpus-emit-differential-path-derived-chunk-id-false-diffs` — bites an extracted tree) and re-verify against those.
 
@@ -11069,6 +11166,21 @@ confirmed repro + root cause: `incoming/2026-08-09-from-peter-to-bryan-486-high-
 ### g-corpus-emit-differential-path-derived-chunk-id-false-diffs — the differential's own docstring claims no absolute-path leak; the chunk-scope ID is path-DERIVED, so two checkouts report ~1009 false differences — `NEW S331-bryan (agent-found during the derived fix); MED`
 <!-- @gap id=g-corpus-emit-differential-path-derived-chunk-id-false-diffs sev=MED status=open locus=scripts/corpus-emit-differential.ts(the no-normalization claim in its docstring)+the chunk-scope id derivation prov=rationale:instrument-defect-found-while-using-the-instrument -->
 
+> **⛑ NARROWED S416-peter — IT NEEDS A ROOTLESS SIDE; TWO ORDINARY CHECKOUTS ARE COMPARABLE.** The
+> chunk-scope token is `chunkNamespaceToken` (`compiler/src/codegen/chunk-namespace.ts`), an FNV-1a of
+> the **project-root-RELATIVE** source path, falling back to the **absolute** path only when the walk
+> finds no root marker (`scrml.toml` / `.git`). Measured S416 by calling it directly:
+> both rooted at different absolute roots → `01w51kr6` **==** `01w51kr6`; neither rooted → `019ycgsj`
+> **!=** `01ir929c`. Corroborated end-to-end the same session: a real base-vs-head run with base in a
+> `git worktree` at `C:/wt-fp/…` and head at the repo path returned **0 artifact content diffs of
+> 7,467**. ⚠ So the *"any two checkouts"* framing is stale — a git checkout and a `git worktree` both
+> carry `.git`. It is LIVE for a **rootless** side: a `git archive` extract or an unpacked tarball, which
+> is exactly what the original repro used, and exactly what the usage block invites by saying to point
+> `--compiler-root` at "a scrml checkout". **The false docstring claim is FIXED S416** (it asserted the
+> artifacts carry no path-derived content); the missing **detection** is split out as
+> [[g-corpus-emit-differential-does-not-detect-a-rootless-compiler-root]].
+
+
 The differential states: *"The emitted ARTIFACTS were separately verified to contain no absolute-path leak, so artifacts are compared byte-exact with no normalization at all."* **That claim is false.** The chunk-scope ID is *derived* from the compiler root's absolute path — `// --- chunk cell scope (01klyi21) ---` vs `(000h8maz)` — so a substring check for the path passes while the bytes still depend on it. A run across two checkouts reported **1009 of 7334** artifacts differing, every one at an identical byte count.
 
 **This is the trust-destroying direction of failure**, and it lands on an instrument this session cited as evidence in three PRs. Worked around by capturing both sides from one path; the fix is to normalize the chunk-scope ID or drop the no-normalization claim. **The claim is the defect** — an instrument that documents a guarantee it does not provide is worse than one that documents nothing.
@@ -13701,6 +13813,21 @@ baseline + its method in `benchmarks/RESULTS.md` rather than in a rotating hand-
 ### g-corpus-emit-differential-incomparable-across-checkout-paths — the differential prints a full CONTENT DIFFERENCES list under an INCOMPARABLE verdict when the two sides sit at different absolute paths, from a path-derived hash; a reader who skims to the list concludes a codegen change touched ~1027 artifacts
 
 <!-- @gap id=g-corpus-emit-differential-incomparable-across-checkout-paths sev=MED status=open locus=scripts/corpus-emit-differential.ts(the --compiler-root comparison path; the chunk cell scope hash is derived from the checkout path, so every artifact differs by that token alone) prov=adopter-dogfood:agent-reported-during-the-prod-root-fallback-arc-1027-of-7427-artifacts-false-diffed-then-VERDICT-NO-DIFFERENCES-on-a-same-root-re-run -->
+
+> **⛑ NARROWED S416-peter — IT NEEDS A ROOTLESS SIDE; TWO ORDINARY CHECKOUTS ARE COMPARABLE.** The
+> chunk-scope token is `chunkNamespaceToken` (`compiler/src/codegen/chunk-namespace.ts`), an FNV-1a of
+> the **project-root-RELATIVE** source path, falling back to the **absolute** path only when the walk
+> finds no root marker (`scrml.toml` / `.git`). Measured S416 by calling it directly:
+> both rooted at different absolute roots → `01w51kr6` **==** `01w51kr6`; neither rooted → `019ycgsj`
+> **!=** `01ir929c`. Corroborated end-to-end the same session: a real base-vs-head run with base in a
+> `git worktree` at `C:/wt-fp/…` and head at the repo path returned **0 artifact content diffs of
+> 7,467**. ⚠ So the *"any two checkouts"* framing is stale — a git checkout and a `git worktree` both
+> carry `.git`. It is LIVE for a **rootless** side: a `git archive` extract or an unpacked tarball, which
+> is exactly what the original repro used, and exactly what the usage block invites by saying to point
+> `--compiler-root` at "a scrml checkout". **The false docstring claim is FIXED S416** (it asserted the
+> artifacts carry no path-derived content); the missing **detection** is split out as
+> [[g-corpus-emit-differential-does-not-detect-a-rootless-compiler-root]].
+
 
 Capturing the base side from a `git archive` extract at a different absolute path yields
 `NOT A VALID COMPARISON` with **1027 of 7427** artifacts reported differing. The entire delta is the
