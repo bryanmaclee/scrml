@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
-| MED | 242 |
-| LOW | 91 |
+| MED | 241 |
+| LOW | 92 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -14691,9 +14691,9 @@ its two sibling for-body sites at `:632`/`:807` did get the fix; `emit-logic.ts:
 
 ---
 
-### g-condition-head-continuation-set-misses-every-merged-shift-run-token — `>>` `>>>` `>>=` `<<` `<<=` after a condition's `)` escape `E-CONDITION-HEAD-UNPARENTHESIZED` because the lexer merges them into ONE token, so the silent body drop #945 closed survives in five spellings — `NEW S415; MED`
+### g-condition-head-continuation-set-misses-every-merged-shift-run-token — `>>` `>>>` `>>=` `<<` `<<=` after a condition's `)` escape `E-CONDITION-HEAD-UNPARENTHESIZED` because the lexer merges them into ONE token, so the silent body drop #945 closed survives in five spellings — `NEW S415; MED; resolved S416-peter (the five merged spellings added to CONDITION_HEAD_CONTINUATION_PUNCT; NON-EXPORT path only — see the residual note)`
 
-<!-- @gap id=g-condition-head-continuation-set-misses-every-merged-shift-run-token sev=MED status=open locus=compiler/src/ast-builder.js(continuesConditionHead — CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text) is exact token-TEXT equality against a 14-member set whose only angle members are the single-char and -equals forms) prov=review:S415-peter-adversarial-pass-on-945-PA-reproduced-by-execution-with-a-firing-control -->
+<!-- @gap id=g-condition-head-continuation-set-misses-every-merged-shift-run-token sev=MED status=resolved locus=compiler/src/ast-builder.js(continuesConditionHead — CONDITION_HEAD_CONTINUATION_PUNCT.has(tok.text) is exact token-TEXT equality against a 14-member set whose only angle members are the single-char and -equals forms) prov=review:S415-peter-adversarial-pass-on-945-PA-reproduced-by-execution-with-a-firing-control -->
 
 `continuesConditionHead()` decides whether a head continues past its `)` by testing **exact token-text
 equality** against a 14-member set whose only `<`/`>` members are `<`, `<=`, `>`, `>=`. **The lexer
@@ -14704,6 +14704,52 @@ path: stop at the `)`, drop the remainder **including the `{` and the whole body
 ```scrml
 while (n + 1) >> 2 { n = n + 1 }     // exit 0, zero diagnostics
 ```
+
+**⛑ RESOLVED S416-peter (`compiler/tests/unit/condition-head-merged-shift-runs.test.js`, 29 tests).** The five
+merged spellings are now members of `CONDITION_HEAD_CONTINUATION_PUNCT`. Red-before-green: **10 fail → 0**,
+and those ten are exactly the subject cases — every control, exclusion and characterization test in the
+file passes in BOTH states, so nothing else in the file is doing the work. The seven sibling suites that
+pin this parser path (`braceless-control-head-regex-literal`, `while-braceless-body-stays-in-the-loop`,
+`loop-head-truncated-at-first-close-paren`, `for-unparenthesized-head-reject`, `for-as-expression`,
+`is-some-member-access`, `example-js-validity`) run **137 pass / 0 fail**.
+
+**Direction newly-rejecting, over an empty corpus.** Population **0 of 2,553** tracked `.scrml` under a
+deliberately OVER-BROAD pattern whose single-char control returned 6 hits (all benign — inner call parens),
+so the pattern demonstrably reaches and the zero is real. Corpus emit-differential over **1,928 sources /
+7,467 artifacts**: **0 newly failing, 0 newly passing, 0 diagnostic-CODE changes, 0 artifact content diffs,
+0 syntax delta, 0 load-context changes.** The 61 diagnostic-TEXT-only diffs were character-diffed and are
+**entirely the absolute compiler-root path** embedded in messages (`C:/wt-fp/s416base/…` vs the repo path),
+i.e. an artifact of capturing the base from a worktree — not a behaviour change.
+
+**⚠ RESIDUAL, AND IT IS THE REASON THIS DOES NOT CLOSE THE SYMPTOM EVERYWHERE: the fix reaches a
+NON-EXPORTED fn only.** In an **exported** body the `export` re-parse swallows ast-builder parse-path
+diagnostics, so **every** spelling — the single-char controls `<` `<=` `>` `>=` included, which were never
+part of this gap — still compiles at exit 0 and still ships `while (n + 1) { }`: the body dropped, the loop
+non-terminating. Measured at `f98510f8` and unchanged at head. That is
+[[g-export-reparse-swallows-ast-builder-parse-path-diagnostics]] (HIGH, open, bryan-gated — closing it is a
+migration), **not** this set's bug, and the set banner now records it at the locus so the next reader does
+not try to fix it here. ⛑ So the honest scope of this landing is: it converts a silent infinite loop into
+a loud refusal **in non-exported code**, and leaves the exported case to the swallow.
+
+### g-unsigned-right-shift-does-not-lower — `>>>` fails to lower in ORDINARY expression position, with no condition head involved, while the sibling `>>` is fine — `NEW S416-peter (found while building the merged-shift-run fix); LOW; open`
+<!-- @gap id=g-unsigned-right-shift-does-not-lower sev=LOW status=open locus=compiler/src/codegen(the-emit-gate-refuses-the-artifact;-the-precise-lowering-site-was-NOT-traced) prov=empirical:PA-executed-library-mode-at-f98510f8-with-the-sibling->>-as-a-firing-control -->
+
+`>>>` (unsigned right shift) cannot be used anywhere in a scrml expression. PA-executed in library mode
+at `f98510f8`, with `>>` as the control:
+
+```scrml
+fn probe(n: int) -> int { let x = n >> 2   return x }    // exit 0, emits `let x = n >> 2;`
+fn probe(n: int) -> int { let x = n >>> 2  return x }    // E-CODEGEN-INVALID-LOGIC ("Unexpected to…")
+```
+
+**It fails LOUDLY** — the §2.2.1 emit gate refuses the artifact because the emitted JS is not parseable — so
+nothing silent ships and no adopter gets a wrong answer; the operator is simply unusable. Severity LOW on
+that basis. **Unrelated to the condition-head set** (that gate is about a token AFTER a head's `)`; this
+fires with no head at all), and independent of the S416 landing: it reproduces identically before and
+after. Pinned as a characterization test in
+`compiler/tests/unit/condition-head-merged-shift-runs.test.js` so a later fix turns it red and whoever
+lands it updates it deliberately. The precise lowering site was **not traced** — located by execution,
+not by reading.
 
 emits `while (n + 1) {` / `}` — body gone, condition always truthy, **silent infinite loop**. That is the
 full headline symptom #945 is named after. **PA-reproduced by execution.**
