@@ -3016,3 +3016,138 @@ dominates the cost side of the ruling; if it is not, the ruling can wait.
 ruling. Do not re-litigate it or block on it. Also out: dpa-044 (ruled), and the three new
 defects round 1 surfaced (`${`-escape, `<`+space, S108 `?{`-in-prose) — those are filings, not
 deliberation, and they land regardless of the camp ruling.
+---
+
+## [dpa-046] debate — Is the undo-tree the same mechanism as the arc graph, or two? (flogence · ONE-vs-TWO)
+`status:    banked`
+banked:    flogence S42 2026-09-15 (bryan: "lets do the undo-tree arc-graph dpa")
+lane:      flogence   # NOT a scrml language question — a flogence architecture question, queued here
+                      # because the queue is the dPA's only intake. No scrml SPEC surface is in scope.
+
+### Origin — bryan, verbatim, flogence S40 + S42
+
+An advanced undo-tree was raised and PARKED at S40 with an explicit instruction attached:
+
+> "ask me to expound when it becomes pressing, this just reminded me is all."
+
+and, on the structural note both parties reached independently and without conferring:
+
+> "I had come to the same conclusion with the undo tree, glad you did as well."
+
+The convergence is the reason this is a debate and not a build ticket: **a branching edit history
+with a movable cursor is structurally the same object as the arc graph.** Two parties reaching that
+independently is evidence the isomorphism is real. It is NOT evidence that the two should be one
+mechanism — and that gap is the whole item.
+
+⚑ This item is banked **after** the S42 `projects-vs-threads` ruling (A: a project is a level above
+a thread, in the narrow "already-existing node" form). That ruling is IN FORCE and is not reopened
+here; it matters only because it establishes that the graph now has a **hierarchy** the cursor moves
+within.
+
+### Scope-lock
+
+**IN:** whether flogence's captured arc graph (`utterance`/`gnode`/`gedge`/`gcursor`) and a wanted
+advanced undo-tree over *edits* are ONE mechanism, TWO, or one storage layer with two cursors.
+**IN:** the cursor semantics — what moving the cursor is *allowed to do to the world*.
+**IN:** whether the undo-tree should exist at all (`simplicity-defender` has standing to argue no).
+**OUT:** the UI/visual presentation of either tree. That is bryan's surface (S39: *"I am going to
+take on the initial structure of this, including the UI"*) — the DD may say what the model makes
+*possible*, never what the screen looks like.
+**OUT:** the scrml language surface. Nothing here proposes a compiler change.
+**OUT:** re-litigating ruling A.
+
+### ★ THE CRUX, stated so the panel attacks it rather than discovers it
+
+The two objects are **structurally isomorphic and semantically opposite**:
+
+> **The arc graph's cursor is a READ cursor.** Moving it selects what gets *assembled into context*.
+> The graph is append-only; nothing is retracted; moving `HEAD` changes **nothing about the world**.
+>
+> **An undo cursor is a WRITE cursor.** Moving it *must* mutate the working tree, or it has not
+> undone anything.
+
+Both are "a movable pointer into a branching history." One is a lens; the other is a lever.
+**The PA's position is that this is the load-bearing asymmetry and that it defeats naive
+unification — and that position is a hypothesis the DD should falsify if it is wrong.**
+`jj` is the sharpest counter-example available: `jj undo` moves a pointer in the **op log** and it
+*does* mutate the working copy, while the **change DAG** underneath is the content history — two
+layers, deliberately, in a shipped tool. `fossil` is the opposite precedent: one append-only
+block-chained graph holding heterogeneous artifact kinds (code, wiki, tickets, forum) in one file.
+
+### ⚑ MEASURED BY THE PA AT flogence `053f04a` — verify by execution before reasoning from any of it
+
+All of the following were run this session, not recalled:
+
+- **Schema** (`src/ports/capture-tool.scrml:30-40`): `utterance` is **canonical, append-only,
+  verbatim — "never edited, never deleted"**; `gnode` is derived; `gnode_src` is **many-to-many**
+  ("one blob of prose touches several nodes; one node accretes many blobs"); `gedge` carries
+  `created_at` = *when the EDGE was declared*, plus `by` and `verified`, so an edge the TOOL
+  inferred and one the OPERATOR declared are distinguishable evidence.
+- **There is exactly ONE cursor.** `gcursor` is keyed by `name` and the only row ever written is
+  `'HEAD'` (`setCursor`, :48-50). A second cursor is a schema question, not a config one.
+- **★ The cursor does not travel.** `bun run graph:export` prints, verbatim:
+  `exported 286 rows -> handOffs/graph.jsonl (gcursor excluded: HEAD is per-machine)`.
+  **Cursor position is already per-machine by design.** Any unification inherits that, and an undo
+  position that silently does not cross machines is a different proposition from a read cursor that
+  does not.
+- **`--arc` already has checkout semantics** (:146-163): branch **only if the arc is new**;
+  re-entering an existing arc lands on its **TIP, not its root** — a bug found by RUNNING at S39,
+  not by compiling. The undo-tree would want the same verb and may want the opposite default.
+- **Live counts:** 27148 nodes · 35393 edges · 55 utterances · 6 arcs · **edge coverage 100.0%,
+  0 orphans** (corpus baseline at S38 was 19.5%). Edge types in use: `follows` · `branches-from` ·
+  `touches` · `in` · `references` · `xref`.
+- **Granularity gap, unpriced:** 55 utterances in ~4 months of deliberate human-paced capture.
+  An edit history is machine-paced and keystroke-granular. Whatever the answer, the **volume ratio
+  is orders of magnitude** and no shared store has been sized for it.
+- **★ Two live scars any shared storage inherits.** (1) `[291]`: node ids are minted from **each
+  box's own sequence and are not lane-scoped**, so two machines capturing before syncing produce a
+  refused import with no clean merge — the ordering constraint today is *import before capturing on
+  the second machine*. (2) `[279]`: `--touch` and `--untouch` normalise their argument
+  differently (`--touch e:cockpit` mints `e:e:cockpit`), so a touch cannot be undone with the
+  argument that made it — **an unfixed undo defect already exists in the graph tool**, which is a
+  small, real datapoint about what "undo over this store" costs.
+
+### The poles
+
+| pole | claim | strongest precedent |
+|---|---|---|
+| **ONE** | one append-only graph, heterogeneous node kinds, one cursor discipline | **Fossil** — VCS + wiki + tickets + forum in one file, one clone |
+| **TWO** | two layers: a content/history DAG and a separate operation log that can move it | **jj** — change DAG + `op log`, shipped, deliberately separate |
+| **ONE-STORE-TWO-CURSORS** | shared storage, two cursor kinds with different write authority | the PA's hypothesis; unargued, needs an advocate |
+| **NEITHER — don't build it** | the undo-tree is addition-by-accumulation; rule 1 is simplicity | `simplicity-defender` has standing to argue this and should |
+
+### The questions
+
+**Q1 — THE LOAD-BEARING ONE. Does the read-cursor/write-cursor asymmetry defeat unification, or is
+it an artifact of how the arc graph happens to be built?** Answer on jj's evidence specifically:
+jj proves a pointer-move *can* mutate the world safely. Does it prove the two pointers can be the
+same pointer, or does jj's two-layer split *refute* that?
+
+**Q2 — Price ONE honestly.** If one mechanism: what does the 100%-edge-coverage, `by`/`verified`,
+never-deleted `utterance` discipline cost when the writer is an editor emitting keystrokes rather
+than a human emitting a turn? Name the volume at which the store stops working, with a number.
+
+**Q3 — Does ruling A change the answer?** A project is now a level above a thread, and `lane:*`
+nodes are `kind=arc`. A hierarchy with a resumable position is exactly what statechart **history
+states** (shallow/deep) formalise. Is "restore to a persisted state" the right frame for BOTH
+cursors — or does xstate's hard line (`createActor({snapshot}).start()` is categorically NOT
+`.send(event)`) mean the two cursors are provably different operations?
+
+**Q4 — The honest half: what does unification NOT buy?** Which capability that either mechanism
+would have alone is *lost* by merging them. If the answer is "nothing", say so plainly — that is a
+legitimate result and it settles the item.
+
+⚑ **Do not recommend a UI.** Report what the model permits; the screen is bryan's.
+
+### Panel (loaded to the active roster, flogence S42)
+
+`jj-vcs-expert` (TWO) · `fossil-scm-architecture-expert` (ONE) · `xstate-expert` (cursor semantics /
+Q3) · `casey-muratori-vcs-expert` (isomorphism ≠ identity; solve the actual problem) ·
+`simplicity-defender` (should it exist at all) · `graphite-stacked-changes-expert` (linearising a
+tree for a human — the half that constrains the model without dictating the screen).
+Reserve, not loaded: `jj-conflict-model-expert` (storage-model-first) if Q2 turns on storage.
+
+### Report-back
+
+Artifact to `scrml-support/docs/deep-dives/`, flip `status: banked → complete`, drop the `(dpa: …)`
+breadcrumb. **RUN-not-RATIFY** — advisory only; the ruling is bryan's with the flogence PA.
