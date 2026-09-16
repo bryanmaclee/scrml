@@ -115,8 +115,18 @@ describe("e2e-render-map — baseline well-formedness", () => {
     // Every app with a registered populated seed must have BOTH cells recorded
     // (the empty-vs-populated distinction is load-bearing — the board bug lives
     // only in populated; an empty-db board renders <empty> clean + looks green).
-    for (const app of SLICE) {
-      if (!seedFor(app.relpath)) continue;
+    //
+    // ⛑ S417 — NON-VACUITY GUARD, and it is the point of this edit.
+    // This loop is `if (!seedFor(...)) continue`, so when `seedFor` matches NOTHING it executes
+    // ZERO expect() calls and passes by asserting nothing. That is exactly what it did on every
+    // Windows clone until the mint-site separator fix in `render-corpus-enumerator.js`: 0 of 449
+    // apps matched, this test made 0 assertions, and it was green. A test whose subject population
+    // can silently empty needs to assert the population is non-empty FIRST — otherwise the only
+    // signal that it stopped testing anything is that it kept passing.
+    const seeded = SLICE.filter((app) => seedFor(app.relpath));
+    expect(seeded.length).toBeGreaterThan(0);
+
+    for (const app of seeded) {
       expect(baseline.cells[`${app.relpath}#empty`]).toBeDefined();
       expect(baseline.cells[`${app.relpath}#populated`]).toBeDefined();
     }
