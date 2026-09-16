@@ -177,7 +177,19 @@ export function enumerateRenderCorpus() {
     const files = [];
     walkDir(src.root, ".scrml", files);
     for (const f of files) {
-      const relpath = relative(REPO_ROOT, f);
+      // ⛑ S417 — POSIX-NORMALISE AT THE MINT SITE. `path.relative` returns win32 separators on
+      // Windows, and EVERY consumer of `relpath` in this tier assumes `/`: `classifyApp` matches
+      // `dirPrefix + "/"`, `tierOf` matches `"examples/"` / `"samples/"` / `"benchmarks/"`, the
+      // multi-file detector matches `"/app.scrml"`, `seedFor` keys the POPULATED_SEEDS table, and
+      // all 438 committed baseline keys are `/`-shaped. Measured on a Windows clone BEFORE this
+      // line: 449 of 449 relpaths carried `\`, `tierOf` returned "other" for ALL of them, NO app
+      // was ever classified multi-file, `seedFor` matched 0, and 0 of 449 baseline keys resolved —
+      // so the tier compared nothing, seeded nothing and tiered nothing, while reporting 12/0.
+      // A silent whole-tier no-op, invisible because the tier runs in no CI job.
+      // Normalising HERE rather than at each consumer is deliberate: the separator is a property of
+      // how the path was minted, and a per-consumer patch would leave the next consumer to find.
+      // On POSIX this is a no-op — `relative` already returns `/` and the replace matches nothing.
+      const relpath = relative(REPO_ROOT, f).split("\\").join("/");
       const { kind, appDir } = classifyApp(relpath);
       if (kind === "multi") {
         if (!multiByDir.has(appDir)) {
