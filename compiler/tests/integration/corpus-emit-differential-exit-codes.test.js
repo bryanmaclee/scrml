@@ -20,6 +20,20 @@
  * carries a real recorded difference asserts a NON-zero exit; the only 0s are on pairs that are
  * genuinely identical.
  *
+ * ⛑ S417 — THAT SENTENCE WAS VACUOUSLY TRUE WHEN IT WAS WRITTEN, AND THAT IS WHY IT READ CLEAN.
+ * As landed, this file carried NO case that had a real recorded difference: one `toBe(0)` on the
+ * identity floor and six `toBe(2)` on refusals. There was no `toBe(1)` anywhere, and
+ * `withRealDifference` — the helper built for exactly that case — was defined and never called.
+ * So the quantifier ranged over an empty set and the claim cost nothing to satisfy.
+ *
+ * The gate's PRIMARY verdict was therefore untested in the one instrument compiler PRs cite as
+ * landing evidence. Measured: blinding the content comparison (`ba.sha256 === ha.sha256` -> `true`)
+ * left the suite at 7 pass / 0 fail. With the VERDICT-floor cases below it goes 7 pass / 2 fail,
+ * and the two that die are exactly those cases. The sentence above is now load-bearing.
+ *
+ * The general lesson, worth more than the fix: **a claim quantified over "every case that X" is
+ * satisfied for free when no case does X.** Check the population before trusting the property.
+ *
  * ⛑ PROVENANCE, AND THE NINE CASES THAT ARE NOT HERE — READ THIS BEFORE "RESTORING" THEM.
  * ========================================================================================
  * This file was RECOVERED (S416) from `origin/worktree-agent-ab7336c5da32f10ed`, where it was
@@ -160,6 +174,52 @@ test("the SAME revision on both sides is NOT A VALID COMPARISON without the opt-
   const { code, out } = runDiff(p, p);
   expect(out).toContain("[INCOMPARABLE]");
   expect(code).toBe(2);
+});
+
+// ---------------------------------------------------------------------------------------------
+// the VERDICT floor — exit 1, the branch this gate exists to reach
+//
+// ⛑ S417. These are the cases the file was landed WITHOUT, and their absence made the header's
+// own boast ("every case that carries a real recorded difference asserts a NON-zero exit")
+// VACUOUSLY true — there were no such cases. The landed rig asserted exit 0 once and exit 2 six
+// times; `withRealDifference` above was defined and never called. So the gate's PRIMARY verdict
+// — "differences found" — had no coverage at all, in the one instrument compiler PRs cite as
+// landing evidence (#956 cited "0 artifact content diffs" from it in the same session).
+//
+// The concrete hole, measured: blinding the content comparison at the `ba.sha256 === ha.sha256`
+// site to `if (true)` left the suite at 7 pass / 0 fail. Nothing here could see a gate that had
+// stopped comparing. These cases close that: they are the mutation detector for the compare path.
+// ---------------------------------------------------------------------------------------------
+
+test("a real artifact CONTENT difference is REPORTED and exits 1", () => {
+  const b = manifest("content-base");
+  let touched = 0;
+  const h = manifest("content-head", (m) => { touched = withRealDifference(m, "1".repeat(40)); });
+  // The fixture must actually carry a difference, or this case proves nothing.
+  expect(touched).toBeGreaterThan(0);
+
+  const { code, out } = runDiff(b, h);
+  expect(out).not.toContain("VERDICT: NO DIFFERENCES");
+  expect(out).not.toContain("[INCOMPARABLE]");
+  expect(out).toContain("DIFFERENCE(S)");
+  // Every artifact was perturbed, so every COMPARED artifact must be reported as DIFFERING.
+  // This is the assertion that dies if the sha comparison is ever short-circuited.
+  expect(out).toMatch(new RegExp(`DIFFERING\\s+: ${touched} of ${touched} compared`));
+  expect(code).toBe(1);
+});
+
+test("a run that finds differences NEVER exits 0, even with the same-revision opt-in present", () => {
+  // Guards the inverse mistake: an opt-in flag that suppresses a refusal must not also suppress
+  // the verdict. The pair genuinely differs, so --allow-same-revision is inert here and the
+  // findings must still drive the exit code.
+  const b = manifest("optin-base");
+  let touched = 0;
+  const h = manifest("optin-head", (m) => { touched = withRealDifference(m, "2".repeat(40)); });
+  expect(touched).toBeGreaterThan(0);
+
+  const { code, out } = runDiff(b, h, "--allow-same-revision");
+  expect(out).toContain("DIFFERENCE(S)");
+  expect(code).toBe(1);
 });
 
 // ---------------------------------------------------------------------------------------------
