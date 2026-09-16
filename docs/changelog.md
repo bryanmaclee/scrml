@@ -7296,6 +7296,64 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-15 (S417 — peter — the floor convicted every code-bearing PR on it, and a drift pin found the bug it was built to detect the absence of)
+
+A Windows-clone session in two arcs. The first was the review floor, opened on Peter's standing
+sequence (*"okay great! We can start out with review floor"*) — **7 owed, 4 code-bearing, 4 findings,
+zero clean.** The second answered his follow-up (*"what can we do to fix the S415 issue as well as any
+other along this vein?"*) with a census of the lexer-merge class and two drift pins. Three PRs landed,
+all gate-green, **all test-only — no compiler source changed this session.**
+
+⚑ **The floor's first finding was the hand-off that scoped it.** S416's pickup said *"#956 is the only
+code-bearing PR in the set — the other four are docs/instrument-only and are carve-outs by path."* By
+`review-debt.ts`'s own `CODE_BEARING_RE`, **four** were code-bearing. Following that instruction would
+have carved out three of them, hidden a HIGH, and pushed the code-bearing carve-out rate from 3/213 to
+6/217 — while its stated rationale was *preserving* that signal. That is `pa-base` §8's absorbed escape
+hatch, and the irony is exact: S416's own durable finding was *"an instrument that exists and is never
+consulted reads identically to one that works"*, and its hand-off then proposed exempting three
+instrument PRs from review.
+
+- **#963 `fix(differential)`** — the landing gate cited as evidence in compiler PRs had **no test for
+  its primary verdict**: one `toBe(0)`, six `toBe(2)`, and not one `toBe(1)` anywhere, while
+  `withRealDifference` — the helper built for exactly that case — sat defined and never called. #956
+  cited this gate's *"0 artifact content diffs"* in the same session. Proven to bite: blinding the sha
+  comparison leaves the **pre-existing** suite at 7/0 and the new one at 7 pass / 2 fail, so the
+  mutation demonstrates the hole rather than asserting it. The gate is also invoked by **no CI job**.
+- **#964 `fix(e2e-render-map)`** — the tier was a **silent whole-tier no-op on every Windows clone**
+  while reporting 12/0. `path.relative` mints win32 separators; every consumer assumes POSIX. Measured:
+  449 of 449 relpaths carried `\`, tiers collapsed to `{other:449}`, no multi-file app was ever
+  detected, `seedFor` matched 0, and **0 of 449 baseline keys resolved**. Fixed at the mint site; the
+  tier went from **0 comparisons to 912 assertions**, and immediately surfaced two green→red cells it
+  had been blind to. Also adds a **non-vacuity guard** to a test that executed zero `expect()` calls and
+  passed by asserting nothing — in the file the PR it reviewed had been editing, two tests above the one
+  that PR added.
+- **#965 `test(lexer-merge)`** — two drift pins for the class rediscovered four separate times, plus a
+  census that BOUNDS it: 6 shift operators × 9 positions, 63 compiled cases, and **shifts behave
+  correctly in ordinary expression positions.** The class bites only where code does token-text
+  set-membership or angle depth-counting.
+
+⚑ **The session's best find came from proving a pin bites, not from the pin.** `tokenizer.ts` matches
+multi-char operators first-match-wins over array order, under a comment asserting *"check longest
+first"* that nothing verified. Across all 35 members: 34 correctly ordered, **exactly one violation —
+`">>>"` is unreachable because `">>"` matches first.** That is the **root cause of
+`g-unsigned-right-shift-does-not-lower`**, filed LOW against `compiler/src/codegen` with its own locus
+admitting the lowering site *"was NOT traced"*. PA-verified by execution: swap the two entries and
+`return n >>> 2` compiles and emits correct JS. A one-line fix, for a gap filed against the wrong file.
+
+**Three fixes were declined, each on a measurement rather than a feeling.** `>>>=` is not added because
+`SPEC.md:20218` says verbatim *"DO NOT WIDEN IT"* and enumerates 14 members where the live set has 19 —
+adding it is the precise act the normative source forbids, so it rides the unruled #945. The `>>>`
+reorder is not landed because it is **newly-accepting**, and the governing-sentence gate came back
+empty: SPEC carries **no shift-operator grammar at all** (one incidental hit in a prohibition list;
+zero for "shift operator"/"bitwise"/"unsigned right"), which makes it a ruling, not a patch. The two
+angle depth-trackers are not fixed because their corpus population is **0**.
+
+**Filed: 8 gaps** (1 HIGH, 5 MED, 2 LOW). The HIGH is `examples/09-error-handling.scrml`, a **shipped
+example that has not compiled since `E-ERROR-009` was minted** — unchanged since 2026-06-22, broken by a
+diagnostic that landed later, and invisible because the only tier compiling the examples corpus runs in
+no CI job *and* was inert on Windows. Its fix direction is a live §14.10-vs-§19.3.3 language question
+and is routed, not guessed. Board **HIGH 107→108 · MED 245→250 · LOW 92→94**. Review floor **7 → 0**.
+
 ### 2026-09-14 (S416 — peter — five landings, and four instruments that existed, read as done, and were never consulted)
 
 A Windows-clone session in five arcs, all landed gate-green: **#955** (the review-floor drain),
