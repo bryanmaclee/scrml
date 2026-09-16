@@ -1,3 +1,187 @@
+# scrml — Session 417 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S416/S415/S414/
+> S413/S412/S411/S410 mine, S405 bryan's) and is untouched.
+>
+> ⚑ **SIBLING STATE: SOLO all session.** `S407-bryan.md` read **WRAPPED** at boot (2026-09-15). His
+> **#962 is OPEN and the merge is his** — it SUPERSEDES #887 and #899, both of which close once it
+> lands. All his open PRs (#962, #951, #950, #939/#938/#937, #920/#919/#918, #907/#906/#905) are
+> **CLAIMED, not lost.**
+>
+> ⚑⚑ **DELTA-LOG COLLISION IS ALREADY QUEUED — READ BEFORE MERGING ANYTHING.** This wrap took
+> `[3068]`–`[3078]`. **bryan's open #962 also claims `[3068]`–`[3072]`.** Whichever merges second must
+> re-run `bun scripts/delta-lint.ts --fix` and resolve `hand-off.md` / `docs/changelog.md` /
+> `handOffs/delta-log.md` **by UNION** (all three are append-only). This is the sanctioned
+> serialization, not a problem — but it is not automatic.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Drain the review floor first — it is now SIX sessions running that it returned something real, and
+   this session it convicted EVERY code-bearing PR on it (4 of 4, zero clean).** The floor will read
+   roughly 4 OWED: **#963, #964, #965 and this wrap PR**. Three are test-only; the wrap is a
+   carve-out by path.
+   ⚑⚑ **DO NOT TRUST A HAND-OFF'S CARVE-OUT CLASSIFICATION — INCLUDING THIS ONE. CHECK THE REGEX.**
+   S416's pickup asserted "#956 is the only code-bearing PR; the other four are carve-outs by path."
+   That was FALSE: by `review-debt.ts`'s own
+   `CODE_BEARING_RE = /^(compiler|stdlib|scripts|lsp|editors|e2e|dashboard)\/|^conformance\//`, **four**
+   were code-bearing, and following the hand-off would have hidden a HIGH. Run the regex against
+   `gh pr view <n> --json files`; it takes one command.
+
+2. ⚑⚑ **BRYAN'S, AND THE LANGUAGE QUESTIONS ARE NOW A LINKED SET OF FOUR. DO NOT BUILD ANY OF IT.**
+   The outbound drop written this session lays all four out:
+   `handOffs/incoming/2026-09-15-from-S417-peter-to-bryan-*.md`.
+   - **§34 says DO NOT WIDEN, and the live set is already wider** (`g-spec-34-forbids-the-widening-…`).
+     `SPEC.md:20218` enumerates 14 members and forbids growth; `ast-builder.js` has 19. Per R4 the SPEC
+     wins, so this is a landed change doing what the normative source forbids, justified only in derived
+     docs. **This is the blocker for (2b).**
+   - **`>>>=` still drops a loop body at exit 0** (`g-condition-head-set-still-misses-the-sixth-merged-run`,
+     MED). One token, population measured 0 of 2,553, thirty seconds of work — **and unfixable until the
+     §34 sentence is reconciled, because adding it IS the forbidden act.**
+   - **`>>>` is structurally unreachable in the tokenizer** (`g-multi-ops-first-match-shadows-the-longer-operator`,
+     MED) — the root of `g-unsigned-right-shift-does-not-lower`. The reorder is **newly-accepting** and
+     the governing-sentence gate came back EMPTY (**SPEC has no shift-operator grammar at all**), so it
+     is a ruling, not a patch.
+   - **NEW HIGH — a shipped example has not compiled since S236**
+     (`g-examples-09-error-handling-does-not-compile`). `fail .SubmitFailed(...)` draws four
+     `E-ERROR-009` whose own message lists `SubmitFailed` as valid. Either §14.10's bare-variant
+     inference extends to `fail` position or the example must be qualified — **different languages,
+     bryan's call.**
+   Everything previously routed is UNCHANGED and still his: the `E-ASSIGN-003` zero-producer root and
+   the whole `declaredNames` family · §49.2.1 braceless loop bodies ·
+   `g-bare-block-statement-is-silently-dropped` (HIGH) ·
+   `g-export-reparse-swallows-ast-builder-parse-path-diagnostics` (HIGH, a 22-file migration) · the
+   must-use spec-citation mis-citation · his three #936 findings ·
+   `g-library-shadowed-inner-binding-is-a-false-rejection` · the §59 library-mode lowering widening ·
+   `E-CONDITION-HEAD-UNPARENTHESIZED` (#945) itself.
+
+3. **THE CHEAPEST REAL ITEM, AND IT NEEDS A POSIX CLONE, NOT A DECISION:**
+   `g-todomvc-mount-throw-unclassified` (LOW). #964 made the e2e-render-map tier live and it reported
+   `benchmarks/todomvc/app.scrml#empty: renders-clean -> compiles-but-throws`. The file **compiles clean
+   (exit 0)**, so the throw is at MOUNT and a happy-dom/Windows cause is not ruled out. **One run of
+   `bun test compiler/tests/e2e-render-map/` on a POSIX clone discriminates it.** I deliberately did NOT
+   classify it — this tier's first live readings on Windows are not yet trustworthy as regression
+   evidence.
+
+4. ⛔ **THREE FIXES WERE DECLINED ON MEASUREMENT. DO NOT "HELPFULLY" LAND THEM.**
+   (a) `>>>=` — the §34 prohibition above. (b) the `>>>` reorder — newly-accepting, no governing
+   sentence. (c) **the two angle depth-trackers** (`g-angle-depth-trackers-miscount-a-merged-run`, LOW) —
+   `ast-builder.js:11742` counts `<`/`>` as brackets and `:3894` does `consumeBalanced("<", ">")`; a
+   merged `>>` matches NEITHER branch. **Corpus population is 0** — all 9 textual matches are comments
+   or string literals, verified individually. §8: a fix built before the problem is measured has
+   unmeasured value.
+
+5. ⛔ **THE VEIN IS CENSUSED — DO NOT RE-EXPLORE IT FROM SCRATCH.** 6 shift operators × 9 syntactic
+   positions, 63 compiled cases: **shifts behave correctly in ordinary expression positions.** The
+   lexer-merge class is NOT a general expression hazard; it bites ONLY where code does token-text
+   SET-MEMBERSHIP or angle DEPTH-COUNTING. 58 token-level angle sites exist and **the raw 325-site
+   figure is WORTHLESS** — most are markup tag-scanning where the angle is a delimiter and nothing
+   merges. Two pins now make the class self-reporting
+   (`condition-head-angle-operator-coverage.test.js`, `tokenizer-multi-ops-ordering.test.js`); both go
+   red in BOTH directions, including when the ruling lands and the bug is fixed.
+
+6. ⛔ **UNCHANGED, CARRIED VERBATIM:** do NOT re-add a recovery scan to `collectIfCondition` (three
+   bounds built, all three ate or corrupted source; the ⛔ banner in `ast-builder.js` records all three
+   by shape — the scan stopping at the `)` is the invariant). Do NOT widen the four surviving `[^>]`
+   marker regexes (live miss count measured ZERO again this session).
+
+7. **Other live work, untouched:** `g-emit-if-stmt-with-opts-is-never-reached` (MED) · the two
+   pre-existing `.size`/bracket residuals under #952 · the partial-emptiness half of
+   `g-e2e-render-map-classifies-renders-empty-as-green` · the newly-filed
+   `g-differential-invalid-run-exits-1-…` (MED) and `g-e2e-render-map-d6-keys-on-textcontent-…` (MED).
+
+8. **⛑ STILL OWED and not fixable here:** `bun scripts/types-gate.ts --write` on a clone where it runs.
+   This Windows clone has no extensionless `node_modules/.bin/tsc`. Nothing is blocked — the step is
+   `continue-on-error: true` inside the non-blocking `tracking` job.
+
+9. **Standing from Peter, unchanged:** merge on green without re-asking; surface `autoMode` blocks as
+   `⛔ BLOCKED BY autoMode — <exact command>` and do not engineer around them. Fired once this session
+   (`gh pr merge 963`), cleared with *"merge both"*.
+   ⚑ **NEW, environment:** the bun memory sentinel was **hidden, not discontinued** — Peter asked
+   whether it was still needed, and the answer was yes but for a narrower reason than "just in case".
+   Its task now launches via `wscript.exe //nologo run-hidden.vbs` (a windowless host) instead of
+   `powershell.exe` under an INTERACTIVE principal. It had been giving him a logon popup whose closure
+   sent Ctrl+C and killed the guard (`LastTaskResult 0xC000013A`) — cost with no protection. Changing
+   the task PRINCIPAL to session 0 needs elevation; changing the ACTION does not. Verified running,
+   windowless, PID logged.
+
+## WHAT LANDED
+
+**Three PRs, all gate-green, all merged, and ALL TEST-ONLY — no compiler source changed this session.**
+
+- **#963 `fix(differential)`** — the gate's primary verdict had no test, and the header's boast about it
+  was vacuously true.
+- **#964 `fix(e2e-render-map)`** — the tier was a silent no-op on every Windows clone, and it reported 12/0.
+- **#965 `test(lexer-merge)`** — pin the class rediscovered four times, and root-cause the fifth.
+
+## 🔭 DURABLE
+
+**A claim quantified over "every case that X" is satisfied for free when no case does X.** #957's header
+asserted *"every case that carries a real recorded difference asserts a NON-zero exit"* — and there were
+no such cases. One `toBe(0)`, six `toBe(2)`, zero `toBe(1)`. The sentence read as a guarantee and cost
+nothing to satisfy. **Check the population before trusting the property.** This is the vacuity sibling
+of S416's "a green test can be the bug", and it is cheaper to detect: count the subjects.
+
+**A test whose subject population can silently empty is a test that will pass by asserting nothing.**
+`e2e-render-map.test.js:113` executed ZERO `expect()` calls on every Windows clone and was green. The
+fix is not better inputs — it is asserting the population is non-empty FIRST, because otherwise **the
+only signal that a test stopped testing anything is that it kept passing.**
+
+**Normalise at the MINT SITE, not at the consumer.** One `path.relative` producing win32 separators
+made a whole tier inert: `tierOf`, `classifyApp`, the multi-file detector, `seedFor` and all 438
+baseline keys each assumed POSIX, and each would have needed its own patch. The separator is a property
+of how the path was MADE. A per-consumer fix leaves the next consumer to find.
+
+**⚑ The best find of the session came from proving a pin bites, not from the pin.** Mutating the
+tokenizer to check that the drift detector went red surfaced that `">>"` precedes `">>>"` in a
+first-match-wins list whose comment claims "longest first" — so `>>>` is structurally unreachable, which
+is the ROOT of a gap filed against a different file with the note "the precise lowering site was NOT
+traced". **The bite proof is not ceremony; it executes the code from an angle the happy path never
+does.**
+
+**Derive the list, or the list drifts from its own source of truth.** `CONDITION_HEAD_CONTINUATION_PUNCT`
+is hand-enumerated from reported symptoms while `tokenizer.ts` MULTI_OPS holds the truth and lists the
+three shift-assigns adjacent on one line. #956 took two and left one. Four sessions found four instances
+of this class by accident; a derivation would have found the fifth on the day it was introduced.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I violated the ingestion-disjoint invariant** (`pa-base` §7). Four adversarial reviewers into
+   ONE non-isolated checkout: #957's mutated `scripts/corpus-emit-differential.ts` to prove gate bite
+   while #959's read `git status` and saw a phantom syntax-broken file appear and vanish. Each restored
+   by file-copy and the tree verified clean — **luck, not design.** Mutation-bearing reviews need
+   `isolation: "worktree"` or serialization; read-only ones are correctly exempt.
+2. **★★ My derived-cell probe row was contaminated and I nearly read it as a finding.** `E-DG-002` fired
+   on the CONTROL too, so the whole row was a second, unrelated failure. Caught only because I had put a
+   control in. **A probe that fails for the wrong reason reads exactly like a confirmed hypothesis** —
+   third session running that this exact shape has bitten.
+3. **★ Two shell failures cost round-trips**: a quoted heredoc that broke on an unmatched quote (checked
+   the file was untouched before retrying — it was), and a Python one-liner handed an MSYS `/c/...` path
+   it cannot resolve. The heredoc lesson is S416's, repeated; I should have gone to a file first.
+4. **★ I rendered the first census matrix with `codes[0]`**, which showed a WARNING where an error
+   followed, and briefly mis-read the `>>>` row. Corrected by re-rendering with the full code list.
+
+## Gate at close
+
+- **Cloud gate GREEN on all three PRs** (`gate` + `windows`). `tracking` red on each and **proven
+  pre-existing every time by name-set comparison against main's own run** — the identical 5-name
+  dev-watcher wait-budget cluster, homed at `g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only`.
+  Re-measured per PR, three times; never inherited.
+- **Local:** `corpus-emit-differential-exit-codes` 9/0 · e2e-render-map tier 12/0 (**912 expect() calls**,
+  from 0 comparisons) · both new pins + the two sibling condition-head suites 101/0.
+- `facts --check`, `state --check`, `regen-spec-index --check` — all PASS. `delta-lint` PASS at `[3078]`.
+- **Board: HIGH 108 · MED 250 · LOW 94** (+1/+5/+2 = the 8 filed). Review floor drained **7 → 0**.
+- **Maps NOT regenerated** — watermark `e74f5423`, already stale before this session
+  (`g-nav-maps-have-no-scheduled-refresh`). **This session added ZERO navigable structure**: no compiler
+  source touched, three new test files, no new/moved/deleted symbol.
+- **Worktrees — four retained, NONE this session's.** `agent-a0742fe4795045e91`,
+  `agent-a4e6b5f2562ae9eaa`, `onmount-c` (`feat/onmount-c-build` — the S322 build held pending bryan's
+  language-surface review, retained deliberately) and the sibling `scrml-pinned` (`app-pinned` @
+  `8f3c5b74`). I created none.
+- **Outbound:** one drop to bryan this session. **FIVE outbound drops now sit unread** (S412, S413,
+  S415, S416, S417).
+
+---
+
 # scrml — Session 416 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S415/S414/S413/

@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 107 |
-| MED | 245 |
-| LOW | 92 |
+| HIGH | 108 |
+| MED | 250 |
+| LOW | 94 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -15177,3 +15177,173 @@ two successive rounds of adding one more policy each produced a new defect in th
 (round 1 receiver-blind → false rejections; round 2 receiver-scoped → false acceptances). ⚑ The fix
 author initially asserted this shape as a refusal, the test FAILED, and the assertion was corrected to
 match the measurement rather than reaching for another bound. Pinned as a characterization test.
+
+---
+
+## §S417 — gaps filed S417 (2026-09-15, Peter; all surfaced by the review floor's S239 pass over the four code-bearing S416 landings)
+
+### g-condition-head-set-still-misses-the-sixth-merged-run — `>>>=` escapes `E-CONDITION-HEAD-UNPARENTHESIZED` and drops the loop body at exit 0, one spelling after the fix named for closing this class — `NEW S417-peter (review floor, S239 pass on #956); MED; open — BLOCKED on the §34 ruling below`
+<!-- @gap id=g-condition-head-set-still-misses-the-sixth-merged-run sev=MED status=open locus=compiler/src/ast-builder.js:10645 prov=empirical:PA-reproduced-on-merged-main-with-shift-assign-control -->
+
+PA-reproduced by execution on merged `main`, library mode, non-exported fn:
+
+    while (n + 1) >>>= 2 { t = t + 1 }   exit 0, ZERO diagnostics, emits  while (n + 1) { }
+    while (n + 1)  >>= 2 { t = t + 1 }   exit 1, E-CONDITION-HEAD-UNPARENTHESIZED   (control)
+
+Body dropped, loop non-terminating — verbatim the symptom `E-CONDITION-HEAD-UNPARENTHESIZED` is named
+after, surviving its own fix for the SECOND time. **FOURTH instance of the lexer-merge class**, in the
+PR whose own banner declares it the third.
+
+⚑ **The tell is at the source.** `compiler/src/tokenizer.ts` MULTI_OPS lists `">>>=", "<<=", ">>="`
+ADJACENT ON ONE LINE. #956 took two of those three and left the first. The member list was enumerated
+**from the reported symptom, not from the tokenizer's own operator set** — fix-the-class was stated in
+the banner and not executed.
+
+Measured migration population: **0 of 2,553** tracked `.scrml` files, with reach controls firing at 84
+and 49, so the zeros are measured rather than a dead grep. **NOT fixed** — see the §34 entry below;
+adding the member is the exact act the normative source forbids. Pinned as a KNOWN ESCAPE by
+`compiler/tests/unit/condition-head-angle-operator-coverage.test.js` (#965), which goes red the moment
+the ruling lands.
+
+### g-spec-34-forbids-the-widening-the-continuation-set-already-has — the normative catalog says DO NOT WIDEN and enumerates 14 members; the live set has 19, and the justification was recorded only in derived docs — `NEW S417-peter (review floor, S239 pass on #956); MED; open — bryan, rides the unruled #945`
+<!-- @gap id=g-spec-34-forbids-the-widening-the-continuation-set-already-has sev=MED status=open locus=compiler/SPEC.md:20218 prov=spec:§34-E-CONDITION-HEAD-UNPARENTHESIZED-row -->
+
+`compiler/SPEC.md:20218` states, verbatim:
+
+> ⚑ **THE CONTINUATION SET IS DELIBERATELY CONSERVATIVE — DO NOT WIDEN IT.** The code fires only when
+> the token immediately after the closing `)` is one of `<` `<=` `>` `>=` `==` `!=` `===` `!==` `&&`
+> `||` `??` `*` `%` `?` — **all PUNCT, and that is the invariant.**
+
+Fourteen members plus an explicit prohibition. The live set in `ast-builder.js` has **nineteen**. #956
+touched `ast-builder.js`, its test, `docs/FACTS.md`, `docs/known-gaps.md` and the delta-log —
+**`compiler/SPEC.md` is not in its file list.**
+
+Per CORE R4 the normative source wins, so this is NOT "the SPEC needs a refresh": it is a landed change
+doing the thing the normative source forbids, with its reasoning recorded only in DERIVED artifacts.
+The DIRECTION is supported (§50.2.3 does mandate rejecting these heads — quoted and verified); the
+ENUMERATION is not. Resolving it either amends §34 or narrows the code, and that is a language call
+riding the still-outstanding #945. **Nothing gates this today** — no test ties the §34 enumeration to
+the live set.
+
+⚑ Related and larger: **SPEC contains no shift-operator grammar at all.** `>>` / `<<` / `>>>` appear
+once, at `:3636`, inside a PROHIBITION list of compound-assignment forms; `"shift operator"`,
+`"bitwise"` and `"unsigned right"` return ZERO hits. That absence is why the entry below cannot be
+closed as a bug fix.
+
+### g-multi-ops-first-match-shadows-the-longer-operator — the tokenizer's maximal munch is an ARRAY-ORDER invariant maintained by hand, its comment asserts an order the data violates, and `>>>` is structurally unreachable — `NEW S417-peter (found while proving a drift pin bites); MED; open — the ROOT of g-unsigned-right-shift-does-not-lower`
+<!-- @gap id=g-multi-ops-first-match-shadows-the-longer-operator sev=MED status=open locus=compiler/src/tokenizer.ts:1864 prov=empirical:PA-verified-by-execution-reorder-makes-the-operator-compile -->
+
+`tokenizer.ts` matches multi-char operators with a FIRST-MATCH-WINS loop under the comment
+`// Multi-char operators (check longest first)`. There is no length sort — maximal munch is a property
+of the ARRAY'S ORDER, maintained by hand, and nothing verified it.
+
+Measured over all 35 members: **34 correctly ordered, exactly ONE violation** —
+
+    ">>>" (index 32) is UNREACHABLE — ">>" (index 31) matches first
+
+so `n >>> 2` never lexes as one token; it splits into `>>` followed by a separate `>`.
+
+⚑ **This is the ROOT CAUSE of `g-unsigned-right-shift-does-not-lower`** (LOW, open), which is filed
+against `compiler/src/codegen` with its own locus field recording "the precise lowering site was NOT
+traced". The codegen refusal is the downstream SYMPTOM. **PA-VERIFIED BY EXECUTION:** with `">>>"`
+moved before `">>"`, `fn f(n: int) -> int { return n >>> 2 }` compiles at exit 0 and emits
+`return n >>> 2;`, where on main it fails `E-CODEGEN-INVALID-LOGIC`.
+
+**NOT fixed, and the reason is recorded rather than assumed.** The reorder is **newly-accepting** — the
+one-way door of `pa-base` §8 — so it is a bug fix only if a normative sentence already makes the form
+legal. **GOVERNING-SENTENCE GATE EXECUTED: searched `compiler/SPEC.md` for the operator (ONE hit,
+`:3636`, a PROHIBITION list, not a grant) and for "shift operator" / "bitwise" / "unsigned right" (ZERO
+hits) — no governing sentence found.** By §8 that makes it *beyond the contract*: a RULING, not a
+patch. Pinned by `compiler/tests/unit/tokenizer-multi-ops-ordering.test.js` (#965).
+
+### g-differential-invalid-run-exits-1-which-its-own-contract-calls-differences-found — a missing or corrupt manifest is indistinguishable from a legitimate red — `NEW S417-peter (review floor, S239 pass on #957); MED; open`
+<!-- @gap id=g-differential-invalid-run-exits-1-which-its-own-contract-calls-differences-found sev=MED status=open locus=scripts/corpus-emit-differential.ts:1136 prov=review:S417-floor-pass-on-957 -->
+
+`scripts/corpus-emit-differential.ts` `loadManifest` calls `JSON.parse(readFileSync(p))` unwrapped; the
+throw is uncaught and the process exits **1**. The tool's own documented contract is
+`exit 0 = no differences | exit 1 = differences found | exit 2 = NOT A VALID COMPARISON`, and `die()`
+(exit 2) is used two lines later for a stale `schemaVersion`. Capture's abort paths alias the same way.
+
+So a wrapper keying on `!= 0` reads a MISSING MANIFEST as a real red, and one keying on `== 2` reads it
+as a valid comparison. This is `pa-base` §8's indistinguishable failure: an error path rendering as a
+substantive answer. No landed case covers a missing or corrupt manifest.
+
+### g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red — the detector was made accusatory without its trigger being tightened — `NEW S417-peter (review floor, S239 pass on #958); MED; open`
+<!-- @gap id=g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red sev=MED status=open locus=compiler/tests/e2e-render-map/render-detectors.js:206 prov=review:S417-floor-pass-on-958 -->
+
+D6 fires on `obs.seeded && bodyText.trim() === ""`, where `bodyText = body.textContent ?? ""` —
+**text nodes only**. A seeded render that produces a full DOM but no TEXT (form inputs carrying seeded
+values, image galleries, SVG/canvas charts, checkbox lists) has `textContent === ""`.
+
+Before #958 that landed in the GREEN `renders-empty` and was harmless. #958 moved the result into
+`renders-empty-with-data`, which is RED — converting a harmless mis-trigger into a false FAILURE,
+without re-examining the trigger's precision.
+
+Latent at 0/438 today (the four seeded cells are all `renders-clean`), but the sibling gap
+`g-e2e-render-map-with-data-coverage-is-four-of-438` argues for RAISING the seed count, and the first
+each-over-input app seeded goes falsely red. That is the cry-wolf shape §8 warns about. The correction
+is to gate on emptiness of the RENDER, not of its text (e.g. also require
+`body.querySelectorAll("*").length === 0`); the unseeded `renders-empty` branch can keep the loose
+definition, being green either way.
+
+### g-examples-09-error-handling-does-not-compile — a SHIPPED example has failed to build since the diagnostic that rejects it was minted, and nothing ran the corpus that would have caught it — `NEW S417-peter (surfaced by the e2e-render-map tier the moment #964 made it live); HIGH; open — bryan, §14.10-vs-§19.3.3`
+<!-- @gap id=g-examples-09-error-handling-does-not-compile sev=HIGH status=open locus=compiler/src/type-system.ts(the-E-ERROR-009-fire-site-minted-at-760e9f83) prov=empirical:PA-compiled-on-merged-main-four-instances -->
+
+`bun compiler/bin/scrml.js compile examples/09-error-handling.scrml` exits **1** with **four
+`E-ERROR-009`**. The offending line is `fail .SubmitFailed("message could not be queued")`, and the
+diagnostic's own message reads:
+
+> 'fail' in function 'submit' does not name a valid variant of the declared error type 'ContactError'.
+> ... **Valid variants: EmptyName, EmptyEmail, InvalidEmail, SubmitFailed.**
+
+It rejects the bare variant while listing that same variant as valid — i.e. **bare-variant inference is
+not reaching `fail` position.**
+
+⚑ **NOT A RECENT REGRESSION — A LONG-STANDING BREAK.** The example is unchanged since `dd5331e2`
+(2026-06-22); `E-ERROR-009` was minted later by `760e9f83 feat(s236)`. The diagnostic broke a shipped
+example when it landed and has been breaking it ever since, invisible because the only tier that
+compiles the examples corpus runs in NO CI job (`g-e2e-render-map-tier-runs-in-no-ci-job-at-all`)
+**and** was separately inert on Windows until #964.
+
+**THE FIX DIRECTION IS A LANGUAGE QUESTION, ROUTED, NOT GUESSED.** §14.10 grants bare-variant inference
+"when the type at the LHS or parameter position is statically known" — a `fail` operand is literally
+neither, though the declared error type IS statically known from the `!` signature, and `:8214` states
+construction rules apply "uniformly across every construction locus — `let` / `const` / state-cell
+initializers, `return`, and `fail`". `:14498` requires only that the variant be valid, which it is.
+So either the compiler should accept it (§14.10 extends to `fail`) or the example must be rewritten to
+the qualified form. **Both produce different languages; neither is the PA's call.**
+
+### g-todomvc-mount-throw-unclassified — the live tier reports a green-to-red on a file that compiles clean, and the cause has not been established — `NEW S417-peter (surfaced by #964; deliberately NOT classified); LOW; open — needs triage`
+<!-- @gap id=g-todomvc-mount-throw-unclassified sev=LOW status=open locus=searched:benchmarks/todomvc/app.scrml,compiler/tests/e2e-render-map/render-harness.js prov=empirical:PA-compiled-clean-so-the-throw-is-at-mount-not-compile -->
+
+With the e2e-render-map tier live (#964), `benchmarks/todomvc/app.scrml#empty` reports
+`renders-clean -> compiles-but-throws ["D1-MOUNT-THROW"]` against the committed baseline.
+
+**Filed UNCLASSIFIED on purpose.** The file compiles clean (exit 0, 13 warnings, 5 ghost lints), so the
+throw is at MOUNT, and a happy-dom / Windows-host cause is NOT ruled out — this tier had never
+meaningfully run on a Windows clone before #964, so its first live readings are not yet trustworthy as
+regression evidence. Calling it a compiler regression without establishing that would be the
+attribution error this ledger keeps recording. Needs one run on a POSIX clone to discriminate.
+
+### g-angle-depth-trackers-miscount-a-merged-run — two depth counters cannot see a merged angle token, with measured-zero corpus reach — `NEW S417-peter (census of the lexer-merge class); LOW; open — latent, deliberately unfixed`
+<!-- @gap id=g-angle-depth-trackers-miscount-a-merged-run sev=LOW status=open locus=compiler/src/ast-builder.js:11742 prov=empirical:PA-census-58-token-level-sites-corpus-population-zero -->
+
+Two sites treat the angle characters as balanced delimiters at TOKEN level, so a merged run matches
+neither branch:
+
+- `compiler/src/ast-builder.js:11742-11743` — a bracket-depth counter across `( ) [ ] { }` plus angles,
+  in the export-declaration path. It increments on the opener and decrements on the closer; a merged
+  `>>` token matches NEITHER, so an opened depth never unwinds and the loop consumes to EOF.
+- `compiler/src/ast-builder.js:3894` — `consumeBalanced` over angles, for type arguments, would never
+  find a merged closer.
+
+**Both require a NESTED angle type-argument to fire, and the corpus population is 0.** All 9 textual
+matches for a nested-angle shape are COMMENTS or STRING LITERALS (verified individually, not counted).
+**Deliberately NOT fixed:** `pa-base` §8 — a fix built before the problem is measured is a fix whose
+value is unmeasured. Recorded so the next reader inherits the census instead of re-taking it.
+
+⚑ **Census context, so the vein is not re-explored from scratch:** 58 token-level angle comparisons
+exist across the compiler; the raw 325-site figure is WORTHLESS (most are markup tag-scanning, where
+the angle is a delimiter and nothing merges) and must never be quoted. Probed 6 shift operators across
+9 syntactic positions (63 compiled cases): **shifts behave correctly in ordinary expression
+positions.** The class bites ONLY where code does token-text SET-MEMBERSHIP or angle DEPTH-COUNTING.
