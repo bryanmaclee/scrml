@@ -290,6 +290,57 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     });
   }
 
+  // ⛑ S419 residuals — g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not.
+  // The text half of hasRenderedContent read `body.textContent`, so text that is present
+  // but NOT RENDERED scored as content: seeded, each of these was renders-clean (green)
+  // while `<img hidden src>` in the same position was renders-empty-with-data. Each must
+  // fire seeded and be renders-empty unseeded. The precondition proves the case HAS
+  // text, i.e. that a textContent check would score it clean.
+  const UNRENDERED_TEXT_ONLY = {
+    "text with inline display:none": '<p style="display:none">secret</p>',
+    "text with inline visibility:hidden": '<p style="visibility: hidden">secret</p>',
+    "text with the hidden attribute": "<p hidden>secret</p>",
+    "text with aria-hidden=true": '<span aria-hidden="true">secret</span>',
+    "text under a hidden ancestor": '<div hidden><ul><li>Ada</li></ul></div>',
+    "a script-only body": "<script>var x = 1;</script>",
+    "a style-only body": "<style>p { color: red; }</style>",
+    "a noscript-only body": "<noscript>Enable JavaScript to use this app.</noscript>",
+    "script + style + noscript together": "<script>var x = 1;</script><style>p{}</style><noscript>no js</noscript>",
+    "an img inside noscript (happy-dom parses it as an element)": '<noscript><img src="a.png"></noscript>',
+  };
+  for (const [label, markup] of Object.entries(UNRENDERED_TEXT_ONLY)) {
+    test(`D6 fires on a seeded render whose only content is unrendered: ${label}`, () => {
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      if (!markup.includes("<img")) expect(body.textContent.trim()).not.toBe("");
+      const seeded = detect(true, { body });
+      expect(seeded.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(seeded.state).toBe("renders-empty-with-data");
+      expect(detect(false, { body }).state).toBe("renders-empty");
+    });
+  }
+
+  // The same exclusion must not eat VISIBLE text. Each case pairs visible text with an
+  // unrendered sibling or a near-miss attribute that must not read as hidden.
+  const VISIBLE_TEXT_RENDERS = {
+    "visible text beside a hidden span": '<p>Ada</p><span hidden>secret</span>',
+    "visible text beside a script": "<script>var x = 1;</script><p>Ada</p>",
+    "aria-hidden=false": '<p aria-hidden="false">Ada</p>',
+    "a non-hiding inline style": '<p style="display: block; visibility: visible">Ada</p>',
+    "a custom property whose value is none": '<p style="--display: none">Ada</p>',
+    "text in an element nested under a visible wrapper": "<div><section><p>Ada</p></section></div>",
+  };
+  for (const [label, markup] of Object.entries(VISIBLE_TEXT_RENDERS)) {
+    test(`D6 does NOT fire on a seeded render with visible text: ${label}`, () => {
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      const seeded = detect(true, { body });
+      expect(seeded.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(seeded.state).toBe("renders-clean");
+      expect(detect(false, { body }).state).toBe("renders-clean");
+    });
+  }
+
   test("a seeded render with CONTENT is unaffected — renders-clean", () => {
     document.documentElement.innerHTML =
       "<body><main id=\"root\"><ul><li>Ada</li><li>Alan</li></ul></main></body>";

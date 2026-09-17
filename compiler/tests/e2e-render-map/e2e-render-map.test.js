@@ -51,8 +51,15 @@ import { createHash } from "node:crypto";
 import { enumerateRenderCorpus, REPO_ROOT } from "./render-corpus-enumerator.js";
 import { seedFor, POPULATED_SEEDS } from "./seed-fixtures.js";
 import { ALL_BASELINE_STATES } from "./render-detectors.js";
-import { observeCellSubprocess } from "./generate-baseline.js";
-import { compileApp, resolveMultiFileCompileInputs } from "./render-harness.js";
+import {
+  observeCellSubprocess,
+  seedLabelsFor,
+  liveCellKeys,
+  findOrphanBaselineCells,
+} from "./generate-baseline.js";
+import { compileApp, observeApp, resolveMultiFileCompileInputs, TMP_PREFIX } from "./render-harness.js";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { tmpdir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -172,6 +179,40 @@ describe("e2e-render-map — baseline well-formedness", () => {
       seedKeysMatchingNoCorpusApp: [],
     });
   });
+
+  // ⛑ S419 residuals — ORPHAN BASELINE CELLS ARE NAMED
+  // (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged).
+  // Every other check here walks LIVE cells into the baseline, so a baseline cell no live app
+  // produces (a renamed/removed app, or a multi-file app whose entry key changed) is never
+  // compared and never reported. WARN-only, per this file's corpus-state convention: an orphan
+  // is stale bookkeeping that a baseline regeneration clears, not a render regression. The
+  // detection itself is asserted hard on an injected orphan, so the warning cannot go silent.
+  test("baseline cells that match no live app/seed are named (WARN-only)", () => {
+    const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+    const live = liveCellKeys();
+    // Non-vacuity: an empty live set would make EVERY baseline cell an "orphan" and still
+    // print; a live set disjoint from the baseline would mean the keying itself broke.
+    expect(live.size).toBeGreaterThan(0);
+    expect([...live].some((k) => k in baseline.cells)).toBe(true);
+
+    // The check can SEE an orphan: inject one into a copy of the baseline cells.
+    const injectedKey = "examples/__no-such-app__.scrml#empty";
+    const copy = { ...baseline.cells, [injectedKey]: { state: "renders-clean", smells: [] } };
+    expect(findOrphanBaselineCells(copy, live)).toContain(injectedKey);
+    // ... and does not call a live cell an orphan.
+    const aLiveKey = [...live].find((k) => k in baseline.cells);
+    expect(findOrphanBaselineCells(copy, live)).not.toContain(aLiveKey);
+
+    const orphans = findOrphanBaselineCells(baseline.cells, live);
+    if (orphans.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[e2e-render-map] ORPHAN baseline cells (${orphans.length}) — no live app/seed produces ` +
+          `these keys, so they are never compared; regenerate the baseline to clear them:\n` +
+          orphans.join("\n"),
+      );
+    }
+  });
 });
 
 // =============================================================================
@@ -275,6 +316,65 @@ describe("e2e-render-map — multi-file apps compile their own tree", () => {
     expect(typeof thrown.harnessTmpDir).toBe("string");
     expect(existsSync(thrown.harnessTmpDir)).toBe(false);
   });
+
+  // ⛑ S419 residuals — the staging root was `resolve("/tmp", …)`, i.e. `C:\tmp\…` on Windows.
+  test("compileApp stages under the OS temp dir, not a hard-coded /tmp", () => {
+    expect(TMP_PREFIX.startsWith(join(tmpdir(), "scrml-e2e-render-map-"))).toBe(true);
+    const app = {
+      relpath: "compiler/tests/e2e-render-map/fixtures/d3-object-in-dom.scrml",
+      path: resolve(__dirname, "fixtures", "d3-object-in-dom.scrml"),
+      kind: "single",
+    };
+    const out = compileApp(app);
+    try {
+      expect(relative(tmpdir(), out.tmpDir).startsWith("scrml-e2e-render-map-")).toBe(true);
+    } finally {
+      rmSync(out.tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // ⛑ S419 residuals — observeApp removes its staging dir on success AND when the mount or
+  // detectors throw (before, only the early returns cleaned up; a throw leaked the dir).
+  const fixtureRow = () => ({
+    relpath: "compiler/tests/e2e-render-map/fixtures/d3-object-in-dom.scrml",
+    path: resolve(__dirname, "fixtures", "d3-object-in-dom.scrml"),
+    kind: "single",
+  });
+  test("observeApp removes its staging dir after a successful observation", async () => {
+    let seen = null;
+    GlobalRegistrator.register();
+    try {
+      const cell = observeApp(fixtureRow(), null, "empty", { onTmpDir: (d) => { seen = d; } });
+      expect(cell.state).toBe("smell-detected-wrong"); // it really mounted (the D3 fixture)
+    } finally {
+      await GlobalRegistrator.unregister();
+    }
+    expect(typeof seen).toBe("string");
+    expect(existsSync(seen)).toBe(false);
+  });
+  test("observeApp removes its staging dir when the mount throws", () => {
+    // Inject a throw that escapes mountAndObserve: its `finally` reads
+    // `window.removeEventListener`, outside the try that records mount errors.
+    const had = Object.prototype.hasOwnProperty.call(globalThis, "window");
+    const prev = globalThis.window;
+    globalThis.window = {
+      get removeEventListener() { throw new Error("injected mount-teardown throw"); },
+    };
+    let seen = null;
+    let thrown = null;
+    try {
+      observeApp(fixtureRow(), null, "empty", { onTmpDir: (d) => { seen = d; } });
+    } catch (e) {
+      thrown = e;
+    } finally {
+      if (had) globalThis.window = prev;
+      else delete globalThis.window;
+    }
+    expect(String(thrown && thrown.message)).toContain("injected mount-teardown throw");
+    expect(typeof seen).toBe("string");
+    expect(thrown.harnessTmpDir).toBe(seen);
+    expect(existsSync(seen)).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -300,9 +400,7 @@ describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)"
     const newCells = [];
 
     for (const app of SLICE) {
-      const seedLabels = ["empty"];
-      if (seedFor(app.relpath)) seedLabels.push("populated");
-      for (const seedLabel of seedLabels) {
+      for (const seedLabel of seedLabelsFor(app)) {
         const cell = observeCellSubprocess(app.relpath, seedLabel);
         const key = `${app.relpath}#${seedLabel}`;
         const prev = baseCells[key];

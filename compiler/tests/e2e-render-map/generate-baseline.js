@@ -97,6 +97,37 @@ export function observeCellSubprocess(relpath, seedLabel) {
 }
 
 /**
+ * The seed labels observed for one corpus app: always "empty", plus "populated" when a
+ * seed fixture is registered. The ONE definition of which cells an app has — used by
+ * runCorpus, by the suite's slice delta, and by liveCellKeys (the orphan check).
+ */
+export function seedLabelsFor(app) {
+  return seedFor(app.relpath) ? ["empty", "populated"] : ["empty"];
+}
+
+/** Every cell key ("<relpath>#<seed>") the current corpus + seeds produce. */
+export function liveCellKeys(corpus = enumerateRenderCorpus()) {
+  const keys = new Set();
+  for (const app of corpus) {
+    for (const seedLabel of seedLabelsFor(app)) keys.add(`${app.relpath}#${seedLabel}`);
+  }
+  return keys;
+}
+
+/**
+ * Baseline cell keys that match no live cell, sorted.
+ *
+ * ⛑ S419 residuals (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged)
+ * — every comparison in this tier walks LIVE cells and looks each one up in the baseline, so a
+ * baseline cell whose app was renamed, removed, or re-keyed (per-route-roles' entry moved from
+ * `routes/loads.scrml` to `routes/admin.scrml` after the S347 sort) is never visited: it keeps
+ * its recorded state forever and nothing says so. This walks the other direction.
+ */
+export function findOrphanBaselineCells(baselineCells, liveKeys) {
+  return Object.keys(baselineCells ?? {}).filter((k) => !liveKeys.has(k)).sort();
+}
+
+/**
  * Run the full corpus. Returns { map, histogram, redCells, timing }.
  * `onProgress(i, total, relpath)` is called per cell for live feedback.
  */
@@ -109,12 +140,8 @@ export function runCorpus(onProgress) {
   let i = 0;
 
   for (const app of corpus) {
-    // Always observe the EMPTY cell.
-    const seedLabels = ["empty"];
-    // Observe a POPULATED cell only if a seed fixture is registered.
-    if (seedFor(app.relpath)) seedLabels.push("populated");
-
-    for (const seedLabel of seedLabels) {
+    // Always observe the EMPTY cell; a POPULATED cell only if a seed fixture is registered.
+    for (const seedLabel of seedLabelsFor(app)) {
       i++;
       if (onProgress) onProgress(i, corpus.length, `${app.relpath}#${seedLabel}`);
       const cell = observeCellSubprocess(app.relpath, seedLabel);
@@ -190,7 +217,9 @@ export function computeDelta(baseline, run) {
       improvements.push({ key, was: prev.state, now: cur.state });
     }
   }
-  return { regressions, improvements, newCells };
+  // A full run's map keys ARE the live cells, so the orphans fall out of the same data.
+  const orphans = findOrphanBaselineCells(baseCells, new Set(Object.keys(run.map)));
+  return { regressions, improvements, newCells, orphans };
 }
 
 // ---------------------------------------------------------------------------
@@ -226,8 +255,16 @@ if (import.meta.main) {
     const delta = computeDelta(baseline, run);
     process.stderr.write(
       `[e2e-render-map] --check delta: ${delta.regressions.length} regression(s), ` +
-        `${delta.improvements.length} improvement(s), ${delta.newCells.length} new cell(s)\n`,
+        `${delta.improvements.length} improvement(s), ${delta.newCells.length} new cell(s), ` +
+        `${delta.orphans.length} orphan baseline cell(s)\n`,
     );
+    if (delta.orphans.length > 0) {
+      // Reported, never an exit code: an orphan is stale bookkeeping, not a regression.
+      process.stderr.write(
+        "[e2e-render-map] orphan baseline cells (no live app/seed produces this key; never compared):\n" +
+          delta.orphans.map((k) => `  ${k}`).join("\n") + "\n",
+      );
+    }
     if (delta.improvements.length > 0) {
       process.stderr.write(
         "[e2e-render-map] improvements (update the baseline DOWN in the same landing):\n" +

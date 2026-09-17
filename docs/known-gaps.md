@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
 | MED | 247 |
-| LOW | 97 |
+| LOW | 96 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -15471,8 +15471,10 @@ check compare the walk against itself. Fix shape: resolve a POSIX `find` explici
 message when only `find.exe` is on PATH), or pick a second genuinely independent enumerator (e.g.
 `git ls-files` for tracked sources).
 
-### g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not — the content predicate is split in two — `NEW S419-peter (PA probe of the render-map fix round); LOW; open`
-<!-- @gap id=g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(hasRenderedContent) prov=review:S419-pa-probe-of-render-map-fix-round -->
+### g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not — the content predicate is split in two — `NEW S419-peter (PA probe of the render-map fix round); LOW; RESOLVED S419-peter`
+<!-- @gap id=g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not sev=LOW status=resolved locus=compiler/tests/e2e-render-map/render-detectors.js(hasRenderedContent) prov=review:S419-pa-probe-of-render-map-fix-round -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-render-map-residuals`) — one shared not-rendered predicate (script/style/noscript/template, `hidden`, `aria-hidden`, inline display:none/visibility:hidden) now governs BOTH the element half and a text walk. PA-probed: hidden text, script-only and `<noscript><img>` bodies fire seeded / `renders-empty` unseeded; visible text stays clean. D3–D5 smell detectors deliberately still read all text (a bad value in a hidden panel is the same codegen bug). Tier 47→67/0, bite-proven. One corpus cell moved green→green (phase2-if-attr-show-compose-110: its only content is a display:none div).
 
 After S419 `hasRenderedContent` excludes content-bearing ELEMENTS hidden by `hidden` / `aria-hidden` /
 inline `display:none` / `visibility:hidden`, but its TEXT half still reads `body.textContent`, which
@@ -15483,6 +15485,8 @@ visible text nodes with the same hidden-ancestor exclusion the element half uses
 
 ### g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged — the baseline carries stale keys and nothing reports them — `NEW S419-peter (S239 pass on the render-map fix); LOW; open`
 <!-- @gap id=g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged sev=LOW status=open locus=compiler/tests/e2e-render-map/e2e-render-map-baseline.json+e2e-render-map.test.js prov=review:S419-floor-pass-on-render-map-fix -->
+
+⚑ **S419-peter — PARTIAL, stays open.** Detection + temp-dir halves FIXED (branch `fix/s419-render-map-residuals`): a warn-only test and `generate-baseline.js --check` now NAME baseline cells no live app produces (today exactly `benchmarks/per-route-roles/routes/loads.scrml#empty`; hard-asserted to see an injected orphan); per-case `mkdtemp` under `os.tmpdir()` with cleanup in `finally` (0 dirs left after a run). STILL OWED: regenerate the baseline on a Linux host once todomvc + 09-error-handling are dispositioned (clears the orphan, the per-route-roles admin key, and the two S419 green→green drifts: phase4-bind-group-031 and phase2-if-attr-show-compose-110). 1495 legacy dirs remain in `C:\tmp\scrml-e2e-render-map` on P-Tech1 (not deleted).
 
 `benchmarks/per-route-roles` is keyed in the baseline as `routes/loads.scrml#empty`, from before the S347
 basename sort; the live entry is `routes/admin.scrml`, so the live cell is reported as NEW and the baseline
