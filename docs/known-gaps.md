@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 107 |
-| MED | 248 |
+| MED | 247 |
 | LOW | 97 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15443,8 +15443,10 @@ the `>>>` set member (it lexes as `>>`+`>`), so that member is dead and unpinned
 patch the derivation now — the UNIFY build should REPLACE this file with a structural pin ("any token but
 `{` after `)` is refused"), which cannot be under-enumerated.** Routed to bryan.
 
-### g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour — the pin stays green when the `>>>` bug is actually fixed — `NEW S419-peter (review floor, S239 pass on #965, my own S417 PR); MED; open`
-<!-- @gap id=g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour sev=MED status=open locus=compiler/tests/unit/tokenizer-multi-ops-ordering.test.js prov=review:S419-floor-pass-on-965 -->
+### g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour — the pin stays green when the `>>>` bug is actually fixed — `NEW S419-peter (review floor, S239 pass on #965, my own S417 PR); MED; RESOLVED S419-peter`
+<!-- @gap id=g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour sev=MED status=resolved locus=compiler/tests/unit/tokenizer-multi-ops-ordering.test.js prov=review:S419-floor-pass-on-965 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-multi-ops-behavioural-pin`) — the pin now runs the REAL tokenizer on every live `MULTI_OPS` member (set read from the loaded `tokenizeLogic`, cross-checked by lexing all 2–4-char operator strings) and pins the not-self-lexing set by equality (`[">>>"]` today) as a language-ruling boundary. Bite: a length-sorted matcher (array untouched) → red naming `>>>` (agent + PA-reproduced); `==` before `===` → red; a new operator → green; `] as const` + a quoted-operator comment → no crash. `g-multi-ops-first-match-shadows-the-longer-operator` stays open (bryan).
 
 All checks parse the `MULTI_OPS` array SOURCE TEXT; none runs the tokenizer, including the test labelled
 "BEHAVIOURAL CONFIRMATION". **PA-REPRODUCED:** changing the matcher loop to iterate
