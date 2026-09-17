@@ -27,13 +27,15 @@
  * called, exactly like the browser test suite's beforeEach/afterEach.
  */
 
-import { resolve, relative, basename, isAbsolute, sep } from "node:path";
+import { resolve, relative, basename, isAbsolute, sep, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   writeFileSync,
   readFileSync,
   rmSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   copyFileSync,
   readdirSync,
   statSync,
@@ -42,7 +44,13 @@ import { compileScrml } from "../../src/api.js";
 import { runDetectors } from "./render-detectors.js";
 import { REPO_ROOT } from "./render-corpus-enumerator.js";
 
-const TMP_ROOT = resolve("/tmp", "scrml-e2e-render-map");
+// ⛑ S419 residuals (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged)
+// — the staging root was `resolve("/tmp", "scrml-e2e-render-map")`, which is `C:\tmp\…` on
+// Windows (a directory nothing else owns or cleans; 1495 leaked case dirs were found there).
+// Each case now gets its own `mkdtemp` directory directly under the OS temp dir, so there is
+// no shared root left behind, and the directory is removed on every exit path (compileApp
+// on a throw, observeApp in a `finally`, the §1b test in its own `finally`).
+export const TMP_PREFIX = join(tmpdir(), "scrml-e2e-render-map-");
 
 /**
  * Compile one corpus app via the real compile path (write:true) and return the
@@ -57,10 +65,8 @@ const TMP_ROOT = resolve("/tmp", "scrml-e2e-render-map");
  * @returns {{ errors, html, clientJs, runtimeJs, compileThrew: string|null }}
  */
 export function compileApp(app) {
-  const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const tmpDir = resolve(TMP_ROOT, `case-${uniq}`);
+  const tmpDir = mkdtempSync(TMP_PREFIX);
   const outDir = resolve(tmpDir, "out");
-  mkdirSync(tmpDir, { recursive: true });
 
   // ⛑ S419 review (L3) — on the success path the CALLER owns cleanup (it gets
   // `tmpDir` back). On a throw it gets nothing back, so a staging/mirror/locate
@@ -411,15 +417,32 @@ function mountAndObserve(artifacts) {
  *
  * The caller (the test) registers happy-dom and resets the document per call.
  *
+ * @param {object} [hooks]
+ * @param {(tmpDir: string) => void} [hooks.onTmpDir] — told the staging dir once it
+ *   exists (test-only: lets a test assert the dir is gone afterwards, on success or throw).
  * @returns {{ cellKey, state, smells, detail, seeded }}
  */
-export function observeApp(app, seed, seedLabel) {
+export function observeApp(app, seed, seedLabel, hooks = {}) {
   const artifacts = compileApp(app);
+  // ⛑ S419 residuals — every return path below cleaned up, but a throw from the mount
+  // or the detectors skipped cleanup and leaked the staging dir. One `finally` now owns it.
+  try {
+    if (typeof hooks.onTmpDir === "function") hooks.onTmpDir(artifacts.tmpDir);
+    return observeCompiled(app, seed, seedLabel, artifacts);
+  } catch (e) {
+    if (e && typeof e === "object") e.harnessTmpDir = artifacts.tmpDir;
+    throw e;
+  } finally {
+    cleanup(artifacts);
+  }
+}
+
+/** The body of observeApp, given compiled artifacts. The caller owns cleanup. */
+function observeCompiled(app, seed, seedLabel, artifacts) {
   const cellKey = `${app.relpath}#${seedLabel}`;
 
   // D0: compile failed (or threw) — record without mounting.
   if (artifacts.compileThrew) {
-    cleanup(artifacts);
     return {
       cellKey,
       state: "fails-compile",
@@ -430,14 +453,12 @@ export function observeApp(app, seed, seedLabel) {
   }
   if (artifacts.errors.length > 0) {
     const det = runDetectors({ compileErrors: artifacts.errors, seeded: seed != null });
-    cleanup(artifacts);
     return { cellKey, state: det.state, smells: det.smells, detail: det.detail, seeded: seed != null };
   }
   if (!artifacts.html) {
     // Compiled clean but produced no html to mount (e.g. a library-mode file
     // that slipped the <program filter, or a per-route app with no entry html
     // located). Record as renders-empty (no UI to assert) — NOT suppressed.
-    cleanup(artifacts);
     return {
       cellKey,
       state: "renders-empty",
@@ -469,7 +490,6 @@ export function observeApp(app, seed, seedLabel) {
     serverDependent: artifacts.serverDependent,
   });
 
-  cleanup(artifacts);
   return { cellKey, state: det.state, smells: det.smells, detail: det.detail, seeded: seed != null };
 }
 

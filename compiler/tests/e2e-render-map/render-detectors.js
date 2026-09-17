@@ -37,18 +37,29 @@
  * the map records every invariant that fired, not just the worst.
  */
 
-/** Walk every text node under `root`, returning their string values. */
-function collectTextNodes(root) {
+/**
+ * Walk every text node under `root`, returning their string values.
+ *
+ * `skipSubtree(el)`, when given, is asked about every ELEMENT below `root` (never
+ * `root` itself); a true answer drops that element and everything under it. The
+ * D4/D5 smell detectors call this with no predicate (every text node);
+ * `hasRenderedContent` passes `isUnrenderedByOwnMarkup` (see there).
+ */
+function collectTextNodes(root, skipSubtree = null) {
   const out = [];
   if (!root) return out;
   // happy-dom supports createTreeWalker; fall back to a manual recursion.
   const TEXT_NODE = 3;
+  const ELEMENT_NODE = 1;
   const stack = [root];
   while (stack.length > 0) {
     const node = stack.pop();
     if (!node) continue;
     if (node.nodeType === TEXT_NODE) {
       out.push(node.nodeValue ?? "");
+    }
+    if (skipSubtree && node !== root && node.nodeType === ELEMENT_NODE && skipSubtree(node)) {
+      continue;
     }
     const kids = node.childNodes;
     if (kids) {
@@ -95,17 +106,42 @@ function nonEmpty(v) {
 }
 
 /**
- * Is `el` (or an ancestor up to `stopAt`) hidden by markup? happy-dom does no
- * layout, so this reads what the DOM states: the `hidden` attribute,
- * `aria-hidden="true"`, and inline `display:none` / `visibility:hidden`.
+ * Elements whose subtree is never rendered as page content, whatever their
+ * attributes: `<script>` / `<style>` text is code, `<template>` is inert, and
+ * `<noscript>` shows only with scripting OFF — the mounted app runs script, so it
+ * is not shown. (happy-dom parses `<noscript>` children as real elements, so a
+ * `<noscript><img src=…>` is reachable by `querySelectorAll` and must be excluded
+ * explicitly; `<template>` children live in `.content` and are already invisible.)
  */
-function isHiddenByMarkup(el, stopAt) {
+const UNRENDERED_CONTAINER_TAGS = new Set(["script", "style", "noscript", "template"]);
+
+/**
+ * Does THIS element (ignoring its ancestors) keep its subtree off the rendered page?
+ * happy-dom does no layout, so this reads what the DOM states: an unrendered
+ * container tag (UNRENDERED_CONTAINER_TAGS), the `hidden` attribute,
+ * `aria-hidden="true"`, and inline `display:none` / `visibility:hidden`.
+ *
+ * ⛑ S419 (g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not)
+ * — the ONE definition of "not rendered" for BOTH halves of `hasRenderedContent`.
+ * The element half applies it to each candidate and its ancestors
+ * (`isUnrenderedByMarkup`); the text half prunes every subtree it is true for while
+ * walking text nodes (`collectTextNodes`), which is the same ancestor test done once
+ * per subtree instead of once per node.
+ */
+function isUnrenderedByOwnMarkup(n) {
+  if (UNRENDERED_CONTAINER_TAGS.has(String(n.tagName ?? "").toLowerCase())) return true;
+  if (typeof n.hasAttribute === "function" && n.hasAttribute("hidden")) return true;
+  if (String(attr(n, "aria-hidden") ?? "").toLowerCase() === "true") return true;
+  const style = String(attr(n, "style") ?? "");
+  if (/(^|;)\s*display\s*:\s*none\b/i.test(style)) return true;
+  if (/(^|;)\s*visibility\s*:\s*hidden\b/i.test(style)) return true;
+  return false;
+}
+
+/** Is `el`, or any ancestor below `stopAt`, unrendered by markup (isUnrenderedByOwnMarkup)? */
+function isUnrenderedByMarkup(el, stopAt) {
   for (let n = el; n && n !== stopAt; n = n.parentElement) {
-    if (typeof n.hasAttribute === "function" && n.hasAttribute("hidden")) return true;
-    if (String(attr(n, "aria-hidden") ?? "").toLowerCase() === "true") return true;
-    const style = String(attr(n, "style") ?? "");
-    if (/(^|;)\s*display\s*:\s*none\b/i.test(style)) return true;
-    if (/(^|;)\s*visibility\s*:\s*hidden\b/i.test(style)) return true;
+    if (isUnrenderedByOwnMarkup(n)) return true;
   }
   return false;
 }
@@ -187,18 +223,23 @@ export function elementCarriesContent(el) {
  * svg, an empty `<button>`/`<progress>`, a hidden img, `<div value="">` and a src-less
  * overlay iframe all scored green. An element now counts only when it HOLDS content.
  *
- * Known limit (pre-existing, not changed here): the text test reads
- * `body.textContent`, which includes `<script>`/`<style>`/`<noscript>` text and text
- * inside hidden elements.
+ * ⛑ S419 residuals (g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not)
+ * — the TEXT half read `body.textContent`, so it counted text the element half would
+ * have excluded: a seeded `<p style="display:none">secret</p>` scored `renders-clean`
+ * while `<img hidden src="a.png">` scored `renders-empty-with-data`, and a body whose
+ * only text was `<script>` / `<style>` / `<noscript>` content scored clean. Both halves
+ * now use one "not rendered" predicate (isUnrenderedByOwnMarkup): text counts only
+ * from text nodes outside every unrendered subtree, and a candidate element counts
+ * only when neither it nor an ancestor is unrendered.
  */
 export function hasRenderedContent(body) {
   if (!body) return false;
-  if ((body.textContent ?? "").trim() !== "") return true;
+  if (collectTextNodes(body, isUnrenderedByOwnMarkup).some((t) => t.trim() !== "")) return true;
   if (typeof body.querySelectorAll !== "function") return false;
   const els = body.querySelectorAll(CONTENT_CANDIDATE_SELECTOR);
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (isHiddenByMarkup(el, body)) continue;
+    if (isUnrenderedByMarkup(el, body)) continue;
     if (elementCarriesContent(el)) return true;
   }
   return false;
@@ -290,6 +331,16 @@ export function runDetectors(obs) {
   }
 
   // Gather DOM facts for the smell detectors.
+  //
+  // ⛑ S419 residuals — these deliberately read ALL text (raw `textContent` for D3, every
+  // text node for D4/D5), NOT the rendered-only text `hasRenderedContent` uses. The two
+  // questions differ: D6 asks "did anything SHOW?", so hidden text must not answer yes;
+  // D3–D5 ask "did codegen write a wrong VALUE into the DOM?", and `[object Object]` /
+  // a literal `${` / a bare `undefined` inside a collapsed panel or an aria-hidden label
+  // is the same defect, one toggle away from the screen. Filtering hidden text here
+  // would hide real smells. (Inline `<script>`/`<style>` text in the mounted body could
+  // in principle trip D3/D4 on legitimate code; see the S419 residuals progress log for
+  // the corpus check — no cell does today.)
   const bodyText = body ? (body.textContent ?? "") : "";
   const textNodes = collectTextNodes(body);
   const attrValues = collectAttrValues(body);
