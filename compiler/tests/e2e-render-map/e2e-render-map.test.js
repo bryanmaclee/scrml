@@ -13,29 +13,46 @@
  *     update the baseline DOWN in the same landing (the allowlist-shrink rule).
  *
  * SHIPPED NON-GATING FIRST (brief step 4): the map is the deliverable; this
- * suite WARNS on a delta but does not hard-fail the build yet. The hard gate is
- * `bun generate-baseline.js --check` on CI/pre-push (NOT pre-commit — the full
- * subprocess-isolated corpus run is minutes, same exclusion as within-node).
+ * suite WARNS on a delta but does not hard-fail the build.
+ *
+ * ⛑ S419 — WHAT ACTUALLY RUNS THIS TIER (g-e2e-render-map-tier-runs-in-no-ci-job-at-all).
+ * This header used to say "the hard gate is `bun generate-baseline.js --check` on
+ * CI/pre-push". Nothing invokes `--check`: no job in `.github/workflows/`, no
+ * `package.json` script, no hook in `scripts/git-hooks/`. The truth, as of S419:
+ *   - NO CI job runs this directory (ci.yml's gate runs `compiler/tests/unit`,
+ *     `compiler/tests/conformance` and the top-level `compiler/tests/*.test.js`;
+ *     tracking/windows/within-node name other paths).
+ *   - NO git hook runs it (pre-commit and pre-push name unit/integration/conformance).
+ *   - It runs only when a human runs it: `bun test compiler/tests/e2e-render-map/`,
+ *     or the whole-tree `bun run test` (`bun test compiler/tests/`, which sweeps
+ *     this directory in), or `bun compiler/tests/e2e-render-map/generate-baseline.js
+ *     [--check]` by hand.
+ * So a green->red delta here is a WARNING that nobody is required to read, and
+ * `--check` is a tool, not a gate. Do not describe either as gating until a job
+ * actually invokes it.
  *
  * To keep this suite test-time-cheap (the full corpus is subprocess-isolated and
  * minutes long — some meta-heavy apps hang at mount), it re-observes only the
  * FAST representative slice (examples + benchmarks, in-process, ~3s) and reports
  * the green->red delta against the baseline for that slice. The samples tier
- * (400 apps incl. the hangers) is covered by the standing `generate-baseline.js`
- * run + its `--check` mode, not by this in-process suite.
+ * (400 apps incl. the hangers) is observed only by a hand-run of
+ * `generate-baseline.js` (write or `--check`), not by this suite — and, per the
+ * note above, nothing schedules that run.
  *
  * NO error-class suppression — the slice records every state (DD §"DO NOT
  * SUPPRESS ANY ERROR CLASS").
  */
 
 import { describe, test, expect } from "bun:test";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync } from "node:fs";
-import { enumerateRenderCorpus } from "./render-corpus-enumerator.js";
-import { seedFor } from "./seed-fixtures.js";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { enumerateRenderCorpus, REPO_ROOT } from "./render-corpus-enumerator.js";
+import { seedFor, POPULATED_SEEDS } from "./seed-fixtures.js";
 import { ALL_BASELINE_STATES } from "./render-detectors.js";
 import { observeCellSubprocess } from "./generate-baseline.js";
+import { compileApp, resolveMultiFileCompileInputs } from "./render-harness.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -131,6 +148,133 @@ describe("e2e-render-map — baseline well-formedness", () => {
       expect(baseline.cells[`${app.relpath}#populated`]).toBeDefined();
     }
   });
+
+  // ⛑ S419 — PARTIAL SEED LOSS IS NOT SILENT (g-e2e-render-map-partial-seed-loss-is-silent).
+  // The guard above only fires when the seeded population is TOTALLY empty. Renaming 3 of the 4
+  // POPULATED_SEEDS keys left it green: the coverage floor counts `#populated` keys in the
+  // BASELINE, while the delta loop walks LIVE seeds, so a baseline populated cell that lost its
+  // seed silently stopped being compared. This pins the two sides to each other in both
+  // directions, and names every seed key that matches no corpus app (the rename itself).
+  test("every baseline #populated cell has a live seed, and every seed a corpus app + baseline cell", () => {
+    const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+    const corpusRelpaths = new Set(enumerateRenderCorpus().map((a) => a.relpath));
+    const liveSeeded = new Set(
+      [...corpusRelpaths].filter((r) => seedFor(r)).map((r) => `${r}#populated`),
+    );
+    const baselinePopulated = Object.keys(baseline.cells).filter((k) => k.endsWith("#populated"));
+    expect({
+      baselinePopulatedWithNoLiveSeed: baselinePopulated.filter((k) => !liveSeeded.has(k)),
+      liveSeedWithNoBaselineCell: [...liveSeeded].filter((k) => !(k in baseline.cells)),
+      seedKeysMatchingNoCorpusApp: Object.keys(POPULATED_SEEDS).filter((k) => !corpusRelpaths.has(k)),
+    }).toEqual({
+      baselinePopulatedWithNoLiveSeed: [],
+      liveSeedWithNoBaselineCell: [],
+      seedKeysMatchingNoCorpusApp: [],
+    });
+  });
+});
+
+// =============================================================================
+// §1b — multi-file apps compile THEIR OWN tree. ADDED S419.
+//
+// ⛑ Closes g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows and
+// g-e2e-render-map-single-input-multi-app-mirrors-nothing. Both bugs made a
+// multi-file app compile the WRONG tree (the process cwd on Windows; nothing at all
+// for a one-file app on every OS) and still score green, so no state assertion
+// could see them. This asserts the property directly, harness-independently: every
+// one of the app's inputs is present in the mirrored compile tree at its path
+// relative to the DECLARED app dir, the compile emits an entry html, and no two
+// multi-file apps produce identical output (identical output is what "every app
+// compiled the same wrong tree" looked like).
+//
+// DELIBERATELY HARD-FAILING (S419 review L2), unlike §2. "Warn-only" in this file's
+// header is about CORPUS STATE: gaps existing, or a cell regressing, is reported not
+// enforced. This is not a corpus-state assertion; it checks that the HARNESS observed
+// the program it claims to have observed. If it fails, every multi-file cell the §2
+// delta prints is about the wrong input, so warning would just print confident
+// nonsense. Same category as the §1 well-formedness tests, which also hard-fail.
+// =============================================================================
+describe("e2e-render-map — multi-file apps compile their own tree", () => {
+  test("each multi-file app mirrors its own inputs, emits html, and output is distinct per app", () => {
+    const multi = SLICE.filter((a) => a.kind === "multi");
+    expect(multi.length).toBeGreaterThan(0);
+    const problems = [];
+    const byDigest = new Map();
+    for (const app of multi) {
+      const root = resolve(REPO_ROOT, app.appDir);
+      let out = null;
+      try {
+        out = compileApp(app);
+      } catch (e) {
+        problems.push(`${app.relpath}: compileApp threw ${String(e && e.message ? e.message : e)}`);
+        continue;
+      }
+      try {
+        const notMirrored = app.inputFiles
+          .map((f) => relative(root, f))
+          .filter((rel) => !existsSync(resolve(out.tmpDir, rel)));
+        if (notMirrored.length > 0) {
+          problems.push(`${app.relpath}: ${notMirrored.length}/${app.inputFiles.length} inputs not in the compile tree (e.g. ${notMirrored[0]})`);
+        }
+        if (!out.html) {
+          // Already a problem; an "identical" line between two EMPTY outputs adds nothing.
+          problems.push(`${app.relpath}: no entry html emitted`);
+        } else {
+          const digest = createHash("sha256").update(out.html).update("\0").update(out.clientJs).digest("hex");
+          if (byDigest.has(digest)) {
+            problems.push(`${app.relpath}: output identical to ${byDigest.get(digest)}`);
+          } else {
+            byDigest.set(digest, app.relpath);
+          }
+        }
+      } finally {
+        if (out && out.tmpDir) {
+          try { rmSync(out.tmpDir, { recursive: true, force: true }); } catch (_) { /* noop */ }
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  }, 180000);
+
+  // S419 review L4 — `..` is rejected only as a whole path segment.
+  test("resolveMultiFileCompileInputs: an in-root `..draft.scrml` is accepted; a real parent escape is rejected", () => {
+    const appDir = "compiler/tests/e2e-render-map/fixtures";
+    const root = resolve(REPO_ROOT, appDir);
+    const row = (inputFiles) => ({ relpath: `${appDir}/x.scrml`, appDir, inputFiles });
+    expect(resolveMultiFileCompileInputs(row([resolve(root, "..draft.scrml")])).relInputs).toEqual(["..draft.scrml"]);
+    expect(() => resolveMultiFileCompileInputs(row([resolve(root, "..", "escape.scrml")]))).toThrow(/not under its root/);
+    expect(() => resolveMultiFileCompileInputs(row([root]))).toThrow(/not under its root/);
+    if (process.platform === "win32") {
+      // Cross-drive: path.relative returns the absolute target.
+      const otherDrive = /^[cC]:/.test(root) ? "D:\\elsewhere\\x.scrml" : "C:\\elsewhere\\x.scrml";
+      expect(() => resolveMultiFileCompileInputs(row([otherDrive]))).toThrow(/not under its root/);
+    }
+  });
+
+  // S419 review L3 — a throw after the staging dir exists must not leak it.
+  test("compileApp removes its staging dir when it throws after mirroring", () => {
+    const appDir = "compiler/tests/e2e-render-map/fixtures";
+    const root = resolve(REPO_ROOT, appDir);
+    const app = {
+      relpath: `${appDir}/d3-object-in-dom.scrml`,
+      path: resolve(root, "d3-object-in-dom.scrml"),
+      kind: "multi",
+      appDir,
+      // The second input is under the root but in a hidden dir mirrorTree skips (and
+      // does not exist), so compileApp throws AFTER mkdir + mirror.
+      inputFiles: [resolve(root, "d3-object-in-dom.scrml"), resolve(root, ".not-mirrored", "x.scrml")],
+    };
+    let thrown = null;
+    try {
+      compileApp(app);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).not.toBeNull();
+    expect(String(thrown.message)).toContain("not mirrored");
+    expect(typeof thrown.harnessTmpDir).toBe("string");
+    expect(existsSync(thrown.harnessTmpDir)).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -144,8 +288,8 @@ describe("e2e-render-map — baseline well-formedness", () => {
 // post-return rejections attach to THIS test and fail it spuriously; in a
 // throwaway subprocess they die with the process. examples+benchmarks is ~34
 // apps × ~0.3s ≈ low-tens-of-seconds — test-time viable. The samples tier (incl.
-// the meta-heavy hangers) is covered by the standing `generate-baseline.js`
-// run + `--check`, not this in-process suite.
+// the meta-heavy hangers) is observed only by a hand-run of `generate-baseline.js`
+// (write or `--check`), not this suite; no CI job or hook runs either (see header).
 // =============================================================================
 describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)", () => {
   test("no green->red regression in the examples+benchmarks slice (WARN-only)", () => {
@@ -193,7 +337,8 @@ describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)"
       console.warn(
         `[e2e-render-map] *** GREEN->RED REGRESSIONS (${regressions.length}) *** a closed cell re-opened:\n` +
           regressions.join("\n") +
-          `\n(NON-gating in the MVP — the hard gate is \`generate-baseline.js --check\` on CI/pre-push.)`,
+          `\n(NON-gating: this suite only warns, and no CI job or git hook runs this tier or ` +
+          `\`generate-baseline.js --check\` — a regression here blocks nothing until someone acts on it.)`,
       );
     }
 

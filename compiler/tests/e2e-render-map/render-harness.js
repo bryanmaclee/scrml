@@ -27,7 +27,7 @@
  * called, exactly like the browser test suite's beforeEach/afterEach.
  */
 
-import { resolve } from "node:path";
+import { resolve, relative, basename, isAbsolute, sep } from "node:path";
 import {
   writeFileSync,
   readFileSync,
@@ -40,6 +40,7 @@ import {
 } from "node:fs";
 import { compileScrml } from "../../src/api.js";
 import { runDetectors } from "./render-detectors.js";
+import { REPO_ROOT } from "./render-corpus-enumerator.js";
 
 const TMP_ROOT = resolve("/tmp", "scrml-e2e-render-map");
 
@@ -61,8 +62,25 @@ export function compileApp(app) {
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
 
+  // ⛑ S419 review (L3) — on the success path the CALLER owns cleanup (it gets
+  // `tmpDir` back). On a throw it gets nothing back, so a staging/mirror/locate
+  // failure used to leak the whole mirrored tree. Clean up here, then re-throw.
+  try {
+    return compileAppInTmp(app, tmpDir, outDir);
+  } catch (e) {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch (_) { /* noop */ }
+    // Diagnostic: name the (now removed) staging dir on the error.
+    if (e && typeof e === "object") e.harnessTmpDir = tmpDir;
+    throw e;
+  }
+}
+
+/** The body of compileApp, run inside an already-created `tmpDir`. */
+function compileAppInTmp(app, tmpDir, outDir) {
   // Determine the entry base-name (drives the emitted .html / .client.js names).
-  const entryBase = app.relpath.split("/").pop().replace(/\.scrml$/, "");
+  // Taken from the native `path` via the path API — never from a separator split
+  // (see the ⛑ S419 note on resolveMultiFileCompileInputs).
+  const entryBase = basename(app.path).replace(/\.scrml$/, "");
 
   let inputFilesForCompile;
   if (app.kind === "single") {
@@ -78,10 +96,19 @@ export function compileApp(app) {
     inputFilesForCompile = [dest];
   } else {
     // Multi-file: mirror the app dir under tmp so relative imports resolve.
-    // mirrorTree copies ALL files (incl. .db/.sql), preserving the layout.
-    const dirRoot = findAppDirRoot(app);
-    const mirrored = mirrorTree(dirRoot, tmpDir);
-    inputFilesForCompile = mirrored.filter((p) => p.endsWith(".scrml"));
+    // mirrorTree copies ALL files (incl. .db/.sql), preserving the layout; the
+    // compile inputs are exactly the enumerator's inputFiles, re-rooted.
+    const { root, relInputs } = resolveMultiFileCompileInputs(app);
+    mirrorTree(root, tmpDir);
+    inputFilesForCompile = relInputs.map((rel) => resolve(tmpDir, rel));
+    const missing = inputFilesForCompile.filter((p) => !existsSync(p));
+    if (missing.length > 0) {
+      // Loud, not silent: a compile over a partial tree is the false-green class
+      // this function exists to close. observe-one records it as HARNESS-ERROR.
+      throw new Error(
+        `multi-file app ${app.relpath}: ${missing.length} input(s) not mirrored from ${root}`,
+      );
+    }
   }
 
   let result = null;
@@ -160,20 +187,52 @@ export function compileApp(app) {
   return out;
 }
 
-/** Resolve the app-dir root for a multi-file app (the dir holding the entry). */
-function findAppDirRoot(app) {
-  // The enumerator's appDir is repo-relative; reconstruct the absolute root by
-  // stripping the entry's relpath tail from its absolute path.
-  // entry path = <repoRoot>/<appDir>/.../<entry>.scrml. The shallowest common
-  // dir of all inputFiles is the app root.
-  let common = app.inputFiles[0].split("/");
-  for (const f of app.inputFiles.slice(1)) {
-    const parts = f.split("/");
-    let i = 0;
-    while (i < common.length && i < parts.length && common[i] === parts[i]) i++;
-    common = common.slice(0, i);
+/**
+ * Resolve a multi-file app's absolute root and its compile inputs relative to it.
+ *
+ * ⛑ S419 — THE ROOT IS DECLARED, NOT INFERRED, AND PATHS GO THROUGH THE PATH API.
+ * This replaced `findAppDirRoot`, which INFERRED the root as the common prefix of
+ * `app.inputFiles` split on "/". That failed two ways, both silently green:
+ *   - on Windows `inputFiles` are native absolute paths (`C:\...`), so the split
+ *     yielded one segment per file, the common prefix was `""`, and `mirrorTree("")`
+ *     mirrored the process CWD. observe-one runs with cwd = this directory, so
+ *     `benchmarks/per-route-roles`, `examples/22-multifile` and
+ *     `examples/23-trucking-dispatch` all compiled THIS tier's fixtures, produced
+ *     identical output, and scored `renders-empty` (green) — reported as an
+ *     "improvement" over the flagship's real baseline state
+ *     (g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows).
+ *   - on EVERY OS, an app with ONE input file had a common prefix equal to the
+ *     FILE, `mirrorTree(file)` copied nothing, and the cell recorded
+ *     `NO-HTML-EMITTED` -> `renders-empty` (green) for `benchmarks/fullstack-scrml`
+ *     (g-e2e-render-map-single-input-multi-app-mirrors-nothing).
+ * #964 normalised `relpath` at the enumerator's mint site; that site mints TWO path
+ * families. `relpath` / `appDir` are repo-relative DISPLAY KEYS and are `/`-shaped;
+ * `path` / `inputFiles` are native FILESYSTEM paths and must only ever be consumed
+ * through `node:path` — never by splitting on a separator. The enumerator already
+ * declares each app's root (`appDir`, from MULTI_FILE_APP_DIRS), so it is used
+ * directly rather than re-derived.
+ *
+ * Throws (-> HARNESS-ERROR, loud) if the row has no appDir or an input lies outside
+ * the root.
+ *
+ * @returns {{ root: string, relInputs: string[] }}
+ */
+export function resolveMultiFileCompileInputs(app) {
+  if (typeof app.appDir !== "string" || app.appDir === "") {
+    throw new Error(`multi-file app ${app.relpath} has no appDir`);
   }
-  return common.join("/");
+  const root = resolve(REPO_ROOT, app.appDir);
+  const relInputs = app.inputFiles.map((f) => {
+    const rel = relative(root, f);
+    // ⛑ S419 review (L4): `..` must be a whole path SEGMENT — a bare
+    // `startsWith("..")` also rejected an in-root file named `..draft.scrml`.
+    // `isAbsolute` catches a cross-drive input on win32 (relative returns it absolute).
+    if (rel === "" || rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
+      throw new Error(`multi-file app ${app.relpath}: input ${f} is not under its root ${root}`);
+    }
+    return rel;
+  });
+  return { root, relInputs };
 }
 
 /**
@@ -262,10 +321,16 @@ function locateEntryArtifacts(outDir, entryBase) {
   walk(outDir);
   if (htmls.length === 0) return result;
   // Prefer an html whose base matches the entry; else the shallowest path.
-  htmls.sort((a, b) => a.split("/").length - b.split("/").length);
+  // ⛑ S419 — depth and name through the path API. `h` is a native path (`resolve`),
+  // so the old `split("/")` depth was 1 for every file on Windows (the "shallowest"
+  // preference silently degraded to readdir order), and `endsWith("app.html")` also
+  // matched `myapp.html`. Depth is counted on the out-dir-relative path, split on
+  // either separator; names compare by basename equality.
+  const depth = (h) => relative(outDir, h).split(/[\\/]/).length;
+  htmls.sort((a, b) => depth(a) - depth(b));
   const chosen =
-    htmls.find((h) => h.endsWith(`${entryBase}.html`)) ??
-    htmls.find((h) => h.endsWith("index.html")) ??
+    htmls.find((h) => basename(h) === `${entryBase}.html`) ??
+    htmls.find((h) => basename(h) === "index.html") ??
     htmls[0];
   result.html = readFileSync(chosen, "utf8");
   const siblingClient = chosen.replace(/\.html$/, ".client.js");
