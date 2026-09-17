@@ -203,6 +203,93 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     expect(det.state).toBe("renders-empty");
   });
 
+  // ⛑ S419 — g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red.
+  // D6 keyed on text alone, so each of these seeded renders — real content, zero text
+  // nodes — scored the RED renders-empty-with-data. Each must NOT fire, and (S419 review
+  // L1) must resolve to renders-clean, not fall through to renders-empty. One element
+  // kind per case so a regression names the kind it lost. Every case HOLDS content: the
+  // first version of this table used an empty <textarea>, a src-less <video> and a
+  // src-less <iframe>, which were the review's M1 over-breadth, not content.
+  const TEXT_FREE_RENDERS = {
+    "inputs holding seeded values": { markup: '<form><input value="Ada"><input value="Alan"></form>' },
+    "an input whose value was set by binding (property only)": {
+      markup: '<input id="bound">',
+      after: (body) => { body.querySelector("#bound").value = "Ada"; },
+    },
+    "a checkbox list": { markup: '<ul><li><input type="checkbox" checked></li><li><input type="checkbox"></li></ul>' },
+    "a select": { markup: "<select><option value=\"1\"></option></select>" },
+    "a textarea holding a value": {
+      markup: '<textarea id="ta"></textarea>',
+      after: (body) => { body.querySelector("#ta").value = "Ada"; },
+    },
+    "an image gallery": { markup: '<div class="gallery"><img src="a.png"><img src="b.png"></div>' },
+    "an svg chart": { markup: '<svg viewBox="0 0 10 10"><rect width="4" height="8"></rect></svg>' },
+    "a canvas": { markup: "<canvas></canvas>" },
+    "a video with a source": { markup: '<video><source src="a.mp4"></video>' },
+    "an iframe with a src": { markup: '<iframe src="https://example.test/embed"></iframe>' },
+  };
+  const detect = (seeded, doc = document) =>
+    runDetectors({ compileErrors: [], throwMessage: null, consoleErrors: [], document: doc, seeded });
+  for (const [label, { markup, after }] of Object.entries(TEXT_FREE_RENDERS)) {
+    test(`D6 does NOT fire on a seeded text-free render: ${label}`, () => {
+      // Built in a DETACHED <body> and handed to runDetectors as `{ body }` (all it reads):
+      // a connected iframe/video with a src makes happy-dom try to LOAD it, which logs a
+      // network error unrelated to the assertion. The detector reads attributes only.
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      if (after) after(body);
+      // Precondition: the DOM really is text-free (else this case proves nothing).
+      expect(body.textContent.trim()).toBe("");
+      const det = detect(true, { body });
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-clean");
+      // Unseeded, the same content is not an `<empty>` fallback either (same predicate).
+      expect(detect(false, { body }).state).toBe("renders-clean");
+    });
+  }
+
+  // The genuine-empty shapes must still fire. The S419 review (M1) cases are here: each
+  // is an element that is PRESENT but holds nothing, or is hidden by markup.
+  const GENUINELY_EMPTY_RENDERS = {
+    "nested empty structural wrappers": "<div><section><ul></ul></section></div>",
+    "whitespace-only text": "<div>   \n  </div>",
+    "only a hidden input": '<input type="hidden" name="csrf" value="t0k3n">',
+    "a select with no options (the seeded options loop rendered nothing)": "<select></select>",
+    "a bare input": "<input>",
+    "an input with only a placeholder": '<input placeholder="Name">',
+    "an unchecked checkbox": '<input type="checkbox">',
+    "an empty button": "<button></button>",
+    "an empty progress": "<progress></progress>",
+    "an empty aria-hidden svg": '<svg aria-hidden="true"></svg>',
+    "a non-empty but aria-hidden svg (decorative icon)": '<svg aria-hidden="true"><path d="M0 0L1 1"></path></svg>',
+    "an img with the hidden attribute": '<img hidden src="a.png">',
+    "an img with inline display:none": '<img style="display:none" src="a.png">',
+    "an img with inline visibility: hidden": '<img style="visibility: hidden" src="a.png">',
+    "an img inside a hidden ancestor": '<div hidden><img src="a.png"></div>',
+    "a canvas with inline display:none": '<canvas style="display: none"></canvas>',
+    "a div with an empty value attribute": '<div value=""></div>',
+    "a div with a checked attribute": "<div checked></div>",
+    "a src-less error-overlay iframe": '<iframe id="error-overlay" style="position:fixed;inset:0"></iframe>',
+    "a src-less video": "<video></video>",
+    "an empty textarea": "<textarea></textarea>",
+  };
+  for (const [label, markup] of Object.entries(GENUINELY_EMPTY_RENDERS)) {
+    test(`D6 still fires on a seeded genuinely-empty render: ${label}`, () => {
+      document.documentElement.innerHTML = `<body><main id="root">${markup}</main></body>`;
+      // Unseeded, the same DOM is the valid `<empty>` fallback.
+      expect(detect(false).state).toBe("renders-empty");
+      const det = runDetectors({
+        compileErrors: [],
+        throwMessage: null,
+        consoleErrors: [],
+        document,
+        seeded: true,
+      });
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
   test("a seeded render with CONTENT is unaffected — renders-clean", () => {
     document.documentElement.innerHTML =
       "<body><main id=\"root\"><ul><li>Ada</li><li>Alan</li></ul></main></body>";

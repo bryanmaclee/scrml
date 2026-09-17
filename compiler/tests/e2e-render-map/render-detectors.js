@@ -75,6 +75,136 @@ function collectAttrValues(root) {
 }
 
 /**
+ * Elements that CAN carry content without any text. Being in this list is only
+ * candidacy: `elementCarriesContent` decides whether a given element actually holds
+ * anything. Structural wrappers (the `<main id="root">` mount shell,
+ * div/section/ul/li/span/...) and bare `[value]` / `[checked]` attributes on
+ * non-form elements are deliberately NOT candidates — an empty wrapper is still an
+ * empty render, and `<div value="">` renders nothing.
+ */
+export const CONTENT_CANDIDATE_SELECTOR = [
+  "input", "textarea", "select", "progress", "meter",
+  "img", "picture", "video", "audio", "svg", "canvas", "iframe", "object", "embed",
+].join(",");
+
+function attr(el, name) {
+  return el && typeof el.getAttribute === "function" ? el.getAttribute(name) : null;
+}
+function nonEmpty(v) {
+  return v != null && String(v).trim() !== "";
+}
+
+/**
+ * Is `el` (or an ancestor up to `stopAt`) hidden by markup? happy-dom does no
+ * layout, so this reads what the DOM states: the `hidden` attribute,
+ * `aria-hidden="true"`, and inline `display:none` / `visibility:hidden`.
+ */
+function isHiddenByMarkup(el, stopAt) {
+  for (let n = el; n && n !== stopAt; n = n.parentElement) {
+    if (typeof n.hasAttribute === "function" && n.hasAttribute("hidden")) return true;
+    if (String(attr(n, "aria-hidden") ?? "").toLowerCase() === "true") return true;
+    const style = String(attr(n, "style") ?? "");
+    if (/(^|;)\s*display\s*:\s*none\b/i.test(style)) return true;
+    if (/(^|;)\s*visibility\s*:\s*hidden\b/i.test(style)) return true;
+  }
+  return false;
+}
+
+/**
+ * Does this candidate element HOLD content (not merely exist)?
+ *   - text-like input / textarea: a non-empty value (live `.value`, else the attribute).
+ *     A placeholder is not content. `<input type="hidden">` never counts.
+ *   - checkbox / radio: checked. (An unchecked box carries no seeded datum the DOM
+ *     can show; its label, if any, is text and counts on its own.)
+ *   - select: at least one `<option>`.
+ *   - progress / meter: a value attribute.
+ *   - img: src or srcset. picture / video / audio: a src/srcset on itself or a
+ *     `<source>`/`<img>` child.
+ *   - svg: at least one child element (a non-empty drawing).
+ *   - iframe / embed: src. object: data.
+ *   - canvas: counts on presence — a canvas is painted by script and the DOM exposes
+ *     no signal of whether it was; treating it as empty would score every seeded
+ *     chart red.
+ */
+export function elementCarriesContent(el) {
+  const tag = String(el.tagName ?? "").toLowerCase();
+  switch (tag) {
+    case "input": {
+      const type = String(attr(el, "type") ?? "text").toLowerCase();
+      if (type === "hidden") return false;
+      if (type === "checkbox" || type === "radio") {
+        return el.checked === true || (typeof el.hasAttribute === "function" && el.hasAttribute("checked"));
+      }
+      return nonEmpty(el.value) || nonEmpty(attr(el, "value"));
+    }
+    case "textarea":
+      return nonEmpty(el.value) || nonEmpty(el.textContent);
+    case "select":
+      return typeof el.querySelector === "function" && el.querySelector("option") != null;
+    case "progress":
+    case "meter":
+      return nonEmpty(attr(el, "value"));
+    case "img":
+      return nonEmpty(attr(el, "src")) || nonEmpty(attr(el, "srcset"));
+    case "picture":
+    case "video":
+    case "audio":
+      return (
+        nonEmpty(attr(el, "src")) ||
+        nonEmpty(attr(el, "srcset")) ||
+        (typeof el.querySelector === "function" &&
+          el.querySelector("source[src], source[srcset], img[src], img[srcset]") != null)
+      );
+    case "svg":
+      return el.children != null && el.children.length > 0;
+    case "iframe":
+    case "embed":
+      return nonEmpty(attr(el, "src"));
+    case "object":
+      return nonEmpty(attr(el, "data"));
+    case "canvas":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Did the render produce ANYTHING content-bearing? True when `body` holds non-
+ * whitespace text, OR a CONTENT_CANDIDATE_SELECTOR element that is not hidden by
+ * markup and actually carries content (elementCarriesContent).
+ *
+ * ⛑ S419 — D6 used to key on `body.textContent.trim() === ""` alone
+ * (g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red): a
+ * seeded render of inputs holding the seeded values, a checkbox list, an image
+ * gallery or an SVG chart has no TEXT and scored the RED `renders-empty-with-data`.
+ * The filed fix (`querySelectorAll("*").length === 0`) would have gone the other way
+ * and never fired on the real board-bug shape, whose empty render still contains
+ * the mount shell.
+ * ⛑ S419 review (M1) — the first version of this counted element PRESENCE, which
+ * was over-broad in the opposite direction: `<select></select>` (the seeded options
+ * loop rendered nothing — exactly D6's bug), a bare `<input>`, an aria-hidden empty
+ * svg, an empty `<button>`/`<progress>`, a hidden img, `<div value="">` and a src-less
+ * overlay iframe all scored green. An element now counts only when it HOLDS content.
+ *
+ * Known limit (pre-existing, not changed here): the text test reads
+ * `body.textContent`, which includes `<script>`/`<style>`/`<noscript>` text and text
+ * inside hidden elements.
+ */
+export function hasRenderedContent(body) {
+  if (!body) return false;
+  if ((body.textContent ?? "").trim() !== "") return true;
+  if (typeof body.querySelectorAll !== "function") return false;
+  const els = body.querySelectorAll(CONTENT_CANDIDATE_SELECTOR);
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i];
+    if (isHiddenByMarkup(el, body)) continue;
+    if (elementCarriesContent(el)) return true;
+  }
+  return false;
+}
+
+/**
  * A no-server mount of a server-DEPENDENT app leaves a server-only binding/data
  * source null; the client then throws (or console-errors) a null/undefined-ACCESS.
  * That is server-ABSENCE (harness-realism, S203 b+c — NOT a compiler bug). A
@@ -203,7 +333,9 @@ export function runDetectors(obs) {
   // ---- D6: empty body where data WAS seeded (S-EMPTY-WITH-DATA) ----
   // Only meaningful when the harness seeded a fixture. An empty render with NO
   // seed is a VALID partial render (the <empty> fallback) — NOT a failure.
-  if (obs.seeded && bodyText.trim() === "") {
+  // "Empty" means nothing content-bearing rendered, not merely no text (⛑ S419,
+  // see hasRenderedContent).
+  if (obs.seeded && !hasRenderedContent(body)) {
     smells.push("S-EMPTY-WITH-DATA");
     detail.emptyWithData = true;
     // Continue — but if no harder smell fired, this is the renders-empty state.
@@ -257,7 +389,16 @@ export function runDetectors(obs) {
   }
   // No smell, no throw, no compile error. If the body is empty WITHOUT a seed,
   // that's a valid empty/partial render (records as renders-empty, NOT a fail).
-  if (bodyText.trim() === "") {
+  //
+  // ⛑ S419 review (L1) — "empty" here uses the SAME predicate as D6. This branch used
+  // `bodyText.trim() === ""`, so a seeded render that passed D6 on content with no
+  // text (`<input value="Alice">`) fell through to `renders-empty` — the state that
+  // means "no data, valid fallback". It now resolves to `renders-clean`.
+  // Deliberately applied to UNSEEDED cells too: an unseeded page showing a filled
+  // input or an image is not an `<empty>` fallback either, and one definition of
+  // "empty" cannot drift into two meanings the way text-vs-content just did. Both
+  // states are green, so no gate outcome can change; any cell that moves is recorded.
+  if (!hasRenderedContent(body)) {
     return { state: "renders-empty", smells, detail };
   }
   return { state: "renders-clean", smells, detail };

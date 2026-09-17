@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 109 |
-| MED | 251 |
-| LOW | 96 |
+| HIGH | 108 |
+| MED | 249 |
+| LOW | 97 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -5075,6 +5075,8 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 
 ### g-e2e-render-map-tier-runs-in-no-ci-job-at-all — the only tier that MOUNTS the corpus and reads the DOM is referenced by no workflow, no package script and no git hook, so nothing it classifies has ever gated anything — `NEW S416-peter (found while fixing the tier's classifier — checked whether the fix would be exercised in CI); MED; open`
 <!-- @gap id=g-e2e-render-map-tier-runs-in-no-ci-job-at-all sev=MED status=open locus=.github/workflows/ci.yml(gate=tests/unit+conformance+tests/*.test.js;tracking=tests/integration+lsp+commands;windows=unit+conformance—none-name-tests/e2e-render-map)+package.json+scripts/git-hooks prov=empirical:PA-grepped-S416-e2e-render-map-returns-zero-hits-across-.github-package.json-and-scripts/git-hooks -->
+
+⚑ **S419-peter — PARTIAL, stays open.** The tier's own text no longer claims a CI/pre-push "hard gate" (it now states it runs only via `bun test compiler/tests/e2e-render-map/`, the whole-tree `bun run test`, or the generator directly). The gap itself — no CI job invokes the tier or `generate-baseline.js --check` — is unchanged. Recommendation recorded by the fix agent: a non-required job on Linux AND Windows (the S419 HIGH was Windows-only), and a scheduled `--check` only after a Linux-side baseline regeneration settles the known reds.
 
 `compiler/tests/e2e-render-map/` is the tier the sibling entries call *"⭐ the e2e tier DOES mount the
 corpus and read the DOM"* — the only place in the tree where a corpus app is actually rendered and
@@ -15272,8 +15274,10 @@ So a wrapper keying on `!= 0` reads a MISSING MANIFEST as a real red, and one ke
 as a valid comparison. This is `pa-base` §8's indistinguishable failure: an error path rendering as a
 substantive answer. No landed case covers a missing or corrupt manifest.
 
-### g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red — the detector was made accusatory without its trigger being tightened — `NEW S417-peter (review floor, S239 pass on #958); MED; open`
-<!-- @gap id=g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red sev=MED status=open locus=compiler/tests/e2e-render-map/render-detectors.js:206 prov=review:S417-floor-pass-on-958 -->
+### g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red — the detector was made accusatory without its trigger being tightened — `NEW S417-peter (review floor, S239 pass on #958); MED; RESOLVED S419-peter`
+<!-- @gap id=g-e2e-render-map-d6-keys-on-textcontent-so-a-text-free-render-scores-red sev=MED status=resolved locus=compiler/tests/e2e-render-map/render-detectors.js:206 prov=review:S417-floor-pass-on-958 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-render-map-truthfulness-land`) — agent dispatch; S239 adversarial pass (4-cell table complete, 403 samples cells unchanged, POSIX behaviour unchanged) + fix round for an over-broad D6 predicate (PA-reproduced, then PA re-probed 19 shapes seeded/unseeded on the fix); tier 12/0 -> 47/0/1026, every new assertion mutation-proven (`docs/changes/s419-render-map-truthfulness/progress.md`).
 
 D6 fires on `obs.seeded && bodyText.trim() === ""`, where `bodyText = body.textContent ?? ""` —
 **text nodes only**. A seeded render that produces a full DOM but no TEXT (form inputs carrying seeded
@@ -15377,8 +15381,10 @@ unknown-flag branch (exit 2 on a VALID value too). Fix shape: one `toBe(1)` case
 same-revision + opt-in + difference case, and a real value flag. Pairs with
 `g-differential-invalid-run-exits-1-…` (same file).
 
-### g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows — every genuine multi-file app compiles the wrong tree and scores green — `NEW S419-peter (review floor, S239 pass on #964); HIGH; open`
-<!-- @gap id=g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows sev=HIGH status=open locus=compiler/tests/e2e-render-map/render-harness.js:findAppDirRoot prov=review:S419-floor-pass-on-964 -->
+### g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows — every genuine multi-file app compiles the wrong tree and scores green — `NEW S419-peter (review floor, S239 pass on #964); HIGH; RESOLVED S419-peter`
+<!-- @gap id=g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows sev=HIGH status=resolved locus=compiler/tests/e2e-render-map/render-harness.js:findAppDirRoot prov=review:S419-floor-pass-on-964 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-render-map-truthfulness-land`) — agent dispatch; S239 adversarial pass (4-cell table complete, 403 samples cells unchanged, POSIX behaviour unchanged) + fix round for an over-broad D6 predicate (PA-reproduced, then PA re-probed 19 shapes seeded/unseeded on the fix); tier 12/0 -> 47/0/1026, every new assertion mutation-proven (`docs/changes/s419-render-map-truthfulness/progress.md`).
 
 #964 normalised `relpath` at the enumerator's mint site but not `app.inputFiles`, which stay absolute
 win32 paths. `render-harness.js` `findAppDirRoot` splits them on `/`, so the common prefix is `""`.
@@ -15394,8 +15400,10 @@ over the flagship. The PR's "normalise at the mint site, no next consumer to fin
 principle and incomplete in execution — the mint site mints TWO path families. Also absent from its
 consumer list: `render-harness.js:65` `relpath.split("/").pop()`.
 
-### g-e2e-render-map-partial-seed-loss-is-silent — the non-vacuity guard only fires on a TOTAL empty — `NEW S419-peter (review floor, S239 pass on #964); MED; open`
-<!-- @gap id=g-e2e-render-map-partial-seed-loss-is-silent sev=MED status=open locus=compiler/tests/e2e-render-map/e2e-render-map.test.js prov=review:S419-floor-pass-on-964 -->
+### g-e2e-render-map-partial-seed-loss-is-silent — the non-vacuity guard only fires on a TOTAL empty — `NEW S419-peter (review floor, S239 pass on #964); MED; RESOLVED S419-peter`
+<!-- @gap id=g-e2e-render-map-partial-seed-loss-is-silent sev=MED status=resolved locus=compiler/tests/e2e-render-map/e2e-render-map.test.js prov=review:S419-floor-pass-on-964 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-render-map-truthfulness-land`) — agent dispatch; S239 adversarial pass (4-cell table complete, 403 samples cells unchanged, POSIX behaviour unchanged) + fix round for an over-broad D6 predicate (PA-reproduced, then PA re-probed 19 shapes seeded/unseeded on the fix); tier 12/0 -> 47/0/1026, every new assertion mutation-proven (`docs/changes/s419-render-map-truthfulness/progress.md`).
 
 The guard is `seeded.length > 0`. Reviewer-reproduced: renaming 3 of the 4 `POPULATED_SEEDS` keys leaves
 **6 pass / 0 fail** and still prints "with-data coverage: 4 populated of 438" — the floor test counts
@@ -15403,8 +15411,10 @@ The guard is `seeded.length > 0`. Reviewer-reproduced: renaming 3 of the 4 `POPU
 populated baseline cell that loses its seed silently stops being compared. Fix: assert live-seeded count
 equals baseline populated count, or warn on baseline cells never observed.
 
-### g-e2e-render-map-single-input-multi-app-mirrors-nothing — `benchmarks/fullstack-scrml` renders nothing on every OS and scores green — `NEW S419-peter (review floor, S239 pass on #964); LOW; open`
-<!-- @gap id=g-e2e-render-map-single-input-multi-app-mirrors-nothing sev=LOW status=open locus=compiler/tests/e2e-render-map/render-harness.js:findAppDirRoot prov=review:S419-floor-pass-on-964 -->
+### g-e2e-render-map-single-input-multi-app-mirrors-nothing — `benchmarks/fullstack-scrml` renders nothing on every OS and scores green — `NEW S419-peter (review floor, S239 pass on #964); LOW; RESOLVED S419-peter`
+<!-- @gap id=g-e2e-render-map-single-input-multi-app-mirrors-nothing sev=LOW status=resolved locus=compiler/tests/e2e-render-map/render-harness.js:findAppDirRoot prov=review:S419-floor-pass-on-964 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-render-map-truthfulness-land`) — agent dispatch; S239 adversarial pass (4-cell table complete, 403 samples cells unchanged, POSIX behaviour unchanged) + fix round for an over-broad D6 predicate (PA-reproduced, then PA re-probed 19 shapes seeded/unseeded on the fix); tier 12/0 -> 47/0/1026, every new assertion mutation-proven (`docs/changes/s419-render-map-truthfulness/progress.md`).
 
 A MULTI_FILE_APP_DIRS entry with ONE input file makes `findAppDirRoot` return the FILE path (PA-reproduced:
 `root=…\fullstack-scrml\app.scrml`); `mirrorTree` of a file copies nothing → `NO-HTML-EMITTED` →
@@ -15452,3 +15462,26 @@ an INDEPENDENT enumerator for HARD REQ 4's set cross-check, and replacing it wit
 check compare the walk against itself. Fix shape: resolve a POSIX `find` explicitly (or fail with a named
 message when only `find.exe` is on PATH), or pick a second genuinely independent enumerator (e.g.
 `git ls-files` for tracked sources).
+
+### g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not — the content predicate is split in two — `NEW S419-peter (PA probe of the render-map fix round); LOW; open`
+<!-- @gap id=g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(hasRenderedContent) prov=review:S419-pa-probe-of-render-map-fix-round -->
+
+After S419 `hasRenderedContent` excludes content-bearing ELEMENTS hidden by `hidden` / `aria-hidden` /
+inline `display:none` / `visibility:hidden`, but its TEXT half still reads `body.textContent`, which
+includes hidden text. PA-probed: a seeded `<main id="root"><p style="display:none">secret</p></main>`
+scores `renders-clean` while `<img hidden src="a.png">` scores `renders-empty-with-data`. Same root as
+the pre-existing script/style/noscript-only-body case (textContent counts their text). Fix shape: walk
+visible text nodes with the same hidden-ancestor exclusion the element half uses.
+
+### g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged — the baseline carries stale keys and nothing reports them — `NEW S419-peter (S239 pass on the render-map fix); LOW; open`
+<!-- @gap id=g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged sev=LOW status=open locus=compiler/tests/e2e-render-map/e2e-render-map-baseline.json+e2e-render-map.test.js prov=review:S419-floor-pass-on-render-map-fix -->
+
+`benchmarks/per-route-roles` is keyed in the baseline as `routes/loads.scrml#empty`, from before the S347
+basename sort; the live entry is `routes/admin.scrml`, so the live cell is reported as NEW and the baseline
+cell is an orphan that is never compared. The S419 seed-coverage test checks `#populated` cells in both
+directions but not `#empty` orphans. After S419 one further cell also legitimately differs from the
+baseline (`samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-group-031.scrml#empty`:
+renders-empty → renders-clean, a checked radio now counts as content; both green). Fix shape: warn on
+baseline cells with no live app, and regenerate the baseline on a Linux host once the two known reds
+(todomvc, 09-error-handling) are dispositioned. Related: the harness temp root is `resolve("/tmp")`, which is
+`C:\tmp` on Windows (1494 accumulated case dirs observed) — should be `os.tmpdir()`.

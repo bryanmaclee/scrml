@@ -5,8 +5,10 @@
  * the whole render corpus and writes the known-failure MAP to
  * `e2e-render-map-baseline.json`. This is the gap-DISCOVERY surface — it is
  * allowed to contain any number of fails-compile / throws / smell cells; gaps
- * existing is NOT a failure (the delta-gate, in e2e-render-map.test.js, fails
- * only on a green->red regression).
+ * existing is NOT a failure. A green->red regression is what `--check` exits 1
+ * on; e2e-render-map.test.js only WARNS on it for the examples+benchmarks slice.
+ * ⛑ S419: no CI job, package script or git hook invokes this file or that suite
+ * directory by name — both run only by hand (see e2e-render-map.test.js header).
  *
  * Each (app, seed) cell is observed in an ISOLATED SUBPROCESS (observe-one.js)
  * with a hard timeout, because some meta-heavy corpus apps hang/loop at mount in

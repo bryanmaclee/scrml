@@ -189,6 +189,11 @@ export function enumerateRenderCorpus() {
       // Normalising HERE rather than at each consumer is deliberate: the separator is a property of
       // how the path was minted, and a per-consumer patch would leave the next consumer to find.
       // On POSIX this is a no-op — `relative` already returns `/` and the replace matches nothing.
+      // ⛑ S419 — this site mints TWO path families, and only one is normalised, deliberately:
+      // `relpath` / `appDir` are repo-relative DISPLAY KEYS (always `/`); `path` / `inputFiles`
+      // stay NATIVE filesystem paths and must only be consumed through `node:path`. S417 missed
+      // the second family: `render-harness.js` split `inputFiles` on `/`, got an empty root on
+      // Windows, and compiled the wrong tree green (see resolveMultiFileCompileInputs there).
       const relpath = relative(REPO_ROOT, f).split("\\").join("/");
       const { kind, appDir } = classifyApp(relpath);
       if (kind === "multi") {
