@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 109 |
-| MED | 254 |
-| LOW | 95 |
+| MED | 251 |
+| LOW | 96 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -1524,8 +1524,10 @@ BRANCH-conditional (the unlanded derived-transitive arc, tip `bdee6c2c`): `E-DER
 
 Pre-existing silent miscompile on main (`3ebaa01e`), reproduced at compile level by the R2 S239 review (`handOffs/s342-arc-audit/dtr-r2-s239-review.md` F2, `h4-const-alias.scrml`; the review verified the emitted JS as text and ran no runtime execution): bind a server-placed function to a file-scope alias (`${ function doHash(p) { return hashPassword(p) } const g = doHash }`) and read the alias from a derived RHS (`const <h> = g(@pw)`) — both main and the arc tip `bdee6c2c` compile at exit 0 with an empty diagnostic set, emitting `const g = _scrml_fetch_doHash_3;` wired into `_scrml_cs_derived_declare("h", () => g(…))`: the async stub bound un-awaited, so the cell holds a pending Promise — the exact defect the §6.6.19 transitive limb exists to refuse. Mechanism per the review: `computeServerReachingFns`' hop nodes are `function`-declaration records only (`route-inference.ts:3820-3915` per the review's read of the arc checkout), so the alias is not a node and cannot be a hop, and the alias name is not in `fnNameToNodeIds`, so the RHS scan finds nothing; the control `h2-alias-in-hop` (the same alias placed *inside* a `function` body) correctly fires, locating the boundary precisely. If the transitive limb lands as-is, this shape bypasses it — and the branch SPEC's §6.6.19 residual list names only two residuals (cross-file reach with no same-file binding; a name resolving same-file to both server-reaching and non-reaching declarations), neither of which covers this, so the list reads as exhaustive and is not — the review's ask: close it or add it to the residual list. Different defect, do not conflate: [[g-imported-server-fn-names-alias-blind]] (as-import async classification). Locus stated by the audit, not traced.
 
-### g-emit-differential-revision-inherited-from-enclosing-repo — `gitRevision()` records a non-toplevel `--compiler-root` with the ENCLOSING repository's HEAD, defeating the same-revision INCOMPARABLE guard — `NEW S345-bryan (S342 arc audit, harness.md); MED; open`
-<!-- @gap id=g-emit-differential-revision-inherited-from-enclosing-repo sev=MED status=open locus=scripts/corpus-emit-differential.ts(gitRevision) prov=rationale:git-rev-parse-cwd-compiler-root-walks-up-to-enclosing-repo-head -->
+### g-emit-differential-revision-inherited-from-enclosing-repo — `gitRevision()` records a non-toplevel `--compiler-root` with the ENCLOSING repository's HEAD, defeating the same-revision INCOMPARABLE guard — `NEW S345-bryan (S342 arc audit, harness.md); MED; RESOLVED S419-peter`
+<!-- @gap id=g-emit-differential-revision-inherited-from-enclosing-repo sev=MED status=resolved locus=scripts/corpus-emit-differential.ts(gitRevision) prov=rationale:git-rev-parse-cwd-compiler-root-walks-up-to-enclosing-repo-head -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-differential-verdict-coverage-land`) — fixed by agent dispatch, S239 adversarial pass + fix round, PA re-verified by execution; suite 36/0/202, every new assertion mutation-proven (see `docs/changes/s419-differential-verdict-coverage/progress.md`).
 
 `scripts/corpus-emit-differential.ts` `gitRevision()` runs `git rev-parse HEAD` with `cwd: --compiler-root`; git walks upward, so a compiler root that is not its own git toplevel is recorded with the ENCLOSING repository's HEAD. The `revision` field feeds the same-revision INCOMPARABLE guard, so a capture pair can defeat that guard while carrying provenance neither side has. Per the S342 arc audit (handOffs/s342-arc-audit/harness.md §7, quoting the arc's own drafted gap text): partially mitigated on the unlanded differential-harness arc branch (`worktree-agent-ab7336c5da32f10ed` @ `d14d3a9b`, pushed) by an S339 diff-time NOTE keyed on `corpusCleanliness.isOwnGitCheckout` — the field itself is still wrong there (annotated, not corrected, and the NOTE carries no test assertion). Remediation per the arc: record `revisionIsOwn: boolean` beside `revision` and either refuse or substitute `<inherited from PATH>`.
 
@@ -15256,8 +15258,10 @@ legal. **GOVERNING-SENTENCE GATE EXECUTED: searched `compiler/SPEC.md` for the o
 hits) — no governing sentence found.** By §8 that makes it *beyond the contract*: a RULING, not a
 patch. Pinned by `compiler/tests/unit/tokenizer-multi-ops-ordering.test.js` (#965).
 
-### g-differential-invalid-run-exits-1-which-its-own-contract-calls-differences-found — a missing or corrupt manifest is indistinguishable from a legitimate red — `NEW S417-peter (review floor, S239 pass on #957); MED; open`
-<!-- @gap id=g-differential-invalid-run-exits-1-which-its-own-contract-calls-differences-found sev=MED status=open locus=scripts/corpus-emit-differential.ts:1136 prov=review:S417-floor-pass-on-957 -->
+### g-differential-invalid-run-exits-1-which-its-own-contract-calls-differences-found — a missing or corrupt manifest is indistinguishable from a legitimate red — `NEW S417-peter (review floor, S239 pass on #957); MED; RESOLVED S419-peter`
+<!-- @gap id=g-differential-invalid-run-exits-1-which-its-own-contract-calls-differences-found sev=MED status=resolved locus=scripts/corpus-emit-differential.ts:1136 prov=review:S417-floor-pass-on-957 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-differential-verdict-coverage-land`) — fixed by agent dispatch, S239 adversarial pass + fix round, PA re-verified by execution; suite 36/0/202, every new assertion mutation-proven (see `docs/changes/s419-differential-verdict-coverage/progress.md`).
 
 `scripts/corpus-emit-differential.ts` `loadManifest` calls `JSON.parse(readFileSync(p))` unwrapped; the
 throw is uncaught and the process exits **1**. The tool's own documented contract is
@@ -15353,8 +15357,10 @@ positions.** The class bites ONLY where code does token-text SET-MEMBERSHIP or a
 Every entry below was reported by an independent adversarial dispatch briefed to FALSIFY the PR's own
 claims, and each load-bearing one was re-reproduced by the PA by execution before filing.
 
-### g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms — the exit-1 verdict has a mutation detector for the artifact-hash term only — `NEW S419-peter (review floor, S239 pass on #963); MED; open`
-<!-- @gap id=g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms sev=MED status=open locus=compiler/tests/integration/corpus-emit-differential-exit-codes.test.js prov=review:S419-floor-pass-on-963 -->
+### g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms — the exit-1 verdict has a mutation detector for the artifact-hash term only — `NEW S419-peter (review floor, S239 pass on #963); MED; RESOLVED S419-peter`
+<!-- @gap id=g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms sev=MED status=resolved locus=compiler/tests/integration/corpus-emit-differential-exit-codes.test.js prov=review:S419-floor-pass-on-963 -->
+
+**✅ RESOLVED S419-peter** (branch `fix/s419-differential-verdict-coverage-land`) — fixed by agent dispatch, S239 adversarial pass + fix round, PA re-verified by execution; suite 36/0/202, every new assertion mutation-proven (see `docs/changes/s419-differential-verdict-coverage/progress.md`).
 
 `scripts/corpus-emit-differential.ts` sums ~12 difference kinds into `findings` (source-set, compile
 failure, diagnostic code/text, artifact added/removed, content, syntax delta). #963 added the first
@@ -15433,3 +15439,16 @@ natural fix. Also fragile: `] as const;` → a JSON-parse SyntaxError; a comment
 quoted operators → a false shadow. Fix shape (inert, test-only): tokenize each member and assert the
 token count. Whether `>>>` SHOULD lex as one token is still bryan's ruling; the pin should record current
 behaviour behaviourally, not textually.
+
+### g-differential-capture-shells-out-to-posix-find-so-it-cannot-run-from-powershell — the differential and its exit-code suite need a POSIX `find` on PATH — `NEW S419-peter (surfaced by the differential-coverage fix and its S239 pass); LOW; open`
+<!-- @gap id=g-differential-capture-shells-out-to-posix-find-so-it-cannot-run-from-powershell sev=LOW status=open locus=scripts/corpus-emit-differential.ts(capture enumeration) prov=review:S419-pre-land-pass-on-differential-coverage -->
+
+`capture` enumerates via an external `find`. From bare PowerShell on Windows `find` resolves to
+`C:\Windows\System32\find.exe`, the fixture capture fails, and
+`compiler/tests/integration/corpus-emit-differential-exit-codes.test.js` reports 0 pass (reviewer- and
+author-reproduced; from Git Bash it is 36/0). Pre-existing since #957. Since S419 the failure exits 2 (NOT
+A VALID RUN) instead of 1, so it is at least honest. ⚑ Do NOT "fix" this by swapping `find` for the script's own walk: `oracleEnumerate` uses `find` DELIBERATELY as
+an INDEPENDENT enumerator for HARD REQ 4's set cross-check, and replacing it with `walkAny` would make the
+check compare the walk against itself. Fix shape: resolve a POSIX `find` explicitly (or fail with a named
+message when only `find.exe` is on PATH), or pick a second genuinely independent enumerator (e.g.
+`git ls-files` for tracked sources).

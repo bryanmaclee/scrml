@@ -34,8 +34,14 @@
  *       --work   /scratch/base \
  *       --manifest /scratch/base.manifest.json
  *       [--roots examples,samples,conformance,stdlib,benchmarks]  # default; recursive; ARGUMENTS
- *       [--concurrency 10]
- *       [--expect-total 1816]                    # hard enumeration assertion, fails loud
+ *       [--concurrency 10]                       # whole number >= 1
+ *       [--expect-total 1816]                    # whole number >= 0; hard enumeration assertion, fails loud
+ *
+ *   ⛑ S419 — NUMERIC FLAGS ARE STRICT, AND THAT IS A BREAK. Values must be plain decimal digits: `abc`,
+ *   empty, ` `, `1.5`, `1e1`, `-1`, `+2` and ` 3` are all refused with exit 2, by design (no sign, no
+ *   padding, no exponent — a value the shell or a template mangled is refused, not reinterpreted).
+ *   `--concurrency 0` used to be CLAMPED to one worker and run; it is now refused. No caller in this
+ *   repository passed it.
  *       [--reuse-artifacts]                      # skip compilation, re-hash + re-check the work
  *                                                # tree in place (this is what makes the gate's
  *                                                # own bite cheap to prove)
@@ -56,18 +62,29 @@
  *   artifact is parsed under BOTH goggles, and the load context is derived from the emitted HTML.
  *
  * EXIT CODES
- *   capture: 0 = manifest written and every self-check agreed. 1 = a self-check FAILED (an
- *            enumeration disagreement, an expect-total mismatch, a slug collision, an unreadable
- *            artifact). A capture NEVER exits non-zero merely because sources failed to compile —
- *            compile failure is DATA (HARD REQ 5).
+ *   capture: 0 = manifest written and every self-check agreed. 2 = NO VALID MANIFEST — a self-check
+ *            FAILED (an enumeration disagreement, an expect-total mismatch, a slug collision, an
+ *            unreadable artifact), the invocation was invalid, or the run crashed. A capture NEVER
+ *            exits non-zero merely because sources failed to compile — compile failure is DATA
+ *            (HARD REQ 5). A capture NEVER exits 1.
  *   diff:    0 = no differences at all. 1 = differences found. 2 = NOT A VALID COMPARISON —
  *            different roots, an enumeration disagreement, the same revision on both sides,
- *            differing check contexts, a reuse-artifacts manifest, or a VACUOUS run in which
- *            zero artifacts were compared or zero checkable artifacts were checked.
+ *            differing check contexts, a reuse-artifacts manifest, a VACUOUS run in which
+ *            zero artifacts were compared or zero checkable artifacts were checked, a missing /
+ *            unreadable / non-JSON / wrongly-shaped manifest, an invalid invocation, or a crash.
+ *
+ *   ⛑ S419 — EXIT 1 IS RESERVED FOR ONE MEANING: "diff compared validly and found differences".
+ *   It used to be reachable from every uncaught throw (a missing manifest, a corrupt one, an
+ *   unreadable corpus directory, a dead goggle worker) and from capture's self-check aborts. A
+ *   wrapper keying on `== 2` then read a MISSING MANIFEST as a valid comparison, and one keying on
+ *   `!= 0` read it as a real red — an error path rendering as a substantive answer. Every error path
+ *   now goes through `die()` (exit 2), and the top-level guard at `main` turns any throw nobody
+ *   anticipated into exit 2 as well. Pinned by
+ *   `compiler/tests/integration/corpus-emit-differential-exit-codes.test.js`.
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, lstatSync, readFileSync, mkdirSync, rmSync, existsSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readdirSync, lstatSync, readFileSync, mkdirSync, rmSync, existsSync, writeFileSync, mkdtempSync, realpathSync } from "node:fs";
 import { join, relative, dirname, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -304,6 +321,21 @@ function req(flags: Record<string, string>, name: string): string {
   const v = flags[name];
   if (v === undefined) die(`--${name} is required`);
   return v;
+}
+
+/**
+ * A STRICT integer value flag. `Number()` was used directly, and it coerces: `""` and `" "` became
+ * 0, `"1.5"` stayed 1.5 (an --expect-total that can never match), `"-1"` was silently clamped, and
+ * `"abc"` became NaN — which for --concurrency built a ZERO-worker pool and crashed downstream. A
+ * value that is not a plain decimal integer at or above `min` is refused, loudly, before any work.
+ */
+function intFlag(flags: Record<string, string>, name: string, min: number): number | undefined {
+  const v = flags[name];
+  if (v === undefined) return undefined;
+  if (!/^[0-9]+$/.test(v)) die(`--${name} must be a whole number >= ${min} (got "${v}")`);
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < min) die(`--${name} must be a whole number >= ${min} (got "${v}")`);
+  return n;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -714,7 +746,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
 
   if (selfCheckFailed) {
     console.error(`\nCAPTURE ABORTED: one or more self-checks failed. No manifest written.`);
-    return 1;
+    return 2;
   }
 
   // ---- stage 2: compile ---------------------------------------------------------------------
@@ -852,7 +884,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
   );
   if (unreadable > 0) {
     console.error(`\nCAPTURE ABORTED: ${unreadable} artifact-stage self-check failure(s). No manifest written.`);
-    return 1;
+    return 2;
   }
 
   // ---- stage 4: syntax check under EXPLICIT goggles ------------------------------------------
@@ -913,7 +945,8 @@ async function capture(opts: CaptureOptions): Promise<number> {
       const r = results[key];
       if (!r) {
         console.error(`SELF-CHECK FAILED: goggle worker returned no result for ${key}`);
-        return 1;
+        console.error(`\nCAPTURE ABORTED: syntax-stage self-check failure. No manifest written.`);
+        return 2;
       }
       checkCache.set(key, r);
     }
@@ -1028,10 +1061,51 @@ function sourceSlug(relPath: string): string {
   return relPath.replace(/\.scrml$/, "").split("/").join("~");
 }
 
-async function gitRevision(root: string): Promise<string> {
-  const proc = Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+async function gitOut(args: string[], cwd: string): Promise<string | undefined> {
+  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
   const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  return code === 0 ? out.trim() : "<unknown>";
+  return code === 0 ? out.trim() : undefined;
+}
+
+/**
+ * Canonical identity of a directory for "is this the same directory" questions: the OS's own
+ * resolved path. `realpathSync.native` follows symlinks and junctions, and on win32 returns the
+ * on-disk case with native separators (and expands 8.3 short names), so git's `C:/x/y` and
+ * `path.resolve`'s `c:\X\y` canonicalise to the same string. A hand-rolled separator/case fold was
+ * tried here and removed: mutation showed it changed no outcome once `realpath` had run.
+ */
+function canonicalDir(p: string): string | undefined {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The revision OF `root` — never of a repository that merely CONTAINS it.
+ *
+ * ⛑ S419 (g-emit-differential-revision-inherited-from-enclosing-repo). This ran `git rev-parse HEAD`
+ * with `cwd: root`, and git walks UPWARD: a compiler root that is not its own git toplevel (a
+ * `git archive` extract unpacked inside another checkout, a subdirectory) was recorded with the
+ * ENCLOSING repository's HEAD. That value feeds the same-revision INCOMPARABLE guard in `diff`, so
+ * a manifest could carry provenance neither side has and the guard would reason about it as fact.
+ * Now the toplevel is compared with the root; when they differ the revision is `<unknown>`, which
+ * `diff` already refuses as NOT A VALID COMPARISON.
+ */
+async function gitRevision(root: string): Promise<string> {
+  const top = await gitOut(["rev-parse", "--show-toplevel"], root);
+  if (top === undefined) return "<unknown>";
+  const topId = canonicalDir(top);
+  const rootId = canonicalDir(root);
+  if (topId === undefined || rootId === undefined || topId !== rootId) {
+    console.error(
+      `NOTE: --compiler-root ${root} is NOT its own git toplevel (git resolves the enclosing repository ${top}).\n` +
+        `      Its revision is recorded as "<unknown>" rather than the enclosing repository's HEAD; \`diff\` refuses it.`,
+    );
+    return "<unknown>";
+  }
+  return (await gitOut(["rev-parse", "HEAD"], root)) ?? "<unknown>";
 }
 
 function walkAny(root: string, dir: string, out: string[], links: string[]): void {
@@ -1133,10 +1207,43 @@ async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>
 // diff
 // ---------------------------------------------------------------------------------------------
 
-function loadManifest(p: string): Manifest {
-  const m = JSON.parse(readFileSync(p, "utf8")) as Manifest;
+/**
+ * ⛑ S419 (g-differential-invalid-run-exits-1-…). This was an unwrapped `JSON.parse(readFileSync(p))`:
+ * a missing or corrupt manifest THREW, and an uncaught throw exits 1 — the code this tool's contract
+ * reserves for "differences found". Every way a manifest can fail to be one is now a `die()` (exit 2)
+ * with a message naming the side and the reason. The shape check covers what `diff` dereferences
+ * unconditionally; anything subtler still lands on the top-level guard, which also exits 2.
+ */
+function loadManifest(p: string, side: "base" | "head"): Manifest {
+  const invalid = (why: string): never => die(`${side} manifest ${p} ${why} — NOT A VALID COMPARISON`);
+  let text: string;
+  try {
+    text = readFileSync(p, "utf8");
+  } catch (e: any) {
+    return invalid(`cannot be read (${e?.code ?? e?.message ?? e})`);
+  }
+  let m: any;
+  try {
+    m = JSON.parse(text);
+  } catch (e: any) {
+    return invalid(`is not valid JSON (${e?.message ?? e})`);
+  }
+  if (m === null || typeof m !== "object" || Array.isArray(m)) return invalid(`is not a JSON object`);
   if (m.schemaVersion !== SCHEMA_VERSION) die(`${p}: schemaVersion ${m.schemaVersion}, expected ${SCHEMA_VERSION}`);
-  return m;
+  const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const missing: string[] = [];
+  if (typeof m.label !== "string") missing.push("label");
+  if (typeof m.revision !== "string") missing.push("revision");
+  if (!Array.isArray(m.roots)) missing.push("roots");
+  if (!isObj(m.checkContext)) missing.push("checkContext");
+  if (!isObj(m.enumeration) || !isObj(m.enumeration.crossCheck) || !isObj(m.enumeration.perRoot)) missing.push("enumeration");
+  if (!isObj(m.totals)) missing.push("totals");
+  if (!Array.isArray(m.sources)) missing.push("sources");
+  else if (!m.sources.every((s: any) => isObj(s) && typeof s.path === "string" && isObj(s.compile) && Array.isArray(s.artifacts))) {
+    missing.push("sources[].{path,compile,artifacts}");
+  }
+  if (missing.length) return invalid(`is missing or has a wrongly-typed field: ${missing.join(", ")}`);
+  return m as Manifest;
 }
 
 function setDiff(a: string[], b: string[]): { onlyA: string[]; onlyB: string[] } {
@@ -1150,8 +1257,8 @@ function h1(s: string): void {
 }
 
 function diff(basePath: string, headPath: string, jsonOut: string | undefined, allowSameRevision: boolean, allowReuseManifest: boolean): number {
-  const base = loadManifest(basePath);
-  const head = loadManifest(headPath);
+  const base = loadManifest(basePath, "base");
+  const head = loadManifest(headPath, "head");
 
   h1(`EMIT DIFFERENTIAL   base=${base.label} (${base.revision.slice(0, 8)})   head=${head.label} (${head.revision.slice(0, 8)})`);
 
@@ -1442,41 +1549,11 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
     contentDiffs.length +
     checkDelta.onlyA.length + checkDelta.onlyB.length + messageChanged.length;
 
-  // The banner NEVER says "NO DIFFERENCES" on a run that was not a valid comparison.
-  //
-  // Previously the VACUOUS/INCOMPARABLE dissent went to stderr while this banner went to stdout, so
-  // a stdout-only log of a run that verified nothing read as a clean pass. The exit code was right
-  // and the human-readable output was wrong; a human reads the banner.
-  const verdictWord = incomparable
-    ? `NOT A VALID COMPARISON — ${findings} difference(s) reported below are UNTRUSTWORTHY`
-    : findings === 0
-      ? "NO DIFFERENCES"
-      : `${findings} DIFFERENCE(S)`;
-  const banner =
-    `VERDICT: ${verdictWord}` +
-    `   over ${common.length} common sources of ${base.enumeration.total} base / ${head.enumeration.total} head enumerated` +
-    `   and ${comparedArtifacts} compared artifacts`;
-  if (incomparable) {
-    // Same stream as the findings that made it incomparable.
-    console.error(`\n${"=".repeat(92)}\n${banner}\n${"=".repeat(92)}`);
-    console.log(`\n${"=".repeat(92)}\n${banner}\n${"=".repeat(92)}`);
-  } else {
-    h1(banner);
-  }
-  console.log(
-    `  sources enumerated        base ${base.enumeration.total}   head ${head.enumeration.total}\n` +
-      `  source set delta          ${srcDelta.onlyA.length + srcDelta.onlyB.length}\n` +
-      `  compile-failure delta     ${compileComparable ? `${newlyFailing.length} newly failing / ${newlyPassing.length} newly passing` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
-      `  diagnostic changes        ${compileComparable ? `${diagChanged.length} code / ${streamChanged.length} text-only` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
-      `  artifact set delta        ${artifactAdded.length} added / ${artifactRemoved.length} removed\n` +
-      `  artifact content diffs    ${contentDiffs.length} of ${comparedArtifacts} compared\n` +
-      `  syntax delta (effective)  ${checkDelta.onlyB.length} new / ${checkDelta.onlyA.length} fixed / ${messageChanged.length} message-changed\n` +
-      `  syntax delta (script)     ${goggleReports[1].delta.onlyB.length} new / ${goggleReports[1].delta.onlyA.length} fixed\n` +
-      `  syntax delta (module)     ${goggleReports[2].delta.onlyB.length} new / ${goggleReports[2].delta.onlyA.length} fixed\n` +
-      `  load-context changes      ${loadContextChanged.length}\n` +
-      `  bare server-fn sites      base ${bFx.bare} / head ${hFx.bare}  (delta ${bareDelta > 0 ? "+" : ""}${bareDelta}, in ${fxSourceDelta.length} source(s))`,
-  );
-
+  // ⛑ S419 — EVERY FALLIBLE STEP RUNS BEFORE THE BANNER. The `--json` write used to come AFTER the
+  // verdict was printed, so an unwritable destination produced `VERDICT: NO DIFFERENCES` on stdout
+  // and THEN crashed to exit 2: a stdout-only log read as a clean pass while the run had failed —
+  // the exact stdout/stderr split the banner comment below exists to prevent. Everything from the
+  // banner to the `return` is now console output of values already computed.
   if (jsonOut) {
     writeFileSync(
       jsonOut,
@@ -1512,8 +1589,44 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
         2,
       ) + "\n",
     );
-    console.log(`\n  machine-readable diff -> ${jsonOut}`);
   }
+
+  // The banner NEVER says "NO DIFFERENCES" on a run that was not a valid comparison.
+  //
+  // Previously the VACUOUS/INCOMPARABLE dissent went to stderr while this banner went to stdout, so
+  // a stdout-only log of a run that verified nothing read as a clean pass. The exit code was right
+  // and the human-readable output was wrong; a human reads the banner.
+  const verdictWord = incomparable
+    ? `NOT A VALID COMPARISON — ${findings} difference(s) reported below are UNTRUSTWORTHY`
+    : findings === 0
+      ? "NO DIFFERENCES"
+      : `${findings} DIFFERENCE(S)`;
+  const banner =
+    `VERDICT: ${verdictWord}` +
+    `   over ${common.length} common sources of ${base.enumeration.total} base / ${head.enumeration.total} head enumerated` +
+    `   and ${comparedArtifacts} compared artifacts`;
+  if (incomparable) {
+    // Same stream as the findings that made it incomparable.
+    console.error(`\n${"=".repeat(92)}\n${banner}\n${"=".repeat(92)}`);
+    console.log(`\n${"=".repeat(92)}\n${banner}\n${"=".repeat(92)}`);
+  } else {
+    h1(banner);
+  }
+  console.log(
+    `  sources enumerated        base ${base.enumeration.total}   head ${head.enumeration.total}\n` +
+      `  source set delta          ${srcDelta.onlyA.length + srcDelta.onlyB.length}\n` +
+      `  compile-failure delta     ${compileComparable ? `${newlyFailing.length} newly failing / ${newlyPassing.length} newly passing` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
+      `  diagnostic changes        ${compileComparable ? `${diagChanged.length} code / ${streamChanged.length} text-only` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
+      `  artifact set delta        ${artifactAdded.length} added / ${artifactRemoved.length} removed\n` +
+      `  artifact content diffs    ${contentDiffs.length} of ${comparedArtifacts} compared\n` +
+      `  syntax delta (effective)  ${checkDelta.onlyB.length} new / ${checkDelta.onlyA.length} fixed / ${messageChanged.length} message-changed\n` +
+      `  syntax delta (script)     ${goggleReports[1].delta.onlyB.length} new / ${goggleReports[1].delta.onlyA.length} fixed\n` +
+      `  syntax delta (module)     ${goggleReports[2].delta.onlyB.length} new / ${goggleReports[2].delta.onlyA.length} fixed\n` +
+      `  load-context changes      ${loadContextChanged.length}\n` +
+      `  bare server-fn sites      base ${bFx.bare} / head ${hFx.bare}  (delta ${bareDelta > 0 ? "+" : ""}${bareDelta}, in ${fxSourceDelta.length} source(s))`,
+  );
+
+  if (jsonOut) console.log(`\n  machine-readable diff -> ${jsonOut}`);
 
   if (incomparable) return 2;
   return findings === 0 ? 0 : 1;
@@ -1542,31 +1655,48 @@ function collectSyntaxFailures(m: Manifest, which: "effective" | Goggle): Map<st
 // main
 // ---------------------------------------------------------------------------------------------
 
-const { mode, flags, bools } = parseArgs(process.argv.slice(2));
+/**
+ * THE TOP-LEVEL GUARD. An exception nobody anticipated is an invalid run, never a verdict: without
+ * this, any throw — from a failed `find`, a dead goggle worker, an unreadable directory, an
+ * unwritable `--json` path, a manifest whose shape passed `loadManifest` but not a deeper read —
+ * exits 1, which `diff`'s contract reserves for "differences found". Exit 2 is the only honest code.
+ */
+function crashed(e: unknown): never {
+  const detail = e instanceof Error ? (e.stack ?? e.message) : String(e);
+  die(`unexpected error — NOT A VALID RUN, no verdict can be read from it:\n${detail}`);
+}
+process.on("uncaughtException", crashed);
+process.on("unhandledRejection", crashed);
 
-if (mode === "capture") {
-  const compilerRoot = resolve(req(flags, "compiler-root"));
-  const code = await capture({
-    compilerRoot,
-    label: req(flags, "label"),
-    work: resolve(req(flags, "work")),
-    manifestPath: resolve(req(flags, "manifest")),
-    roots: (flags["roots"] ?? DEFAULT_ROOTS.join(",")).split(",").map((r) => r.trim()).filter(Boolean),
-    concurrency: Number(flags["concurrency"] ?? 10),
-    expectTotal: flags["expect-total"] !== undefined ? Number(flags["expect-total"]) : undefined,
-    reuseArtifacts: bools.has("reuse-artifacts"),
-    syntaxCheck: !bools.has("no-syntax-check"),
-  });
-  process.exit(code);
-} else {
-  // parseArgs already rejected any mode other than capture/diff.
-  process.exit(
-    diff(
-      resolve(req(flags, "base")),
-      resolve(req(flags, "head")),
-      flags["json"] ? resolve(flags["json"]) : undefined,
-      bools.has("allow-same-revision"),
-      bools.has("allow-reuse-manifest"),
-    ),
-  );
+try {
+  const { mode, flags, bools } = parseArgs(process.argv.slice(2));
+
+  if (mode === "capture") {
+    const compilerRoot = resolve(req(flags, "compiler-root"));
+    const opts: CaptureOptions = {
+      compilerRoot,
+      label: req(flags, "label"),
+      work: resolve(req(flags, "work")),
+      manifestPath: resolve(req(flags, "manifest")),
+      roots: (flags["roots"] ?? DEFAULT_ROOTS.join(",")).split(",").map((r) => r.trim()).filter(Boolean),
+      concurrency: intFlag(flags, "concurrency", 1) ?? 10,
+      expectTotal: intFlag(flags, "expect-total", 0),
+      reuseArtifacts: bools.has("reuse-artifacts"),
+      syntaxCheck: !bools.has("no-syntax-check"),
+    };
+    process.exit(await capture(opts));
+  } else {
+    // parseArgs already rejected any mode other than capture/diff.
+    process.exit(
+      diff(
+        resolve(req(flags, "base")),
+        resolve(req(flags, "head")),
+        flags["json"] ? resolve(flags["json"]) : undefined,
+        bools.has("allow-same-revision"),
+        bools.has("allow-reuse-manifest"),
+      ),
+    );
+  }
+} catch (e) {
+  crashed(e);
 }
