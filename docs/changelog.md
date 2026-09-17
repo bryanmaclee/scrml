@@ -7296,6 +7296,49 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-09-16 (S419 — peter — the floor convicted all three of my own PRs, and every fix re-created its class one level away)
+
+A Windows-clone session, concurrent with a LIVE S418-bryan (four language rulings recorded, none built).
+Peter's opener was the standing one — *"review, then get after MEDs and LOWs"* — then *"keep going"* twice.
+Seven PRs landed, all gate-green; one touched compiler source. **Board 108·250·94 → 107·247·96**
+(resolved 2 HIGH · 8 MED · 2 LOW; filed 1 HIGH · 5 MED · 4 LOW).
+
+⚑ **Isolation was disabled on this clone before any work started, by my own S417 inbox drop.** Its
+189-char filename put the worktree path past Windows MAX_PATH, so all three review dispatches failed at
+`git worktree add`. Renamed in #968.
+
+**The review floor (#969) convicted all three S417 PRs, all mine**, and in each the fix had re-created the
+diagnosed class one level away: #963's exit-1 test covered one of twelve causes; #964 normalised one of two
+path families and turned three multi-file apps from a loud HARNESS-ERROR into a silent false green over the
+flagship; #965's "derived" coverage pin was hand-typed and its "behavioural" ordering pin read array text.
+
+Then the MED/LOW drain, every arc through an isolated agent, an independent adversarial pass (which found a
+MED in two of three arcs, each PA-reproduced and sent back), and PA re-verification by execution:
+
+- **#968** `chore(inbox)` — shorten the S417 drop filename that broke every worktree on Windows.
+- **#969** `review(s419)` — floor 5 → 0; findings on #963/#964/#965; 6 gaps filed (1 HIGH · 4 MED · 1 LOW);
+  inbox note routing the condition-head coverage pin's replacement into bryan's UNIFY build.
+- **#970** `fix(differential)` — resolves `g-differential-invalid-run-exits-1-…`,
+  `g-emit-differential-revision-inherited-from-enclosing-repo`, `g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms`.
+  Exit 1 now means only "differences found"; the adversarial pass caught a crashed run still printing
+  `VERDICT: NO DIFFERENCES` on stdout. Suite 9 → 36 (36/36 in CI). Files `g-differential-capture-shells-out-to-posix-find-…` (LOW).
+- **#971** `fix(e2e-render-map)` — resolves the multi-file empty-root HIGH, single-input LOW, partial-seed-loss
+  MED and the D6 textContent MED; corrects the tier's false CI hard-gate claim (that gap stays open). The
+  adversarial pass caught the first D6 redesign scoring a seeded `<select></select>` green. Tier 12 → 47. Files 2 LOW.
+- **#972** `fix(composition)` — resolves `g-uptoroot-vs-distrel-anchor-mismatch`,
+  `g-shell-subdir-asset-guard-pins-a-404-path` and the HIGH
+  `g-composed-route-drops-the-attr-tpl-effect-…`: ONE root — a subdirectory shell's route pages 404'd its css
+  and bundle, so every shell-chrome reactive construct was dead on routes. §40.8.2 conformance restoration;
+  root-shell output byte-identical. Files the MED RULING
+  `g-soft-nav-to-an-error-route-hard-navigates-where-spec-20-8-5-5-says-swap-into-outlet` for bryan.
+- **#973** `test(tokenizer)` — resolves `g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour`.
+- **#974** `fix(e2e-render-map)` — resolves `g-e2e-render-map-hidden-text-counts-as-content-…`; partially
+  resolves the baseline-drift LOW (orphans now named; regeneration owed on POSIX).
+
+**Gate:** `gate` + `windows` green on all seven; `tracking` red on each and proven pre-existing by name-set
+identity with main's run every time (the 5-test dev-watcher cluster). Maps not regenerated (watermark
+`e74f5423`, stale). One autoMode block (`gh pr merge 968`), cleared by Peter in three words.
+
 ### 2026-09-15 (S417 — peter — the floor convicted every code-bearing PR on it, and a drift pin found the bug it was built to detect the absence of)
 
 A Windows-clone session in two arcs. The first was the review floor, opened on Peter's standing
