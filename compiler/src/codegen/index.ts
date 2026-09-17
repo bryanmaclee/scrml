@@ -320,6 +320,28 @@ export interface CgOutput {
 }
 
 /**
+ * Source path → the POSIX path the artifact ACTUALLY occupies relative to the
+ * dist root. Models api.js `pathFor`: relative to the write base, with a leading
+ * `pages/` segment stripped (a `pages/X/` source emits at dist `X/`, §47.9.2).
+ * POSIX-normalized first so a native `\` cannot defeat the strip on Windows.
+ */
+function toDistRelPath(outputBaseDir: string, absPath: string): string {
+  return relative(outputBaseDir, absPath)
+    .replace(/\\/g, "/")
+    .replace(/^pages(?:\/|$)/, "");
+}
+
+/**
+ * A reference from one dist-relative location to another — the relative URL an
+ * emitted document in `hostDistDir` writes to reach `targetDistRel`. Both
+ * arguments are POSIX, dist-root-relative. A same-dir sibling yields a bare
+ * basename; a nested target `sub/x.js`; a shallower one `../x.js`.
+ */
+function distRelRef(hostDistDir: string, targetDistRel: string): string {
+  return relative(hostDistDir, targetDistRel).split(/[\\/]/).join("/");
+}
+
+/**
  * known-gaps-#6 (S152, Approach B) — compute the ordered dependency
  * `<script src>` paths for an entry's HTML.
  *
@@ -364,10 +386,7 @@ function computeDependencyClientScripts(
   // `../../schema.client.js`, i.e. a sibling of dist, and 404'd on every
   // cross-file dependency of every nested route). POSIX-normalized first so a
   // native `\` cannot defeat the match on Windows.
-  const toDistRel = (absPath: string): string =>
-    relative(outputBaseDir!, absPath)
-      .replace(/\\/g, "/")
-      .replace(/^pages(?:\/|$)/, "");
+  const toDistRel = (absPath: string): string => toDistRelPath(outputBaseDir!, absPath);
 
   // Dist dir of the HOST HTML — `<script src>` paths are relative to it. That
   // is the entry's own dist dir in the own-document case, and the composed
@@ -423,25 +442,18 @@ function computeDependencyClientScripts(
   // is stable regardless of nesting depth. Fallback (no outputBaseDir):
   // basename siblings.
   //
-  // NOT claimed: agreement with the per-page composition `upToRoot`
-  // (~`index.ts:2311`). That anchors on `relative(dirname(entryFilePath), …)`
-  // while this anchors on `relative(outputBaseDir, …)` (which is what `pathFor`
-  // uses, i.e. the real dist layout). The two coincide only when the entry sits
-  // at `outputBaseDir` or `outputBaseDir/pages`; a shell entry in some OTHER
-  // subdir makes them disagree, and `upToRoot` is the one that is wrong there
-  // (S280 finder-B fixture: a `shell/app.scrml` entry emits `../../app.css`
-  // from a root-level route, escaping dist). Tracked separately — this function
-  // does not fix it and must not be read as doing so.
+  // The per-page shell COMPOSITION resolves the shell's own stylesheet, bundle
+  // and runtime through the same two helpers (`toDistRelPath` + `distRelRef`),
+  // so a composed document's every asset ref models one dist layout
+  // (g-uptoroot-vs-distrel-anchor-mismatch, S419).
   return ordered.map((depAbs) => {
     const depClient = depAbs.replace(/\.scrml$/, ".client.js");
     if (!outputBaseDir) return basename(depClient);
-    const depDist = toDistRel(depClient);
-    // Relative path from the entry HTML's dist dir to the dep's dist file,
-    // POSIX-normalized. A same-dir sibling yields a bare basename (matching the
-    // entry's own `<script src="${base}.client.js">` form); a nested dep yields
+    // Relative path from the host HTML's dist dir to the dep's dist file. A
+    // same-dir sibling yields a bare basename (matching the entry's own
+    // `<script src="${base}.client.js">` form); a nested dep yields
     // `sub/dep.client.js` or `../dep.client.js`.
-    const rel = relative(entryDistDir, depDist).split(/[\\/]/).join("/");
-    return rel;
+    return distRelRef(entryDistDir, toDistRel(depClient));
   });
 }
 
@@ -3043,6 +3055,36 @@ export function runCG(input: CgInput): CgOutput {
             : 0;
           const upToRoot = depth > 0 ? "../".repeat(depth) : "";
 
+          // g-uptoroot-vs-distrel-anchor-mismatch, DESTINATION half (S419).
+          // `upToRoot` only climbs from this page to the dist ROOT; it says
+          // nothing about where a shell asset actually LIVES. The shell entry's
+          // `<entryBase>.css` / `<entryBase>.client.js` are written next to the
+          // entry's own document (api.js `pathFor`), so a shell at
+          // `shell/app.scrml` emits `dist/shell/app.css` — and the bare
+          // `${upToRoot}app.css` this used to write resolved to `dist/app.css`,
+          // a 404. With the shell bundle 404'd, every piece of shell-chrome
+          // reactivity in the composed route was dead (a nav `href="${…}"`
+          // shipped as the empty SSR placeholder —
+          // g-composed-route-drops-the-attr-tpl-effect; that effect lives in the
+          // shell bundle, which this document already lists).
+          //
+          // ONE computation for every shell asset the composed document
+          // references: the dist-relative path from THIS page's dist dir to the
+          // asset's real dist location — the model `computeDependencyClientScripts`
+          // already uses for the shell's dependencies. For a shell at the dist
+          // root (or at `pages/`) this is byte-identical to `${upToRoot}<name>`.
+          // With no dist base (no write layout to model) the pre-S419 form stands.
+          const pageDistDir = cgOutputBaseDir
+            ? dirname(toDistRelPath(cgOutputBaseDir, filePath))
+            : null;
+          const entryDistDir = cgOutputBaseDir
+            ? dirname(toDistRelPath(cgOutputBaseDir, entryFilePath))
+            : null;
+          const shellAssetRef = (name: string, atDistRoot: boolean): string =>
+            pageDistDir !== null && entryDistDir !== null
+              ? distRelRef(pageDistDir, atDistRoot ? name : `${entryDistDir}/${name}`)
+              : `${upToRoot}${name}`;
+
           // GH #235 — the composed document rebuilds its ENTIRE script set from
           // scratch (the page's original tags were stripped above), so every
           // `<script>` a route page needs has to be re-derived HERE. Pre-fix
@@ -3092,7 +3134,7 @@ export function runCG(input: CgInput): CgOutput {
             )) {
               pushScript(depSrc);
             }
-            pushScript(`${upToRoot}${entryBase}.client.js`);
+            pushScript(shellAssetRef(`${entryBase}.client.js`, false));
           }
           // Re-add the page's own client.js (was stripped above). basename
           // (win32-aware, matches the asset-naming sites) — not a hand-rolled
@@ -3144,7 +3186,8 @@ export function runCG(input: CgInput): CgOutput {
                 // to whatever the own-document path emitted — SINGLE prefix,
                 // byte-identical to pre-fix composed output.
                 const bareSrc = src.replace(/^(?:\.\.?\/)+/, "");
-                runtimeTagRewritten = `<script${scriptModuleTypeAttr} src="${upToRoot}${bareSrc}"></script>`;
+                // The shared runtime is written ONCE at the dist root.
+                runtimeTagRewritten = `<script${scriptModuleTypeAttr} src="${shellAssetRef(bareSrc, true)}"></script>`;
               }
             }
           }
@@ -3184,10 +3227,11 @@ export function runCG(input: CgInput): CgOutput {
 
           // Add the entry's CSS link so shell styles (Tailwind utility
           // classes used by header/footer/nav) reach per-page HTMLs.
-          // The entry CSS lives at `<entryBase>.css` next to app.html;
-          // per-page HTMLs may be nested, so prefix with upToRoot.
+          // The entry CSS lives at `<entryBase>.css` next to the entry's own
+          // document (which may itself sit in a subdir); per-page HTMLs may be
+          // nested, so resolve page-dir → entry-dir.
           if (entryOutput?.css && entryBase) {
-            const entryCssTag = `  <link rel="stylesheet" href="${upToRoot}${entryBase}.css">`;
+            const entryCssTag = `  <link rel="stylesheet" href="${shellAssetRef(`${entryBase}.css`, false)}">`;
             // Insert right before the </head> so it appears AFTER the
             // page's own CSS (so per-page CSS — which is more specific
             // — wins on conflicts, consistent with the page-content-
