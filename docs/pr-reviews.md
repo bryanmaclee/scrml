@@ -1197,3 +1197,32 @@ every load-bearing finding was then re-verified by the PA personally before it e
 <!-- @review pr=960 verdict=carve-out by=S417-peter date=2026-09-15 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-a-wrap-PR-touching-only-docs-changelog-md-hand-off-md-handOffs-delta-log-md-and-one-handOffs-incoming-drop-none-of-which-match-CODE_BEARING_RE-no-code-path-to-review-by-construction -->
 
 <!-- @review pr=961 verdict=carve-out by=S417-peter date=2026-09-15 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-the-scheduled-generated-rollup-touching-master-list-md-alone-which-does-not-match-CODE_BEARING_RE-and-whose-content-is-machine-generated-by-scripts-state-ts-write-so-the-reviewable-surface-is-the-generator-not-this-commit -->
+
+## S419 (2026-09-16, Peter) — the floor drained 5 to 0, and all three code-bearing PRs were mine and all three returned a finding
+
+Five owed: #963–#967. Classified by running `review-debt.ts`'s own `CODE_BEARING_RE` against
+`gh pr view <n> --json files`, not by the S417 hand-off's labels: **#963, #964, #965 are code-bearing**
+(test files under `compiler/tests/`); **#966** (the S417 wrap) and **#967** (scheduled regen) match no
+code-bearing path.
+
+Each code-bearing PR went to an independent adversarial dispatch in its OWN worktree (S417's miss was four
+mutating reviewers in one shared checkout), briefed to FALSIFY the PR's claims and seeded with no PA
+hypothesis. ⚑ **The first dispatch attempt failed at worktree creation:** my own S417 inbox drop had a
+189-char filename, past Windows MAX_PATH under `.claude/worktrees/agent-<id>/` — fixed by rename in #968
+before any review could run. Every load-bearing finding was then re-reproduced by the PA by execution.
+
+**All three returned a finding. Zero clean — and all three are PRs I authored at S417.** The shared
+shape: each PR correctly diagnosed a vacuity or a separator defect, and then re-created the same class
+one level away from where it looked.
+
+<!-- @review pr=963 verdict=finding by=S419-peter date=2026-09-16 probe=ALL-THIRTEEN-STATED-CLAIMS-CHECKED-the-core-mutation-proof-REPRODUCES-exactly-blinding-the-sha256-comparison-gives-7-pass-2-fail-with-the-two-new-tests-failing-BUT-THE-EXIT-1-VERDICT-HAS-ONE-MUTATION-DETECTOR-NOT-ONE-PER-TERM-PA-REPRODUCED-BY-EXECUTION-replacing-the-whole-findings-sum-of-about-12-difference-kinds-with-contentDiffs-length-leaves-the-suite-9-pass-0-fail-script-restored-md5-f678176d-identical-so-a-gate-that-stopped-counting-compile-failures-or-diagnostic-code-changes-stays-green-the-same-vacuity-963-diagnosed-one-level-down-PLUS-reviewer-reproduced-the-opt-in-test-builds-a-DIFFERENT-revision-so-allow-same-revision-is-inert-in-it-and-the-numeric-flag-test-passes-reverify-limit-which-does-not-exist-in-diff-mode-ALSO-the-comment-claiming-the-DIFFERING-regex-is-the-assertion-that-dies-is-false-an-earlier-assertion-fails-first-FILED-g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms-MED-LOW-the-suite-runs-only-in-the-continue-on-error-tracking-job -->
+
+<!-- @review pr=964 verdict=finding by=S419-peter date=2026-09-16 probe=THE-MINT-SITE-FIX-HOLDS-AND-BITES-reviewer-reverted-it-5-pass-1-fail-restored-green-hash-matched-BUT-ONE-HIGH-PA-REPRODUCED-BY-PROBE-the-PR-normalised-relpath-and-not-inputFiles-so-findAppDirRoot-splits-absolute-win32-paths-on-forward-slash-and-returns-EMPTY-STRING-for-per-route-roles-22-multifile-and-23-trucking-dispatch-reviewer-reproduced-all-three-then-compile-IDENTICAL-output-html-438-client-2206-score-renders-empty-GREEN-and-the-delta-test-reports-22-multifile-as-an-IMPROVEMENT-pre-fix-they-failed-LOUDLY-as-HARNESS-ERROR-post-fix-they-pass-silently-so-the-PR-converted-a-loud-failure-into-a-false-green-over-the-flagship-FILED-HIGH-g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows-PLUS-MED-partial-seed-loss-is-silent-renaming-3-of-4-seeds-stays-6-0-and-LOW-single-input-multi-app-mirrors-nothing-PA-reproduced-root-equals-the-file-path-the-912-expect-figure-in-the-body-is-mostly-baseline-schema-checks-not-comparisons -->
+
+<!-- @review pr=965 verdict=finding by=S419-peter date=2026-09-16 probe=TWO-MED-BOTH-PA-REPRODUCED-BY-MUTATION-tokenizer-restored-hash-identical-D1-THE-COVERAGE-PIN-DERIVES-NOTHING-its-ANGLE_OPERATORS-is-a-hand-typed-list-of-10-while-its-header-says-the-tokenizer-holds-the-truth-and-this-file-is-that-comparison-adding-the-operator-less-equal-greater-to-MULTI_OPS-leaves-both-pins-26-pass-0-fail-and-reviewer-reproduced-a-while-head-using-it-then-compiles-with-zero-errors-and-the-body-dropped-the-exact-fifth-instance-the-pin-claims-to-catch-D2-THE-ORDERING-PIN-IS-TEXTUAL-a-longest-first-sort-in-the-matcher-loop-with-the-array-untouched-leaves-26-pass-0-fail-while-n-unsigned-shift-2-then-compiles-and-emits-correctly-so-red-in-both-directions-is-false-for-the-most-natural-fix-ALSO-reviewer-simulated-bryans-S418-UNIFY-ruling-the-coverage-pin-then-fails-with-a-stale-fix-it-and-following-it-leaves-a-zero-expect-pass-DISPOSITION-the-coverage-pin-is-to-be-REPLACED-by-a-structural-pin-in-the-UNIFY-build-routed-to-bryan-not-patched-now-FILED-both -->
+
+<!-- @review pr=966 verdict=carve-out by=S419-peter date=2026-09-16 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-the-S417-wrap-PR-no-file-matches-CODE_BEARING_RE-checked-against-gh-pr-view-966-json-files-no-code-path-to-review-by-construction -->
+
+<!-- @review pr=967 verdict=carve-out by=S419-peter date=2026-09-16 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-the-scheduled-regen-plus-1-minus-1-no-file-matches-CODE_BEARING_RE-checked-against-gh-pr-view-967-json-files-machine-generated-so-the-reviewable-surface-is-the-generator -->
+
+<!-- @review pr=968 verdict=carve-out by=S419-peter date=2026-09-16 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-a-pure-R100-rename-of-one-handOffs-incoming-file-content-unchanged-no-file-matches-CODE_BEARING_RE -->

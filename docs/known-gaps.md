@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 108 |
-| MED | 250 |
-| LOW | 94 |
+| HIGH | 109 |
+| MED | 254 |
+| LOW | 95 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -15347,3 +15347,89 @@ exist across the compiler; the raw 325-site figure is WORTHLESS (most are markup
 the angle is a delimiter and nothing merges) and must never be quoted. Probed 6 shift operators across
 9 syntactic positions (63 compiled cases): **shifts behave correctly in ordinary expression
 positions.** The class bites ONLY where code does token-text SET-MEMBERSHIP or angle DEPTH-COUNTING.
+
+## §S419 — gaps filed S419 (2026-09-16, Peter; all surfaced by the review floor's S239 pass over #963–#965)
+
+Every entry below was reported by an independent adversarial dispatch briefed to FALSIFY the PR's own
+claims, and each load-bearing one was re-reproduced by the PA by execution before filing.
+
+### g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms — the exit-1 verdict has a mutation detector for the artifact-hash term only — `NEW S419-peter (review floor, S239 pass on #963); MED; open`
+<!-- @gap id=g-differential-exit-codes-suite-pins-one-of-twelve-finding-terms sev=MED status=open locus=compiler/tests/integration/corpus-emit-differential-exit-codes.test.js prov=review:S419-floor-pass-on-963 -->
+
+`scripts/corpus-emit-differential.ts` sums ~12 difference kinds into `findings` (source-set, compile
+failure, diagnostic code/text, artifact added/removed, content, syntax delta). #963 added the first
+`toBe(1)` cases, but both construct only a CONTENT-hash difference. **PA-REPRODUCED:** replacing the whole
+`findings` sum with `contentDiffs.length` leaves the suite **9 pass / 0 fail**; the script restored
+md5-identical. So a gate that silently stopped counting new compile failures or diagnostic-code changes —
+the evidence #956 was landed on — stays green. The same vacuity #963 diagnosed, one level down.
+
+Two further limbs, reviewer-reproduced: (a) the "opt-in must not suppress the verdict" test builds a
+DIFFERENT revision, so `--allow-same-revision` is inert in it — a verdict suppressed only when the opt-in
+is actually effective (same revision + real difference) passes 9/0; (b) the "non-numeric flag value is
+rejected" test passes `--reverify-limit`, a flag that does not exist in `diff` mode, so it re-tests the
+unknown-flag branch (exit 2 on a VALID value too). Fix shape: one `toBe(1)` case per finding term, a
+same-revision + opt-in + difference case, and a real value flag. Pairs with
+`g-differential-invalid-run-exits-1-…` (same file).
+
+### g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows — every genuine multi-file app compiles the wrong tree and scores green — `NEW S419-peter (review floor, S239 pass on #964); HIGH; open`
+<!-- @gap id=g-e2e-render-map-multi-file-apps-compile-an-empty-root-on-windows sev=HIGH status=open locus=compiler/tests/e2e-render-map/render-harness.js:findAppDirRoot prov=review:S419-floor-pass-on-964 -->
+
+#964 normalised `relpath` at the enumerator's mint site but not `app.inputFiles`, which stay absolute
+win32 paths. `render-harness.js` `findAppDirRoot` splits them on `/`, so the common prefix is `""`.
+**PA-REPRODUCED by probe on main:** `per-route-roles` (5 files), `22-multifile` (3), `23-trucking-dispatch`
+(36) all resolve `root=""`. Reviewer-reproduced downstream: all three compile to the IDENTICAL output
+(`html=438 client=2206`, 0 errors) — none compiles its own source — score `renders-empty` (GREEN), and the
+delta test reports `examples/22-multifile … compiles-but-throws -> renders-empty` as an IMPROVEMENT. With
+`inputFiles` normalised the real roots appear and outputs differ (`839/2660/1374`).
+
+**#964 made this worse, not better:** pre-fix these apps mis-classified as single-file and failed LOUDLY
+(HARNESS-ERROR); post-fix they pass silently, inviting a baseline "improvement" that is a regression mask
+over the flagship. The PR's "normalise at the mint site, no next consumer to find" durable was right in
+principle and incomplete in execution — the mint site mints TWO path families. Also absent from its
+consumer list: `render-harness.js:65` `relpath.split("/").pop()`.
+
+### g-e2e-render-map-partial-seed-loss-is-silent — the non-vacuity guard only fires on a TOTAL empty — `NEW S419-peter (review floor, S239 pass on #964); MED; open`
+<!-- @gap id=g-e2e-render-map-partial-seed-loss-is-silent sev=MED status=open locus=compiler/tests/e2e-render-map/e2e-render-map.test.js prov=review:S419-floor-pass-on-964 -->
+
+The guard is `seeded.length > 0`. Reviewer-reproduced: renaming 3 of the 4 `POPULATED_SEEDS` keys leaves
+**6 pass / 0 fail** and still prints "with-data coverage: 4 populated of 438" — the floor test counts
+`#populated` keys in the BASELINE JSON, not live-matched seeds, and the delta loop walks live seeds, so a
+populated baseline cell that loses its seed silently stops being compared. Fix: assert live-seeded count
+equals baseline populated count, or warn on baseline cells never observed.
+
+### g-e2e-render-map-single-input-multi-app-mirrors-nothing — `benchmarks/fullstack-scrml` renders nothing on every OS and scores green — `NEW S419-peter (review floor, S239 pass on #964); LOW; open`
+<!-- @gap id=g-e2e-render-map-single-input-multi-app-mirrors-nothing sev=LOW status=open locus=compiler/tests/e2e-render-map/render-harness.js:findAppDirRoot prov=review:S419-floor-pass-on-964 -->
+
+A MULTI_FILE_APP_DIRS entry with ONE input file makes `findAppDirRoot` return the FILE path (PA-reproduced:
+`root=…\fullstack-scrml\app.scrml`); `mirrorTree` of a file copies nothing → `NO-HTML-EMITTED` →
+`renders-empty` (green). Pre-existing, not #964's. Same false-green class as the HIGH above; fix together.
+
+### g-condition-head-coverage-pin-hand-enumerates-the-operators-it-claims-to-derive — a new merged angle operator escapes and both pins stay green — `NEW S419-peter (review floor, S239 pass on #965, my own S417 PR); MED; open`
+<!-- @gap id=g-condition-head-coverage-pin-hand-enumerates-the-operators-it-claims-to-derive sev=MED status=open locus=compiler/tests/unit/condition-head-angle-operator-coverage.test.js prov=review:S419-floor-pass-on-965 -->
+
+The header says "the tokenizer already holds the truth … this file is that comparison"; `ANGLE_OPERATORS`
+is a hand-typed closed list of 10 that never reads `MULTI_OPS`. **PA-REPRODUCED:** adding `"<=>"` to
+`MULTI_OPS` leaves both #965 pins **26 pass / 0 fail**; reviewer-reproduced that
+`while (n + 1) <=> 2 { … }` then compiles `errors: []` with the body dropped — exactly the "fifth instance"
+the pin claims to catch. The PR re-created the hand-enumeration failure one level up.
+
+⚑ **Interaction with bryan's S418 UNIFY ruling (the token after a condition head's `)` SHALL be `{`):**
+that build deletes the enumeration this pin guards. Reviewer-simulated: the pin then fails 2 tests with
+only an array diff; its fix-it text points at a set that no longer exists; and following it
+(`KNOWN_ESCAPES = []`) leaves a test that passes with zero expects. Also: the `>>>` fence never exercises
+the `>>>` set member (it lexes as `>>`+`>`), so that member is dead and unpinned. **Disposition: do NOT
+patch the derivation now — the UNIFY build should REPLACE this file with a structural pin ("any token but
+`{` after `)` is refused"), which cannot be under-enumerated.** Routed to bryan.
+
+### g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour — the pin stays green when the `>>>` bug is actually fixed — `NEW S419-peter (review floor, S239 pass on #965, my own S417 PR); MED; open`
+<!-- @gap id=g-multi-ops-ordering-pin-reads-array-text-not-tokenizer-behaviour sev=MED status=open locus=compiler/tests/unit/tokenizer-multi-ops-ordering.test.js prov=review:S419-floor-pass-on-965 -->
+
+All checks parse the `MULTI_OPS` array SOURCE TEXT; none runs the tokenizer, including the test labelled
+"BEHAVIOURAL CONFIRMATION". **PA-REPRODUCED:** changing the matcher loop to iterate
+`[...MULTI_OPS].sort((a, b) => b.length - a.length)` (array untouched) leaves the pins **26 pass / 0 fail**,
+while reviewer-reproduced `return n >>> 2` then compiles `errors: []` and emits `n >>> 2`. So the pin
+asserts `>>>` is unreachable after it became reachable — "red in both directions" is false for the most
+natural fix. Also fragile: `] as const;` → a JSON-parse SyntaxError; a comment line inside the array with
+quoted operators → a false shadow. Fix shape (inert, test-only): tokenize each member and assert the
+token count. Whether `>>>` SHOULD lex as one token is still bryan's ruling; the pin should record current
+behaviour behaviourally, not textually.
