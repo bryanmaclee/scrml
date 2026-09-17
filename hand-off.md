@@ -1,3 +1,143 @@
+# scrml — Session 419 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: CONCURRENT with S418-bryan all session** — his board read LIVE (booted 2026-09-15), no
+> wrap commit and no PR from it at S419 close. He RULED four language questions (user-voice-scrml.md S418):
+> `E-ASSIGN-003` fires (a) · §49.2.1 braceless loop bodies REFUSED (b) · **UNIFY — the token after a condition
+> head's `)` SHALL be `{`** (a, "I like braces") · `E-MU-001` specified as-is (a). **None of the four builds has
+> landed. They are HIS.** I touched none of their footprint.
+>
+> ⚑ **THE S417 PICKUP IS PARTLY SUPERSEDED by those rulings:** its item 2 bullets 1–2 (§34 "do not widen" vs
+> the 19-member set; the `>>>=` refusal) and item 4(a) are MOOT — UNIFY deletes the continuation enumeration
+> wholesale. Still bryan's and still unruled: the `>>>` tokenizer reorder and `examples/09-error-handling`
+> (`fail .SubmitFailed`).
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Drain the review floor first — seven sessions running it has returned something real.** It will read
+   **7 OWED: #969 (ledger-only carve-out) + #970, #971, #972, #973, #974 (all code-bearing) + this wrap PR.**
+   (#968 is recorded.) Classify by running `review-debt.ts`'s `CODE_BEARING_RE` against `gh pr view <n> --json files` —
+   never by this hand-off. **Every one of #970–#974 already had a pre-land S239 pass** (#970/#971/#972 by an
+   independent adversarial agent + a fix round; #973/#974 PA-verified by execution only, NO independent agent
+   — review those two hardest). The floor pass is still owed on all of them; a pre-land pass is not a floor
+   record.
+   ⚑ **Mutation-bearing reviewers get `isolation: "worktree"`** — and worktrees now WORK on this clone (see 2).
+
+2. ⚑ **ENVIRONMENT, NEW: a tracked filename ≥ ~215 chars disables EVERY worktree dispatch on this Windows
+   clone** ("Filename too long" at `git worktree add`). My S417 inbox drop (189 chars) did it; fixed by rename
+   in #968. **Keep `handOffs/incoming/` drop slugs SHORT** (date + from/to + ≤5 words; long title goes in
+   `subject:`). A failed attempt leaves empty `worktree-agent-*` branches at origin/main — delete them.
+
+3. **Bryan's, and NOT to be built by us** (unchanged + two new routings):
+   - the four S418 ruling builds (above);
+   - ⚑ NEW — `g-soft-nav-to-an-error-route-hard-navigates-where-spec-20-8-5-5-says-swap-into-outlet` (MED,
+     RULING): SPEC §20.8.5(5) says a 404/500 SHALL swap into `<outlet>`; the runtime deliberately hard-navigates
+     ("Finding #3", `9b00511b`). Linked to `g-soft-nav-redirect-leaves-orphan-history-entry` (same branch).
+     **Do not fix either until he rules.**
+   - ⚑ NEW — `g-condition-head-coverage-pin-hand-enumerates-the-operators-it-claims-to-derive` (MED): to be
+     REPLACED by a structural pin inside his UNIFY build (inbox drop `2026-09-16-from-S419-peter-to-bryan-unify-build-pin.md`).
+     Do NOT patch it.
+   - still: `>>>` reorder (`g-multi-ops-first-match-shadows-the-longer-operator`), examples/09 `fail` bare
+     variant, the whole S417 list.
+
+4. **Peter-lane MED/LOW candidates left from the S419 triage, already reproduced on HEAD 8c996934** (verify
+   again — HEAD moved):
+   - `g-e2e-render-map-tier-runs-in-no-ci-job-at-all` (MED, stays open): the false claim was corrected; wiring
+     a NON-required job on Linux AND Windows is the remainder — `.github/` is shared infra, so propose it to
+     bryan rather than landing it unilaterally.
+   - `g-e2e-render-map-baseline-keys-have-drifted-…` (LOW, PARTIAL): detection + temp dir fixed; the baseline
+     REGENERATION is owed on a POSIX host after todomvc + 09 are dispositioned.
+   - `g-differential-capture-shells-out-to-posix-find-…` (LOW): ⚑ `find` is DELIBERATELY the independent
+     second enumerator for HARD REQ 4 — do NOT swap it for the script's own walk.
+   - reserves the triage excluded as possibly non-inert (need a direction-of-change call first):
+     `g-display-position-call-is-emitted-at-file-scope-and-invoked-again-by-the-render-wiring` (3 calls at boot),
+     `g-template-literal-escaped-delimiter-mislowered`, `g-sse-stream-errors-are-swallowed-…`.
+   - probably STALE, probe once then close: `g-w-lint-018-false-fires-on-the-sanctioned-generator-surface`.
+   - cheap inert cleanups confirmed still real: `g-s320-autoawait-stale-injectpromiseawait-comments`.
+
+5. **STILL NEEDS A POSIX CLONE (unchanged):** `g-todomvc-mount-throw-unclassified`; plus a Linux run of
+   `compiler/tests/browser/composed-route-shell-chrome-wiring.browser.test.js` (#972's browser test ran ONLY
+   locally on Windows — CI's browser lane did not run it; its integration sibling ran 8/8 in CI).
+
+6. ⛔ **UNCHANGED, CARRIED:** no recovery scan in `collectIfCondition`; do not widen the four `[^>]` marker
+   regexes; `bun scripts/types-gate.ts --write` still owed on a clone with an extensionless `tsc`.
+
+7. **Standing from Peter, exercised again:** merge on green without re-asking (re-measure `tracking`'s
+   failure NAME-SET against main's run every time — it was the same 5 dev-watcher tests on all 7 PRs this
+   session); surface `⛔ BLOCKED BY autoMode — <exact command>` (fired once, `gh pr merge 968`, cleared with
+   *"merge 968"*).
+
+## WHAT LANDED
+
+Seven PRs, all gate-green, all merged. **One touched compiler source (#972); the rest are instruments/tests/ledger.**
+
+- **#968** `chore(inbox)` — shortened the 189-char S417 drop that broke every worktree on Windows.
+- **#969** `review(s419)` — floor 5 → 0; all three code-bearing PRs (#963–#965, mine) returned a finding; 6 gaps filed.
+- **#970** `fix(differential)` — exit 1 means only "differences found"; every one of 12 finding terms has a
+  test that dies without it; `gitRevision` refuses a non-toplevel root. 3 MED resolved. Suite 9 → 36.
+- **#971** `fix(e2e-render-map)` — multi-file apps compiled the WRONG TREE on Windows and scored green;
+  partial seed loss is loud; D6 "empty" means nothing content-bearing rendered. 1 HIGH + 2 MED + 1 LOW. Tier 12 → 47.
+- **#972** `fix(composition)` — a subdirectory shell's route pages 404'd its css + bundle, so ALL shell chrome
+  reactivity was dead on routes. One path fix in `codegen/index.ts`. 1 HIGH + 2 MED. §40.8.2 conformance restoration.
+- **#973** `test(tokenizer)` — the MULTI_OPS ordering pin runs the tokenizer instead of reading array text. 1 MED.
+- **#974** `fix(e2e-render-map)` — hidden/script text is not content; orphan baseline cells are named; temp
+  dirs under `os.tmpdir()` with cleanup. 1 LOW resolved + 1 LOW partial.
+
+## 🔭 DURABLE
+
+**Every PR I wrote at S417 re-created the class it diagnosed, one level away.** #963 fixed "no test for
+exit 1" with a test for ONE of twelve exit-1 causes. #964 normalised `relpath` at the mint site and left
+`inputFiles` — the same site minted a second path family. #965 derived nothing it claimed to derive and pinned
+array text while calling it behaviour. **When you fix a vacuity, ask what the NEAREST sibling of your own fix
+is, and test that too** — it is where the class moves when you push on it.
+
+**A fix can convert a loud failure into a silent green.** Pre-#964 the multi-file apps failed as
+HARNESS-ERROR; post-#964 they compiled a different program and scored `renders-empty`, and the delta reported
+it as an IMPROVEMENT. A "fix" that makes red go away is not evidence until you check WHAT turned green.
+
+**Two defects filed separately were one bug (#972).** The dead nav href HIGH (filed "locus unknown") and the
+404 asset MED shared a root: the shell's wiring lives only in the bundle that 404'd. Nothing was dropped.
+**Before building a second fix, execute the page and ask whether the first bug explains the second.**
+
+**A presence check is not a content check.** The first D6 redesign counted element PRESENCE, so a seeded
+`<select></select>` — the exact "the seeded loop rendered nothing" bug D6 exists for — scored green. The
+adversarial pass caught it; my own read of the design did not.
+
+## ⚑ MISSES (mine)
+
+1. **★★ My S417 drop filename silently disabled all isolation on this clone.** Three dispatches failed at
+   worktree creation. Caught immediately, but only because the harness errored; nothing checked it at write time.
+2. **★ A `cd` into an agent's worktree moved the harness's primary working directory.** Recovered by
+   re-asserting the root; the agent's tree was verified untouched. Use absolute paths / `git -C`, never `cd`.
+3. **★ Two shell-escaping failures:** a heredoc (S416/S417's lesson, repeated) and a perl replacement that
+   turned `C:\tmp` into a TAB in a ledger note — caught by reading the output, fixed in a follow-up commit.
+   Write text to a file first; verify bytes with `od -c`.
+4. **★ #973 and #974 landed on PA execution-verification only, no independent adversarial agent** — a
+   judgment call for test-only diffs, but S417 showed test-only PRs are exactly where the floor finds things.
+   Named in pickup item 1.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on all 7 PRs; `tracking` red on each, **proven pre-existing by name-set
+  identity with main's run every time** (the 5-test dev-watcher wait-budget cluster).
+- **CI-executed evidence:** #970's suite ran 36/36 in `tracking` (Linux); #972's integration guard 8/8 in
+  `tracking`; #973's pin in `windows`. **Not CI-executed:** the e2e-render-map tier (no job runs it — open
+  gap) and #972's browser test.
+- `state --check`, `facts --check` PASS at each landing.
+- **Board: HIGH 107 · MED 247 · LOW 96** (boot: 108 · 250 · 94). Resolved 12 (2 HIGH · 8 MED · 2 LOW) · filed
+  10 (1 HIGH · 5 MED · 4 LOW, counting the #969 six) — net −1 · −3 · +2, reconciled against `state.ts`.
+- **Maps NOT regenerated** — watermark still `e74f5423` (stale since before S417; `g-nav-maps-have-no-scheduled-refresh`
+  is open and the triage confirmed the nav-map stage is absent from `cloud-maps.yml`). #972 added two
+  module-level helpers in `codegen/index.ts` (`toDistRelPath`, `distRelRef`); no file moved.
+- **Worktrees:** all this session's cleaned EXCEPT `agent-aba5185b9d1048b0f` (#974's, landed) — LOCKED by the
+  agent process at wrap; remove with `git worktree remove -f -f` + `git branch -D worktree-agent-aba5185b9d1048b0f`.
+  Pre-existing, not mine: `agent-a0742fe4…`, `agent-a4e6b5f2…`, `onmount-c` (S322 build held for bryan's
+  review), sibling `scrml-pinned`; two empty Aug-26 orphan dirs `agent-a04e9c51…` / `agent-ad349cc5…`.
+- **Outbound:** one drop to bryan (the UNIFY coverage-pin note, in #969). SIX peter→bryan drops now sit unread.
+
+---
+
 # scrml — Session 417 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S416/S415/S414/
