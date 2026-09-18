@@ -2,6 +2,70 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S421 — 2026-09-18 (bryan · XPS-8950)
+
+**A PR-backlog drain: 26 open PRs, every one of them bryan's, oldest 39 days — taken to 6.** The docs
+half consolidated onto ONE branch so fifteen PRs need one merge instead of fifteen (branch protection
+is `strict:true`, so each merge re-stales every sibling — the hand-race that had already lost #887 and
+#899 twice). Five more closed as verified-superseded. **A third of the "code-bearing" half turned out
+to be already landed**, which only a file-by-file diff against `main` could show. Board **HIGH 108 →
+110 · MED 254 → 257** — the rise is filings becoming VISIBLE, not new breakage.
+
+- **PR #982 `land/s421-docs-backlog`** — fifteen PRs MERGED in (not cherry-picked), so their head SHAs
+  become ancestors of `main` and GitHub auto-closes them all. ⚑ **Requires a MERGE COMMIT, not a
+  squash**; a squash orphans every one. Delivers: the **five flogence adopter reports** that had never
+  reached `main` (including the HIGH silent one — an imported server fn assigned to a reactive cell
+  lands as a Promise, compiles, serves, renders nothing, no diagnostic), the **S407 and S409 hand-off
+  blocks** (neither had ever been on `main`, so every session since booted off a hand-off missing
+  bryan's last two), **four dPA ruling records**, and three S407 spec-defect filings.
+  Consolidated: #559 #640 #655 #727 #887 #899 #906 #918 #919 #920 #937 #938 #950 #951 #962.
+
+- **PR #983 `fix/s421-browser-tier-order`** — re-implements #529, which was 422 commits behind and no
+  longer applied: it patched a `spawnSync` call the S357 streaming fix had replaced with `spawn`. The
+  idea survived the rewrite, the patch did not. `bun test <dir>` enumerates in FILESYSTEM order; the
+  tier shares one happy-dom document and the gate asserts an exact failure NAME SET, so order decides
+  the verdict. ⚑ Stated in the commit rather than implied: **the bite cannot be demonstrated on this
+  clone** — `ls -U` here already returns sorted order, so the change is a measurable no-op locally and
+  its value is removing the DEPENDENCE on that coincidence. Two guards added, because replacing a
+  directory with an explicit list is a §8 NARROWING: an empty list and a newly-appeared subdirectory
+  each exit 2 with a HARNESS ERROR rather than quietly running a smaller tier.
+
+- **Five PRs verified superseded and owed a close** (branches retained, nothing deleted): **#885**
+  byte-identical to #906 · **#862** subsumed by #865 · **#905** would REGRESS SPEC-INDEX (its line
+  totals are OLDER than main's) · **#907** all three code files byte-identical to main, whose `ci.yml`
+  already calls both gates · **#918** code half already landed, ruling record folded into #982.
+
+- **`compiler/tests/integration/corpus-emit-differential-exit-codes.test.js`** — the script-copy
+  fixture omitted `package.json`, so the repo's `"type": "module"` did not travel with the copy, the
+  ESM stub worker parsed as CJS, and the script aborted at a SyntaxError instead of the no-result
+  branch the test names. The assertion was being satisfied by the wrong abort. ⚑ It had been red on
+  `main` and **hard-blocked every local commit on this clone**, while `gate` stayed green — because
+  `compiler/tests/integration` runs in NO blocking job (only `tracking`, non-blocking by two
+  mechanisms) but the pre-commit hook runs it and bails. Not filed as a new gap: it is a live instance
+  of `g-tracking-job-red-on-main-and-nobody-reads-it` and `g-tracking-job-is-red-as-a-whole`, and a
+  third entry would fork the class.
+
+- **`delta-lint --fix` renumbered 11 already-published entries** and had to be reverted. The 14-branch
+  union produced 70 colliding sequence numbers; `--fix` keeps first-in-file order, which is blind to
+  which side is PUBLISHED. The flogence bridge uses that sequence as a checkpoint cursor, so those 11
+  would have dropped out of the digest silently, with no gate going red. Redone by hand against main's
+  copy: all 2,360 published sequences keep their numbers, only the 282 unpublished branch entries
+  moved, verified entry-by-entry. The tool's own warning names this hazard; it fired on first contact
+  with a real multi-branch union. Structural fix would be a `--published-base <ref>` argument.
+
+- **`#770` reverse-verified and is NOT stale** — `hasProgramDbAttr` (`type-system.ts:8516`) still
+  searches only the current file's AST for a `<program db=>`, so under the canonical multi-file layout
+  `E-AUTH-005` still over-fires on every page file and server-rendered page data remains structurally
+  unavailable to every multi-file app. Written fix unmerged for 191 commits; first of the six
+  remaining.
+
+- **`S418-bryan` board marker flipped LIVE → CRASHED** (the ASUS died mid-session; it had read LIVE
+  for three days and both S419 and S420-peter correctly stayed off the footprint), and **an S418
+  hand-off block was reconstructed** from the voice ledger — its four ratified-but-unbuilt rulings had
+  existed only in `user-voice-scrml.md` and the board file, so a session reading `hand-off.md` for the
+  plan would not have found them.
+
+
 ## S407 — 2026-09-07/15 (bryan · XPS-8950)
 
 **A thin session that became an article-authoring arc, and the article standard found three
