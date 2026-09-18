@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 108 |
-| MED | 253 |
+| MED | 254 |
 | LOW | 100 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15534,8 +15534,27 @@ hard-nav decision. Row 1-4 of the fork rule do not obviously discriminate; bryan
 **Linked:** `g-soft-nav-redirect-leaves-orphan-history-entry` is the same branch (pushState happens before the
 fetch, so the hard-nav adds a second entry) — any fix to either should consider both.
 
-### g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject — every POPULATED seed produces an observation identical to the unseeded one, so D6 / `S-EMPTY-WITH-DATA` — the detector the whole tier exists for — has never run against data on any corpus cell — `NEW S420-peter (floor pass on #971 + #974, two independent reviewers converging from opposite ends; PA-reproduced by execution); HIGH; open`
-<!-- @gap id=g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject sev=HIGH status=open locus=compiler/tests/e2e-render-map/render-harness.js:474-482(the seed-set loop)+render-detectors.js:389(D6 gated on obs.seeded, hasRenderedContent is body-global) prov=empirical:PA-reproduced-at-a5c3810a-all-four-seeded-apps-observe-IDENTICAL-seeded-vs-unseeded -->
+### g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject — every POPULATED seed produces an observation identical to the unseeded one, so D6 / `S-EMPTY-WITH-DATA` — the detector the whole tier exists for — has never run against data on any corpus cell — `NEW S420-peter (floor pass on #971 + #974, two independent reviewers converging from opposite ends; PA-reproduced by execution); HIGH; narrowed S420 — LIMB 1 (the bridge) CLOSED, LIMB 2 (D6's body-global predicate) still open`
+<!-- @gap id=g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject sev=HIGH status=narrowed locus=compiler/tests/e2e-render-map/render-detectors.js:389(LIMB 2 — D6 gated on obs.seeded, hasRenderedContent is body-global; LIMB 1's seed bridge is FIXED in render-harness.js) prov=empirical:PA-reproduced-at-a5c3810a-all-four-seeded-apps-observe-IDENTICAL-seeded-vs-unseeded -->
+
+> ⚑ **NARROWED S420 — LIMB 1 IS CLOSED. The remaining defect is limb 2 only.**
+> The bridge now resolves a seed name STATICALLY against the chunk's real cell set (parsed from the
+> `_scrml_cs_*` accessor call sites) and its derived set, and writes **at most one key, or none**, with a
+> per-name reason code (`written` · `no-such-cell` · `derived-cell` · `set-threw`). A read-back is never
+> consulted — `_scrml_state` is a plain `{}` and the accessors are a bare property write/read, so EVERY
+> invented key reads back and a read-back certifies nothing. `domChanged` is the load-bearing signal.
+> **The seed is now live on `03-contact-book` and `25-triage-board`**; the other two write nothing at all
+> because their fixtures are wrong — see [[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]].
+>
+> ⛑ **D6 still fires nowhere, and that is now the whole of this entry.** `hasRenderedContent` inspects the
+> whole `body`, so page chrome satisfies it before any datum arrives. **`25-triage-board` renders all three
+> task lists EMPTY under a live seed and still scores `renders-clean`** — the board-bug shape D6 exists for,
+> now sitting in the corpus as a ready-made live subject. That evidence did not exist before limb 1 landed,
+> because the seed changed nothing at all.
+>
+> Landed on a branch whose S239 pass returned **2 HIGH + 2 MED + 4 LOW**, all closed structurally before
+> merge (the first revision's own evidence artifact certified a key for a cell that does not exist, and
+> would have routed a per-compile random token into the committed baseline).
 
 **PA-reproduced by execution at `a5c3810a`**, running each seeded app through `observeApp` twice — once with its fixture, once with `null`:
 
@@ -15672,3 +15691,31 @@ Reviewer-executed: stripping `sha256` from every artifact on both sides of a rea
 The `upToRoot` binding's only surviving reference is the fallback branch at `:3086`, taken only when `cgOutputBaseDir` is falsy — and `computeOutputBaseDir` (`api.js:231`) returns `null` only for a non-array or EMPTY input list, which cannot reach shell composition (composition needs an entry plus at least one route). So the block is unreachable in any real compile, and the base-dir-relative branch inside it is dead even in the fallback.
 
 The cost is navigational: a future reader lands on an 18-line comment presenting the S400 anchor fix as the mechanism that drives the emitted path, when it no longer drives any byte. Same shape as the `emit-expr.ts` stale-premise comments — a comment that survives the code it justified.
+
+### g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries — the populated seeds name a derived cell, a cell that does not exist, and a column value the app never matches, so with-data coverage is 1 app of 4 even with a working bridge — `NEW S420-peter (found by making the seed bridge live; each PA-verified against app source); MED; open`
+<!-- @gap id=g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries sev=MED status=open locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS — the 06-kanban, 16-remote-data and 25-triage entries) prov=empirical:PA-verified-each-against-the-app-source-at-a5c3810a-after-the-seed-bridge-made-resolution-observable -->
+
+Fixing the seed bridge ([[g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject]]) made the
+seeds RESOLVE, and resolution immediately showed that **three of the four fixtures could never have worked
+even with a correct bridge.** Each is a different defect, and each violates `seed-fixtures.js`'s own
+documented SEED-SHAPE INVARIANT:
+
+| fixture | seeds | why it cannot work | PA check |
+|---|---|---|---|
+| `examples/06-kanban-board.scrml` | `todo` | `const <todo> = @cards.filter(c => c.status == Status.Todo)` (`:42`) is a **DERIVED** cell — the runtime recomputes it from `@cards` and discards any write. The source cell is `cards`. ⚑ Doubly wrong: the fixture rows use `column:` where the struct field is `status: Status`. | read `06-kanban-board.scrml:6,12,30,42` |
+| `examples/16-remote-data.scrml` | `contacts` | **there is no `contacts` cell.** The app declares exactly one cell, `<phase>: ContactsPhase = .Idle` (`:64`); the list is `<each in=rows>` (`:159`) where `rows` is the MATCH BINDING of `@phase = .Loaded(rows)` (`:85`). No plain cell-set can drive this app at all — `.Loaded(rows)` is a payload-carrying variant. | grepped for a `contacts` cell decl — none; read `:64,:85,:145,:159` |
+| `examples/25-triage-board.scrml` | `tasks` with `column: "todo"` / `"doing"` | the app filters `@tasks.filter(t => t.column == col)` (`:123`) over `const columns = ["Inbox", "Doing", "Done"]` (`:46`). Under §45 strict equality `"doing" != "Doing"`, so **nothing matches**: the seed replaces the app's four default tasks with three empty columns. | read `:46,:57,:113,:123` |
+
+**Consequence, and it is the reason this is MED not LOW:** the tier's with-data half reaches **one app**, not
+four. `[[g-e2e-render-map-with-data-coverage-is-four-of-438]]` is corrected to 0-of-438 pre-bridge; post-bridge
+the honest figure is 1 app (`03-contact-book`, which renders both seeded rows).
+
+⚑ **`25-triage-board` is now the single most valuable cell in the tier** and should NOT be "fixed" first. With
+a live seed it renders all three task lists EMPTY and still scores `renders-clean` — which is exactly the
+board-bug shape D6 exists to catch, sitting in the corpus as a ready-made live subject for the
+`hasRenderedContent` scoping work (limb 2). Fix the detector against it BEFORE correcting the fixture, or the
+subject disappears.
+
+**Not silent any more.** The seed bridge reports a per-name reason code (`no-such-cell` · `derived-cell` ·
+`written` · `set-threw`) on `cell.detail.seed`, and the pinned per-app table reds in both directions — so a
+fixture coming alive forces this entry to be updated rather than drifting.
