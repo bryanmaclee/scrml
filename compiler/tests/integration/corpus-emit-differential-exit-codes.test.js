@@ -680,6 +680,13 @@ test("a capture SYNTAX-stage abort (the goggle worker returns no result for a jo
   const copy = join(dir, "corpus-emit-differential.ts");
   writeFileSync(copy, readFileSync(SCRIPT));
   expect(readFileSync(copy).equals(readFileSync(SCRIPT))).toBe(true);
+  // The repo's own package.json declares `"type": "module"`, which is what makes the REAL
+  // `corpus-check-goggles.js` parse as ESM. A copy that omits it is not a faithful copy: node
+  // falls back to CJS for a bare `.js`, the stub below dies at its `import` with a SyntaxError,
+  // and the script aborts for the WRONG reason — so the assertion below was being satisfied by
+  // a parse failure rather than by the no-result branch it names. Carry the declaration with
+  // the copy, exactly as the script's real neighbourhood supplies it.
+  writeFileSync(join(dir, "package.json"), `{"type":"module"}\n`);
   writeFileSync(
     join(dir, "corpus-check-goggles.js"),
     `import { writeFileSync } from "node:fs";\nwriteFileSync(process.argv[3], "{}");\n`,
