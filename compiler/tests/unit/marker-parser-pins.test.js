@@ -101,7 +101,7 @@ describe("@gap status scan (state.headingMarkerDrift) — UNWIDENED sibling, pin
     const src =
       "### g-z — a heading that says open — `NEW S1; MED; open`\n" +
       "<!-- @gap id=g-z sev=MED status=resolved locus=compiler/src/c.ts -->\n";
-    expect(headingMarkerDrift(src)).toHaveLength(1);
+    expect(headingMarkerDrift(src).drift).toHaveLength(1);
   });
 
   test("a `>` BEFORE status= makes the marker invisible to the scan — CURRENT behaviour, not endorsed", () => {
@@ -111,7 +111,45 @@ describe("@gap status scan (state.headingMarkerDrift) — UNWIDENED sibling, pin
     const src =
       "### g-z — a heading that says open — `NEW S1; MED; open`\n" +
       "<!-- @gap id=g-z sev=<MED> status=resolved locus=compiler/src/c.ts -->\n";
-    expect(headingMarkerDrift(src)).toHaveLength(0);
+    expect(headingMarkerDrift(src).drift).toHaveLength(0);
+  });
+
+  // ⛑ S420 — `g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings`.
+  // The scan used to require the status word to be the LAST thing before a closing backtick, which
+  // almost no real heading in the ledger satisfies: measured 279 of 998 headings parsed and 22 of 25
+  // real drifts invisible. These pin the three shapes that were escaping, the collapsed-bucket blind
+  // spot, the `non-gap` truncation, and the no-false-fire control. Each fails against the pre-S420 scan.
+  test("the shapes that used to escape the scan are now caught, and prose still does not false-fire", () => {
+    const H = (tail) => `### g-x — sym — ${tail}\n`;
+    const M = (status) => `<!-- @gap id=g-x sev=MED status=${status} -->\n`;
+    const cases = [
+      // [name, source, expected drift count]
+      ["bolded severity, NO trailing backtick", H("`NEW S1`; **HIGH**; open") + M("resolved"), 1],
+      ["status followed by a parenthetical", H("`NEW S1; MED; open (pre-existing, latent)`") + M("resolved"), 1],
+      ["status followed by a resolving-session note", H("`NEW S1; LOW; RESOLVED S347-peter`") + M("open"), 1],
+      // norm() used to collapse open/deferred/nominal, so this disagreement was invisible BY CONSTRUCTION.
+      ["deferred heading over an open marker", H("`NEW S1; MED; deferred`") + M("open"), 1],
+      // status=(\w+) used to truncate `non-gap` to `non`, which matched nothing and silently skipped.
+      ["non-gap marker is not truncated", H("`NEW S1; MED; resolved`") + M("non-gap"), 0],
+      ["agreement does not fire", H("`NEW S1; MED; open`") + M("open"), 0],
+      ["a heading with no status tail does not fire", "### g-v — no status tail at all\n" + M("open"), 0],
+    ];
+    for (const [name, src, want] of cases) {
+      expect({ name, drift: headingMarkerDrift(src).drift.length }).toEqual({ name, drift: want });
+    }
+  });
+
+  // The probe must state the population it measured — a bare count cannot be told apart from one taken
+  // over a quarter of the subject, which is how the 28% reach went unnoticed (pa-base §8, truncated probe).
+  test("the scan reports the population it inspected, not just a count", () => {
+    const src =
+      "### g-a — s — `NEW S1; MED; open`\n<!-- @gap id=g-a sev=MED status=resolved -->\n" +
+      "### g-b — s — `NEW S1; MED; open`\n<!-- @gap id=g-b sev=MED status=open -->\n" +
+      "### g-c — a prose heading with no status and no marker\n";
+    const got = headingMarkerDrift(src);
+    expect(got.headings).toBe(3);   // every `### ` line counted
+    expect(got.inspected).toBe(2);  // only those with a comparable status pair
+    expect(got.drift).toHaveLength(1);
   });
 });
 

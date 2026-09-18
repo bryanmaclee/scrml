@@ -16,12 +16,24 @@
 //
 // COUNT BASIS (the whole point of DD3 Fork 2 — see docs/known-gaps.md §0 "Count basis" legend):
 //   Every gap in docs/known-gaps.md carries a grep token
-//     <!-- @gap id=<id> sev=<HIGH|MED|LOW|NOMINAL> status=<open|resolved|deferred|nominal|non-gap|forensic> -->
+//     <!-- @gap id=<id> sev=<HIGH|MED|LOW|NOMINAL> status=<status> -->
 //   Headline counts derive ONLY from these tokens:
-//     HIGH/MED/LOW open = `sev=<SEV> status=open`
-//     Nominal line      = `sev=NOMINAL status=nominal`
-//   Everything else (resolved/deferred/non-gap/forensic, and a non-NOMINAL status=nominal such as the
-//   framing-corrected Bug 10) is excluded — those are the four entries a human silently discounts.
+//     HIGH/MED/LOW open = `sev=<SEV>` AND status ∈ GAP_STATUS_OPEN
+//     Nominal line      = `sev=NOMINAL` AND status ∈ GAP_STATUS_NOMINAL
+//   Everything in GAP_STATUS_CLOSED is excluded.
+//
+//   ⚑ THE STATUS VOCABULARY IS NOT A FIXED SIX AND `open` IS NOT THE ONLY OPEN VALUE. The authority is
+//   the GAP_STATUS_OPEN / GAP_STATUS_CLOSED / GAP_STATUS_NOMINAL sets below — read THEM, not this
+//   comment. `in-progress`, `narrowed`, `ruling-gated` and `partial-impl` all count as OPEN (S299 direction
+//   (b), extended S313); `fixed`, `deferred`, `non-gap`, `forensic` and `root-caused-elsewhere` count as
+//   CLOSED. A status in NEITHER set THROWS (the S307 fail-loud guard) rather than vanishing from a count.
+//
+//   ⛑ S420 — this comment previously said the vocabulary was exactly those six values and that open was
+//   `status=open`. Both were false, and the cost was measured: a PA read this block, counted the 21
+//   markers carrying statuses outside the stale list, and concluded 7 HIGH + 5 MED of live work were
+//   silently excluded from the board — a finding that was wholly false and was caught only by reading
+//   GAP_STATUS_OPEN before writing it down. S299 and S313 changed the classifier and left this comment.
+//   `g-state-ts-header-comment-misstates-the-open-count-basis`.
 //   The §R28/§R27 cluster-table OPEN rows DO count (their tokens live inline in each row's final cell).
 //   This reproduces the canonical S170 hand-count HIGH 0 · MED 9 · LOW 18 · Nominal 9.
 
@@ -232,30 +244,73 @@ export function gapCountsFromTokens(tokens: { id: string; sev: string; status: s
 // marker's status); it is reported WARN-only (never gates — pre-existing drift exists and a
 // hard gate would block CI + this is doc hygiene, not a currency guarantee). Only headings
 // with a parseable structured status tail are checked, so free-text/prose headings never
-// false-fire. open/deferred/nominal collapse to "open-ish"; only open-ish-vs-resolved counts.
-export function headingMarkerDrift(srcText?: string): { line: number; id: string; heading: string; marker: string }[] {
+// false-fire.
+//
+// ⛑ S420 — THIS PROBE USED TO MEASURE A QUARTER OF ITS SUBJECT AND REPORT A BARE COUNT
+// (`g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings`). Three defects, all fixed here:
+//
+//   1. The tail regex required the status word to be the LAST thing before a closing backtick
+//      (`/;\s*(open|…)\s*`\s*$/`). Almost no real heading in this ledger looks like that — they end
+//      `; **HIGH**; open` (no backtick at all), `; MED; open (pre-existing, latent)`, or
+//      `; LOW; RESOLVED S347-peter`. Measured: 279 of 998 headings parsed, and 22 of 25 real drifts
+//      invisible. The status word is now taken from the LAST `;`-separated segment, with bold markers
+//      and a trailing qualifier allowed.
+//   2. `norm()` collapsed open/deferred/nominal into one bucket, so a heading saying "deferred" over a
+//      marker saying `open` was invisible BY CONSTRUCTION. Heading words now classify through the SAME
+//      GAP_STATUS_* sets the counts use, so open-vs-closed disagreement is visible whichever side it is on.
+//   3. `status=(\w+)` truncated `status=non-gap` to `non`. Now `[a-z-]+`.
+//
+// ⛔ The `[^>]` in the marker match is DELIBERATELY NOT WIDENED — it is one of the four marker regexes
+// S416 measured (live miss count ZERO) and froze. The defect was never there.
+//
+// Returns the drift rows AND the population it actually inspected, because a probe that reports a bare
+// count cannot be distinguished from one that measured everything (pa-base §8, the truncated probe).
+export function headingMarkerDrift(srcText?: string): {
+  drift: { line: number; id: string; heading: string; marker: string }[];
+  headings: number;
+  inspected: number;
+} {
   const text = srcText ?? readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
   const lines = text.split("\n");
   const drift: { line: number; id: string; heading: string; marker: string }[] = [];
-  const norm = (s: string) => (s === "resolved" ? "resolved" : "open-ish");
+  // Classify a status word the same way the COUNTS do, so the two can never disagree about what
+  // "still open" means. A word in no set is unknown → skipped (prose), never guessed at.
+  const cls = (s: string): "open" | "closed" | "nominal" | null =>
+    GAP_STATUS_OPEN.has(s) ? "open"
+      : GAP_STATUS_CLOSED.has(s) ? "closed"
+        : GAP_STATUS_NOMINAL.has(s) ? "nominal"
+          : null;
+  let headings = 0;
+  let inspected = 0;
   for (let i = 0; i < lines.length; i++) {
     if (!/^### /.test(lines[i])) continue;
-    const tail = lines[i].match(/;\s*(open|resolved|deferred|nominal)\s*`\s*$/i);
-    if (!tail) continue;
-    const hStatus = tail[1].toLowerCase();
+    headings++;
+    // The status is the last `;`-separated segment's leading word, ignoring bold/backtick decoration
+    // and any trailing parenthetical or resolving-session note.
+    const segs = lines[i].split(";");
+    if (segs.length < 2) continue;
+    const tailSeg = segs[segs.length - 1].replace(/[`*]/g, "").trim();
+    const hm = tailSeg.match(/^([a-z][a-z-]*)\b/i);
+    if (!hm) continue;
+    const hStatus = hm[1].toLowerCase();
+    const hCls = cls(hStatus);
+    if (!hCls) continue;
     let mStatus: string | null = null;
     for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-      const mm = lines[j].match(/<!--\s*@gap\s+[^>]*status=(\w+)/);
+      const mm = lines[j].match(/<!--\s*@gap\s+[^>]*status=([a-z-]+)/i);
       if (mm) { mStatus = mm[1].toLowerCase(); break; }
       if (/^### /.test(lines[j])) break;
     }
     if (!mStatus) continue;
-    if (norm(hStatus) !== norm(mStatus)) {
+    const mCls = cls(mStatus);
+    if (!mCls) continue;
+    inspected++;
+    if (hCls !== mCls) {
       const idm = lines[i].match(/^###\s+(\S+)/);
       drift.push({ line: i + 1, id: idm ? idm[1] : "?", heading: hStatus, marker: mStatus });
     }
   }
-  return drift;
+  return { drift, headings, inspected };
 }
 
 // ── Generated-section registry (Fork 3B/4) ──────────────────────────────────
@@ -484,12 +539,18 @@ function runCheck(): number {
   console.log(`  ${maps.note}  [WARN-only — not gated; project-mapper seam]`);
   console.log(`  ${digestStaleness().note}  [WARN-only — not gated; PA-start freshness guard]`);
   // Heading/marker drift: WARN-only (pre-existing drift + doc hygiene, not currency). See headingMarkerDrift.
-  const drift = headingMarkerDrift();
+  // ⛑ S420 — the probe STATES ITS OWN SCOPE (`N of M`). A bare count reads identically whether it
+  // measured the whole population or a quarter of it, which is exactly how this probe's 28% reach went
+  // unnoticed. Never print the drift count without the denominator it was taken over.
+  const { drift, headings, inspected } = headingMarkerDrift();
+  const scope = `${inspected} of ${headings} headings carry a comparable status pair`;
   if (drift.length === 0) {
-    console.log(`  known-gaps heading/marker status: 0 drift  [WARN-only — not gated]`);
+    console.log(`  known-gaps heading/marker status: 0 drift — ${scope}  [WARN-only — not gated]`);
   } else {
-    console.log(`  known-gaps heading/marker status: ${drift.length} DRIFT (heading tail ≠ marker status)  [WARN-only — not gated]`);
-    for (const d of drift) console.log(`      L${d.line} ${d.id}: heading=${d.heading} marker=${d.marker}`);
+    console.log(`  known-gaps heading/marker status: ${drift.length} DRIFT (heading ≠ marker) — ${scope}  [WARN-only — not gated]`);
+    const SHOWN = 10;
+    for (const d of drift.slice(0, SHOWN)) console.log(`      L${d.line} ${d.id}: heading=${d.heading} marker=${d.marker}`);
+    if (drift.length > SHOWN) console.log(`      … and ${drift.length - SHOWN} more (this list is truncated; the count above is not)`);
   }
   console.log("");
   if (failed) {
