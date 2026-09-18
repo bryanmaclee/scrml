@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 260 |
+| MED | 261 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15975,3 +15975,43 @@ The mechanism and the shipped numbers are PA-verified; the 61/620 figure is not.
 
 — NEW S422-bryan (surfaced by the review-floor drain of #979; mechanism PA-reproduced, scale carried)
 <!-- @gap id=g-heading-drift-rule-rejects-legitimate-note-segments-and-files-its-own-miss-as-corpus sev=MED status=open locus=scripts/state.ts:headingMarkerDrift(the last-;-segment status rule)+compiler/tests/unit/marker-parser-pins.test.js:170(the test has prose controls only and no note-segment control) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-control-inspects-and-three-live-note-shapes-all-return-noTail -->
+
+### G-MCP-AUTOFLIP-IS-BUILD-SCOPED-SO-ONE-FILES-OPT-IN-DRAGS-EVERY-ENTRY-POINT-THROUGH-THE-ROUTE-SPLITTER — one `<program mcp>` file flips `--emit-per-route` for the WHOLE directory build, so unrelated `kind="tool"` programs get route-split and warn — `NEW S422; MED`
+
+A single file carrying the `<program mcp>` opt-in flips `--emit-per-route` ON, and in a **directory**
+build that flip applies to **every entry point in the batch**. CLI tools that have nothing to do with
+MCP, routes or pages are run through the route-splitter and draw `W-CG-CHUNK-EMPTY`.
+
+**PA-REPRODUCED BY EXECUTION on `f95321bf`, with the reporter's own control:**
+
+| batch | `W-CG-CHUNK-EMPTY` |
+|---|---|
+| two `kind="tool"` programs, compiled as a directory, **no mcp file present** | **0** |
+| the same two tools + one unrelated `<program mcp>` file in the directory | **2** (100%) |
+
+Nothing about the tools changes between the two runs. The adopter measured the same shape at scale:
+**12 of 12** `kind="tool"` programs firing, 0 of 9 everything else — no partial case, cleanly by
+program kind. They bisected it to five rows including the isolating control; we reproduced rows C and E.
+
+**Two limbs, and the first is the interesting one.**
+
+1. **The auto-flip's blast radius is the whole build, not the opting-in program.** The surfacing line
+   at `compile.js:636-643` exists, per its own comment, so *"adopters don't deploy a build with hidden
+   auto-flips"* — a good instinct, and it is what let the adopter find this. The gap is that the flip
+   is announced **per-build and scoped per-build**, while a reader of that line naturally assumes it
+   describes the program that opted in.
+2. **Once dragged in, the check can never NOT fire on a tool.** A `kind="tool"` program has no
+   components, no routes and no pages, so its admission count is structurally zero — the chunk-empty
+   check has no notion of program kind and cannot be satisfied.
+
+⚑ **The diagnostic recommends damaging correct code** (the adopter's words, and they are right): a
+tool warned for having an empty initial chunk invites an author to add routing it must not have.
+
+**Nothing is blocked** — their gate is otherwise green (`compile` exit 0, `compile:dir` exit 0). The
+cost is 12 false warnings per build on a flagship adopter, standing since 2026-09-07.
+
+⚑ **Filed 11 days late.** The report arrived 2026-09-07 `needs: action` and sat unread in
+`handOffs/incoming/` across four sessions. Related: [[g-outgoing-staged-has-no-promotion-step-so-adopter-replies-are-never-delivered]] — the same channel failing in the other direction.
+
+— NEW S422-bryan (flogence-PA S38 report of 2026-09-07; PA-reproduced with the control at S422)
+<!-- @gap id=g-mcp-autoflip-is-build-scoped-so-one-files-opt-in-drags-every-entry-point-through-the-route-splitter sev=MED status=open locus=compiler/src/commands/compile.js:636-643(the auto-flip surfacing line — announced per-build and scoped per-build)+compiler/src/codegen/route-splitter.ts(the admission count has no notion of program kind) prov=adopter:flogence-S38-bisection-five-rows-with-an-isolating-control-PA-reproduced-rows-C-and-E-at-f95321bf -->
