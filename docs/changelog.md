@@ -7295,6 +7295,39 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+### 2026-09-17 — S420: the floor drained 8 to 0, and it convicted my own fix of the class it was fixing
+
+Review-floor session. Eight PRs owed (#969–#976), classified by `review-debt.ts`'s own `CODE_BEARING_RE`
+rather than by the hand-off: 5 code-bearing, 3 carve-outs. Five independent adversarial reviewers, one per
+code-bearing PR, briefed to falsify and seeded with no PA hypothesis, all read-only with mutations confined
+to sandbox copies. **27 findings, 2 HIGH, zero clean.** Three load-bearing findings were re-reproduced by
+the PA before filing; one PA finding was falsified by the PA in the same pass and withdrawn.
+
+The headline: **the e2e-render-map tier's seeded half had never tested anything.** Two reviewers converged
+from opposite ends — the seed write targeted a bare key while emitted chunks read a chunk-namespaced one,
+*and* the content predicate is body-global so page chrome satisfies it before data arrives. Either alone
+leaves D6 dark. Limb 1 was fixed and landed; limb 2 now has a live corpus subject for the first time.
+
+Then the same class landed on our own work, twice. #978's first revision certified a seed key for a cell
+that does not exist and would have routed a per-compile random token into the committed baseline. #979 —
+whose entire subject is *"a bare count cannot be distinguished from a truncated one"* — shipped a second,
+undisclosed truncation and a scope line that blamed the corpus for it. Both were caught by adversarial
+passes, neither by the author, and both were sent back rather than landed.
+
+- **#977** `review(s420)` — floor 8 → 0; 11 gaps filed; `g-e2e-render-map-with-data-coverage-is-four-of-438`
+  corrected in place from 4 to **0** of 438.
+- **#978** `fix(e2e-render-map)` — the populated seed now resolves statically against the chunk's real cell
+  set and writes at most one key, or none, with a reason code per name. A read-back is never consulted:
+  `_scrml_state` is a plain object, so every invented key reads back and a read-back certifies nothing.
+  S239 returned 2 HIGH + 2 MED + 4 LOW; two fix rounds. Tier 69 pass / 0 fail / 1116 expect().
+- **#979** `fix(state)` — the heading/marker drift probe parsed 279 of 998 headings and reported 3 of 25
+  real drifts. Cap removed, denominator split and pinned to balance, tail parse made structural
+  (`; <SEV>; <status>`) so trailing prose cannot mint a phantom. Live reading 45 drift over 545 comparable.
+  2 LOWs drained, 1 residual filed.
+
+Board: HIGH 107 → 108 · MED 247 → 254 · LOW 96 → 98. The rise is the count getting honest — the session's
+finds were in instruments that read as done.
+
 
 ### 2026-09-16 (S419 — peter — the floor convicted all three of my own PRs, and every fix re-created its class one level away)
 
