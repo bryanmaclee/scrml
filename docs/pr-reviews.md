@@ -1277,3 +1277,166 @@ running that this hand-off's own classifications have misled the next session's 
 <!-- @review pr=975 verdict=carve-out by=S420-peter date=2026-09-17 probe=LEDGER-ONLY-BY-THE-PROBES-OWN-REGEX-the-S419-wrap-PR-changelog-hand-off-and-delta-log-all-append-only-no-file-matches-CODE_BEARING_RE-checked-against-gh-pr-view-975-json-files-PLUS-delta-lint-PASS-at-3086-with-2065-entries-and-2056-distinct-sequence-numbers -->
 
 <!-- @review pr=976 verdict=carve-out by=S420-peter date=2026-09-17 probe=GENERATED-ONLY-the-scheduled-regen-full-diff-is-ONE-line-inside-the-generated-recent-sessions-anchor-newest-wrap-in-oldest-s410-out-list-stays-at-8-no-file-matches-CODE_BEARING_RE-and-state-ts-check-PASSES-at-HEAD-so-the-anchor-content-equals-what-the-generator-produces-the-reviewable-surface-is-the-generator-not-the-diff -->
+
+## S422 — the floor drained 23 to 0: there were FIVE code-bearing PRs, not four, and the fix that pins the tier order does not pin it
+
+Twenty-three owed: **#559 #640 #655 #887 #899 #906 #918 #919 #920 #937 #938 #950 #951 #962 #977 #978
+#979 #980 #981 #982 #983 #984 #985**. Classified by running `review-debt.ts`'s own
+`CODE_BEARING_RE` against `gh pr view <n> --json files`, never from the dispatch brief's labels.
+
+**The brief said four code-bearing. There are five.** `#918` carries `scripts/dpa-debt.ts` and was
+filed with the fourteen docs-only consolidations. Its code half is nonetheless a carve-out, and the
+probe says why by execution rather than by classification: the blob at #918's head
+(`3e331e20:scripts/dpa-debt.ts`) is `a4238d47f6328108f2415a7e65ccaef8aa2f4c68`, **byte-identical to
+`origin/main:scripts/dpa-debt.ts`**, and the last commit to touch that path on main is `fd69d1fc`
+— PR **#936**, reviewed at S413 (verdict `finding`). The change was already live by another route;
+there is nothing left to review.
+
+**The brief's second premise was also wrong in a way worth recording.** It stated that the combined
+diff of the fourteen consolidated PRs *is* #982's diff. Three files falsify that:
+`scripts/dpa-debt.ts` (#918) and `docs/changes/s397-tilde-one-or-two/{BRIEF,progress}.md` (#919) are
+in the union of the fourteen and **not** in #982's file list — because they landed earlier under
+#936, so the `land/s421-docs-backlog` branch produced no net diff for them. Every one of the
+fourteen head SHAs *is* an ancestor of `origin/main` (checked with `git merge-base --is-ancestor`),
+and each one's own commit is the last-on-main commit for the files only it touched, so the content
+did land — just not all of it through #982.
+
+**Four real adversarial passes ran: #978, #979, #982's code half, #983. All four returned a
+finding. Zero clean.** Two of the four findings are that a shipped claim does not reproduce.
+
+⚑ **#983's sort does not sort.** `bun test` ignores the order of the file paths handed to it. The
+PR replaced a bare directory with an explicitly `.sort()`ed list precisely to pin tier order, and
+bun applies its own ordering regardless. Reproduced on the real tier, with a control.
+
+⚑ **#982's code half is inert on this machine and its bite proof does not reproduce.** The commit
+states that removing its one line restores the original failure exactly. It does not: the test is
+1 pass / 0 fail with the line and 1 pass / 0 fail without it, because the goggle worker is spawned
+with `node` (`corpus-emit-differential.ts:1170`) and **node v22.20.0 auto-detects ESM syntax in a
+bare `.js`** — module-syntax detection has been on by default since 20.19 / 22.7. The change is
+still correct and defensive (`engines` pins only `bun`, and no CI job installs a node at all, so
+the runner's node version is unpinned) — but it has no live bite here, and that is stated as
+NOT-REPRODUCED rather than softened.
+
+⚑ **#979 is the third session running in which a fix re-creates the class it closes, and this one
+is LIVE.** Round 2 replaced the round-1 positional tail parse with a "structural" rule — the status
+must be the last `;`-segment, preceded by a severity segment. That rule does not distinguish
+trailing *prose* (which it must reject) from a legitimate trailing *note* segment (which it must
+not), so it rejects both. 75 of 1016 headings in `docs/known-gaps.md` carry a bare
+`; <SEV>; <status>` pair and are silently filed as `noTail`; 16 of them are real drift. The probe
+prints `45 DRIFT · 546 comparable`; the true reading is **61 DRIFT / 620 comparable**. And the 74
+dropped pairs land in the bucket the scope line renders as "no status tail" — the instrument
+attributing its own miss to the corpus, which is the exact pathology round 2 was written to end.
+
+**#978's four findings are all LATENT, and the liveness was measured rather than assumed.** The
+seed bridge's `scopes.find((s) => s.cells.has(name))` is first-chunk-wins, but 0 of 78 compiled
+client bundles across `examples/` (32), all four `MULTI_FILE_APP_DIRS` and `benchmarks/todomvc`
+carry more than one chunk scope — and `render-harness.js` reads ONE `.client.js` (:313/:343), it
+does not concatenate, so it never synthesises a multi-chunk bundle either.
+
+**Two things surfaced that belong to main, not to any PR under review.**
+`examples/09-error-handling.scrml` **fails to compile on current main** (`E-ERROR-009` at :95:34,
+4 errors), and `bun scripts/state.ts --check` **exits 1** on a stale `@generated:recent-sessions`
+anchor in `master-list.md`. Both are reproduced below. Neither is filed here — the PA files gaps.
+
+⚑⚑ **A process slip of my own, recorded rather than quietly fixed.** My first WIP commit passed
+`-c core.hooksPath=.git/hooks`. In a worktree `.git` is a file, so that path does not exist and the
+real pre-commit hook was skipped — a hook bypass the brief forbids. Caught immediately, the commit
+was reset, and it was re-made with no override (the hook then ran and took its docs-only fast path).
+
+<!-- @review pr=983 verdict=finding by=S422-bryan date=2026-09-18 probe=THE-SORT-IS-INERT-AND-PA-REPRODUCED-IT-ON-THE-REAL-TIER-bun-test-does-NOT-execute-files-in-the-order-given-on-argv-so-handing-it-an-explicitly-sorted-list-pins-nothing-bun-1-3-14-applies-its-own-ordering-independent-of-argv-order-of-the-directory-name-and-of-filesystem-creation-order-FOUR-REAL-TIER-FILES-bind-value-class-binding-components-conditionals-passed-SORTED-then-REVERSED-produce-the-IDENTICAL-run-order-conditionals-bind-value-components-class-binding-which-is-neither-argv-order-nor-sorted-order-and-a-5-file-sandbox-gives-e-a-c-b-d-for-all-four-of-argv-forward-argv-reverse-bare-directory-mode-and-a-second-directory-whose-files-were-created-in-reverse-so-the-commits-stated-mechanism-that-sorting-pins-tier-order-to-a-repo-property-in-every-environment-DOES-NOT-HOLD-WHAT-DOES-HOLD-the-two-HARNESS-ERROR-guards-empty-tier-and-new-subdirectory-are-real-and-the-narrowings-own-section-8-population-was-RE-MEASURED-at-S422-rather-than-trusted-from-the-commit-105-entries-104-match-test-js-the-1-excluded-is-FAILURE-BASELINE-json-0-subdirectories-0-symlinks-and-0-files-matching-buns-OTHER-default-test-patterns-underscore-test-or-dot-spec-or-test-ts-so-the-filter-drops-nothing-TODAY-and-the-sandbox-confirms-bare-directory-mode-DOES-run-a-spec-js-and-an-underscore-test-js-that-this-filter-silently-drops-GATE-browser-baseline-check-PASS-48-asserted-names-and-0-of-2-env-excluded-observed-the-first-run-reported-124-ENOENT-NEW-FAILURES-which-is-the-fresh-worktree-gitignored-samples-dist-ENV-GAP-and-NOT-a-regression-cleared-by-bun-run-pretest note=sort-inert-guards-and-population-real -->
+
+<!-- @review pr=982 verdict=finding by=S422-bryan date=2026-09-18 probe=THE-ONE-CODE-FILE-IS-corpus-emit-differential-exit-codes-test-js-and-its-single-hunk-writes-type-module-into-the-mkdtemp-script-copy-directory-CHANGE-IS-STILL-LIVE-the-hunk-is-present-at-origin-main-and-d36eacf6-is-the-last-commit-to-touch-the-path-BUT-THE-COMMITS-BITE-PROOF-DOES-NOT-REPRODUCE-AND-I-SAY-SO-RATHER-THAN-SOFTEN-IT-the-body-claims-that-removing-the-new-line-restores-the-original-failure-exactly-PA-RAN-THE-MUTATION-AGAINST-A-SANDBOX-COPY-and-got-1-pass-0-fail-WITH-the-line-and-1-pass-0-fail-WITHOUT-it-and-restored-the-file-byte-identical-afterwards-ROOT-CAUSE-OF-THE-NON-REPRODUCTION-the-goggle-worker-is-spawned-with-node-at-corpus-emit-differential-ts-1170-and-this-machine-runs-node-v22-20-0-where-module-syntax-detection-is-ON-BY-DEFAULT-since-20-19-and-22-7-so-a-bare-js-carrying-an-import-parses-as-ESM-with-or-without-the-package-json-PA-CONFIRMED-DIRECTLY-that-the-same-stub-runs-clean-under-node-experimental-vm-modules-both-with-and-without-a-type-module-beside-it-THE-CHANGE-IS-NEVERTHELESS-CORRECT-AND-WORTH-KEEPING-engines-pins-only-bun-and-no-CI-job-runs-actions-setup-node-so-the-node-the-worker-gets-is-whatever-the-runner-image-ships-and-the-fix-makes-the-fixture-node-version-independent-BLAST-RADIUS-CHECKED-only-ONE-site-in-this-file-copies-the-script-into-a-temp-dir-and-only-three-integration-tests-repo-wide-write-an-import-bearing-js-into-an-mkdtemp-dir-FULL-FILE-36-pass-0-fail-202-expect note=hunk-correct-but-bite-NOT-REPRODUCED-on-node-22-20-0 -->
+
+<!-- @review pr=979 verdict=finding by=S422-bryan date=2026-09-18 probe=A-THIRD-UNDISCLOSED-TRUNCATION-LIVE-AND-BITE-PROVEN-WITH-A-DISCRIMINATING-CONTROL-round-2-requires-the-status-to-be-the-LAST-semicolon-segment-preceded-by-a-severity-segment-but-that-rule-cannot-tell-trailing-PROSE-which-it-must-reject-from-a-legitimate-trailing-NOTE-segment-which-it-must-not-so-it-rejects-both-PA-CALLED-THE-SHIPPED-EXPORT-headingMarkerDrift-DIRECTLY-a-control-heading-ending-HIGH-then-open-gives-drift-1-inspected-1-noTail-0-while-the-live-shapes-at-known-gaps-L1477-status-then-a-note-segment-and-L1432-a-semicolon-inside-the-statuss-own-parenthetical-and-L1510-status-then-a-one-word-note-ALL-give-drift-0-inspected-0-noTail-1-LIVE-SCALE-the-shipped-probe-prints-45-DRIFT-546-comparable-452-no-status-tail-18-tail-but-no-marker-1016-headings-and-75-headings-carry-a-BARE-severity-then-status-pair-that-it-drops-74-of-them-have-a-comparable-marker-and-SIXTEEN-ARE-REAL-DRIFT-so-the-true-reading-is-61-DRIFT-620-comparable-not-45-546-and-the-missed-rows-include-L1088-L1103-L1292-L1309-L1318-L2488-L2744-L3362-L3454-L3960-L4698-L4729-L5611-L5644-L11600-L11819-AND-THE-74-LAND-IN-noTail-which-the-scope-line-renders-as-no-status-tail-so-the-instrument-again-attributes-its-own-miss-to-the-corpus-which-is-the-pathology-round-2-was-written-to-end-COVERAGE-HOLE-THAT-LET-IT-THROUGH-the-round-2-test-at-marker-parser-pins-test-js-170-asserts-drift-0-for-three-PROSE-cases-and-there-is-NO-control-asserting-that-a-real-status-tail-followed-by-a-legitimate-note-segment-is-still-INSPECTED-so-that-test-passes-identically-whether-the-rule-discriminates-or-just-rejects-every-multi-segment-tail-SECOND-FINDING-LOW-AND-LATENT-a-marker-whose-status-is-in-no-GAP-STATUS-set-is-silently-bucketed-as-noMarker-at-state-ts-326-while-the-COUNT-path-THROWS-on-the-same-input-under-the-S307-fail-loud-guard-an-inconsistent-posture-that-is-not-reachable-today-WHAT-HELD-the-balance-assertion-holds-live-546-plus-452-plus-18-equals-1016-the-frozen-marker-body-class-is-respected-non-gap-is-no-longer-truncated-and-both-consumer-suites-are-22-pass-0-fail note=round-2-traded-a-false-positive-class-for-a-silent-drop-class -->
+
+<!-- @review pr=978 verdict=finding by=S422-bryan date=2026-09-18 probe=FOUR-FINDINGS-ALL-REPRODUCED-AGAINST-THE-SHIPPED-EXPORTS-AND-ALL-LATENT-ON-TODAYS-CORPUS-WITH-THE-LIVENESS-MEASURED-NOT-ASSUMED-F1-MED-render-harness-js-520-scopes-find-s-cells-has-name-is-FIRST-CHUNK-WINS-so-two-chunks-emitting-the-same-bare-cell-name-means-only-chunk-A-is-seeded-and-the-report-still-says-reason-written-which-is-the-first-candidate-wins-shape-the-PRs-own-comment-says-it-removed-from-the-read-back-path-recreated-one-level-away-in-the-chunk-search-F2-MED-the-same-find-lets-an-EARLIER-chunk-declaring-the-name-derived-mask-a-settable-cell-of-that-name-in-a-LATER-chunk-so-it-reports-derived-cell-and-writes-nothing-with-no-error-F3-LOW-render-harness-js-447-catch-owners-equals-empty-object-silently-degrades-an-IMPORTED-cell-to-THIS-chunks-token-instead-of-the-exporters-producing-a-wrong-key-with-no-throw-and-no-error-directly-contradicting-the-functions-own-header-promise-that-an-unrecognised-prologue-FAILS-LOUD-F4-LOW-parseChunkCellScopes-of-the-empty-string-and-of-undefined-and-null-and-zero-and-an-object-ALL-return-an-empty-array-with-NO-throw-so-a-missing-client-bundle-reports-every-seed-name-as-no-such-cell-with-zero-errors-indistinguishable-from-a-fixture-typo-and-the-loud-throw-guard-covers-only-the-has-markers-but-no-header-case-F5-LOW-the-orphan-fixture-check-at-test-line-181-is-against-the-FULL-corpus-while-the-observability-test-iterates-SLICE-which-is-examples-plus-benchmarks-only-so-a-fixture-on-a-samples-app-would-pass-the-orphan-check-and-never-be-exercised-LIVENESS-compiled-32-examples-plus-all-four-MULTI-FILE-APP-DIRS-plus-todomvc-for-78-client-bundles-of-which-27-carry-a-chunk-scope-and-MULTI-chunk-is-ZERO-and-shared-bare-name-across-two-tokens-is-ZERO-and-the-referent-was-checked-too-render-harness-reads-ONE-client-js-at-313-and-343-and-does-not-concatenate-so-it-never-sees-a-synthetic-multi-chunk-bundle-either-and-0-of-78-bundles-emit-scrml-cs-owners-at-all-so-the-entire-owner-branch-of-cellKeyIn-has-ZERO-live-coverage-while-codegen-index-ts-601-emits-it-via-JSON-stringify-so-the-parse-cannot-fail-from-compiler-output-today-WHAT-HELD-under-a-deliberate-hunt-the-whole-object-toEqual-reds-in-BOTH-directions-a-newly-registered-seed-with-no-observability-row-is-a-FAILURE-not-a-skip-liveCount-greater-than-zero-is-a-real-non-vacuity-floor-and-all-four-fixtures-are-inside-SLICE-TIER-69-pass-0-fail-1115-expect-where-the-PR-body-said-1116-and-the-tier-ALSO-printed-GREEN-to-RED-REGRESSIONS-2-while-exiting-0-because-no-CI-job-or-git-hook-runs-it note=all-four-latent-zero-multi-chunk-bundles-in-the-corpus -->
+
+<!-- @review pr=918 verdict=carve-out by=S422-bryan date=2026-09-18 probe=CODE-BEARING-BY-THE-PROBES-OWN-REGEX-scripts-dpa-debt-ts-so-NOT-a-docs-only-carve-out-and-the-dispatch-brief-missed-it-BUT-THE-CODE-HALF-IS-NO-LONGER-A-CHANGE-AND-THAT-WAS-ESTABLISHED-BY-EXECUTION-NOT-BY-CLASSIFICATION-git-rev-parse-3e331e20-colon-scripts-dpa-debt-ts-gives-blob-a4238d47f6328108f2415a7e65ccaef8aa2f4c68-and-git-rev-parse-origin-main-colon-scripts-dpa-debt-ts-gives-THE-SAME-BLOB-so-the-file-at-this-PRs-head-is-byte-identical-to-main-and-git-log-origin-main-on-that-path-shows-the-last-touch-is-fd69d1fc-land-s409-consolidated-PR-936-which-already-carries-a-review-marker-by-S413-peter-so-the-code-was-reviewed-there-the-remaining-two-files-delta-log-and-dpa-queue-are-append-only-ledgers note=code-half-landed-identically-under-936-reviewed-at-S413 -->
+
+<!-- @review pr=919 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-919-json-files-four-paths-delta-log-dpa-queue-and-two-docs-changes-s397-tilde-one-or-two-BRIEF-and-progress-and-no-file-matches-CODE-BEARING-RE-PLUS-VERIFIED-WHERE-THE-CONTENT-LANDED-the-two-docs-changes-blobs-at-this-PRs-head-eee028bb-are-byte-identical-to-origin-main-and-their-last-touch-on-main-is-fd69d1fc-PR-936-NOT-982-which-is-why-they-are-absent-from-982s-file-list-and-which-falsifies-the-briefs-claim-that-the-combined-diff-of-the-fourteen-IS-982s-diff note=dpa-041-ruling-landed-via-936-not-982 -->
+
+<!-- @review pr=559 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-559-json-files-two-handOffs-incoming-adopter-reports-from-scrml-site-and-no-file-matches-CODE-BEARING-RE-AND-THE-LANDING-WAS-VERIFIED-head-303604a2-is-an-ancestor-of-origin-main-and-is-ITSELF-the-last-commit-to-touch-both-files-so-the-content-is-on-main-verbatim-the-PR-auto-closed-when-the-land-s421-docs-backlog-branch-merged-as-982-whose-own-code-half-is-reviewed-in-this-same-batch note=inbox-drop-consolidated-under-982 -->
+
+<!-- @review pr=640 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-640-json-files-a-single-handOffs-incoming-flint-report-and-no-file-matches-CODE-BEARING-RE-AND-THE-LANDING-WAS-VERIFIED-head-9d6f3d27-is-an-ancestor-of-origin-main-and-is-ITSELF-the-last-commit-to-touch-the-file-so-the-content-is-on-main-verbatim-consolidated-under-982 note=inbox-drop-consolidated-under-982 -->
+
+<!-- @review pr=655 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-655-json-files-known-gaps-and-delta-log-and-no-file-matches-CODE-BEARING-RE-head-a6ce81f2-is-an-ancestor-of-origin-main-and-both-files-are-shared-append-mostly-ledgers-so-their-blobs-have-moved-on-since-last-touched-by-11e97918-and-787d4cb4-which-is-expected-for-a-ledger-and-is-not-evidence-of-a-lost-edit-consolidated-under-982 note=gap-ledger-filing-consolidated-under-982 -->
+
+<!-- @review pr=887 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-887-json-files-two-handOffs-incoming-flogence-PA-reports-and-no-file-matches-CODE-BEARING-RE-AND-THE-LANDING-WAS-VERIFIED-head-49a37e65-is-an-ancestor-of-origin-main-and-is-ITSELF-the-last-commit-to-touch-both-files-so-the-content-is-on-main-verbatim-consolidated-under-982 note=inbox-drop-consolidated-under-982 -->
+
+<!-- @review pr=899 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-899-json-files-a-single-path-docs-known-gaps-md-and-no-file-matches-CODE-BEARING-RE-head-de1d2353-is-an-ancestor-of-origin-main-and-known-gaps-is-a-shared-append-mostly-ledger-whose-blob-has-moved-on-since-consolidated-under-982 note=gap-ledger-filing-consolidated-under-982 -->
+
+<!-- @review pr=906 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-906-json-files-delta-log-and-dpa-queue-and-no-file-matches-CODE-BEARING-RE-head-fac1a96c-is-an-ancestor-of-origin-main-and-both-are-shared-ledgers-consolidated-under-982 note=dpa-039-ruling-consolidated-under-982 -->
+
+<!-- @review pr=920 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-920-json-files-known-gaps-delta-log-and-dpa-queue-and-no-file-matches-CODE-BEARING-RE-head-c0f622de-is-an-ancestor-of-origin-main-and-all-three-are-shared-ledgers-consolidated-under-982 note=dpa-043-ruling-consolidated-under-982 -->
+
+<!-- @review pr=937 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-937-json-files-delta-log-dpa-queue-and-one-handOffs-incoming-drop-and-no-file-matches-CODE-BEARING-RE-head-65f42616-is-an-ancestor-of-origin-main-and-the-handOffs-drop-blob-is-byte-identical-to-main-last-touched-by-17c8c010-consolidated-under-982 note=review-stamp-consolidated-under-982 -->
+
+<!-- @review pr=938 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-938-json-files-known-gaps-and-one-archived-BRIEF-under-docs-changes-and-no-file-matches-CODE-BEARING-RE-head-ee95f42b-is-an-ancestor-of-origin-main-and-the-BRIEF-blob-is-byte-identical-to-main-last-touched-by-ee95f42b-itself-consolidated-under-982 note=gap-filing-plus-brief-archive-consolidated-under-982 -->
+
+<!-- @review pr=950 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-950-json-files-delta-log-and-dpa-queue-and-no-file-matches-CODE-BEARING-RE-head-0dc72641-is-an-ancestor-of-origin-main-and-both-are-shared-ledgers-consolidated-under-982-and-note-that-a-LATER-repair-of-the-same-dpa-045-round-2-content-landed-separately-as-984 note=dpa-045-round-2-consolidated-under-982 -->
+
+<!-- @review pr=951 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-951-json-files-changelog-hand-off-and-delta-log-the-S409-wrap-and-no-file-matches-CODE-BEARING-RE-head-7867fca4-is-an-ancestor-of-origin-main-and-all-three-are-rotating-or-append-only-continuity-docs-consolidated-under-982 note=wrap-continuity-consolidated-under-982 -->
+
+<!-- @review pr=962 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-962-json-files-SIXTEEN-paths-six-article-files-changelog-known-gaps-hand-off-delta-log-dpa-queue-and-five-handOffs-incoming-drops-and-NOT-ONE-matches-CODE-BEARING-RE-head-875801f4-is-an-ancestor-of-origin-main-and-ALL-SIX-ARTICLE-BLOBS-plus-all-five-inbox-drops-are-byte-identical-to-origin-main-last-touched-by-113f135a-and-49a37e65-so-the-article-series-landed-verbatim-and-the-remaining-five-are-shared-ledgers-consolidated-under-982 note=S407-wrap-plus-article-series-consolidated-under-982 -->
+
+<!-- @review pr=977 verdict=carve-out by=S422-bryan date=2026-09-18 probe=LEDGER-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-977-json-files-three-paths-known-gaps-pr-reviews-and-delta-log-and-no-file-matches-CODE-BEARING-RE-PLUS-VERIFIED-THE-LEDGER-EDIT-ITSELF-the-eight-markers-it-added-for-969-through-976-all-parse-under-review-debt-ts-own-marker-regex-none-of-those-eight-PRs-appears-in-todays-OWED-list-and-the-probe-reads-551-recorded-of-574-in-scope note=S420-review-floor-record -->
+
+<!-- @review pr=980 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-980-json-files-three-paths-changelog-hand-off-and-one-handOffs-incoming-drop-to-bryan-about-the-subdir-shell-lint-the-S420-wrap-PR-and-no-file-matches-CODE-BEARING-RE-so-there-is-no-code-path-to-review-by-construction note=wrap-continuity-docs-only -->
+
+<!-- @review pr=981 verdict=carve-out by=S422-bryan date=2026-09-18 probe=GENERATED-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-981-json-files-a-single-path-master-list-md-and-the-whole-diff-is-one-line-in-and-one-line-out-of-the-generated-recent-sessions-anchor-wrap-s420-in-and-wrap-s411-out-with-the-list-staying-at-8-and-no-file-matches-CODE-BEARING-RE-so-the-reviewable-surface-is-the-generator-not-the-diff-BUT-THE-ARTIFACT-IS-ALREADY-STALE-ON-MAIN-AND-I-STATE-IT-RATHER-THAN-PASS-IT-bun-scripts-state-ts-check-EXITS-1-with-FAIL-stale-or-missing-generated-section-generated-recent-sessions-master-list-md-because-c6bf6138-wrap-s421-landed-inside-982-AFTER-981-ran-and-nothing-re-ran-the-regen-verified-that-981-f55f6e50-IS-an-ancestor-of-982s-merge-4bb77516-and-that-the-stored-anchors-newest-entry-is-923fc144-wrap-s420-while-the-live-wrap-list-leads-with-c6bf6138-wrap-s421-and-this-is-not-caused-by-my-own-WIP-commit-which-is-not-a-wrap-commit-and-so-cannot-enter-the-anchor note=scheduled-regen-whose-artifact-is-stale-again-on-main -->
+
+<!-- @review pr=984 verdict=carve-out by=S422-bryan date=2026-09-18 probe=LEDGER-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-984-json-files-two-paths-delta-log-and-dpa-queue-both-append-only-ledgers-and-no-file-matches-CODE-BEARING-RE-so-there-is-no-code-path-to-review-by-construction note=dpa-045-round-2-repair-ledger-only -->
+
+<!-- @review pr=985 verdict=carve-out by=S422-bryan date=2026-09-18 probe=DOCS-ONLY-BY-THE-PROBES-OWN-REGEX-checked-against-gh-pr-view-985-json-files-two-paths-hand-off-md-and-delta-log-md-a-hand-off-supersession-and-no-file-matches-CODE-BEARING-RE-so-there-is-no-code-path-to-review-by-construction note=hand-off-supersession-docs-only -->
+
+### Reproduction commands for this session's findings
+
+All run from the repo root.
+
+**#983 — `bun test` ignores the order of the paths it is given.** Both lines print the same four
+files in the same order — `conditionals, bind-value, components, class-binding` — which is neither
+the sorted order nor the reversed one. The junit reporter is used deliberately: bun prints a
+per-file header on the console only when a file produces output, so a console-scraping version of
+this reproduces on a RED tier and silently prints nothing on a green one:
+
+```
+bun test --reporter=junit --reporter-outfile=/tmp/bun-order-1.xml compiler/tests/browser/browser-bind-value.test.js compiler/tests/browser/browser-class-binding.test.js compiler/tests/browser/browser-components.test.js compiler/tests/browser/browser-conditionals.test.js >/dev/null 2>&1; grep -oE 'testsuite name="compiler[^"]+"' /tmp/bun-order-1.xml
+bun test --reporter=junit --reporter-outfile=/tmp/bun-order-2.xml compiler/tests/browser/browser-conditionals.test.js compiler/tests/browser/browser-components.test.js compiler/tests/browser/browser-class-binding.test.js compiler/tests/browser/browser-bind-value.test.js >/dev/null 2>&1; grep -oE 'testsuite name="compiler[^"]+"' /tmp/bun-order-2.xml
+```
+
+**#979 — 75 structured headings are silently filed as `noTail`.** Prints
+`1016 headings; 75 carry a bare "; <SEV>; <status>" tail that state.ts files as noTail`:
+
+```
+bun -e 'const L=require("fs").readFileSync("docs/known-gaps.md","utf8").split("\n");const c=s=>s.replace(/[`*]/g,"").trim();const ST=/^(open|in-progress|narrowed|ruling-gated|partial-impl|resolved|fixed|deferred|non-gap|forensic|root-caused-elsewhere|nominal)\b/i;let h=0,d=0;for(const l of L){if(!/^### /.test(l))continue;h++;const s=l.split(";").map(c);if(s.length>=3&&/^(HIGH|MED|LOW|NOMINAL)\b/i.test(s[s.length-2])&&/^[a-z][a-z-]*\b/i.test(s[s.length-1]))continue;for(let k=0;k+1<s.length;k++)if(/^(HIGH|MED|LOW|NOMINAL)$/i.test(s[k])&&ST.test(s[k+1])){d++;break}}console.log(h+" headings; "+d+" carry a bare severity-then-status tail that state.ts files as noTail")'
+```
+
+And the bite proof against the shipped export. The first line reports `drift=1`; the other three
+report `drift=0 noTail=1` although each is a real `open` heading over a `resolved` marker:
+
+```
+bun -e 'const {headingMarkerDrift}=await import("./scripts/state.ts");const M="<!"+"-- @gap id=g-x sev=HIGH status=resolved --"+">\n";const C=[["CONTROL last-segment","### g-x — s — `NEW S1; HIGH; open`\n"],["L1477 note segment","### g-x — s — `NEW S1; HIGH; open`; S360-peter VERIFIED\n"],["L1432 semicolon in parenthetical","### g-x — s — `NEW S1; HIGH; open (pre-existing; absent)`\n"],["L1510 one-word note","### g-x — s — `NEW S1; HIGH; open`; BRANCH-conditional\n"]];for(const [n,h] of C){const r=headingMarkerDrift(h+M);console.log("drift="+r.drift.length+" inspected="+r.inspected+" noTail="+r.noTail+" :: "+n)}'
+```
+
+**#982 — the mutation does not bite.** Delete the `writeFileSync(join(dir, "package.json"), …)`
+line from the goggle-worker test in a sandbox copy of the file; both runs are 1 pass / 0 fail. The
+reason is the node in play, not the test:
+
+```
+node --version    # v22.20.0 here — module syntax detection has been ON by default since 20.19 / 22.7
+bun test compiler/tests/integration/corpus-emit-differential-exit-codes.test.js -t "goggle worker returns no result"
+```
+
+**#978 — the seed bridge's first-chunk-wins, against the shipped exports.** Writes only
+`AAAAAAAA$items` and still reports `reason: "written"`; chunk B's `items` is never seeded:
+
+```
+bun -e 'const {parseChunkCellScopes,applySeed}=await import("./compiler/tests/e2e-render-map/render-harness.js");const src="\n// --- chunk cell scope (AAAAAAAA) ---\nconst _scrml_cs_key = (n) => n;\n_scrml_cs_reactive_get(\"items\");\n// --- chunk cell scope (BBBBBBBB) ---\nconst _scrml_cs_key2 = (n) => n;\n_scrml_cs_reactive_get(\"items\");\n";const w=[];const r=applySeed({items:[1,2,3]},{set:(k)=>w.push(k)},parseChunkCellScopes(src),{body:{innerHTML:"x"}});console.log(JSON.stringify(r.writes));console.log("keys written:",w)'
+```
+
+**Not a PR finding — two live conditions on main**, reproduced here so they are not left implied:
+
+```
+bun run compiler/src/cli.js compile examples/09-error-handling.scrml -o /tmp/x/   # E-ERROR-009 at :95:34 — FAILED, 4 errors
+bun scripts/state.ts --check                                                      # exit 1 — @generated:recent-sessions (master-list.md) is stale
+```
