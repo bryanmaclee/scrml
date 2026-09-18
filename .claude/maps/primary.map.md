@@ -1,6 +1,161 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ⚑ **LINE 3 IS THE CURRENCY ANCHOR AND `scripts/state.ts` PARSES *LINE 3 ONLY*** — re-verified this
+# pass by reading the parser, not by memory: `mapsStaleness()` takes `mapText.split("\n")[2]` and
+# matches `/commit:\s*([0-9a-f]+)/i` (`scripts/state.ts:760-764`). Every line below line 3, this one
+# included, is invisible to it. **Do not reformat line 3.**
+#
+# ━━━━━━━ S422 PRIMARY DELTA — **THE FIGURES, THE INDEX, AND TWO NEW INVARIANTS.** ━━━━━━━
+#
+# ⛑ **FINGERPRINT / SIZE — RE-EXECUTED AT `787d4cb4`, EVERY FIGURE BY RUNNING ITS OWN COMMAND, THEN
+# RECONCILED AGAINST `docs/FACTS.md`. FACTS, the raw walks and the §34 census agree on every one:**
+# `compiler/src` **253,519 lines across 195 files** (lines **+1,116** over S405's 252,403; files
+# **FLAT for the FOURTH consecutive window**) · `test files` **1,459** (**+19**; FACTS, `find`, and
+# `git ls-files 'compiler/tests/**.test.js'` all return 1,459 — EXACT three-way reconcile) ·
+# `specification lines` **37,993** (**+46**) · `conformance cases` **905** (**FLAT**, still **54**
+# category dirs — no new category and no new case in 112 commits) · `docs/changes/` **745** (**+11**).
+# §34 catalog **819** by `bun scripts/s34-census.ts` (**+1**), range **`19750..20640`**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**; `^| W-` **182**,
+# `^| I-` **10**, `^| H-` **2** all FLAT; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+# ⚠ **Version stays `0.7.1`; `package.json` + `bun.lock` are `--name-only` EMPTY over the whole
+# 112-commit window — the FIFTH consecutive window with no dependency movement.**
+# ⚠ **THE CENSUS'S `1996 source files` READS *LOWER* THAN S405's `2013`, AND THAT IS NOT A DELETION.**
+# It is the census's FILESYSTEM walk, and this pass ran in a fresh worktree carrying no untracked
+# scratch. **It is not a repo fact and must not be published as one.** The standing note was right,
+# and this is the first pass where the figure moved DOWN — which is the clearest possible proof of it.
+#
+# ⛑ **DERIVED-FIGURE AUTHORITY — the four standing DEFINITION BOUNDARIES re-measured, all unchanged
+# in kind:** (1) `find compiler/src -type f` returns **197** vs FACTS' **195** — gap **2**, a scope
+# difference, not a contradiction. (2) repo-wide `git ls-files '*.test.js'` returns **1,460** vs FACTS'
+# **1,459** — gap **1**, `conformance/conformance-corpus.test.js`, outside `compiler/tests`
+# (invariant 88). (3) the `@generated` `test.generated.md` keys on the first SUBDIRECTORY, so the
+# **14 ROOT-level** `compiler/tests/*.test.js` fall out of its total. Per-dir at this SHA:
+# `unit 954 · integration 220 · conformance 133 · browser 104 · commands 17 · ROOT 14 · lsp 11 ·
+# self-host 4 · e2e-render-map 2` = **1,459**. (4) "CLI verbs = 11" still depends on the
+# hand-maintained `NOT_A_VERB` set in `scripts/facts.ts` against **14** files in
+# `compiler/src/commands/` — **nothing checks it**, and this window did not retire the hazard, it
+# merely did not exercise it (`compiler/src/commands/` is byte-unchanged).
+# **Record all four; do not "fix" either instrument.**
+#
+# ⛑ **MAP INDEX — ALL THIRTEEN TRACKED STAMPS ADVANCE TO `787d4cb4`.** Five advance on a RE-MEASURED
+# ZERO-DIFF in their own keyed surface, each naming the command that produced its zero:
+# **`auth`** (`compiler/src/**auth**|**session**|**protect**`, `stdlib/auth*|oauth*` -> EMPTY; and
+# ALL of `stdlib/` -> EMPTY) · **`migrations`** (`compiler/src/**migrate**`, `compiler/src/commands/**`
+# -> EMPTY) · **`config`** (`package.json bun.lock bunfig.toml` -> EMPTY, and `'*.json'` -> EMPTY,
+# strictly emptier than S405's ten fixtures) · **`dependencies`** (manifest EMPTY, 5th consecutive) ·
+# **`infra`** (`Dockerfile*`, `docker-compose*`, `**/deploy/**` -> EMPTY).
+# ⚠ **`build` IS *NOT* A ZERO-DIFF ROW THIS WINDOW — IT WAS FOR FOUR OF THE LAST FIVE.** `.github/`
+# moved: `gate` went **14 -> 15 steps**. A row that has read zero five times running is exactly the
+# row a refresh stops genuinely checking.
+# The other eight (`structure` · `schema` · `error` · `test` · `domain` · `primary`, plus this file
+# and `non-compliance.report.md`) were re-walked against the source delta.
+#
+# ⛔ **THE FOUR `@generated` MAPS ARE STILL S405-ERA AND THIS PASS STRUCTURALLY COULD NOT REFRESH
+# THEM — THE REASON IS WORTH RECORDING, BECAUSE IT WILL RECUR ON EVERY WORKTREE-ISOLATED REFRESH.**
+#   - The files are `structure.generated.md` · `error.generated.md` · `dependencies.generated.md` ·
+#     `test.generated.md`. Their own header reads
+#     `<!-- @generated by flogence/scripts/mapgen.ts — DO NOT hand-edit; re-run to refresh. -->`
+#     and all four are stamped **`2026-09-08 05:00`** — S405. `test.generated.md` still publishes
+#     **1426 .test.js**, against FACTS' **1,459** at this HEAD.
+#   - ⚑ **THEY ARE GITIGNORED AND THEREFORE ABSENT FROM ANY WORKTREE.** `.gitignore:3` is `.claude/`;
+#     `git check-ignore -v .claude/maps/structure.generated.md` -> `.gitignore:3:.claude/`. Only the
+#     **13 hand-written maps are force-added and tracked** (`git ls-files .claude/maps/` lists exactly
+#     those 13). A fresh worktree checks out tracked files only, so the four generated maps exist in
+#     the MAIN checkout and nowhere else.
+#   - ⚑ **AND THE GENERATOR IS IN A DIFFERENT REPO** — `/home/bryan-maclee/scrmlMaster/flogence/scripts/mapgen.ts`.
+#     There is no `scripts/mapgen.ts` in scrml and there never has been (`git log --all --` returns
+#     nothing). **A prior note here spelled the command `bun scripts/mapgen.ts --root <scrml>`, which
+#     reads as a scrml-local script and is not one.** The file headers are the unambiguous source.
+#   - **CONSEQUENCE, STATED PLAINLY: the nav-map refresh is split across two repos and one gitignored
+#     surface, so a worktree-isolated refresh can only ever complete the tracked half.** The four
+#     generated maps will NOT show `E-CONDITION-HEAD-UNPARENTHESIZED` nor the 19 new test files until
+#     someone runs `bun /home/bryan-maclee/scrmlMaster/flogence/scripts/mapgen.ts --kind
+#     {structure,errors,deps,tests} --root /home/bryan-maclee/scrmlMaster/scrml --write`
+#     **from the main checkout.** This is a KNOWN, NAMED omission of this pass — not something to be
+#     rediscovered as a surprise next window.
+#
+# ⛔ **INVARIANT 79 — A *CORRECTION* ROTS EXACTLY AS FAST AS THE CITATION IT CORRECTED, AND THIS PASS
+# CAUGHT TWO INDEPENDENT INSTANCES.** Invariant 78 taught "verify the citation names the THING." The
+# stronger rule this window forces: **a published FIX to a bad `file:line` earns no durability from
+# having once been right.**
+#   (1) `non-compliance.report.md` corrected a bad `postRe` locus by publishing `type-system.ts:27224
+#       / :28162 / :28287`. **At this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+#       returns `:27384`, `:28322`, `:28447`.** The correction is stale.
+#   (2) Invariant 78 corrected `auth.map.md`'s §20.5 citation by publishing `SPEC.md:15738-15743`.
+#       **At this HEAD §20.5 Session Context is at `SPEC.md:16006` (§20.5.1 at `:16079`), and
+#       `:15738-15743` is markup inside an `<errorBoundary>` example** — the THIRD distinct thing
+#       that range has pointed at across three watermarks.
+#   ⚑ **THE RULE: never carry a `file:line` across a stamp, including one this map set published as
+#   the fix. Re-derive by SYMBOL (`grep -n '<symbol>' <file>`) and record the SYMBOL beside the line
+#   so the next pass can re-derive it too.** A line number is a cache, not a fact.
+#
+# ⛔ **INVARIANT 80 — A MAP PASS THAT NEVER CHECKS FILE WELL-FORMEDNESS CAN STAMP A BROKEN TRUNK AND
+# PUBLISH A CLEAN BILL. IT DID.** `compiler/SPEC-INDEX.md` reached `main` at **`e74f5423`** (#900)
+# with three raw conflict markers at `:33`, `:91`, `:149` enclosing **57 Sections rows on each side
+# (114 rows over a 117-line hunk)**, and cloud `gate` was GREEN. ⚑ **`e74f5423` IS THE SHA EVERY MAP
+# IN THIS DIRECTORY WAS STAMPED AT.** The two sides were **NOT identical** — §14 Type System read
+# `8050-9941 | 1892` on one and `8050-9856 | 1807` on the other — so a Profile-A PA boot, which
+# full-reads this file, got two different answers per section for the whole window.
+# ⚑ **THE GATE THAT EXISTED WAS NOT BROKEN.** `SPEC-INDEX totals gate` verified the two numbers in the
+# `@generated` totals block; those numbers were correct. It measured what it was built to measure and
+# its answer was true — **it simply was not an answer to "is this file well-formed."** Closed S409 by
+# `scripts/conflict-marker-gate.ts` (now a blocking `gate` step) plus the widened `SPEC-INDEX currency
+# gate`. **The map-side lesson stands on its own: "the source diff is EMPTY" and "the source is
+# INTACT" are different claims, and only the first was ever being checked here.**
+#
+# ⚠ **TASK-SHAPE ROUTING IS ONE WINDOW BEHIND BY CONSTRUCTION AND THIS WINDOW IT IS *FOUR*.** The
+# `router-lag` structural finding (S404, still open) assumes a per-wrap refresh; S417-S421 ran no
+# wrap-6c at all. **Treat the Task-Shape Routing table below as S405-era.** The surfaces that actually
+# moved this window, and therefore route differently now: `codegen/emit-library.ts` (+400, map-surface
+# lowering) · `ast-builder.js` (+241, condition-head collection) · `type-system.ts` (+170,
+# inner-function lexical binding) · `codegen/index.ts` (+92, dist-relative asset paths) ·
+# `codegen/emit-logic.ts` (+73, block-scoped declared names) · `tokenizer.ts` (+65, regex-after-`)`).
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # generated-at: e74f5423 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
 # `merge-base HEAD origin/main` == `origin/main` == **`e74f5423`**, and that is the watermark.
 # ⛔ **`HEAD` DID *NOT* AGREE WITH IT WHEN THESE FIGURES WERE MEASURED, AND THAT IS RECORDED RATHER

@@ -1,6 +1,104 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ━━━━━━━ S422 ERROR DELTA — **ONE NEW CODE IN SPEC, TWO STILL-UNDOCUMENTED EMITTERS.** ━━━━━━━
+#
+# ⛑ **THE ONLY CODE ADDED TO `compiler/SPEC.md` THIS WINDOW IS `E-CONDITION-HEAD-UNPARENTHESIZED`**
+# (set-diff of unique codes at both watermark ends: 786 -> 787, ADDED = that one, REMOVED = EMPTY).
+#   - §34 catalog row: `compiler/SPEC.md:20218`. Normative prose: `:27067`, `:27816` (§49.2.3, §50.2.3).
+#   - Emitted in `collectIfCondition()` — `compiler/src/ast-builder.js:10719-10720`
+#     (design commentary `:10531`, worked example `:10619`). Serves `parseOneIfStmt` AND all three
+#     `while` parse sites, which is why `if` and `while` close together.
+#   - Pinned by `compiler/tests/unit/loop-head-truncated-at-first-close-paren.test.js`.
+#   - **Partitions into `result.errors`.** Severity Error. **REJECT WITHOUT RECOVERY** — deliberately;
+#     three successively tighter recovery bounds were implemented and WITHDRAWN, each fabricating or
+#     deleting source in a new shape. Do not re-attempt recovery here without reading the §34 row.
+#   - ⚑ **THE CONTINUATION SET IS DELIBERATELY CONSERVATIVE — DO NOT WIDEN IT.** Fires only when the
+#     token after the closing `)` is one of `<` `<=` `>` `>=` `==` `!=` `===` `!==` `&&` `||` `??`
+#     `*` `%` `?` — **all PUNCT, and that is the invariant.** `/` is EXCLUDED and the exclusion is
+#     load-bearing (a braceless `while` body may start with a regex literal, pinned by
+#     `compiler/tests/unit/while-braceless-body-stays-in-the-loop.test.js`). `+`/`-` excluded as unary
+#     prefixes; `.`/`(`/`[` because each can begin a statement; `:` for labels/ternary. **`is` is
+#     excluded because it is WORD-shaped and therefore also a legal identifier** — measured, both an
+#     IDENT-or-KEYWORD arm and a KEYWORD-only arm falsely reject `function f(is) { … }`.
+#   - ⛔ **IT IS SWALLOWED INSIDE AN `export`-ED DECLARATION AND REACHES NEITHER STREAM.** The
+#     `export function` synth re-parse surfaces only `E-FN-EQUALS-BODY` and discards the rest, over
+#     the whole lexical interior. Measured SILENT for `export function` / `export fn` /
+#     `export const g = () => …` / `export server function` / a plain `function` nested inside an
+#     `export function`; measured FIRING at top level and for bare `function` / `fn` /
+#     `server function`. **So "newly-rejecting" is NOT true inside that region.** Pre-existing
+#     plumbing, not introduced here — ratified S308 `E-FOR-UNPARENTHESIZED-HEAD` is swallowed
+#     identically. Closing it is NOT free: **22 of 2,553 tracked corpus files would newly error**
+#     (17 `E-THROW-NOT-IN-SCRML`, 7 `E-TRY-NOT-IN-SCRML`, 1 `E-STMT-MISSING-SEMICOLON`), including
+#     ten shipped `stdlib/` modules and the native parser. A migration needing a ruling.
+#
+# ⛔ **TWO LIVE CODES STILL HAVE ZERO MENTIONS IN `compiler/SPEC.md` — N-S405-1, UNREMEDIATED AFTER
+# FOUR SESSIONS, AND IT SURVIVED A WINDOW THAT ADDED +400 LINES TO ITS OWN FILE.** Re-executed here:
+#   - `E-CG-ENUM-BINDING-COLLISION` — emitter `compiler/src/codegen/emit-library.ts:1517-1518`.
+#     `grep -c` in SPEC.md: **0**. PINNED by `compiler/tests/integration/export-enum-library-emit.test.js`
+#     — so a test asserts a code the specification does not contain.
+#   - `E-CG-SQL-FN-UNVERIFIABLE-SPAN` — emitter `compiler/src/codegen/emit-library.ts:713-714`,
+#     referenced in-file at `:1255`. `grep -c` in SPEC.md: **0**. **NO test and NO conformance case
+#     references it anywhere.** This one is both undocumented AND unpinned.
+#   **Both are invisible to every count in this map set, because every count derives from SPEC.**
+#
+# ⚑ **CODES WHOSE EMIT SITES GREW THIS WINDOW BUT WHICH ARE *NOT* NEW — CHECKED, NOT ASSUMED:**
+# `E-EQ-002` (SPEC mentions 9, catalog rows 2), `E-FN-003` (22 / 2), `E-MU-001` (1 / 1),
+# `E-SCOPE-001` (13 / 1). All four already carried SPEC rows before this window. **Do not file these
+# as new codes** — a grep of the source diff alone would say otherwise.
+# ⚠ `E-MU-001` has exactly ONE mention and ONE row in the whole specification while now emitting from
+# TWO source files (`type-system.ts`, `ast-builder.js`) and carrying TWO dedicated unit tests. Thin
+# documentation against a widening emitter — flagged in `non-compliance.report.md`, not silently mapped.
+#
+# ⛑ **§34 CATALOG: 819 ROWS (`19750..20640`), +1.** Buckets re-run by `bun scripts/s34-census.ts`:
+# `STRUCK 34 · PINNED 346 · IMPL-SITES 307 (+1) · DECLARED-AHEAD 18 · RUNTIME-SURFACED 3 ·
+# FALSE-CLAIM 111`. Dispositions `BUILD-ARC 69 · HOME-NO-SHALL 26 · ORPHAN-INDEX 4 · NOMINAL-HOME 12`
+# — every disposition FLAT. Row-prefix series: `^| E-` **921 -> 922**, `^| W-`/`^| I-`/`^| H-` FLAT
+# at **182 / 10 / 2**.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
 # **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
 # LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`

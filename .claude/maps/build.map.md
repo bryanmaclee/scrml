@@ -1,6 +1,93 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ━━━━━━━ S422 BUILD DELTA — **`.github/` IS *NOT* EMPTY THIS WINDOW. `gate` GREW A STEP.** ━━━━━━━
+#
+# ⛑ **`gate` IS NOW 15 STEPS (13 `- name:` + 2 `- uses:`), UP FROM 14 (12 + 2).** RE-COUNTED BY
+# PARSE over `ci.yml:103-192` at this SHA, stated both ways because a bare total has invited an
+# ambiguity before. The added step is **`Conflict-marker gate (no unresolved merge markers on the
+# trunk)` -> `bun scripts/conflict-marker-gate.ts`** (NEW FILE, S409). One step was also RENAMED and
+# WIDENED: `SPEC-INDEX totals gate` -> **`SPEC-INDEX currency gate (totals + every row's range +
+# full-scan coverage)`**, running the SAME command (`bun run scripts/regen-spec-index.ts --check`).
+# ⚠ **A RENAMED STEP RUNNING THE SAME COMMAND IS INVISIBLE TO A COMMAND-LEVEL DIFF** — the behaviour
+# change lives inside `regen-spec-index.ts` (+71 this window), not in the workflow.
+# `tracking` (**8** steps) and `windows` (**4**) are BOTH still `continue-on-error: true` — re-counted
+# by parse, not carried. `gate` remains the ONLY blocking job. Three workflows on `main`, unchanged
+# in number: `ci.yml`, `advisory-review.yml`, `cloud-maps.yml`.
+#
+# ⛔ **WHY THE NEW GATE EXISTS, AND IT INDICTS THIS DIRECTORY'S OWN PRIOR STAMP.** Per its own
+# header, `conflict-marker-gate.ts` was added because **an unresolved merge conflict reached `main`
+# at `e74f5423` (#900) and `gate` was GREEN.** ⚑ **`e74f5423` IS THE SHA EVERY MAP IN THIS DIRECTORY
+# WAS STAMPED AT.** Verified here by execution, not taken from the script's word:
+# `git show e74f5423:compiler/SPEC-INDEX.md` carries raw markers at **`:33`, `:91`, `:149`**,
+# enclosing **57 Sections rows on each side — 114 rows over a 117-line hunk**.
+# ⚠ **THE TWO SIDES ARE NOT IDENTICAL — THIS WAS COMPETING DATA, NOT MERE DUPLICATION.** §14 Type
+# System appears as `8050-9941 | 1892` on one side and `8050-9856 | 1807` on the other. A Profile-A
+# PA boot full-reads this file, so for that whole window the navigation table offered two different
+# answers per section with nothing to choose between them. (Current `SPEC-INDEX.md` agrees with the
+# FORMER: `| 14 | Type System | 8050-9941 | 1892 |`.)
+# ⛔ **NO MAP NOTICED, INCLUDING THIS ONE.** The S405 pass stamped itself at that commit and
+# published a clean bill. That is the durable lesson: **a map pass that never checks file
+# WELL-FORMEDNESS can stamp a broken trunk and call it current.**
+#
+# ⚑ **SCRIPT SURFACE: `scripts/` now holds 37 `.ts`/`.js` files.** NEW this window:
+# `scripts/conflict-marker-gate.ts`. MODIFIED: `browser-baseline.ts`, `corpus-emit-differential.ts`,
+# `dpa-debt.ts`, `flograph.ts`, `generate-api-reference.js`, `regen-spec-index.ts`, `state.ts`.
+# ⚠ `conflict-marker-gate.ts` matches ONLY the two DISTINCTIVE 7-char markers anchored at column 0;
+# the bare `=======` middle marker is deliberately NOT matched (it collides with setext Markdown
+# headings). Backlog at introduction was ZERO, the pa-base §8 precondition for adding a gate.
+#
+# ⚠ **`cloud-maps.yml` STILL HAS NO NAV-MAP STAGE, AND THAT IS BY RULING, NOT BY BREAKAGE.** Stage 2
+# (project-mapper regeneration) was REMOVED 2026-08-01 (S310) as a COST decision — bryan ruled the
+# cloud AI spend off, so the leg was deleted rather than left erroring red. What remains is Stage 1
+# (`bun scripts/state.ts --write`) and Stage 1b (`threads.ts`, `continue-on-error`). **The 112-commit
+# staleness this stamp just closed is the direct, predicted consequence of that ruling** — the gap
+# `g-nav-maps-have-no-scheduled-refresh` is accurate and open. Nothing will move a map stamp but a
+# wrap-6c run by hand.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
 # **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
 # LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`

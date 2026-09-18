@@ -1,6 +1,28 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-08T05:00:00Z  commit: e74f5423
+# generated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# scan mode: FULL_COLD_START re-execution (S422 wrap-6c, run from worktree agent-a83548a63b17c0d54)
+#
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`.** MAP-STAMP RULE run at WRITE time:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main`);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+#
+# ⛔ **THIS REPORT SAT FOUR SESSIONS AND 112 COMMITS STALE (S417-S421 ran no wrap-6c), AND THE WINDOW
+# IT MISSED CONTAINED THE ANSWER TO ONE OF ITS OWN STANDING FINDINGS.**
+#
+# ⚑ **NOTHING BELOW WAS CARRIED. EVERY STANDING ITEM WAS RE-EXECUTED BY RUNNING ITS COMMAND**, on
+# explicit instruction from the dispatching brief — and the instruction paid for itself twice:
+#   (1) **the `postRe` CORRECTION this report published at S405 has itself gone stale** (it named
+#       `:27224 / :28162 / :28287`; `grep -n 'const postRe'` now returns `:27384 / :28322 / :28447`);
+#   (2) **invariant 78's published fix for the §20.5 citation has also gone stale** (it named
+#       `SPEC.md:15738-15743`; §20.5 Session Context is now at `:16006`, and that old range is markup
+#       inside an `<errorBoundary>` example).
+# **A correction is not durable merely because it was correct when written. Locate by SYMBOL.**
+#
+# ━━━━━━━ BELOW: the superseded S405 header, carried for provenance. ━━━━━━━
+# ⚠ Its stamp line read: `generated: 2026-09-08T05:00:00Z  commit: e74f5423`.
 # scan mode: INCREMENTAL_UPDATE (doc-population delta scan) — run as part of the S405 wrap-6c refresh
 #
 # MAP-STAMP RULE run at WRITE time: `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`;
@@ -30,7 +52,324 @@
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
 
-## Summary — S405 pass (this pass)
+## Summary — S422 pass (this pass)
+
+**Scan mode:** FULL re-execution at `787d4cb4`, run from worktree `agent-a83548a63b17c0d54`.
+**Window:** `e74f5423..787d4cb4` — **112 commits**, the longest gap this report has ever covered.
+S417–S421 ran no wrap-6c.
+
+| | |
+|---|---|
+| Tracked `.md` in repo | **2,213** |
+| In-scope after excluding `handOffs/` + `archive/` | **1,590** |
+| Changed `.md` in window | **64** (21 `handOffs/` — out of scope; 13 are these maps themselves) |
+| **In-scope docs changed and scanned** | **30** (9 modified, 21 added; 15 of the additions are `docs/changes/*` dispatch artifacts) |
+| Non-compliant | **6** (3 standing + 3 new) |
+| Uncertain | **3** |
+
+⚑ **EVERY STANDING ITEM BELOW WAS RE-EXECUTED, NOT CARRIED.** The dispatching brief specifically
+forbade inheriting a prior "verified" locus, and it was right to: **two published CORRECTIONS were
+found stale this pass**, one of them the very fix this report issued for N8.
+
+---
+
+## ⛔ N-S422-1. **THE `postRe` CORRECTION THIS REPORT PUBLISHED HAS ITSELF GONE STALE. SECOND GENERATION OF THE SAME DEFECT.**
+
+**Reason:** grep-mismatch (self-inflicted).
+**Detail.** The S405 pass caught a bad locus and published the fix as
+*"`grep -n 'const postRe'` returns THREE sites — `:27224`, `:28162`, `:28287`"*.
+**RE-DERIVED BY SYMBOL AT `787d4cb4`:**
+
+```
+grep -n 'const postRe' compiler/src/type-system.ts
+27384:      const postRe = new RegExp(...escapeRe(postName)...);
+28322:    const postRe = new RegExp(...esc(postName)...);
+28447:    const postRe = new RegExp(...postName.replace(...)...);
+```
+
+**All three published numbers are wrong.** `postRe.test(...)` sits at `:27385`, `:28323`, `:28448`.
+
+⛔ **AND THE BRIEF'S OWN RESTATEMENT OF THE DEFECT HAS DRIFTED TOO — WHICH IS THE POINT.** The
+dispatch said `:26048` "is `structInstances: Map<string, string>;`". At this HEAD
+`sed -n '26048p'` returns ` * @param structInstances      — map of bindingName → structTypeName (callers`
+— **a doc-comment line.** The real declarations are at `:26571`, `:26741`, `:26887`, `:26916`.
+**Three watermarks, three different readings of line 26048** (`parts.push` guard → `@param` doc line →
+whatever comes next). The number carries no information at all.
+
+**Suggested disposition:** already applied in `schema.map.md` and `primary.map.md` (invariant 79).
+No source edit is owed by this finding itself — see N-S422-2 for the source-side half.
+
+---
+
+## ⛔ N-S422-2. **`scripts/source-text-regex-census.ts` STILL BAKES `type-system.ts:26048` — THIRD CONSECUTIVE WATERMARK, AND IT IS IN AN EXECUTABLE.**
+
+**Reason:** grep-mismatch, in source rather than a doc.
+**Detail.** Re-executed, and the file is `--name-only` EMPTY over `e74f5423..787d4cb4` — unchanged,
+therefore un-fixed:
+
+- `scripts/source-text-regex-census.ts:38` — doc comment: *"the confirmed pre-existing defect at `type-system.ts:26048` lives"*
+- `scripts/source-text-regex-census.ts:170` — a **runtime `console.log`**, reprinted on every run:
+  *"see `postRe.test(t)` — the site of the confirmed defect at type-system.ts:26048."*
+
+At this HEAD `:26048` is a `@param` doc line (above). The guard the S391 note named
+(`parts.push(s.slice(start))`) is — located **by symbol** — at **`:26869`**.
+
+⛔ **A BAKED CITATION IN AN EXECUTABLE IS STRICTLY WORSE THAN ONE IN A DOC:** it is reprinted with
+authority on every run, and **no doc-currency gate covers it.** Three passes have now filed this.
+
+**Suggested disposition:** **update to match current** — delete `:26048` from both sites and cite the
+SYMBOL, disambiguated (`postRe.test(tv)` in `<enclosing function name>`), since there are three
+`postRe` sites. `compiler/SPEC.md`'s own `E-TYPE-031` §34 row (`:19872`) already states the governing
+rule: *"Trust the symbol — and now the symbol is all there is."*
+
+---
+
+## ⛔ N-S422-3. **`docs/PA-SCRML-REFERENCE.md` STILL CITES `SPEC §55.1 line 24295` TWICE, AND THE LINE HAS NOW DRIFTED INTO A THIRD DIFFERENT SECTION.**
+
+**Reason:** grep-mismatch.
+**Detail.** Two sites, both unchanged: `docs/PA-SCRML-REFERENCE.md:60` and `:131`, each reading
+*"`E-TYPE-031` per SPEC §55.1 line 24295"*.
+
+- At `e74f5423` the prior pass measured `:24295` as an **EMPTY line**.
+- **At `787d4cb4` `sed -n '24295p' compiler/SPEC.md` returns §41.14.5 prose** about
+  `pick=`/`omit=`/`partial=` on `<formFor>` — *Form Generation*, not §55.
+- Live `§55.1` references, re-derived: `compiler/SPEC.md:2137`, `:2146`, `:2160`, and the
+  `E-TYPE-031` §34 row at **`:19872`**.
+
+⚑ **The §34 row it points at is the one document in the repo that argues line numbers must be
+dropped. The reference doc cites it by line number.**
+
+**Suggested disposition:** **update to match current** — cite `§55.1` alone, or the §34 row by CODE
+(`E-TYPE-031`). Never re-measure the number; dropping it is the fix.
+
+---
+
+## ⛔ N-S422-4. **N-S405-1 IS UNREMEDIATED AFTER FOUR SESSIONS: TWO LIVE DIAGNOSTIC CODES STILL HAVE *ZERO* MENTIONS IN `compiler/SPEC.md`, AND ONE OF THEM IS ALSO UNPINNED.**
+
+**Reason:** spec-mismatch (code ahead of specification).
+**Detail.** Re-executed by `grep -c` at this HEAD. Both emitters are live, and both live in
+`compiler/src/codegen/emit-library.ts` — **the single most-changed source file this window (+400 lines)**,
+so the window had every opportunity to document them:
+
+| code | emitter | `grep -c` in `SPEC.md` | §34 row | test/conformance pin |
+|---|---|---|---|---|
+| `E-CG-ENUM-BINDING-COLLISION` | `emit-library.ts:1517-1518` | **0** | **none** | `compiler/tests/integration/export-enum-library-emit.test.js` |
+| `E-CG-SQL-FN-UNVERIFIABLE-SPAN` | `emit-library.ts:713-714` (ref `:1255`) | **0** | **none** | ⛔ **NONE ANYWHERE** |
+
+⛔ **`E-CG-SQL-FN-UNVERIFIABLE-SPAN` IS BOTH UNDOCUMENTED AND UNPINNED** — it can be deleted or
+broken with nothing failing and nothing to read. `E-CG-ENUM-BINDING-COLLISION` is the inverse
+pathology: **a test asserts a code the specification does not contain.**
+
+⚑ **Both are invisible to every figure this map set publishes**, because the §34 census, the
+prefix-grep series and the unique-code set-diff all derive from `SPEC.md`. The window's honest
+"ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}" is true of SPEC and false of the compiler.
+
+**Suggested disposition:** **update to match current** — add both §34 rows (each stating where it
+fires, per the §34.0 row-provenance gate), and add a conformance case for the SQL one.
+⚠ Note the §34.0 gate is **DIFF-SCOPED**, so it is silent on these two by construction: they predate
+its coverage. This is a gate blind-spot, not a gate failure.
+
+---
+
+## ⚠ N-S422-5. **`docs/known-gaps.md` CARRIES 45 ENTRIES WHOSE HEADING CONTRADICTS THEIR OWN MACHINE MARKER — CONFIRMED ON A SAMPLE.**
+
+**Reason:** content-heuristic (doc contradicts itself).
+**Detail.** `bun scripts/state.ts --check` reports, WARN-only and ungated:
+`known-gaps heading/marker status: 45 DRIFT (heading ≠ marker) — 546 comparable · 452 no status tail
+· 18 tail but no marker · 1016 headings`.
+
+**Falsified by reading one, rather than trusting the count.** `g-each-in-if-else-chain-emits-zero-renderers`
+(`docs/known-gaps.md:1169`): the heading's status tail reads **`; open`**, while the very next line's
+marker reads **`status=resolved`** and the body beneath opens **"RESOLVED S392 (Peter)."** with a
+full root-cause trace and a named gate test. **The heading is the stale half.**
+
+⛔ **THIS IS THE S248 NO-OP-DISPATCH CLASS, AT SCALE.** A session planning from headings would
+dispatch 45 candidate items, an unknown number of which are already done — and the standing rule is
+explicit that plans come from landed artifacts, never from ledger markers.
+
+**Suggested disposition:** **update to match current** — reconcile heading tails to markers. The
+instrument already exists and already names every offender; what is missing is that **nothing acts on
+it, because it is WARN-only.** Consider promoting to a gate once the backlog is zero (pa-base §8).
+
+---
+
+## ⚠ N-S422-6. **`master-list.md`'s `@generated:recent-sessions` BLOCK IS STALE, AND `state.ts --check` REPORTS `FAIL` FOR IT.**
+
+**Reason:** content-heuristic (generated block out of date).
+**Detail.** At this HEAD:
+`FAIL — stale/missing @generated section(s): @generated:recent-sessions (master-list.md)`.
+`@generated:gap-counts` PASSes, so this is one block, not the rollup.
+
+⚑ **RELEVANT CONTEXT, NOT AN EXCUSE:** the S410 fix pinned by
+`compiler/tests/unit/state-session-close-suffix.test.js` records that these matchers previously
+dropped **79 of 100 wrap subjects** over the last 600 commits (51 peter-suffixed, 28 bryan-suffixed)
+because they demanded `)` immediately after the session digits. The matcher is fixed; **the derived
+block simply has not been regenerated since.**
+
+**Suggested disposition:** **update to match current** — `bun scripts/state.ts --write`.
+⚠ **NOT DONE BY THIS PASS**, which is constrained to `.claude/maps/` plus its own `progress.md`.
+
+---
+
+## ⛑ C-S422-A. **CLASS FINDING — THE OLD WATERMARK WAS A COMMIT WITH AN UNRESOLVED MERGE CONFLICT ON THE TRUNK, AND NO MAP NOTICED. NOW CLOSED IN CI.**
+
+**Reason:** combo (location + content), retrospective.
+**Detail, verified here rather than taken from the fixing script's word.**
+`compiler/SPEC-INDEX.md` reached `main` at **`e74f5423` (#900)** carrying three raw conflict markers
+at lines **33 / 91 / 149** (`git show e74f5423:compiler/SPEC-INDEX.md`), the last naming
+`35ca0980 (chore(spec-index): regen totals after the §14.8.10 SPEC amendment)`.
+
+**57 Sections rows on each side — 114 rows across a 117-line hunk**, against ~71 sections total.
+
+⛔ **`e74f5423` IS THE SHA EVERY MAP IN THIS DIRECTORY WAS STAMPED AT**, and the S405 pass published a
+clean bill against it.
+⚠ **THE TWO SIDES WERE NOT IDENTICAL — SO "duplicated" UNDERSTATES IT.** §14 Type System read
+`8050-9941 | 1892` on one side and `8050-9856 | 1807` on the other. `compiler/SPEC-INDEX.md` is a
+**mandatory full-read at every Profile-A PA boot**, so for that window the navigation table offered
+two different answers per section with nothing to choose between them. (Current file agrees with the
+former.)
+
+⚑ **THE GATE THAT EXISTED WAS NOT BROKEN, AND THAT IS THE DURABLE PART.** `SPEC-INDEX totals gate`
+checked the two numbers in the `@generated` totals block; those numbers were correct. It measured what
+it was built to measure and its answer was true — **it simply was not an answer to "is this file
+well-formed."**
+
+**STATUS: CLOSED IN CI AT S409**, by two changes verified present in `.github/workflows/ci.yml`:
+a new blocking step `Conflict-marker gate` (`bun scripts/conflict-marker-gate.ts`), and the widened
+`SPEC-INDEX currency gate (totals + every row's range + full-scan coverage)`. `gate` went **14 → 15 steps**.
+
+**The map-side lesson remains OPEN and is recorded as invariant 80:** *"the source diff is EMPTY" and
+"the source is INTACT" are different claims, and only the first was ever being checked by a map pass.*
+
+---
+
+## UNCERTAIN — needs human review (S422)
+
+### U-S422-1. ⚠ `conflict-marker-gate.ts`'s own header says "117 duplicated Sections rows". Measured: 114 rows over a 117-line hunk, and they were not duplicates.
+
+**Why uncertain:** a one-word imprecision in a comment, in a file whose comments are its correctness
+argument — the same class the S405 pass filed as N-S405-2, but far milder, and the gate's BEHAVIOUR
+is unaffected.
+**What to check:** decide whether `scripts/conflict-marker-gate.ts:5-7` should read *"114 Sections
+rows across a 117-line hunk, in two NON-IDENTICAL versions"*. My measurement:
+`sed -n '34,90p'` → 57 rows matching `^|`; `sed -n '92,148p'` → 57; a `diff` of the two → all 57
+differ. Purely editorial; **I did not change it** (out of write scope).
+
+### U-S422-2. ⚠ `E-MU-001` has exactly ONE mention and ONE §34 row in the whole specification, while emitting from TWO source files and carrying TWO dedicated unit tests.
+
+**Why uncertain:** thin is not the same as absent, so this is not N-S422-4's class. But the emitter
+widened this window — `type-system.ts` gained `_lexicalBindingsAtInnerFunction` (`:18885`)
+specifically because a missed descent *"costs a false `E-MU-001`"* — and a code whose false-positive
+surface is actively being tuned usually earns more than one normative sentence.
+**What to check:** read the `E-MU-001` §34 row against
+`compiler/tests/unit/e-mu-001-inner-fn-reassignment.test.js` and
+`e-mu-001-nested-block-name-collision.test.js`, and decide whether the row states the
+inner-function / nested-block-collision behaviour those tests pin.
+
+### U-S422-3. ⚠ `docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md:4` still says **"Untracked and uncommitted."** and `git ls-files` returns it. **STILL LIVE, VERBATIM — third pass.**
+
+**Why uncertain:** unchanged from U5. Plausibly a working note the author wants preserved verbatim;
+it needs one human sentence, not a cartographer's edit.
+**What to check:** confirmed ISOLATED this pass — `grep -l 'Untracked and uncommitted' docs/articles/*.md`
+returns **only this file**, so the six newly-added `i-am-jacks-*` articles did NOT inherit the
+pattern. Either delete the clause or add "(now tracked)".
+
+---
+
+## STANDING ITEMS — RE-EXECUTED AT `787d4cb4` (verdicts are commands, not carry-forward)
+
+| item | S405 verdict | **S422 verdict, re-executed** |
+|---|---|---|
+| **N8** census bakes `type-system.ts:26048` | STILL LIVE | ⛔ **STILL LIVE — 3rd watermark.** File byte-unchanged over the window. Re-filed as **N-S422-2**. |
+| **N17** `PA-SCRML-REFERENCE.md` cites `§55.1 line 24295` | STILL LIVE, line was EMPTY | ⛔ **STILL LIVE — the line now holds §41.14.5 `<formFor>` prose.** Re-filed as **N-S422-3**. |
+| **U5** article claims it is untracked | STILL LIVE | ⚠ **STILL LIVE, VERBATIM.** Re-filed as **U-S422-3**, now with the negative: no other article repeats it. |
+| **N-S405-1** two `E-CG-*` codes absent from SPEC | NEW, HIGH | ⛔ **STILL LIVE after 4 sessions**, and one of the two is also unpinned. Re-filed as **N-S422-4**. |
+| **Location heuristic** (`deep-dives`/`adrs`/`debates`/`gauntlets`/`research`) | all ENOENT | ⛑ **ALL FIVE STILL ENOENT** — re-run by `ls`. The repo carries none of the doc classes that belong in `scrml-support`. |
+| **Name heuristic** (`-draft-`/`-proposal-`/`-plan-`/`-rfc-`/`-ideas-`/`-amendments-`/`-staging-`/`SPEC-AMENDMENTS`) | zero | ⛑ **STILL ZERO** across all **1,590** in-scope tracked `.md`. |
+| **Spec-draft heuristic** (`spec-*` outside the four authoritative files) | only `docs/audits/*` | ⛑ **UNCHANGED** — no new `spec-*` doc entered the in-scope population. |
+
+⚑ **THE NEGATIVE RESULTS ARE LOAD-BEARING AND WERE RE-RUN, NOT ASSUMED.** "Flat" and "unmeasured"
+are indistinguishable in a report; each row above names the command that produced its verdict.
+
+---
+
+## Docs scanned this window — the 30 changed in-scope docs
+
+**Modified (9):** `compiler/SPEC.md` (+46) · `compiler/SPEC-INDEX.md` (net −47, the conflict repair) ·
+`docs/FACTS.md` (regenerated; agrees with every raw count re-run this pass) · `docs/changelog.md` ·
+`docs/known-gaps.md` · `docs/pr-reviews.md` · `hand-off.md` · `master-list.md` ·
+`docs/changes/library-mode-structural-routing-2026-09-06/progress.md`.
+
+**Added (21):** six `docs/articles/i-am-jacks-{engine,match,program}*.md` · fifteen
+`docs/changes/*/{BRIEF,progress,SCOPE}.md` dispatch artifacts.
+
+⛑ **`docs/changelog.md` IS CURRENT AND WAS CHECKED, NOT ASSUMED** — its top entry is **S421 —
+2026-09-18**, and it mentions `E-CONDITION-HEAD-UNPARENTHESIZED` twice. **Compliant.**
+
+⚠ **THE GREP CROSS-CHECK ON THE NEW ARTICLES RETURNED CLEAN, BUT OVER A POPULATION TOO SMALL TO MEAN
+MUCH — SAYING SO RATHER THAN BANKING IT.** `i-am-jacks-engine-PUBLISH.md` and
+`i-am-jacks-match-PUBLISH.md` each yielded only **2** backticked identifier-shaped tokens, both found
+in `compiler/src` / `stdlib` / `SPEC.md` (0% missing). These are prose-led essays, so the
+identifier-density heuristic is nearly blind on them. **Recorded as "not evidence of correctness",
+NOT as a pass.**
+
+⚠ **`docs/changes/*` artifacts are HISTORICAL BY DESIGN** (a BRIEF is archived verbatim at dispatch
+time). They are in scope but are **not** authoritative, and are not flagged for describing the state
+of the world at their dispatch date.
+
+---
+
+## Map currency at this stamp — S422
+
+- `bun scripts/state.ts --check` **BEFORE** this pass:
+  `maps: 112 commits behind HEAD (watermark e74f5423, HEAD 787d4cb4)  [WARN-only — not gated]`
+- **AFTER** the write:
+  `maps: 1 commits behind HEAD (watermark 787d4cb4, HEAD 894da9c6)  [WARN-only — not gated]`
+  ⛑ **THAT IS THE CORRECT TERMINAL STATE, NOT A FAILED ADVANCE.** The `1` is this pass's own
+  progress-anchor commit on branch `worktree-agent-a83548a63b17c0d54`. `mapsStaleness()` compares the
+  watermark to local `HEAD` (`scripts/state.ts:760-764`), so `maps: current` is unreachable without
+  stamping an unpushed branch tip — the S326/S328/S331 orphaning hazard the MAP-STAMP RULE exists to
+  prevent.
+- MAP-STAMP RULE, all three commands executed at write time:
+  `merge-base HEAD origin/main` → **`787d4cb4`**; source diff `BASE..HEAD` over
+  `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` → **EMPTY**;
+  `merge-base --is-ancestor 787d4cb4 origin/main` → **exit 0**.
+  Inbound (invariant 48): `merge-base --is-ancestor e74f5423 787d4cb4` → **exit 0**.
+- ⚠ **It exits 0 either way for maps. Nothing in the toolchain fails on a stale map** — established by
+  reading the WARN-only branch, not assumed.
+
+⛔ **NOT DONE BY THIS PASS, NAMED SO IT IS NOT REDISCOVERED AS A SURPRISE:**
+1. **The four `@generated` maps are still S405-era** (stamped `2026-09-08 05:00`). `.gitignore:3` is
+   `.claude/`, so they are **absent from every worktree** — only the 13 hand-written maps are
+   force-added and tracked (`git ls-files .claude/maps/` lists exactly 13). Their generator is
+   **`flogence/scripts/mapgen.ts`**, in a *different repo*; there is no `scripts/mapgen.ts` in scrml
+   and there never has been (`git log --all -- scripts/mapgen.ts` → empty). `test.generated.md` still
+   publishes **1426** `.test.js` against FACTS' **1,459**. **A worktree-isolated refresh structurally
+   cannot fix this** — it needs a run from the main checkout.
+2. `bun scripts/state.ts --write` (N-S422-6) — outside this pass's write scope.
+
+---
+
+## Tags
+#scrml #non-compliance #project-mapper #cleanup #maps #s422 #citation-rot #spec-drift
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [build.map.md](./build.map.md) — the `gate` 14→15 delta and the conflict-marker story
+- [error.map.md](./error.map.md) — the two undocumented `E-CG-*` codes
+- [schema.map.md](./schema.map.md) — the re-derived `postRe` loci
+- [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+
+---
+---
+
+# ⟵ EVERYTHING BELOW IS PRIOR-PASS CONTENT, CARRIED VERBATIM FOR PROVENANCE
+
+⚠ **Its figures and `file:line` citations are S405-era or older and several are KNOWN STALE** — see
+N-S422-1 / N-S422-2 / N-S422-3 above. Read it as history, not as current truth.
+
+## Summary — S405 pass (PRIOR pass — carried for provenance; its stamp `e74f5423` is superseded)
 
 | | |
 |---|---|

@@ -1,6 +1,88 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ━━━━━━━ S422 TEST DELTA — **+19 TEST FILES, 16 OF THEM NEW UNIT PINS.** ━━━━━━━
+#
+# ⛑ **1,459 test files — RE-COUNTED THREE WAYS AND ALL THREE AGREE EXACTLY:** `docs/FACTS.md`,
+# `find compiler/tests -name '*.test.js' | wc -l`, and `git ls-files 'compiler/tests/**.test.js' |
+# wc -l` each return **1,459** (was 1,440, **+19**).
+# Per category dir, re-derived at this SHA: `unit 954` (**+17**) · `integration 220` (**+1**) ·
+# `conformance 133` (FLAT) · `browser 104` (**+1**) · `commands 17` (FLAT) · **`ROOT 14`** (FLAT) ·
+# `lsp 11` (FLAT) · `self-host 4` (FLAT) · `e2e-render-map 2` (FLAT). Sum = **1,459**.
+# ⚠ **THE TWO STANDING DEFINITION BOUNDARIES ARE UNCHANGED IN KIND AND RE-MEASURED IN SIZE:**
+# (1) the `@generated` `test.generated.md` figure keys on the first SUBDIRECTORY, so the **14
+# ROOT-level `compiler/tests/*.test.js`** fall out of its total — expect **1,445** there against
+# FACTS' 1,459 (`1,445 + 14 = 1,459`). (2) a repo-wide `git ls-files '*.test.js'` returns **1,460**,
+# the extra being `conformance/conformance-corpus.test.js`, which lives OUTSIDE `compiler/tests` and
+# is the §62.2 corpus bridge (invariant 88). **Record both; do not "fix" either instrument.**
+#
+# ⛑ **16 NEW `compiler/tests/unit/` FILES, EACH NAMED FOR THE DEFECT IT PINS** — the naming
+# convention is doing real work here and is worth preserving:
+# `braceless-control-head-regex-literal` · `condition-head-angle-operator-coverage` ·
+# `condition-head-merged-shift-runs` · `declared-names-block-scope` · `e-eq-002-hint-is-some` ·
+# `e-mu-001-inner-fn-reassignment` · `e-mu-001-nested-block-name-collision` ·
+# `g-library-map-surface-unlowered` · `inner-fn-assignment-to-captured-binding` ·
+# `library-mode-map-literal-runtime` · `loop-head-truncated-at-first-close-paren` ·
+# `marker-parser-pins` · `regex-char-class-colon-not-a-map-literal` ·
+# `semdiff-chunk-token-discovery` · `state-session-close-suffix` · `tokenizer-multi-ops-ordering` ·
+# `while-braceless-body-stays-in-the-loop`.
+# NEW integration: `corpus-emit-differential-exit-codes.test.js` (+707 lines — the largest single
+# test addition this window). NEW browser: `composed-route-shell-chrome-wiring.browser.test.js`.
+#
+# ⚑ **THE `e2e-render-map` HARNESS WAS SUBSTANTIALLY REWORKED WITHOUT ITS FILE COUNT MOVING** —
+# still 2 `.test.js`, but `e2e-render-map.test.js` (+532), `render-harness.js` (+387),
+# `render-detectors.js` (+237), `detector-validation.test.js` (+208), `generate-baseline.js` (+59),
+# `render-corpus-enumerator.js` (+19). **A FLAT FILE COUNT OVER A REWRITTEN HARNESS IS EXACTLY THE
+# CASE A COUNT-ONLY TEST MAP MISSES.** Read the harness, do not infer it from the tally.
+#
+# ⚠ **`gate` STILL RUNS `unit` + `conformance` + ROOT-LEVEL `*.test.js` ONLY — NOT `integration`,
+# NOT `lsp`, NOT `commands`** (invariant 87). So the +707-line `corpus-emit-differential-exit-codes`
+# integration test, the single largest test artifact added this window, **is NOT gated in cloud CI.**
+# The local pre-commit hook is a different and wider instrument; do not conflate the two.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
 # **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
 # LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
