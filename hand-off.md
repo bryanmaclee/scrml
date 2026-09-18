@@ -1,3 +1,150 @@
+# scrml — Session 420 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: `S418-bryan.md` still reads `status: LIVE` (2026-09-15) and no `board(s418): WRAPPED`
+> commit exists** — his voice entry landed, the board flip did not. Treated as POSSIBLY-LIVE all session;
+> I stayed entirely off his footprint. His four S418 rulings remain UNBUILT and are his: `E-ASSIGN-003`
+> fires · §49.2.1 braceless loop bodies REFUSED · **UNIFY** (the token after a condition head's `)` SHALL
+> be `{`) · `E-MU-001` specified as-is. His open PRs (#962, #951, #950, #939/#938/#937, #920/#919/#918,
+> #907/#906/#905, #899, #887) are CLAIMED, not lost.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Drain the review floor first — nine sessions running it has returned something real, and this
+   session it convicted a PR of mine TWICE in a row.** It will read **4 OWED: #977, #978, #979 + this
+   wrap PR.** Classify with `review-debt.ts`'s `CODE_BEARING_RE` against `gh pr view <n> --json files` —
+   **never** by this hand-off (the S419 hand-off's own CI claim was inverted; see item 6).
+   ⚑ #978 and #979 each already had an independent S239 pass **and a fix round**; #977 is ledger-only.
+   The floor pass is still owed on all of them — a pre-land pass is not a floor record.
+
+2. **⚑ THE ONE PIECE OF REAL WORK TEED UP: limb 2 of the render HIGH, and it now has a live subject for
+   the first time.** `g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject` is
+   `status=narrowed` — limb 1 (the seed bridge) LANDED in #978; the remainder is D6 alone.
+   `render-detectors.js:389` gates D6 on `obs.seeded`, but `hasRenderedContent` inspects the whole
+   `body`, so page chrome satisfies it before any datum arrives and **D6 has still never fired.**
+   **The subject: `examples/25-triage-board.scrml#populated` renders all three task lists EMPTY under a
+   live seed and scores `renders-clean`.** That is exactly the board-bug shape D6 exists for. Scope
+   `hasRenderedContent` to the seeded region (the `<each>` container) and use that cell as the fixture.
+   ⛔ Do NOT "fix" `25-triage`'s fixture first — correcting it makes the subject disappear.
+
+3. **Bryan's, unchanged + ONE new routing:**
+   - the four S418 ruling builds (above); the `>>>` tokenizer reorder; `examples/09-error-handling`;
+     the two soft-nav RULING gaps; the whole S417 list.
+   - ⚑ NEW — **`g-program-shape-inference-anchors-on-the-entry-file-dirname` (MED).** A shell in a
+     subdirectory draws a FALSE `W-PROGRAM-SPA-INFERRED` ("no `pages/` directory exists at the project
+     root" — it does) and **silently suppresses** the correct `W-OUTLET-ABSENT-SOFT-NAV-DISABLED`.
+     PA-reproduced with a control. Root is `ast-builder.js:20054` `projectRoot = dirname(filePath)` — the
+     same anchor #972 fixed in `codegen/`, one file away, misfiring on precisely the layout #972 shipped
+     support for. **Fixing it changes which diagnostics fire**; both are info-level and no compile status
+     moves, so it reads as conformance restoration toward §40.8.1 — but the call is his. Outbound drop
+     written this session.
+
+4. **Peter-lane, still open, cheapest first:**
+   - `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED) — three DIFFERENT defects,
+     each PA-verified against app source: `06-kanban` seeds the DERIVED cell `todo` (source is `cards`,
+     and it uses `column:` where the field is `status:`); `16-remote-data` seeds `contacts`, **a cell that
+     app does not have** (one cell, `<phase>`; the list iterates `rows`, the match binding of
+     `.Loaded(rows)` — no plain cell-set can drive it); `25-triage` uses `column: "todo"` against
+     `["Inbox","Doing","Done"]` under §45 strict `==`. See item 2 before touching `25-triage`.
+   - `g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition` (LOW, 1 live
+     instance) — ⛔ do NOT fix by pattern-matching `→`/`RE-TRIGGERED`; that is another hand-enumerated
+     list of the kind this probe's history punishes.
+   - the S419 item-4 list is UNTOUCHED and still valid (e2e-render-map CI job · baseline regen owed on
+     POSIX · the three non-inert reserves · `g-w-lint-018` probe-then-close ·
+     `g-s320-autoawait-stale-injectpromiseawait-comments`).
+
+5. **STILL NEEDS A POSIX CLONE:** `g-todomvc-mount-throw-unclassified`; the e2e-render-map baseline
+   regeneration; a Linux run of `composed-route-shell-chrome-wiring.browser.test.js`.
+
+6. ⚑⚑ **CORRECTION TO THE S419 HAND-OFF — IT WAS INVERTED ON CI COVERAGE AND I PROPAGATED IT.** It said
+   #972's browser test "ran ONLY locally on Windows — CI's browser lane did not run it; its integration
+   sibling ran 8/8 in CI." **Both halves are wrong.** `scripts/browser-baseline.ts --check` is a step in
+   the **BLOCKING `gate` job** (`ci.yml:148-149`, "a regression here now blocks"); `compiler/tests/integration`
+   runs **only** in `tracking`, which is `continue-on-error: true`. I copied the false claim into a dispatch
+   brief before a reviewer caught it. Filed as
+   `g-instrument-suites-cite-themselves-as-gates-while-running-only-in-the-non-blocking-tracking-job` (MED) —
+   the ask there is **promote-or-stop-citing**, not "make integration blocking"; `.github/` is shared infra
+   → propose to bryan.
+
+7. ⛔ **UNCHANGED, CARRIED:** no recovery scan in `collectIfCondition`; do not widen the four `[^>]` marker
+   regexes (S416 measured live miss count ZERO — and the S420 drift-probe fix deliberately did **not**
+   touch the one at `state.ts`); `bun scripts/types-gate.ts --write` still owed on a clone with an
+   extensionless `tsc`.
+
+8. **Standing from Peter, exercised again:** merge on green without re-asking, re-measuring `tracking`'s
+   failure NAME-SET against main's own run every time (identical 5-test dev-watcher cluster on all three
+   PRs, re-measured per PR, never inherited). `autoMode` did not fire this session.
+
+## WHAT LANDED
+
+Three PRs, all gate-green, all merged. **One touched `scripts/`; one touched the test tier; one ledger-only.**
+
+- **#977** `review(s420)` — floor drained **8 → 0**; 27 findings across 5 code-bearing PRs, 2 HIGH, zero
+  clean; 11 gaps filed; `g-e2e-render-map-with-data-coverage-is-four-of-438` corrected in place to 0-of-438.
+- **#978** `fix(e2e-render-map)` — limb 1 of the HIGH: the seed reaches the cell the app actually reads.
+  Its S239 pass returned **2 HIGH + 2 MED + 4 LOW** and it did **not** land as-is; two fix rounds.
+- **#979** `fix(state)` — the drift probe measured a quarter of its subject and reported a bare count.
+  Its S239 pass falsified the PR's own headline; one fix round. 2 LOWs drained.
+
+## 🔭 DURABLE
+
+**The floor convicted my own work twice in one session, at the same class, one level apart.** #979's whole
+subject is "a bare count cannot be told from a truncated one" — and it shipped a SECOND undisclosed
+truncation (an `i+8` marker window the loop's own `### ` break made redundant), discarding 68 comparable
+pairs and 19 real drifts, while its new scope line blamed the CORPUS for them. **When you fix a truncation,
+the next question is what else in the same function is bounded and why.**
+
+**A balance assertion is the cheapest guard there is.** Splitting the denominator and asserting
+`inspected + noTail + noMarker === headings` immediately caught a silent patch failure of my own — a
+`python` hunk that never applied, leaving `noTail` at 0 and the parts summing 573 of 1010, with a
+plausible-looking output. **Make the parts sum to the whole and a silent skip cannot hide.**
+
+**"Verify before claim" is not a slogan; it stopped a false headline this session.** I counted 21 markers
+carrying undocumented statuses, concluded 7 HIGH + 5 MED were missing from the board, and was wrong in
+full — I had reasoned from `state.ts`'s stale header COMMENT instead of its classifier. Caught only by
+reading `GAP_STATUS_OPEN` before writing it down. **The derived doc that lies to you is often in the same
+file as the code that would correct you.**
+
+**Two reviewers who never spoke converged on one defect from opposite ends** (the seed never reaches the
+cells / the predicate is satisfied before data arrives). Neither alone explains it; either alone is
+sufficient to break it. **Convergence from independent angles is worth more than agreement.**
+
+## ⚑ MISSES (mine)
+
+1. **★★★ #979 shipped the class it was fixing.** An adversarial pass caught it; I did not, despite having
+   spent the session filing that exact class against other people's work.
+2. **★★ I propagated a false claim from my own hand-off into a dispatch brief** (the CI inversion, item 6).
+   Second consecutive session my hand-off has misled the next session's work.
+3. **★★ My first brief handed the agent an unimplementable fix** ("prefer `_scrml_cs_reactive_set` when
+   defined") — those wrappers are IIFE-local and unreachable from the harness. The agent corrected it
+   because the brief told it to push back; a brief that demanded compliance would have got a worse fix.
+4. **★ A `python` heredoc patch silently no-op'd one hunk** and produced a plausible wrong number. Caught
+   by the balance assertion, not by me reading the output.
+5. **★ A `cd` moved the harness's primary working directory twice** (S419's miss #2, repeated). Re-asserted
+   the root both times; no damage.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on all three PRs; `tracking` red on each, **proven pre-existing by
+  name-set identity against main's own run every time** (the 5-test dev-watcher wait-budget cluster).
+- **CI-executed evidence:** #979's suites ride `compiler/tests/unit` in the **blocking** `gate` job.
+  ⚑ **NOT CI-executed:** the whole `e2e-render-map` tier (#978) — no job runs it
+  (`g-e2e-render-map-tier-runs-in-no-ci-job-at-all`, open). #978's evidence is local: 69 pass / 0 fail /
+  1116 expect(), reproduced by the PA on the agent's final tip.
+- `state --check`, `facts --check`, `delta-lint` PASS at each landing. Delta-log at `[3101]`.
+- **Board: HIGH 108 · MED 254 · LOW 98** (boot: 107 · 247 · 96). Filed 1 HIGH · 7 MED · 4 LOW; drained
+  2 LOW; narrowed 1 HIGH to its remaining limb. **The rise is the count getting honest** — this session was
+  mostly discovery, and the discovery was in instruments that read as done.
+- **Maps NOT regenerated** — watermark still `e74f5423` (stale since before S417;
+  `g-nav-maps-have-no-scheduled-refresh` open, the nav-map stage is absent from `cloud-maps.yml`). #979
+  changed one function's signature in `scripts/`; no new/moved/deleted compiler symbol.
+- **Worktrees:** mine cleaned. **Four retained, none mine:** `agent-a0742fe4…`, `agent-a4e6b5f2…`,
+  `onmount-c` (`feat/onmount-c-build`, held for bryan's language-surface review), sibling `scrml-pinned`.
+- **Outbound:** one drop to bryan this session (the subdir-shell lint routing). **SEVEN peter→bryan drops
+  now sit unread.**
+
+---
 # scrml — Session 419 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
