@@ -2,6 +2,33 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S407 — 2026-09-07/15 (bryan · XPS-8950)
+
+**A thin session that became an article-authoring arc, and the article standard found three
+compiler-vs-spec defects.** A new public series was commissioned — **"I am Jack's ___"**, in the
+register of the *Fight Club* organ columns, a scrml construct speaking in the first person about the
+developer who wrote it. Three pieces drafted: **`<program>`**, **`<match>`**, **`<engine>`**. The
+series rule that every code block must COMPILE CLEAN, verified by execution rather than read off the
+spec, is what turned three spec sentences into three filed gaps. Board **HIGH 107 → 108 · MED 245 →
+247**.
+
+- **`docs/articles/i-am-jacks-{program,match,engine}-*.md`** — three articles plus their working
+  files, each carrying its version history, its verification table, and the session's standing
+  rulings. Every scrml block compiled at exit 0; the `<program>` piece's client/server split is
+  additionally proved BY ARTIFACT (`grep` on both emitted bundles), and the `<match>` piece's closing
+  claim — that a `<match>` becomes an `<engine>` by changing only the opener, §51.0.A trait 3 — was
+  compiled both ways.
+- **HIGH `g-nested-program-is-accepted-and-silently-flattened-into-the-parent`** — §43's "Universal
+  Execution Context Boundary" is, measured by artifact, not a boundary: exit 0, zero diagnostics, no
+  worker file, the nested body inlined into the parent's client bundle, closing over the parent's
+  cell. `E-PROG-003` and `E-PROG-004` are normative SHALLs with no reachable fire site.
+- **MED ×2** — §43.5.1's own worked example is invalid scrml (it uses `await`; §19.9.8 says the
+  language has none), leaving cross-program RPC with no working call syntax in either direction; and
+  `SPEC.md:7787` names the wrong error code for a missing engine state-child.
+- **Five undelivered adopter reports committed** — the S290 per-clone hazard, recurred and grown.
+  Written into `handOffs/incoming/` on this machine by the co-located flogence clone and never
+  committed, so they reached no other clone. One is HIGH and silent. Triage is owed.
+
 ## S414 — 2026-09-13 (peter · P-Tech1 Windows)
 
 **One ruled opener, four adversarial rounds, and a fix that reproduced the defect it was named after

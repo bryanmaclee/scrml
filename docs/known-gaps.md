@@ -43,6 +43,8 @@
 | MED | 230 |
 | MED | 232 |
 | LOW | 87 |
+| MED | 247 |
+| LOW | 92 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 

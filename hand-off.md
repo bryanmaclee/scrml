@@ -466,6 +466,97 @@ of this class by accident; a derivation would have found the fifth on the day it
   `8f3c5b74`). I created none.
 - **Outbound:** one drop to bryan this session. **FIVE outbound drops now sit unread** (S412, S413,
   S415, S416, S417).
+# scrml — Session 407 (bryan · XPS-8950) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' (S416/S415/S414/
+> S413/S412/S411/S410 peter's, S405 bryan's) and is **untouched**. The S401→S400 precedent is on the
+> board: a wholesale rewrite ate a collaborator's pickup section.
+>
+> ⚑ **SIBLING STATE: I am SOLO.** Every board entry S405–S416 reads WRAPPED. No deferral owed.
+
+**Machine: `bryan-XPS-8950` — the THIRD clone**, not ASUS-Vivobook and not the Windows/poliv fork.
+That matters, and it is most of this hand-off. Booted `/boot thin` on `2c34a94c`; wrapped on
+`cfe7f09a` eight days later. scrml-support was **538 commits behind** at boot (the S240 trap, avoided).
+
+---
+
+## ⏭ NEXT-SESSION PICKUP
+
+### 1. ⚑⚑ FIVE ADOPTER REPORTS SAT UNDELIVERED ON THIS DISK — now committed, triage OWED
+
+`git status --porcelain handOffs/incoming/` was **not clean** at boot: two flogence-PA S38 reports
+written on this machine and never committed. By this wrap there were **five** (three more from
+flogence S39). Every session since S405 reported a clean inbox and **every one was correct about its
+own disk** — the write alone delivers only to yourself.
+
+**All five are now committed. None is triaged into `known-gaps.md`, and that is the owed work** —
+deliberately not filed, because this project's gap entries require empirical reproduction and the PA
+did not reproduce them. Do not file them from the reports' own text.
+
+| report | severity per flogence | note |
+|---|---|---|
+| `2026-09-12-…-cross-file-server-fn-not-awaited-at-reactive-assignment` | ⚑ **HIGH, silent** | imported server fn assigned to a reactive cell lands as a Promise — compiles, serves, renders NOTHING, no diagnostic. flogence names it `g-local-thunk-callsite-not-awaited` (#851) one position over, across a file boundary. **Blocks sharing query fns between a tool and a page.** |
+| `2026-09-07-…-W-CG-CHUNK-EMPTY-over-fires-on-program-kind-tool` | MED | one file's `<program mcp>` auto-flips `--emit-per-route` for EVERY entry point in a directory build (`compile.js:642`); the check is a tautology for `kind="tool"`. Its Resolution text tells an adopter to delete a working CLI entry point. |
+| `2026-09-07-…-trailing-comment-with-angle-bracket-breaks-parse` | MED | a trailing `// <-- x` breaks the parse; `E-SYNTAX-050` blames a well-formed `<program>` closer. |
+| `2026-09-07-…-regex-literal-with-quote-breaks-codegen-in-foreign-block` | MED | lexer is not regex-aware inside `_={}`. |
+| `2026-09-07-…-table-level-primary-key-fails-in-db-src-library` | MED | table-level `PRIMARY KEY (...)` fails shadow-DB validation → `E-PA-003`. |
+
+⚑ **The second half of this failure is that delivery is not the push, it is the MERGE.** The first two
+sat in PR #887 — opened, gate-green, rebased twice — and **were never merged for eight days.**
+
+### 2. ⚑ TWO STALE PRs, AND THIS WRAP SUPERSEDES BOTH
+- **#887** (the two S38 reports) and **#899** (the three gap filings) are both still OPEN, ~50 commits
+  behind main. **Their content is carried in full by this wrap PR.** Close both once this merges.
+- Root cause worth naming: the PA's `gh pr merge` is **denied by the permission classifier on this
+  clone**, so every merge needs the operator. Two PRs hand-raced `strict:true` against a busy branch
+  and lost — each sibling land re-staled them. **If this recurs, use `--auto` rather than re-racing.**
+
+### 3. THE ARTICLE SERIES — three drafted, all UNPUBLISHED
+`docs/articles/i-am-jacks-{program,match,engine}-*.md`. Each `-PUBLISH.md` is the clean text; each
+dated working file carries version history, a verification table, and the standing rulings.
+
+**Order (ruled):** `<program>` (v3, 665w) → `<match>` (v1, 487w) → `<engine>` (v6, 609w).
+
+⚑ **Fight Club line ledger — do not spend one twice.** `cold sweat` → program · `complete lack of
+surprise` → match · `raging bile duct` → engine. **Unspent:** `medulla oblongata` · `smirking
+revenge` · `broken heart` · `inflamed sense of rejection` · `wasted life` · `colon`.
+
+**Open, needs bryan:** (a) the `<program>` piece's cold-sweat section is written **hypothetically**
+(*"consider what I would be if I got this backwards"*); the sharper version is that **scrml actually
+did** ship a secret to a browser — §12.2's Trigger-3 amendment says so in its own words, fixed S299.
+Publishing it is a disclosure call the PA will not make. (b) Word counts run over the ~350-550 band
+the PA set from *"somewhere in the middle"*; the band was the PA's invention, not a directive.
+
+### 4. THREE SPEC DEFECTS FILED THIS SESSION — one HIGH, and it is an architecture question
+Filed at the tail of `known-gaps.md`. The HIGH is
+**`g-nested-program-is-accepted-and-silently-flattened-into-the-parent`**: §43's "Universal Execution
+Context Boundary" is, measured by artifact, not a boundary at all. **The fork is not decided** —
+(a) fail-closed with a `NOMINAL` banner (the §23.3 recognized-and-fail-closed pattern), or (b) build
+§43.2's four context types. ⚑ **They are not alternatives; (a) should land regardless of when (b)
+does.** That call is bryan's.
+
+### 5. PETER'S FOUR INBOUND MESSAGES ARE UNREAD BY THIS SESSION
+`2026-09-10-…-S412`, `2026-09-12-…-S413`, `2026-09-13-…-S415`, `2026-09-14-…-S416` — all bryan-owed,
+all left **unarchived on purpose**. This session was scoped to articles and did not read them.
+
+---
+
+## 🔭 DURABLE
+
+**The article standard is a defect-finding instrument, and that was not the plan.** The rule is only
+*"every code block compiles clean, verified by execution."* It found three spec defects in three
+days, including a HIGH. **Every one would have been published as fact, because SPEC said so.** A
+derived-doc claim inside SPEC is still a derived claim (Rule 4) — §13.5's cross-refs are prose about
+§51, not §51; §43.5.1's worked example is not scrml. ⚑ **Compiling the example is a cheaper audit of
+the spec than reading it, and it is the only one that can disagree with you.**
+
+**A boundary nobody checks is not a boundary, it is a comment.** The nested-`<program>` HIGH is the
+S404 durable in a new position: written as an execution context, accepted at exit 0, emitted as
+inlined code sharing the parent's state. The language says shared-nothing; the artifact says
+otherwise; nothing in between said a word.
+
+**Delivery is the merge, not the push.** Five adopter reports, eight days, two green PRs, zero
+arrivals.
 
 ---
 
