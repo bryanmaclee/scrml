@@ -11,7 +11,36 @@
 
 ## ⏭ NEXT-SESSION PICKUP
 
-### 1. ⚑⚑ TWO PRs ARE READY AND BLOCKED ON A PERMISSION, NOT ON WORK
+> ⚑⚑ **POST-WRAP ADDENDUM — ITEM 1 BELOW IS SUPERSEDED. READ THIS FIRST.**
+> The wrap was written BEFORE the session's own ending. bryan then added
+> `scrml/.claude/settings.local.json` granting `Bash(gh pr merge:*)` + `Bash(gh pr close:*)`, **it
+> took effect in the SAME session**, and everything item 1 describes as blocked was landed:
+> **#982 merged with a MERGE COMMIT — all 15 consolidated PRs auto-closed as MERGED** · **#983**
+> merged · **#984** merged. **Closed with reasons, branches retained: #885 #862 #905 #907 #529 #501.**
+> **Backlog 26 → 5.** Item 1 is kept verbatim below only as the record of what the permission wall
+> cost; it is NOT current state.
+>
+> ⚑ **ONE THING WAS FOUND ONLY BECAUSE THE OPERATOR ASKED "is everything done, I need to move to
+> other machine" — and no gate could have found it.** The dPA's **dpa-045 round-2 repair** sat
+> UNCOMMITTED in the XPS working tree all session (flagged at boot, deliberately left alone during
+> the drain). On `main` it read **2 × `BANKED — UNRUN`**, so `dpa-debt` called dpa-045 unrun and
+> **the next boot would have re-fired a completed AXIOM-LEVEL deliberation.** Landed as **#984**;
+> main now reads **0 UNRUN** and carries the dpa-046 row for the first time.
+> The naive landing would have been worse than the loss: those files were based on `875801f4` and
+> main had since gained SIX S409 ruling records in the same file, so a wholesale copy would have
+> reverted all six. Applied `git apply --3way` and verified both sides survived.
+>
+> **#501 RULED — WRITTEN OFF, to be REBUILT** (bryan: *"write off and rebuild"*). ⚑ **`tare` does
+> not exist on main in any form** — `tare(` matches 0, no §6.8.4 heading, all 9 substring hits are
+> inside `textarea`. The spec lives ONLY on `feat/tare-primitive-land` @ `ed2d748a`
+> (`SPEC.md:5646`, 30 refs). **That branch is the SOLE COPY OF THE SPECIFICATION — do not delete it.**
+>
+> **STILL OPEN, 5:** #939 · #865 · **#770 (take it first — root verified still live on main)** ·
+> #580 · #579. **Also owed:** the four S418 ruling builds · **8** dPA advisories (up from 4 — the
+> consolidation surfaced more) · review floor 5 OWED · stale nav-maps · the five adopter reports
+> delivered but NOT triaged into `known-gaps.md`.
+
+### 1. ⚑⚑ TWO PRs ARE READY AND BLOCKED ON A PERMISSION, NOT ON WORK — ⛔ SUPERSEDED, see addendum above
 
 **#982** (`land/s421-docs-backlog`) and **#983** (`fix/s421-browser-tier-order`). Both
 `mergeable=MERGEABLE`, both **`gate` PASS + `windows` PASS**, both `tracking` red and **each proven
