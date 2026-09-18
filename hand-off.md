@@ -842,6 +842,220 @@ source-mirror correction + the self-host coverage hole), S413's (the §49.2.1 fo
 findings), and **S415's new one** (the `E-ASSIGN-003` ruling + two owed language-surface reviews +
 the unchanged §59 routing). All three deliberately left in place.
 
+# scrml — Session 409 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the `---` is prior sessions' and is untouched,
+> per the S408-peter precedent (the S401→S400 wholesale rewrite ate a collaborator's pickup section).
+
+**Date:** 2026-09-08 → 09-13. Booted `/boot` Profile A onto `e1a12848`. **Ran across five calendar
+days behind a merge gate**; S410/S411/S412/S413/S414/S415-peter all landed while this session's work
+sat in open PRs. Mechanical state — landings, counts, the stream — is in `docs/changelog.md` and
+`handOffs/delta-log.md`. This file carries only what those cannot.
+
+**The framing: four rulings banked, a five-day-old conflict cleared off main, a test directory that
+ran in NO job now gated — and FOURTEEN instruments that read clean while measuring the wrong thing,
+five of them mine.**
+
+---
+
+## ⚑⚑ THE DURABLE FINDING — unratified, and the reason to read this file
+
+> **Co-mention in a justification is not co-membership in its evidence.**
+
+`compiler/tests/self-host` was excluded from every CI job for a year. The stated reason:
+
+> *"the self-host tests (`compiler/tests/self-host` AND `integration/self-host-smoke.test.js`) need a
+> locally-built, gitignored dist that CANNOT be rebuilt on a clean checkout"*
+
+**It was never measured for the first of those two.** It was named in the same breath as a file for
+which the claim was true, and inherited that file's exclusion by grammatical proximity. Measured at
+S409: with the dist removed entirely, the tier runs **139 pass / 122 skip / 3 fail in under 0.6s**,
+identical failure name set. It compiles its inputs at test time and never reads a built dist at all.
+
+That is not a wrong measurement. It is a **never-taken** measurement, propagated as though taken,
+because one sentence covered two subjects. The cost was the **82 GB host lockup** (#924): a defect
+that mangled a regex on *every* platform lived only in that directory, so it reached a machine
+instead of a gate.
+
+⚑ **This is distinct from "verify your findings."** There was no finding to verify — there was a
+conjunction. The check it implies: *when a justification names more than one subject, which of them
+was actually measured?*
+
+---
+
+## ⚑ THE SESSION'S SPINE — fourteen instruments, every one reading clean
+
+Not a list of mistakes; a measurement of the measurement surface. Five are mine, three are agents',
+and the rest were already shipped and load-bearing.
+
+| # | instrument | what it actually measured |
+|---|---|---|
+| 1 | CI's "SPEC-INDEX totals gate" | the two totals numbers — **passed on a file with 3 conflict markers and 117 duplicated rows** |
+| 2 | my replacement row-check | **14 of 71 rows** — the marker ended the table scan, and it reported "all current" |
+| 3 | `dpa-debt.ts` cell-split | the empty string between a `\|\|` inside a quoted source string — **a ruling was invisible** |
+| 4 | my `origin/main...branch` (three-dot) | the merge base, not main's tip — **#902 and #888 read as live; both were no-ops** |
+| 5 | my locus-resolution probe | paths with `(symbol` suffixes attached — **3 false MISSING** |
+| 6 | my three severity greps | three different answers (`@gap` markers contain `>`) |
+| 7 | agent's reference sweep | `head -30`, and `scripts/` sorts after `docs/` — **7 stale pointers past the cut** |
+| 8 | my exit-code matrix | one giant token per row — **zsh does not word-split** — perfectly inverted |
+| 9 | `--tier <name>` (space form) | **the browser tier, while printing PASS about self-host** |
+| 10 | `delta-lint --fix` | first-in-file order — would have renumbered **peter's published** entries |
+| 11 | `git checkout --theirs` in a cherry-pick | the incoming copy wholesale — **4 ruling rows + 10 gap entries lost, found in three separate passes** |
+| 12 | the dPA's path grep | `2>/dev/null` swallowed "No such file" — a wrong path read as a clean absence |
+| 13 | `browser-baseline.ts`'s SCOPE note | asserted lsp/commands/self-host "carry their own baselines" — **none existed** |
+| 14 | `ci.yml`'s exclusion rationale | the co-mention above |
+
+⚑ **The one worth generalizing beyond this project is #11's aftermath.** I found that clobber
+THREE times. Each repair verified the wrong axis: I asked *"are the four **S409** rulings present?"* —
+an enumeration that **structurally cannot see an S405 row**. The method was sound every time. **A
+repair's verification inherits the scope of the thing it was looking for, not the scope of the
+damage.**
+
+---
+
+## ⏭ NEXT-SESSION PICKUP
+
+### 0. ⚑⚑ TWO UNREAD INBOX MESSAGES — READ THESE FIRST. One is a one-way door already on main.
+
+**Neither was surfaced by the boot hook**, which only ever named the older S411 message. Both arrived
+while S409 was mid-flight and both are `needs:` items.
+
+**(a) `2026-09-12-2300-from-S413-peter` — `needs: reply`. A LANGUAGE-SURFACE FORK RESOLVED WITHOUT
+ROUTING, AND IT IS ALREADY MERGED.** PR **#933** fixed a braceless `while`/`for` body being emitted
+*after* the loop. The engineering is correct; the **fork-half is the problem**. Peter quotes
+`compiler/SPEC.md` §49.2.1 verbatim — `loop-body ::= '{' loop-statement* '}'` — and reports grepping
+all of §49 plus the whole SPEC for `braceless`/`un-braced`: **no sentence licenses a braceless body.**
+So the compiler always accepted a form the grammar excludes, and miscompiled it. #933 closed that by
+**making the form work** — adding braceless limbs. The other resolution, a new `E-LOOP-*` per
+§49.2.1, *was never put on the table*.
+
+⚑ That is base §8 verbatim — *a leak can be closed by making a form WORK or by REJECTING it, and
+those produce different languages* — and it is **newly-ACCEPTING**, the one-way door. Direction is
+`semantics-changed`, which owes a language-surface review it did not get. **He routed it himself and
+says plainly it is his miss.** He also carries three findings on **#936** (my surface, routed not
+edited), a correction to his own S412 wrap, and four items he will fix unless told otherwise.
+
+**(b) `2026-09-10-2330-from-S412-peter`** — three silent defects in the SHIPPED stdlib (throttle,
+debounce, jwt), all fixed; **and the self-host coverage hole has a SECOND LIMB that is bryan's.**
+⚑ Read this against #939 before assuming the coverage work is finished — S409 gated
+`compiler/tests/self-host/`, and this names a limb that gating may not cover.
+
+**Both left in `handOffs/incoming/` deliberately**, unarchived, so the next boot cannot miss them.
+
+
+### 1. ⚑ THE MERGE GATE IS THE BOTTLENECK, AND IT SHAPED THIS ENTIRE SESSION
+`gh pr merge` and `git push --force*` are blocked by the **auto-mode classifier**, not by the
+allowlist — `Bash(gh pr merge:*)` is already on file in `.claude/settings.local.json` and was not
+honoured. **Nothing to add to settings.json.** The user merges with `! gh pr merge <n> --squash
+--delete-branch`, or the mode changes.
+
+Consequence worth carrying: `strict:true` + a required `gate` means **every merge puts every other
+open PR into BEHIND**, so N PRs is N round-trips of the operator's attention. That is why six S409
+PRs were consolidated into #936. **If PRs are accumulating again, consolidate early rather than
+late** — and re-verify contended-file unions by marker-set diff, not by line count.
+
+### 2. OPEN PRs — five, all mine, all gate-green or running
+`#937` peter's language-surface review (+ the dpa-039/030 row restore) · `#938` the self-host parity
+gap + brief archive · `#939` the self-host tier gate · `#950` the dPA's dpa-045 landing · plus this
+wrap. **`#936` MERGED** and cleared the SPEC-INDEX conflict that had been on main five days.
+
+### 3. Owed to bryan — the advisory queue, 2 items after #937/#950 land
+**dpa-037** (NaN — he stopped it himself: *"ok hold on I am not ratifying NaN! TBC"*) and **dpa-045**
+(AXIOM, ladder row 7 — the S109 reopen, *is text in a markup body a string*; both rounds now run and
+the artifact is in scrml-support). dpa-039/040/041/042/043 all ruled this session.
+
+### 4. Taken but NOT built — the three deferrals from the tier-gate arc
+- **`bs.test.js` emits on a FAILED compile** — writes `bs.js`/`bs.css` even when it reports "compile
+  failed", and `self-host-smoke.test.js:665` gates on bare `existsSync`. Safe in CI today only
+  because the tiers sit in different jobs — **luck of layout, not a property.**
+- **`lsp` and `commands` are still asserted by nothing.** The registry now makes adding them an
+  entry + a `--write` + a step.
+- **`.git/hooks/post-commit` is permanently red** — runs `bun test compiler/tests/`, greps
+  `\d+ fail`, and browser's 48 baselined failures make it print `⚠ TEST REGRESSION DETECTED` on
+  every compiler-touching commit. **Config B, per-machine, NOT source-controlled — bryan's to
+  change, and the contract forbids auto-resetting B→A.** The lever now exists: point it at
+  `bun scripts/tier-baseline.ts --tier=browser --check`. Filed since S326 as
+  `g-post-commit-hook-is-permanently-red-and-cries-wolf-in-three-ways`.
+
+### 5. Carried, unchanged
+The worktree sweep — **~100 worktrees**, and S409 produced one measured instance of what is in them:
+`docs/changes/s397-tilde-one-or-two/{progress,BRIEF}.md`, the **evidence matrix for a RATIFIED axiom
+ruling**, existed ONLY on an unmerged agent branch and was cited from `master-list.md` §0. Recovered
+and landed in #936. **That is one of ~100.** Still bryan's call.
+
+---
+
+## 🔭 DURABLE — what the session established
+
+**A gate's name is a claim about its axis, and nobody checks it.** "SPEC-INDEX **totals** gate" did
+exactly what it said and passed a file with three conflict markers in it. The fix was not a better
+gate but a *second* one — and building it surfaced that a third was needed (scan coverage), because
+a zero over a truncated enumeration is not a pass, it is a smaller measurement. **Three checks, three
+different failures, and none subsumes the others.**
+
+**An adversarial review can be accurate, and that is not the null hypothesis.** The ledger records
+relayed findings failing ~1 in 3. This session's `/code-review high` returned 8 findings; I
+reproduced the two load-bearing ones **by execution before acting**, and both held — including one
+(`--tier <name>` asserting the wrong tier while printing PASS) that would have shipped a hollow gate
+inside the arc built to close hollow gates. **Reproduce anyway; the point is that the check is cheap,
+not that reviewers are usually wrong.**
+
+**A baseline is a control, not a defect ledger.** Gating the self-host tier on a name set records
+*that* three tests fail, never *what* they are. Filed `g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch`
+so the baseline has a referent — otherwise those three sit permanently green-by-baseline with nothing
+describing them, which is how a name-set gate rots.
+
+**Conformance restoration is not a design ruling, and the difference is a quoted sentence.** Peter
+routed the regex-class-colon fix as *"narrows the §59 map-literal recognizer's reach — your design
+surface."* §59.3 scopes the rule to a *"bracketed expression"*; a regex character class is not one, so
+the pre-fix behaviour **violated** §59.3 rather than implementing it. No surface moved; no ruling was
+owed. **He over-delivered — the right direction to err, and worth telling him so.**
+
+---
+
+## ⚑ MISSES (mine)
+
+1. **★★★ A blind clobber, found three times, because each repair verified a narrower axis than the
+   damage.** `git checkout --theirs` in a cherry-pick loop took the incoming copy wholesale on two
+   append-only ledgers. Lost 10 gap entries (681 lines of a sibling's filings) and 4 ruling rows. I
+   caught the gap entries, then dpa-040/042, then — only after the probe still read ADVISORY —
+   dpa-039/030. **Calling a file "append-only" does not make a resolution additive.**
+2. **★★ I reported a stale boot number twice.** Said 6 owed reviews; it was 4. My probe ran at 08:00,
+   `wrap(s408)` merged at 08:06 carrying three of them. Re-measured only when the drain disagreed.
+3. **★★ My own review of four PRs was shallower than peter's of the same four.** I verified file-set
+   + `locus=`/`prov=` well-formedness and marked all four carve-out; he **reproduced the filed
+   defects** and found two of three carried a falsified cause. Mine checked the entries were
+   well-formed; his checked they were *true*.
+4. **★ I relayed a citation as independent corroboration without checking its provenance.** Told the
+   dPA that a `hand-off.md` line was a second arc converging on the loop-census finding; it derives
+   from the same commit the dPA already cited. The dPA caught it and declined to bank it.
+5. **★ Five of the fourteen instruments above are mine**, and #8 (the zsh word-split) is a trap
+   named verbatim in my own memory file.
+
+## ⚑ Wrap step 6c — MAPS DELIBERATELY NOT REFRESHED, and why
+
+`.claude/maps/` is stamped `commit: e74f5423` — **five sessions behind** main (`4aa4560e`). Code DID
+land from S409 (#936: `scripts/conflict-marker-gate.ts`, `scripts/regen-spec-index.ts`, `ci.yml`), so
+this is **not** a docs-only session and the step is not vacuous.
+
+**Not refreshed on purpose:** #939 renames `scripts/browser-baseline.ts` → `scripts/tier-baseline.ts`
+and is still open. A map regenerated now is stale the moment that merges. The agent independently
+measured two specific staleness points worth carrying:
+
+- `primary.map.md` invariant 8 still spells `browser-baseline.ts` — **a file #939 deletes.**
+- The map states `gate` is "14 total steps (12 `- name:` + 2 `- uses:`)"; measured at `origin/main`
+  it was **already 15 before S409 touched anything**, and #939 takes it to 16.
+
+**Refresh after #939 merges, not before.** Recorded rather than skipped.
+
+## Gate at close
+Cloud `gate` GREEN on every S409 PR. `tracking` RED — the known non-blocking job.
+Advisory queue **0 UNRUN · 3 ADVISORY** (→ 2 once #937 lands). Review floor drained twice this
+session, both times by a sibling first. `conflict-marker-gate` 8,186 files / 0 markers on main.
+
+⚑ **Two working-tree items that are NOT this session's and were deliberately not committed:**
+`docs/articles/teej_baiting_tweet.md` shows as deleted by someone else's uncommitted act — surfaced,
+not resolved, because committing it would land another party's decision.
 
 ---
 

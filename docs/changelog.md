@@ -7580,6 +7580,40 @@ Local on merged main: conformance **905/905**; the new unit file **78 tests / 0 
 exit 0. R26 on merged main: the headline shapes refuse, the false-rejection cases compile and return
 correct values.
 
+### 2026-09-08 → 09-13 — S409: four rulings, a five-day-old conflict cleared, and a test directory that ran in no job
+
+Ran across five calendar days behind the merge gate, with S410–S415 landing alongside. Four dPA
+advisories ruled and banked; the unresolved merge conflict that had been sitting in
+`compiler/SPEC-INDEX.md` since #900 removed from main; `compiler/tests/self-host/` — the directory
+the 82 GB lockup lived in — brought under a blocking failure-name-set gate for the first time.
+
+The session's spine was instrumentation: **fourteen instruments read clean while measuring the wrong
+thing**, five of them the PA's own. The durable finding is narrower and newer than "verify your
+findings": **co-mention in a justification is not co-membership in its evidence** — `compiler/tests/self-host`
+inherited an exclusion that was only ever measured for the *other* file named in the same sentence.
+
+- **#936** — consolidated landing. Removed the `SPEC-INDEX.md` conflict markers (3 markers, 117
+  duplicated rows, on main since #900); added `scripts/conflict-marker-gate.ts` (blocking, 8,186
+  files) and extended `regen-spec-index --check` from totals-only to rows + scan coverage; landed
+  bryan's dpa-039 ruling and the S409 `~`/dpa-041/dpa-043 rulings; recovered
+  `docs/changes/s397-tilde-one-or-two/{progress,BRIEF}.md`, the evidence matrix for a ratified axiom
+  ruling, which had only ever existed on an unmerged agent branch while `master-list.md` §0 cited it.
+- **#939** — `scripts/browser-baseline.ts` → `scripts/tier-baseline.ts`, parameterised by `--tier=`;
+  self-host gated blocking on a 3-name baseline; `timeout-minutes` added to `gate` (20) and the new
+  step (3), which had been absent entirely. The adversarial pass caught `--tier <name>` silently
+  asserting the *browser* tier while printing PASS.
+- **#937** — language-surface review of peter's regex-class-colon fix (#924): **conformance
+  restoration, not a §59 narrowing**, since §59.3 scopes its rule to a *"bracketed expression"* and a
+  regex character class is not one. Also restored two ruling rows lost to a `--theirs` clobber.
+- **#938** — filed `g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch`, so the new
+  baseline has a referent rather than three permanently-green unnamed failures.
+- **#950** — landed the dPA's dpa-045 round-2 completion; advisory queue `1 UNRUN` → `0`.
+
+**Rulings (bryan):** dpa-040 + dpa-042 — the `~` exactly-once rule, option (c): keep the
+no-double-read guard (127 sites), drop must-consume-before-scope-exit (~1,330 sites). dpa-041 —
+closed, dead as framed. dpa-043 — option (d), narrow §13.6's generator grant to `server function*` +
+`_{}` on a §63 deprecation window.
+
 ### 2026-09-12/13 (S413 — peter — the review floor drained 9 to 0, and it convicted four of my own six PRs)
 
 A review session on the Windows clone. **Two landings, both gate-green** — #940 (the floor drain) and
