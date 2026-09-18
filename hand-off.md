@@ -180,9 +180,15 @@ nobody had checked.
   been sitting on unmerged branches.
 - **`pa-ruled` count: 3** — unchanged this session; no PA rulings were taken under the S385 class.
 - **Adopter issues: 0 open.**
-- **Worktrees:** `s421-land` + `s421-land2` are THIS session's and are cleaned at close. Four
-  retained and NOT mine: `agent-a0742fe4…`, `agent-a4e6b5f2…`, `onmount-c` (held for bryan's
-  language-surface review), sibling `scrml-pinned`.
+- **Worktrees:** `s421-land` + `s421-land2` are THIS session's and are cleaned at close. ⚑ **CORRECTED
+  BEFORE PUSH — this clone has NO others.** An earlier draft of this line listed four retained
+  worktrees (`agent-a0742fe4…`, `agent-a4e6b5f2…`, `onmount-c`, `scrml-pinned`) as present-and-not-mine.
+  **Those are on PETER'S WINDOWS CLONE**; they were copied out of the S420 hand-off without being
+  checked here, and `git worktree list` on XPS-8950 shows only the main checkout plus this session's
+  two. This is the base-§1 rule biting its own author: *a predecessor's state claims get the same
+  verify-before-claim treatment as any other derived doc — being written by "us, last session" confers
+  nothing.* The `onmount-c` build IS still held for bryan's language-surface review; it is just not
+  held HERE.
 - **Cross-machine:** `scrml-support` pushed (board S418 CRASHED + S421 registered + this wrap's
   voice entry). `scrml` has TWO unmerged PRs, both surfaced above — **never silent unpushed work.**
 
