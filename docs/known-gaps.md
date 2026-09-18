@@ -39,6 +39,9 @@
 | HIGH | 101 |
 | MED | 225 |
 | LOW | 90 |
+| HIGH | 103 |
+| MED | 230 |
+| LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
