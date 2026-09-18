@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 107 |
-| MED | 247 |
-| LOW | 96 |
+| HIGH | 108 |
+| MED | 253 |
+| LOW | 100 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -5109,6 +5109,17 @@ home (a non-blocking job first), stabilise, THEN promote — and that is a decis
 
 ### g-e2e-render-map-with-data-coverage-is-four-of-438 — the detector class that finds the board bug can only run on SEEDED cells, and seeding is a hand-maintained 4-entry map, so 99.1% of the corpus is observed only in the state the DD itself calls "looks green" — `NEW S416-peter (measured while splitting D6 out of GREEN_STATES); MED; open`
 <!-- @gap id=g-e2e-render-map-with-data-coverage-is-four-of-438 sev=MED status=open locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS—four-entries)+render-detectors.js:206(D6-gated-on-obs.seeded) prov=empirical:PA-counted-S416-from-e2e-render-map-baseline.json-438-cells-4-populated -->
+
+> ⚑⚑ **CORRECTED S420 — THE COUNT IN THIS ENTRY'S OWN TITLE IS WRONG. THE REACH IS 0 OF 438, NOT 4.**
+> This entry says the with-data half reaches four cells. It reaches **none**. All four seeded cells
+> observe **identically seeded and unseeded** — PA-reproduced by execution at `a5c3810a`, running
+> `observeApp(app, seed, "populated")` against `observeApp(app, null, "empty")` for each:
+> `03-contact-book`, `06-kanban-board`, `16-remote-data`, `25-triage-board` — all four
+> `empty=renders-clean populated=renders-clean IDENTICAL=true`.
+> **Do NOT act on this entry's "raise the seed count" framing** — adding seeds to a map whose existing
+> entries are inert buys nothing. The live blocker is [[g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject]],
+> which carries both root causes; this entry stays open as the COVERAGE axis and is unblocked only
+> after that one closes.
 
 `seed-fixtures.js` states the premise of this whole tier in its own header: *"an app with a `<db>`/`<each>`
 that renders the `<empty>` fallback from an EMPTY cell is a VALID partial render (looks green) — the board
@@ -15522,3 +15533,142 @@ hard-nav decision. Row 1-4 of the fork rule do not obviously discriminate; bryan
 
 **Linked:** `g-soft-nav-redirect-leaves-orphan-history-entry` is the same branch (pushState happens before the
 fetch, so the hard-nav adds a second entry) — any fix to either should consider both.
+
+### g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject — every POPULATED seed produces an observation identical to the unseeded one, so D6 / `S-EMPTY-WITH-DATA` — the detector the whole tier exists for — has never run against data on any corpus cell — `NEW S420-peter (floor pass on #971 + #974, two independent reviewers converging from opposite ends; PA-reproduced by execution); HIGH; open`
+<!-- @gap id=g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject sev=HIGH status=open locus=compiler/tests/e2e-render-map/render-harness.js:474-482(the seed-set loop)+render-detectors.js:389(D6 gated on obs.seeded, hasRenderedContent is body-global) prov=empirical:PA-reproduced-at-a5c3810a-all-four-seeded-apps-observe-IDENTICAL-seeded-vs-unseeded -->
+
+**PA-reproduced by execution at `a5c3810a`**, running each seeded app through `observeApp` twice — once with its fixture, once with `null`:
+
+```
+examples/03-contact-book.scrml :: empty=renders-clean populated=renders-clean IDENTICAL=true
+examples/06-kanban-board.scrml :: empty=renders-clean populated=renders-clean IDENTICAL=true
+examples/16-remote-data.scrml  :: empty=renders-clean populated=renders-clean IDENTICAL=true
+examples/25-triage-board.scrml :: empty=renders-clean populated=renders-clean IDENTICAL=true
+```
+
+Same `state`, same `detail`. **Seeding changes nothing observable.**
+
+**TWO independent root causes, either of which alone is sufficient — a fix to one leaves D6 dark.**
+
+1. **The seed write lands nowhere (reviewer on #971, executed).** `observeApp` calls `obs.set("contacts", [...])` via `_scrml_reactive_set`. The mounted app's cells are CHUNK-SCOPED: after mounting `03-contact-book` the live `_scrml_state` keys are `["001a4t7q$name","001a4t7q$email","001a4t7q$phone"]` — there is no bare `contacts`. `_scrml_reactive_get("contacts")` is `undefined` before the set, readable after it, and **no subscriber fires; the DOM never changes**, immediately or after a 50 ms flush.
+2. **The content predicate is body-global (reviewer on #974, executed).** `hasRenderedContent` inspects the whole `body`, so a title bar, a button, or the `<empty>` fallback string satisfies it before a single datum arrives. All four seeded apps return `true` unseeded. Emptying every `ul,ol,tbody,[data-scrml-each]` container — the exact board-bug shape — still scores `renders-clean`.
+
+**Why this is HIGH and not a test-hygiene LOW.** The board-bug class this tier was built for lives ONLY in the populated render (`seed-fixtures.js` says so in its own header). That half has never had a live subject, so the tier's green on `#populated` cells is not evidence of anything. It is the project's own *instrument that exists and is never consulted* class, one layer in: the instrument IS invoked, and measures a state it cannot reach.
+
+⚑ **The bitter part: #971 added a hard test to pin this and it cannot see it.** The new both-directions test asserts a seed KEY exists on both sides; it never asserts the seed DOES anything. That is `g-e2e-render-map-partial-seed-loss-is-silent` — closed by the same PR — re-created one level away.
+
+**Fix shape (not scoped, and it needs BOTH limbs):** resolve the seed name to the app's chunk-scoped cell (or seed through a path the app actually subscribes to), AND scope D6's emptiness question to the seeded region rather than `body`. Correcting [[g-e2e-render-map-with-data-coverage-is-four-of-438]] to 0-of-438 is part of the same landing.
+
+### g-program-shape-inference-anchors-on-the-entry-file-dirname — a shell in a subdirectory draws a FALSE `W-PROGRAM-SPA-INFERRED` that says no `pages/` exists when it does, and SILENTLY SUPPRESSES the correct `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` — `NEW S420-peter (floor pass on #972; PA-reproduced with a control); MED; open`
+<!-- @gap id=g-program-shape-inference-anchors-on-the-entry-file-dirname sev=MED status=open locus=compiler/src/ast-builder.js:20054(projectRoot = _pathDirname(filePath)) prov=empirical:PA-reproduced-at-a5c3810a-two-projects-identical-but-for-shell-position-opposite-lints -->
+
+**PA-reproduced by execution at `a5c3810a`**, two projects identical except where the shell sits, both with a real `pages/` directory at the project root and an outlet-less shell:
+
+```
+A - shell at <root>/app.scrml        -> info [W-OUTLET-ABSENT-SOFT-NAV-DISABLED]   (correct)
+B - shell at <root>/shell/app.scrml  -> info [W-PROGRAM-SPA-INFERRED]              (false; outlet lint absent)
+```
+
+`projectRoot` is computed as `dirname(<entry file>)`, so for B the `pages/` probe looks in `<root>/shell/pages`, misses, and infers SPA. The emitted lint tells the author *"no `pages/` directory exists at the project root"* — **it does** — and advises them to *"create a `pages/` directory at the project root"* to fix it and *"create an empty `pages/` directory"* to suppress it. Both already true. Composition demonstrably ran.
+
+**Two defects, and the second is the quiet one:** the false SPA lint is noise, but `W-PROGRAM-SPA-INFERRED` and `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` are mutually exclusive (§20.8.1 / §20.8.7), so inferring SPA **suppresses** the outlet lint. A subdirectory shell with no `<outlet>` is told nothing about soft navigation being dead.
+
+⚑ **This is the class #972 closed, surviving one file away.** #972 united three gap entries under "the entry file's directory is not the dist root" and fixed it in `codegen/index.ts`; the identical `dirname(entryFilePath)` anchor in `ast-builder.js` was not looked at, and it misfires on **precisely the subdirectory-shell layout #972 exists to support**. Before landing a fix, ask what the NEXT consumer of `dirname(filePath)` as a project root is.
+
+**Direction-of-change note for whoever takes it:** fixing this changes which diagnostics fire. Both are info-level lints and no program's compile status moves, so this reads as conformance restoration toward §40.8.1's filesystem-inference rule rather than a language-surface change — but the call is bryan's if he wants it, and the fix should say which it claims to be.
+
+### g-differential-census-pins-the-exit-1-terms-and-none-of-the-nine-incomparable-arms — the census #970 built covers the `findings` half of the verdict; the `incomparable` half has no population check and 6 of its 9 arms are unpinned — `NEW S420-peter (floor pass on #970; reviewer-executed with a validity control); MED; open`
+<!-- @gap id=g-differential-census-pins-the-exit-1-terms-and-none-of-the-nine-incomparable-arms sev=MED status=open locus=scripts/corpus-emit-differential.ts:1265-1320,1437,1458,1462(nine incomparable=true arms)+compiler/tests/integration/corpus-emit-differential-exit-codes.test.js prov=review:S420-floor-pass-on-970-six-arms-neutered-simultaneously-suite-stays-36-0 -->
+
+#970's own stated lesson is *"a claim quantified over 'every case that X' is satisfied for free when no case does X — check the population before trusting the property."* The population was checked for `findings` (exit 1). It was **not** checked for `incomparable` (exit 2) — which is the half the PR's contract change is actually about.
+
+**Arms WITH a case:** same-revision, `<unknown>` revision, compared-ZERO-artifacts.
+**Arms with NONE:** root sets differ · enumeration cross-check disagreed · differing check contexts · `--reuse-artifacts` manifest · base syntax-half vacuous · head syntax-half vacuous.
+
+**Reviewer-executed, with an instrument-validity control:** neutering exactly those six `incomparable = true` lines on a copy leaves the suite **36 pass / 0 fail / 202 expect()** — byte-identical to the unmutated run. Neutering a COVERED arm instead gives 34/2, so the harness can go red; the six arms simply are not watched. Per-arm liveness confirmed: the real script exits 2 on all six, the mutant exits **0** with `VERDICT: NO DIFFERENCES`.
+
+⚑ The two syntax-vacuity arms are the re-landing of *"defect #3 from this file's own header"* — a defect this tool already shipped once, now unpinned again.
+
+### g-multi-ops-ordering-pin-has-no-member-presence-floor — deleting a healthy operator from `MULTI_OPS` leaves the pin 4 pass / 0 fail, because its quantifier is over the live array and shrinks with it — `NEW S420-peter (floor pass on #973; PA-reproduced by mutation); MED; open`
+<!-- @gap id=g-multi-ops-ordering-pin-has-no-member-presence-floor sev=MED status=open locus=compiler/tests/unit/tokenizer-multi-ops-ordering.test.js:116-117(OPS=liveMultiOps;RESULTS=OPS.map)+:120-125(only OPS.length>20 and toContain-gt-gt) prov=empirical:PA-reproduced-deleted-a-healthy-member-in-a-sandbox-copy-pin-stayed-green -->
+
+**PA-reproduced by mutation** in a sandbox copy of `compiler/src` (restored and `diff`-verified identical afterwards): removing `"::"` from `MULTI_OPS` at `tokenizer.ts:1864` — a real removal from the language — leaves the pin at **4 pass / 0 fail**.
+
+The test claims to tokenize *"every live `MULTI_OPS` member"*, but `OPS` **is** the live array, so the claim is self-relativizing: when the array shrinks the quantifier shrinks with it. The only presence assertions are `OPS.length > 20` and a `toContain` on one member, so **14 operators can be dropped silently**; 33 of 35 members are unguarded.
+
+⚑ **Regression from the pin it replaced:** #965's version asserted the three-char shift member was present. The rebuild dropped that and put nothing in its place.
+
+**Fix shape that preserves the PR's intended "a new operator stays green" property:** a FLOOR, not an equality — a hand-frozen `MUST_LEX` list asserted to be a subset of the live `OPS`. Additions stay green; removals go red.
+
+**Sibling limb, same file (reviewer-executed, not separately filed):** delete the three-char shift member and the pin reds with *"NOW lex correctly as one token"* — the OPPOSITE of what happened (behaviour is unchanged; the member was removed). Following the header's own instruction, the next reader would then resolve `g-multi-ops-first-match-shadows-the-longer-operator` while the bug is live. The red message needs to branch on whether the member is still in `OPS`.
+
+### g-render-content-predicate-passes-static-container-chrome — the redesigned "holds content" predicate still scores a template skeleton as content, one static child away from the hole it was redesigned to close — `NEW S420-peter (floor pass on #971 + #974; reviewer-executed, two reviewers); MED; open`
+<!-- @gap id=g-render-content-predicate-passes-static-container-chrome sev=MED status=open locus=compiler/tests/e2e-render-map/render-detectors.js:194-195(svg children)+:178-179(select any option)+:174(input non-empty value)+:109-116,124-129(UNRENDERED_CONTAINER_TAGS) prov=review:S420-floor-pass-on-971-and-974-adversarial-markups-driven-through-runDetectors -->
+
+All of the following are static template skeletons holding **zero** seeded data, and every one scores `renders-clean` under the landed predicate (reviewer-executed via `runDetectors({seeded:true})`):
+
+- an `<svg>` holding only a static axis `<g>` — a chart whose data-mark loop rendered nothing
+- a `<select>` holding only a static empty-value `<option>` — the options loop rendered nothing
+- `<input type="submit" value="Save">` · `<img src="/spinner.gif">` · `<progress value="0">` · `<meter value="0">`
+
+**And the UA-hidden container family is counted as content** (`display:none` by user-agent stylesheet): `<dialog>` without `open`, `<datalist>`, a closed `<details>` non-summary subtree, and `<title>` inside body. ⚑ The nearest sibling is live in the corpus — `examples/11-meta-programming.scrml:107` uses a closed `<details>`; it is scored correctly today only because its `<summary>` has text.
+
+**Population count on the narrowed surface (the measurement, not a diff):** the unified predicate inspects exactly six signals — tag in a 4-set, `hidden`, `aria-hidden=true`, inline `display:none`, inline `visibility:hidden`. **Zero computed-style signals.** So `opacity:0`, `content-visibility:hidden`, a zero-size overflow-hidden box, an off-screen absolute position, and all **class-based hiding** score as content. ⚑ The irony worth recording: #974 now prunes `<style>` element text — removing the only DOM trace that a hiding rule exists — while still counting the element that rule hides. Class-based hiding is how the corpus styles (`samples/dashboard.scrml`, `expense-tracker.scrml`, `gauntlet-r11/*`).
+
+The fixed case (the literally childless container) is closed only for that exact shape. Not uniformly broken — an empty `<tbody>`, a hidden `<input>`, and an empty-src `<img>` all still fire correctly.
+
+### g-e2e-render-map-harness-leaks-a-temp-dir-on-the-subprocess-kill-path — "removed on every exit path" is false; a SIGTERM'd cell never runs the `finally`, and that is the tier's own designed timeout path — `NEW S420-peter (floor pass on #974; reviewer-executed, 3 leaks in 5 kills); MED; open`
+<!-- @gap id=g-e2e-render-map-harness-leaks-a-temp-dir-on-the-subprocess-kill-path sev=MED status=open locus=compiler/tests/e2e-render-map/generate-baseline.js:66-80(spawnSync with timeout then SIGTERM) vs render-harness.js:439-446(finally cleanup) prov=review:S420-floor-pass-on-974-five-timed-kills-three-leaked-dirs-reviewer-removed-its-own -->
+
+`render-harness.js:47-53` claims the staging directory *"is removed on every exit path."* A SIGTERM'd subprocess never runs its `finally`. Reviewer ran `spawnSync` against one cell at timeouts 300/400/500/600/700 ms: **5 kills, 3 leaked `scrml-e2e-render-map-*` directories** (the 2 earliest died before `mkdtemp`).
+
+This is exactly the path that mints `HARNESS-TIMEOUT` — a state the baseline already records (`samples/gauntlet-r18/rails-dev.scrml#empty`) — and for a multi-file app the leaked directory holds the whole mirrored app tree. #974's *"0 dirs left after the run"* observation held only because no cell timed out in that run.
+
+No inverse hazard: every `rmSync` target traces to a `mkdtempSync` result, so nothing deletes what it did not create.
+
+### g-instrument-suites-cite-themselves-as-gates-while-running-only-in-the-non-blocking-tracking-job — three separate landings claimed a suite as landing evidence; the blocking `gate` job runs none of them — `NEW S420-peter (floor pass on #970 + #972 + #974, three reviewers independently); MED; open`
+<!-- @gap id=g-instrument-suites-cite-themselves-as-gates-while-running-only-in-the-non-blocking-tracking-job sev=MED status=open locus=.github/workflows/ci.yml:193-220(tracking job, continue-on-error true, the only place compiler/tests/integration runs)+:103-190(gate job runs unit+conformance+root-level tests, never integration) prov=review:S420-floor-pass-three-independent-reviewers-reached-this-from-different-PRs -->
+
+`compiler/tests/integration` runs in exactly one place — the `tracking` job, which is `continue-on-error: true` and documented in `ci.yml` itself as *"NON-BLOCKING BY TWO MECHANISMS, ON PURPOSE."* The blocking `gate` job runs unit + conformance + root-level tests + gauntlet + the script gates, and **never `integration`**.
+
+**That is a deliberate CI design and this entry does NOT propose changing it.** What it records is the mismatch: #970 landed a suite described as *"the standing pre-land gate for codegen changes"* and offered its 36/0 result as landing evidence; #972's integration guard is cited the same way. A revert of the exit-code contract turns those suites red in `tracking` only — a job already habitually red for documented baseline reasons, which is `ci.yml:126`'s own filed pattern (*"a gate that is correctly non-blocking and habitually red is where a real regression hides"*).
+
+⚑ **The decision this entry asks for is promote-or-stop-citing**, not "make integration blocking." `.github/` is shared infrastructure — propose it to bryan rather than landing it unilaterally.
+
+⚑⚑ **AND IT CORRECTS THE S419 HAND-OFF, WHICH HAD THIS EXACTLY INVERTED.** That hand-off states #972's browser test *"ran ONLY locally on Windows — CI's browser lane did not run it; its integration sibling ran 8/8 in CI."* Both halves are wrong: `scripts/browser-baseline.ts --check` is a step in the **blocking** `gate` job (`ci.yml:148-149`, *"a regression here now blocks"*), and it is the INTEGRATION test that never gates. The PA propagated the false claim into a dispatch brief this session before a reviewer caught it.
+
+### g-state-ts-header-comment-misstates-the-open-count-basis — the header says open is `status=open`; the classifier has five open statuses, and a reader reasoning from the comment concludes twelve live entries are uncounted — `NEW S420-peter (PA-found and PA-falsified in the same pass); LOW; open`
+<!-- @gap id=g-state-ts-header-comment-misstates-the-open-count-basis sev=LOW status=open locus=scripts/state.ts:19-22(header comment) vs :59-71(GAP_STATUS_OPEN) prov=empirical:PA-misled-by-it-at-S420-then-caught-it-by-reading-the-classifier -->
+
+`scripts/state.ts:19-22` documents the marker vocabulary as six values and the count basis as `HIGH/MED/LOW open = sev=<SEV> status=open`. Neither is true: `GAP_STATUS_OPEN` holds **five** values (`open`, `in-progress`, `narrowed`, `ruling-gated`, `partial-impl`) and `GAP_STATUS_CLOSED` a further six, with a fail-loud guard on anything unclassified. S299 and S313 changed the classifier and left the header.
+
+**The cost is demonstrated, not hypothetical.** The S420 PA read the comment, counted the 21 markers carrying statuses outside the documented six, and concluded that **7 HIGH + 5 MED of live work were silently excluded from the board count** — a would-be headline finding, false in full. Caught only by reading `GAP_STATUS_OPEN` before writing it down. The counts are sound; the comment is what is wrong. Two lines.
+
+### g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings — `state --check` reports "3 DRIFT" over a population it never states; the real count is 25 and it is blind to 22 — `NEW S420-peter (PA-measured); LOW; open`
+<!-- @gap id=g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings sev=LOW status=open locus=scripts/state.ts:236-259(headingMarkerDrift — the tail regex at :243, the norm at :240, the status capture at :248) prov=empirical:PA-measured-at-a5c3810a-279-of-998-headings-parsed-25-real-drifts-3-reported -->
+
+**PA-measured at `a5c3810a`: 998 gap headings, 279 parsed by the detector (28%), 719 skipped.** Of the skipped, 355 carry a status word the detector never reads. Real heading-vs-marker drift is **25**; it reports **3**.
+
+**Root:** the tail regex at `:243` requires the status word to be the LAST thing before a closing backtick. Real headings in this ledger do not look like that — a bolded severity then the status with no trailing backtick, or the status followed by a parenthetical, or the status followed by a resolving-session name. Hand-verified 7 of the 22 misses.
+
+**Two sibling limbs in the same function:** the normaliser at `:240` collapses `open`/`deferred`/`nominal` into one bucket, so 4 further drifts are invisible by construction (incl. `G-SSE-SERVER-KEYWORD`, heading=deferred marker=open); and the status capture at `:248` uses a word-character class, which truncates `status=non-gap` to `non`.
+
+⚑ **This REOPENS [[g-known-gaps-heading-and-marker-status-can-disagree-silently]], which is marked `resolved` — closed by building this detector.** The project's own *instrument that exists and is never consulted* class, one layer in: it IS consulted, and measures a quarter of its surface while reporting a bare count. Per `pa-base` §8 a probe must state its own scope; this one does not.
+
+⛑ **Severity is LOW and the bound is honest:** the COUNTS are unaffected (the counter uses an attr-bag parse with a loud silent-omission guard, verified), and the DANGEROUS direction is empty today — no entry reads `resolved` to a human while counting as open. The cost is triage noise: 22 entries read "open" in a heading scan while being resolved.
+
+⛔ **Do NOT fix this by widening the negated-angle character class in the `@gap` matcher at `:248`** — that is one of the four marker regexes S416 measured (live miss count ZERO) and explicitly froze. The defect is the heading-tail regex and the normaliser, not the marker match.
+
+### g-differential-manifest-shape-check-admits-an-artifact-without-sha256 — `loadManifest` validates the source record and nothing inside an artifact, so a missing hash compares undefined-to-undefined and every artifact counts as byte-identical — `NEW S420-peter (floor pass on #970; reviewer-executed); LOW; open`
+<!-- @gap id=g-differential-manifest-shape-check-admits-an-artifact-without-sha256 sev=LOW status=open locus=scripts/corpus-emit-differential.ts:1226-1237(loadManifest checks the source record only) consumed at :1404(the sha256 equality that increments identicalArtifacts) prov=review:S420-floor-pass-on-970-sha256-stripped-from-both-sides-exit-0-4-of-4-identical -->
+
+The comment at `:1211-1213` claims *"anything subtler still lands on the top-level guard, which also exits 2."* The residual here is not a throw — it is a silent wrong verdict.
+
+Reviewer-executed: stripping `sha256` from every artifact on both sides of a real fixture pair, with head given a different revision and different `bytes`, yields exit **0**, `artifacts COMPARED: 4 / byte-identical: 4 of 4 / DIFFERING: 0 of 4`, `VERDICT: NO DIFFERENCES`, empty stderr. Not VACUOUS (4 compared), so no floor catches it. Reachable from a partially-written capture or a manifest produced by a variant writer.
+
+### g-codegen-uptoroot-block-is-dead-code-behind-a-this-is-the-fix-comment — #972 left 27 unreachable lines whose 18-line comment describes the S400 anchor fix as the live mechanism — `NEW S420-peter (floor pass on #972); LOW; open`
+<!-- @gap id=g-codegen-uptoroot-block-is-dead-code-behind-a-this-is-the-fix-comment sev=LOW status=open locus=compiler/src/codegen/index.ts:3030-3056(pageRelDir/depth/upToRoot plus the S400 rationale comment); sole remaining reference is the fallback at :3086 prov=review:S420-floor-pass-on-972-upToRoot-occurrences-3056-def-3086-sole-use-rest-comments -->
+
+The `upToRoot` binding's only surviving reference is the fallback branch at `:3086`, taken only when `cgOutputBaseDir` is falsy — and `computeOutputBaseDir` (`api.js:231`) returns `null` only for a non-array or EMPTY input list, which cannot reach shell composition (composition needs an entry plus at least one route). So the block is unreachable in any real compile, and the base-dir-relative branch inside it is dead even in the fallback.
+
+The cost is navigational: a future reader lands on an 18-line comment presenting the S400 anchor fix as the mechanism that drives the emitted path, when it no longer drives any byte. Same shape as the `emit-expr.ts` stale-premise comments — a comment that survives the code it justified.
