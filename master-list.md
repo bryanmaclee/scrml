@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `923fc144` — wrap(s420): the floor drained 8 to 0, and then convicted my own fix of the class it was fixing (#980) — **pushed**
 - `6620771b` — wrap(s419): the floor convicted all three of my own PRs, and every fix re-created its class one level away (#975) — **pushed**
 - `6b138677` — wrap(s417): the floor convicted every code-bearing PR on it, and a drift pin found the bug it was built to detect the absence of (#966) — **pushed**
 - `3f7bf3ff` — wrap(s416): five landings, and four instruments that existed, read as done, and were never consulted (#960) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `9eb9eb24` — wrap(s414b): the post-wrap continuation — #947, and a baseline I chose not to hand-fix (#948) — **pushed**
 - `c439f929` — wrap(s413): the review floor drained 9 to 0, and it convicted four of my own six PRs (#942) — **pushed**
 - `b9440511` — wrap(s412): three silent defects in the shipped stdlib, and five instruments that lied (#934) — **pushed**
-- `36c99dc9` — wrap(s411): the 82 GB lockup was a colon in a regex character class — found, fixed, and measured (#925) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
