@@ -73,7 +73,7 @@ describe("state.ts §3 — heading/marker status drift is detected (not silent)"
       "### g-no-tail — a free-text heading with no structured status",
       "<!-- @gap id=g-no-tail sev=MED status=resolved -->",
     ].join("\n");
-    const drift = headingMarkerDrift(text);
+    const { drift } = headingMarkerDrift(text);
     const ids = drift.map((d) => d.id);
     expect(ids).toContain("g-drifted");     // heading=resolved vs marker=open
     expect(ids).not.toContain("g-agree");   // both open — agree
@@ -81,13 +81,20 @@ describe("state.ts §3 — heading/marker status drift is detected (not silent)"
     expect(drift.length).toBe(1);
   });
 
-  test("open/deferred/nominal all collapse to open-ish vs resolved", () => {
+  // ⛑ S420 — THIS TEST IS INVERTED ON PURPOSE. It previously pinned
+  // "open/deferred/nominal all collapse to open-ish vs resolved" and asserted NO drift here.
+  // That collapse was a BLIND SPOT, not a feature: a heading reading `deferred` tells a human the
+  // entry is not being worked, while `status=deferred` is classified CLOSED and `status=open` is
+  // counted as OPEN — so heading=deferred over marker=open is a real disagreement that the old
+  // normaliser could not express. The scan now classifies BOTH sides through the same
+  // GAP_STATUS_* sets the counts use, so the two can never disagree about what "still open" means.
+  // `g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings`.
+  test("a deferred heading over an open marker IS drift (supersedes the open-ish collapse)", () => {
     const text = [
       "### g-def — x — `S1; MED; deferred`",
       "<!-- @gap id=g-def sev=MED status=open -->",
     ].join("\n");
-    // heading 'deferred' and marker 'open' both normalize to open-ish → NO drift.
-    expect(headingMarkerDrift(text).length).toBe(0);
+    expect(headingMarkerDrift(text).drift).toHaveLength(1);
   });
 });
 

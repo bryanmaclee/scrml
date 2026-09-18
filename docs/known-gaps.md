@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 108 |
 | MED | 254 |
-| LOW | 100 |
+| LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -15656,15 +15656,15 @@ No inverse hazard: every `rmSync` target traces to a `mkdtempSync` result, so no
 
 ⚑⚑ **AND IT CORRECTS THE S419 HAND-OFF, WHICH HAD THIS EXACTLY INVERTED.** That hand-off states #972's browser test *"ran ONLY locally on Windows — CI's browser lane did not run it; its integration sibling ran 8/8 in CI."* Both halves are wrong: `scripts/browser-baseline.ts --check` is a step in the **blocking** `gate` job (`ci.yml:148-149`, *"a regression here now blocks"*), and it is the INTEGRATION test that never gates. The PA propagated the false claim into a dispatch brief this session before a reviewer caught it.
 
-### g-state-ts-header-comment-misstates-the-open-count-basis — the header says open is `status=open`; the classifier has five open statuses, and a reader reasoning from the comment concludes twelve live entries are uncounted — `NEW S420-peter (PA-found and PA-falsified in the same pass); LOW; open`
-<!-- @gap id=g-state-ts-header-comment-misstates-the-open-count-basis sev=LOW status=open locus=scripts/state.ts:19-22(header comment) vs :59-71(GAP_STATUS_OPEN) prov=empirical:PA-misled-by-it-at-S420-then-caught-it-by-reading-the-classifier -->
+### g-state-ts-header-comment-misstates-the-open-count-basis — the header says open is `status=open`; the classifier has five open statuses, and a reader reasoning from the comment concludes twelve live entries are uncounted — `NEW S420-peter (PA-found and PA-falsified in the same pass); LOW; RESOLVED S420`
+<!-- @gap id=g-state-ts-header-comment-misstates-the-open-count-basis sev=LOW status=resolved resolved-by=S420-peter locus=scripts/state.ts:19-22(header comment) vs :59-71(GAP_STATUS_OPEN) prov=empirical:PA-misled-by-it-at-S420-then-caught-it-by-reading-the-classifier -->
 
 `scripts/state.ts:19-22` documents the marker vocabulary as six values and the count basis as `HIGH/MED/LOW open = sev=<SEV> status=open`. Neither is true: `GAP_STATUS_OPEN` holds **five** values (`open`, `in-progress`, `narrowed`, `ruling-gated`, `partial-impl`) and `GAP_STATUS_CLOSED` a further six, with a fail-loud guard on anything unclassified. S299 and S313 changed the classifier and left the header.
 
 **The cost is demonstrated, not hypothetical.** The S420 PA read the comment, counted the 21 markers carrying statuses outside the documented six, and concluded that **7 HIGH + 5 MED of live work were silently excluded from the board count** — a would-be headline finding, false in full. Caught only by reading `GAP_STATUS_OPEN` before writing it down. The counts are sound; the comment is what is wrong. Two lines.
 
-### g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings — `state --check` reports "3 DRIFT" over a population it never states; the real count is 25 and it is blind to 22 — `NEW S420-peter (PA-measured); LOW; open`
-<!-- @gap id=g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings sev=LOW status=open locus=scripts/state.ts:236-259(headingMarkerDrift — the tail regex at :243, the norm at :240, the status capture at :248) prov=empirical:PA-measured-at-a5c3810a-279-of-998-headings-parsed-25-real-drifts-3-reported -->
+### g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings — `state --check` reports "3 DRIFT" over a population it never states; the real count is 25 and it is blind to 22 — `NEW S420-peter (PA-measured); LOW; RESOLVED S420`
+<!-- @gap id=g-heading-marker-drift-detector-inspects-a-quarter-of-the-headings sev=LOW status=resolved resolved-by=S420-peter locus=scripts/state.ts:236-259(headingMarkerDrift — the tail regex at :243, the norm at :240, the status capture at :248) prov=empirical:PA-measured-at-a5c3810a-279-of-998-headings-parsed-25-real-drifts-3-reported -->
 
 **PA-measured at `a5c3810a`: 998 gap headings, 279 parsed by the detector (28%), 719 skipped.** Of the skipped, 355 carry a status word the detector never reads. Real heading-vs-marker drift is **25**; it reports **3**.
 
@@ -15719,3 +15719,28 @@ subject disappears.
 **Not silent any more.** The seed bridge reports a per-name reason code (`no-such-cell` · `derived-cell` ·
 `written` · `set-threw`) on `cell.detail.seed`, and the pinned per-app table reds in both directions — so a
 fixture coming alive forces this entry to be updated rather than drifting.
+
+### g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition — a heading tail that records a state CHANGE (`deferred → RE-TRIGGERED … to MED/open`) is read by its leading word, so the probe reports the superseded state as current — `NEW S420-peter (S239 pass on #979, Finding 3; PA-reproduced independently); LOW; open`
+<!-- @gap id=g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition sev=LOW status=open locus=scripts/state.ts(headingMarkerDrift — the last-segment leading-word read, after the S420 severity-predecessor guard) prov=review:S420-adversarial-pass-on-979-finding-3-one-live-instance-in-1010-headings -->
+
+The S420 round-2 guard requires the status segment to be preceded by a SEVERITY segment, which kills the
+trailing-prose false positives (`…; MED; open`; fixed upstream in a sibling` no longer reports
+`heading=fixed` — pinned). **One shape survives it:** a tail whose own text narrates a transition.
+
+Live instance, and the only one in 1010 headings — `L7658 g-decl-span-overshoot-systemic`:
+
+```
+… — `NEW S212; LOW; deferred → RE-TRIGGERED S348-peter to MED/open (… PROVEN + reproduced on HEAD)`
+<!-- @gap … status=open -->
+```
+
+Read whole, the tail AGREES with the marker — it says the entry was re-triggered **to open**. The probe
+fires on the stale leading word and reports `heading=deferred marker=open`, sending a reader to fix nothing.
+
+**WARN-only, never gates, one instance — hence LOW.** Deliberately NOT fixed by pattern-matching `→` or
+`RE-TRIGGERED`: that is a second hand-enumerated list of the exact kind this probe's own history keeps
+punishing. The honest options are to normalise the ledger's tail convention (a transition gets a NEW tail,
+not an amended one) or to read the entry body's own resolution banner. Neither is worth a round today.
+
+⛑ **Filed rather than quietly tolerated** because a probe with one known false positive that nobody
+recorded is how the next reader concludes the whole 45 are noise.
