@@ -269,6 +269,8 @@ export function headingMarkerDrift(srcText?: string): {
   drift: { line: number; id: string; heading: string; marker: string }[];
   headings: number;
   inspected: number;
+  noTail: number;
+  noMarker: number;
 } {
   const text = srcText ?? readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
   const lines = text.split("\n");
@@ -282,35 +284,54 @@ export function headingMarkerDrift(srcText?: string): {
           : null;
   let headings = 0;
   let inspected = 0;
+  let noTail = 0;    // heading carries no classifiable status word
+  let noMarker = 0;  // heading HAS a status, but no @gap marker before the next heading
   for (let i = 0; i < lines.length; i++) {
     if (!/^### /.test(lines[i])) continue;
     headings++;
     // The status is the last `;`-separated segment's leading word, ignoring bold/backtick decoration
     // and any trailing parenthetical or resolving-session note.
+    // ⛑ S420 ROUND 2 — THE TAIL IS STRUCTURAL (`; <SEV>; <status>`), NOT POSITIONAL.
+    // Taking the last `;`-segment unconditionally made any trailing prose that happens to LEAD with a
+    // status word a phantom drift — `…; MED; open`; fixed upstream in a sibling` reported
+    // `heading=fixed`. The discriminator is the SEVERITY segment that precedes the status in every real
+    // tail; requiring it keeps all four shapes the widening was for (bold-no-backtick, parenthetical,
+    // resolving-session note, plain) and rejects trailing prose by construction.
     const segs = lines[i].split(";");
-    if (segs.length < 2) continue;
-    const tailSeg = segs[segs.length - 1].replace(/[`*]/g, "").trim();
+    if (segs.length < 3) { noTail++; continue; }
+    const clean = (s: string) => s.replace(/[`*]/g, "").trim();
+    const prevSeg = clean(segs[segs.length - 2]);
+    if (!/^(HIGH|MED|LOW|NOMINAL)\b/i.test(prevSeg)) { noTail++; continue; }
+    const tailSeg = clean(segs[segs.length - 1]);
     const hm = tailSeg.match(/^([a-z][a-z-]*)\b/i);
-    if (!hm) continue;
+    if (!hm) { noTail++; continue; }
     const hStatus = hm[1].toLowerCase();
     const hCls = cls(hStatus);
-    if (!hCls) continue;
+    if (!hCls) { noTail++; continue; }
     let mStatus: string | null = null;
-    for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+    // ⛑ S420 ROUND 2 — THE `i + 8` CAP WAS A SECOND, UNDISCLOSED TRUNCATION AND IS GONE.
+    // The loop already breaks at the next `### `, so the cap bought nothing except a silent miss:
+    // measured on the live ledger it discarded 68 heading/marker pairs that DO exist, 19 of them real
+    // drift (27 reported against a true 46). Worse, `inspected` is only incremented once BOTH sides
+    // classify, so those 68 fell into the "no comparable status pair" remainder — the scope line blamed
+    // the CORPUS for the instrument's own cap. Nearest witness was off by ONE line:
+    // `g-slot-fill-unknown-slot-name-unchecked`, marker at +8, body reads "RESOLVED S313-bryan".
+    // The heading break is the real bound; a numeric window over a variable-length entry never was.
+    for (let j = i + 1; j < lines.length; j++) {
       const mm = lines[j].match(/<!--\s*@gap\s+[^>]*status=([a-z-]+)/i);
       if (mm) { mStatus = mm[1].toLowerCase(); break; }
       if (/^### /.test(lines[j])) break;
     }
-    if (!mStatus) continue;
+    if (!mStatus) { noMarker++; continue; }
     const mCls = cls(mStatus);
-    if (!mCls) continue;
+    if (!mCls) { noMarker++; continue; }
     inspected++;
     if (hCls !== mCls) {
       const idm = lines[i].match(/^###\s+(\S+)/);
       drift.push({ line: i + 1, id: idm ? idm[1] : "?", heading: hStatus, marker: mStatus });
     }
   }
-  return { drift, headings, inspected };
+  return { drift, headings, inspected, noTail, noMarker };
 }
 
 // ── Generated-section registry (Fork 3B/4) ──────────────────────────────────
@@ -542,8 +563,11 @@ function runCheck(): number {
   // ⛑ S420 — the probe STATES ITS OWN SCOPE (`N of M`). A bare count reads identically whether it
   // measured the whole population or a quarter of it, which is exactly how this probe's 28% reach went
   // unnoticed. Never print the drift count without the denominator it was taken over.
-  const { drift, headings, inspected } = headingMarkerDrift();
-  const scope = `${inspected} of ${headings} headings carry a comparable status pair`;
+  const { drift, headings, inspected, noTail, noMarker } = headingMarkerDrift();
+  // ⛑ S420 ROUND 2 — the denominator is SPLIT, because one conflated number is the same defect this
+  // probe exists to report. `487 of 1010` read as "the corpus only offers 487 comparable pairs" when a
+  // third of the shortfall had been the probe's own marker-window cap. Each remainder now names WHY.
+  const scope = `${inspected} comparable · ${noTail} no status tail · ${noMarker} tail but no marker · ${headings} headings`;
   if (drift.length === 0) {
     console.log(`  known-gaps heading/marker status: 0 drift — ${scope}  [WARN-only — not gated]`);
   } else {

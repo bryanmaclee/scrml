@@ -118,7 +118,12 @@ describe("@gap status scan (state.headingMarkerDrift) — UNWIDENED sibling, pin
   // The scan used to require the status word to be the LAST thing before a closing backtick, which
   // almost no real heading in the ledger satisfies: measured 279 of 998 headings parsed and 22 of 25
   // real drifts invisible. These pin the three shapes that were escaping, the collapsed-bucket blind
-  // spot, the `non-gap` truncation, and the no-false-fire control. Each fails against the pre-S420 scan.
+  // spot and the `non-gap` truncation.
+  //
+  // ⛑ FIVE of these seven DISCRIMINATE (they fail against the pre-S420 scan); the last two are
+  // CONTROLS and pass against both. An earlier revision of this comment said "each fails against the
+  // pre-S420 scan", which was false for exactly those two — the same overclaiming shape this file is
+  // pinning against, caught by the adversarial pass on the PR that added it.
   test("the shapes that used to escape the scan are now caught, and prose still does not false-fire", () => {
     const H = (tail) => `### g-x — sym — ${tail}\n`;
     const M = (status) => `<!-- @gap id=g-x sev=MED status=${status} -->\n`;
@@ -150,6 +155,28 @@ describe("@gap status scan (state.headingMarkerDrift) — UNWIDENED sibling, pin
     expect(got.headings).toBe(3);   // every `### ` line counted
     expect(got.inspected).toBe(2);  // only those with a comparable status pair
     expect(got.drift).toHaveLength(1);
+    // The remainders must ACCOUNT for every heading. A conflated denominator is the defect this
+    // probe reports; an unbalanced one silently hides a skip path. (This caught a real silent patch
+    // failure during S420 round 2, where `noTail` stayed 0 and the parts summed to 573 of 1010.)
+    expect(got.inspected + got.noTail + got.noMarker).toBe(got.headings);
+  });
+
+  // ⛑ S420 ROUND 2 — THE FALSE-POSITIVE CLASS THE WIDENING CREATES, which had ZERO coverage.
+  // The old scan anchored on a trailing backtick; the new one splits the WHOLE line on `;` and reads
+  // the last segment's leading word. The surviving "no status tail" control does not exercise that at
+  // all — it has no semicolon, so it exits at the older `segs.length < 2` guard and never reaches the
+  // new parse. These do reach it: a genuine status tail FOLLOWED by more prose that happens to lead
+  // with a status word. All must report ZERO drift against an `open` marker.
+  test("a status tail followed by trailing prose does not report a phantom drift", () => {
+    const M = "<!-- @gap id=g-x sev=MED status=open -->\n";
+    const cases = [
+      ["prose leading with 'fixed'", "### g-x — s — `NEW S1; MED; open`; fixed upstream in a sibling, see #900\n"],
+      ["prose leading with 'resolved'", "### g-x — s — `NEW S1; MED; open`; resolved questions remain about the mint\n"],
+      ["prose leading with 'forensic'", "### g-x — s — `NEW S1; MED; open`; forensic trace kept at docs/forensics/x.md\n"],
+    ];
+    for (const [name, head] of cases) {
+      expect({ name, drift: headingMarkerDrift(head + M).drift.length }).toEqual({ name, drift: 0 });
+    }
   });
 });
 

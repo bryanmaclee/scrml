@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 108 |
 | MED | 254 |
-| LOW | 98 |
+| LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -15719,3 +15719,28 @@ subject disappears.
 **Not silent any more.** The seed bridge reports a per-name reason code (`no-such-cell` · `derived-cell` ·
 `written` · `set-threw`) on `cell.detail.seed`, and the pinned per-app table reds in both directions — so a
 fixture coming alive forces this entry to be updated rather than drifting.
+
+### g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition — a heading tail that records a state CHANGE (`deferred → RE-TRIGGERED … to MED/open`) is read by its leading word, so the probe reports the superseded state as current — `NEW S420-peter (S239 pass on #979, Finding 3; PA-reproduced independently); LOW; open`
+<!-- @gap id=g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition sev=LOW status=open locus=scripts/state.ts(headingMarkerDrift — the last-segment leading-word read, after the S420 severity-predecessor guard) prov=review:S420-adversarial-pass-on-979-finding-3-one-live-instance-in-1010-headings -->
+
+The S420 round-2 guard requires the status segment to be preceded by a SEVERITY segment, which kills the
+trailing-prose false positives (`…; MED; open`; fixed upstream in a sibling` no longer reports
+`heading=fixed` — pinned). **One shape survives it:** a tail whose own text narrates a transition.
+
+Live instance, and the only one in 1010 headings — `L7658 g-decl-span-overshoot-systemic`:
+
+```
+… — `NEW S212; LOW; deferred → RE-TRIGGERED S348-peter to MED/open (… PROVEN + reproduced on HEAD)`
+<!-- @gap … status=open -->
+```
+
+Read whole, the tail AGREES with the marker — it says the entry was re-triggered **to open**. The probe
+fires on the stale leading word and reports `heading=deferred marker=open`, sending a reader to fix nothing.
+
+**WARN-only, never gates, one instance — hence LOW.** Deliberately NOT fixed by pattern-matching `→` or
+`RE-TRIGGERED`: that is a second hand-enumerated list of the exact kind this probe's own history keeps
+punishing. The honest options are to normalise the ledger's tail convention (a transition gets a NEW tail,
+not an amended one) or to read the entry body's own resolution banner. Neither is worth a round today.
+
+⛑ **Filed rather than quietly tolerated** because a probe with one known false positive that nobody
+recorded is how the next reader concludes the whole 45 are noise.
