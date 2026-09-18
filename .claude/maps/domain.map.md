@@ -1,6 +1,110 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ━━━━━━━ S422 DOMAIN DELTA — **ONE NEW NORMATIVE LANGUAGE RULE; ONE LOWERING INVARIANT MADE EXPLICIT.** ━━━━━━━
+#
+# ⛑ **NEW NORMATIVE RULE — A CONDITION HEAD'S PARENS MUST WRAP THE WHOLE CONDITION.**
+# §49.2.3 / §50.2.1 / §50.2.3 (`compiler/SPEC.md:27067`, `:27816`), enforced by
+# **`E-CONDITION-HEAD-UNPARENTHESIZED`** (§34 row `compiler/SPEC.md:20218`).
+# `while (n + 1) < 4 { … }` and `if (n + 1) < 4 { … }` are **not legal scrml**. Canonical spellings:
+# `while (n + 1 < 4)` or `while ((n + 1) < 4)`.
+# ⚑ **THE DOMAIN POINT, NOT THE DIAGNOSTIC POINT: the parens are the CONDITION'S OWN DELIMITERS, not
+# decoration.** §49.2.1's production is `'while' '(' expression ')'` — one expression, fully enclosed.
+# That is why the rule can be stated in the grammar and why the fix lives in ONE collector
+# (`collectIfCondition()`, `compiler/src/ast-builder.js`) serving `parseOneIfStmt` and all three
+# `while` parse sites.
+# ⛔ **THE PRIOR BEHAVIOUR WAS SILENT DATA LOSS, WHICH IS WHY THIS IS AN ERROR AND NOT A WARNING.**
+# The head collector stopped the instant the outermost `(` closed, so the remainder — **including the
+# `{`, and therefore the entire body** — was DROPPED. `while (n + 1) < 4 { n = n + 1 }` emitted
+# `while (n + 1) {\n}` at **exit 0 with zero diagnostics**: an infinite loop whenever the condition
+# depends on the body. `if (n + 1) < 4 { n = 0 }` lost its branch the same way.
+# ⚑ **Population at landing: ZERO of 2,553 tracked corpus `.scrml` files.** This newly-rejecting rule
+# migrates nothing — which is why it could land as an error rather than a warning.
+#
+# ⛑ **LOWERING INVARIANT MADE EXPLICIT — "A MAP SURFACE READ MUST NOT SURVIVE INTO EMITTED LIBRARY
+# OUTPUT UNLOWERED."** `unloweredMapSurfaceReads(emitted)` — `compiler/src/codegen/emit-library.ts:262`
+# — is the detector; `MAP_SET_SURFACE_METHODS` (`:117`) names the surface it polices, and
+# `MAP_RUNTIME_REFERENCED` (`:100`, `/_scrml_map_[a-z]/`) is the cheap pre-filter.
+# ⚑ **`blankStringLiteralContent` (`:329`) exists so the detector does not fire on a METHOD NAME
+# APPEARING INSIDE A STRING LITERAL.** That is a real correctness subtlety: a textual scan over
+# emitted JS must blank string contents first or it reports lowering failures that are just data.
+# Guard sites: `:1090` and `:1192`. Pinned by `compiler/tests/unit/g-library-map-surface-unlowered.test.js`
+# and `compiler/tests/unit/library-mode-map-literal-runtime.test.js`.
+#
+# ⛑ **BLOCK SCOPE IS NOW A FIRST-CLASS CONCEPT IN TWO INDEPENDENT ANALYSES, AND THEY ARE NOT THE
+# SAME ONE — DO NOT CONFLATE THEM:**
+#   - `blockScopedDeclaredNames(...)` — `compiler/src/codegen/emit-logic.ts` (exported), applied per
+#     LIMB in `emit-control-flow.ts:511` (then) and `:527` (else). A `let` in the then-limb must not
+#     mark the name as declared for the else-limb. Pinned by
+#     `compiler/tests/unit/declared-names-block-scope.test.js`.
+#   - `_lexicalBindingsAtInnerFunction(target)` — `compiler/src/type-system.ts:18885`, helper
+#     `sameLevelDecls` at `:18889`. Answers what is visible at an INNER FUNCTION boundary, and it
+#     descends GENERICALLY rather than over a fixed key list, because a fixed list cannot see an
+#     `if-chain`'s `branches[].element` / `elseBranch` — **and a miss there costs a FALSE `E-MU-001`.**
+#     Collects `let-decl`, `const-decl`, `lin-decl`, `variable-decl`; does NOT descend into
+#     `function-decl` or `closure`. Pinned by `e-mu-001-nested-block-name-collision.test.js`,
+#     `e-mu-001-inner-fn-reassignment.test.js`, `inner-fn-assignment-to-captured-binding.test.js`.
+#   ⚑ **If you add a declaration `kind` to the AST, BOTH of these must learn about it.**
+#
+# ⚑ **A CROSS-LAYER INVARIANT WAS COLLAPSED TO ONE DEFINITION — WORTH KNOWING BEFORE TOUCHING THE
+# TOKENIZER.** Which control-flow heads permit a regex literal after their closing `)` is now owned
+# solely by `REGEX_AFTER_CLOSE_PAREN_KEYWORDS` (`compiler/src/codegen/code-segments.ts:46`), read by
+# the tokenizer's `closesControlFlowHead` (`compiler/src/tokenizer.ts:1573`, test at `:1586`) and by
+# codegen's `regexAllowedAfter`. **Previously hand-spelled on both sides.** The braceless-body case is
+# the one that makes it matter: a `while` body may legitimately START with a regex literal
+# (`while (h) /a\sb/.test(c)`), which is also precisely why `/` is EXCLUDED from
+# `CONDITION_HEAD_CONTINUATION_PUNCT` above. Pinned by
+# `compiler/tests/unit/braceless-control-head-regex-literal.test.js` and
+# `compiler/tests/unit/while-braceless-body-stays-in-the-loop.test.js`.
+#
+# ⚠ **THIS MAP IS THE LARGEST IN THE SET AND THE LEAST RE-VERIFIED.** The window's zero-diff over
+# `stdlib/` means the domain vocabulary below did not MOVE, but almost none of it was re-read against
+# source this pass. Given two carried `SPEC.md` citations were caught stale elsewhere in this set,
+# **treat the concept definitions below as current and their `file:line` anchors as hypotheses.**
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
 # **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
 # LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`

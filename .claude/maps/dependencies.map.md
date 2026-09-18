@@ -1,6 +1,80 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ━━━━━━━ S422 DEPENDENCY DELTA — **ZERO. FIFTH CONSECUTIVE WINDOW.** ━━━━━━━
+#
+# ⛑ **`git diff --name-only e74f5423..787d4cb4 -- package.json bun.lock bunfig.toml` -> EMPTY**,
+# across **112 commits**. No runtime or dev dependency was added, removed, or version-bumped.
+# Version stays **v0.7.1**; `engines.bun` stays **>=1.3.13**. This is the **fifth consecutive window**
+# with an empty manifest diff.
+# ⚑ **THAT IS A DELIBERATE PROPERTY OF THIS PROJECT, NOT AN ACCIDENT OF A QUIET WINDOW.** +1,195 lines
+# of compiler source and a new blocking CI gate landed with no new dependency: `conflict-marker-gate.ts`
+# shells out via `node:child_process` `execFileSync` rather than pulling a git library. **When adding
+# code here, the default is the Bun/Node built-in, not a package.**
+#
+# ⚠ **THE INTERNAL MODULE GRAPH DID MOVE, AND THAT IS WHAT THIS MAP SHOULD BE READ FOR THIS WINDOW.**
+# One genuinely new internal edge, and it exists specifically to kill a duplicated invariant:
+#   **`compiler/src/tokenizer.ts` -> `compiler/src/codegen/code-segments.ts`**
+#   (`tokenizer.ts:62`: `import { REGEX_AFTER_CLOSE_PAREN_KEYWORDS } from "./codegen/code-segments.ts"`).
+#   ⚑ **A TOKENIZER IMPORTING FROM `codegen/` IS A DIRECTION-OF-DEPENDENCY SURPRISE** — it is
+#   deliberate: `code-segments.ts` owns the single shared vocabulary of control-flow heads after whose
+#   `)` a regex literal may start, so `tokenizer.ts`'s `closesControlFlowHead` (`:1573`) and codegen's
+#   `regexAllowedAfter` cannot drift. Do not "clean this up" by re-hand-spelling the set in the tokenizer.
+# Reinforced (pre-existing) edge:
+#   **`compiler/src/codegen/emit-control-flow.ts` -> `compiler/src/codegen/emit-logic.ts`** — now also
+#   importing `blockScopedDeclaredNames` alongside `emitLogicNode`, `emitLogicBody`, `planBlockArmLift`,
+#   `_awaitMatchArmServerCalls`, `_matchArmResultIsBlockBody`, `_blockTailIsValueExpr`,
+#   `_objectLiteralArmFromStructuredBody` (`emit-control-flow.ts:3`).
+#
+# ⚑ **`compiler/src/codegen/emit-library.ts` TOOK +400 LINES — A THIRD OF THE WHOLE `compiler/src`
+# DELTA — WITHOUT GAINING AN IMPORT.** Its new machinery (`unloweredMapSurfaceReads` `:262`,
+# `blankStringLiteralContent` `:329`, `containsIndexExpr` `:148`, `MAP_RUNTIME_PROVIDED_NAMES` `:89`,
+# `MAP_RUNTIME_REFERENCED` `:100`, `MAP_SET_SURFACE_METHODS` `:117`) is entirely module-private.
+# **Module-graph maps are blind to this class of change by construction.**
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
 # **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
 # LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`

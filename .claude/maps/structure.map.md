@@ -1,6 +1,79 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-09-08T05:00:00Z  commit: e74f5423
+# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
+# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
+# executed at write time, not carried:
+# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
+# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
+# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
+# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
+# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
+# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
+# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
+# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
+# a DIFFERENT SHA and the stamp is then orphaned.
+#
+# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
+# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
+# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
+# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
+# assumption that a flat count stays flat.
+#
+# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
+# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
+# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
+# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
+# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
+# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
+# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
+# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
+#
+# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
+# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
+# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
+# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
+# lines this window** and neither code was documented on the way past. They are invisible to every
+# count above, because every count above derives from SPEC.
+#
+# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
+# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
+# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
+# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
+# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
+#
+# ━━━━━━━ S422 STRUCTURE DELTA — **NO NEW DIRECTORY. NO DELETION. 20 NEW FILES, 19 OF THEM TESTS.** ━━━━━━━
+#
+# ⛑ **RE-DERIVED BY `git diff --name-status e74f5423..HEAD`, not inferred from a tally.**
+#   - **Added (non-doc): 20 files** — 19 under `compiler/tests/` (16 `unit/`, 1 `integration/`,
+#     1 `browser/`, plus the two e2e-render-map harness files were MODIFIED not added) and
+#     **`scripts/conflict-marker-gate.ts`**, the one new non-test source file in the window.
+#   - **Deleted: ZERO.** `git diff --name-status … | grep '^D'` returns nothing.
+#   - **No new directory at any level.** Every added file landed in a directory that already existed.
+#   - `compiler/src` is **195 files — FLAT for the FOURTH consecutive window** while growing
+#     **+1,116 lines to 253,519**. ⚑ **A FLAT FILE COUNT OVER A GROWING LINE COUNT IS THE SIGNATURE OF
+#     THIS REPO** — work lands by deepening existing modules, not by adding them. A structure map keyed
+#     on directory shape will therefore look "unchanged" through very large behavioural windows. That is
+#     a property of the instrument, not evidence of a quiet tree.
+#
+# ⚑ **WHERE THE WORK ACTUALLY LANDED (`compiler/src`, +1,195 / -79 over 12 files) — the ranking is
+# the useful artifact, because the directory tree does not show it:**
+#   `codegen/emit-library.ts` **+400** · `ast-builder.js` **+241** · `type-system.ts` **+170** ·
+#   `codegen/index.ts` **+92** · `codegen/emit-logic.ts` **+73** · `tokenizer.ts` **+65** ·
+#   `semdiff.ts` **+59** · `codegen/code-segments.ts` **+57** · `expression-parser.ts` **+39** ·
+#   `codegen/emit-expr.ts` **+35** · `gauntlet-phase3-eq-checks.js` **+24** ·
+#   `codegen/emit-control-flow.ts` **+19**.
+#   **`codegen/` took 676 of the 1,195 added lines — a clear majority, concentrated in `emit-library.ts`.**
+#
+# ⚠ **`scripts/` IS NOW 37 `.ts`/`.js` FILES** (+1: `conflict-marker-gate.ts`). Seven more were
+# modified: `browser-baseline.ts`, `corpus-emit-differential.ts`, `dpa-debt.ts`, `flograph.ts`,
+# `generate-api-reference.js`, `regen-spec-index.ts`, `state.ts`.
+#
+# ⚠ **STILL NOT A WORKSPACE MONOREPO.** Root `package.json` remains the SOLE manifest; there is no
+# `workspaces` key, no `packages/*`, no `apps/*`. Re-checked this window, not carried.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
+# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
 # generated-at: e74f5423 — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** `merge-base HEAD origin/main`
 # == `origin/main` == **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS** — it advanced to
 # `e6b8fc77` mid-pass (LOCAL, UNPUSHED, docs-only wrap commit on `wrap/s405`;
