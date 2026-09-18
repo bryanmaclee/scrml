@@ -41,6 +41,7 @@
 | LOW | 90 |
 | HIGH | 103 |
 | MED | 230 |
+| MED | 232 |
 | LOW | 87 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15830,3 +15831,23 @@ So SPEC contradicts SPEC: a **narrative cross-ref** in §13.5 against a **normat
 ⛑ **Worth recording HOW this surfaced, because it is the general case.** A draft of the "I am Jack's `<engine>`" article was going to state the §13.5 code as fact — *SPEC said so.* It was caught only because the article series' standard is that every code block is compiled rather than read. **A derived-doc claim inside SPEC itself is still a derived claim** (Rule 4), and §13.5's cross-refs are prose about §51, not §51.
 — `NEW S407-bryan (caught by compiling an article code block instead of trusting the spec sentence about it)`; **MED**; open
 <!-- @gap id=g-spec-13-5-names-e-match-not-exhaustive-for-a-missing-engine-state-child sev=MED status=open locus=compiler/SPEC.md:7787(§13.5 engine-recipe cross-ref) vs compiler/SPEC.md(§51.0.B normative state-child statement) prov=empirical:PA-compiled-both-shapes-at-2c34a94c-engine-missing-state-child-fires-E-ENGINE-STATE-CHILD-MISSING-and-match-missing-arm-fires-E-MATCH-NOT-EXHAUSTIVE -->
+### g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch — three self-host parity cases emit one token where the JS tokenizer emits two, and they are the baseline the new tier gate pins
+
+**PA-MEASURED at `fd69d1fc`**, running `bun test compiler/tests/self-host` both with and without `compiler/self-host/dist/` present — **identical failure name set either way**:
+
+```
+tokenizeLogic parity > tilde
+tokenizeLogic parity > punct chars
+tokenizeCSS parity > pseudo selector
+```
+
+All three are **token-count mismatches**, asserted at `compiler/tests/self-host/tab.test.js:72` in `assertSameTokens` (`expect(b.length).toBe(a.length)`) — measured `Expected: 2, Received: 1` on the `tilde` case. The self-hosted tokenizer emits ONE token where `compiler/src/tokenizer.js` emits two.
+
+⚑ **THIS IS THE RESIDUE OF A RESOLVED GAP, NOT A NEW SYMPTOM OF IT.** [[g-selfhost-tokenizelogic-tdz-pos-before-initialization]] is `status=resolved` (S412), and this run independently confirms that: **zero `ReferenceError` in the entire tier**, where previously *"every `tokenizeLogic parity` case fails identically"* with `Cannot access 'pos' before initialization`. S412's fix moved those two cases from a loud throw to a quiet parity mismatch. The TDZ is closed; what it was masking is this.
+
+⚑ **Why it is filed rather than left to the baseline.** S409 gates this tier on a failure NAME SET (`compiler/tests/self-host/FAILURE-BASELINE.json`), which records these three as known-failing. **A baseline is a control, not a defect ledger** — it asserts "no NEW failure" and says nothing about what the old ones are. Without this entry the three would be permanently green-by-baseline with no referent, which is the shape a name-set gate is most likely to rot into.
+
+**Not attempted here, deliberately.** The S409 arc's scope was the coverage disposition; fixing parity is its own arc with its own measurement. The useful next step is a token-by-token diff of the three cases against `compiler/src/tokenizer.js`, since `tokenizeAttributes` parity passes on the same closure shape.
+
+— NEW S409-bryan (measured while taking the self-host coverage disposition routed by S411-peter; the with/without-dist comparison is what establishes these are repo state, not environment state)
+<!-- @gap id=g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic+tokenizeCSS)+compiler/src/tokenizer.js(the-parity-oracle)+compiler/tests/self-host/tab.test.js:72(assertSameTokens-the-assertion-site) prov=empirical:S409-measured-by-running-the-tier-with-and-without-the-gitignored-dist-identical-name-set -->
