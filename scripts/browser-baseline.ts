@@ -43,7 +43,7 @@
 // cry-wolf retrofit. This lands as a step in `tracking` that reports honestly; whether `gate` should
 // require it is bryan's.
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
@@ -133,7 +133,39 @@ async function runTier(): Promise<{
   // DROPPING the multi-thousand-line object dumps that are the 155 MB bulk. `raw` below is therefore
   // the FILTERED text (tens of KB), and every downstream computation (names / ranOk / reported /
   // parseOk / failureReason / the `!ranOk` tail) runs on it byte-identically to the buffered version.
-  const child = spawn("bun", ["test", TIER], { cwd: REPO_ROOT });
+  // S421 — hand bun an explicitly SORTED file list, never the bare directory.
+  // `bun test <dir>` enumerates in FILESYSTEM order, which is a property of the machine and — in CI —
+  // of the runner image and even of how the checkout was written (a `push` build and a `pull_request`
+  // build lay the tree down differently). This tier shares ONE happy-dom document across files, so
+  // tier order decides which file gets a clean document and which inherits a predecessor's, and this
+  // gate asserts an exact failure NAME SET. Order-sensitive input under an order-intolerant gate is
+  // the shape that produced the S345 outage; sorting pins tier order to a repo property in every
+  // environment. Passing files explicitly also keeps the streaming filter below byte-identical — bun
+  // emits the same markers and the same trailing summary either way.
+  // ⚑ THIS IS A NARROWING, so it owes the §8 population count: an explicit list can silently DROP
+  // what the bare directory would have found. Measured at S421: the tier is FLAT (no subdirectories)
+  // and 104 of its 105 entries match — the one excluded is `FAILURE-BASELINE.json`, which is not a
+  // test. The standing hazard is a FUTURE entry the filter cannot see (a subdirectory, a `.test.ts`),
+  // because a dropped file removes its failures from the observed set and the name-set comparison
+  // then reads CLEANER, not redder — it would look like an improvement. The assertion below cannot
+  // catch a partial drop, only a total one; it is the floor, not the proof. If this tier ever grows
+  // a subdirectory, this must become a recursive walk.
+  const tierEntries = readdirSync(join(REPO_ROOT, TIER), { withFileTypes: true });
+  const tierFiles = tierEntries
+    .filter((e) => e.isFile() && e.name.endsWith(".test.js"))
+    .map((e) => e.name)
+    .sort()
+    .map((f) => `${TIER}/${f}`);
+  if (tierFiles.length === 0) {
+    console.error(`\n  HARNESS ERROR — no *.test.js found under ${TIER}. Refusing to report a name set from an empty tier.\n`);
+    process.exit(2);
+  }
+  const skippedDirs = tierEntries.filter((e) => e.isDirectory()).map((e) => e.name);
+  if (skippedDirs.length > 0) {
+    console.error(`\n  HARNESS ERROR — ${TIER} now has subdirector${skippedDirs.length === 1 ? "y" : "ies"} (${skippedDirs.join(", ")}) that this non-recursive walk would SILENTLY DROP. Make the walk recursive before running the gate.\n`);
+    process.exit(2);
+  }
+  const child = spawn("bun", ["test", ...tierFiles], { cwd: REPO_ROOT });
 
   // Merge stdout + stderr into ONE ordered line sequence. The tier writes ~all of its payload (markers,
   // error blocks, dumps, AND the `N pass/skip/fail` summary) to STDERR; stdout is ~181 bytes. Both
