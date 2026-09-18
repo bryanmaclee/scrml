@@ -345,6 +345,211 @@ function locateEntryArtifacts(outDir, entryBase) {
 }
 
 /**
+ * Parse the per-chunk CELL SCOPES out of an emitted client bundle.
+ *
+ * ⛑ S420 (g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject) —
+ * THE SEED MUST BE WRITTEN UNDER THE KEY THE APP ACTUALLY READS, AND ONLY IF THE APP
+ * ACTUALLY HAS THAT CELL.
+ *
+ * `codegen/index.ts buildCellScopePrologue` renames every cell-accessor call in a chunk body
+ * to a chunk-local wrapper and emits a prologue that namespaces the key space:
+ *
+ *     // --- chunk cell scope (01hrlbd8) ---
+ *     const _scrml_cs_key = (n) => { ...; return raw ? "01hrlbd8$" + raw : raw; };
+ *     const _scrml_cs_reactive_set = (n, ...r) => _scrml_reactive_set(_scrml_cs_key(n), ...r);
+ *
+ * so the app's real store key for `<contacts>` is `01hrlbd8$contacts`. The harness used to
+ * seed through the BARE `_scrml_reactive_set`, writing an un-namespaced `contacts` that
+ * nothing subscribes to: no effect fired, the DOM never changed, and all four seeded cells
+ * scored byte-identical to their unseeded twin. D6 (S-EMPTY-WITH-DATA) therefore never had a
+ * live subject on the corpus.
+ *
+ * ⚑ The `_scrml_cs_*` wrappers CANNOT simply be preferred by name. The whole client bundle is
+ * wrapped in `(function() { ... })()`, so those `const`s are IIFE-local and `typeof
+ * _scrml_cs_reactive_set` is `"undefined"` at the harness's capture point (which appends
+ * statements to the same `new Function` body, OUTSIDE that IIFE). The key space has to be
+ * reconstructed and applied to the bare accessor instead.
+ *
+ * ⚑⚑ AND A WRITE MUST BE VALIDATED BEFORE IT HAPPENS, NOT INFERRED FROM A READ-BACK.
+ * `_scrml_state` is a plain `{}` and `_scrml_reactive_set`/`_scrml_reactive_get` are a bare
+ * property write/read (runtime-template.js:548/819/853), so **every invented key reads back**.
+ * A read-back therefore certifies nothing: it cannot tell a real cell from a typo, and an
+ * earlier revision of this bridge used "first key that reads back wins" — which is just
+ * "first candidate wins", leaving the documented fallback unreachable. Worse, a speculative
+ * `_scrml_reactive_set` is not free: it runs `_scrml_propagate_dirty` and notifies
+ * subscribers, so probing can fire effects on the very subject the detectors then read.
+ *
+ * So this resolves the seed name STATICALLY, against the call sites the chunk really emits,
+ * and writes exactly one key — or none at all.
+ *
+ * Each returned scope carries:
+ *   - `token` / `prefix` — the chunk's namespace (`"01hrlbd8"` / `"01hrlbd8$"`).
+ *   - `owners`           — the `_scrml_cs_owners` map of the dotted-root OWNER form, where an
+ *                          IMPORTED cell keys under the EXPORTER's token (§51.0.A/§51.0.D).
+ *   - `cells`            — every name the chunk passes to a `_scrml_cs_*` accessor. This is
+ *                          the app's real cell set for the chunk; a seed name absent from it
+ *                          names no cell in this app and must NOT be written.
+ *   - `derived`          — names declared via `_scrml_cs_derived_declare`. A derived cell is
+ *                          read through `_scrml_derived_fns`/`_scrml_derived_get`, NOT out of
+ *                          `_scrml_state`, so writing its slot is discarded — and leaves junk
+ *                          in a slot the runtime itself never writes. Never write one.
+ *
+ * Anchored on the `// --- chunk cell scope (<token>) ---` header, which `buildCellScopePrologue`
+ * emits for BOTH prologue shapes (the compact no-owner form and the dotted-root owner form).
+ * Matching the key-fn BODY instead would silently miss the owner form, whose key fn ends in a
+ * plain `return "<prefix>" + raw;` with no ternary.
+ *
+ * ⚑ An unrecognised prologue FAILS LOUD (throws) rather than returning `[]`. Returning an
+ * empty list would silently degrade to bare-key seeding — which is precisely the bug this
+ * function exists to fix, one level away.
+ *
+ * @param {string} clientJs
+ * @returns {Array<{token,prefix,owners,cells:Set<string>,derived:Set<string>}>} one entry per
+ *   chunk, in emission order. A bundle with NO chunk scope at all yields a single synthetic
+ *   bare scope (`prefix: ""`) whose cells are read off the un-namespaced accessor call sites.
+ */
+export function parseChunkCellScopes(clientJs) {
+  const src = typeof clientJs === "string" ? clientJs : "";
+  if (src === "") return [];
+
+  const headerRe = /\/\/ --- chunk cell scope \(([^)\s]+)\) ---/g;
+  const heads = [];
+  let h;
+  while ((h = headerRe.exec(src)) !== null) heads.push({ token: h[1], at: h.index });
+
+  if (heads.length === 0) {
+    // No chunk scope. Either a genuinely un-namespaced emit (valid — a chunk with no reactive
+    // state carries no prologue) or a prologue shape this parser no longer recognises. The
+    // `_scrml_cs_` marker discriminates the two, and the second is a hard error.
+    if (src.includes("_scrml_cs_key") || src.includes("_scrml_cs_reactive_")) {
+      throw new Error(
+        "render-harness: emitted bundle defines _scrml_cs_* wrappers but carries no " +
+          "`// --- chunk cell scope (<token>) ---` header — the prologue shape changed and the " +
+          "seed bridge can no longer resolve the app's key space. Update parseChunkCellScopes.",
+      );
+    }
+    return [{
+      token: "",
+      prefix: "",
+      owners: {},
+      cells: collectAccessorNames(src, /(?<![\w$])_scrml_(?:reactive_get|reactive_set|init_set|reset)\(\s*"((?:[^"\\]|\\.)*)"/g),
+      derived: collectAccessorNames(src, /(?<![\w$])_scrml_derived_declare\(\s*"((?:[^"\\]|\\.)*)"/g),
+    }];
+  }
+
+  return heads.map((head, i) => {
+    // A chunk's region runs from its header to the next chunk's header (or EOF).
+    const end = i + 1 < heads.length ? heads[i + 1].at : src.length;
+    const region = src.slice(head.at, end);
+    let owners = {};
+    const om = /const _scrml_cs_owners = (\{[\s\S]*?\});/.exec(region);
+    if (om) {
+      try { owners = JSON.parse(om[1]); } catch (_e) { owners = {}; }
+    }
+    return {
+      token: head.token,
+      prefix: `${head.token}$`,
+      owners,
+      cells: collectAccessorNames(region, /(?<![\w$])_scrml_cs_\w+\(\s*"((?:[^"\\]|\\.)*)"/g),
+      derived: collectAccessorNames(region, /(?<![\w$])_scrml_cs_derived_declare\(\s*"((?:[^"\\]|\\.)*)"/g),
+    };
+  });
+}
+
+/** Every first-string-argument captured by `re` over `src`, as a Set. */
+function collectAccessorNames(src, re) {
+  const out = new Set();
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    if (m[1] !== "") out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * The store key a chunk resolves `name` to — a faithful mirror of the emitted `_scrml_cs_key`
+ * (codegen/index.ts cellScopeKeyFn), INCLUDING the dotted-root owner lookup, so an imported
+ * cell keys under the exporter's token rather than this chunk's.
+ */
+export function cellKeyIn(scope, name) {
+  const raw = String(name == null ? "" : name);
+  if (!raw) return raw;
+  if (scope.owners && Object.keys(scope.owners).length > 0) {
+    const d = raw.indexOf(".");
+    const owned = scope.owners[d === -1 ? raw : raw.slice(0, d)];
+    if (owned) return d === -1 ? owned : owned + raw.slice(d);
+  }
+  return scope.prefix + raw;
+}
+
+/**
+ * Apply a POPULATED seed through the key space the app actually reads, and REPORT whether the
+ * seed was OBSERVABLE — i.e. whether it moved the render.
+ *
+ * Per seed cell, exactly one of:
+ *   - `no-such-cell`  — no chunk emits an accessor for this name. The fixture names a cell the
+ *                       app does not have. NOTHING IS WRITTEN.
+ *   - `derived-cell`  — the name is declared derived; the runtime recomputes it and would
+ *                       discard the write. NOTHING IS WRITTEN.
+ *   - `written`       — resolved to a real, settable cell; one key written.
+ *   - `set-threw`     — the accessor threw.
+ *
+ * `domChanged` is the load-bearing signal. A read-back is deliberately NOT consulted: the store
+ * is a plain object, so a read-back is true for any key whatsoever and proves nothing.
+ *
+ * ⚑ THE REPORT IS DETERMINISTIC AND CARRIES NO CHUNK TOKEN. It rides on `cell.detail`, and
+ * `generate-baseline.js` PERSISTS `detail` for every RED cell straight into the committed
+ * baseline JSON. The chunk token is `fnv1aHash(projectRelativeSourcePath)` over a fresh
+ * `mkdtemp` staging dir, so it differs on every run and every machine; letting one reach
+ * `detail` would put a per-run random value in a committed artifact the moment a seeded cell
+ * goes red — which is exactly what D6 exists to make happen. Names, booleans and reason codes
+ * only: no keys, no prefixes, no tokens, and no lengths.
+ *
+ * @returns {{ chunks:number, writes:Array<{name,reason,namespaced,wrote}>,
+ *             domChanged:boolean, observable:boolean, errors:string[] }}
+ */
+export function applySeed(seed, obs, scopes, doc) {
+  const writes = [];
+  const errors = [];
+  const readBody = () => {
+    try { return doc && doc.body ? doc.body.innerHTML : ""; } catch (_e) { return ""; }
+  };
+  const before = readBody();
+
+  for (const [name, value] of Object.entries(seed)) {
+    const scope = scopes.find((s) => s.cells.has(name));
+    if (!scope) {
+      writes.push({ name, reason: "no-such-cell", namespaced: false, wrote: false });
+      continue;
+    }
+    if (scope.derived.has(name)) {
+      writes.push({ name, reason: "derived-cell", namespaced: false, wrote: false });
+      continue;
+    }
+    const key = cellKeyIn(scope, name);
+    try {
+      obs.set(key, value);
+      writes.push({ name, reason: "written", namespaced: key !== name, wrote: true });
+    } catch (e) {
+      // The NAME, never the key — the key carries the per-run chunk token.
+      errors.push(`[seed-set ${name}] ${String(e && e.message ? e.message : e)}`);
+      writes.push({ name, reason: "set-threw", namespaced: key !== name, wrote: false });
+    }
+  }
+
+  const after = readBody();
+  const domChanged = after !== before;
+  return {
+    chunks: scopes.length,
+    writes,
+    domChanged,
+    observable: writes.some((w) => w.wrote) && domChanged,
+    errors,
+  };
+}
+
+
+/**
  * Mount the compiled artifacts in the (caller-registered) happy-dom global and
  * observe it. Captures: a mount throw (D1/D7), console.error during mount+settle
  * (D2), and exposes the reactive set/get side-channel so the caller can seed a
@@ -470,14 +675,29 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
 
   const obs = mountAndObserve(artifacts);
 
-  // POPULATED seed: set each fixture cell, then re-read the DOM.
-  if (seed != null && obs.set) {
-    try {
-      for (const [name, value] of Object.entries(seed)) {
-        obs.set(name, value);
+  // POPULATED seed: resolve each fixture cell against the chunk scopes the app really emits
+  // and write only the ones that name a real, settable cell (⛑ S420 — see
+  // parseChunkCellScopes), then re-read the DOM.
+  let seedReport = null;
+  if (seed != null) {
+    if (obs.set) {
+      try {
+        seedReport = applySeed(seed, obs, parseChunkCellScopes(artifacts.clientJs), document);
+      } catch (e) {
+        // Includes the LOUD unrecognised-prologue throw. Recorded, never swallowed into a
+        // silent bare-key fallback.
+        seedReport = {
+          chunks: 0, writes: [], domChanged: false, observable: false,
+          errors: [`[seed-bridge] ${String(e && e.message ? e.message : e)}`],
+        };
+        obs.consoleErrors.push(`[seed-bridge] ${String(e && e.message ? e.message : e)}`);
       }
-    } catch (e) {
-      obs.consoleErrors.push(`[seed-set] ${String(e && e.message ? e.message : e)}`);
+    } else {
+      // Loud, not silent: no reactive side-channel at all means the seed CANNOT be live.
+      seedReport = {
+        chunks: 0, writes: [], domChanged: false, observable: false,
+        errors: ["no _scrml_reactive_set side-channel exposed by this emit"],
+      };
     }
   }
 
@@ -490,7 +710,11 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
     serverDependent: artifacts.serverDependent,
   });
 
-  return { cellKey, state: det.state, smells: det.smells, detail: det.detail, seeded: seed != null };
+  // ⛑ S420 — the seed report rides on `detail` so a populated cell can never again claim a
+  // seed it did not actually deliver. generate-baseline.js keeps `detail` only for RED
+  // cells, so this does not perturb the recorded baseline of the (green) seeded cells.
+  const detail = seedReport ? { ...det.detail, seed: seedReport } : det.detail;
+  return { cellKey, state: det.state, smells: det.smells, detail, seeded: seed != null };
 }
 
 function cleanup(artifacts) {

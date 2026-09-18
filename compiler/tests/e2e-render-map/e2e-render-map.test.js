@@ -57,7 +57,13 @@ import {
   liveCellKeys,
   findOrphanBaselineCells,
 } from "./generate-baseline.js";
-import { compileApp, observeApp, resolveMultiFileCompileInputs, TMP_PREFIX } from "./render-harness.js";
+import {
+  compileApp,
+  observeApp,
+  parseChunkCellScopes,
+  resolveMultiFileCompileInputs,
+  TMP_PREFIX,
+} from "./render-harness.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { tmpdir } from "node:os";
 
@@ -179,6 +185,204 @@ describe("e2e-render-map — baseline well-formedness", () => {
       seedKeysMatchingNoCorpusApp: [],
     });
   });
+
+  // ⛑ S420 — A POPULATED SEED MUST BE OBSERVABLE, NOT MERELY BOOKKEPT
+  // (g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject).
+  //
+  // Every check above this one asserts BOOKKEEPING: that a seed key exists, that both cells
+  // are recorded, that the two sides name the same apps. All four passed while the seed was
+  // completely INERT — the harness wrote the BARE `_scrml_reactive_set("contacts", …)` while
+  // the app reads `_scrml_cs_key("contacts")` = `01hrlbd8$contacts`, so nothing subscribed,
+  // no effect fired, and every `#populated` cell was byte-identical to its unseeded twin
+  // (same state, same smells, same detail). D6 (S-EMPTY-WITH-DATA) exists to catch the board
+  // class in exactly that cell and had never once had a live subject on the corpus.
+  //
+  // ⚑ A READ-BACK PROVES NOTHING, SO THIS TEST NEVER ASSERTS ONE. `_scrml_state` is a plain
+  // `{}` and the accessors are a bare property write/read (runtime-template.js:548/819/853),
+  // so EVERY invented key reads back — including the un-namespaced key of the original bug,
+  // and including a key for a cell the app does not have. The load-bearing signals are
+  // therefore (a) did the bridge RESOLVE the name to a real cell of a real chunk, and (b) did
+  // the render MOVE. `observable` is exactly their conjunction.
+  //
+  // The expectation is a per-app TABLE, not a floor, so it reds in BOTH directions: a live
+  // seed going inert (the regression this closes) and an inert seed coming alive (which means
+  // a fixture was fixed and the note below is stale). The `wrote:false` rows are NOT the
+  // harness bug — they are separate SEED-FIXTURE bugs, named here so they cannot hide behind
+  // a green cell. Do not "fix" any of them by relaxing this table.
+  const SEED_OBSERVABILITY = {
+    "examples/03-contact-book.scrml": {
+      reason: "written",
+      domChanged: true,
+      note: "seed resolves to the real cell <contacts>; the Tier-1 <each> renders both rows",
+    },
+    "examples/06-kanban-board.scrml": {
+      reason: "derived-cell",
+      domChanged: false,
+      note:
+        "FIXTURE BUG: the seed names `todo`, which the emit declares via " +
+        "`_scrml_cs_derived_declare(\"todo\", () => …cards.filter(…))`. A derived cell is read " +
+        "through `_scrml_derived_fns`, never out of `_scrml_state`, so the write would be " +
+        "discarded — and would leave junk in a slot the runtime itself never writes, on a " +
+        "path that still fires `_scrml_propagate_dirty`. The bridge refuses it. Seeding the " +
+        "SOURCE cell `cards` is what would drive this app.",
+    },
+    "examples/16-remote-data.scrml": {
+      reason: "no-such-cell",
+      domChanged: false,
+      note:
+        "FIXTURE BUG: THIS APP HAS NO `contacts` CELL. It declares exactly one cell, " +
+        "`<phase>: ContactsPhase = .Idle`; the list is `<each in=rows>` where `rows` is the " +
+        "MATCH BINDING of `@phase = .Loaded(rows)`, not a cell. The old bridge wrote " +
+        "`<token>$contacts` and it 'read back' — because a plain-object store reads back " +
+        "anything — which is how this was previously mis-reported as a live seed. There is " +
+        "no plain cell-set that drives this app: `.Loaded(rows)` is a PAYLOAD VARIANT, so " +
+        "even seeding `phase` needs a constructed variant, not a value.",
+    },
+    "examples/25-triage-board.scrml": {
+      reason: "written",
+      domChanged: true,
+      note:
+        "seed resolves to the real cell <tasks> and the DOM moves — but it SHRINKS, because " +
+        "the seed's `column` values are lowercase ('todo'/'doing') while the app filters " +
+        "against `const columns = [\"Inbox\", \"Doing\", \"Done\"]`, so all three columns " +
+        "render empty. That is seed-fixtures.js's own SEED-SHAPE INVARIANT being violated by " +
+        "the fixture, not a codegen bug.",
+    },
+  };
+
+  test("a populated seed resolves to a real cell of the app and is observable in the DOM", async () => {
+    const seeded = SLICE.filter((app) => seedFor(app.relpath));
+    // Non-vacuity: an empty list would make every assertion below trivially true.
+    expect(seeded.length).toBeGreaterThan(0);
+
+    GlobalRegistrator.register();
+    const actual = {};
+    try {
+      for (const app of seeded) {
+        const cell = observeApp(app, seedFor(app.relpath), "populated");
+        const rep = cell.detail && cell.detail.seed;
+        expect({ app: app.relpath, hasSeedReport: Boolean(rep) }).toEqual({
+          app: app.relpath,
+          hasSeedReport: true,
+        });
+        // Every fixture in this map is single-cell; a multi-cell fixture would need this
+        // flattening revisited rather than silently reporting only its first write.
+        expect({ app: app.relpath, writeCount: rep.writes.length }).toEqual({
+          app: app.relpath,
+          writeCount: Object.keys(seedFor(app.relpath)).length,
+        });
+        const w = rep.writes[0];
+        actual[app.relpath] = {
+          // The bridge found this app's chunk scope at all. Breaking the prologue parse
+          // makes this 0 (and, for a bundle that does define `_scrml_cs_*`, throws).
+          foundChunkScope: rep.chunks > 0,
+          // How the seed name resolved against the chunk's REAL accessor call sites.
+          reason: w.reason,
+          // A write that happened went through the chunk-namespaced key, not the bare name.
+          namespaced: w.namespaced,
+          wrote: w.wrote,
+          // ... and the render actually moved. THIS is the bit the old harness could not buy.
+          domChanged: rep.domChanged,
+          observable: rep.observable,
+          seedErrors: rep.errors,
+        };
+      }
+    } finally {
+      await GlobalRegistrator.unregister();
+    }
+
+    const expected = {};
+    for (const app of seeded) {
+      const row = SEED_OBSERVABILITY[app.relpath];
+      // A newly-registered seed with no row here is a FAILURE, not a skip — that is how an
+      // unobserved seed shipped in the first place.
+      expect({ app: app.relpath, hasObservabilityRow: Boolean(row) }).toEqual({
+        app: app.relpath,
+        hasObservabilityRow: true,
+      });
+      const wrote = row.reason === "written";
+      expected[app.relpath] = {
+        foundChunkScope: true,
+        reason: row.reason,
+        // Only a write that happened can be namespaced; a refused one reports false.
+        namespaced: wrote,
+        wrote,
+        domChanged: row.domChanged,
+        // `observable` is the conjunction the harness computes independently — pinning it
+        // next to BOTH of its own inputs catches the predicate itself drifting.
+        observable: wrote && row.domChanged,
+        seedErrors: [],
+      };
+    }
+    expect(actual).toEqual(expected);
+
+    // Hard non-vacuity on the whole point: at LEAST one corpus seed must actually be live.
+    // Before the S420 bridge fix this count was 0 of 4 — this line alone reds on the bug.
+    const liveCount = Object.values(actual).filter((r) => r.observable).length;
+    expect(liveCount).toBeGreaterThan(0);
+  }, 60000);
+
+  // ⛑ S420 — NOTHING PER-RUN MAY REACH `detail`, BECAUSE `detail` IS COMMITTED.
+  // `generate-baseline.js` runCorpus persists `detail` for every cell that is NOT green
+  // (`map[key].detail = cell.detail ?? {}`) and then writeFileSync's the whole object to the
+  // tracked baseline JSON. The chunk token is derived from the compile's staging path — a
+  // fresh `mkdtemp` dir — so it differs on every run and every machine. An earlier revision
+  // of the seed report carried `namespaces: ["00tyi1b4$"]` and `writes[].key`, which would
+  // have put a per-run random value into a committed artifact the moment a seeded cell went
+  // red — and reddening a seeded cell is D6's entire purpose. The report is booleans, names
+  // and reason codes only; this pins that it stays that way.
+  test("the seed report carries nothing per-run, so a RED seeded cell cannot churn the baseline", async () => {
+    const app = SLICE.find((a) => seedFor(a.relpath) && a.relpath.includes("03-contact-book"));
+    expect(Boolean(app)).toBe(true);
+
+    GlobalRegistrator.register();
+    let a;
+    let b;
+    let tokens;
+    try {
+      // THE PREMISE OF THIS TEST, ASSERTED RATHER THAN ASSUMED. Everything below rests on
+      // "two runs of the same app mint different chunk tokens" — if the token were stable,
+      // the equality would hold for a report that leaked it and prove nothing. Read the token
+      // from the one artifact that legitimately still carries it: the
+      // `// --- chunk cell scope (<token>) ---` header of the emitted client body. Each
+      // compileApp stages into its own fresh `mkdtemp` dir, exactly as the observeApp calls
+      // below do, so this measures the same mechanism that produces their reports.
+      tokens = [0, 1].map(() => {
+        const art = compileApp(app);
+        try {
+          return parseChunkCellScopes(art.clientJs).map((s) => s.token);
+        } finally {
+          rmSync(art.tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      // Two independent observations of the SAME app: separate compiles, separate staging dirs.
+      a = observeApp(app, seedFor(app.relpath), "populated");
+      b = observeApp(app, seedFor(app.relpath), "populated");
+    } finally {
+      await GlobalRegistrator.unregister();
+    }
+
+    // Each compile produced exactly one chunk scope, and the two tokens really DO differ.
+    expect(tokens.map((t) => t.length)).toEqual([1, 1]);
+    expect(tokens[0][0]).not.toEqual(tokens[1][0]);
+
+    // ... so THIS equality is a real property of the report, not an accident of a stable token.
+    // Serialized exactly as generate-baseline.js would persist it for a red cell.
+    expect(JSON.stringify(a.detail.seed)).toEqual(JSON.stringify(b.detail.seed));
+
+    // And the stronger guarantee the equality is a consequence of: no namespace token may
+    // appear in the report at all. This is the assertion mutation D reds.
+    const tokensIn = (v) => {
+      const seen = new Set();
+      const re = /[0-9a-z]{6,}\$/g;
+      let m;
+      while ((m = re.exec(JSON.stringify(v))) !== null) seen.add(m[0]);
+      return [...seen];
+    };
+    expect(tokensIn(a.detail.seed)).toEqual([]);
+  }, 60000);
+
 
   // ⛑ S419 residuals — ORPHAN BASELINE CELLS ARE NAMED
   // (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged).
