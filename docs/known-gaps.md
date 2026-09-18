@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 258 |
+| MED | 260 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15907,3 +15907,71 @@ in their outgoing ledger as advice.
 
 — NEW S422-bryan (flogence S45 re-report; PA-diagnosed by execution on two baselines, 16 cases)
 <!-- @gap id=g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic sev=MED status=open locus=compiler/src/block-splitter.js:3938-3968(the legacy bare-slash-closer heuristic; comment spans are not masked before this scan — TRACED by reading the fire site, not searched) prov=spec:§27.2-a-developer-who-uses-only-slash-slash-will-never-encounter-a-comment-syntax-error -->
+
+### G-BROWSER-TIER-SORT-IS-INERT-BUN-TEST-IGNORES-ARGV-ORDER — #983's `.sort()` does not order anything; `bun test` applies its own file order regardless of argv — `NEW S422; MED`
+
+#983 landed on 2026-09-18 to "run the tier in SORTED file order, not filesystem order", on the stated
+mechanism that sorting "pins tier order to a repo property in every environment". **`bun test` does not
+execute files in the order given on argv**, so the sort is inert and the stated mechanism does not hold.
+
+**PA-REPRODUCED BY EXECUTION on `787d4cb4` / bun 1.3.14** (not carried on the reviewer's word):
+
+```sh
+bun test --reporter=junit --reporter-outfile=/tmp/o1.xml \
+  compiler/tests/browser/browser-{bind-value,class-binding,components,conditionals}.test.js >/dev/null 2>&1
+bun test --reporter=junit --reporter-outfile=/tmp/o2.xml \
+  compiler/tests/browser/browser-{conditionals,components,class-binding,bind-value}.test.js >/dev/null 2>&1
+grep -oE 'testsuite name="compiler[^"]+"' /tmp/o1.xml /tmp/o2.xml
+```
+
+Both orderings print `conditionals, bind-value, components, class-binding` — **neither sorted nor
+reversed nor argv-order**. bun applies an internal order independent of argv.
+
+**What DOES hold, measured:** the two HARNESS ERROR guards #983 added are real. The narrowing's §8
+population was re-measured rather than trusted — 105 entries, 104 `*.test.js`, 1 `FAILURE-BASELINE.json`,
+0 subdirs, 0 symlinks. `browser-baseline.ts --check` PASS, 48 asserted.
+
+⚑ **OPEN, and it is what the PR's goal now rests on:** whether bun's internal order is stable *across bun
+versions and CI runner images*. Proven here only that it ignores argv and is stable across runs, directory
+names and creation order on **one** bun version on **one** box. That is not the property #983 needed.
+
+— NEW S422-bryan (surfaced by the review-floor drain of #983; PA-reproduced independently)
+<!-- @gap id=g-browser-tier-sort-is-inert-bun-test-ignores-argv-order sev=MED status=open locus=scripts/browser-baseline.ts(the .sort() call — inert; the two HARNESS ERROR guards in the same landing are sound) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-argv-forward-and-argv-reversed-yield-byte-identical-junit-testsuite-order -->
+
+### G-HEADING-DRIFT-RULE-REJECTS-LEGITIMATE-NOTE-SEGMENTS-AND-FILES-ITS-OWN-MISS-AS-CORPUS — #979's round-2 structural rule drops a real status tail followed by a note, then reports the drop as "no status tail" — `NEW S422; MED`
+
+#979 (S420) fixed a truncation in the heading/marker drift probe. **Its round-2 rule ships a third
+truncation.** The rule requires the status to be the last `;`-segment preceded by a severity segment, which
+cannot distinguish trailing **prose** from a legitimate trailing **note** segment — so it rejects both.
+
+**PA-REPRODUCED BY EXECUTION on `787d4cb4`:**
+
+```sh
+bun -e 'const {headingMarkerDrift}=await import("./scripts/state.ts");
+const M="<!"+"-- @gap id=g-x sev=HIGH status=resolved --"+">\n";
+for (const [n,h] of [["CONTROL","### g-x — s — `NEW S1; HIGH; open`\n"],
+  ["note segment","### g-x — s — `NEW S1; HIGH; open`; S360-peter VERIFIED\n"],
+  ["semicolon in parenthetical","### g-x — s — `NEW S1; HIGH; open (pre-existing; absent)`\n"],
+  ["one-word note","### g-x — s — `NEW S1; HIGH; open`; BRANCH-conditional\n"]]) {
+  const r=headingMarkerDrift(h+M);
+  console.log(`drift=${r.drift.length} inspected=${r.inspected} noTail=${r.noTail} :: ${n}`)}'
+```
+
+Control → `drift=1 inspected=1 noTail=0`. All three live shapes → `drift=0 inspected=0 **noTail=1**`.
+
+⚑ **The dropped rows land in `noTail`, which the scope line renders as "no status tail" — the instrument
+attributing its own miss to the corpus.** That is precisely the pathology round 2 was written to end,
+recreated one level away. Shipped probe output confirmed byte-for-byte here:
+`45 DRIFT · 546 comparable · 452 no status tail · 1016 headings [WARN-only — not gated]`.
+
+**Why it got through:** the round-2 test (`marker-parser-pins.test.js:170`) has three *prose* controls and
+**no** control asserting that a real status tail followed by a legitimate note segment is still inspected —
+so it passes identically whether the rule discriminates or simply rejects every multi-segment tail.
+
+**CARRIED AS THE REVIEWER'S CENSUS, not re-derived here:** that the true reading is **61 DRIFT / 620
+comparable** (75 headings dropped, 74 with a comparable marker, 16 real drift), with missed rows at
+L1088 L1103 L1292 L1309 L1318 L2488 L2744 L3362 L3454 L3960 L4698 L4729 L5611 L5644 L11600 L11819.
+The mechanism and the shipped numbers are PA-verified; the 61/620 figure is not.
+
+— NEW S422-bryan (surfaced by the review-floor drain of #979; mechanism PA-reproduced, scale carried)
+<!-- @gap id=g-heading-drift-rule-rejects-legitimate-note-segments-and-files-its-own-miss-as-corpus sev=MED status=open locus=scripts/state.ts:headingMarkerDrift(the last-;-segment status rule)+compiler/tests/unit/marker-parser-pins.test.js:170(the test has prose controls only and no note-segment control) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-control-inspects-and-three-live-note-shapes-all-return-noTail -->
