@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 108 |
-| MED | 254 |
+| HIGH | 110 |
+| MED | 257 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1308,6 +1308,10 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-compile-floor-goes-green-and-silent-when-a-whole-program-root-vanishes — `scripts/corpus-compile-floor.ts` reports **PASS** after silently ceasing to check an entire program root, because its two anti-truncation defences do not overlap. **Neither half is a defect alone; the interaction is.** (1) `enumeratePrograms` pushes `notes.push("root missing: <root>")` when a `PROGRAM_DIR_ROOTS` entry fails `existsSync` — but `main()` prints `notes` inside `if (!check)`, and **CI invokes the gate as `--check`** (`.github/workflows/ci.yml:160`). So the one signal that a root vanished is suppressed in exactly the mode where it is load-bearing. (2) `MIN_PROGRAMS = 25` against a live population of **37**, so losing a whole root does not breach the truncation floor. **MEASURED on `a042f3fd`:** the population is 32 single-file + 5 multi-file = 37; `examples/` contributes 34 of them and **`benchmarks/` contributes 3** — `fullstack-scrml`, `per-route-roles`, and **`todomvc`**, the project's flagship perf/regression program. Delete, rename or move `benchmarks/` and the count falls 37 → 34, still 9 above `MIN_PROGRAMS`; the note is suppressed by `--check`; **the gate prints PASS having stopped compiling todomvc, and nothing anywhere goes red.** ⚑ **This is the pa-base §8 coverage-removal blind spot occurring inside the gate that quotes it** — the script's own header cites the truncated-probe lesson and lists "the FULL enumerated program set is printed (never a silent subset)" as its first defence, which is the defence `--check` turns off. **Fix direction (cheap, and both halves are one-liners): print `notes` unconditionally — a note is not report chrome, it is the truncation signal — and make the floor per-root (`examples/` and `benchmarks/` each ≥1 program) rather than one global count, so a root cannot vanish under a global margin.** The stale-baseline check is sound and is not implicated; it fails correctly in both directions. Header nit while in there: the comment says "the current true count (36)" and it is 37 — `NEW S383-bryan (S239 review-floor pass on #742, PA-reproduced by execution: ran the gate, read the CI invocation, enumerated the per-root composition); **MED**; open` **RESOLVED S400-peter** — both stated one-liners landed: notes print UNCONDITIONALLY (a `root missing:` note is the truncation signal, not report chrome that `--check` suppresses), and a NEW PER-ROOT floor (`assertPerRootFloor`) throws `TruncationError`→exit-2 when any `PROGRAM_DIR_ROOT` contributes 0 programs, so `benchmarks/` (todomvc) vanishing hard-fails instead of the count sliding 37→34 under the 25 global floor. Header nit 36→37 fixed; `main()` guarded by `import.meta.main` so the pure fn is unit-testable. Verified: real corpus exit 0, a vanished root exit 2. Committed guard `compiler/tests/unit/corpus-compile-floor-per-root.test.js` (4/4).
 <!-- @gap id=g-compile-floor-goes-green-and-silent-when-a-whole-program-root-vanishes sev=MED status=resolved locus=scripts/corpus-compile-floor.ts(both one-liners landed: notes now print UNCONDITIONALLY not just under !check; NEW per-root floor assertPerRootFloor throws TruncationError→exit-2 when any PROGRAM_DIR_ROOT contributes 0 programs; header count nit 36→37 fixed; main() guarded by import.meta.main so the pure fn is unit-testable) prov=empirical:S400-peter-verified-real-corpus-exit-0-vanished-root-exit-2-committed-guard-4of4 -->
+<!-- ⚑ S379-bryan filing batch 2 — surfaced by the round-9 adversarial pass on the #724 branch; PRE-EXISTING, PA-reproduced end-to-end, filed rather than fixed in that arc -->
+
+### g-session-store-keyed-per-compilation-unit-not-per-program — `_scrml_session_db_path` is derived from **the emitting unit's own `import.meta.dir`**, so a program whose pages compile to nested output directories opens **two or more separate SQLite session stores**, and a login on one page is invisible to another. PA-REPRODUCED END-TO-END on `48f0aaf8`: a two-page program (`index.scrml` calling `session.set`, `pages/admin/panel.scrml` reading `session.isAuth`) compiles clean — **0 errors, 0 warnings** — and emits `dist/index.server.js` → `<app>/dist/.scrml-sessions.db` alongside `dist/admin/panel.server.js` → `<app>/dist/admin/.scrml-sessions.db`. The write lands in the first file; the nested page's auth middleware reads the second; **`session.isAuth` is false forever and nothing anywhere says so.** ⚑ **This violates a normative SHALL the emitter's own comment block quotes verbatim** — §20.5 / #282, *"the READ middleware and the WRITE path SHALL consult the SAME durable store"* — so it is a Rule 4 item, not a design gap: the code asserts the property it breaks. The #282 fix (a durable path-keyed store, replacing an in-memory one) is correct and works; **per-PATH is necessary and NOT sufficient once units emit at different depths**, and that second half was never stated. The existing conformance case misses it because `pages/reader.scrml` has its `pages/` prefix stripped and lands in the SAME directory as the entry — a fixture that cannot exhibit the defect it would be the natural pin for. **Fix direction: key the store on the PROGRAM's output root, not the emitting unit's directory** — a codegen change with its own migration (any adopter with an existing nested-page session store has live sessions in the wrong file), which is why it is filed rather than folded into the arc that surfaced it. Blast radius: every multi-page app with a page in a subdirectory AND `<program auth="session">`. Silent, adopter-facing, and auth-shaped — `NEW S379-bryan (round-9 S239 pass on the #724 dev-server branch, which touched the adjacent lines; PA-reproduced by compiling a two-page fixture and resolving both emitted paths); **HIGH**; open`
+<!-- @gap id=g-session-store-keyed-per-compilation-unit-not-per-program sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(_scrml_session_db_path emit) prov=spec:§20.5-the-READ-middleware-and-the-WRITE-path-SHALL-consult-the-SAME-durable-store -->
 
 <!-- ⚑ S379-bryan filing batch 1 — adopter issue #724, both halves PA-reproduced by execution on main `48f0aaf8`; one root cause -->
 
@@ -4024,6 +4028,29 @@ accumulating unnoticed is the empirical proof that it does.
 
 ### g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy — the stale-worktree sweep has been owed since S268 because its natural probe answers the wrong question: we land by copying file CONTENT, so an agent branch is never an ancestor of main and `--merged` reports "nothing prunable" forever — `NEW S326-bryan; MED; open`
 <!-- @gap id=g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy sev=MED status=open locus=searched:scripts/,compiler/scripts/ — no script implements wrap 6b; the step is manual prose in ../scrml-support/pa-scrml-overlay.md {{wrap_step_fills}} 6b prov=rationale:the-sweep-owed-since-S268-is-a-probe-mismatch-not-a-backlog -->
+> **⚑ S365-bryan — A WORKING PROBE, derived by running the broken ones and watching them disagree.** This gap has been owed since S268 and diagnosed since S326; the blocker was always that nobody had a trustworthy test. Here is one, measured.
+>
+> **Both obvious probes are structurally wrong under squash-merge**, and I reproduced both rather than assuming:
+> - `git merge-base --is-ancestor <branch> origin/main` → reported **every** worktree branch unmerged, **including two I squash-merged the same hour**. A squash merge creates a new commit, so the branch tip is never an ancestor. This is the S326 diagnosis, confirmed.
+> - `git cherry origin/main <branch>` → same failure by a different route: it reported **25 unmatched commits** on a fully-landed branch, because squash collapses N commits into 1 and no individual patch-id survives.
+>
+> **The probe that works — a per-file content compare, restricted to the files the branch itself changed:**
+> ```sh
+> mb=$(git merge-base origin/main "$b")
+> git diff --name-only "$mb" "$b" | while read -r f; do
+>   git diff --quiet origin/main "$b" -- "$f" || echo "$f"      # differs from main
+> done
+> ```
+> Empty output ⇒ every change the branch made is present in main ⇒ **sweepable**.
+>
+> **It has one residual false positive, and the correction is one line.** If MAIN edited the same file *after* the merge, the file differs for the wrong reason. Discriminate:
+> ```sh
+> git diff --quiet "$mb" origin/main -- "$f" >   && echo "branch work genuinely absent" >   || echo "main changed it after the merge — FALSE POSITIVE"
+> ```
+>
+> **Measured today:** `handle-onion-top-level-dispatch` — 51 files touched, **all content in main → genuinely landed.** `fix/s365-instrument-partial-blindness` — flagged 1 of 11, and that 1 is `docs/FACTS.md`, which **main changed after the merge**; also landed. So the naive form over-reports by exactly the generated-file churn this repo produces constantly.
+>
+> ⚑ **NOTHING WAS SWEPT.** The method is recorded, not executed — a wrong sweep is irreversible work loss, and the probe deserves a bite proof (plant a branch with genuinely unlanded work, confirm it is NOT flagged sweepable) before it is trusted with `worktree remove`. That bite proof is the remaining work on this entry, and it is small.
 
 ⛑ **S402-bryan — THE BITE PROOF S365 SAID WAS THE REMAINING WORK IS DONE, TWO-SIDED, AND THE SWEEP NOW HAS ITS FIRST TRUSTWORTHY NUMBER.**
 
@@ -15744,3 +15771,73 @@ not an amended one) or to read the entry body's own resolution banner. Neither i
 
 ⛑ **Filed rather than quietly tolerated** because a probe with one known false positive that nobody
 recorded is how the next reader concludes the whole 45 are noise.
+### g-nested-program-is-accepted-and-silently-flattened-into-the-parent — a nested `<program>` declares no execution context at all: no worker, no isolation, no diagnostic
+
+§43 titles nested `<program>` **"Universal Execution Context Boundary"** and specifies it as *"an independent execution context — a separate compilation unit with its own scope, lifecycle, and communication channel."* **It is none of those today, and nothing says so.**
+
+**PA-MEASURED by artifact at `22bc1c08`.** Source: a `<program title>` containing `<rate> = 0.08` and a nested `<program name="compute">` whose exported `withTax` reads `@rate`:
+
+- **Compiles clean — exit 0, ZERO diagnostics.** No nominal/unimplemented banner.
+- **No separate artifact.** Emitted set is `*.client.js` / `*.css` / `*.html` / runtime — there is no worker file and no `new Worker(` anywhere in the output.
+- **The nested body is inlined into the PARENT's client bundle**: `withTax_1(n) { … }` sits in `n3-shared-nothing.client.js`.
+- **It closes over the parent's cell**: the inlined body reads `_scrml_cs_reactive_get("rate")` — the parent's `@rate`, from inside what §43.3 says is a shared-nothing scope.
+
+⛑ **`E-PROG-003` is a normative SHALL that cannot fire, because there is no boundary for it to guard.** §43.3: *"A reference to a parent-scope name from inside a nested `<program>` SHALL be compile error E-PROG-003."* The measurement above IS that reference, and it compiles silently. Filing the missing diagnostic alone would be treating a symptom — the diagnostic is missing because the isolation it defends does not exist.
+
+⛑ **Same for `E-PROG-004`.** §43.5.1 says an unawaited cross-program call is an error; the call does not lower in either form (see [[g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml]]), so no call site reaches the check.
+
+**Why HIGH rather than "a Nominal feature not built yet":** the compiler does not REFUSE the construct, it ACCEPTS it and produces something structurally different from what was written, with no diagnostic. An adopter who nests a `<program>` to move work off the main thread gets code on the main thread, sharing the parent's state, and a green build. That is the S404 durable exactly — *you write ordinary code, the compiler accepts it, and it silently does the wrong thing.* A Nominal feature that fires `E-*-NOMINAL` (the §23.3/§23.4 fail-closed pattern) would be fine; silent flattening is not.
+
+**Fork (not decided here):** (a) fail-closed — recognize the nested form and fire a `NOMINAL` diagnostic until the contexts are built, mirroring §23.3's recognized-and-fail-closed banner; (b) build §43.2's four context types. (a) is the containment move and is cheap; (b) is the feature. **They are not alternatives — (a) should land regardless of when (b) does.**
+— `NEW S407-bryan (found while writing the "I am Jack's <program>" article — the piece's standard is that every code block compiles, so the nesting block was compiled and its ARTIFACTS inspected; reading §43 alone would have published the boundary as real)`; **HIGH**; open
+<!-- @gap id=g-nested-program-is-accepted-and-silently-flattened-into-the-parent sev=HIGH status=open locus=compiler/src/(nested-<program> handling — the construct parses and its body is emitted into the parent client bundle; no execution-context split, no Worker emission, and neither E-PROG-003 nor E-PROG-004 has a reachable fire site) prov=empirical:PA-compiled-a-nested-program-reading-the-parent-cell-at-22bc1c08-exit-0-zero-diagnostics-no-worker-artifact-withTax-inlined-into-the-parent-client-bundle-reading-_scrml_cs_reactive_get-rate -->
+
+### g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml — §43.5.1's worked example uses `await`, which §19.9.8 says the language does not have, making `E-PROG-004` unreachable
+
+§43.5.1 specifies cross-program RPC with this worked example:
+
+```scrml
+${ const result = await <#compute>.add(1, 2) }
+```
+
+**PA-verified at `22bc1c08` — that source does not compile.** It fires `E-AWAIT-NOT-IN-SCRML`: *"an `await` expression — scrml has no `await` keyword (§19.9.8)."* So SPEC's own example for the feature is invalid scrml, and **§43.5.1 contradicts §19.9.8.**
+
+The contradiction closes a loop: §43.5.1 also states *"Unawaited cross-program calls SHALL be compile error `E-PROG-004`."* If `await` cannot be written, every cross-program call is unawaited, so the rule as stated condemns the only expressible form. Removing the `await` does not help either — `<#compute>.add(1, 2)` bare fires `E-CODEGEN-INVALID-LOGIC`. **There is no working call syntax in either direction.**
+
+**Two things are owed and they are separable:** the SPEC example must be corrected to whatever the resolved-Promise surface actually is (§19.9.3 says the compiler resolves a host-boundary Promise with no source-level `await` — §43.5.1 predates that and was never revisited), and `E-PROG-004`'s wording needs re-deriving from the corrected form. Root cause of the unusability is [[g-nested-program-is-accepted-and-silently-flattened-into-the-parent]].
+— `NEW S407-bryan (found by compiling SPEC's own §43.5.1 worked example verbatim while drafting the <program> article)`; **MED**; open
+<!-- @gap id=g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml sev=MED status=open locus=compiler/SPEC.md(§43.5.1 worked example + the E-PROG-004 sentence, vs §19.9.8 no-await-keyword and §19.9.3 compiler-resolves-at-the-boundary) prov=empirical:PA-compiled-the-verbatim-43.5.1-example-at-22bc1c08-E-AWAIT-NOT-IN-SCRML-and-the-await-free-form-E-CODEGEN-INVALID-LOGIC -->
+
+### g-spec-13-5-names-e-match-not-exhaustive-for-a-missing-engine-state-child — a §13.5 narrative cross-ref contradicts §51.0.B's normative statement, and the implementation sides with §51.0.B
+
+`SPEC.md:7787` (§13.5, the engine-recipe cross-ref) states the gain as:
+
+> *"compile-time exhaustiveness over states (every state has UI; missing a `<Failed>` arm is `E-MATCH-NOT-EXHAUSTIVE`)"*
+
+**PA-verified by execution at `2c34a94c` — the code is wrong.** An `<engine for=Order>` missing a state-child fires **`E-ENGINE-STATE-CHILD-MISSING`** (naming §51.0.B + §51.0.F), which is what §51.0.B's own normative statement specifies. `E-MATCH-NOT-EXHAUSTIVE` is real but belongs to block-form `<match>` (§18.0.1) — verified separately on a `<match for=Order>` missing the same variant.
+
+So SPEC contradicts SPEC: a **narrative cross-ref** in §13.5 against a **normative statement** in §51.0.B, with the implementation siding with the normative one. Fix is a one-line correction at §13.5; §51.0.B and the compiler need no change.
+
+⛑ **Worth recording HOW this surfaced, because it is the general case.** A draft of the "I am Jack's `<engine>`" article was going to state the §13.5 code as fact — *SPEC said so.* It was caught only because the article series' standard is that every code block is compiled rather than read. **A derived-doc claim inside SPEC itself is still a derived claim** (Rule 4), and §13.5's cross-refs are prose about §51, not §51.
+— `NEW S407-bryan (caught by compiling an article code block instead of trusting the spec sentence about it)`; **MED**; open
+<!-- @gap id=g-spec-13-5-names-e-match-not-exhaustive-for-a-missing-engine-state-child sev=MED status=open locus=compiler/SPEC.md:7787(§13.5 engine-recipe cross-ref) vs compiler/SPEC.md(§51.0.B normative state-child statement) prov=empirical:PA-compiled-both-shapes-at-2c34a94c-engine-missing-state-child-fires-E-ENGINE-STATE-CHILD-MISSING-and-match-missing-arm-fires-E-MATCH-NOT-EXHAUSTIVE -->
+### g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch — three self-host parity cases emit one token where the JS tokenizer emits two, and they are the baseline the new tier gate pins
+
+**PA-MEASURED at `fd69d1fc`**, running `bun test compiler/tests/self-host` both with and without `compiler/self-host/dist/` present — **identical failure name set either way**:
+
+```
+tokenizeLogic parity > tilde
+tokenizeLogic parity > punct chars
+tokenizeCSS parity > pseudo selector
+```
+
+All three are **token-count mismatches**, asserted at `compiler/tests/self-host/tab.test.js:72` in `assertSameTokens` (`expect(b.length).toBe(a.length)`) — measured `Expected: 2, Received: 1` on the `tilde` case. The self-hosted tokenizer emits ONE token where `compiler/src/tokenizer.js` emits two.
+
+⚑ **THIS IS THE RESIDUE OF A RESOLVED GAP, NOT A NEW SYMPTOM OF IT.** [[g-selfhost-tokenizelogic-tdz-pos-before-initialization]] is `status=resolved` (S412), and this run independently confirms that: **zero `ReferenceError` in the entire tier**, where previously *"every `tokenizeLogic parity` case fails identically"* with `Cannot access 'pos' before initialization`. S412's fix moved those two cases from a loud throw to a quiet parity mismatch. The TDZ is closed; what it was masking is this.
+
+⚑ **Why it is filed rather than left to the baseline.** S409 gates this tier on a failure NAME SET (`compiler/tests/self-host/FAILURE-BASELINE.json`), which records these three as known-failing. **A baseline is a control, not a defect ledger** — it asserts "no NEW failure" and says nothing about what the old ones are. Without this entry the three would be permanently green-by-baseline with no referent, which is the shape a name-set gate is most likely to rot into.
+
+**Not attempted here, deliberately.** The S409 arc's scope was the coverage disposition; fixing parity is its own arc with its own measurement. The useful next step is a token-by-token diff of the three cases against `compiler/src/tokenizer.js`, since `tokenizeAttributes` parity passes on the same closure shape.
+
+— NEW S409-bryan (measured while taking the self-host coverage disposition routed by S411-peter; the with/without-dist comparison is what establishes these are repo state, not environment state)
+<!-- @gap id=g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic+tokenizeCSS)+compiler/src/tokenizer.js(the-parity-oracle)+compiler/tests/self-host/tab.test.js:72(assertSameTokens-the-assertion-site) prov=empirical:S409-measured-by-running-the-tier-with-and-without-the-gitignored-dist-identical-name-set -->
