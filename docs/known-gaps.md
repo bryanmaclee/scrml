@@ -1247,6 +1247,7 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js — a multi-statement `_={ … }=` used as a **bare STATEMENT** (rather than as an initializer) lowers to `return (stmt stmt)` and fails codegen with `E-CODEGEN-INVALID-LOGIC`. ⚑ **Filed because the diagnostic itself asks for it** — verbatim: *"This is a compiler defect (codegen produced malformed output). Please report it."* — which makes leaving it unfiled a straightforward instruction-following failure, not a triage judgement. **PA-REPRODUCED by execution on `ff4b37e5`** with flogence's 9-line repro: inside a `<program kind="tool" lang="ts">` §64 tool body, a single-expression `_={ in: { args } args.slice(0) }=` in INITIALIZER position lowers fine, while a following multi-statement `_={ in: { xs } console.log(…) for (…) { … } }=` in STATEMENT position does not — `FAILED — 1 error`. The discriminator is the POSITION, not the foreign block: §23.2.4a's inline value-returning form is an EXPRESSION, and the value-returning lowering wraps its body in `return ( … )`, which is well-formed for one expression and malformed for a statement sequence. §64.2 explicitly admits bare-`_{}` for host I/O in a tool body as a third admitted form, so a tool body is exactly where an author reaches for the statement position — and `console.log` + a `for` loop is the canonical thing they reach for it WITH. Adopter: flogence, hit while mirroring an unrelated fix, worked around then minimised. Fix direction (unverified, for whoever takes it): a `_{}` in statement position should lower as a statement BLOCK rather than through the value-returning `return ( … )` path; the two forms already differ syntactically (`_={ … }=` vs `_{ … }`), so the position may be recoverable at lowering time without new syntax — `NEW S383-bryan (adopter report from flogence PA S36, arrived during the wrap; PA-reproduced by execution); **MED**; open`
 <!-- @gap id=g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-expr.ts,compiler/src/codegen/emit-foreign.ts prov=adopter:flogence-S36-9-line-repro-PA-reproduced-on-ff4b37e5-single-expression-foreign-block-in-initializer-position-lowers-fine-while-a-multi-statement-one-in-statement-position-hits-E-CODEGEN-INVALID-LOGIC-whose-own-text-requests-the-report -->
+> ⚑ **S422-bryan PA-VERIFICATION — STILL REPRODUCES, the locus is NARROWED, and the disposition is INVERTED from the reporter's own recommendation.** PA-EXECUTED on `787d4cb4`: a multi-statement bare `_{}` in a `kind="tool"` `function main` body → exit 1, `E-CODEGEN-INVALID-LOGIC`, emit `…return (console.log("a") console.log("b")); })…`. Single-statement bare `_{}` and the assigned multi-statement form both compile clean. **Locus narrowing (the entry records `searched:` — this is the first positive evidence):** the WORKING single-statement case emits `await (async () => { return (EXPR); })();`, so the lowering wraps foreign-block contents in `return ( … )` **unconditionally**; with two statements that parenthesised expression is invalid JS. The defect is the unconditional `return (` wrapper in the bare-statement path, not the multi-statement handling per se — find the site that emits that IIFE. **⚑ DISPOSITION — the reporter recommended "won't fix, the assigned form is the intended shape, just improve the diagnostic"; that is WRONG and the governing sentence says so.** SPEC §64.2: *"The tool body is an admitted bare-`_{}` context. A CLI/server does its host I/O (`console.log`, `Bun.stdin.stream()`, `Bun.serve`) via bare non-value `_{}` blocks. §23.2.4 (amended S238) admits the `kind="tool"` program body — its top-level `function` bodies incl. `main` — as a valid bare-`_{}` locus."* It names `console.log` as its own example, which is exactly what the adopter wrote. **The bare form is normatively admitted, so this is a genuine codegen defect and `E-CODEGEN-INVALID-LOGIC`'s "This is a compiler defect. Please report it." is CORRECT** — they were right to report it, twice. **⚑ And the reason it was reported twice is OURS:** the gap was filed and never answered. Return leg dropped to flogence S422 (base §10 / S310 — a decision recorded only in our tree exists in exactly one place, and that place is not where the reporter looks). Reported 2026-08-29, re-reported 2026-09-18 after a second real site; both sites are error paths, which is the adopter's own load-bearing observation — the unsupported form is the one authors reach for while writing diagnostics, and a diagnostic is the thing nobody re-runs.
 
 ### g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm — `E-STATE-UNDECLARED` reports a **declared, imported channel cell as undeclared**, but ONLY when the read sits inside a `<match>` arm. **flogence's flagship gate went GREEN 68w/0e → RED 3 errors with ZERO source change on their side** (their `src/` is byte-identical to its last-green state, last `src/` commit `12fe035`, 2026-07-17), so this is a scrml-side regression inside a wide window. **PA-REPRODUCED by execution on `ff4b37e5`** with their 21-line two-file repro: an `export <channel name="probe">` declaring `<stamp> = ""`, imported and mounted in `a.scrml`, read as `${@stamp}` inside a `<match for=Phase>` `<Ready>` arm → `error [E-STATE-UNDECLARED] … stage: TS`, exit 1. ⚑ **PA-BISECTED: it reproduces IDENTICALLY on `a042f3fd`, the S383 boot base, so S383's `symbol-table.ts` extraction did NOT cause it** — checked because scope resolution is exactly where this session touched. **PA-VERIFIED their load-bearing localization rather than relaying it:** the same `${@stamp}` read moved OUTSIDE the match arm compiles **CLEAN**. Their variant matrix (6 compiles, one variable each) isolates the failing conjunction to **cross-file (imported channel) cell · `${…}` interpolation position · inside a `<match>` arm** — the mount is irrelevant (B errors without it), a same-file local cell is clean (E), and an `<each>` body is clean (F), so it is not nested scopes generally. Scope resolution inside a match arm appears not to consult the imported channel's cell table while the same resolution outside the arm, and inside an `<each>` body, does. **TWO COMPANION DEFECTS in the same report, both PA-verified:** ⑵ **the diagnostic carries NO source location** — `stage: TS`, no `-->` and no `line/col`, in the 21-line repro AND in their real 3,700-line `app.scrml`, while every other diagnostic in the same run carries both; localising three errors cost them manual line-by-line bisection. ⑶ **`each in=` reads appear never to be checked at all** — `<each in=@undeclaredName>` with no declaration anywhere is clean, which they surfaced as an observation rather than a claim about intent: in their app `<acks>` and `<heartbeat>` are declared on ADJACENT lines of the same channel and read from the same panel, and `${@heartbeat}` errors while `<each in=@acks>` does not. If the check is meant to be sound that is a coverage gap in the same predicate; whether that position is in scope is a scrml-side ruling. **Unexplained and worth correlating, not yet characterised:** their warning count moved **68 → 221** (`compile`) and **→ 594** (`compile:dir`) on byte-identical source. **Third occurrence of this over-fire pattern for this adopter** (cf. their S33 `E-ASYNC` report, ruled an over-fire and fixed). Not laundered — they restructured no source to go green, per the S33 precedent — `NEW S383-bryan (adopter report from flogence PA S36, arrived during the wrap; PA-reproduced, PA-bisected to clear S383, localization independently verified); **HIGH**; open`
 <!-- @gap id=g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm sev=HIGH status=open locus=searched:compiler/src/type-system.ts,compiler/src/symbol-table.ts(lookupStateCell),compiler/src/codegen/emit-match.ts prov=adopter:flogence-S36-flagship-gate-red-on-byte-identical-source-PA-reproduced-on-ff4b37e5-and-PA-bisected-to-a042f3fd-so-not-caused-by-S383-and-variant-C-outside-the-arm-compiles-clean -->
@@ -15841,3 +15842,68 @@ All three are **token-count mismatches**, asserted at `compiler/tests/self-host/
 
 — NEW S409-bryan (measured while taking the self-host coverage disposition routed by S411-peter; the with/without-dist comparison is what establishes these are repo state, not environment state)
 <!-- @gap id=g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic+tokenizeCSS)+compiler/src/tokenizer.js(the-parity-oracle)+compiler/tests/self-host/tab.test.js:72(assertSameTokens-the-assertion-site) prov=empirical:S409-measured-by-running-the-tier-with-and-without-the-gitignored-dist-identical-name-set -->
+
+---
+
+## §S422 — gaps filed S422 (2026-09-18, bryan; adopter re-report from flogence S45, diagnosed by execution on two baselines)
+
+### G-LINE-COMMENT-IN-A-FUNCTION-BODY-TRIPS-THE-BARE-SLASH-CLOSER-HEURISTIC — a `//` comment whose next non-whitespace character is `<` fires `E-SYNTAX-050` and blames the `<program>` closer — `NEW S422; MED`
+
+A `//` line comment inside a **function body** refuses the program when a `/` in that comment is
+immediately followed (whitespace-skipped) by `<`. The commonest instance is the comment marker's
+**own second slash**, so `// <tag>` fires while `// x <tag>` does not.
+
+**Reproduced by execution on `787d4cb4`, 16 cases, and on the 2026-09-07 baseline `5e6842ee`, identically.**
+
+| comment, own line inside a `function` body | result |
+|---|---|
+| `// <tag>` · `// <-- arrow` · `// < alone` · `// refs/pa/event/<N>` | **E-SYNTAX-050** |
+| `// x <tag>` · `// note: see <N> below` | clean |
+| `// path a/<N> here` | **E-SYNTAX-050** (a real path slash, not the marker) |
+| `// </close>` · `// a < b` | clean |
+| any of the above at **program level** (outside a function body) | clean |
+
+⚑ **The trigger is NOT "`<` followed by a non-space"**, which is how both adopter filings state it.
+It is **a `/` whose next non-whitespace character is `<` and is not `</`**. `// note: see <N> below`
+contains `<` + non-space and compiles; `// <tag>` does not. The stated rule mispredicts both.
+
+⚑ **NOT a regression and NOT a widening.** The 2026-09-18 re-report claims a case that passed on
+2026-09-07 now fails. It does not: all 16 cases behave **identically** on `5e6842ee` (2026-09-07) and
+`787d4cb4`. The two adopter measurements differ because they tested different POSITIONS — program
+level (inert) in September, function body (fires) today — not because the compiler changed.
+
+**Mechanism, traced not searched.** `block-splitter.js` scans markup/state text content for a legacy
+bare-`/` closer: it skips whitespace after a `/` and fires when the next non-ws char is `<` and the
+char after that is not `/`. Comment spans are not masked before this scan, so the `//` marker itself
+satisfies the predicate. Program level is inert because `topFrame()` is not `markup`/`state` there, so
+the whole branch is skipped.
+
+**Governing sentence — outcome (1), quoted.** SPEC §27.1: *"`//` is a single-line comment. It is valid
+in all scrml contexts."* And §27.2: *"The `//` form is universal and works in all contexts. **A
+developer who uses only `//` will never encounter a comment syntax error.**"* The second sentence is a
+direct normative promise this behaviour breaks. Direction is therefore **newly-accepting TOWARD the
+contract** — conformance restoration per base §8, not a widening.
+
+**Secondary defect, and per both filings the expensive half:** the diagnostic names the wrong
+construct and points one character early. On the repro it reports col 33 — the `/` in `event/` — when
+the cause is the `<` at col 34, and the message reads *"Use `</>` to close `<program>`"* about a
+well-formed closer. The author is sent to the bottom of the file. flogence spent two compile cycles
+on the path before testing the bracket, and a full bisect on the September instance.
+
+⚑ **SEVENTH member of a family that is being fixed one position at a time** — the FORK-RULE row-4
+shape (root beats position; a per-position fix is a bug generator). Siblings:
+[[g-markup-comment-angle-bracket-parsed-as-tag]] (markup section, fixed) ·
+[[g-blocksplitter-comment-span-not-opaque]] (`<!-- -->`, resolved) ·
+[[g-line-comment-truncates-the-rest-of-a-default-logic-body]] (HIGH, open) ·
+[[g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration]] (HIGH, open) ·
+[[g-state-block-bare-write-scan-has-no-comment-state]] (open) ·
+[[g-markup-body-const-at-scan-has-no-comment-state]] (open). **The root is that `//` spans are not
+masked before ANY of these scanners run; each landing has masked them for one scanner.**
+
+**Adopter cost, stated by them:** reported 2026-09-07, re-reported 2026-09-18 after a second site.
+Workaround is cosmetic (remove the brackets) so nothing is blocked — but the September drop's own
+documented workaround (*"put it on its own line"*) is **falsified** by this measurement and is sitting
+in their outgoing ledger as advice.
+
+— NEW S422-bryan (flogence S45 re-report; PA-diagnosed by execution on two baselines, 16 cases)
+<!-- @gap id=g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic sev=MED status=open locus=compiler/src/block-splitter.js:3938-3968(the legacy bare-slash-closer heuristic; comment spans are not masked before this scan — TRACED by reading the fire site, not searched) prov=spec:§27.2-a-developer-who-uses-only-slash-slash-will-never-encounter-a-comment-syntax-error -->
