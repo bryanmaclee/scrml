@@ -1,0 +1,14 @@
+<page>
+  <db src="./notes.db" tables="notes">
+    ${
+      <notes server> = 0
+
+      function seedNotes() {
+        return ?{`CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)`}.run()
+      }
+    }
+  </db>
+  <h1>Notes</h1>
+  <p>${@notes}</p>
+  <button onclick=${seedNotes()}>Seed</button>
+</page>

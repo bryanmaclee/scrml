@@ -86,6 +86,159 @@ export function getNodes(fileAST: FileAST): Node[] {
   return fileAST.nodes ?? (fileAST.ast ? fileAST.ast.nodes : []);
 }
 
+/**
+ * §52.11 — does this file establish a DATABASE (server) context of its own via a
+ * `<db src=…>` state block, in ITS OWN compilation unit?
+ *
+ * Keyed on AST **Form 2** — `{ kind: "state", stateType: "db" }` with a non-empty
+ * `src=` — which is the SAME shape `collectDbScopes` (`emit-server.ts:767`)
+ * recognises when it builds the file's real SQL connection scopes. The two are
+ * meant to agree: a file for which codegen emits a live database handle is, by
+ * definition, not a client-only context.
+ *
+ * ⛔ THE `src=` CHECK IS LOAD-BEARING, NOT DEFENSIVE. `collectDbScopes` registers a
+ * scope only when `typeof srcVal === "string" && srcVal.length > 0`; a `<db>` with
+ * no `src=` (or an empty one) builds NO handle there. An earlier revision of this
+ * function tested only `kind`/`stateType` and never looked at `src` at all, so a
+ * bare `<db tables="…">` suppressed `E-AUTH-005` while codegen connected nothing.
+ * It was not exploitable — that shape independently raises `E-PA-006` — but the
+ * predicate's soundness rested on an UNRELATED diagnostic instead of on itself,
+ * which is exactly the dependency nobody re-checks. Verified against `E-PA-006`
+ * being absent as well as present.
+ *
+ * ⛔ A NESTED `<program>` IS FENCED OFF, ON THE §4.12.1 GROUND FORM 1 ALSO RESTS ON
+ * — BUT THE TWO HALVES STILL KEY DIFFERENTLY, AND THAT IS NOT YET ONE RULE.
+ * §4.12.1 makes a nested `<program>` (§43 worker / §4.12.2 scoped-db) a SEPARATE
+ * compilation unit, so a database declared inside one is not in scope for a
+ * `<var server>` in the enclosing program. Both halves now honour that GROUND, but
+ * by different tests: Form 1 (`findTopLevelProgramNode`) scans the LITERAL ROOT
+ * ARRAY, whereas this fence propagates an `insideProgram` flag through arbitrary
+ * intervening elements. §4.12 defines nesting as a DIRECT child, so the two agree
+ * on every shape anyone has exhibited and are still not the same predicate. Do not
+ * read the fence as having unified them; unifying them belongs to the
+ * scope-resolution arc named below. (The `insideProgram` propagation matches
+ * `collectDbScopes`' own descent, which is why the direction agrees.)
+ *
+ * Before the fence, this half walked straight through a nested `<program>` and
+ * reported its `<db src=>` as the outer file's context — so Form 1 and Form 2
+ * disagreed about nesting while one docstring claimed a single rule. Reproduced: a
+ * `<db src=>` reachable ONLY inside `<program name="worker">` suppressed
+ * `E-AUTH-005` for a `<var server>` in the OUTER program, at exit 0.
+ *
+ * ⛔ THE FENCE OVER-FIRES ON ONE SHAPE, AND THIS IS THE DISCLOSURE, NOT A CAVEAT.
+ * A `<var server>` declared INSIDE the nested `<program>` that owns the database:
+ *
+ *     <program title="Outer">
+ *       <program name="worker">
+ *         <db src="./worker.db" tables="jobs"></db>
+ *         <count server> = 0            // <-- E-AUTH-005 fires. It should not.
+ *       </program>
+ *     </program>
+ *
+ * ⚑ IT CONTRADICTS THIS FUNCTION'S OWN OPENING INVARIANT — "a file for which codegen
+ * emits a live database handle is, by definition, not a client-only context."
+ * Codegen DOES connect `./worker.db` here; the predicate calls the file
+ * client-only. Stated rather than reconciled, because the invariant is right and
+ * the predicate is the thing not yet able to honour it.
+ *
+ * ⚑ THE CAUSE IS NOT IN THIS FUNCTION — IT IS THE UNIT. Its consumer,
+ * `compilationUnitHasServerContext`, yields ONE boolean per compilation, and the
+ * `E-AUTH-005` fire site applies that boolean to EVERY `<var server>` in the file
+ * regardless of which `<program>` scope the cell sits in. So fencing the worker's
+ * database OUT of the answer also strips server context FROM the cells inside that
+ * worker. No per-scope repair is possible here: this function cannot fix a
+ * whole-file verdict. **The real fix is per-`<program>`-scope resolution**, which
+ * belongs to the same build-root-entry-resolver arc as the LSP divergence and the
+ * two-applications-in-one-invocation gap (both recorded at
+ * `compilationUnitHasServerContext`). All three want the same object.
+ *
+ * ⚑ THE CALL THAT WAS MADE, RECORDED BECAUSE IT WAS A DECISION AND NOT A DISCOVERY:
+ * the `<program db=…>` spelling of this same shape ALREADY over-fired, both before
+ * this arc and after its first cut — MEASURED at `f95321bf`, `fc27fbe8` and HEAD.
+ * So Form-1/Form-2 consistency was reached by EXTENDING a known defect to the
+ * second spelling rather than by narrowing it out of either. Defensible — two
+ * spellings of one shape disagreeing is worse than both being wrong the same way,
+ * and the direction is over-FIRE, which fails safe — but the alternative (fixing
+ * both spellings now) was DEFERRED, not overlooked. Relative to `main` the fence
+ * introduces NO new over-fire: `f95321bf` fires on this shape too. It is new only
+ * relative to `fc27fbe8`, which silenced it.
+ * **BLAST RADIUS: ZERO** — no corpus source changes verdict either way.
+ * Pinned by `DISCLOSED OVER-FIRE:` in
+ * `compiler/tests/unit/e-auth-005-application-scope.test.js`, which asserts the
+ * KNOWN-WRONG verdict deliberately so that landing scope resolution FAILS that
+ * test instead of changing behaviour silently.
+ *
+ * ⚑ ONE REMAINING DIVERGENCE FROM `collectDbScopes`, DELIBERATE AND NAMED: the
+ * nested-`<program>` fence above. `collectDbScopes` has no such fence, because it
+ * is collecting every handle it must EMIT; this predicate is answering a
+ * SCOPE question, and the answers differ exactly there. The divergence makes this
+ * predicate NARROWER — i.e. it errs toward FIRING `E-AUTH-005`, the conservative
+ * direction for a check whose whole job is to refuse a context that is not there,
+ * and the over-fire documented above is the concrete price of that choice.
+ * Everything else — the node shape, the `src=` extraction, and the children-only
+ * descent — is a deliberate mirror of `emit-server.ts:767-786`. Do not add a
+ * `node.body` descent back without re-deriving it against that arm: an earlier
+ * revision had one, it was justified as a fail-safe superset, and it was measured
+ * to change nothing on the corpus. (Independently re-derived in review: `body` is
+ * `LogicStatement[]` at all 13 declaration sites, so a db state node is not
+ * reachable through a `body` edge at all — the descent was UNREACHABLE, not merely
+ * inert.)
+ *
+ * ⚑ THIS ANSWERS ONLY ONE OF THE TWO WAYS A FILE CAN CARRY A SERVER CONTEXT —
+ * `<program db=…>` is the other. Neither is the whole question; see
+ * `compilationUnitHasServerContext` in `type-system.ts`, which is what the
+ * `E-AUTH-005` check actually consults. In particular, the ABSENCE of both shapes
+ * is NOT evidence of a client-only context: under the canonical v0.3 multi-file
+ * layout (SPEC §40.8) a page or component file has no `<program>` of its own —
+ * §40.8 forbids one there — and per §58.8 it "shares the application `<program>`
+ * scope", which lives in a file this predicate cannot see.
+ */
+export function fileHasDbStateContext(fileAST: FileAST): boolean {
+  let found = false;
+
+  /** Mirror of `collectDbScopes`' Form-2 `src=` extraction (emit-server.ts:769-775). */
+  const hasNonEmptySrc = (node: Record<string, unknown>): boolean => {
+    const attrs = (node.attrs ?? node.attributes ?? []) as Array<Record<string, unknown>>;
+    if (!Array.isArray(attrs)) return false;
+    const srcAttr = attrs.find((a) => a && a.name === "src");
+    const v = srcAttr?.value as Record<string, unknown> | undefined;
+    const srcVal = v?.kind === "string-literal" ? v.value : (v?.value ?? v?.name ?? "");
+    return typeof srcVal === "string" && srcVal.length > 0;
+  };
+
+  const isProgramMarkup = (node: Record<string, unknown>): boolean =>
+    node.kind === "markup" && node.tag === "program";
+
+  /**
+   * `insideProgram` carries the §4.12.1 fence. The file's OWN top-level
+   * `<program>` must be descended into; any `<program>` encountered BELOW one is a
+   * separate compilation unit and is skipped whole.
+   */
+  const walk = (nodes: unknown, insideProgram: boolean): void => {
+    if (found || !Array.isArray(nodes)) return;
+    for (const node of nodes as Node[]) {
+      if (found) return;
+      if (!node || typeof node !== "object") continue;
+      const n = node as unknown as Record<string, unknown>;
+
+      if (isProgramMarkup(n)) {
+        if (insideProgram) continue; // nested <program> — separate unit (§4.12.1)
+        walk(n.children, true);
+        continue;
+      }
+
+      if (n.kind === "state" && n.stateType === "db" && hasNonEmptySrc(n)) {
+        found = true;
+        return;
+      }
+      walk(n.children, insideProgram);
+    }
+  };
+
+  walk(getNodes(fileAST), false);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // Markup node collection
 // ---------------------------------------------------------------------------
