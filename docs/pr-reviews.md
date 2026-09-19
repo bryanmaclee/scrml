@@ -1470,3 +1470,86 @@ miniature — and it was caught only because an adversarial pass executed every 
 verbatim instead of reading them. **Execute your own repros before landing them.**
 
 — S422-bryan, self-correction after an adversarial pass on the filing branch
+
+---
+
+## S423 — peter · the floor read 4 OWED, all four are carve-outs BY PATH — and all four were probed by EXECUTION anyway
+
+**Zero findings, and that is the honest result.** All four (#986 #987 #988 #989) are bryan's S422
+landings; `CODE_BEARING_RE` run against `gh pr view <n> --json files` matches **no path in any of
+them**. A carve-out by path is not a reason to stamp and move on, so each was probed on its
+substance — #986 in particular, because it **falsified an adopter's regression claim and inverted
+their own recommendation**, and a wrong diagnosis there propagates into a fix direction.
+
+**#986 — both diagnoses reproduce, independently, on `3b66030a`.**
+
+- The line-comment heuristic: **7 of 7 rows reproduce**, including the load-bearing discriminator.
+  `// <tag>` in a function body fires `E-SYNTAX-050`; `// x <tag>` is clean; the same comment at
+  program level is clean; **`// x a/<N> here` FIRES** — a real path slash, not the comment marker.
+  That last row is what makes the entry's correction of the adopter's stated rule ("`<` followed by
+  a non-space") a real correction rather than a restatement.
+- Its governing sentence exists verbatim: `SPEC.md:19209` — *"A developer who uses only `//` will
+  never encounter a comment syntax error."* So the direction classification (newly-accepting TOWARD
+  the contract) is sound.
+- The locus is genuinely **traced, not searched**: `looksLikeCloser = nextNonWs === "" || (nextNonWs
+  === "<" && !nextIsCloseTag)`, gated on a `markup`/`state` frame, which is exactly why program level
+  is inert.
+- ⚑ **The "NOT a regression" claim is corroborated structurally, without re-running the old
+  compiler:** `git diff 5e6842ee..787d4cb4 -- compiler/src/block-splitter.js` is **EMPTY** — the fire
+  site is byte-identical across the two baselines the adopter compared. That is independent evidence
+  from the 16-case re-run the entry rests on.
+- The `_{}` diagnosis: a multi-statement bare `_{}` in a `kind="tool"` `main` gives
+  `E-CODEGEN-INVALID-LOGIC`; the single-statement form compiles and emits
+  **`await (async () => { return (console.log("a")); })();`** — the unconditional `return (` wrapper
+  the entry narrowed the locus to, confirmed from the artifact rather than from the source.
+  `SPEC.md:37400` carries *"The tool body is an admitted bare-`_{}` context"* verbatim, so inverting
+  the reporter's "won't fix" rests on the governing sentence, not on taste.
+- All six sibling gap ids in the family cross-reference resolve in `known-gaps.md` (6/6).
+
+**#987 — the headline claim is true, and the citation sweep came back clean.** `git grep -l
+"^<<<<<<< " e74f5423` returns **`compiler/SPEC-INDEX.md`**: the commit four sessions of maps were
+stamped at did carry unmerged conflict markers. `conflict-marker-gate` at HEAD: 8232 files, 0
+markers, PASS. Swept **208 distinct file paths cited across the 13 maps** for existence: 10 do not
+resolve and **all ten are accounted for** — three the map itself labels *"does not exist"*, two are
+rows in the non-compliance report's own broken-cross-reference table (its finding, correctly
+reported), two resolve under `compiler/tests/` per that table's own relative convention, one is an
+ellipsis my regex ate, and `scripts/mapgen.ts` + `compiler/package.json` are both documented in the
+PR itself as absent by design. **Zero unmarked broken citations.**
+
+**#988 — the record parses and its surviving claim still reproduces.** 23 markers (4 `finding`, 19
+`carve-out`); `review-debt.ts` reads **574 recorded** and none of the 23 appears in today's OWED
+list, so nothing failed toward debt. Executed its published claim rather than reading it:
+`examples/09-error-handling.scrml` still draws **4 x `E-ERROR-009`**, one at **`:95:34`**, whose own
+message lists `SubmitFailed` among the valid variants. Its self-correction on the invalidated repro
+stands.
+
+**#989 — the staleness its predecessor recorded is discharged.** #981's marker stated
+`state.ts --check` exited 1 on a stale `@generated:recent-sessions` anchor. At HEAD that check
+**exits 0**, and the live gap counts (HIGH 111 · MED 261 · LOW 99 · Nominal 7) agree between the
+generated table in `known-gaps.md` and a fresh `state.ts` run.
+
+⚑ **One observation, not a finding, and it is about the fix DIRECTION #986 hands the next session.**
+The entry names its defect the **seventh** member of a family whose root it states in its own words —
+*"`//` spans are not masked before ANY of these scanners run; each landing has masked them for one
+scanner."* Six landings, six scanners, two HIGH siblings still open. That is the FORK-RULE row-4
+shape (root beats position) with six data points behind it: **the next landing on this family should
+be the masking pass, not the seventh scanner.** Whoever picks it up owes that argument a hearing
+before writing a local fix.
+
+⚑ **A probe of mine failed in the most dangerous way and I am recording it.** My first run of the
+comment matrix `cd`'d into the scratchpad, which made `compiler/bin/scrml.js` unresolvable — and my
+classifier looked for the string `FAILED`, so **four cases reported "clean" because the compiler had
+never run.** That is `pa-base` §8's indistinguishable failure exactly: the probe's error rendered as
+its negative answer. It was caught only because a later command printed the module error. Re-run with
+an absolute compiler path, no `cd`, and the exit code read separately from the output.
+
+— S423-peter, floor drain on a live-sibling session (S422-bryan LIVE; `docs/pr-reviews.md` is
+append-only, so this serializes by union)
+
+<!-- @review pr=986 verdict=carve-out by=S423-peter date=2026-09-19 probe=CARVE-OUT-BY-PATH-checked-against-gh-pr-view-986-json-files-nine-paths-known-gaps-pr-reviews-dpa-queue-master-list-and-five-handOffs-incoming-read-drops-and-NOT-ONE-matches-CODE-BEARING-RE-BUT-PROBED-THE-CLAIMS-BY-EXECUTION-ANYWAY-because-the-PR-falsifies-an-adopter-regression-claim-and-inverts-their-recommendation-SEVEN-OF-SEVEN-comment-rows-reproduce-on-3b66030a-including-the-discriminator-slash-slash-x-a-slash-N-here-which-FIRES-E-SYNTAX-050-and-the-governing-sentence-is-verbatim-at-SPEC-md-19209-and-the-locus-is-traced-not-searched-looksLikeCloser-gated-on-a-markup-or-state-frame-and-the-NOT-A-REGRESSION-claim-is-corroborated-structurally-by-git-diff-5e6842ee-787d4cb4-block-splitter-js-being-EMPTY-and-the-tool-bare-foreign-block-repro-emits-await-async-arrow-return-paren-console-log-the-unconditional-return-wrapper-and-SPEC-md-37400-admits-the-bare-form-verbatim-so-the-disposition-inversion-is-correct-and-all-six-sibling-gap-ids-resolve note=adopter-report-triage-verified-by-execution-zero-findings -->
+
+<!-- @review pr=987 verdict=carve-out by=S423-peter date=2026-09-19 probe=CARVE-OUT-BY-PATH-checked-against-gh-pr-view-987-json-files-fourteen-paths-thirteen-under-dot-claude-maps-plus-one-docs-changes-progress-md-and-no-file-matches-CODE-BEARING-RE-BUT-VERIFIED-THE-HEADLINE-CLAIM-BY-EXECUTION-git-grep-l-conflict-marker-at-e74f5423-returns-compiler-SPEC-INDEX-md-so-the-commit-four-stale-sessions-were-stamped-at-DID-carry-unmerged-markers-and-conflict-marker-gate-at-HEAD-scans-8232-files-with-0-markers-PASS-AND-SWEPT-208-DISTINCT-CITED-PATHS-ACROSS-THE-13-MAPS-FOR-EXISTENCE-ten-do-not-resolve-and-all-ten-are-accounted-for-three-labelled-does-not-exist-by-the-map-itself-two-are-rows-in-the-non-compliance-reports-own-broken-cross-reference-table-two-resolve-under-compiler-tests-per-that-tables-relative-convention-one-is-a-regex-artifact-and-mapgen-ts-plus-compiler-package-json-are-documented-absent-by-design-so-ZERO-unmarked-broken-citations note=nav-map-watermark-e74f5423-to-787d4cb4-verified -->
+
+<!-- @review pr=988 verdict=carve-out by=S423-peter date=2026-09-19 probe=CARVE-OUT-BY-PATH-checked-against-gh-pr-view-988-json-files-two-paths-docs-changes-progress-md-and-docs-pr-reviews-md-and-neither-matches-CODE-BEARING-RE-BUT-PROBED-THE-RECORD-ITSELF-all-23-markers-parse-4-finding-19-carve-out-review-debt-ts-reads-574-recorded-and-none-of-the-23-appears-in-todays-OWED-list-so-nothing-failed-toward-debt-AND-EXECUTED-ITS-SURVIVING-PUBLISHED-CLAIM-rather-than-reading-it-examples-09-error-handling-scrml-still-draws-four-E-ERROR-009-one-at-95-34-whose-own-message-lists-SubmitFailed-among-the-valid-variants-so-the-self-correction-on-the-invalidated-repro-stands note=S422-floor-drain-record-23-to-0 -->
+
+<!-- @review pr=989 verdict=carve-out by=S423-peter date=2026-09-19 probe=CARVE-OUT-BY-PATH-checked-against-gh-pr-view-989-json-files-a-single-path-master-list-md-and-the-diff-is-the-generated-recent-sessions-anchor-only-and-no-file-matches-CODE-BEARING-RE-so-the-reviewable-surface-is-the-generator-not-the-diff-AND-THE-STALENESS-981s-OWN-MARKER-RECORDED-IS-NOW-DISCHARGED-bun-scripts-state-ts-check-EXITS-0-at-HEAD-3b66030a-and-the-live-gap-counts-HIGH-111-MED-261-LOW-99-NOMINAL-7-agree-between-the-generated-table-in-known-gaps-md-and-a-fresh-state-ts-run note=scheduled-regen-artifact-current-at-HEAD -->
