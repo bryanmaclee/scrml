@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 111 |
-| MED | 261 |
+| HIGH | 110 |
+| MED | 262 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15562,8 +15562,36 @@ hard-nav decision. Row 1-4 of the fork rule do not obviously discriminate; bryan
 **Linked:** `g-soft-nav-redirect-leaves-orphan-history-entry` is the same branch (pushState happens before the
 fetch, so the hard-nav adds a second entry) — any fix to either should consider both.
 
-### g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject — every POPULATED seed produces an observation identical to the unseeded one, so D6 / `S-EMPTY-WITH-DATA` — the detector the whole tier exists for — has never run against data on any corpus cell — `NEW S420-peter (floor pass on #971 + #974, two independent reviewers converging from opposite ends; PA-reproduced by execution); HIGH; narrowed S420 — LIMB 1 (the bridge) CLOSED, LIMB 2 (D6's body-global predicate) still open`
-<!-- @gap id=g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject sev=HIGH status=narrowed locus=compiler/tests/e2e-render-map/render-detectors.js:389(LIMB 2 — D6 gated on obs.seeded, hasRenderedContent is body-global; LIMB 1's seed bridge is FIXED in render-harness.js) prov=empirical:PA-reproduced-at-a5c3810a-all-four-seeded-apps-observe-IDENTICAL-seeded-vs-unseeded -->
+### g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject — every POPULATED seed produces an observation identical to the unseeded one, so D6 / `S-EMPTY-WITH-DATA` — the detector the whole tier exists for — has never run against data on any corpus cell — `NEW S420-peter (floor pass on #971 + #974, two independent reviewers converging from opposite ends; PA-reproduced by execution); HIGH; narrowed S420 — LIMB 1 (the bridge) CLOSED; RESOLVED S423-peter — LIMB 2 closed, D6 fires`
+<!-- @gap id=g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject sev=HIGH status=resolved locus=compiler/tests/e2e-render-map/render-detectors.js(LIMB 2 CLOSED S423 — D6 now also asks its emptiness question of the leaf <each> regions, gated on a DELIVERED seed that GAINED no content; LIMB 1's seed bridge was fixed in render-harness.js at #978) prov=empirical:PA-verified-by-execution-at-3b66030a-25-triage-board-populated-scores-renders-empty-with-data-scope-each-regions-3-of-3-leaves-empty -->
+
+> ⚑ **RESOLVED S423 — LIMB 2 IS CLOSED AND D6 HAS FIRED FOR THE FIRST TIME.** `examples/25-triage-board.scrml#populated`
+> now scores **`renders-empty-with-data`** with `S-EMPTY-WITH-DATA`, `emptyWithDataScope: "each-regions"`,
+> 3 of 3 leaf regions empty. **PA-verified by execution on the landing branch, not inherited from the
+> agent's report.** The acceptance bar was closed structurally rather than by sampling: D6 is gated on a
+> DELIVERED seed, so the 434 unseeded cells cannot move; the base baseline held **zero** cells in that
+> state, so nothing red could go green; the other three populated cells are unchanged. Full-tier
+> before/after: exactly ONE state change.
+>
+> ⚑ **THE FIX DIRECTION THIS ENTRY CARRIED WAS WRONG, AND SO WAS THE PA'S CORRECTION OF IT.** The entry
+> said to "scope D6's emptiness question to the seeded region"; the dispatching brief sharpened that to a
+> surviving-empty-mount rule and asserted the runtime "consumes the slot" when rows render. **Both were
+> falsified by the agent, from the emitter and runtime source:** the mount div is the nested each's
+> CONTAINER and is present either way — `03-contact-book` shows zero slots because its each is TOP-LEVEL
+> (comment-fence shape), a different emission entirely. The PA then sent a correction ("fire on ANY empty
+> mount") which was ALSO wrong: measured against the corrected seed the fixture arc will land, it scores a
+> CORRECT board red. What survived three rounds is a conjunction over **LEAF** regions — one containing no
+> other region — plus a gain conjunct across the seed write.
+>
+> ⚑ **AND "DID THE RENDER MOVE" IS WRONG IN BOTH DIRECTIONS** (the PA's second proposal, also falsified by
+> measurement): 25-triage's `<tasks>` is non-empty at boot, so the seed makes the render move by SHRINKING
+> to nothing — `domChanged` is TRUE on the one cell D6 exists for — while the new fixture's bug seed leaves
+> it FALSE. The measure that holds on all six observations is **"did the render GAIN content"**; a pure
+> loss is not a gain.
+>
+> **Landed with a pre-land adversarial pass that returned FIVE findings, three of which the PA reproduced
+> itself** (two false-positive classes plus a broken S419 invariant), then a fix round that closed four
+> classes and moved **zero** corpus cells. Residual → [[g-d6-region-emptiness-is-fail-quiet-and-its-gain-conjunct-is-page-global]].
 
 > ⚑ **NARROWED S420 — LIMB 1 IS CLOSED. The remaining defect is limb 2 only.**
 > The bridge now resolves a seed name STATICALLY against the chunk's real cell set (parsed from the
@@ -16049,3 +16077,44 @@ compile does not.
 
 — NEW S422-bryan (surfaced adjacent to the oracle-ask-5 feasibility read; PA-reproduced and RE-SCOPED — the reported scope did not survive reproduction, the count did)
 <!-- @gap id=g-block-analysis-sidecar-is-basename-flat-so-same-named-pages-silently-overwrite-each-other sev=HIGH status=open locus=searched:compiler/src/commands/compile.js,compiler/src/block-analysis.ts — the sidecar write path that joins outputDir to the basename rather than to the source-relative path; the deciding site was NOT traced prov=empirical:PA-reproduced-by-execution-at-f95321bf-36-sources-115-nested-artifacts-but-only-32-flat-sidecars-with-7-colliding-basenames-collapsing-to-3 -->
+
+---
+
+### g-d6-region-emptiness-is-fail-quiet-and-its-gain-conjunct-is-page-global — D6 can tell that the seeded data rendered SOMEWHERE, never WHICH region took it, so a page that renders the data in one place while the list that should hold it stays empty scores green — `NEW S423-peter (stated by the dispatched agent as the residual of its own fix, PA-verified by execution on the landing branch); MED; open`
+<!-- @gap id=g-d6-region-emptiness-is-fail-quiet-and-its-gain-conjunct-is-page-global sev=MED status=open locus=compiler/tests/e2e-render-map/render-detectors.js(regionScopedEmptiness — the leaf conjunction; and seedMovedTheRender — the page-global gain conjunct) prov=review:the-S423-pre-land-adversarial-pass-findings-1-and-2-which-the-PA-reproduced-then-routed-as-a-fix-round -->
+
+**Two named limits of the S423 limb-2 rule, filed together because they are ONE class — the detector
+reads only the FINAL DOM plus a page-global before/after, so it can never attribute rendered content to
+the region that should have held it.** Filing them as one entry deliberately: a second entry would fork
+a class whose fix is a single mechanism.
+
+1. **Fail-quiet on partial emptiness.** The rule is a conjunction over LEAF regions, so it fires only
+   when EVERY leaf rendered nothing. An app where one of several lists is wrongly empty stays green.
+   This is the original, deliberate trade — the alternative (fire on ANY empty region) was measured and
+   **scores a CORRECT board red**: mounted with the corrected 25-triage seed, two columns render their
+   task and the third is legitimately empty.
+
+2. **The gain conjunct is page-global.** D6 additionally requires that the render GAINED no content
+   across the seed write. That correctly kills the two false-positive classes the S423 adversarial pass
+   found (rows render while their per-row nested lists are legitimately empty; the seeded datum renders
+   by interpolation beside one unrelated empty each) — but it knows only that *something* new appeared,
+   not *where*. So the reverse case now also passes: data rendering in one place while the region that
+   should hold it stays empty.
+
+**Why neither is closable by looking harder at the DOM.** The false-positive shape is STRUCTURALLY
+IDENTICAL to the true subject — an outer range holding rows, each row an empty mount — and differs only
+in whether that outer range rendered DATA or CHROME. Nothing in the final tree distinguishes them; only
+the transition does, which is why the gain conjunct exists at all.
+
+**What would close it: per-region attribution across the seed write.** The machinery is within reach —
+the regions are already identified and `applySeed` already straddles the write — but region identity is
+not stable across a reconcile that replaces the nodes, so this is real work rather than a tweak. Not
+attempted at S423, and deliberately not scoped here.
+
+⚑ **Also carried, and weaker than it looks:** the F4 fail-open guard landed with it (a seed-bridge
+failure must stay loud, or a dropped `_scrml_reactive_set` silently switches D6 off for every populated
+cell) is pinned by a contract + source assertion, **not by execution** — the real compiler cannot be made
+to emit a client lacking that side-channel, so the mutation proof reds only the source-level pin. Treat
+that pin as weaker evidence than the rest of the tier's.
+
+— NEW S423-peter (the dispatched agent stated this residual against its own landing rather than reporting the class closed; PA-verified by execution — `GAINED=1` silences the true subject's own shape, `GAINED=0` keeps it firing)
