@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 111 |
+| HIGH | 112 |
 | MED | 261 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -16049,3 +16049,62 @@ compile does not.
 
 — NEW S422-bryan (surfaced adjacent to the oracle-ask-5 feasibility read; PA-reproduced and RE-SCOPED — the reported scope did not survive reproduction, the count did)
 <!-- @gap id=g-block-analysis-sidecar-is-basename-flat-so-same-named-pages-silently-overwrite-each-other sev=HIGH status=open locus=searched:compiler/src/commands/compile.js,compiler/src/block-analysis.ts — the sidecar write path that joins outputDir to the basename rather than to the source-relative path; the deciding site was NOT traced prov=empirical:PA-reproduced-by-execution-at-f95321bf-36-sources-115-nested-artifacts-but-only-32-flat-sidecars-with-7-colliding-basenames-collapsing-to-3 -->
+
+### G-SCANNER-CONTEXT-AMBIGUITY-IS-ONE-FAMILY-OF-28-AND-THE-LEVER-IS-ONE-SHARED-MASKING-PASS — 28 open gaps are one bug in four costumes; string/comment/interpolation masking, applied once and reused, is pointed at 27 of them — `NEW S422; HIGH; open`
+
+**AGGREGATE ENTRY — this files no new defect.** It records that 28 already-open gaps share one root,
+so they are worked as a family rather than one position at a time.
+
+**Counted by flogence-PA (S46) over OUR ledger, and INDEPENDENTLY RE-COUNTED HERE.** They invited
+re-judgement rather than trust and supplied the full ID list; all 28 were verified to exist and to be
+`status=open` at `3b66030a`. My counts against theirs:
+
+| | flogence | PA re-count |
+|---|---|---|
+| distinct gaps tracked | 1037 | 1038 |
+| open | 459 | 455 |
+| open with a scanner/parser locus | 63 (13.7%) | 64 |
+| **context-ambiguity shaped** | **28** | **28** — exact |
+
+**The four costumes**, and the sizes are the finding:
+
+| what is misread | open gaps |
+|---|---|
+| **string-literal masking** (a `~`, a quote, a prose run inside a string) | **13** |
+| **`${ }` / template interpolation** | **8** |
+| **no comment state** (`//`, `/*`) | **6** |
+| **`<` read as a tag opener** | **1** |
+
+Severity across the 28: **13 HIGH · 11 MED · 4 LOW**.
+
+**The shared shape:** *a layer that decides what a character means before a grammar exists to ask.* A
+scanner that splits source into blocks must disambiguate blind, and every one of these is a case where
+blind was not good enough.
+
+⚑ **THE LEVER IS ONE SHARED MASKING PASS** — string, comment and template-interpolation state,
+computed once and reused by every downstream scanner — and it is pointed at **27 of 28**. That is the
+root-vs-position fork (FORK RULE row 4) with the whole denominator attached, and it supersedes the
+"seventh member" framing in
+[[g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic]]: the family is 28 across
+four causes, not 7 within one.
+
+⚑ **AND IT REFUTES THE SYNTAX HYPOTHESIS, on our own data.** flogence's operator asked whether `<`
+is overloaded and whether that overload is the pain behind scrml's parsing issues. **It is 1 of 28.**
+Their own corpus shows the overload is real — 1007 opening tags, 94 `<cell> =` declarations, 3
+`const <cell>`, 18 comparisons, 129 `<` inside `//` comments — but removing the `<cell> =` form would
+cost ~94 rewrites in their corpus and far more in ours **and close exactly ONE MED gap**. A breaking
+syntax simplification aimed at `<` is pointed at 3.6% of the family. They filed this against their own
+side's hypothesis, which is why it is worth the weight.
+
+**Methodology limits, stated by them and preserved here:** classification is by gap-ID text, not by
+reading all 28, so some will be misfiled — the IDs are unusually descriptive, which is the only reason
+it works. Their first pass had a wrong denominator (473/326) because the extraction regex required
+`locus=` to sit immediately after `status=`; they caught and corrected it before computing anything
+above, and disclosed it as "exactly the error class we filed at you twice this week."
+
+**What this entry does NOT claim:** that any of the 28 is mis-filed, that the masking pass is cheap, or
+that it is the next thing to build. It claims the denominator, and that per-position fixes have now
+been measured as a bug generator on this exact family.
+
+— NEW S422-bryan (flogence-PA S46 aggregate over our ledger; PA re-counted, 28/28 IDs verified open)
+<!-- @gap id=g-scanner-context-ambiguity-is-one-family-of-28-and-the-lever-is-one-shared-masking-pass sev=HIGH status=open locus=searched:compiler/src/block-splitter.js,compiler/src/tokenizer.js,compiler/src/expression-parser.ts,compiler/src/ast-builder.js,compiler/native-parser/ — this is an AGGREGATE over 28 entries and has no single deciding site by construction; the lever is a shared masking pass that does not yet exist prov=adopter:flogence-S46-counted-our-own-ledger-against-their-own-side-hypothesis-PA-re-counted-28-of-28-verified-open -->
