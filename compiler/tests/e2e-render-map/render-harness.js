@@ -718,7 +718,7 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
         // Includes the LOUD unrecognised-prologue throw. Recorded, never swallowed into a
         // silent bare-key fallback.
         seedReport = {
-          chunks: 0, writes: [], domChanged: false, gainedContent: false, observable: false,
+          chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
           errors: [`[seed-bridge] ${String(e && e.message ? e.message : e)}`],
         };
         obs.consoleErrors.push(`[seed-bridge] ${String(e && e.message ? e.message : e)}`);
@@ -748,7 +748,11 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       }
       // ⛑ fix round 2 (finding 3) — a failed render snapshot makes `gainedContent`
       // UNMEASURED. It already vetoes D6; surface it so it is loud, not merely quiet.
-      if (seedReport && seedReport.gainedContent === null) {
+      // ⛑ final round — keyed on the SIGNATURE error, not on `gainedContent === null`
+      // alone: the `catch` above now also reports `null` (it never took a snapshot either),
+      // and it has already pushed its own accurate message. Keying on null would add a
+      // second, untrue "the snapshot failed" line on top of it.
+      if (seedReport && seedReport.errors.some((e) => String(e).startsWith("[seed-signature]"))) {
         obs.consoleErrors.push(
           "[seed-bridge] the render-content snapshot failed — gainedContent is UNMEASURED, D6 suppressed",
         );
@@ -767,7 +771,7 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // makes the cell red and keeps the reason attached.
       const msg = "no _scrml_reactive_set side-channel exposed by this emit";
       seedReport = {
-        chunks: 0, writes: [], domChanged: false, gainedContent: false, observable: false,
+        chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
         errors: [msg],
       };
       obs.consoleErrors.push(`[seed-bridge] ${msg}`);

@@ -667,17 +667,24 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   // definition — "A encloses B iff B's anchor is at-or-inside one of A's nodes" —
   // with no map, no ordering, and no shared code. Any future optimisation that
   // changes the meaning reds here regardless of whether anyone predicted the shape.
-  const referenceLeaves = (regions) => {
-    const enclosedBy = (a, b) => {
-      if (a === b) return false;
-      const marker = b.shape === "mount" ? b.host : b.start;
-      for (let n = marker; n; n = n.parentNode) {
-        for (const node of a.nodes) if (node === n) return true;
-      }
-      return false;
-    };
-    return regions.filter((r) => !regions.some((o) => enclosedBy(r, o))).length;
+  // `a` encloses `b` — straight from the definition, pairwise, no map, no ordering.
+  const encloses = (a, b) => {
+    if (a === b) return false;
+    const marker = b.shape === "mount" ? b.host : b.start;
+    for (let n = marker; n; n = n.parentNode) {
+      for (const node of a.nodes) if (node === n) return true;
+    }
+    return false;
   };
+  // A leaf is RESOLVED, encloses nothing, and is not inside a span of unknown extent
+  // (⛑ S423 final round, finding 2 — unknown resolves quiet, so it is not a leaf either).
+  const referenceLeaves = (regions) =>
+    regions.filter(
+      (r) =>
+        !r.unresolved &&
+        !regions.some((o) => encloses(r, o)) &&
+        !regions.some((o) => o.unresolved && encloses(o, r)),
+    ).length;
   const M = (id, inner = "") => `<div data-scrml-each-mount="each_${id}">${inner}</div>`;
   const F = (id, inner) => `<!--scrml-each:${id}-->${inner}<!--/scrml-each:${id}-->`;
   const OWNERSHIP_SHAPES = {
@@ -693,6 +700,16 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     "three levels, all direct": M("a", F("b", M("c"))),
     "two fences sharing a parent with a mount": `<ul>${F("a", "")}${M("b")}${F("c", "<li>y</li>")}</ul>`,
     "sibling subtrees each with their own nesting": `<div>${F("a", M("b"))}</div><div>${M("c", F("d", ""))}</div>`,
+    // ⛑ S423 final round (finding 2) — the UNRESOLVED shapes, carried by the differential
+    // rather than by enumerated cases, exactly as asked.
+    "unterminated fence wrapping a mount": '<!--scrml-each:o--><section>Task A<div data-scrml-each-mount="each_i"></div></section>',
+    "unterminated fence, mount as a direct following sibling": `<ul><!--scrml-each:o-->${M("i")}</ul>`,
+    "unterminated fence with nothing after it, beside a resolved each": `<ul>${F("v", "")}</ul><div><!--scrml-each:o--></div>`,
+    "unterminated fence in a sibling subtree of a resolved each": `<div><!--scrml-each:o--></div><ul>${F("v", "")}</ul>`,
+    "unterminated fence INSIDE a resolved fence": F("outer", `<section><!--scrml-each:o-->${M("i")}</section>`),
+    "unterminated fence inside a mount host": M("outer", `<!--scrml-each:o--><span>x</span>${M("i")}`),
+    "two unterminated fences nested": '<!--scrml-each:a--><section><!--scrml-each:b--><div data-scrml-each-mount="each_i"></div></section>',
+    "resolved fence nested inside an unterminated one": `<!--scrml-each:o--><section>${F("r", M("i"))}</section>`,
   };
   for (const [label, markup] of Object.entries(OWNERSHIP_SHAPES)) {
     test(`ownership model agrees with the brute-force reference: ${label}`, () => {
@@ -700,10 +717,80 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
       body.innerHTML = `<main id="root">${markup}</main>`;
       const regions = collectEachRegions(body);
       expect(regions.length).toBeGreaterThan(0); // non-vacuity
+      // A shape with no resolved leaf yields null (the question is unanswerable) — which is
+      // reference-leaves 0. Both halves of that equivalence are part of what is pinned.
       const v = regionScopedEmptiness(body);
-      expect(v.summary.leaves).toBe(referenceLeaves(regions));
+      expect(v ? v.summary.leaves : 0).toBe(referenceLeaves(regions));
     });
   }
+
+  // =========================================================================
+  // ⛑ S423 FINAL ROUND (finding 2) — A DROPPED REGION MUST NOT PROMOTE ITS CHILDREN.
+  //
+  // The same ruling as fix-round-2 finding 1, reached by a different route: an
+  // unterminated fence was dropped with a bare `continue`, but the regions inside
+  // its span were still collected, so an inner mount was promoted to a FALSE LEAF
+  // and its outer each's rendered rows no longer vetoed. It is now kept as an
+  // UNRESOLVED region: never a leaf, never in the resolved counts, but still
+  // enclosing — so everything possibly inside it is unknown, and unknown is quiet.
+  // =========================================================================
+  test("finding 2: an unterminated fence does not promote the mount inside it to a leaf", () => {
+    const markup = '<!--scrml-each:o--><section>Task A<div data-scrml-each-mount="each_i"></div></section>';
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    // The inner mount IS empty and DOES enclose nothing — under the old rule it was a leaf.
+    expect(collectEachRegions(body).length).toBe(2);
+    // ... but its leaf status is unknown, so the question is unanswerable.
+    expect(regionScopedEmptiness(body)).toBeNull();
+    const det = seededDetectGained(markup, false);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+  });
+
+  // The exclusion must not go too far: an unresolved span that can enclose NOTHING
+  // must not silence an unrelated, genuinely-empty each elsewhere.
+  // ⚠ Each carries visible chrome (`<h1>`) ON PURPOSE. Without it the body renders nothing,
+  // the BODY scope answers first, and the test would pass while proving nothing about
+  // regions — which is exactly how the first version of this table passed the wrong way.
+  // The `emptyWithDataScope` assertion is what makes that impossible to repeat.
+  const UNRESOLVED_MUST_STILL_FIRE = {
+    "unterminated fence with nothing after it": `<h1>Board</h1><ul>${"<!--scrml-each:v--><!--/scrml-each:v-->"}</ul><div><!--scrml-each:o--></div>`,
+    "unterminated fence in a sibling subtree": `<h1>Board</h1><div><!--scrml-each:o--></div><ul>${"<!--scrml-each:v--><!--/scrml-each:v-->"}</ul>`,
+  };
+  for (const [label, markup] of Object.entries(UNRESOLVED_MUST_STILL_FIRE)) {
+    test(`finding 2: a non-enclosing unresolved span still lets a real empty each fire: ${label}`, () => {
+      const det = seededDetectGained(markup, false);
+      expect(det.detail.emptyWithDataScope).toBe("each-regions");
+      expect(det.detail.emptyRegions).toEqual({
+        regions: 1, mounts: 0, ranges: 1, leaves: 1, emptyLeaves: 1, unresolved: 1,
+      });
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // The count surface: `unresolved` appears ONLY when non-zero, so the committed
+  // `detail.emptyRegions` shape is unchanged for every cell that has none — including
+  // 25-triage, whose baseline entry must not churn.
+  test("finding 2: the summary omits `unresolved` when there is none", () => {
+    const det = seededDetectGained(`<h1>Board</h1><ul>${"<!--scrml-each:v--><!--/scrml-each:v-->"}</ul>`, false);
+    expect(det.detail.emptyRegions).toEqual({ regions: 1, mounts: 0, ranges: 1, leaves: 1, emptyLeaves: 1 });
+    expect("unresolved" in det.detail.emptyRegions).toBe(false);
+  });
+
+  // The sibling drop-site, checked rather than assumed: a HIDDEN region is also dropped,
+  // but that one is self-consistent — anything inside a hidden ancestor is itself hidden,
+  // so it is dropped too and there is nothing left to promote.
+  test("finding 2: the hidden-region drop site cannot promote, because children are hidden too", () => {
+    const body = document.createElement("body");
+    body.innerHTML =
+      '<main id="root"><h1>App</h1><div hidden>' +
+      '<!--scrml-each:o--><section><div data-scrml-each-mount="each_i"></div></section><!--/scrml-each:o-->' +
+      "</div></main>";
+    // BOTH regions are dropped, so no child survives to be promoted.
+    expect(collectEachRegions(body)).toEqual([]);
+    expect(regionScopedEmptiness(body)).toBeNull();
+  });
 
   // ⛑ S420 HAZARD, PINNED HERE TOO. `generate-baseline.js` persists `detail` for every
   // NON-GREEN cell into the tracked baseline JSON, and reddening a seeded cell is this
@@ -950,6 +1037,33 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     expect(src).toContain("sigFailed");
     expect(src).toContain("beforeSig === null || afterSig === null ? null : signatureGained");
     expect(src).toContain("gainedContent is UNMEASURED");
+  });
+
+  // ⛑ S423 FINAL ROUND (finding 3) — THE SAME RULING, APPLIED TO THE CLASS.
+  // The `applySeed` instance was fixed a round ago, but the two SYNTHETIC seed reports
+  // (the bridge-threw `catch` and the no-side-channel branch) still wrote
+  // `gainedContent: false` where no snapshot was ever taken. Both push a console error, so
+  // the cell reddens via D2 and `generate-baseline.js` PERSISTS `detail.seed` — committing
+  // a fabricated measurement into the tracked baseline. `false` means measured-no-gain;
+  // `null` means unmeasured. Neither branch measured anything.
+  test("finding 3: every synthetic seed report reports gainedContent as null, never false", () => {
+    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // No hand-built report may claim a measurement.
+    expect(src).not.toContain("gainedContent: false");
+    // Both synthetic reports are present and report null.
+    const synthetic = src.match(/chunks: 0, writes: \[\], domChanged: false, gainedContent: (\w+)/g) ?? [];
+    expect(synthetic.length).toBe(2);
+    for (const s of synthetic) expect(s).toContain("gainedContent: null");
+    // The only place `gainedContent` may be a boolean is the computed one in applySeed.
+    expect(src).toContain("beforeSig === null || afterSig === null ? null : signatureGained");
+  });
+
+  // ... and the UNMEASURED message must not be emitted on the bridge-threw path, which
+  // took no snapshot either but has already reported its own, accurate reason.
+  test("finding 3: the UNMEASURED notice is keyed on the signature error, not on null alone", () => {
+    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    expect(src).toContain('seedReport.errors.some((e) => String(e).startsWith("[seed-signature]"))');
+    expect(src).not.toContain("if (seedReport && seedReport.gainedContent === null) {");
   });
 });
 

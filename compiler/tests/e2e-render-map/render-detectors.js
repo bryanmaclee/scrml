@@ -437,7 +437,26 @@ export function collectEachRegions(body) {
       }
       nodes.push(n);
     }
-    if (!end) continue; // unterminated fence — extent unknown, stay quiet
+    if (!end) {
+      // ⛑ S423 final round (finding 2) — AN UNTERMINATED FENCE USED TO BE DROPPED WITH A
+      // BARE `continue`, AND THAT PROMOTED ITS CHILDREN. The regions inside its span were
+      // still collected, and with the enclosing region gone an inner mount became a FALSE
+      // LEAF: `<!--scrml-each:o--><section>Task A<div data-scrml-each-mount=…></div></section>`
+      // with no end anchor scored `leaves:1 emptyLeaves:1` and RED, while the outer each had
+      // rendered "Task A". That is fix-round-2 finding 1 reached by another route — a dropped
+      // outer region promoting an inner one — so the same ruling applies: A REGION THAT IS
+      // DROPPED OR UNIDENTIFIABLE MUST NOT PROMOTE ITS CHILDREN TO LEAVES.
+      //
+      // It is kept as an UNRESOLVED region rather than discarded: it never counts as a leaf
+      // and never appears in the resolved counts, but it still participates in enclosure, so
+      // everything possibly inside it is marked unknown and the whole question resolves QUIET.
+      // `nodes` is already every following sibling (the loop ran to the end without finding
+      // the anchor), which is exactly the widest span the runtime's own `_scrml_each_end`
+      // could have matched — it searches `nextSibling` within the same parent and gives up
+      // the same way. So the suspect set is bounded the way the runtime bounds it, not guessed.
+      regions.push({ shape: "range", start, end: null, nodes, unresolved: true });
+      continue;
+    }
     regions.push({ shape: "range", start, end, nodes });
   }
   return regions;
@@ -483,16 +502,27 @@ function leafRegions(regions) {
   // one. A leaf encloses nothing (the innermost lists) — NOT "nothing encloses it", which
   // is the outermost and the exact inversion this rewrite shipped for one round before the
   // 25-triage control caught it.
+  //
+  // ⛑ S423 final round (finding 2) — plus the UNKNOWN tier. A region enclosed by an
+  // UNRESOLVED region (a fence whose extent could not be determined) has unknown leaf
+  // status, because whether it really sits inside that span is unknowable. Unknown resolves
+  // QUIET, like every other ambiguity in this detector, so such a region is excluded from
+  // the leaf set rather than counted as one.
   const encloses = new Set();
+  const suspect = new Set();
   for (const r of regions) {
     const marker = r.shape === "mount" ? r.host : r.start;
     for (let n = marker; n; n = n.parentNode) {
       const set = owners.get(n);
       if (!set) continue;
-      for (const o of set) if (o !== r) encloses.add(o);
+      for (const o of set) {
+        if (o === r) continue;
+        encloses.add(o);
+        if (o.unresolved) suspect.add(r);
+      }
     }
   }
-  return regions.filter((r) => !encloses.has(r));
+  return regions.filter((r) => !r.unresolved && !encloses.has(r) && !suspect.has(r));
 }
 
 /**
@@ -507,15 +537,21 @@ export function regionScopedEmptiness(body) {
   const leaves = leafRegions(regions);
   if (leaves.length === 0) return null;
   const emptyLeaves = leaves.filter((r) => !nodesHaveRenderedContent(r.nodes));
+  // ⛑ S423 final round — the counts describe RESOLVED regions; an unresolved span is not a
+  // region anyone can reason about. Reported separately, and only when non-zero, so the
+  // committed `detail.emptyRegions` shape is unchanged for every cell that has none.
+  const resolved = regions.filter((r) => !r.unresolved);
+  const unresolved = regions.length - resolved.length;
   return {
     allLeavesEmpty: emptyLeaves.length === leaves.length,
     // Counts + shapes ONLY — never an id (see collectEachRegions).
     summary: {
-      regions: regions.length,
-      mounts: regions.filter((r) => r.shape === "mount").length,
-      ranges: regions.filter((r) => r.shape === "range").length,
+      regions: resolved.length,
+      mounts: resolved.filter((r) => r.shape === "mount").length,
+      ranges: resolved.filter((r) => r.shape === "range").length,
       leaves: leaves.length,
       emptyLeaves: emptyLeaves.length,
+      ...(unresolved > 0 ? { unresolved } : {}),
     },
   };
 }

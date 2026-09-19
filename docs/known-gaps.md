@@ -16101,7 +16101,25 @@ a class whose fix is a single mechanism.
    not *where*. So the reverse case now also passes: data rendering in one place while the region that
    should hold it stays empty.
 
-**Why neither is closable by looking harder at the DOM.** The false-positive shape is STRUCTURALLY
+3. **The gain conjunct's own blind spot — and it is a FALSE POSITIVE, the opposite direction from 1 and 2.**
+   `renderedContentSignature` records per-value text counts plus a COUNT of content-bearing elements,
+   never their attribute values. So a seed whose entire visible effect is a **non-empty → non-empty swap
+   carried by an attribute on a content-candidate element** — `value="Bob"` → `value="Ada"`,
+   `src="a.png"` → `src="b.png"` — moves neither the element count nor any text node, reads as
+   `gainedContent:false`, and combined with one legitimately-empty leaf `<each>` on the page **reddens a
+   correct render**. Surfaced by the third S423 adversarial pass, verified by execution.
+   ⚑ **"Value-only gains are invisible" OVERSTATES it, and the precision matters for whoever fixes this.**
+   Measured: `<input value="">` → `"Ada"` is CAUGHT (also via the live `.value`), an `<img>` gaining a
+   `src` is CAUGHT, unchecked → checked is CAUGHT, a `<select>` gaining an option is CAUGHT, and a text
+   swap `"Bob"` → `"Ada"` is CAUGHT (per-value counts, not a Set). Only the attribute-carried
+   non-empty → non-empty swap falls through.
+   ⛔ **DELIBERATELY NOT FIXED at S423, and the reason is the point.** Enriching the signature's precision
+   is the path that produced findings in three consecutive adversarial rounds, and each enrichment invites
+   the next question (which attributes? `value` vs `defaultValue`?). The PA ruled it out of scope and filed
+   it here instead. **Do not patch the signature — close it with the attribution fix below, which subsumes
+   all three limits.**
+
+**Why none of these is closable by looking harder at the DOM.** The false-positive shape is STRUCTURALLY
 IDENTICAL to the true subject — an outer range holding rows, each row an empty mount — and differs only
 in whether that outer range rendered DATA or CHROME. Nothing in the final tree distinguishes them; only
 the transition does, which is why the gain conjunct exists at all.

@@ -731,3 +731,158 @@ Same five-name set, zero new — see the numbers appended below.
 ```
 The same five names as both earlier rounds (3 self-host smoke, the B5 CSRF guard, 1 unnamed).
 **Zero new**, and identical totals — the fix round changed nothing outside this tier.
+
+---
+
+# FINAL ROUND — two rulings completed at the class, one finding deliberately declined
+
+## Finding 2 — TAKEN AS THE CLASS
+
+Reproduced on the fix-round-2 code, the coordinator's probe verbatim:
+
+```
+<!--scrml-each:o--><section>Task A<div data-scrml-each-mount="each_i"></div></section>   (no end anchor)
+→ regions:1 leaves:1 emptyLeaves:1  allLeavesEmpty=true  D6 FIRED
+```
+
+The outer each rendered "Task A" and the cell scored red. The coordinator's reading is right and I
+adopted it without argument: **this is fix-round-2 finding 1 reached by a different route** — a
+dropped outer region promoting an inner one — so the existing ruling governs: *a region that is
+dropped or unidentifiable must not promote its children to leaves.*
+
+**Applied at the drop site, not the symptom.** An unterminated fence is no longer discarded; it is
+kept as an **UNRESOLVED region** — never a leaf, never in the resolved counts, but still
+participating in enclosure. Everything possibly inside it is marked suspect, and suspect resolves
+QUIET like every other ambiguity here.
+
+**The span is bounded the way the RUNTIME bounds it, not guessed.** `nodes` is every following
+sibling, which is exactly the widest range `_scrml_each_end` could have matched — it searches
+`nextSibling` within the same parent and gives up the same way. So the suspect set mirrors the
+runtime's own search, rather than inventing an extent the ruling forbids guessing at.
+
+**The sibling drop site was CHECKED, not assumed.** A hidden region is also dropped — but it cannot
+promote, because anything inside a hidden ancestor is itself hidden and therefore dropped too.
+Verified and pinned (`collectEachRegions` → `[]` for both nested regions), so the audit of drop sites
+is complete rather than partial.
+
+**Counts:** `unresolved` appears in the summary **only when non-zero**, so the committed
+`detail.emptyRegions` shape is unchanged for every cell that has none — `25-triage-board#populated`
+keeps `{regions:4, mounts:3, ranges:1, leaves:3, emptyLeaves:3}` exactly and its baseline entry does
+not churn.
+
+⚠ **One of my own test expectations was wrong twice here, and it is worth recording** — both the
+probe and the first version of the must-still-fire table used markup that rendered NOTHING, so the
+**body** scope answered and the assertions passed (or failed) for a reason unrelated to regions. Each
+case now carries visible chrome and asserts `emptyWithDataScope === "each-regions"`, which makes that
+mistake impossible to repeat silently.
+
+## Finding 3 — TAKEN, same reasoning
+
+`render-harness.js:721` and `:770` still wrote `gainedContent: false` into synthetic reports where no
+snapshot was ever taken: the `applySeed` **instance** was fixed a round ago, the **class** was not.
+Both branches push a console error, so the cell reddens via D2 and `generate-baseline.js` persists
+`detail.seed` — committing a fabricated measurement into the tracked baseline. Both are `null` now.
+
+**One correctness detail the report did not mention, found while applying it:** the UNMEASURED notice
+was keyed on `gainedContent === null`. With the bridge-threw `catch` now also reporting `null` (it
+took no snapshot either), that key would have added a second, **untrue** "the render-content snapshot
+failed" line on top of the catch's own accurate message. Re-keyed on the `[seed-signature]` error, so
+each branch reports only what actually happened.
+
+## Finding 1 — DECLINED, and I agree with the ruling
+
+The coordinator ruled `signatureGained`'s blindness to value-only gains out of scope. **I agree, and
+I am not going to argue it** — the enrichment path (which attributes? `value` vs `defaultValue`?) is
+exactly the treadmill that produced findings in three consecutive rounds, and the principled closure
+is per-region attribution, already scoped as real work. The signature is untouched: no attribute
+capture, no value capture.
+
+**One measurement offered to sharpen the residual entry, at zero scope cost** — the blindness is
+narrower than "value swaps", and the gap entry should say which half:
+
+- an **empty → non-empty** transition IS caught, because `elementCarriesContent` gates on
+  non-emptiness, so the content-bearing element COUNT rises (`<input value="">` → `<input
+  value="Ada">` reads as a gain);
+- a **non-empty → non-empty** swap is blind (`"Bob"` → `"Ada"`, `src="a.png"` → `src="b.png"`), because
+  the count stays flat and no text node changed.
+
+So the false-positive direction requires a seed whose *only* visible effect is a value-to-value swap
+**and** all leaf regions empty. Narrow, but real. Numbers below.
+
+## BITE PROOF — final round
+
+⛔ No `git stash`; file copies only. From a **134 pass / 0 fail** baseline.
+
+| # | mutation | result |
+|---|---|---|
+| **L** | drop the unterminated fence again | **3 fail** — the promotion pin + both non-enclosing-span guards |
+| **M** | synthetic reports fabricate `false` again | **1 fail** — the every-synthetic-report-is-null pin |
+
+Restored → **134 pass / 0 fail**. Whole tier: **150 pass / 0 fail** (135 → 150).
+
+⚠ **A limit of the oracle, stated rather than left implied:** the differential pins the *leaf
+computation* against the definition **given the same region set** — it consumes `collectEachRegions`,
+so it cannot catch a change in what gets COLLECTED. Mutation L proves that: it reds the three
+explicit finding-2 pins and **none** of the oracle shapes, because dropping the unresolved region
+changes both sides identically. Collection is covered by the explicit pins; the oracle covers
+ownership. Neither alone is sufficient and I am not claiming otherwise.
+
+## FINAL ROUND — full-tier before/after
+
+Both runs mine, serial, flipped by FILE COPY — ⛔ no `git stash`. BASE is `3b66030a`'s two harness
+files dropped into this worktree.
+
+| state | base | after final round | delta |
+|---|---|---|---|
+| `renders-clean` | 277 | 276 | **−1** |
+| `renders-empty-with-data` | **0** | **1** | **+1** |
+| `renders-empty` · `needs-server` · `compiles-but-throws` · `smell-detected-wrong` · `fails-compile` | 18 · 8 · 21 · 2 · 117 | same | **0** |
+| **total** | **443** | **443** | **0** |
+
+```
+STATE CHANGES (1)      examples/25-triage-board.scrml#populated: renders-clean -> renders-empty-with-data
+SMELL-SET CHANGES (1)  the same cell
+ACCEPTANCE-BAR OFFENCES (0)
+cells carrying an `unresolved` count: 0
+PER-RUN TOKENS IN COMMITTED detail (0)
+```
+
+**Zero corpus movement, as predicted** — finding 2 is fail-quiet and no corpus app emits an
+unterminated fence; finding 3's two branches are unreachable on today's corpus. The histogram is
+byte-identical to all three previous rounds. The control keeps
+`{regions:4, mounts:3, ranges:1, leaves:3, emptyLeaves:3}` with **no `unresolved` key**, so the
+committed baseline entry does not churn.
+
+Tier **150 pass / 0 fail** (135 → 150); `detector-validation.test.js` **134** (119 → 134).
+
+### How blind `signatureGained` actually is — measured, for the gap entry only
+
+The coordinator ruled this out of scope and I did not change it. But the residual entry should say
+*which half* is blind, and "value-only gains" is broader than the truth. Measured:
+
+| transition | verdict |
+|---|---|
+| `<input value="">` → `<input value="Ada">` | **GAIN** (caught) |
+| `<input>` with live `.value` set to `"Ada"` | **GAIN** (caught) |
+| `<img>` → `<img src="a.png">` | **GAIN** (caught) |
+| unchecked → checked checkbox | **GAIN** (caught) |
+| `<select>` gains an `<option>` | **GAIN** (caught) |
+| text `"Bob"` → `"Ada"` | **GAIN** (caught) |
+| **`<input value="Bob">` → `<input value="Ada">`** | **BLIND** |
+| **`<img src="a.png">` → `<img src="b.png">`** | **BLIND** |
+
+So the blind set is narrower than "value-only": **every empty→non-empty transition is caught**
+(because `elementCarriesContent` gates on non-emptiness, so the content-element count rises), and
+**text swaps are caught** (per-value counts, not a Set). What is blind is specifically a
+**non-empty → non-empty swap carried by an ATTRIBUTE on a content-candidate element**, where neither
+the element count nor any text node moves. The false-positive therefore needs a seed whose *only*
+visible effect is such a swap **and** all leaf regions empty. Real, and narrow — worth recording in
+the gap at that precision rather than as "value gains".
+
+### Pre-commit subset, final round
+
+```
+23969 pass · 99 skip · 10 todo · 5 fail · 124663 expect() — Ran 24083 tests across 1322 files.
+```
+The same five names as all three earlier rounds (3 self-host smoke, the B5 CSRF guard, 1 unnamed).
+**Zero new**, identical totals.
