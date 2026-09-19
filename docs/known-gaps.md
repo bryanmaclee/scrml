@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 262 |
+| MED | 263 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -16136,3 +16136,47 @@ to emit a client lacking that side-channel, so the mutation proof reds only the 
 that pin as weaker evidence than the rest of the tier's.
 
 — NEW S423-peter (the dispatched agent stated this residual against its own landing rather than reporting the class closed; PA-verified by execution — `GAINED=1` silences the true subject's own shape, `GAINED=0` keeps it firing)
+
+---
+
+### g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed — the F4 loudness guard can be downgraded to green by an unrelated console error, a partial seed failure reddens the compiler for the harness's own miss, and `undefined` takes the fire direction where `null` vetoes — `NEW S423-peter (fourth adversarial pass on the limb-2 landing, #993; all three verified by the reviewer by execution, all three LATENT on today's corpus); MED; open`
+<!-- @gap id=g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js:742,772(the two F4 loudness guards) and compiler/tests/e2e-render-map/render-detectors.js:666(seedMovedTheRender's === null) prov=review:the-fourth-S423-adversarial-pass-which-found-no-correctness-bug-in-the-leaf-ownership-core-and-these-three-in-the-gating-plumbing-around-it -->
+
+**Three paths where D6 produces a verdict from a seed that failed or was never measured.** Filed
+together because they are one class — the gating PLUMBING around the detector, not the region model
+(that residual is [[g-d6-region-emptiness-is-fail-quiet-and-its-gain-conjunct-is-page-global]]) — and
+because #993's own history is that fixing one site of a class and not the others is what re-opened it
+twice.
+
+⚑ **ALL THREE ARE LATENT ON TODAY'S CORPUS, and that is why they were FILED rather than fixed.** The
+landing PA had committed to a stopping rule BEFORE seeing this pass — land unless a finding reds a
+correct corpus cell or makes D6 dark on its subject — and none of them does. Recording the rule here
+because the alternative (re-deciding the bar once the evidence is in) is how a fix round becomes a
+treadmill. The fourth pass also fuzzed **3000 random nestings** against the brute-force oracle with
+**zero mismatches** and found no correctness bug in the leaf/ownership/emptiness core.
+
+1. **`seedMovedTheRender` vetoes on `gainedContent === null` but FIRES on `undefined`** — and both mean
+   *unmeasured*. The "never fabricate a measurement" ruling was applied as a `=== null` check, so any
+   seed report built without the field takes the fire direction: D6 reddens a cell on a measurement
+   that never happened, and `generate-baseline.js` commits the fabricated verdict. Live today only in
+   `detector-validation.test.js`'s own back-compat helper, so it is one forgotten field away in any
+   fourth construction site. **The cheapest pickup on this board: `if (report.gainedContent == null) return true;`.**
+
+2. **The F4 loud push can be silently downgraded back to green.** The no-side-channel branch pushes a
+   `[seed-bridge]` message into `consoleErrors` on the stated premise that a D2 console error reddens
+   the cell. It does not, unconditionally: the `needs-server` arm returns a NON-red state whenever the
+   app is `serverDependent`, no codegen error or hard smell fired, and **any** console error matches
+   `isServerAbsenceMessage` (`.some()`, not all). A server-dependent seeded app that both console-errors
+   on server absence and loses `_scrml_reactive_set` scores `needs-server` — green — and the bridge
+   failure is invisible again, which is the exact fail-open F4 was written to close.
+
+3. **A genuine `set-threw` stays silent whenever any OTHER key landed.** The guard is
+   `!writes.some(w => w.wrote) && writes.some(w => w.reason === "set-threw")`. With a ≥2-key fixture
+   where the key driving the list throws and an unrelated key lands, `seedWasDelivered` is true, no
+   console error is raised, the list renders nothing, and the cell reddens as `renders-empty-with-data`
+   — **blaming the compiler for a seed write the harness itself failed to make.**
+   ⚑ **This one has a NEAR-TERM TRIGGER:** every corpus fixture is single-key *today*, and the next arc
+   on this tier is [[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]], which rewrites
+   those fixtures. Whoever takes that arc should close this first, or keep the fixtures single-key.
+
+— NEW S423-peter (fourth adversarial pass on #993; the pass found NO correctness bug in the leaf/ownership core it was aimed at, and these three in the plumbing around it — recorded with that framing because "the review found three things" reads very differently from "the core held and the edges did not")
