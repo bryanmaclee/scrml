@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 110 |
-| MED | 257 |
+| HIGH | 111 |
+| MED | 261 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1247,6 +1247,7 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js — a multi-statement `_={ … }=` used as a **bare STATEMENT** (rather than as an initializer) lowers to `return (stmt stmt)` and fails codegen with `E-CODEGEN-INVALID-LOGIC`. ⚑ **Filed because the diagnostic itself asks for it** — verbatim: *"This is a compiler defect (codegen produced malformed output). Please report it."* — which makes leaving it unfiled a straightforward instruction-following failure, not a triage judgement. **PA-REPRODUCED by execution on `ff4b37e5`** with flogence's 9-line repro: inside a `<program kind="tool" lang="ts">` §64 tool body, a single-expression `_={ in: { args } args.slice(0) }=` in INITIALIZER position lowers fine, while a following multi-statement `_={ in: { xs } console.log(…) for (…) { … } }=` in STATEMENT position does not — `FAILED — 1 error`. The discriminator is the POSITION, not the foreign block: §23.2.4a's inline value-returning form is an EXPRESSION, and the value-returning lowering wraps its body in `return ( … )`, which is well-formed for one expression and malformed for a statement sequence. §64.2 explicitly admits bare-`_{}` for host I/O in a tool body as a third admitted form, so a tool body is exactly where an author reaches for the statement position — and `console.log` + a `for` loop is the canonical thing they reach for it WITH. Adopter: flogence, hit while mirroring an unrelated fix, worked around then minimised. Fix direction (unverified, for whoever takes it): a `_{}` in statement position should lower as a statement BLOCK rather than through the value-returning `return ( … )` path; the two forms already differ syntactically (`_={ … }=` vs `_{ … }`), so the position may be recoverable at lowering time without new syntax — `NEW S383-bryan (adopter report from flogence PA S36, arrived during the wrap; PA-reproduced by execution); **MED**; open`
 <!-- @gap id=g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-expr.ts,compiler/src/codegen/emit-foreign.ts prov=adopter:flogence-S36-9-line-repro-PA-reproduced-on-ff4b37e5-single-expression-foreign-block-in-initializer-position-lowers-fine-while-a-multi-statement-one-in-statement-position-hits-E-CODEGEN-INVALID-LOGIC-whose-own-text-requests-the-report -->
+> ⚑ **S422-bryan PA-VERIFICATION — STILL REPRODUCES, the locus is NARROWED, and the disposition is INVERTED from the reporter's own recommendation.** PA-EXECUTED on `787d4cb4`: a multi-statement bare `_{}` in a `kind="tool"` `function main` body → exit 1, `E-CODEGEN-INVALID-LOGIC`, emit `…return (console.log("a") console.log("b")); })…`. Single-statement bare `_{}` and the assigned multi-statement form both compile clean. **Locus narrowing (the entry records `searched:` — this is the first positive evidence):** the WORKING single-statement case emits `await (async () => { return (EXPR); })();`, so the lowering wraps foreign-block contents in `return ( … )` **unconditionally**; with two statements that parenthesised expression is invalid JS. The defect is the unconditional `return (` wrapper in the bare-statement path, not the multi-statement handling per se — find the site that emits that IIFE. **⚑ DISPOSITION — the reporter recommended "won't fix, the assigned form is the intended shape, just improve the diagnostic"; that is WRONG and the governing sentence says so.** SPEC §64.2: *"The tool body is an admitted bare-`_{}` context. A CLI/server does its host I/O (`console.log`, `Bun.stdin.stream()`, `Bun.serve`) via bare non-value `_{}` blocks. §23.2.4 (amended S238) admits the `kind="tool"` program body — its top-level `function` bodies incl. `main` — as a valid bare-`_{}` locus."* It names `console.log` as its own example, which is exactly what the adopter wrote. **The bare form is normatively admitted, so this is a genuine codegen defect and `E-CODEGEN-INVALID-LOGIC`'s "This is a compiler defect. Please report it." is CORRECT** — they were right to report it, twice. **⚑ And the reason it was reported twice is OURS:** the gap was filed and never answered. Return leg dropped to flogence S422 (base §10 / S310 — a decision recorded only in our tree exists in exactly one place, and that place is not where the reporter looks). Reported 2026-08-29, re-reported 2026-09-18 after a second real site; both sites are error paths, which is the adopter's own load-bearing observation — the unsupported form is the one authors reach for while writing diagnostics, and a diagnostic is the thing nobody re-runs.
 
 ### g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm — `E-STATE-UNDECLARED` reports a **declared, imported channel cell as undeclared**, but ONLY when the read sits inside a `<match>` arm. **flogence's flagship gate went GREEN 68w/0e → RED 3 errors with ZERO source change on their side** (their `src/` is byte-identical to its last-green state, last `src/` commit `12fe035`, 2026-07-17), so this is a scrml-side regression inside a wide window. **PA-REPRODUCED by execution on `ff4b37e5`** with their 21-line two-file repro: an `export <channel name="probe">` declaring `<stamp> = ""`, imported and mounted in `a.scrml`, read as `${@stamp}` inside a `<match for=Phase>` `<Ready>` arm → `error [E-STATE-UNDECLARED] … stage: TS`, exit 1. ⚑ **PA-BISECTED: it reproduces IDENTICALLY on `a042f3fd`, the S383 boot base, so S383's `symbol-table.ts` extraction did NOT cause it** — checked because scope resolution is exactly where this session touched. **PA-VERIFIED their load-bearing localization rather than relaying it:** the same `${@stamp}` read moved OUTSIDE the match arm compiles **CLEAN**. Their variant matrix (6 compiles, one variable each) isolates the failing conjunction to **cross-file (imported channel) cell · `${…}` interpolation position · inside a `<match>` arm** — the mount is irrelevant (B errors without it), a same-file local cell is clean (E), and an `<each>` body is clean (F), so it is not nested scopes generally. Scope resolution inside a match arm appears not to consult the imported channel's cell table while the same resolution outside the arm, and inside an `<each>` body, does. **TWO COMPANION DEFECTS in the same report, both PA-verified:** ⑵ **the diagnostic carries NO source location** — `stage: TS`, no `-->` and no `line/col`, in the 21-line repro AND in their real 3,700-line `app.scrml`, while every other diagnostic in the same run carries both; localising three errors cost them manual line-by-line bisection. ⑶ **`each in=` reads appear never to be checked at all** — `<each in=@undeclaredName>` with no declaration anywhere is clean, which they surfaced as an observation rather than a claim about intent: in their app `<acks>` and `<heartbeat>` are declared on ADJACENT lines of the same channel and read from the same panel, and `${@heartbeat}` errors while `<each in=@acks>` does not. If the check is meant to be sound that is a coverage gap in the same predicate; whether that position is in scope is a scrml-side ruling. **Unexplained and worth correlating, not yet characterised:** their warning count moved **68 → 221** (`compile`) and **→ 594** (`compile:dir`) on byte-identical source. **Third occurrence of this over-fire pattern for this adopter** (cf. their S33 `E-ASYNC` report, ruled an over-fire and fixed). Not laundered — they restructured no source to go green, per the S33 precedent — `NEW S383-bryan (adopter report from flogence PA S36, arrived during the wrap; PA-reproduced, PA-bisected to clear S383, localization independently verified); **HIGH**; open`
 <!-- @gap id=g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm sev=HIGH status=open locus=searched:compiler/src/type-system.ts,compiler/src/symbol-table.ts(lookupStateCell),compiler/src/codegen/emit-match.ts prov=adopter:flogence-S36-flagship-gate-red-on-byte-identical-source-PA-reproduced-on-ff4b37e5-and-PA-bisected-to-a042f3fd-so-not-caused-by-S383-and-variant-C-outside-the-arm-compiles-clean -->
@@ -15841,3 +15842,210 @@ All three are **token-count mismatches**, asserted at `compiler/tests/self-host/
 
 — NEW S409-bryan (measured while taking the self-host coverage disposition routed by S411-peter; the with/without-dist comparison is what establishes these are repo state, not environment state)
 <!-- @gap id=g-selfhost-tokenizelogic-and-css-parity-token-count-mismatch sev=MED status=open locus=compiler/self-host/tab.scrml(tokenizeLogic+tokenizeCSS)+compiler/src/tokenizer.js(the-parity-oracle)+compiler/tests/self-host/tab.test.js:72(assertSameTokens-the-assertion-site) prov=empirical:S409-measured-by-running-the-tier-with-and-without-the-gitignored-dist-identical-name-set -->
+
+---
+
+## §S422 — gaps filed S422 (2026-09-18, bryan; adopter re-report from flogence S45, diagnosed by execution on two baselines)
+
+### G-LINE-COMMENT-IN-A-FUNCTION-BODY-TRIPS-THE-BARE-SLASH-CLOSER-HEURISTIC — a `//` comment whose next non-whitespace character is `<` fires `E-SYNTAX-050` and blames the `<program>` closer — `NEW S422; MED; open`
+
+A `//` line comment inside a **function body** refuses the program when a `/` in that comment is
+immediately followed (whitespace-skipped) by `<`. The commonest instance is the comment marker's
+**own second slash**, so `// <tag>` fires while `// x <tag>` does not.
+
+**Reproduced by execution on `787d4cb4`, 16 cases, and on the 2026-09-07 baseline `5e6842ee`, identically.**
+
+| comment, own line inside a `function` body | result |
+|---|---|
+| `// <tag>` · `// <-- arrow` · `// < alone` · `// refs/pa/event/<N>` | **E-SYNTAX-050** |
+| `// x <tag>` · `// note: see <N> below` | clean |
+| `// path a/<N> here` | **E-SYNTAX-050** (a real path slash, not the marker) |
+| `// </close>` · `// a < b` | clean |
+| any of the above at **program level** (outside a function body) | clean |
+
+⚑ **The trigger is NOT "`<` followed by a non-space"**, which is how both adopter filings state it.
+It is **a `/` whose next non-whitespace character is `<` and is not `</`**. `// note: see <N> below`
+contains `<` + non-space and compiles; `// <tag>` does not. The stated rule mispredicts both.
+
+⚑ **NOT a regression and NOT a widening.** The 2026-09-18 re-report claims a case that passed on
+2026-09-07 now fails. It does not: all 16 cases behave **identically** on `5e6842ee` (2026-09-07) and
+`787d4cb4`. The two adopter measurements differ because they tested different POSITIONS — program
+level (inert) in September, function body (fires) today — not because the compiler changed.
+
+**Mechanism, traced not searched.** `block-splitter.js` scans markup/state text content for a legacy
+bare-`/` closer: it skips whitespace after a `/` and fires when the next non-ws char is `<` and the
+char after that is not `/`. Comment spans are not masked before this scan, so the `//` marker itself
+satisfies the predicate. Program level is inert because `topFrame()` is not `markup`/`state` there, so
+the whole branch is skipped.
+
+**Governing sentence — outcome (1), quoted.** SPEC §27.1: *"`//` is a single-line comment. It is valid
+in all scrml contexts."* And §27.2: *"The `//` form is universal and works in all contexts. **A
+developer who uses only `//` will never encounter a comment syntax error.**"* The second sentence is a
+direct normative promise this behaviour breaks. Direction is therefore **newly-accepting TOWARD the
+contract** — conformance restoration per base §8, not a widening.
+
+**Secondary defect, and per both filings the expensive half:** the diagnostic names the wrong
+construct and points one character early. On the repro it reports col 33 — the `/` in `event/` — when
+the cause is the `<` at col 34, and the message reads *"Use `</>` to close `<program>`"* about a
+well-formed closer. The author is sent to the bottom of the file. flogence spent two compile cycles
+on the path before testing the bracket, and a full bisect on the September instance.
+
+⚑ **SEVENTH member of a family that is being fixed one position at a time** — the FORK-RULE row-4
+shape (root beats position; a per-position fix is a bug generator). Siblings:
+[[g-markup-comment-angle-bracket-parsed-as-tag]] (markup section, fixed) ·
+[[g-blocksplitter-comment-span-not-opaque]] (`<!-- -->`, resolved) ·
+[[g-line-comment-truncates-the-rest-of-a-default-logic-body]] (HIGH, open) ·
+[[g-default-logic-comment-flushes-a-run-severing-a-statement-from-its-declaration]] (HIGH, open) ·
+[[g-state-block-bare-write-scan-has-no-comment-state]] (open) ·
+[[g-markup-body-const-at-scan-has-no-comment-state]] (open). **The root is that `//` spans are not
+masked before ANY of these scanners run; each landing has masked them for one scanner.**
+
+**Adopter cost, stated by them:** reported 2026-09-07, re-reported 2026-09-18 after a second site.
+Workaround is cosmetic (remove the brackets) so nothing is blocked — but the September drop's own
+documented workaround (*"put it on its own line"*) is **falsified** by this measurement and is sitting
+in their outgoing ledger as advice.
+
+— NEW S422-bryan (flogence S45 re-report; PA-diagnosed by execution on two baselines, 16 cases)
+<!-- @gap id=g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic sev=MED status=open locus=compiler/src/block-splitter.js:3938-3968(the legacy bare-slash-closer heuristic; comment spans are not masked before this scan — TRACED by reading the fire site, not searched) prov=spec:§27.2-a-developer-who-uses-only-slash-slash-will-never-encounter-a-comment-syntax-error -->
+
+### G-BROWSER-TIER-SORT-IS-INERT-BUN-TEST-IGNORES-ARGV-ORDER — #983's `.sort()` does not order anything; `bun test` applies its own file order regardless of argv — `NEW S422; MED; open`
+
+#983 landed on 2026-09-18 to "run the tier in SORTED file order, not filesystem order", on the stated
+mechanism that sorting "pins tier order to a repo property in every environment". **`bun test` does not
+execute files in the order given on argv**, so the sort is inert and the stated mechanism does not hold.
+
+**PA-REPRODUCED BY EXECUTION on `787d4cb4` / bun 1.3.14** (not carried on the reviewer's word):
+
+```sh
+bun test --reporter=junit --reporter-outfile=/tmp/o1.xml \
+  compiler/tests/browser/browser-{bind-value,class-binding,components,conditionals}.test.js >/dev/null 2>&1
+bun test --reporter=junit --reporter-outfile=/tmp/o2.xml \
+  compiler/tests/browser/browser-{conditionals,components,class-binding,bind-value}.test.js >/dev/null 2>&1
+grep -oE 'testsuite name="compiler[^"]+"' /tmp/o1.xml /tmp/o2.xml
+```
+
+Both orderings print `conditionals, bind-value, components, class-binding` — **neither sorted nor
+reversed nor argv-order**. bun applies an internal order independent of argv.
+
+**What DOES hold, measured:** the two HARNESS ERROR guards #983 added are real. The narrowing's §8
+population was re-measured rather than trusted — 105 entries, 104 `*.test.js`, 1 `FAILURE-BASELINE.json`,
+0 subdirs, 0 symlinks. `browser-baseline.ts --check` PASS, 48 asserted.
+
+⚑ **OPEN, and it is what the PR's goal now rests on:** whether bun's internal order is stable *across bun
+versions and CI runner images*. Proven here only that it ignores argv and is stable across runs, directory
+names and creation order on **one** bun version on **one** box. That is not the property #983 needed.
+
+— NEW S422-bryan (surfaced by the review-floor drain of #983; PA-reproduced independently)
+<!-- @gap id=g-browser-tier-sort-is-inert-bun-test-ignores-argv-order sev=MED status=open locus=scripts/browser-baseline.ts(the .sort() call — inert; the two HARNESS ERROR guards in the same landing are sound) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-argv-forward-and-argv-reversed-yield-byte-identical-junit-testsuite-order -->
+
+### G-HEADING-DRIFT-RULE-REJECTS-LEGITIMATE-NOTE-SEGMENTS-AND-FILES-ITS-OWN-MISS-AS-CORPUS — #979's round-2 structural rule drops a real status tail followed by a note, then reports the drop as "no status tail" — `NEW S422; MED; open`
+
+#979 (S420) fixed a truncation in the heading/marker drift probe. **Its round-2 rule ships a third
+truncation.** The rule requires the status to be the last `;`-segment preceded by a severity segment, which
+cannot distinguish trailing **prose** from a legitimate trailing **note** segment — so it rejects both.
+
+**PA-REPRODUCED BY EXECUTION on `787d4cb4`:**
+
+```sh
+bun -e 'const {headingMarkerDrift}=await import("./scripts/state.ts");
+const M="<!"+"-- @gap id=g-x sev=HIGH status=resolved --"+">\n";
+for (const [n,h] of [["CONTROL","### g-x — s — `NEW S1; HIGH; open`\n"],
+  ["note segment","### g-x — s — `NEW S1; HIGH; open`; S360-peter VERIFIED\n"],
+  ["semicolon in parenthetical","### g-x — s — `NEW S1; HIGH; open (pre-existing; absent)`\n"],
+  ["one-word note","### g-x — s — `NEW S1; HIGH; open`; BRANCH-conditional\n"]]) {
+  const r=headingMarkerDrift(h+M);
+  console.log(`drift=${r.drift.length} inspected=${r.inspected} noTail=${r.noTail} :: ${n}`)}'
+```
+
+Control → `drift=1 inspected=1 noTail=0`. All three live shapes → `drift=0 inspected=0 **noTail=1**`.
+
+⚑ **The dropped rows land in `noTail`, which the scope line renders as "no status tail" — the instrument
+attributing its own miss to the corpus.** That is precisely the pathology round 2 was written to end,
+recreated one level away. Shipped probe output, measured at `787d4cb4` BEFORE this section was added (the figures move as entries are filed — pin them, do not re-quote live):
+`45 DRIFT · 546 comparable · 452 no status tail · 1016 headings [WARN-only — not gated]`.
+
+**Why it got through:** the round-2 test (`marker-parser-pins.test.js:170`) has three *prose* controls and
+**no** control asserting that a real status tail followed by a legitimate note segment is still inspected —
+so it passes identically whether the rule discriminates or simply rejects every multi-segment tail.
+
+**CARRIED AS THE REVIEWER'S CENSUS, not re-derived here:** that the true reading is **61 DRIFT / 620
+comparable** (75 headings dropped, 74 with a comparable marker, 16 real drift), with missed rows at
+L1088 L1103 L1292 L1309 L1318 L2488 L2744 L3362 L3454 L3960 L4698 L4729 L5611 L5644 L11600 L11819.
+The mechanism and the shipped numbers are PA-verified; the 61/620 figure is not.
+
+— NEW S422-bryan (surfaced by the review-floor drain of #979; mechanism PA-reproduced, scale carried)
+<!-- @gap id=g-heading-drift-rule-rejects-legitimate-note-segments-and-files-its-own-miss-as-corpus sev=MED status=open locus=scripts/state.ts:headingMarkerDrift(the last-;-segment status rule)+compiler/tests/unit/marker-parser-pins.test.js:170(the test has prose controls only and no note-segment control) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-control-inspects-and-three-live-note-shapes-all-return-noTail -->
+
+### G-MCP-AUTOFLIP-IS-BUILD-SCOPED-SO-ONE-FILES-OPT-IN-DRAGS-EVERY-ENTRY-POINT-THROUGH-THE-ROUTE-SPLITTER — one `<program mcp>` file flips `--emit-per-route` for the WHOLE directory build, so unrelated `kind="tool"` programs get route-split and warn — `NEW S422; MED; open`
+
+A single file carrying the `<program mcp>` opt-in flips `--emit-per-route` ON, and in a **directory**
+build that flip applies to **every entry point in the batch**. CLI tools that have nothing to do with
+MCP, routes or pages are run through the route-splitter and draw `W-CG-CHUNK-EMPTY`.
+
+**PA-REPRODUCED BY EXECUTION on `f95321bf`, with the reporter's own control:**
+
+| batch | `W-CG-CHUNK-EMPTY` |
+|---|---|
+| two `kind="tool"` programs, compiled as a directory, **no mcp file present** | **0** |
+| the same two tools + one unrelated `<program mcp>` file in the directory | **2** (100%) |
+
+Nothing about the tools changes between the two runs. The adopter measured the same shape at scale:
+**12 of 12** `kind="tool"` programs firing, 0 of 9 everything else — no partial case, cleanly by
+program kind. They bisected it to five rows including the isolating control; we reproduced rows C and E.
+
+**Two limbs, and the first is the interesting one.**
+
+1. **The auto-flip's blast radius is the whole build, not the opting-in program.** The surfacing line
+   at `compile.js:636-643` exists, per its own comment, so *"adopters don't deploy a build with hidden
+   auto-flips"* — a good instinct, and it is what let the adopter find this. The gap is that the flip
+   is announced **per-build and scoped per-build**, while a reader of that line naturally assumes it
+   describes the program that opted in.
+2. **Once dragged in, the check can never NOT fire on a tool.** A `kind="tool"` program has no
+   components, no routes and no pages, so its admission count is structurally zero — the chunk-empty
+   check has no notion of program kind and cannot be satisfied.
+
+⚑ **The diagnostic recommends damaging correct code** (the adopter's words, and they are right): a
+tool warned for having an empty initial chunk invites an author to add routing it must not have.
+
+**Nothing is blocked** — their gate is otherwise green (`compile` exit 0, `compile:dir` exit 0). The
+cost is 12 false warnings per build on a flagship adopter, standing since 2026-09-07.
+
+⚑ **Filed 11 days late.** The report arrived 2026-09-07 `needs: action` and sat unread in
+`handOffs/incoming/` across four sessions. Related: [[g-outgoing-staged-has-no-promotion-step-so-adopter-replies-are-never-delivered]] — the same channel failing in the other direction.
+
+— NEW S422-bryan (flogence-PA S38 report of 2026-09-07; PA-reproduced with the control at S422)
+<!-- @gap id=g-mcp-autoflip-is-build-scoped-so-one-files-opt-in-drags-every-entry-point-through-the-route-splitter sev=MED status=open locus=compiler/src/commands/compile.js:636-643(the auto-flip surfacing line — announced per-build and scoped per-build)+compiler/src/codegen/route-splitter.ts(the admission count has no notion of program kind) prov=adopter:flogence-S38-bisection-five-rows-with-an-isolating-control-PA-reproduced-rows-C-and-E-at-f95321bf -->
+
+### G-BLOCK-ANALYSIS-SIDECAR-IS-BASENAME-FLAT-SO-SAME-NAMED-PAGES-SILENTLY-OVERWRITE-EACH-OTHER — `--emit-block-analysis` writes `<basename>.block-analysis.json` into the output ROOT, so a multi-page app loses one sidecar per basename collision, silently — `NEW S422; HIGH; open`
+
+`--emit-block-analysis` emits one `<basename>.block-analysis.json` per source **into the output root,
+flat**, while the compiled artifacts themselves are written **nested**, mirroring the source tree. So
+two pages with the same filename in different directories produce two artifacts and **one** sidecar.
+The later file wins. No diagnostic, exit 0.
+
+**PA-REPRODUCED BY EXECUTION on `f95321bf`, `examples/23-trucking-dispatch`:**
+
+| measure | value |
+|---|---|
+| source `.scrml` files (excl. `dist/`) | **36** |
+| colliding basenames | `home` ×2 · `load-detail` ×3 · `profile` ×2 |
+| compiled artifact files (nested — `customer/home.*`, `driver/home.*`, `dispatch/load-detail.*` …) | **115, all distinct — no loss** |
+| `*.block-analysis.json` sidecars (flat, output root) | **32** |
+
+7 colliding sources collapse to 3 names; **4 sidecars are silently overwritten** (36 − 4 = 32, exact).
+
+⚑ **The compiled output is NOT affected** — this is sidecar-only. An earlier framing of this as
+"artifact filenames are basename-flattened" was **wrong and was corrected by reproduction**; the
+artifacts nest correctly. The count (36 → 32) was right; the scope was not.
+
+⚑ **Why HIGH rather than MED:** the sidecar has a live external consumer. flogence builds code
+navigation on it and has an open ask (#5, 2026-09-18) to extend it. Silent loss of 4 of 36 files means
+their tooling is missing whole pages with no signal — and the `file` field INSIDE each sidecar is
+correct, so the loss is invisible unless you count files.
+
+**Why it has not been caught:** both in-repo consumers (`scripts/dock.ts`, `scripts/dock-health.ts`)
+compile one file at a time into a temp dir, which dodges the collision entirely. A whole-project
+compile does not.
+
+— NEW S422-bryan (surfaced adjacent to the oracle-ask-5 feasibility read; PA-reproduced and RE-SCOPED — the reported scope did not survive reproduction, the count did)
+<!-- @gap id=g-block-analysis-sidecar-is-basename-flat-so-same-named-pages-silently-overwrite-each-other sev=HIGH status=open locus=searched:compiler/src/commands/compile.js,compiler/src/block-analysis.ts — the sidecar write path that joins outputDir to the basename rather than to the source-relative path; the deciding site was NOT traced prov=empirical:PA-reproduced-by-execution-at-f95321bf-36-sources-115-nested-artifacts-but-only-32-flat-sidecars-with-7-colliding-basenames-collapsing-to-3 -->
