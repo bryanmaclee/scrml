@@ -1440,3 +1440,33 @@ bun -e 'const {parseChunkCellScopes,applySeed}=await import("./compiler/tests/e2
 bun run compiler/src/cli.js compile examples/09-error-handling.scrml -o /tmp/x/   # E-ERROR-009 at :95:34 — FAILED, 4 errors
 bun scripts/state.ts --check                                                      # exit 1 — @generated:recent-sessions (master-list.md) is stale
 ```
+
+---
+
+## ⛑ S422 SELF-CORRECTION — three figures in the S422 floor-drain section above are stale, and one published repro no longer reproduces
+
+Surfaced by an adversarial pass over the S422 filing branch itself. Recorded here rather than edited
+in place, because the ledger is append-only and the stale readings are part of the record.
+
+1. **`bun scripts/state.ts --check # exit 1 — @generated:recent-sessions stale` (`:1441`, and the prose
+   at `:1338`) NO LONGER REPRODUCES.** It exits **0**, `PASS — all @generated sections current`. The
+   anchor was regenerated in `ba60b52f` ("regen the @generated sections staled by the S422 filing"),
+   an ancestor of this very branch — i.e. **the session published a live-condition repro and then
+   fixed the condition two commits later without updating the repro.** The sibling condition in the
+   same block (`examples/09-error-handling.scrml`, `E-ERROR-009` at `:95:34`) DOES still reproduce.
+
+2. **`1016 headings` (`:1324`, `:1408`) is stale.** The S422 filings themselves moved it — first to
+   1021, and the heading-format repair in this branch moves `comparable`/`noTail` again. **Pin such a
+   figure to the SHA it was measured at, or do not quote it.** The `75 carry a bare tail` figure is
+   unaffected.
+
+3. **The `#978` marker's `probe=FOUR-FINDINGS-ALL-REPRODUCED…` under-counts by one** — five findings
+   are enumerated in the body (F1 MED, F2 MED, F3 LOW, F4 LOW, F5 LOW). The durable marker is the
+   thing a future reader greps, so the count in it is the one that matters.
+
+⚑ **The generalizable one is #1.** A published reproduction command is a claim with a timestamp. This
+session emitted one and invalidated it from inside the same branch, which is the corpus-ouroboros in
+miniature — and it was caught only because an adversarial pass executed every published command
+verbatim instead of reading them. **Execute your own repros before landing them.**
+
+— S422-bryan, self-correction after an adversarial pass on the filing branch

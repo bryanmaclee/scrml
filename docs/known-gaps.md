@@ -15847,7 +15847,7 @@ All three are **token-count mismatches**, asserted at `compiler/tests/self-host/
 
 ## §S422 — gaps filed S422 (2026-09-18, bryan; adopter re-report from flogence S45, diagnosed by execution on two baselines)
 
-### G-LINE-COMMENT-IN-A-FUNCTION-BODY-TRIPS-THE-BARE-SLASH-CLOSER-HEURISTIC — a `//` comment whose next non-whitespace character is `<` fires `E-SYNTAX-050` and blames the `<program>` closer — `NEW S422; MED`
+### G-LINE-COMMENT-IN-A-FUNCTION-BODY-TRIPS-THE-BARE-SLASH-CLOSER-HEURISTIC — a `//` comment whose next non-whitespace character is `<` fires `E-SYNTAX-050` and blames the `<program>` closer — `NEW S422; MED; open`
 
 A `//` line comment inside a **function body** refuses the program when a `/` in that comment is
 immediately followed (whitespace-skipped) by `<`. The commonest instance is the comment marker's
@@ -15908,7 +15908,7 @@ in their outgoing ledger as advice.
 — NEW S422-bryan (flogence S45 re-report; PA-diagnosed by execution on two baselines, 16 cases)
 <!-- @gap id=g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic sev=MED status=open locus=compiler/src/block-splitter.js:3938-3968(the legacy bare-slash-closer heuristic; comment spans are not masked before this scan — TRACED by reading the fire site, not searched) prov=spec:§27.2-a-developer-who-uses-only-slash-slash-will-never-encounter-a-comment-syntax-error -->
 
-### G-BROWSER-TIER-SORT-IS-INERT-BUN-TEST-IGNORES-ARGV-ORDER — #983's `.sort()` does not order anything; `bun test` applies its own file order regardless of argv — `NEW S422; MED`
+### G-BROWSER-TIER-SORT-IS-INERT-BUN-TEST-IGNORES-ARGV-ORDER — #983's `.sort()` does not order anything; `bun test` applies its own file order regardless of argv — `NEW S422; MED; open`
 
 #983 landed on 2026-09-18 to "run the tier in SORTED file order, not filesystem order", on the stated
 mechanism that sorting "pins tier order to a repo property in every environment". **`bun test` does not
@@ -15938,7 +15938,7 @@ names and creation order on **one** bun version on **one** box. That is not the 
 — NEW S422-bryan (surfaced by the review-floor drain of #983; PA-reproduced independently)
 <!-- @gap id=g-browser-tier-sort-is-inert-bun-test-ignores-argv-order sev=MED status=open locus=scripts/browser-baseline.ts(the .sort() call — inert; the two HARNESS ERROR guards in the same landing are sound) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-argv-forward-and-argv-reversed-yield-byte-identical-junit-testsuite-order -->
 
-### G-HEADING-DRIFT-RULE-REJECTS-LEGITIMATE-NOTE-SEGMENTS-AND-FILES-ITS-OWN-MISS-AS-CORPUS — #979's round-2 structural rule drops a real status tail followed by a note, then reports the drop as "no status tail" — `NEW S422; MED`
+### G-HEADING-DRIFT-RULE-REJECTS-LEGITIMATE-NOTE-SEGMENTS-AND-FILES-ITS-OWN-MISS-AS-CORPUS — #979's round-2 structural rule drops a real status tail followed by a note, then reports the drop as "no status tail" — `NEW S422; MED; open`
 
 #979 (S420) fixed a truncation in the heading/marker drift probe. **Its round-2 rule ships a third
 truncation.** The rule requires the status to be the last `;`-segment preceded by a severity segment, which
@@ -15961,7 +15961,7 @@ Control → `drift=1 inspected=1 noTail=0`. All three live shapes → `drift=0 i
 
 ⚑ **The dropped rows land in `noTail`, which the scope line renders as "no status tail" — the instrument
 attributing its own miss to the corpus.** That is precisely the pathology round 2 was written to end,
-recreated one level away. Shipped probe output confirmed byte-for-byte here:
+recreated one level away. Shipped probe output, measured at `787d4cb4` BEFORE this section was added (the figures move as entries are filed — pin them, do not re-quote live):
 `45 DRIFT · 546 comparable · 452 no status tail · 1016 headings [WARN-only — not gated]`.
 
 **Why it got through:** the round-2 test (`marker-parser-pins.test.js:170`) has three *prose* controls and
@@ -15976,7 +15976,7 @@ The mechanism and the shipped numbers are PA-verified; the 61/620 figure is not.
 — NEW S422-bryan (surfaced by the review-floor drain of #979; mechanism PA-reproduced, scale carried)
 <!-- @gap id=g-heading-drift-rule-rejects-legitimate-note-segments-and-files-its-own-miss-as-corpus sev=MED status=open locus=scripts/state.ts:headingMarkerDrift(the last-;-segment status rule)+compiler/tests/unit/marker-parser-pins.test.js:170(the test has prose controls only and no note-segment control) prov=empirical:PA-reproduced-by-execution-at-787d4cb4-control-inspects-and-three-live-note-shapes-all-return-noTail -->
 
-### G-MCP-AUTOFLIP-IS-BUILD-SCOPED-SO-ONE-FILES-OPT-IN-DRAGS-EVERY-ENTRY-POINT-THROUGH-THE-ROUTE-SPLITTER — one `<program mcp>` file flips `--emit-per-route` for the WHOLE directory build, so unrelated `kind="tool"` programs get route-split and warn — `NEW S422; MED`
+### G-MCP-AUTOFLIP-IS-BUILD-SCOPED-SO-ONE-FILES-OPT-IN-DRAGS-EVERY-ENTRY-POINT-THROUGH-THE-ROUTE-SPLITTER — one `<program mcp>` file flips `--emit-per-route` for the WHOLE directory build, so unrelated `kind="tool"` programs get route-split and warn — `NEW S422; MED; open`
 
 A single file carrying the `<program mcp>` opt-in flips `--emit-per-route` ON, and in a **directory**
 build that flip applies to **every entry point in the batch**. CLI tools that have nothing to do with
@@ -16016,7 +16016,7 @@ cost is 12 false warnings per build on a flagship adopter, standing since 2026-0
 — NEW S422-bryan (flogence-PA S38 report of 2026-09-07; PA-reproduced with the control at S422)
 <!-- @gap id=g-mcp-autoflip-is-build-scoped-so-one-files-opt-in-drags-every-entry-point-through-the-route-splitter sev=MED status=open locus=compiler/src/commands/compile.js:636-643(the auto-flip surfacing line — announced per-build and scoped per-build)+compiler/src/codegen/route-splitter.ts(the admission count has no notion of program kind) prov=adopter:flogence-S38-bisection-five-rows-with-an-isolating-control-PA-reproduced-rows-C-and-E-at-f95321bf -->
 
-### G-BLOCK-ANALYSIS-SIDECAR-IS-BASENAME-FLAT-SO-SAME-NAMED-PAGES-SILENTLY-OVERWRITE-EACH-OTHER — `--emit-block-analysis` writes `<basename>.block-analysis.json` into the output ROOT, so a multi-page app loses one sidecar per basename collision, silently — `NEW S422; HIGH`
+### G-BLOCK-ANALYSIS-SIDECAR-IS-BASENAME-FLAT-SO-SAME-NAMED-PAGES-SILENTLY-OVERWRITE-EACH-OTHER — `--emit-block-analysis` writes `<basename>.block-analysis.json` into the output ROOT, so a multi-page app loses one sidecar per basename collision, silently — `NEW S422; HIGH; open`
 
 `--emit-block-analysis` emits one `<basename>.block-analysis.json` per source **into the output root,
 flat**, while the compiled artifacts themselves are written **nested**, mirroring the source tree. So
