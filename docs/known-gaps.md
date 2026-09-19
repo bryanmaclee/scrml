@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 110 |
+| HIGH | 111 |
 | MED | 261 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -16015,3 +16015,37 @@ cost is 12 false warnings per build on a flagship adopter, standing since 2026-0
 
 — NEW S422-bryan (flogence-PA S38 report of 2026-09-07; PA-reproduced with the control at S422)
 <!-- @gap id=g-mcp-autoflip-is-build-scoped-so-one-files-opt-in-drags-every-entry-point-through-the-route-splitter sev=MED status=open locus=compiler/src/commands/compile.js:636-643(the auto-flip surfacing line — announced per-build and scoped per-build)+compiler/src/codegen/route-splitter.ts(the admission count has no notion of program kind) prov=adopter:flogence-S38-bisection-five-rows-with-an-isolating-control-PA-reproduced-rows-C-and-E-at-f95321bf -->
+
+### G-BLOCK-ANALYSIS-SIDECAR-IS-BASENAME-FLAT-SO-SAME-NAMED-PAGES-SILENTLY-OVERWRITE-EACH-OTHER — `--emit-block-analysis` writes `<basename>.block-analysis.json` into the output ROOT, so a multi-page app loses one sidecar per basename collision, silently — `NEW S422; HIGH`
+
+`--emit-block-analysis` emits one `<basename>.block-analysis.json` per source **into the output root,
+flat**, while the compiled artifacts themselves are written **nested**, mirroring the source tree. So
+two pages with the same filename in different directories produce two artifacts and **one** sidecar.
+The later file wins. No diagnostic, exit 0.
+
+**PA-REPRODUCED BY EXECUTION on `f95321bf`, `examples/23-trucking-dispatch`:**
+
+| measure | value |
+|---|---|
+| source `.scrml` files (excl. `dist/`) | **36** |
+| colliding basenames | `home` ×2 · `load-detail` ×3 · `profile` ×2 |
+| compiled artifact files (nested — `customer/home.*`, `driver/home.*`, `dispatch/load-detail.*` …) | **115, all distinct — no loss** |
+| `*.block-analysis.json` sidecars (flat, output root) | **32** |
+
+7 colliding sources collapse to 3 names; **4 sidecars are silently overwritten** (36 − 4 = 32, exact).
+
+⚑ **The compiled output is NOT affected** — this is sidecar-only. An earlier framing of this as
+"artifact filenames are basename-flattened" was **wrong and was corrected by reproduction**; the
+artifacts nest correctly. The count (36 → 32) was right; the scope was not.
+
+⚑ **Why HIGH rather than MED:** the sidecar has a live external consumer. flogence builds code
+navigation on it and has an open ask (#5, 2026-09-18) to extend it. Silent loss of 4 of 36 files means
+their tooling is missing whole pages with no signal — and the `file` field INSIDE each sidecar is
+correct, so the loss is invisible unless you count files.
+
+**Why it has not been caught:** both in-repo consumers (`scripts/dock.ts`, `scripts/dock-health.ts`)
+compile one file at a time into a temp dir, which dodges the collision entirely. A whole-project
+compile does not.
+
+— NEW S422-bryan (surfaced adjacent to the oracle-ask-5 feasibility read; PA-reproduced and RE-SCOPED — the reported scope did not survive reproduction, the count did)
+<!-- @gap id=g-block-analysis-sidecar-is-basename-flat-so-same-named-pages-silently-overwrite-each-other sev=HIGH status=open locus=searched:compiler/src/commands/compile.js,compiler/src/block-analysis.ts — the sidecar write path that joins outputDir to the basename rather than to the source-relative path; the deciding site was NOT traced prov=empirical:PA-reproduced-by-execution-at-f95321bf-36-sources-115-nested-artifacts-but-only-32-flat-sidecars-with-7-colliding-basenames-collapsing-to-3 -->
