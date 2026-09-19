@@ -76,6 +76,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-046 | **COMPLETE (ADVISORY) dPA 2026-09-15 — awaiting bryan + the flogence PA; lane: flogence, NOT a scrml language question.** ★★ **CANNOT BE RULED AS FRAMED — three of the item's own premises are false by execution.** ⚑ **The crux is falsified (6/6 voices):** the item rests on *"the graph is append-only; nothing is retracted; moving HEAD changes nothing about the world"* — but `--untouch` runs `DELETE FROM gedge` (*"inference must be REVERSIBLE"*) and `--move` DELETEs+re-adds the parent edge behind a cycle guard. **Only `utterance` is append-only; the lever is already installed.** The axis that survives is **derivable-vs-extrinsic**, not read-vs-write — *if `--path` were a materialised cache, moving HEAD would need to write, with no change to the cursor's semantics.* ⚑ **"There is exactly ONE cursor" is FALSE — `gcursor` holds THREE rows** (`arc:jill-story|t9`, `arc:dispatch-async|t9`, `HEAD|t55`). **The PA's "unargued" ONE-STORE-TWO-CURSORS pole was BUILT here and RETIRED at S39** for silent desync under `--move`; the fix deleted the code and **left the data**. Five of six voices ranked this above jj and Fossil as precedent. **The S39 fix is structurally the decision NOT to build an undo-tree** — computed state can be recomputed, never restored. ★★ **THE PANEL'S OWN Q2 NUMBER IS WRONG BY THREE ORDERS AND THE dPA MEASURED IT.** Four of six built Q2 on *"no `dst` index → full scan per recursion step"*; the index claim is true, the conclusion is false — SQLite builds an `AUTOMATIC PARTIAL COVERING INDEX` once per query. **Measured: 100k edges/depth 100k = 0.146s; 1M edges/depth 1M = 1.73s; the recommended index buys 1.6×, not 10-100×.** The real ceiling is the **`cross` self-join in `--path`** (cost = Σ entity degree, which an edit history maximises) — **it did not finish at 10k nodes in ten minutes.** Located by ONE voice only. ⚑ **Q4 is NOT "nothing" — five losses**, strongest being **retention-policy independence** (conceded first by the ONE pole) and the **id-namespace collision that breaks `--import` for the HUMAN half on day one for the second box**. And the headline win of ONE *"this edit happened during this turn"* is **one `--link` edge** — available without unification. ★★ **NO PROBLEM STATEMENT.** Every other verb in `capture-tool.scrml` was born from a measured defect; this is the first proposal justified by a resemblance. bryan parked it himself (*"ask me to expound when it becomes pressing"*) — the item was banked without the expounding. **Return leg = ONE question: which nouns get versioned — (a) text buffers [item dissolves] · (b) repo changes [**already substantially built**: `vcs_save`+`project_vcs` written from live jj state, and `docs/giti-mount.md` slice 3 already designs the `delta_log ↔ vcs_save` join → *"one history"*] · (c) the graph itself [the real question, and small]** — plus *name the incident you wanted back.* ⚑ **THREE DEFECTS, TWO NEW, file regardless of the ruling:** (1) **dPA-CONFIRMED BY EXECUTION** — `addEdge` is `INSERT OR IGNORE`, auto-touch writes `verified=0` and `--touch` writes `verified=1`, so **an operator's declaration over an inferred edge is a SILENT NO-OP and the edge stays `[inferred]` forever**, defeating the one column the design is sold on; (2) `--link` has **zero validation** and can mint the S39 diamond today; (3) the known `--touch`/`--untouch` normalisation split (`e:e:cockpit`), still unfixed. ⚑ **CONVERGENCE (5/6, five traditions): the first build step is a precondition under EVERY pole including NEITHER — make the mutating verbs record what they DESTROY.** `--move X A` then `--move X B` leaves no trace A existed. *A tool whose own comment says "inference must be REVERSIBLE" has a reverse verb that is itself irreversible.* **NOT RATIFIED — RUN-not-RATIFY.** | banked flogence S42 2026-09-15 (bryan: "lets do the undo-tree arc-graph dpa") · drained 2026-09-15 (advisory; bryan's + the flogence PA's call outstanding) · ⚑ **this row did not exist until the dPA added it** — the item was banked with no table row, so `dpa-debt` never counted it (the 5th witnessed obligation-vs-probe mismatch on this file) |
 | dpa-047 | **COMPLETE (ADVISORY) dPA 2026-09-19 — awaiting bryan; THREE calls, §7 of the artifact.** ⚑ **CALL 2 IS NOT A DESIGN QUESTION:** §50.8.5 already mandates `E-ASSIGN-004` at STATEMENT position, in bryan's own words (*"Use `let`…"*), and it has NEVER fired — scrml ships a crashing binary at **exit 0** for that exact shape. ★★ **The asymmetry settles ruling 1:** §50.8.4 says "statement" ZERO times; §50 extended ONE code to statement form and pointedly not its sibling → ruling 1 IS a widening past its governing sentence. **Narrow it; build E-ASSIGN-004 instead** (~1h SPEC work owed, since §34's row still calls the code expression-only). ★★ **Call 1 UNRULED** — SPEC SILENT, §7.2 contradicts §50.8.4's Note, semantics live in a parser comment; and bryan's recollection conflicts with **his own S418 ruling 1** (the middle option was never on either ballot). ★★ **Call 3 MEASURED:** **195 bindings / 138 files as a FLOOR**, **≥15.4% of those rejections PROVABLY WRONG**, densest in `examples/` (21.3%) not fixtures, ~3x tail hidden in the non-compiling self-host tree; `_{}` blast radius **ZERO** but three other blind spots live, all ONE nested-container mechanism. **The opt-out reasoning INVERTS** — refuse the FLAG, grant the TOKEN, which reconciles S422 with S418. S418's "INERT" no longer holds. ★★ Whole `E-ASSIGN` family has zero producers; three fixtures assert codes that never fire. | **bryan** — three calls; dPA-produced ADVISORY, awaiting his ruling; artifact → `scrml-support/docs/deep-dives/bare-assignment-const-and-unused-binding-dpa-047-2026-09-19.md`; queue+delta-log edits UNCOMMITTED for the PA |
 | dpa-048 | **COMPLETE (ADVISORY) dPA 2026-09-19 — awaiting bryan; AXIOM-ADJACENT (§32), rule it ON ITS OWN and NOT in the same pass as dpa-047 (no-batch-axioms floor).** ⚑ **Both of the item's "why it composes" arguments FAIL:** §32.2:19398 says *"A variable declaration… **SHALL NOT** initialize `~`"* — `:int = expr` IS a declaration, so this is an **amendment**, not a free composition; and the S397 axiom it quotes **is not SPEC text** (the only `"ONE thing"` hit is §51.0.S). ★★ The shape **dies in CG** (TAB+TS accept it) telling the author to report a compiler bug with no line/col. ★★ **The worked example is legal only in `kind="tool"`** (bare `_{}` is rejected in `${ }`) — **and `kind="tool"` never allocates a `~` slot**. ★★ **MECHANISM:** a `_{}` interior resolves names by **LEXICAL COINCIDENCE** over a verbatim slice; an anonymous value has no name to coincide with, so **anonymity and verbatim opacity are structurally incompatible** — the "vanishes by construction" claim is defeated where the sketch puts it. ★★ **§53.14.4 synonym gate is the live call:** a cheaper baseline exists — **no binding at all** compiles AND runs today, so the proposal must beat INLINING, not naming. ★★ **dpa-040 CUTS AGAINST** (no canonical category of "anonymous linear value with a live range"; Rust's anonymous temporaries needed an edition boundary) — **and dpa-040's own artifact is partly STALE** (exit-0 count 6/6→3/6; §32.2.1 re-authored in the tree while it was never ruled). ★★ **NEW DEFECT:** SPEC §17.6.6's own verbatim example compiles **exit 0, zero diagnostics** → runtime `ReferenceError` (browser confirmation owed). ★★ Cost **Class C ~105-255h**; the syntax is the cheap part. | **bryan** — AXIOM-ADJACENT (§32), ONE-AT-A-TIME; dPA-produced ADVISORY; artifact → `scrml-support/docs/deep-dives/anonymous-typed-binding-tilde-readback-dpa-048-2026-09-19.md`; queue+delta-log edits UNCOMMITTED for the PA |
+| dpa-049 | **BANKED — UNRUN (S422 2026-09-19).** ⚑ **A GENERAL BUILD-INTEGRITY MECHANISM, not a lint question** — banked separately from dpa-047 call 3 for exactly that reason. bryan, verbatim: *"is there a way that we can compile into development mode only when an unreccomended flag is set true? … at least the compiler can say 'don't ship this' … if this is in the wild, it should not be considered production ready scrml."* ★★ **IT ALREADY HAS A HOME:** §58's build story is `compile(source, buildStory) → artifact` with a **mandatory human-inspectable `build-story.lock` sidecar**, and a suppression IS a build input by construction; `chunks.json` already carries `compiler` + `language` identity fields that travel with the artifact (a non-strippable channel); `dev.js`/`build.js` already split the modes. §58 is **Nominal/spec-ahead — nothing is built.** ★★ **THE TENSION TO RULE ON:** call 3 went lint-first SPECIFICALLY so the ~30 false positives are not blockers. If suppressing a lint taints the build, an adopter hitting them must choose between noise and a tainted artifact — **partially re-creating what lint-first solved.** ★★ **Five options, weakest→strongest:** (1) nothing · (2) RECORD which lints were suppressed in the build-story/`chunks.json` — descriptive, reversible, nearly free given §58 · (3) taint the artifact, `scrml build --target` warns/refuses · (4) disclaim in the wild — ⚑ **output comments are STRIPPABLE by any minifier**; only a runtime banner or `chunks.json` survives · (5) refuse the flag entirely (Zig: *"Zig will never have a 'sloppy mode' flag"*) — but §28 already ships four such flags, so removal is itself breaking. ★★ **Precedent is real at the strong end:** Android `debuggable=true` is rejected by the Play Store; dev-signed iOS cannot ship; Chrome shows an unsupported-flag banner **to the end user**. **PA lean: (2)** — you can tighten a record into a refusal; walking back "we called your build unsafe" is harder. | **bryan** — banked S422 2026-09-19; governs EVERY suppression scrml ships, not just the unused-binding lint; check §58 (Nominal) + §28's four existing `lint.*` flags before ruling |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -3317,3 +3318,87 @@ instead of inventing a name that exists only to be consumed once.
   block, or until the next `:T =`? What does a second `:int =` in the same block do to the first?
 - **Does it generalize past throwaways**, or is it a single-use idiom? If the latter, the synonym-test
   discipline (§53.14.4) applies: is this a synonym for `let _x = expr`, and if so what does it buy?
+
+---
+
+## [dpa-049] deliberation — Should a project-wide lint suppression TAINT the build, and how far should the taint travel?
+`status:    banked`  # S422 2026-09-19. A GENERAL build-integrity mechanism — NOT an unused-binding question. Banked separately per the no-batch-axioms floor.
+banked:     S422 2026-09-19 (bryan: "bank it.")
+
+### Origin — bryan, verbatim, S422
+
+Raised while ruling dpa-047 call 3 lint-first, on being shown that §28 already ships project-wide
+`lint.<name> = off` suppression:
+
+> my one issue is with the project wide flag, is there a way that we can compile into development mode
+> only when an unreccomended flag is set true? Not that it would be impossible to ship it. But at least
+> the compiler can say "don't ship this". Or even put comments in the output that clearly disclaims the
+> app was shipped from development or unsafe mode. basically to say, if this is in the wild, it should
+> not be considered production ready scrml. maybe thats going too far, IDK
+
+### ⚑ Why it is banked separately from call 3
+
+It governs **every suppression scrml ever ships**, not the unused-binding lint. Folding it into call 3
+would decide a language-wide build-integrity policy inside a diagnostic-severity ruling — the batch
+the floor exists to prevent. bryan banked it on that reasoning.
+
+### The ground — PA-verified, S422
+
+- **§58 Build Story is the natural home and it is already designed.** `compile(source, buildStory) →
+  artifact`, content-addressed Merkle closure, and a **mandatory human-inspectable `build-story.lock`
+  sidecar** (§58.5). A suppression is a build INPUT by construction, so it belongs in the story.
+  ⚑ **§58 is Nominal / spec-ahead — no build-story implementation exists.**
+- **`chunks.json` already carries identity fields that travel with the artifact** (`compiler` §47.5,
+  `language` §62.4). A non-strippable channel already exists.
+- **`dev.js` and `build.js` are separate commands** — a dev/prod distinction already exists.
+- **§28 already ships four project-wide `lint.*` flags** (`lifecycle-candidate`, `match-rule-inert`,
+  `engine-initial-missing`, `tailwind-unrecognized-class`). ⚑ And a retired fifth,
+  `lint.deprecated-machine`, whose own §28 row records it was **never wired in `compiler/src/` — a
+  documented control that did not exist while the warning was live.** Whatever is ruled here, the
+  lesson is that it must be WIRED, not merely written down.
+
+### ⚑ THE TENSION — this fights the ruling it came from
+
+dpa-047 call 3 was ruled **lint-first specifically so the ~30 measured false positives are not
+blockers.** If suppressing a lint taints the build as not-production-ready, an adopter who hits those
+false positives must choose between living with noise and shipping a tainted artifact. **That
+partially re-creates the problem lint-first solved.**
+
+Two ways out, and the ruling should pick one: make the record **descriptive** (option 2 — name which
+lints were off, let a reader judge) rather than a binary safe/unsafe verdict; or keep the taint
+mechanism **entirely separate** from any lint whose false-positive rate is unfixed.
+
+### The five options, weakest → strongest
+
+| # | mechanism | survives to the wild? |
+|---|---|---|
+| 1 | **Nothing** — today; the flag is silent | — |
+| 2 | **RECORD** — build-story / `chunks.json` names which lints were suppressed | **yes** — machine-readable, travels, inspectable |
+| 3 | **TAINT** — a mode marker; `scrml build --target` warns or refuses | yes |
+| 4 | **DISCLAIM IN THE WILD** — runtime banner or output comment | ⚑ **output comments are STRIPPABLE by any minifier**; only a runtime banner or `chunks.json` actually survives |
+| 5 | **REFUSE THE FLAG** — per-site token only, no project-wide off | n/a — but §28 already ships four, so removal is itself breaking |
+
+### Prior art
+
+**The strong end is shipped, not novel:** Android `debuggable=true` is **rejected by the Play Store**;
+dev-signed iOS builds cannot ship; **Chrome shows an "unsupported command-line flag" banner to the END
+USER.** So "the artifact announces its own build conditions" has real precedent.
+
+**And the opposite end has precedent too:** Zig refused the mechanism rather than taint it — *"Zig will
+never have a 'sloppy mode' flag."* Given the limit-primitives lean (FORK RULE row 1) that is arguably
+the more scrml answer — except §28 already ships the flags, so option 5 is a breaking removal, not a
+non-addition.
+
+### PA lean, offered for veto
+
+**Option 2.** You can tighten a record into a refusal later; walking back *"we called your build
+unsafe"* is much harder — the reversibility axis (FORK RULE row 3) points at the descriptive form.
+It is also nearly free given §58 already designs the sidecar, and it is the only option that does not
+re-create the call-3 tension.
+
+### What a ruling has to deliver
+
+(a) which of the five; (b) whether the record is descriptive or a verdict; (c) where it travels —
+`build-story.lock`, `chunks.json`, runtime, or `scrml build` refusal; (d) whether it binds ALL `lint.*`
+flags or only a designated safety-relevant subset; (e) whether §58 must land first, since the natural
+home is Nominal today.
