@@ -41,7 +41,7 @@ import {
   statSync,
 } from "node:fs";
 import { compileScrml } from "../../src/api.js";
-import { runDetectors } from "./render-detectors.js";
+import { runDetectors, renderedContentSignature, signatureGained } from "./render-detectors.js";
 import { REPO_ROOT } from "./render-corpus-enumerator.js";
 
 // ⛑ S419 residuals (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged)
@@ -514,7 +514,28 @@ export function applySeed(seed, obs, scopes, doc) {
   const readBody = () => {
     try { return doc && doc.body ? doc.body.innerHTML : ""; } catch (_e) { return ""; }
   };
+  // ⛑ S423 fix round — the RENDERED-content fingerprint either side of the write, so the
+  // report can answer "did anything NEW appear?" (D6's F1/F2 discriminator). Same
+  // "rendered" definition as the detectors (S419 invariant). Held locally and reduced to
+  // a BOOLEAN before it reaches the report: the signature holds raw page text, and the
+  // report is committed to the baseline.
+  //
+  // ⛑ S423 fix round 2 (finding 3) — a THROW here is recorded, never silently folded into
+  // "nothing gained". Swallowing it resolved to the FIRE direction: an unmeasured snapshot
+  // yielded `gainedContent:false`, which does not veto, so a page with all-empty leaves was
+  // scored red on a measurement that never happened — and the fabricated `false` was
+  // committed to the baseline as though it had been measured.
+  let sigFailed = null;
+  const readSig = () => {
+    try {
+      return renderedContentSignature(doc && doc.body ? doc.body : null);
+    } catch (e) {
+      sigFailed = String(e && e.message ? e.message : e);
+      return null;
+    }
+  };
   const before = readBody();
+  const beforeSig = readSig();
 
   for (const [name, value] of Object.entries(seed)) {
     const scope = scopes.find((s) => s.cells.has(name));
@@ -539,10 +560,20 @@ export function applySeed(seed, obs, scopes, doc) {
 
   const after = readBody();
   const domChanged = after !== before;
+  const afterSig = readSig();
+  // ⛑ S423 fix round — did the write make anything NEW render? A pure LOSS (25-triage,
+  // whose seed empties every column) is deliberately NOT a gain.
+  // ⛑ fix round 2 (finding 3) — `null` when either snapshot failed: UNMEASURED, which the
+  // detector treats as a veto (fail-quiet) rather than as "nothing gained". Recorded as an
+  // error too, so a broken measurement is loud instead of silently wrong.
+  const gainedContent =
+    beforeSig === null || afterSig === null ? null : signatureGained(beforeSig, afterSig);
+  if (sigFailed !== null) errors.push(`[seed-signature] ${sigFailed}`);
   return {
     chunks: scopes.length,
     writes,
     domChanged,
+    gainedContent,
     observable: writes.some((w) => w.wrote) && domChanged,
     errors,
   };
@@ -687,17 +718,63 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
         // Includes the LOUD unrecognised-prologue throw. Recorded, never swallowed into a
         // silent bare-key fallback.
         seedReport = {
-          chunks: 0, writes: [], domChanged: false, observable: false,
+          chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
           errors: [`[seed-bridge] ${String(e && e.message ? e.message : e)}`],
         };
         obs.consoleErrors.push(`[seed-bridge] ${String(e && e.message ? e.message : e)}`);
       }
+      // ⛑ S423 fix round (F4), second half: "same path when every write throws". A
+      // per-write `set-threw` is recorded in `seedReport.errors` and nowhere else, so a
+      // seed whose every write threw ALSO scored green. Raised only for `set-threw` —
+      // NOT for `derived-cell` / `no-such-cell`, which are the three KNOWN, TABLED
+      // fixture bugs (see SEED_OBSERVABILITY in e2e-render-map.test.js). Those are
+      // fixture defects on a scheduled fix, not emit regressions, and reddening them
+      // here would both break the additive bar and pre-empt that arc.
+      //
+      // ⛑ S423 fix round 2 (finding 2) — THIS REQUIRED *EVERY* WRITE TO BE `set-threw`,
+      // which is not the stated intent and left a real accessor throw silent. A 2-key
+      // fixture of `[{set-threw}, {no-such-cell}]` failed `every`, so nothing was pushed,
+      // `seedWasDelivered` was false, D6 was off, and `generate-baseline.js` stripped
+      // `detail` from the green cell — the throw vanishing exactly the way F4 exists to
+      // prevent. The condition that matches the intent is: NOTHING was delivered, and at
+      // least one write FAILED BY THROWING (as opposed to the known fixture-bug reasons).
+      if (seedReport && seedReport.writes.length > 0 &&
+          !seedReport.writes.some((w) => w.wrote) &&
+          seedReport.writes.some((w) => w.reason === "set-threw")) {
+        const threw = seedReport.writes.filter((w) => w.reason === "set-threw").length;
+        obs.consoleErrors.push(
+          `[seed-bridge] ${threw} of ${seedReport.writes.length} seed write(s) threw and none landed — the seed cannot be live`,
+        );
+      }
+      // ⛑ fix round 2 (finding 3) — a failed render snapshot makes `gainedContent`
+      // UNMEASURED. It already vetoes D6; surface it so it is loud, not merely quiet.
+      // ⛑ final round — keyed on the SIGNATURE error, not on `gainedContent === null`
+      // alone: the `catch` above now also reports `null` (it never took a snapshot either),
+      // and it has already pushed its own accurate message. Keying on null would add a
+      // second, untrue "the snapshot failed" line on top of it.
+      if (seedReport && seedReport.errors.some((e) => String(e).startsWith("[seed-signature]"))) {
+        obs.consoleErrors.push(
+          "[seed-bridge] the render-content snapshot failed — gainedContent is UNMEASURED, D6 suppressed",
+        );
+      }
     } else {
       // Loud, not silent: no reactive side-channel at all means the seed CANNOT be live.
+      //
+      // ⛑ S423 fix round (F4) — THIS COMMENT SAID "LOUD" AND THE BRANCH WAS SILENT. It
+      // recorded the reason in `seedReport.errors` only, and unlike the sibling `catch`
+      // above it never pushed into `obs.consoleErrors` — so nothing downstream could see
+      // it. That became FAIL-OPEN the moment D6 started gating on a real write: if an
+      // emit regression drops `_scrml_reactive_set`, every write is skipped,
+      // `seedWasDelivered` is false, and EVERY populated cell scores green however empty
+      // it renders — D6 blind, with `generate-baseline.js` stripping `detail` from green
+      // cells so the explanation never reaches the baseline either. A D2 console error
+      // makes the cell red and keeps the reason attached.
+      const msg = "no _scrml_reactive_set side-channel exposed by this emit";
       seedReport = {
-        chunks: 0, writes: [], domChanged: false, observable: false,
-        errors: ["no _scrml_reactive_set side-channel exposed by this emit"],
+        chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
+        errors: [msg],
       };
+      obs.consoleErrors.push(`[seed-bridge] ${msg}`);
     }
   }
 
@@ -707,6 +784,12 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
     consoleErrors: obs.consoleErrors,
     document,
     seeded: seed != null,
+    // ⛑ S423 limb 2 — D6 needs to know whether the seed was actually WRITTEN, not
+    // merely registered. Two of the four corpus fixtures resolve to `derived-cell` /
+    // `no-such-cell` and write nothing while still carrying `seeded:true`; scoring
+    // such a cell red for an empty render would blame the compiler for a broken
+    // fixture. The report is already computed above, so this is a pass-through.
+    seedReport,
     serverDependent: artifacts.serverDependent,
   });
 

@@ -6,11 +6,12 @@
     "histogram": {
       "renders-empty": 20,
       "needs-server": 9,
-      "renders-clean": 259,
+      "renders-clean": 258,
       "compiles-but-throws": 22,
       "fails-compile": 126,
       "smell-detected-wrong": 1,
-      "HARNESS-TIMEOUT": 1
+      "HARNESS-TIMEOUT": 1,
+      "renders-empty-with-data": 1
     },
     "note": "e2e L1 render known-failure map. Gaps existing is NOT a failure; the delta-gate fails only on a green->red regression. NO error-class suppression — every state is recorded."
   },
@@ -216,9 +217,37 @@
     },
     "examples/25-triage-board.scrml#populated": {
       "tier": "flagship",
-      "state": "renders-clean",
-      "smells": [],
-      "seeded": true
+      "state": "renders-empty-with-data",
+      "smells": [
+        "S-EMPTY-WITH-DATA"
+      ],
+      "seeded": true,
+      "detail": {
+        "emptyWithData": true,
+        "emptyWithDataScope": "each-regions",
+        "emptyRegions": {
+          "regions": 4,
+          "mounts": 3,
+          "ranges": 1,
+          "leaves": 3,
+          "emptyLeaves": 3
+        },
+        "seed": {
+          "chunks": 1,
+          "writes": [
+            {
+              "name": "tasks",
+              "reason": "written",
+              "namespaced": true,
+              "wrote": true
+            }
+          ],
+          "domChanged": true,
+          "gainedContent": false,
+          "observable": true,
+          "errors": []
+        }
+      }
     },
     "examples/26-type-derived-schema.scrml#empty": {
       "tier": "flagship",
