@@ -707,6 +707,12 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
     consoleErrors: obs.consoleErrors,
     document,
     seeded: seed != null,
+    // ⛑ S423 limb 2 — D6 needs to know whether the seed was actually WRITTEN, not
+    // merely registered. Two of the four corpus fixtures resolve to `derived-cell` /
+    // `no-such-cell` and write nothing while still carrying `seeded:true`; scoring
+    // such a cell red for an empty render would blame the compiler for a broken
+    // fixture. The report is already computed above, so this is a pass-through.
+    seedReport,
     serverDependent: artifacts.serverDependent,
   });
 

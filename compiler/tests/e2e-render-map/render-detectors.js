@@ -24,7 +24,8 @@
  *   D3  DOM text contains `[object `          -> smell-wrong (S-OBJECT-IN-DOM)
  *   D4  rendered text/attr contains `${`      -> smell-wrong (S-RAW-INTERP)
  *   D5  a text node is "undefined" / "null"   -> smell-wrong (S-NULLISH-TEXT)
- *   D6  empty body where data WAS seeded      -> partial/empty (S-EMPTY-WITH-DATA)
+ *   D6  seeded data rendered NOWHERE           -> partial/empty (S-EMPTY-WITH-DATA)
+ *       — empty body, OR every leaf <each> region empty (⛑ S423 limb 2)
  *   D7  the D1 message matches /is not defined/-> compiles-but-throws (S-UNBOUND-REF)
  *
  * Render-state (one per cell, the taxonomy's cell value):
@@ -245,6 +246,243 @@ export function hasRenderedContent(body) {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// REGION-SCOPED EMPTINESS (⛑ S423 limb 2) — the half of D6 that can actually see
+// the board bug.
+//
+// g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject, limb 2.
+// Limb 1 (#978) made the populated seed reach the app's chunk-scoped cell, so the
+// seed is live on two corpus apps. D6 STAYED DARK ANYWAY, because it asks its
+// emptiness question of the whole `<body>` and PAGE CHROME ANSWERS IT. Measured on
+// `3b66030a`, `examples/25-triage-board.scrml#populated`: the seed writes `<tasks>`
+// (`reason:"written"`, `wrote:true`), all three `<ul class="task-list">` render
+// ZERO rows, and the cell scores `renders-clean` with no smells — off 52 characters
+// of column headings. That is the exact class the whole tier exists for, scored green.
+//
+// AN `<each>` LANDS IN THE DOM IN ONE OF TWO SHAPES, AND A PREDICATE THAT KNOWS
+// ONLY ONE IS HALF A FIX. Read from the emitter + runtime, not inferred:
+//
+//   1. TOP-LEVEL each -> a parse-safe two-comment FENCE
+//      `<!--scrml-each:N-->` … rows as SIBLINGS … `<!--/scrml-each:N-->`.
+//      (runtime-template.js, "Approach A-unified" / g-each-mount-div-foster-parented-in-table:
+//      a `<div>` wrapper was foster-parented out of `<table>` and dropped outright
+//      inside `<select>`; a comment is inserted in every insertion mode.)
+//   2. NESTED each -> a runtime `<div data-scrml-each-mount="each_N">`.
+//      (emit-each.ts, both the Tier-1 nested branch and the Tier-0 `${for…lift}`
+//      branch: "The item-local mount is created + appended ONCE (stable DOM node
+//      identity across inner re-renders); the inner reconcile writes into it in place.")
+//
+// ⚠ THE DISPATCHING HYPOTHESIS SAID THE RUNTIME "CONSUMES THE SLOT" WHEN ITEMS
+// RENDER, AND THAT IS WRONG — the mount div is the nested each's CONTAINER and is
+// present either way. `examples/03-contact-book.scrml#populated` shows zero mount
+// divs because its each is TOP-LEVEL (fence), not because a slot was consumed.
+// The corrected reading makes the signal STRONGER, not weaker: since the container
+// always exists and is written into in place, an EMPTY `[data-scrml-each-mount]` is
+// an exact structural witness that THAT each rendered zero rows.
+//
+// THE DECISION RULE IS A CONJUNCTION OVER **LEAF** REGIONS — every identifiable
+// each-region that contains no other each-region rendered nothing. Two rules were
+// measured against it and both are wrong, in opposite directions:
+//
+//   * "every identifiable region is empty" leaves D6 DARK on its only live subject:
+//     25-triage's OUTER each renders 446 chars of column chrome, so the conjunction
+//     over ALL regions is false while the three inner regions are empty.
+//   * "ANY surviving empty mount slot" FALSE-FIRES. Measured by mounting 25-triage
+//     with the CORRECTED seed the fixture-fix arc will land (`column:"Inbox"`/
+//     `"Doing"` instead of the current non-matching `"todo"`): two columns render
+//     their task, the third is LEGITIMATELY empty, and that rule scores a correct
+//     board `renders-empty-with-data`. It is safe today only by accident of a
+//     fixture everyone agrees is broken.
+//
+// The leaf conjunction is the only candidate correct on both. It keeps the
+// load-bearing insight — a non-empty OUTER range must not veto empty inner mounts —
+// but gets there structurally: the outer range is excluded because it is a
+// CONTAINER of other regions, not because of its emission shape. A top-level each
+// with nothing nested inside it is a leaf and still counts (03-contact-book, 06-kanban).
+//
+// FAIL-QUIET ON AMBIGUITY, deliberately (pa-base §8 — a detector that cries wolf
+// gets ignored and then deleted): no identifiable region, or no leaf, means keep
+// today's body-global answer rather than firing blind. An outer each that renders
+// chrome answers "did the page show anything", not "did the DATA appear"; the leaf
+// regions are where item data lands. So a two-list app with one legitimately-empty
+// list stays green, at the cost of missing a one-of-two-lists-broken render.
+// ---------------------------------------------------------------------------
+
+const TEXT_NODE = 3;
+const ELEMENT_NODE = 1;
+const COMMENT_NODE = 8;
+const EACH_FENCE_PREFIX = "scrml-each:";
+
+/** Every comment node under `root`, in document order. */
+function collectCommentNodes(root) {
+  const out = [];
+  if (!root) return out;
+  const visit = (node) => {
+    const kids = node.childNodes;
+    if (!kids) return;
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (k.nodeType === COMMENT_NODE) out.push(k);
+      visit(k);
+    }
+  };
+  visit(root);
+  return out;
+}
+
+/**
+ * Did this SET of sibling nodes render anything content-bearing?
+ *
+ * The same question `hasRenderedContent` asks of a `<body>`, asked of an arbitrary
+ * node list — because a fence region is a RANGE of siblings with no element that
+ * wraps it, so there is no root to hand `hasRenderedContent`. Deliberately NOT
+ * implemented by cloning the range into a detached wrapper: `cloneNode` does not
+ * copy the live `.value` PROPERTY of an input, which is exactly the S419
+ * "value set by binding (property only)" case, so a clone would score a filled
+ * input as empty. One "not rendered" predicate across both halves, as S419 established.
+ */
+function nodesHaveRenderedContent(nodes) {
+  if (!Array.isArray(nodes)) return false;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (!n) continue;
+    if (n.nodeType === TEXT_NODE) {
+      if ((n.nodeValue ?? "").trim() !== "") return true;
+      continue;
+    }
+    if (n.nodeType !== ELEMENT_NODE) continue; // comments/PIs carry nothing
+    if (isUnrenderedByOwnMarkup(n)) continue; // the whole subtree is off-page
+    if (collectTextNodes(n, isUnrenderedByOwnMarkup).some((t) => t.trim() !== "")) return true;
+    // The node ITSELF may be a content candidate (`<img src>` as a direct row).
+    if (
+      typeof n.matches === "function" &&
+      n.matches(CONTENT_CANDIDATE_SELECTOR) &&
+      elementCarriesContent(n)
+    ) {
+      return true;
+    }
+    if (typeof n.querySelectorAll !== "function") continue;
+    const els = n.querySelectorAll(CONTENT_CANDIDATE_SELECTOR);
+    for (let j = 0; j < els.length; j++) {
+      const el = els[j];
+      if (isUnrenderedByMarkup(el, n)) continue;
+      if (elementCarriesContent(el)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Every identifiable `<each>` render region under `body`, in BOTH emission shapes.
+ *
+ *   { shape: "mount", host, nodes }          — a nested each's container div.
+ *   { shape: "range", start, end, nodes }    — a top-level each's comment fence.
+ *
+ * `nodes` is the region's rendered content: the div's children, or the siblings
+ * strictly between the paired fence anchors. An UNTERMINATED fence is skipped
+ * rather than guessed at (fail-quiet) — its extent is not identifiable, and the
+ * runtime's own `_scrml_each_end` gives up the same way.
+ *
+ * ⚠ The region IDs are deliberately NOT returned. They embed the chunk token
+ * (`each_00hqpedw_120`), which is derived from the compile's `mkdtemp` staging dir
+ * and therefore differs on EVERY run and machine. `generate-baseline.js` persists
+ * `detail` for every non-green cell into the tracked baseline JSON, and reddening a
+ * seeded cell is this detector's entire purpose — so an id reaching `detail` would
+ * churn a committed artifact on every regeneration. Counts and shapes only (S420).
+ */
+export function collectEachRegions(body) {
+  const regions = [];
+  if (!body || typeof body.querySelectorAll !== "function") return regions;
+
+  const mounts = body.querySelectorAll("[data-scrml-each-mount]");
+  for (let i = 0; i < mounts.length; i++) {
+    const host = mounts[i];
+    regions.push({ shape: "mount", host, nodes: Array.from(host.childNodes ?? []) });
+  }
+
+  const comments = collectCommentNodes(body);
+  for (let i = 0; i < comments.length; i++) {
+    const start = comments[i];
+    const data = String(start.nodeValue ?? "").trim();
+    if (!data.startsWith(EACH_FENCE_PREFIX)) continue;
+    const want = `/${data}`;
+    const nodes = [];
+    let end = null;
+    for (let n = start.nextSibling; n; n = n.nextSibling) {
+      if (n.nodeType === COMMENT_NODE && String(n.nodeValue ?? "").trim() === want) {
+        end = n;
+        break;
+      }
+      nodes.push(n);
+    }
+    if (!end) continue; // unterminated fence — extent unknown, stay quiet
+    regions.push({ shape: "range", start, end, nodes });
+  }
+  return regions;
+}
+
+/** Does region `a` enclose region `b`? (`b`'s anchor sits inside one of `a`'s nodes.) */
+function regionEncloses(a, b) {
+  if (a === b) return false;
+  const marker = b.shape === "mount" ? b.host : b.start;
+  if (!marker) return false;
+  for (let n = marker; n; n = n.parentNode) {
+    for (let i = 0; i < a.nodes.length; i++) {
+      if (a.nodes[i] === n) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Did EVERY leaf each-region render nothing? Returns null when the question is not
+ * identifiable (no region, or no leaf) — the caller then keeps the body-global answer.
+ *
+ * @returns {{ allLeavesEmpty: boolean, summary: object } | null}
+ */
+export function regionScopedEmptiness(body) {
+  const regions = collectEachRegions(body);
+  if (regions.length === 0) return null;
+  const leaves = regions.filter((r) => !regions.some((o) => regionEncloses(r, o)));
+  if (leaves.length === 0) return null;
+  const emptyLeaves = leaves.filter((r) => !nodesHaveRenderedContent(r.nodes));
+  return {
+    allLeavesEmpty: emptyLeaves.length === leaves.length,
+    // Counts + shapes ONLY — never an id (see collectEachRegions).
+    summary: {
+      regions: regions.length,
+      mounts: regions.filter((r) => r.shape === "mount").length,
+      ranges: regions.filter((r) => r.shape === "range").length,
+      leaves: leaves.length,
+      emptyLeaves: emptyLeaves.length,
+    },
+  };
+}
+
+/**
+ * Was a seed actually DELIVERED to a cell of the app?
+ *
+ * `obs.seeded` is only `seed != null` — a fixture was REGISTERED. Two of the four
+ * corpus fixtures write nothing at all (`examples/06-kanban-board` names a DERIVED
+ * cell; `examples/16-remote-data` names a cell the app does not have — the reason
+ * codes limb 1 added), and both still carry `seeded:true`. Scoring such a cell red
+ * for an empty render would blame the compiler for a broken fixture. They cannot
+ * false-fire TODAY only because those two apps happen to render a non-empty body —
+ * a property of those apps, not of this detector, and the fixtures are scheduled to
+ * be corrected.
+ *
+ * BACK-COMPATIBLE BY CONSTRUCTION: an observation that carries NO seed report (every
+ * direct `runDetectors` call, including all of `detector-validation.test.js`) is
+ * gated on `obs.seeded` exactly as before, so no existing assertion changes meaning.
+ */
+function seedWasDelivered(obs) {
+  if (!obs.seeded) return false;
+  const report = obs.seedReport;
+  if (report == null) return true; // no report available — pre-S423 behaviour
+  const writes = Array.isArray(report.writes) ? report.writes : [];
+  return writes.some((w) => w && w.wrote === true);
+}
+
 /**
  * A no-server mount of a server-DEPENDENT app leaves a server-only binding/data
  * source null; the client then throws (or console-errors) a null/undefined-ACCESS.
@@ -274,7 +512,11 @@ export function isServerAbsenceMessage(msg) {
  * @param {string[]} obs.consoleErrors — captured console.error messages (D2).
  * @param {Document|null} obs.document — the mounted happy-dom document, or null
  *                                       if mount threw / compile failed.
- * @param {boolean} obs.seeded — was a data fixture set before observing (D6)?
+ * @param {boolean} obs.seeded — was a data fixture REGISTERED for this cell (D6)?
+ * @param {object|null} [obs.seedReport] — the harness's seed-bridge report
+ *   (`{ writes: [{ wrote }], domChanged, ... }`), when available. D6 requires a
+ *   real write, not merely a registered fixture; omitted/null falls back to
+ *   `obs.seeded` alone (⛑ S423 — see seedWasDelivered).
  * @param {boolean} obs.serverDependent — does the app have a server side (emits
  *   serverJs / uses a `?{}` SQL block)? Gates the needs-server classification.
  * @returns {{ state: string, smells: string[], detail: object }}
@@ -381,14 +623,27 @@ export function runDetectors(obs) {
     detail.nullishText = nullishNode;
   }
 
-  // ---- D6: empty body where data WAS seeded (S-EMPTY-WITH-DATA) ----
-  // Only meaningful when the harness seeded a fixture. An empty render with NO
-  // seed is a VALID partial render (the <empty> fallback) — NOT a failure.
-  // "Empty" means nothing content-bearing rendered, not merely no text (⛑ S419,
-  // see hasRenderedContent).
-  if (obs.seeded && !hasRenderedContent(body)) {
-    smells.push("S-EMPTY-WITH-DATA");
-    detail.emptyWithData = true;
+  // ---- D6: seeded data that rendered nowhere (S-EMPTY-WITH-DATA) ----
+  // Only meaningful when a seed was actually DELIVERED (⛑ S423 — `seedWasDelivered`,
+  // not the bare `obs.seeded`). An empty render with NO seed is a VALID partial
+  // render (the <empty> fallback) — NOT a failure. "Empty" means nothing
+  // content-bearing rendered, not merely no text (⛑ S419, see hasRenderedContent).
+  //
+  // TWO SCOPES, asked in order, because the body-global one is answered by page
+  // chrome (⛑ S423 limb 2 — see the region-scoped emptiness block above):
+  //   body        — nothing content-bearing rendered anywhere. The original question.
+  //   each-regions — the body showed SOMETHING, but every identifiable leaf
+  //                  `<each>` region rendered nothing. This is the board bug: the
+  //                  chrome is there and the DATA is not.
+  if (seedWasDelivered(obs)) {
+    const bodyEmpty = !hasRenderedContent(body);
+    const regionVerdict = bodyEmpty ? null : regionScopedEmptiness(body);
+    if (bodyEmpty || (regionVerdict && regionVerdict.allLeavesEmpty)) {
+      smells.push("S-EMPTY-WITH-DATA");
+      detail.emptyWithData = true;
+      detail.emptyWithDataScope = bodyEmpty ? "body" : "each-regions";
+      if (regionVerdict) detail.emptyRegions = regionVerdict.summary;
+    }
     // Continue — but if no harder smell fired, this is the renders-empty state.
   }
 

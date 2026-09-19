@@ -30,7 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { observeApp } from "./render-harness.js";
-import { runDetectors } from "./render-detectors.js";
+import { runDetectors, regionScopedEmptiness } from "./render-detectors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -340,6 +340,247 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
       expect(detect(false, { body }).state).toBe("renders-clean");
     });
   }
+
+  // ⛑ S423 limb 2 — REGION-SCOPED EMPTINESS. Everything above asks D6's question of
+  // the whole body. These ask it of the `<each>` REGIONS, which is the only scope that
+  // can see the board bug: a render whose chrome is present and whose DATA is not.
+  //
+  // Each case is `{ body }`-only (runDetectors reads nothing else) and is built from the
+  // two emission shapes the compiler really produces, copied from measured DOM:
+  //   range — `<!--scrml-each:ID-->` … rows … `<!--/scrml-each:ID-->`   (top-level each)
+  //   mount — `<div data-scrml-each-mount="each_ID"></div>`             (nested each)
+  const FENCE = (id, inner) => `<!--scrml-each:${id}-->${inner}<!--/scrml-each:${id}-->`;
+  const MOUNT = (id, inner = "") => `<div data-scrml-each-mount="each_${id}">${inner}</div>`;
+  const seededDetect = (markup, seedReport) => {
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    return runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: [],
+      document: { body },
+      seeded: true,
+      ...(seedReport === undefined ? {} : { seedReport }),
+    });
+  };
+
+  // The headline: the EXACT 25-triage-board#populated shape. Chrome renders, data does
+  // not. Before S423 this scored `renders-clean` with zero smells — D6's whole reason
+  // for existing, scored green off 52 characters of column headings.
+  test("D6 fires on the BOARD BUG: non-empty outer range, every inner mount empty", () => {
+    const columns = ["Inbox", "Doing", "Done"]
+      .map((c) => `<section class="column"><h2>${c}</h2><ul class="task-list">${MOUNT("t_120")}</ul></section>`)
+      .join("");
+    const det = seededDetect(`<div class="board"><h1>Triage Board</h1>${FENCE("t_126", columns)}</div>`);
+    // The body is emphatically NOT empty — this is what defeated the body-global check.
+    expect(det.detail.emptyWithData).toBe(true);
+    expect(det.detail.emptyWithDataScope).toBe("each-regions");
+    expect(det.detail.emptyRegions).toEqual({
+      regions: 4, mounts: 3, ranges: 1, leaves: 3, emptyLeaves: 3,
+    });
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  // ⚑ THE ANTI-CRY-WOLF PIN, AND THE MOST LOAD-BEARING ASSERTION IN THIS BLOCK.
+  // The same board, correctly rendered: two columns hold their task, the third is
+  // LEGITIMATELY empty. A predicate of "fire on ANY surviving empty mount slot" — the
+  // obvious reading of the discriminator, and the one this arc was dispatched with —
+  // scores this correct board RED. It is measured, not hypothetical: mounting
+  // 25-triage with the corrected `column:"Inbox"`/`"Doing"` seed that the
+  // seed-fixtures fix arc will land produces exactly this DOM. This test is what
+  // reds if anyone widens the conjunction to a disjunction.
+  test("D6 does NOT fire when some inner mounts rendered and one is legitimately empty", () => {
+    const columns =
+      `<section><h2>Inbox</h2><ul>${MOUNT("t_120", '<li class="task">Alpha</li>')}</ul></section>` +
+      `<section><h2>Doing</h2><ul>${MOUNT("t_120", '<li class="task">Beta</li>')}</ul></section>` +
+      `<section><h2>Done</h2><ul>${MOUNT("t_120")}</ul></section>`;
+    const markup = `<div class="board">${FENCE("t_126", columns)}</div>`;
+    // Asserted through the predicate itself, not through `detail` — `detail.emptyRegions`
+    // is recorded only when D6 fires, so reading it here would prove nothing about
+    // whether the region machinery RAN. These counts prove it ran, saw all three inner
+    // mounts, and found exactly ONE of them empty.
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    const verdict = regionScopedEmptiness(body);
+    expect(verdict.summary).toEqual({
+      regions: 4, mounts: 3, ranges: 1, leaves: 3, emptyLeaves: 1,
+    });
+    expect(verdict.allLeavesEmpty).toBe(false);
+    // ... and therefore the cell stays green.
+    const det = seededDetect(markup);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+  });
+
+  // Both emission shapes standing alone, each in both directions. A predicate that
+  // understands only one shape is half a fix.
+  const REGION_SHAPES = {
+    "a lone empty comment-fence range (top-level each rendered nothing)": {
+      markup: `<h1>Contacts</h1><ul>${FENCE("c_99", "")}</ul>`, fires: true,
+    },
+    "a lone NON-empty comment-fence range": {
+      markup: `<h1>Contacts</h1><ul>${FENCE("c_99", "<li>Ada</li><li>Alan</li>")}</ul>`, fires: false,
+    },
+    "a lone empty mount div (nested each rendered nothing)": {
+      markup: `<h1>Board</h1><ul>${MOUNT("n_1")}</ul>`, fires: true,
+    },
+    "a lone NON-empty mount div": {
+      markup: `<h1>Board</h1><ul>${MOUNT("n_1", "<li>Alpha</li>")}</ul>`, fires: false,
+    },
+    "two sibling leaf regions, BOTH empty (both shapes)": {
+      markup: `<h1>App</h1><ul>${FENCE("a_1", "")}</ul><ul>${MOUNT("b_2")}</ul>`, fires: true,
+    },
+    "two sibling leaf regions, only ONE empty — fail-quiet on ambiguity": {
+      markup: `<h1>App</h1><ul>${FENCE("a_1", "<li>Ada</li>")}</ul><ul>${MOUNT("b_2")}</ul>`, fires: false,
+    },
+    "an each region whose only content is UNRENDERED (hidden row)": {
+      markup: `<h1>App</h1><ul>${FENCE("a_1", '<li hidden>Ada</li>')}</ul>`, fires: true,
+    },
+    "an each region holding a text-free but content-BEARING row (S419 parity)": {
+      markup: `<h1>App</h1><ul>${FENCE("a_1", '<li><img src="a.png"></li>')}</ul>`, fires: false,
+    },
+  };
+  for (const [label, { markup, fires }] of Object.entries(REGION_SHAPES)) {
+    test(`D6 region scope ${fires ? "FIRES" : "is quiet"}: ${label}`, () => {
+      const det = seededDetect(markup);
+      // Every case has visible chrome, so the body-global check answers "not empty"
+      // for all of them — the verdict below can only come from the region scope.
+      expect(det.detail.emptyWithDataScope).toBe(fires ? "each-regions" : undefined);
+      expect(det.smells.includes("S-EMPTY-WITH-DATA")).toBe(fires);
+      expect(det.state).toBe(fires ? "renders-empty-with-data" : "renders-clean");
+    });
+  }
+
+  // Fail-quiet when the question is not identifiable at all: an app with no <each>
+  // keeps today's body-global answer rather than firing blind.
+  test("D6 stays quiet on a seeded render with NO identifiable each-region", () => {
+    const det = seededDetect("<h1>Settings</h1><p>No lists here.</p>");
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+    expect(det.detail.emptyRegions).toBeUndefined();
+  });
+
+  // An UNTERMINATED fence has no identifiable extent — the runtime's own
+  // `_scrml_each_end` gives up the same way, so the detector must not guess.
+  test("D6 stays quiet on an unterminated each fence (extent unknown)", () => {
+    const det = seededDetect('<h1>App</h1><ul><!--scrml-each:a_1--></ul>');
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+  });
+
+  // ⛑ S420 HAZARD, PINNED HERE TOO. `generate-baseline.js` persists `detail` for every
+  // NON-GREEN cell into the tracked baseline JSON, and reddening a seeded cell is this
+  // detector's entire purpose — so the FIRST cell this change reddens is also the first
+  // to commit its `detail`. The region ids embed the chunk token (`each_00hqpedw_120`),
+  // minted from a fresh `mkdtemp` staging dir and therefore different on every run and
+  // machine. Emitting one would churn a committed artifact on every regeneration.
+  test("the region report carries NO id, so a newly-red cell cannot churn the baseline", () => {
+    const det = seededDetect(`<h1>Board</h1><ul>${MOUNT("00hqpedw_120")}</ul>`);
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    const serialized = JSON.stringify(det.detail);
+    expect(serialized).not.toContain("00hqpedw");
+    expect(serialized).not.toContain("each_");
+    // Counts and shapes only.
+    expect(Object.keys(det.detail.emptyRegions).sort()).toEqual(
+      ["emptyLeaves", "leaves", "mounts", "ranges", "regions"],
+    );
+  });
+
+  // ⛑ S423 — the seed-WRITE gate. `seeded` is only "a fixture was registered";
+  // `examples/06-kanban-board` (derived-cell) and `examples/16-remote-data`
+  // (no-such-cell) write nothing and still carry `seeded:true`.
+  test("D6 does NOT fire when the seed bridge wrote NOTHING, even on an empty body", () => {
+    const det = seededDetect("", { writes: [{ name: "todo", reason: "derived-cell", wrote: false }], domChanged: false });
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-empty");
+  });
+
+  test("D6 DOES fire when the seed bridge really wrote and the render is empty", () => {
+    const det = seededDetect("", { writes: [{ name: "tasks", reason: "written", wrote: true }], domChanged: true });
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.detail.emptyWithDataScope).toBe("body");
+    expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  // Back-compat: an observation with NO seed report is gated on `seeded` alone, exactly
+  // as before S423 — which is what keeps every assertion above this block meaningful.
+  test("with no seed report at all, D6 still fires on `seeded` alone (pre-S423 behaviour)", () => {
+    const det = seededDetect("", undefined);
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-empty-with-data");
+  });
+});
+
+// =============================================================================
+// D6 END-TO-END against a COMPILED fixture the tier owns (⛑ S423 limb 2).
+//
+// The block above pins the predicate against synthetic DOM. This one compiles and
+// mounts a real `.scrml` through the real harness, so the region shapes are the ones
+// the CURRENT compiler emits rather than the ones this test believes it emits. That
+// distinction is the point: if the emitter switches a nested each away from
+// `data-scrml-each-mount`, or a top-level each away from the comment fence, the
+// synthetic pins above keep passing and THIS one reds.
+//
+// It also gives D6 a subject of its own. Before this fixture, D6's only live corpus
+// subject was `examples/25-triage-board.scrml#populated`, and only because
+// `seed-fixtures.js` seeds a `column` that matches none of that app's columns — a
+// fixture bug tracked separately and scheduled for correction. A detector whose only
+// proof is "an example app that happens to be broken this week" is one fixture-fix
+// away from being unproven again.
+// =============================================================================
+describe("D6 end-to-end — the board-bug fixture compiles, mounts, and reddens", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  const FIXTURE = "d6-nested-each-empty-with-data.scrml";
+  const TASKS = (col) => ({
+    tasks: [
+      { id: 1, title: "Alpha", column: col },
+      { id: 2, title: "Beta", column: col },
+    ],
+  });
+
+  test("a seed whose column matches NOTHING renders no rows and D6 reddens the cell", () => {
+    const cell = observeApp(fixtureApp(FIXTURE), TASKS("todo"), "populated");
+    // The seed must really have landed, or this proves nothing about the DETECTOR.
+    expect(cell.detail.seed.writes.map((w) => w.wrote)).toEqual([true]);
+    expect(cell.detail.emptyWithDataScope).toBe("each-regions");
+    expect(cell.detail.emptyRegions).toEqual({
+      regions: 4, mounts: 3, ranges: 1, leaves: 3, emptyLeaves: 3,
+    });
+    expect(cell.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(cell.state).toBe("renders-empty-with-data");
+  });
+
+  test("a seed whose column MATCHES renders rows and the cell stays green", () => {
+    const cell = observeApp(fixtureApp(FIXTURE), TASKS("Inbox"), "populated");
+    expect(cell.detail.seed.writes.map((w) => w.wrote)).toEqual([true]);
+    expect(cell.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(cell.state).toBe("renders-clean");
+  });
+
+  test("UNSEEDED, the same fixture is a valid empty render and stays green", () => {
+    const cell = observeApp(fixtureApp(FIXTURE), null, "empty");
+    expect(cell.seeded).toBe(false);
+    expect(cell.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(["renders-clean", "renders-empty"]).toContain(cell.state);
+  });
+});
+
+describe("D6 — trailing body-scope cases", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
 
   test("a seeded render with CONTENT is unaffected — renders-clean", () => {
     document.documentElement.innerHTML =

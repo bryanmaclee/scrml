@@ -1,0 +1,63 @@
+// d6-nested-each-empty-with-data.scrml — detector-validation fixture for D6
+// (S-EMPTY-WITH-DATA), added S423 limb 2.
+//
+// THE BOARD-BUG SHAPE, OWNED BY THE TIER. Before this file, D6's only live
+// subject was `examples/25-triage-board.scrml#populated`, and it was a subject
+// only because `seed-fixtures.js` happens to seed a `column` value that matches
+// none of that app's columns — a fixture bug tracked separately
+// (g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries) and
+// scheduled for correction. A detector whose only proof is "an example app that
+// happens to be broken this week" is one fixture-fix away from being unproven
+// again, which is why D6 gets a fixture of its own.
+//
+// The shape, deliberately minimal but structurally EXACT:
+//   - an OUTER `<each>` over a literal array          -> emits as a comment
+//     fence `<!--scrml-each:N-->` … `<!--/scrml-each:N-->` and renders the
+//     column chrome, so it is NON-EMPTY;
+//   - an INNER `<each>` over a FILTER of the seeded cell, one per outer item ->
+//     each emits as a nested `<div data-scrml-each-mount="each_N">` whose
+//     container is created once and written into in place.
+//
+// Both of D6's emission shapes are therefore present in ONE render, and they
+// disagree: the page shows column chrome while every seeded item rendered
+// nowhere. That disagreement is the whole detection problem — a body-global
+// emptiness question is answered "not empty" by the chrome.
+//
+// The test drives this fixture with TWO seeds:
+//   (a) a seed whose `column` matches NO column  -> every inner each renders
+//       zero rows -> 3 empty mount divs -> D6 MUST fire;
+//   (b) a seed whose `column` matches            -> rows render -> D6 MUST be
+//       silent, even though the third column is still legitimately empty.
+// (b) is the anti-cry-wolf half and is why the predicate is a conjunction over
+// LEAF regions rather than "any empty mount slot".
+//
+// `<tasks>` starts EMPTY on purpose: unseeded, this fixture is a valid empty
+// render (the detector must stay green), so the only thing that can turn it red
+// is a seed that was really written and still showed nothing.
+<program title="D6 Nested Each">
+
+    type Task:struct = {
+        id:     number
+        title:  string
+        column: string
+    }
+
+    const columns = ["Inbox", "Doing", "Done"]
+
+    <tasks>: Task[] = []
+
+    <main>
+        <div class="board">
+            <each in=columns as col>
+                <section class="column">
+                    <h2 class="column-title">${col}</>
+                    <ul class="task-list">
+                        <each in=@tasks.filter(t => t.column == col) key=@.id as task>
+                            <li class="task">${task.title}</>
+                        </each>
+                    </>
+                </section>
+            </each>
+        </div>
+    </main>
+</program>
