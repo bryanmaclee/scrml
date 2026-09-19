@@ -454,21 +454,42 @@ export function collectEachRegions(body) {
  * handles both shapes uniformly.
  */
 function leafRegions(regions) {
-  // node -> the region that directly holds it as one of its own nodes.
-  const owner = new Map();
+  // node -> EVERY region that directly holds it as one of its own nodes.
+  //
+  // ⛑ S423 fix round 2 (finding 1) — THIS WAS A `Map<node, region>` WITH FIRST-WINS, AND
+  // THAT IS A LOSSY ENCODING OF A GENUINELY MANY-TO-MANY RELATION. One node can belong to
+  // two regions at once: a fence's rows are the siblings between its anchors, and if that
+  // fence sits directly inside a mount host, those same nodes are ALSO that mount's direct
+  // children. First-wins gave the node to whichever region was pushed first — and
+  // `collectEachRegions` pushes every mount before every range — so the inner range never
+  // owned anything, survived the filter as a FALSE LEAF, and its own row chrome then
+  // vetoed the empty mount beneath it. That is the exact "outer chrome vetoes empty inner
+  // mounts" failure this whole rewrite exists to prevent, re-opened one level deeper, and
+  // it is FAIL-QUIET: D6 goes dark and `detail.emptyRegions` commits wrong counts.
+  //
+  // The fix is the faithful encoding, not another case: a Set per node, and every owner
+  // marked. With it the computation below is literally the definition of "A encloses B"
+  // (B's anchor is at-or-inside one of A's nodes), with no ordering assumption left to be
+  // wrong about. Still linear.
+  const owners = new Map();
   for (const r of regions) {
-    for (const n of r.nodes) if (!owner.has(n)) owner.set(n, r);
+    for (const n of r.nodes) {
+      let set = owners.get(n);
+      if (!set) owners.set(n, (set = new Set()));
+      set.add(r);
+    }
   }
-  // Walk each region's anchor upward ONCE; whichever region directly holds an ancestor
-  // ENCLOSES this one. A leaf is a region that encloses nothing (the innermost lists) —
-  // NOT one that nothing encloses, which is the outermost and the exact inversion this
-  // rewrite shipped for one round before the 25-triage control caught it.
+  // Walk each region's anchor upward ONCE; every region holding an ancestor ENCLOSES this
+  // one. A leaf encloses nothing (the innermost lists) — NOT "nothing encloses it", which
+  // is the outermost and the exact inversion this rewrite shipped for one round before the
+  // 25-triage control caught it.
   const encloses = new Set();
   for (const r of regions) {
     const marker = r.shape === "mount" ? r.host : r.start;
     for (let n = marker; n; n = n.parentNode) {
-      const o = owner.get(n);
-      if (o && o !== r) encloses.add(o);
+      const set = owners.get(n);
+      if (!set) continue;
+      for (const o of set) if (o !== r) encloses.add(o);
     }
   }
   return regions.filter((r) => !encloses.has(r));
@@ -598,7 +619,16 @@ function seedWasDelivered(obs) {
  */
 function seedMovedTheRender(obs) {
   const report = obs.seedReport;
-  return Boolean(report && report.gainedContent === true);
+  if (!report) return false; // the question was never asked — do not veto (back-compat)
+  // ⛑ S423 fix round 2 (finding 3) — TRI-STATE, because "the snapshot threw" is not the
+  // same answer as "nothing was gained", and resolving it to the FIRE direction would have
+  // scored a cell `renders-empty-with-data` on a measurement that never happened — and
+  // committed `gainedContent:false` to the baseline as though it had. `null` means
+  // UNMEASURED and vetoes, matching what every other ambiguity in this detector does (no
+  // region, no leaf, unterminated fence, hidden region all stay quiet). The harness also
+  // raises it as a bridge error, so it is LOUD rather than silently quiet.
+  if (report.gainedContent === null) return true;
+  return report.gainedContent === true;
 }
 
 /**

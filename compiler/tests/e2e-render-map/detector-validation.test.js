@@ -616,6 +616,95 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     expect(signatureGained(mk("<p>A</p>"), mk('<p>A</p><img src="b.png">'))).toBe(true);
   });
 
+  // =========================================================================
+  // ⛑ S423 FIX ROUND 2 (finding 1) — REGION OWNERSHIP IS MANY-TO-MANY.
+  //
+  // A node can belong to TWO regions at once: a fence's rows are the siblings
+  // between its anchors, and when that fence sits directly inside a mount host
+  // those same nodes are ALSO that mount's direct children. The owner map was a
+  // first-wins `Map<node, region>`, and `collectEachRegions` pushes every mount
+  // before every range — so the inner range owned nothing, survived as a FALSE
+  // LEAF, and its own row chrome vetoed the empty mount beneath it. Fail-quiet:
+  // D6 went dark and `detail.emptyRegions` committed wrong counts.
+  // =========================================================================
+  const NESTED_FENCE_IN_MOUNT =
+    '<div data-scrml-each-mount="each_out">' +
+    "<!--scrml-each:mid-->" +
+    '<section>Row text<div data-scrml-each-mount="each_in"></div></section>' +
+    "<!--/scrml-each:mid-->" +
+    "</div>";
+
+  test("finding 1: a fence directly inside a mount host does not become a false leaf", () => {
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${NESTED_FENCE_IN_MOUNT}</main>`;
+    const v = regionScopedEmptiness(body);
+    // The ONLY true leaf is `each_in`. Before the fix this read leaves:2 emptyLeaves:1.
+    expect(v.summary).toEqual({ regions: 3, mounts: 2, ranges: 1, leaves: 1, emptyLeaves: 1 });
+    expect(v.allLeavesEmpty).toBe(true);
+    const det = seededDetectGained(NESTED_FENCE_IN_MOUNT, false);
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  test("finding 1: the same shape with a NON-empty inner mount stays quiet", () => {
+    const markup = NESTED_FENCE_IN_MOUNT.replace(
+      '<div data-scrml-each-mount="each_in"></div>',
+      '<div data-scrml-each-mount="each_in"><li>Tag</li></div>',
+    );
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).summary).toEqual({
+      regions: 3, mounts: 2, ranges: 1, leaves: 1, emptyLeaves: 0,
+    });
+    expect(seededDetectGained(markup, false).state).toBe("renders-clean");
+  });
+
+  // ⚑ THE MODEL, PINNED AGAINST AN INDEPENDENT ORACLE — not another enumerated
+  // position. Two review rounds have now found real defects in region ownership
+  // (an inverted leaf direction, then a lossy owner map), and both were shapes
+  // nobody had thought to enumerate. So this asserts the PRODUCTION leaf
+  // computation against a brute-force reference written straight from the
+  // definition — "A encloses B iff B's anchor is at-or-inside one of A's nodes" —
+  // with no map, no ordering, and no shared code. Any future optimisation that
+  // changes the meaning reds here regardless of whether anyone predicted the shape.
+  const referenceLeaves = (regions) => {
+    const enclosedBy = (a, b) => {
+      if (a === b) return false;
+      const marker = b.shape === "mount" ? b.host : b.start;
+      for (let n = marker; n; n = n.parentNode) {
+        for (const node of a.nodes) if (node === n) return true;
+      }
+      return false;
+    };
+    return regions.filter((r) => !regions.some((o) => enclosedBy(r, o))).length;
+  };
+  const M = (id, inner = "") => `<div data-scrml-each-mount="each_${id}">${inner}</div>`;
+  const F = (id, inner) => `<!--scrml-each:${id}-->${inner}<!--/scrml-each:${id}-->`;
+  const OWNERSHIP_SHAPES = {
+    "flat: one fence": F("a", "<li>x</li>"),
+    "flat: one mount": M("a", "<li>x</li>"),
+    "two disjoint siblings, both shapes": `<ul>${F("a", "")}</ul><ul>${M("b")}</ul>`,
+    "mount inside fence (the 25-triage shape)": F("o", `<section>${M("i")}</section>`),
+    "fence DIRECTLY inside mount (finding 1)": NESTED_FENCE_IN_MOUNT,
+    "fence deeper inside mount (no shared node)": M("o", `<section>${F("m", `<b>${M("i")}</b>`)}</section>`),
+    "fence directly inside fence": F("o", F("i", "<li>x</li>")),
+    "mount directly inside mount": M("o", M("i")),
+    "three levels alternating": M("a", F("b", `<section>${M("c")}</section>`)),
+    "three levels, all direct": M("a", F("b", M("c"))),
+    "two fences sharing a parent with a mount": `<ul>${F("a", "")}${M("b")}${F("c", "<li>y</li>")}</ul>`,
+    "sibling subtrees each with their own nesting": `<div>${F("a", M("b"))}</div><div>${M("c", F("d", ""))}</div>`,
+  };
+  for (const [label, markup] of Object.entries(OWNERSHIP_SHAPES)) {
+    test(`ownership model agrees with the brute-force reference: ${label}`, () => {
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      const regions = collectEachRegions(body);
+      expect(regions.length).toBeGreaterThan(0); // non-vacuity
+      const v = regionScopedEmptiness(body);
+      expect(v.summary.leaves).toBe(referenceLeaves(regions));
+    });
+  }
+
   // ⛑ S420 HAZARD, PINNED HERE TOO. `generate-baseline.js` persists `detail` for every
   // NON-GREEN cell into the tracked baseline JSON, and reddening a seeded cell is this
   // detector's entire purpose — so the FIRST cell this change reddens is also the first
@@ -756,6 +845,20 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
   });
 
+  // Local twin of the D6 block's helper (that one is scoped to its own describe).
+  const seededDetectGained = (markup, gainedContent) => {
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    return runDetectors({
+      compileErrors: [], throwMessage: null, consoleErrors: [],
+      document: { body }, seeded: true,
+      seedReport: {
+        writes: [{ name: "x", reason: "written", namespaced: true, wrote: true }],
+        domChanged: true, gainedContent, errors: [],
+      },
+    });
+  };
+
   // The emit-regression shape, driven through the REAL observeApp by handing it an app
   // whose compiled client exposes no side-channel is not reachable from a fixture — so
   // this asserts the contract the branch must satisfy: a non-delivery reason reaches
@@ -785,9 +888,68 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     // set-threw is an emit/harness failure and IS raised...
     expect(src).toContain('w.reason === "set-threw"');
     // ... while the fixture-bug reasons are deliberately not.
-    const guard = src.slice(src.indexOf('w.reason === "set-threw"') - 900, src.indexOf('w.reason === "set-threw"') + 400);
+    const guard = src.slice(src.indexOf('w.reason === "set-threw"') - 1400, src.indexOf('w.reason === "set-threw"') + 400);
     expect(guard).toContain("derived-cell");
     expect(guard).toContain("no-such-cell");
+  });
+
+  // ⛑ S423 fix round 2 (finding 2) — the guard required EVERY write to be `set-threw`,
+  // so a MIXED fixture stayed silent: a real accessor throw disappearing exactly the way
+  // F4 exists to prevent. Any >=2-key fixture with one missing key and one throwing key
+  // hits it. Asserted as a predicate over write-sets, so the condition itself is pinned
+  // rather than one example of it.
+  const LOUDNESS_CASES = {
+    "every write threw": [{ reason: "set-threw", wrote: false }, { reason: "set-threw", wrote: false }],
+    "MIXED: one threw, one names no such cell": [{ reason: "set-threw", wrote: false }, { reason: "no-such-cell", wrote: false }],
+    "MIXED: one threw, one is a derived cell": [{ reason: "derived-cell", wrote: false }, { reason: "set-threw", wrote: false }],
+    "a single throwing write": [{ reason: "set-threw", wrote: false }],
+  };
+  const QUIET_CASES = {
+    "the known fixture bugs alone": [{ reason: "derived-cell", wrote: false }, { reason: "no-such-cell", wrote: false }],
+    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
+    "everything written": [{ reason: "written", wrote: true }],
+  };
+  // The production condition, mirrored from render-harness.js. The tests below pin its
+  // MEANING; the source assertion above pins that the harness still carries it.
+  const shouldBeLoud = (writes) =>
+    writes.length > 0 && !writes.some((w) => w.wrote) && writes.some((w) => w.reason === "set-threw");
+  for (const [label, writes] of Object.entries(LOUDNESS_CASES)) {
+    test(`F4 loudness FIRES: ${label}`, () => expect(shouldBeLoud(writes)).toBe(true));
+  }
+  for (const [label, writes] of Object.entries(QUIET_CASES)) {
+    test(`F4 loudness stays quiet: ${label}`, () => expect(shouldBeLoud(writes)).toBe(false));
+  }
+  test("finding 2: the harness's own condition is the not-delivered AND some-threw shape", () => {
+    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // The `every(...)` form is the bug; it must be gone.
+    expect(src).not.toContain('writes.every((w) => w.reason === "set-threw")');
+    expect(src).toContain("!seedReport.writes.some((w) => w.wrote)");
+    expect(src).toContain('seedReport.writes.some((w) => w.reason === "set-threw")');
+  });
+
+  // ⛑ S423 fix round 2 (finding 3) — an UNMEASURED gain signal must not resolve to the
+  // FIRE direction. `null` (the snapshot threw) vetoes, like every other ambiguity here.
+  test("finding 3: gainedContent null (UNMEASURED) suppresses D6 rather than firing it", () => {
+    const markup = `<h1>App</h1><ul>${"<!--scrml-each:a1--><!--/scrml-each:a1-->"}</ul>`;
+    // measured-no-gain -> fires (the control for this test)
+    expect(seededDetectGained(markup, false).smells).toContain("S-EMPTY-WITH-DATA");
+    // UNMEASURED -> must NOT fire
+    const det = seededDetectGained(markup, null);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+  });
+
+  test("finding 3: an unmeasured signal also suppresses the BODY scope, not just regions", () => {
+    expect(seededDetectGained("", false).smells).toContain("S-EMPTY-WITH-DATA");
+    expect(seededDetectGained("", null).smells).not.toContain("S-EMPTY-WITH-DATA");
+  });
+
+  test("finding 3: the harness reports null (not false) when a snapshot fails, and says so", () => {
+    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // The swallow-to-false form is the bug; the throw must be captured.
+    expect(src).toContain("sigFailed");
+    expect(src).toContain("beforeSig === null || afterSig === null ? null : signatureGained");
+    expect(src).toContain("gainedContent is UNMEASURED");
   });
 });
 

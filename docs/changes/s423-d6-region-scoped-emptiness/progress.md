@@ -553,3 +553,181 @@ Tier suite: **110 pass / 0 fail** (was 88 before the fix round; 94 of them in
 `23969 pass / 99 skip / 10 todo / 5 fail / 124663 expect()` across 1322 files — the SAME five-name
 set as before the fix round (3 self-host smoke, the B5 CSRF guard, 1 unnamed), **zero new**.
 Identical totals, so the fix round changed nothing outside this tier.
+
+---
+
+# FIX ROUND 2 — three more findings, and the substrate question answered
+
+## Finding 1 (MEDIUM) — reproduced exactly
+
+On the fix-round code, the coordinator's probe verbatim:
+
+```
+<div data-scrml-each-mount="each_out">
+  <!--scrml-each:mid--><section>Row text<div data-scrml-each-mount="each_in"></div></section><!--/scrml-each:mid-->
+</div>
+→ summary {"regions":3,"mounts":2,"ranges":1,"leaves":2,"emptyLeaves":1}  allLeavesEmpty=false  D6 fired=false
+```
+
+Correct verdict is `leaves:1 emptyLeaves:1 allLeavesEmpty:true`. I also found a third affected shape
+the report did not name — `mount inside fence inside mount, all empty` — which *fired*, but with
+`leaves:2` where the truth is `1`, i.e. **the right answer off wrong counts, and those counts are
+committed to `detail`.**
+
+**Root cause, stated as a class rather than a position:** `owner` was `Map<node, region>` with
+first-wins. Region membership is **genuinely many-to-many** — a fence's rows are the siblings between
+its anchors, and when that fence sits directly inside a mount host those same nodes are ALSO that
+mount's direct children. A many-to-one map cannot hold that, so the second owner was dropped; which
+owner won was decided by `collectEachRegions` pushing all mounts before all ranges. The ordering
+dependence was a *symptom*. The fix is `Map<node, Set<region>>` with every owner marked, after which
+the computation is literally the definition.
+
+## ⚠ REACHABILITY — the report's claim, checked, and CORRECTED
+
+The review said this is reachable today because an `<each>` inside an `<if>`/`<match>` arm emits a
+fence into the arm's render HTML. I verified the **mechanism** and it is real:
+`emit-variant-guard.ts:1056` sets `hasEachMount = renderFunctionsJs.includes("scrml-each:")`, and the
+surrounding comment confirms an arm's `<each>` renders its fence into the arm's render-fn HTML string.
+
+**But the adjacency does not follow, and the adjacency is what the bug needs.** The bug requires a
+node to be in BOTH a mount's `nodes` (its direct children) and a range's `nodes` — i.e. the fence
+anchors must be *direct children of the mount host*. The arm's HTML is written by
+`_mount.innerHTML = <armFn>()` (`emit-variant-guard.ts:1247`), where `_mount` is the match/engine
+arm's own mount element — never a `[data-scrml-each-mount]` div. A nested-each mount div's children
+come from the inner reconcile's row factory, and an `<each>` in a row body is itself nested, so it
+emits a mount div, not a fence. **I could not construct the shape from today's emitters, and I am not
+going to quote a reachability claim I could not confirm.**
+
+Fixed anyway, and the reason is the important part: a **lossy encoding whose failure direction is
+fail-QUIET** is exactly what silently re-opens a closed class the next time an emitter moves. The
+cost of correctness here is one `Set`.
+
+## Findings 2 and 3 — both accepted, both real
+
+**2 (LOW).** The F4 guard required `every` write to be `set-threw`, so a mixed
+`[{set-threw},{no-such-cell}]` fixture stayed silent: no push, `seedWasDelivered` false, D6 off, and
+`generate-baseline.js` strips `detail` from the green cell — the throw vanishing exactly the way F4
+exists to prevent. Now `!writes.some(wrote) && writes.some(reason === "set-threw")`, which is the
+stated intent. Pinned as a predicate over **write-sets** (4 loud cases, 3 quiet) rather than one
+example, plus a source assertion that the `every(...)` form is gone.
+
+**3 (LOW).** A swallowed snapshot throw resolved to the FIRE direction — `gainedContent:false` on a
+measurement that never happened, and that fabricated `false` committed to the baseline as though
+measured. `gainedContent` is now a **tri-state**: `true` gained → quiet; `false` measured-no-gain →
+may fire; **`null` UNMEASURED → vetoes**, matching every other ambiguity in this detector (no region,
+no leaf, unterminated fence, hidden region); `undefined` (field absent) stays non-blocking for
+back-compat. And it is *loud* as well as quiet — the harness pushes a bridge error, so the cell reds
+via D2 instead of being silently suppressed.
+
+---
+
+## THE JUDGEMENT CALL — asked for, and answered
+
+**I did not need a third special case, and I did not add one.** But I am also not going to tell you
+"these are genuinely the last two edges", because I have now been wrong about this machinery twice
+and a third assertion of confidence from me is worth nothing.
+
+Here is what I think is actually true:
+
+**The MODEL has been right the whole time; both defects were in COMPUTING it.** The model is one
+sentence — *A encloses B iff B's anchor is at-or-inside one of A's nodes; a leaf encloses nothing.*
+Round 1's bug computed the **converse** (kept the outermost). Round 2's bug **dropped edges** by
+encoding a many-to-many relation in a many-to-one map. Neither was the definition being wrong, and
+neither was a missing case. So "converge on a simpler substrate" does not apply the way it would if I
+were stacking conditionals: there are zero special cases in the ownership code, before or after.
+
+**So instead of asserting correctness, I changed what backs it.** The leaf computation is now pinned
+against a **brute-force reference written straight from the definition** — pairwise, no map, no
+ordering, no shared code with production — over 12 nesting shapes including every pathological one
+from both rounds. That converts the claim from *"I enumerated the edges"* (which failed twice) to
+*"production agrees with the definition on every shape we can generate"*. It already paid: reverting
+the owner map reds **five** tests, two of which (`three levels alternating`, `three levels, all
+direct`) nobody enumerated as findings.
+
+**And that is also why I did NOT take the reviewer's alternative of dropping the owner map for a
+direct pairwise test.** The pairwise version is now the *oracle*. If production were pairwise too,
+the differential test would compare an implementation against itself and be vacuous. The two need to
+differ for the test to have power — the linear one in production, the obvious one as the reference.
+That is a better arrangement than either alone, and it is the thing I would defend if a third round
+finds a fourth defect: the next lossy optimisation reds without anyone having to predict its shape.
+
+**Summary for the land decision:** the model is right, the encoding was lossy, there are no special
+cases, and the guarantee now rests on a differential oracle rather than on my confidence.
+
+## BITE PROOF — fix round 2
+
+⛔ No `git stash`; file copies only. All from a **119 pass / 0 fail** baseline.
+
+| # | mutation | result |
+|---|---|---|
+| **I** | owner map back to first-wins | **5 fail** — both finding-1 pins **plus 3 oracle shapes**, incl. two nobody enumerated |
+| **J** | F4 guard back to `every(... set-threw)` | **1 fail** — the finding-2 condition pin |
+| **K** | `null` gain no longer vetoes | **2 fail** — both finding-3 pins (region scope AND body scope) |
+
+⚠ My first attempt at J was sloppy — it left an undefined `writes` in scope, so the harness threw a
+`ReferenceError` and reddened three unrelated end-to-end tests. That is a mutation that proves
+nothing (any syntax error reds a suite). Redone faithfully against `seedReport.writes`, it reds
+exactly the one pin that names the condition. Recorded because a bad mutation is as misleading as a
+missing one.
+
+Restored → **119 pass / 0 fail**. Whole tier: **135 pass / 0 fail** (was 110).
+
+## FIX ROUND 2 — full-tier before/after, re-run from scratch
+
+Both runs mine, serial (never two `bun` tiers at once on this box), flipped by FILE COPY from
+`_probe/{rd,rh}.{BASE,FIXED}.js` — ⛔ no `git stash`. BASE is `3b66030a`'s two harness files dropped
+into this worktree.
+
+| state | base | after fix round 2 | delta |
+|---|---|---|---|
+| `renders-clean` | 277 | 276 | **−1** |
+| `renders-empty-with-data` | **0** | **1** | **+1** |
+| `renders-empty` · `needs-server` · `compiles-but-throws` · `smell-detected-wrong` · `fails-compile` | 18 · 8 · 21 · 2 · 117 | same | **0** |
+| **total** | **443** | **443** | **0** |
+
+```
+STATE CHANGES (1)      examples/25-triage-board.scrml#populated: renders-clean -> renders-empty-with-data
+SMELL-SET CHANGES (1)  the same cell
+ACCEPTANCE-BAR OFFENCES (0)
+PER-RUN TOKENS IN COMMITTED detail (0)
+```
+
+**Zero corpus movement from all three findings, exactly as predicted** — finding 1 is fail-quiet, and
+findings 2 and 3 are unreachable on today's corpus (no fixture mixes `set-threw` with another reason;
+no snapshot throws). The histogram is byte-identical to both previous rounds. The control cell keeps
+`emptyRegions {regions:4, mounts:3, ranges:1, leaves:3, emptyLeaves:3}` and
+`gainedContent:false` — correct counts, correct reason.
+
+Tier suite **135 pass / 0 fail** (110 → 135; `detector-validation.test.js` 94 → 119).
+Delta-gate warns on **2** cells, both pre-existing base drift.
+
+### Pre-commit subset, fix round 2
+
+Same five-name set, zero new — see the numbers appended below.
+
+---
+
+# RESIDUAL — final, after three rounds
+
+1. **One-of-several-lists remains invisible**, by two independent mechanisms: the leaf conjunction
+   (one empty leaf among several stays green) and the page-global gain conjunct (data rendering
+   *anywhere* silences the detector). The second is the price of closing F1/F2 and is unavoidable for
+   anything reading only the final DOM — F1 and the 25-triage control are DOM-identical.
+2. **What would close it: per-region attribution across the seed write.** Snapshot each region's
+   content either side of the write and ask whether the region that *should* have gained did. The
+   pieces exist (`collectEachRegions` identifies regions; `applySeed` straddles the write) but region
+   identity is not stable across a reconcile that replaces nodes, so it is real work. Not attempted.
+3. **F4's behavioural half is pinned by contract + source assertion, not execution** — the real
+   compiler cannot be made to emit a client without `_scrml_reactive_set`.
+4. **Reachability of finding 1 is UNCONFIRMED** (see above). Fixed on correctness grounds.
+5. **`<template>` regions are excluded twice over** (happy-dom hides template children from
+   `querySelectorAll`), so mutation F does not red those two cases.
+6. Unchanged across all rounds: `seed-fixtures.js` and the three wrong fixtures untouched;
+   `compiler/src` untouched (incl. the stale `emit-ssr-render.ts:411` comment and the shared
+   mount-id question); the 5 pre-existing base drifts left visible rather than laundered.
+
+```
+23969 pass · 99 skip · 10 todo · 5 fail · 124663 expect() — Ran 24083 tests across 1322 files.
+```
+The same five names as both earlier rounds (3 self-host smoke, the B5 CSRF guard, 1 unnamed).
+**Zero new**, and identical totals — the fix round changed nothing outside this tier.
