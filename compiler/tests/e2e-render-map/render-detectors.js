@@ -148,6 +148,25 @@ function isUnrenderedByMarkup(el, stopAt) {
 }
 
 /**
+ * The same ancestor question for an ARBITRARY node — a comment fence anchor, not just
+ * an element. Walks `parentNode` (not `parentElement`) because the caller starts from a
+ * comment node, and tests only the ELEMENT ancestors.
+ *
+ * ⛑ S423 fix round (F3) — `collectEachRegions` did not apply this, so an `<each>` inside
+ * `<div hidden>` / `aria-hidden` / `display:none` / `<noscript>` was collected as a live
+ * region and was PERMANENTLY empty, reddening any seeded page whose only list is hidden.
+ * That broke the S419 one-definition-of-not-rendered invariant this file's own header
+ * cites: both halves of `hasRenderedContent` prune unrendered subtrees, and the region
+ * collector was a third reader of the DOM that did not.
+ */
+function isInUnrenderedSubtree(node, stopAt) {
+  for (let n = node; n && n !== stopAt; n = n.parentNode) {
+    if (n.nodeType === 1 && isUnrenderedByOwnMarkup(n)) return true;
+  }
+  return false;
+}
+
+/**
  * Does this candidate element HOLD content (not merely exist)?
  *   - text-like input / textarea: a non-empty value (live `.value`, else the attribute).
  *     A placeholder is not content. `<input type="hidden">` never counts.
@@ -397,6 +416,8 @@ export function collectEachRegions(body) {
   const mounts = body.querySelectorAll("[data-scrml-each-mount]");
   for (let i = 0; i < mounts.length; i++) {
     const host = mounts[i];
+    // ⛑ S423 fix round (F3) — a region nobody can see is not evidence of anything.
+    if (isInUnrenderedSubtree(host, body)) continue;
     regions.push({ shape: "mount", host, nodes: Array.from(host.childNodes ?? []) });
   }
 
@@ -405,6 +426,7 @@ export function collectEachRegions(body) {
     const start = comments[i];
     const data = String(start.nodeValue ?? "").trim();
     if (!data.startsWith(EACH_FENCE_PREFIX)) continue;
+    if (isInUnrenderedSubtree(start, body)) continue; // ⛑ S423 fix round (F3)
     const want = `/${data}`;
     const nodes = [];
     let end = null;
@@ -421,17 +443,35 @@ export function collectEachRegions(body) {
   return regions;
 }
 
-/** Does region `a` enclose region `b`? (`b`'s anchor sits inside one of `a`'s nodes.) */
-function regionEncloses(a, b) {
-  if (a === b) return false;
-  const marker = b.shape === "mount" ? b.host : b.start;
-  if (!marker) return false;
-  for (let n = marker; n; n = n.parentNode) {
-    for (let i = 0; i < a.nodes.length; i++) {
-      if (a.nodes[i] === n) return true;
+/**
+ * The LEAF regions of `regions` — those enclosed by no other region.
+ *
+ * ⛑ S423 fix round (F5) — this was a pairwise `regionEncloses` with a LINEAR array scan
+ * inside an ancestor walk, i.e. O(regions² × siblings × depth). It is now one ancestor
+ * walk per region against a node→owner Map built in a single pass: O(total nodes + Σ
+ * depth), with O(1) membership. A range region is a SIBLING RANGE with no wrapping
+ * element, so `node.contains()` cannot express it directly — the owner map can, and it
+ * handles both shapes uniformly.
+ */
+function leafRegions(regions) {
+  // node -> the region that directly holds it as one of its own nodes.
+  const owner = new Map();
+  for (const r of regions) {
+    for (const n of r.nodes) if (!owner.has(n)) owner.set(n, r);
+  }
+  // Walk each region's anchor upward ONCE; whichever region directly holds an ancestor
+  // ENCLOSES this one. A leaf is a region that encloses nothing (the innermost lists) —
+  // NOT one that nothing encloses, which is the outermost and the exact inversion this
+  // rewrite shipped for one round before the 25-triage control caught it.
+  const encloses = new Set();
+  for (const r of regions) {
+    const marker = r.shape === "mount" ? r.host : r.start;
+    for (let n = marker; n; n = n.parentNode) {
+      const o = owner.get(n);
+      if (o && o !== r) encloses.add(o);
     }
   }
-  return false;
+  return regions.filter((r) => !encloses.has(r));
 }
 
 /**
@@ -443,7 +483,7 @@ function regionEncloses(a, b) {
 export function regionScopedEmptiness(body) {
   const regions = collectEachRegions(body);
   if (regions.length === 0) return null;
-  const leaves = regions.filter((r) => !regions.some((o) => regionEncloses(r, o)));
+  const leaves = leafRegions(regions);
   if (leaves.length === 0) return null;
   const emptyLeaves = leaves.filter((r) => !nodesHaveRenderedContent(r.nodes));
   return {
@@ -457,6 +497,47 @@ export function regionScopedEmptiness(body) {
       emptyLeaves: emptyLeaves.length,
     },
   };
+}
+
+/**
+ * A comparable fingerprint of everything `body` currently RENDERS: a count per distinct
+ * non-whitespace rendered text value, plus the number of content-bearing candidate
+ * elements. Same "rendered" definition as `hasRenderedContent` — the S419 invariant — so
+ * hidden text, `<script>`/`<style>`/`<noscript>` content and hidden images are excluded.
+ *
+ * ⛑ S423 fix round — this exists so the harness can ask "did the render GAIN anything
+ * across the seed write?". Counts, not a Set: a list going from one "Alpha" row to two
+ * is a gain, and a Set would miss it.
+ *
+ * ⚠ It holds raw page TEXT and must never reach `detail` — only the derived BOOLEAN does.
+ */
+export function renderedContentSignature(body) {
+  const counts = new Map();
+  for (const t of collectTextNodes(body, isUnrenderedByOwnMarkup)) {
+    const v = t.trim();
+    if (v === "") continue;
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  let elements = 0;
+  if (body && typeof body.querySelectorAll === "function") {
+    const els = body.querySelectorAll(CONTENT_CANDIDATE_SELECTOR);
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      if (isUnrenderedByMarkup(el, body)) continue;
+      if (elementCarriesContent(el)) elements++;
+    }
+  }
+  return { counts, elements };
+}
+
+/** Did `after` render anything `before` did not? (Strictly a GAIN — a pure loss is false.) */
+export function signatureGained(before, after) {
+  if (!before || !after) return false;
+  if (after.elements > before.elements) return true;
+  for (const [v, n] of after.counts) {
+    if (n > (before.counts.get(v) ?? 0)) return true;
+  }
+  return false;
 }
 
 /**
@@ -481,6 +562,43 @@ function seedWasDelivered(obs) {
   if (report == null) return true; // no report available — pre-S423 behaviour
   const writes = Array.isArray(report.writes) ? report.writes : [];
   return writes.some((w) => w && w.wrote === true);
+}
+
+/**
+ * Did the seeded data SHOW UP somewhere — anywhere — when the seed was written?
+ *
+ * ⛑ S423 fix round, and this is the conjunct that closes F1 and F2. The region predicate
+ * asks "are the leaf lists empty", which is NOT the same question as D6's, "was data
+ * delivered and did the render fail to show it". Two shapes are indistinguishable by DOM
+ * structure alone and want opposite answers:
+ *   F1 — an outer each renders the seeded ROWS, and each row holds a nested list (tags,
+ *        sub-tasks) that is legitimately empty. Structurally identical to 25-triage,
+ *        where the outer each renders only column CHROME.
+ *   F2 — the seeded datum renders by interpolation OUTSIDE any each, next to one
+ *        unrelated empty each.
+ * No amount of looking at the final DOM separates "the outer region rendered chrome" from
+ * "the outer region rendered the data". What separates them is the TRANSITION: the
+ * harness writes the seed into a live page, so it can compare what rendered before and
+ * after and ask whether anything NEW appeared.
+ *
+ * ⚠ THE MEASURE IS "GAINED", NOT "CHANGED", AND THAT DISTINCTION IS LOAD-BEARING — the
+ * obvious `domChanged` reading is WRONG IN BOTH DIRECTIONS, measured on the real corpus:
+ *   - `examples/25-triage-board#populated` — `domChanged` is TRUE. The app's own initial
+ *     `<tasks>` renders four tasks; the seed replaces them with rows whose `column` matches
+ *     no column, so the render MOVES by SHRINKING to nothing. Gating on "did not change"
+ *     would make D6 dark on the one cell it exists for.
+ *   - the D6 fixture with its bug seed — `domChanged` is FALSE (its `<tasks>` starts empty,
+ *     so an all-empty render stays all-empty), yet it is exactly the bug.
+ * A pure LOSS is not a gain, so both land correctly: 25-triage gains nothing and fires;
+ * `03-contact-book` gains "Ada Lovelace" and goes quiet; the fixture's matching seed gains
+ * "Alpha"/"Beta" and goes quiet.
+ *
+ * Absent (a direct `runDetectors` call with no report) is NOT treated as "moved" — the
+ * question was never asked, so it must not veto. Only an explicit `true` blocks.
+ */
+function seedMovedTheRender(obs) {
+  const report = obs.seedReport;
+  return Boolean(report && report.gainedContent === true);
 }
 
 /**
@@ -635,7 +753,7 @@ export function runDetectors(obs) {
   //   each-regions — the body showed SOMETHING, but every identifiable leaf
   //                  `<each>` region rendered nothing. This is the board bug: the
   //                  chrome is there and the DATA is not.
-  if (seedWasDelivered(obs)) {
+  if (seedWasDelivered(obs) && !seedMovedTheRender(obs)) {
     const bodyEmpty = !hasRenderedContent(body);
     const regionVerdict = bodyEmpty ? null : regionScopedEmptiness(body);
     if (bodyEmpty || (regionVerdict && regionVerdict.allLeavesEmpty)) {

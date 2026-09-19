@@ -361,3 +361,195 @@ cluster; none is in this arc's surface:
 compiler/tests/{unit,integration,conformance}` returns **nothing** — no test in the pre-commit subset
 imports this tier, so a change confined to `compiler/tests/e2e-render-map/` cannot reach it.
 Every file this arc touches is under that directory (plus `docs/changes/`).
+
+---
+
+# FIX ROUND — the adversarial pass's 5 findings
+
+All five verified against the landed predicate before touching anything. **All real.** I also found
+**three variants the pass did not list** (`aria-hidden`, inline `display:none`, and a hidden MOUNT
+div — F3 was reported only for `hidden` / `<noscript>`), and **one bug of my own** while fixing F5.
+
+Reproduced on `ebf1681b`, via `runDetectors` on synthetic DOM with a delivered seed report:
+
+```
+FIRES  F1  rows render, nested tag-lists empty      regions=3 leaves=2 emptyLeaves=2
+FIRES  F2  seeded datum outside any each            regions=1 leaves=1 emptyLeaves=1
+FIRES  F3  only each inside <div hidden>            regions=1 leaves=1 emptyLeaves=1
+FIRES  F3a only each inside aria-hidden             (NOT IN THE REPORT)
+FIRES  F3c only each inside display:none            (NOT IN THE REPORT)
+FIRES  F3b only each inside <noscript>              regions=1 leaves=1 emptyLeaves=1
+FIRES  F3d only each inside a hidden MOUNT div      (NOT IN THE REPORT)
+FIRES  CONTROL 25-triage shape                      regions=4 leaves=3 emptyLeaves=3
+```
+
+## The hypothesis: RIGHT IN DIRECTION, WRONG IN MEASURE — and the real corpus is what says so
+
+The coordinator proposed: fire only when a seed was delivered AND **the render did not move**.
+The direction is right — the discriminator has to be the TRANSITION, because no DOM-shape rule can
+separate F1 from the control (see below). But the MEASURE is wrong, and wrong in **both** directions.
+Measured by mounting the real apps and comparing rendered text either side of the seed write:
+
+| app | `domChanged` / moved? | gained NEW rendered text? | what the measures imply |
+|---|---|---|---|
+| `examples/03-contact-book` | true | **true** (`"Ada Lovelace"`, `"ada@x.io"`) | both agree: quiet |
+| **`examples/25-triage-board`** | **TRUE** | **FALSE** | ⛔ "did not move" ⇒ **quiet** — kills the control |
+| `examples/06-kanban-board` | false | false | no write at all; gated earlier |
+| `examples/16-remote-data` | false | false | no write at all; gated earlier |
+| D6 fixture, bug seed | **FALSE** | false | ⛔ "did not move" ⇒ fires, but only by luck |
+| D6 fixture, ok seed | true | **true** | both agree: quiet |
+
+**Why 25-triage MOVES.** Its `<tasks>` is not empty at boot — the app declares four tasks that render
+across Inbox/Doing/Done. The seed REPLACES them with rows whose `column` matches no column, so the
+render moves by **shrinking to nothing**. `domChanged:true` is exactly what limb 1 established. A
+"did not move" gate would therefore have made D6 dark on the one cell it exists for — the same
+failure mode as the brief's original lean, arrived at from the other side. And the fixture shows the
+inverse error: `domChanged:false` there even though it IS the bug.
+
+**The measure that works on all six: did the render GAIN anything.** A pure LOSS is not a gain.
+`renderedContentSignature` fingerprints what a body renders (per-value counts of non-whitespace
+rendered text + a count of content-bearing elements, using the SAME "rendered" definition as
+`hasRenderedContent`, so the S419 invariant holds); `signatureGained(before, after)` is true when any
+value's count rose or the element count rose. Counts, not a Set — one "Alpha" row becoming two is a
+gain and a Set would miss it. `applySeed` already snapshotted the body either side of the write and
+threw both away; it now reduces them to the single **boolean** `gainedContent`. The signature holds
+raw page text and never leaves the harness — only the boolean reaches `detail`.
+
+## F1 + F2 are one bug, and it is not a DOM-shape bug
+
+F1's markup is **structurally identical to 25-triage** — an outer range holding rows, each row
+holding an empty mount. In F1 the outer range rendered the seeded DATA; in 25-triage it rendered
+column CHROME. The final DOM cannot tell those apart, which is why the leaf rule could not and no
+refinement of it would. What separates them is that the harness writes the seed into a LIVE page, so
+it can ask whether anything new appeared. That is also the more faithful reading of D6's own
+question: *"data was seeded and the render showed nothing"* — not *"are the lists empty"*.
+
+So the rule is now: **seed delivered AND the render gained nothing AND (body empty OR every leaf each
+region empty)**. F1 gains `"Task A"/"Task B"` → quiet. F2 gains `"Welcome, Ada"` → quiet. 25-triage
+gains nothing → fires.
+
+## F3 — accepted without argument, and widened
+
+An `<each>` nobody can see is not evidence of anything, and the pass is right that this broke the
+S419 one-predicate invariant my own header cites: `collectEachRegions` was a THIRD reader of the DOM
+that did not prune unrendered subtrees. `isInUnrenderedSubtree` (walks `parentNode`, because a fence
+anchor is a comment node, not an element) now filters both shapes at collection time — so a hidden
+each is not merely non-firing, it is **not a region at all**, pinned with `collectEachRegions(body)`
+`toEqual([])` so a later change that only tweaks the verdict cannot reopen it. Covered: `hidden`,
+`aria-hidden`, `display:none`, `visibility:hidden`, `<noscript>`, `<template>`, and a hidden
+GRANDparent × both emission shapes = 14 cases. Plus the opposite guard: a VISIBLE empty each beside a
+hidden one still fires, and the hidden one is not counted in the summary.
+
+## F4 — accepted; the fix is narrower than "make it loud"
+
+`render-harness.js`'s no-side-channel branch had a comment reading "Loud, not silent" above code that
+was silent. It now pushes to `obs.consoleErrors`, which D2 turns into a red `compiles-but-throws`.
+Same for the "every write threw" path — but **only for `set-threw`**. Deliberately NOT for
+`derived-cell` / `no-such-cell`: those are the three KNOWN fixture bugs tabled in
+`SEED_OBSERVABILITY` and owned by a different arc; reddening them here would break the additive bar
+AND pre-empt that arc. Emit regression ⇒ loud. Known fixture bug ⇒ unchanged.
+
+⚠ **Honest limit on the F4 pin.** The behavioural half is not reachable from a fixture — I cannot
+make the real compiler emit a client without `_scrml_reactive_set`. So it is pinned two ways instead:
+a `runDetectors` contract test (a bridge failure in `consoleErrors` ⇒ `compiles-but-throws`, asserted
+explicitly NOT green) and a source-level assertion that the branch pushes and that the fixture-bug
+reasons are excluded. Mutation H reds only the source-level one. That is weaker than an executed
+pin and I am not going to call it more than it is.
+
+## F5 — taken, and it shipped INVERTED for one round
+
+Replaced the pairwise `regionEncloses` (O(regions² × siblings × depth), linear array scans) with one
+node→owner Map plus one ancestor walk per region. `node.contains()` cannot express a range region —
+a sibling range has no wrapping element — so the owner map is what handles both shapes uniformly.
+
+⚑ **My first version was an exact inversion**: it kept the regions that nothing encloses (the
+OUTERMOST) instead of those that enclose nothing (the innermost). The 25-triage control caught it
+immediately — `leaves: 3, emptyLeaves: 3` became `leaves: 1, emptyLeaves: 0` and the control went
+quiet. It is now pinned by its own test (`F5: leaf detection keeps the INNERMOST regions`), because
+a performance rewrite that silently changes a predicate's meaning is exactly the class that a
+green suite would have shipped.
+
+## BITE PROOF — fix round
+
+⛔ No `git stash`; every flip is a FILE COPY. All from a **94 pass / 0 fail** baseline.
+
+| # | mutation | result |
+|---|---|---|
+| **E** | drop the `gainedContent` conjunct | **2 fail** — F1, F2 |
+| **F** | drop the unrendered-ancestor filter | **13 fail** — all 12 hidden-host × shape cases + the visible-beside-hidden guard |
+| **G** | invert the leaf direction (outermost) | **6 fail** — board-bug pin, anti-cry-wolf pin, F1, the F5 direction pin, **and both compiled end-to-end cases** |
+| **H** | silence the no-side-channel branch | **1 fail** — the F4 source-level pin (see the honest limit above) |
+
+Restored → **94 pass / 0 fail**. Whole tier: **110 pass / 0 fail**.
+(`<template>` cases pass even under mutation F, because happy-dom puts template children in
+`.content` where `querySelectorAll` cannot reach them — recorded, not "fixed".)
+
+## FIX ROUND — full-tier before/after, re-run from scratch
+
+Both runs mine, executed serially (never two `bun` tiers at once on this box), flipped by FILE COPY
+from `_probe/{rd,rh}.{BASE,FIXED}.js` — ⛔ no `git stash`. The BASE run is `origin/main`'s
+`render-detectors.js` + `render-harness.js` dropped into this worktree, so it measures the true base
+and not the stale committed map (which holds 438 cells against 443 live).
+
+| state | base | after fix round | delta |
+|---|---|---|---|
+| `renders-clean` | 277 | 276 | **−1** |
+| `renders-empty-with-data` | **0** | **1** | **+1** |
+| `renders-empty` | 18 | 18 | 0 |
+| `needs-server` | 8 | 8 | 0 |
+| `compiles-but-throws` | 21 | 21 | 0 |
+| `smell-detected-wrong` | 2 | 2 | 0 |
+| `fails-compile` | 117 | 117 | 0 |
+| **total** | **443** | **443** | **0** |
+
+```
+STATE CHANGES (1)
+  examples/25-triage-board.scrml#populated: renders-clean -> renders-empty-with-data
+                                            [] -> ["S-EMPTY-WITH-DATA"]
+SMELL-SET CHANGES (1)   — the same cell
+ACCEPTANCE-BAR OFFENCES (0) — none, strictly additive
+PER-RUN TOKENS IN COMMITTED detail (0) — none
+POPULATED (4): 03-contact-book / 06-kanban / 16-remote-data unchanged; 25-triage red
+```
+
+**The control fires, and the new field shows it fires for the right reason:**
+`domChanged: true` (the render moved — it SHRANK) with `gainedContent: false` (nothing new
+appeared). That pair is the whole argument for the measure, recorded in the committed baseline.
+
+Identical to the pre-fix-round numbers: **the fix round closed four false-positive classes and moved
+zero corpus cells.** F1/F2/F3 were all reachable only by DOM shapes no corpus app currently produces
+— which is exactly why they needed synthetic pins, and exactly why "the tier is green" was never
+evidence they were absent.
+
+Tier suite: **110 pass / 0 fail** (was 88 before the fix round; 94 of them in
+`detector-validation.test.js`). The delta-gate warns on **2** cells, both pre-existing base drift.
+
+## RESIDUAL — stated plainly, after the fix round
+
+1. **One-of-several-lists is still invisible, and now doubly so.** An app where one leaf list is
+   wrongly empty while another renders stays green (the leaf conjunction), AND an app where the
+   seeded data renders *somewhere* while a list that should hold it is empty now also stays green
+   (the gain conjunct). The second is a REAL narrowing bought to close F1/F2, and it is the honest
+   cost: F1 and the 25-triage control are DOM-identical, so nothing that reads only the final DOM can
+   separate them. The gain signal separates them by reading the transition, but it is page-global —
+   it cannot say *which* region the new content landed in.
+2. **What would close it** is per-region attribution across the seed write (snapshot each region's
+   content before and after, and ask whether the region that should have gained did). The machinery
+   is within reach — `collectEachRegions` already identifies regions, and `applySeed` already
+   straddles the write — but region identity is not stable across a reconcile that replaces the
+   nodes, so it is a real piece of work and not a tweak. Not attempted in this arc.
+3. **F4's behavioural half is pinned by contract + source assertion, not by execution** — I cannot
+   make the real compiler emit a client without `_scrml_reactive_set`. Mutation H reds only the
+   source-level pin. Weaker than an executed pin; stated, not dressed up.
+4. **`<template>`-hosted regions are excluded for a second reason** (happy-dom puts template children
+   in `.content`, unreachable by `querySelectorAll`), so mutation F does not red those two cases.
+   Recorded, not "fixed" — the explicit filter covers them anyway.
+5. Unchanged from the first round: `seed-fixtures.js` and the three wrong fixtures untouched;
+   `compiler/src` untouched (incl. the stale `emit-ssr-render.ts:411` comment and the shared
+   mount-id question); the 5 pre-existing base drifts left visible rather than laundered.
+
+### Pre-commit subset, fix round
+
+`23969 pass / 99 skip / 10 todo / 5 fail / 124663 expect()` across 1322 files — the SAME five-name
+set as before the fix round (3 self-host smoke, the B5 CSRF guard, 1 unnamed), **zero new**.
+Identical totals, so the fix round changed nothing outside this tier.

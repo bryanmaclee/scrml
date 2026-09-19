@@ -28,9 +28,16 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { observeApp } from "./render-harness.js";
-import { runDetectors, regionScopedEmptiness } from "./render-detectors.js";
+import {
+  runDetectors,
+  regionScopedEmptiness,
+  collectEachRegions,
+  renderedContentSignature,
+  signatureGained,
+} from "./render-detectors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -469,6 +476,146 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     expect(det.state).toBe("renders-clean");
   });
 
+  // =========================================================================
+  // ⛑ S423 FIX ROUND — the four false-positive classes an adversarial pass found
+  // against the first landed predicate. Each fired RED on a correct render.
+  //
+  // F1 and F2 are ONE bug: region emptiness is not the same question as "did the
+  // seeded data render". They are closed by the `gainedContent` conjunct, which is
+  // the only signal that separates two DOM-identical shapes wanting opposite
+  // answers. F3 is closed by the unrendered-ancestor filter.
+  // =========================================================================
+  const seededDetectGained = (markup, gainedContent) => {
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    return runDetectors({
+      compileErrors: [], throwMessage: null, consoleErrors: [],
+      document: { body }, seeded: true,
+      seedReport: {
+        writes: [{ name: "x", reason: "written", namespaced: true, wrote: true }],
+        domChanged: true, gainedContent, errors: [],
+      },
+    });
+  };
+
+  // F1 — the seeded ROWS rendered; the leaves are per-row nested lists (tags,
+  // sub-tasks) that are legitimately empty. ⚠ STRUCTURALLY IDENTICAL TO 25-TRIAGE:
+  // an outer range holding rows, each row holding an empty mount. The ONLY thing
+  // that tells them apart is whether the write made new content appear, which is
+  // why no DOM-shape rule can close this and the transition signal must.
+  test("F1: D6 is quiet when the seeded rows rendered but their nested lists are empty", () => {
+    const markup =
+      "<!--scrml-each:o1-->" +
+      '<section>Task A<div data-scrml-each-mount="each_t1"></div></section>' +
+      '<section>Task B<div data-scrml-each-mount="each_t2"></div></section>' +
+      "<!--/scrml-each:o1-->";
+    // The leaf regions really ARE all empty — the region predicate alone says FIRE.
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+    // ... and the gain conjunct is what keeps it green.
+    const det = seededDetectGained(markup, true);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+    // Control: the SAME DOM with no gain is the 25-triage shape and must still fire.
+    expect(seededDetectGained(markup, false).smells).toContain("S-EMPTY-WITH-DATA");
+  });
+
+  // F2 — the seeded datum rendered by interpolation OUTSIDE any each, and one
+  // unrelated empty each reddened the whole page.
+  test("F2: D6 is quiet when the seeded datum rendered outside any each", () => {
+    const markup = "<h1>Welcome, Ada</h1><p>ada@x.io</p><!--scrml-each:n1--><!--/scrml-each:n1-->";
+    const det = seededDetectGained(markup, true);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-clean");
+    expect(seededDetectGained(markup, false).smells).toContain("S-EMPTY-WITH-DATA");
+  });
+
+  // F3 — an each nobody can see is not evidence of anything. This is the S419
+  // one-definition-of-"not rendered" invariant: the region collector was a third
+  // reader of the DOM that did not prune unrendered subtrees.
+  const HIDDEN_REGION_HOSTS = {
+    "the hidden attribute": '<div hidden>{R}</div>',
+    "aria-hidden=true": '<div aria-hidden="true">{R}</div>',
+    "inline display:none": '<div style="display:none">{R}</div>',
+    "inline visibility:hidden": '<div style="visibility: hidden">{R}</div>',
+    "a <noscript>": "<noscript>{R}</noscript>",
+    "a <template>": "<template>{R}</template>",
+    "a hidden GRANDparent": "<div hidden><section><ul>{R}</ul></section></div>",
+  };
+  for (const [label, host] of Object.entries(HIDDEN_REGION_HOSTS)) {
+    for (const [shape, region] of Object.entries({
+      "fence": "<!--scrml-each:h1--><!--/scrml-each:h1-->",
+      "mount": '<div data-scrml-each-mount="each_h1"></div>',
+    })) {
+      test(`F3: an empty ${shape} each inside ${label} is not a region at all`, () => {
+        const markup = `<h1>App</h1>${host.replace("{R}", region)}`;
+        const body = document.createElement("body");
+        body.innerHTML = `<main id="root">${markup}</main>`;
+        // Not merely "does not fire" — it must not be COLLECTED, or a later change
+        // that only tweaks the verdict would reopen this.
+        expect(collectEachRegions(body)).toEqual([]);
+        expect(regionScopedEmptiness(body)).toBeNull();
+        const det = seededDetectGained(markup, false);
+        expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+        expect(det.state).toBe("renders-clean");
+      });
+    }
+  }
+
+  // The exclusion must not go too far: a VISIBLE empty each beside a hidden one is
+  // still the bug, and the hidden one must not dilute the count.
+  test("F3: a visible empty each beside a hidden one still fires, and the hidden one is not counted", () => {
+    const markup =
+      '<h1>App</h1><div hidden><ul><!--scrml-each:h1--><!--/scrml-each:h1--></ul></div>' +
+      "<ul><!--scrml-each:v1--><!--/scrml-each:v1--></ul>";
+    const det = seededDetectGained(markup, false);
+    expect(det.detail.emptyRegions).toEqual({
+      regions: 1, mounts: 0, ranges: 1, leaves: 1, emptyLeaves: 1,
+    });
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  // The leaf direction itself, pinned. The first version of the O(n)-rewrite kept the
+  // OUTERMOST regions instead of the innermost — an exact inversion that only the
+  // 25-triage control caught. `leaves` must be the 3 inner mounts, never the 1 outer range.
+  test("F5: leaf detection keeps the INNERMOST regions, not the outermost", () => {
+    const body = document.createElement("body");
+    body.innerHTML =
+      '<main id="root"><!--scrml-each:t126-->' +
+      ["Inbox", "Doing", "Done"]
+        .map((c) => `<section><h2>${c}</h2><ul><div data-scrml-each-mount="each_t120"></div></ul></section>`)
+        .join("") +
+      "<!--/scrml-each:t126--></main>";
+    const v = regionScopedEmptiness(body);
+    expect(v.summary).toEqual({ regions: 4, mounts: 3, ranges: 1, leaves: 3, emptyLeaves: 3 });
+    expect(v.allLeavesEmpty).toBe(true);
+  });
+
+  // The gain signal itself.
+  test("signatureGained: a pure LOSS is not a gain (the 25-triage transition)", () => {
+    const mk = (html) => {
+      const b = document.createElement("body");
+      b.innerHTML = html;
+      return renderedContentSignature(b);
+    };
+    const full = mk("<ul><li>Inbox</li><li>Task A</li><li>Task B</li></ul>");
+    const emptied = mk("<ul><li>Inbox</li></ul>");
+    // 25-triage's shape: the seed REPLACES four rendered tasks with none.
+    expect(signatureGained(full, emptied)).toBe(false);
+    // ... and the other direction is a gain.
+    expect(signatureGained(emptied, full)).toBe(true);
+    // Unchanged is not a gain (the fixture's bug seed: empty before, empty after).
+    expect(signatureGained(full, full)).toBe(false);
+    // A repeated value is counted, not set-deduped: 1 row -> 2 identical rows is a gain.
+    expect(signatureGained(mk("<ul><li>Ada</li></ul>"), mk("<ul><li>Ada</li><li>Ada</li></ul>"))).toBe(true);
+    // Hidden content does not count as gained (S419 one-predicate invariant).
+    expect(signatureGained(mk("<p>A</p>"), mk("<p>A</p><p hidden>B</p>"))).toBe(false);
+    // A content-bearing element with no text does.
+    expect(signatureGained(mk("<p>A</p>"), mk('<p>A</p><img src="b.png">'))).toBe(true);
+  });
+
   // ⛑ S420 HAZARD, PINNED HERE TOO. `generate-baseline.js` persists `detail` for every
   // NON-GREEN cell into the tracked baseline JSON, and reddening a seeded cell is this
   // detector's entire purpose — so the FIRST cell this change reddens is also the first
@@ -570,6 +717,77 @@ describe("D6 end-to-end — the board-bug fixture compiles, mounts, and reddens"
     expect(cell.seeded).toBe(false);
     expect(cell.smells).not.toContain("S-EMPTY-WITH-DATA");
     expect(["renders-clean", "renders-empty"]).toContain(cell.state);
+  });
+
+  // ⛑ S423 fix round (F4) — the gain signal measured end-to-end on the real compile,
+  // which is the half a synthetic `gainedContent` flag cannot prove. The bug seed makes
+  // NOTHING new render; the matching seed makes "Alpha"/"Beta" appear.
+  test("the seed report's gainedContent is measured from the real render transition", () => {
+    const bug = observeApp(fixtureApp(FIXTURE), TASKS("todo"), "populated");
+    expect(bug.detail.seed.gainedContent).toBe(false);
+    expect(bug.state).toBe("renders-empty-with-data");
+
+    const ok = observeApp(fixtureApp(FIXTURE), TASKS("Inbox"), "populated");
+    expect(ok.detail.seed.gainedContent).toBe(true);
+    expect(ok.state).toBe("renders-clean");
+
+    // Deterministic + token-free, because it rides on committed `detail`.
+    expect(typeof bug.detail.seed.gainedContent).toBe("boolean");
+    expect(JSON.stringify(bug.detail.seed)).not.toMatch(/[0-9a-z]{6,}\$/);
+  });
+});
+
+// =============================================================================
+// ⛑ S423 fix round (F4) — THE SEED BRIDGE MUST BE LOUD WHEN IT CANNOT DELIVER.
+//
+// D6 now gates on a real write, which makes a SILENT non-delivery fail-OPEN: if an
+// emit regression drops `_scrml_reactive_set`, no write happens, `seedWasDelivered`
+// is false, and every populated cell scores green however empty it renders — and
+// `generate-baseline.js` strips `detail` from green cells, so the reason never
+// reaches the baseline either. The branch's own comment already claimed "Loud, not
+// silent" while recording the reason only in `seedReport.errors`.
+// =============================================================================
+describe("F4 — a seed that cannot be delivered is LOUD, not silently green", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  // The emit-regression shape, driven through the REAL observeApp by handing it an app
+  // whose compiled client exposes no side-channel is not reachable from a fixture — so
+  // this asserts the contract the branch must satisfy: a non-delivery reason reaches
+  // `consoleErrors`, which D2 turns into a red `compiles-but-throws`, not a green cell.
+  test("a bridge failure reaching consoleErrors reddens the cell (D2), never scores green", () => {
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: ["[seed-bridge] no _scrml_reactive_set side-channel exposed by this emit"],
+      document: { body: (() => { const b = document.createElement("body"); b.innerHTML = "<main id=\"root\"></main>"; return b; })() },
+      seeded: true,
+      seedReport: { chunks: 0, writes: [], domChanged: false, gainedContent: false, observable: false, errors: ["x"] },
+    });
+    expect(det.smells).toContain("D2-CONSOLE-ERROR");
+    expect(det.state).toBe("compiles-but-throws");
+    // Explicitly NOT green.
+    expect(["renders-clean", "renders-empty", "needs-server"]).not.toContain(det.state);
+  });
+
+  // The source-level half: the branch must actually push, and must NOT push for the
+  // three KNOWN fixture bugs (derived-cell / no-such-cell), which are tabled in
+  // e2e-render-map.test.js and belong to a different arc.
+  test("the harness pushes a consoleError for a missing side-channel, but not for a fixture-bug reason", () => {
+    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    const noChannel = src.slice(src.indexOf("no _scrml_reactive_set side-channel"));
+    expect(noChannel.slice(0, 400)).toContain("obs.consoleErrors.push");
+    // set-threw is an emit/harness failure and IS raised...
+    expect(src).toContain('w.reason === "set-threw"');
+    // ... while the fixture-bug reasons are deliberately not.
+    const guard = src.slice(src.indexOf('w.reason === "set-threw"') - 900, src.indexOf('w.reason === "set-threw"') + 400);
+    expect(guard).toContain("derived-cell");
+    expect(guard).toContain("no-such-cell");
   });
 });
 
