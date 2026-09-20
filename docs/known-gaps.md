@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 110 |
+| HIGH | 111 |
 | MED | 263 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -16137,6 +16137,19 @@ that pin as weaker evidence than the rest of the tier's.
 
 — NEW S423-peter (the dispatched agent stated this residual against its own landing rather than reporting the class closed; PA-verified by execution — `GAINED=1` silences the true subject's own shape, `GAINED=0` keeps it firing)
 
+⚑ **S424-peter AMENDMENT — the "only the attribute-carried swap falls through" precision above is
+itself too narrow.** Found by the S424 review-floor pass on #993 (`docs/pr-reviews.md` S424). The
+caught-list is correct as far as it goes, but it was measured on swaps that hold the element count
+constant, and `signatureGained` compares **aggregate** counts (`after.elements > before.elements`), not
+per-element identity. **So a content swap under a NET ELEMENT LOSS also reads as no-gain** — a seeded
+gallery replacing three placeholder `<img src="ph.png">` rows with one seeded `<img src="ada.png">`
+goes 3 → 1, `gainedContent:false`, and any empty leaf region on the page then reds a correct render.
+The same holds for any seed that renders FEWER, richer nodes than the placeholder state — a filtered
+list, a collapsed summary, a "show top 1 of N" view. **This strengthens the entry's own conclusion
+rather than changing it:** it is a third instance of the signature being the wrong instrument, and it
+is further evidence for the standing ⛔ above — do not enrich the signature, close it with per-region
+attribution, which subsumes this too. Argued from source, not executed.
+
 ---
 
 ### g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed — the F4 loudness guard can be downgraded to green by an unrelated console error, a partial seed failure reddens the compiler for the harness's own miss, and `undefined` takes the fire direction where `null` vetoes — `NEW S423-peter (fourth adversarial pass on the limb-2 landing, #993; all three verified by the reviewer by execution, all three LATENT on today's corpus); MED; open`
@@ -16180,3 +16193,101 @@ treadmill. The fourth pass also fuzzed **3000 random nestings** against the brut
    those fixtures. Whoever takes that arc should close this first, or keep the fixtures single-key.
 
 — NEW S423-peter (fourth adversarial pass on #993; the pass found NO correctness bug in the leaf/ownership core it was aimed at, and these three in the plumbing around it — recorded with that framing because "the review found three things" reads very differently from "the core held and the edges did not")
+
+⚑⚑ **S424-peter AMENDMENT — ITEM 1's PRESCRIBED FIX IS WRONG, and there is a FOURTH path.** Found by
+the S424 review-floor pass on #993 (`docs/pr-reviews.md` S424), which re-derived the same defect
+independently. The id is left unrenamed on purpose — `three-latent-paths` is referenced by `[[...]]`
+elsewhere, and renaming a slug forks every citation.
+
+- **Item 1's one-liner would RED an existing test, so do NOT land it as written.**
+  `if (report.gainedContent == null) return true;` is the fix this entry recommends and it is
+  incomplete. `detector-validation.test.js:823` ("D6 DOES fire when the seed bridge really wrote and
+  the render is empty") builds `{writes:[{name:"tasks",reason:"written",wrote:true}], domChanged:true}`
+  with **no `gainedContent` field**, and asserts D6 fires — so vetoing on absent-or-null turns that
+  test red. ⚑ The reviewer noticed the dependency and proposed
+  `!("gainedContent" in report) || report.gainedContent == null`, which **breaks the same test for the
+  same reason**; neither form works alone. **The correct change is two lines:** veto on absent-or-null
+  at `render-detectors.js:666`, AND make `:823` pass `gainedContent: false` explicitly, which is what
+  that test actually means (it is exercising measured-no-gain, and today it relies on the bug to get
+  there). **Blast radius MEASURED, not assumed:** of nine `seededDetect` call sites, `:823` is the only
+  one that passes a report while omitting the field — `:817` omits it too but is gated off earlier by
+  `seedWasDelivered`, and the bare-markup sites pass no report at all and take the `!report` back-compat
+  path. Reproduced by execution under happy-dom against the landed predicate.
+
+- **FOURTH PATH — tightening to "a seed was actually WRITTEN" made the BODY-GLOBAL half of D6
+  fail-open.** `seedWasDelivered` (`render-detectors.js:616`) now requires
+  `writes.some(w => w.wrote === true)` for **both** scopes, while the loudness guard deliberately raises
+  nothing for `no-such-cell` / `derived-cell`. That justification covers the REGION scope; for the
+  original body-global check it is a regression. Pre-S423 a registered seed plus a completely empty body
+  was red. Now: a codegen change that renames or reshapes the cell accessor so `parseChunkCellScopes`
+  resolves every seed key to `no-such-cell` takes no prologue throw, so the loud path never fires —
+  **every populated cell scores green however empty it renders, D6 off entirely, `consoleErrors` empty
+  and `detail` stripped.** That is the detector going dark on exactly the regression class it exists to
+  catch. Argued from source, not executed.
+
+---
+
+### g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render — D6's per-region content test asks only the region's OWN nodes, but `select`/`picture`/`video`/`audio` carry content THROUGH children the region contains while the element that counts them sits outside it — `NEW S424-peter (review-floor pass on #993, reproduced by execution under happy-dom); HIGH; open`
+<!-- @gap id=g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render sev=HIGH status=open locus=compiler/tests/e2e-render-map/render-detectors.js:363(nodesHaveRenderedContent — it maps elementCarriesContent over the region's own nodes and their descendants only) with the conferring definitions at :199(select -> querySelector("option")) and :205(picture/video/audio -> their source children) and the candidate list at :97(CONTENT_CANDIDATE_SELECTOR, which contains neither "option" nor "source") prov=review:S424-floor-pass-on-993-finding-1-reproduced-by-execution-two-shapes -->
+
+**D6 scores `renders-empty-with-data` — RED, against the compiler — on a render that is correct.**
+This is a FALSE POSITIVE in the direction that matters: the tier's whole purpose is to catch the
+compiler silently rendering nothing, so a red cell here is read as a codegen regression.
+
+**The mechanism, and it is a scope mismatch rather than a missing case.** `nodesHaveRenderedContent`
+asks `elementCarriesContent` of the region's own nodes and their descendants. But two entries in
+`elementCarriesContent` define content by looking UPWARD-OUT rather than at the element itself:
+
+- `case "select"` → `el.querySelector("option") != null` (`:199`)
+- `case "picture" / "video" / "audio"` → their `src`/`srcset`-bearing `<source>` children (`:205`)
+
+`emitEachMountHtml` places the each's fence at the each's SOURCE position, so an `<each>` written
+inside a `<select>` puts the `<option>` nodes INSIDE the region while the `<select>` that makes them
+count sits OUTSIDE it. Neither `option` nor `source` is in `CONTENT_CANDIDATE_SELECTOR`, and both are
+text-free in the common value-only form — so every leaf in the region reads empty, `allLeavesEmpty` is
+true, and D6 fires.
+
+**Reproduced by execution** (happy-dom, against the landed predicate, seed report
+`{writes:[{reason:"written",wrote:true}], domChanged:true, gainedContent:false}`):
+
+| markup | `hasRenderedContent(body)` | D6 verdict |
+|---|---|---|
+| `<select><option value="">Select…</option>` + fence of `<option value="1">` / `<option value="2">` | **true** | **`renders-empty-with-data`** |
+| `<picture><img src="fallback.png">` + fence of two `<source srcset=…>` | **true** | **`renders-empty-with-data`** |
+
+⚑ **The gain conjunct does NOT save the realistic shape.** A static placeholder
+`<option value="">Select…</option>` before the each — the exact pattern `emitEachMountHtml`'s own
+comment cites — already makes the `<select>` content-bearing BEFORE the seed, so `elements` does not
+rise across the write and text-free options contribute no text counts. `gainedContent:false`, veto
+unavailable, cell red.
+
+⚑ **LATENT on today's tier, and the corpus already holds the shape — those are both true and the
+second one is why this is HIGH.** None of the four seeded apps (`03-contact-book`, `06-kanban-board`,
+`16-remote-data`, `25-triage-board`) contains a `<select>` or `<picture>`, so **zero cells move today.**
+But three corpus files already put an `<each>` inside a `<select>` — the trucking-dispatch flagship's
+`components/assignment-picker.scrml` (3 sites), `components/status-picker.scrml` (1) and
+`pages/dispatch/load-new.scrml` (1). **It goes live the moment the seeded set grows, and growing the
+seeded set is precisely the next arc on this tier**
+([[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]]).
+
+**This is the S419 "one definition of not-rendered" invariant broken in the other direction** — the
+invariant this diff's own F3 comment invokes. S419 fixed D6 keying on `textContent` alone, which reds a
+text-free render; this is the same error re-created one level down, at the REGION scope instead of the
+BODY scope, by a predicate written to honour it.
+
+**Fix direction (not taken here).** The region test needs to consult the conferring ANCESTOR, not only
+the region's own nodes: when a region's nodes are `option`/`source` (or, generally, when their parent is
+a `CONTENT_CANDIDATE_SELECTOR` element whose content definition delegates to children), the question
+"did this region render content" is answered by asking the parent. ⚑ **Do not fix it by adding `option`
+and `source` to `CONTENT_CANDIDATE_SELECTOR`** — that would make a bare `<option value="1"></option>`
+count as rendered content everywhere, including at body scope, which re-opens the S419 class from the
+other side. **And count what the change stops inspecting before narrowing anything** (pa-base §8,
+coverage-removal blind spot).
+
+⚑ **Sibling check owed with the fix, because this entry's own class is "one site of a class was fixed
+and the others were not":** `elementCarriesContent`'s `textarea` case reads `el.value || el.textContent`
+and `input` reads `.value`/`checked` — both self-contained, so they do not share the defect. `select`
+and the three media parents are the complete set of delegating definitions at the time of filing;
+re-derive that set rather than trusting this sentence.
+
+— `NEW S424-peter (review-floor pass on #993 — the PR the S423 hand-off predicted was "least likely to return anything"; reproduced by execution rather than relayed, per pa-base §8)`; **HIGH**; open
