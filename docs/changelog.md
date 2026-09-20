@@ -48,11 +48,26 @@ documented as a shape check, with the real gate named (the same mutation reds 13
 that strips `detail` — the gate read as closed while open by a different door than the one it shut.
 Confirmed by execution before the fix; now disqualified, deliberately narrowly.
 
-Board **HIGH 110 → 111 · MED 263 → 264**. Review floor re-opens at 3 (all mine). `tracking` was red on
-all three PRs and re-measured **per PR** against main's own run — byte-identical five names every time.
-⛔ The merge was blocked mid-session by the auto-mode classifier (*Merge Without Review*) — the
-S407/S421 class recurring, CONFIGURED-NOT-TO rather than CANNOT. S425-bryan booted mid-session as
-successor and stayed off the footprint.
+Board **HIGH 110 → 111 · MED 263 → 264**. `tracking` was red on every PR and re-measured **per PR**
+against main's own run — byte-identical five names every time. ⛔ The merge was blocked mid-session by
+the auto-mode classifier (*Merge Without Review*) — the S407/S421 class recurring, CONFIGURED-NOT-TO
+rather than CANNOT. S425-bryan booted mid-session as successor and stayed off the footprint.
+
+**Post-wrap addendum — five PRs, not three, and two landed after the wrap.** #1003 was the wrap itself;
+**#1004** then promoted the D6 parent-content HIGH to the session's lead pickup item after Peter scoped
+it post-wrap (*"take the new HIGH next session"*), and flipped the ordering between the two D6 arcs from
+advisory to binding: the seed-fixtures arc must run **behind** the HIGH, because growing the seeded set
+is the only reason that false positive is latent rather than live. ⚑ **The stale-state-claim class this
+session spent the day filing against #997 then caught the session's own wrap one turn later** — the
+pickup said the HIGH *"wants a decision"* after the decision had been made. A wrap's closing state is a
+prediction formatted as a record whenever anything lands after it. Review floor re-opens at **5 OWED**,
+all mine.
+
+⚑ **A structural wrinkle worth knowing, not a bug:** `state.ts --check` goes red the instant a wrap PR
+merges, because the `@generated:recent-sessions` index derives from `wrap(s…)` commits — so the wrap
+commit cannot exist when the wrap itself runs `--write`. It is cleared by the next landing (historically
+the scheduled maps regen). Not filed as a gap: it self-heals, and a standing entry would read as
+permanently open for a condition that resolves itself.
 
 ## S421 — 2026-09-18 (bryan · XPS-8950)
 
