@@ -30,7 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { observeApp } from "./render-harness.js";
+import { observeApp, seedThrewNotice } from "./render-harness.js";
 import {
   runDetectors,
   regionScopedEmptiness,
@@ -1043,28 +1043,60 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     "MIXED: one threw, one names no such cell": [{ reason: "set-threw", wrote: false }, { reason: "no-such-cell", wrote: false }],
     "MIXED: one threw, one is a derived cell": [{ reason: "derived-cell", wrote: false }, { reason: "set-threw", wrote: false }],
     "a single throwing write": [{ reason: "set-threw", wrote: false }],
+    // ⛑ S424 item 3 — MOVED UP FROM QUIET_CASES, and this row IS the gap. A throw is a
+    // harness/emit failure on its own terms; a sibling key landing says nothing about it.
+    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
+    "the list key throws, TWO unrelated keys land": [
+      { reason: "set-threw", wrote: false },
+      { reason: "written", wrote: true },
+      { reason: "written", wrote: true },
+    ],
+    "a throw, a landed write AND a tabled fixture bug together": [
+      { reason: "set-threw", wrote: false },
+      { reason: "written", wrote: true },
+      { reason: "derived-cell", wrote: false },
+    ],
   };
   const QUIET_CASES = {
     "the known fixture bugs alone": [{ reason: "derived-cell", wrote: false }, { reason: "no-such-cell", wrote: false }],
-    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
     "everything written": [{ reason: "written", wrote: true }],
+    // The carve-out must survive a landed sibling too — it is not conditional on delivery.
+    "a tabled fixture bug alongside a write that LANDED": [
+      { reason: "derived-cell", wrote: false },
+      { reason: "written", wrote: true },
+    ],
+    "no writes at all": [],
   };
-  // The production condition, mirrored from render-harness.js. The tests below pin its
-  // MEANING; the source assertion above pins that the harness still carries it.
-  const shouldBeLoud = (writes) =>
-    writes.length > 0 && !writes.some((w) => w.wrote) && writes.some((w) => w.reason === "set-threw");
+  // ⛑ S424 item 3 — THIS USED TO BE A MIRROR of the production condition, re-typed into
+  // the test file. A mirror is not a gate: it can be green while the harness says the
+  // opposite, which is how rounds 1 and 2 of this predicate both shipped wrong. It now
+  // calls the REAL exported `seedThrewNotice`, so every case below is a bite on production.
+  const shouldBeLoud = (writes) => seedThrewNotice({ writes }) !== null;
   for (const [label, writes] of Object.entries(LOUDNESS_CASES)) {
     test(`F4 loudness FIRES: ${label}`, () => expect(shouldBeLoud(writes)).toBe(true));
   }
   for (const [label, writes] of Object.entries(QUIET_CASES)) {
     test(`F4 loudness stays quiet: ${label}`, () => expect(shouldBeLoud(writes)).toBe(false));
   }
-  test("finding 2: the harness's own condition is the not-delivered AND some-threw shape", () => {
-    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
-    // The `every(...)` form is the bug; it must be gone.
+  test("the harness's loudness condition is neither of the two forms that shipped wrong", () => {
+    const raw = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // ⛑ S424 item 3 — ASSERT OVER CODE, NOT PROSE. This read the whole file, so the moment
+    // the harness DOCUMENTED the two broken forms in a comment (so a fourth round would not
+    // re-derive them), the "must be gone" assertions fired on the explanation of the bug
+    // rather than the bug. A gate that forbids naming a defect in a comment is not
+    // measuring the code. Comments are stripped first; the assertions below are unchanged.
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    // Round 1's `every(...)` form is a bug; it must stay gone.
     expect(src).not.toContain('writes.every((w) => w.reason === "set-threw")');
-    expect(src).toContain("!seedReport.writes.some((w) => w.wrote)");
-    expect(src).toContain('seedReport.writes.some((w) => w.reason === "set-threw")');
+    // Round 2's "NOTHING was delivered" conjunct is ALSO a bug (it silenced a genuine throw
+    // whenever a sibling key landed) and must likewise stay gone.
+    expect(src).not.toContain("!seedReport.writes.some((w) => w.wrote)");
+    // ...and the guard must still be WIRED, not merely deleted: the call site pushes
+    // whatever the predicate returns into consoleErrors, which is what D2 reddens on.
+    expect(src).toContain("const threwNotice = seedThrewNotice(seedReport);");
+    expect(src).toContain("if (threwNotice) obs.consoleErrors.push(threwNotice);");
   });
 
   // ⛑ S423 fix round 2 (finding 3) — an UNMEASURED gain signal must not resolve to the
@@ -1141,5 +1173,122 @@ describe("D6 — trailing body-scope cases", () => {
     });
     expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-clean");
+  });
+});
+
+/**
+ * ⛑ S424 item 3 — a genuine `set-threw` was SILENT whenever any OTHER seed key landed.
+ *
+ * Own describe block on purpose (merge hygiene: a sibling branch is appending to the D6
+ * block above). Every test here drives the REAL exported `seedThrewNotice` / `runDetectors`,
+ * never a re-typed mirror of either.
+ */
+describe("S424 item 3 — a set-threw is loud even when a sibling seed key landed", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  // The partial-delivery shape: the key DRIVING the list threw, an unrelated key landed.
+  const PARTIAL = [
+    { name: "items", reason: "set-threw", namespaced: true, wrote: false },
+    { name: "title", reason: "written", namespaced: true, wrote: true },
+  ];
+
+  test("the notice FIRES on a partial delivery (the round-2 bug: it used to be null)", () => {
+    expect(seedThrewNotice({ writes: PARTIAL })).not.toBeNull();
+  });
+
+  test("the notice states the REAL counts and never claims 'none landed' when some did", () => {
+    const msg = seedThrewNotice({ writes: PARTIAL });
+    expect(msg).toContain("1 of 2 seed write(s) threw");
+    expect(msg).toContain("1 landed");
+    // The round-2 wording was only ever true in the all-threw case. Asserting its ABSENCE
+    // is the half that stops a "fix" that fires but still lies about what happened.
+    expect(msg).not.toContain("none landed");
+  });
+
+  test("the all-threw wording is PRESERVED verbatim — this fix widens the gate, it does not move it", () => {
+    const msg = seedThrewNotice({
+      writes: [
+        { reason: "set-threw", wrote: false },
+        { reason: "set-threw", wrote: false },
+      ],
+    });
+    expect(msg).toBe(
+      "[seed-bridge] 2 of 2 seed write(s) threw and none landed — the seed cannot be live",
+    );
+  });
+
+  test("a malformed or absent report is tolerated, not thrown on", () => {
+    expect(seedThrewNotice(null)).toBeNull();
+    expect(seedThrewNotice(undefined)).toBeNull();
+    expect(seedThrewNotice({})).toBeNull();
+    expect(seedThrewNotice({ writes: null })).toBeNull();
+    expect(seedThrewNotice({ writes: [null, undefined] })).toBeNull();
+  });
+
+  // ---- QUESTION B, ANSWERED BY MEASUREMENT: loud, and NO veto. ----
+  //
+  // These cases are the evidence, pinned so the answer cannot silently rot. The decisive
+  // fact is that D2's console-error branch in `runDetectors` RETURNS — it is terminal and
+  // outranks D6's state resolution. So once the notice exists, the `renders-empty-with-data`
+  // verdict is already displaced; a veto adds nothing to the STATE and only deletes the
+  // S-EMPTY-WITH-DATA smell, which is real recorded evidence if the throw turns out to be a
+  // broken emitted accessor (a COMPILER defect).
+  const partialObs = (consoleErrors) => ({
+    compileErrors: [],
+    throwMessage: null,
+    consoleErrors,
+    document: { body: (() => { const b = document.createElement("body"); b.innerHTML = ""; return b; })() },
+    seeded: true,
+    seedReport: {
+      chunks: 1, writes: PARTIAL, domChanged: false,
+      gainedContent: false, observable: false, errors: ["[seed-set items] boom"],
+    },
+    serverDependent: false,
+  });
+
+  test("BEFORE (the gap): silent + a landed sibling => renders-empty-with-data, blaming the compiler", () => {
+    const det = runDetectors(partialObs([]));
+    expect(det.state).toBe("renders-empty-with-data");
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+  });
+
+  test("AFTER: the notice displaces that verdict with compiles-but-throws, which is RED and truthful", () => {
+    const det = runDetectors(partialObs([seedThrewNotice({ writes: PARTIAL })]));
+    expect(det.state).toBe("compiles-but-throws");
+    expect(det.smells).toContain("D2-CONSOLE-ERROR");
+    expect(["renders-clean", "renders-empty", "needs-server"]).not.toContain(det.state);
+    // The reason travels WITH the cell, so the baseline records why (detail is kept for RED).
+    expect(JSON.stringify(det.detail)).toContain("seed write(s) threw");
+  });
+
+  test("question B: the D6 smell SURVIVES as corroborating evidence — a veto would delete it", () => {
+    const notice = seedThrewNotice({ writes: PARTIAL });
+    // Guard the premise: a null notice would still make `consoleErrors` length-1 and fire
+    // D2, so this test would pass for the WRONG reason on the unfixed harness.
+    expect(notice).not.toBeNull();
+    const det = runDetectors(partialObs([notice]));
+    // Both facts recorded at once: the seed write threw AND the render came back empty.
+    // If the throw is a compiler defect, this second fact is the corroboration; vetoing
+    // D6 would hide exactly that. Loud-without-veto keeps both.
+    expect(det.smells).toEqual(expect.arrayContaining(["D2-CONSOLE-ERROR", "S-EMPTY-WITH-DATA"]));
+  });
+
+  test("question B: a VETO WITHOUT the notice would be FAIL-OPEN — it scores the cell GREEN", () => {
+    // Simulating the veto as any implementation must amount to: seedWasDelivered() false.
+    const vetoed = partialObs([]);
+    vetoed.seedReport = { ...vetoed.seedReport, writes: PARTIAL.map((w) => ({ ...w, wrote: false })) };
+    const det = runDetectors(vetoed);
+    expect(det.state).toBe("renders-empty");
+    expect(["renders-clean", "renders-empty", "needs-server"]).toContain(det.state);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    // ^ This is why the loudness is the load-bearing half and the veto is not merely
+    //   unnecessary but hazardous: the two are separable in code, and the veto alone
+    //   turns a throwing seed into a green cell.
   });
 });

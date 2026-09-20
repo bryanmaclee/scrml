@@ -579,6 +579,53 @@ export function applySeed(seed, obs, scopes, doc) {
   };
 }
 
+/**
+ * The F4 loudness notice for a seed whose accessor(s) THREW — or `null` for silence.
+ *
+ * ⛑ S424 item 3, and this condition's THIRD attempt. Extracted from `observeCompiled` on
+ * purpose: the two previous rounds were pinned only by a MIRROR of the predicate re-typed
+ * into the test file plus a `toContain` over the source text, and a mirror asserts nothing
+ * about the code that actually runs (the §8 hollow-gate shape — a test can go green while
+ * production says the opposite, which is precisely how rounds 1 and 2 both shipped). This
+ * is the real function the harness calls, so the tests drive production.
+ *
+ * ⚠ THE CARVE-OUT, UNCHANGED AND LOAD-BEARING: `derived-cell` and `no-such-cell` are the
+ * KNOWN, TABLED fixture bugs (see SEED_OBSERVABILITY in e2e-render-map.test.js). They are
+ * fixture defects on a scheduled fix, not emit regressions, and must stay QUIET — reddening
+ * them here would break the additive bar and pre-empt that arc. They stay quiet by
+ * CONSTRUCTION rather than by an exclusion list: neither reason can ever make `threw > 0`.
+ *
+ * ⚠ HISTORY OF THIS PREDICATE, so a fourth round does not re-derive it:
+ *   round 1 — `writes.every((w) => w.reason === "set-threw")`. A 2-key fixture of
+ *             `[{set-threw},{no-such-cell}]` failed `every` and the throw vanished.
+ *   round 2 — `!writes.some((w) => w.wrote) && writes.some((w) => w.reason === "set-threw")`,
+ *             i.e. "NOTHING was delivered AND something threw". This is the S424 item-3 bug:
+ *             on a >=2-key fixture where the key DRIVING the list throws and an unrelated key
+ *             LANDS, the first conjunct is false, so a genuine accessor throw was silent,
+ *             `seedWasDelivered` was true anyway, and the cell reddened as
+ *             `renders-empty-with-data` — blaming the COMPILER for a write the HARNESS
+ *             failed to make.
+ *   round 3 (here) — a throw is a harness/emit failure ON ITS OWN TERMS. Whether a SIBLING
+ *             key happened to land is irrelevant to whether THIS key threw, so it is not a
+ *             conjunct at all. The landed count belongs in the MESSAGE, not in the gate.
+ *
+ * The message states the real counts either way, and never claims "none landed" when some
+ * did — the round-2 wording was only ever true in the all-threw case.
+ *
+ * @param {{writes?: Array<{reason?: string, wrote?: boolean}>}|null|undefined} seedReport
+ * @returns {string|null}
+ */
+export function seedThrewNotice(seedReport) {
+  if (!seedReport) return null;
+  const writes = Array.isArray(seedReport.writes) ? seedReport.writes : [];
+  const threw = writes.filter((w) => w && w.reason === "set-threw").length;
+  if (threw === 0) return null;
+  const landed = writes.filter((w) => w && w.wrote === true).length;
+  return landed === 0
+    ? `[seed-bridge] ${threw} of ${writes.length} seed write(s) threw and none landed — the seed cannot be live`
+    : `[seed-bridge] ${threw} of ${writes.length} seed write(s) threw while ${landed} landed — the seed is only PARTLY live`;
+}
+
 
 /**
  * Mount the compiled artifacts in the (caller-registered) happy-dom global and
@@ -731,21 +778,12 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // fixture defects on a scheduled fix, not emit regressions, and reddening them
       // here would both break the additive bar and pre-empt that arc.
       //
-      // ⛑ S423 fix round 2 (finding 2) — THIS REQUIRED *EVERY* WRITE TO BE `set-threw`,
-      // which is not the stated intent and left a real accessor throw silent. A 2-key
-      // fixture of `[{set-threw}, {no-such-cell}]` failed `every`, so nothing was pushed,
-      // `seedWasDelivered` was false, D6 was off, and `generate-baseline.js` stripped
-      // `detail` from the green cell — the throw vanishing exactly the way F4 exists to
-      // prevent. The condition that matches the intent is: NOTHING was delivered, and at
-      // least one write FAILED BY THROWING (as opposed to the known fixture-bug reasons).
-      if (seedReport && seedReport.writes.length > 0 &&
-          !seedReport.writes.some((w) => w.wrote) &&
-          seedReport.writes.some((w) => w.reason === "set-threw")) {
-        const threw = seedReport.writes.filter((w) => w.reason === "set-threw").length;
-        obs.consoleErrors.push(
-          `[seed-bridge] ${threw} of ${seedReport.writes.length} seed write(s) threw and none landed — the seed cannot be live`,
-        );
-      }
+      // ⛑ S424 item 3 — the predicate now lives in `seedThrewNotice` (see its header for
+      // the full three-round history and the derived-cell / no-such-cell carve-out). It
+      // used to be inlined here gated on `!writes.some((w) => w.wrote)`, i.e. "NOTHING was
+      // delivered", which silenced a genuine throw whenever any SIBLING key landed.
+      const threwNotice = seedThrewNotice(seedReport);
+      if (threwNotice) obs.consoleErrors.push(threwNotice);
       // ⛑ fix round 2 (finding 3) — a failed render snapshot makes `gainedContent`
       // UNMEASURED. It already vetoes D6; surface it so it is loud, not merely quiet.
       // ⛑ final round — keyed on the SIGNATURE error, not on `gainedContent === null`
