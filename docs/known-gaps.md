@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 111 |
-| MED | 263 |
+| MED | 264 |
 | LOW | 99 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -16291,3 +16291,46 @@ and the three media parents are the complete set of delegating definitions at th
 re-derive that set rather than trusting this sentence.
 
 — `NEW S424-peter (review-floor pass on #993 — the PR the S423 hand-off predicted was "least likely to return anything"; reproduced by execution rather than relayed, per pa-base §8)`; **HIGH**; open
+
+---
+
+### g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible — `mountAndObserve` restores the real `console.error` in its own `finally`, and `applySeed` runs after it returns, so nothing the seed-driven re-render logs ever reaches D2 — `NEW S424-peter (surfaced by the item-3 dispatch as a deferred observation, PA-verified by reading the call ordering); MED; open`
+<!-- @gap id=g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js(mountAndObserve — the console.error shim is installed just before the mount and restored in that function's own `finally`; applySeed is invoked from observeCompiled AFTER mountAndObserve has returned, so the seed write and every re-render it drives run with the REAL console.error installed) prov=review:S424-item3-dispatch-deferred-observation-PA-verified-by-reading-the-call-ordering-not-by-executing-a-repro -->
+
+**The `e2e-render-map` tier captures `console.error` only during MOUNT, never during the SEED WRITE.**
+`mountAndObserve` shims `console.error` immediately before mounting and restores the real one in its
+own `finally`. `applySeed` is called later, from `observeCompiled`, once `mountAndObserve` has already
+returned. So every console error raised by the seed write — and by the reactive re-render the seed
+triggers, which is the whole point of seeding — goes to the real console, never lands in
+`obs.consoleErrors`, and is therefore invisible to **D2**, to the cell state, and to the committed
+baseline.
+
+⚑ **Why this matters more after S424's item-3 landing, not less.** Item 3 made a seed accessor THROW
+loud on its own terms, and the question it forced was *"is a `set-threw` the harness's fault or the
+compiler's?"* — the answer being that it can be either, which is precisely why the notice must stay
+loud rather than veto. **This entry is the other half of that same question and it is still open:** a
+compiler defect that `console.error`s instead of throwing during the seed-driven render is silent. The
+throwing case is now covered; the logging case is not, and the logging case is the more common shape
+for a reactive runtime.
+
+**Not a fork of [[g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed]],
+and here is the discriminator.** Those items are all GATING conditions — predicates in the harness and
+the detector deciding whether to fire on a seed that was delivered, partially delivered, or never
+measured. This one is an OBSERVATION WINDOW defect: the signal is never captured in the first place, so
+no gating change can reach it. Different machinery, different fix — the shim's lifetime has to span
+`applySeed`, which means hoisting it out of `mountAndObserve` or re-installing it around the seed — and
+a fix to either entry leaves the other exactly as it was. Cross-linked rather than merged.
+
+**NOT reproduced by execution.** Verified by reading the call ordering (shim install → mount → restore
+in `finally`; `applySeed` invoked afterwards) and by the S424 item-3 agent independently reporting the
+same ordering from its own reading. A repro needs a fixture whose seed write drives a render that
+`console.error`s without throwing — no corpus fixture does that today, which is also why nothing has
+noticed. **Treat the mechanism as located-not-executed** until someone builds that fixture.
+
+⚑ **Sibling check owed with the fix.** If the shim is hoisted to span the seed, confirm it is still
+restored on every exit path (the file's own header comment at `:52` notes three separate `finally`
+owners already), and confirm the widened window does not start capturing the harness's OWN
+`[seed-bridge]` pushes as if they were app errors — those are pushed directly into `obs.consoleErrors`
+and would double-count.
+
+— `NEW S424-peter (deferred observation from the item-3 dispatch, kept rather than dropped because it is the unclosed half of the question that dispatch answered)`; **MED**; open
