@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `6961d66d` — wrap(s424): the floor convicted my own PR five times, and the same class appeared three times with the third being my fix to the second (#1003) — **pushed**
+- `60f8b1fc` — wrap(s424-addendum): correct the wrap's own closing state — five PRs, not three, and two landed after it (#1005) — **pushed**
 - `27a0bb17` — wrap(s423): the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes (#998) — **pushed**
 - `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
 - `c6bf6138` — wrap(s421): correct an inherited worktree claim before it reached main — **pushed**
