@@ -663,12 +663,33 @@ function seedMovedTheRender(obs) {
   // UNMEASURED and vetoes, matching what every other ambiguity in this detector does (no
   // region, no leaf, unterminated fence, hidden region all stay quiet). The harness also
   // raises it as a bridge error, so it is LOUD rather than silently quiet.
-  // ⛑ S424 — LOOSE `== null`, so an ABSENT field vetoes exactly as an explicit `null` does.
-  // Both mean UNMEASURED; the strict form let `undefined` fall through to the FIRE direction,
-  // which is the very thing round 2 ruled against one value short of the class. The sibling
-  // `seedWasDelivered` (:616) already writes the loose form — this makes the two agree.
-  if (report.gainedContent == null) return true;
-  return report.gainedContent === true;
+  // ⛑ S424 — FIRE ONLY ON THE MEASURED VALUE; EVERYTHING ELSE VETOES.
+  //
+  // The first S424 attempt widened `=== null` to `== null` so an ABSENT field would veto too.
+  // That closed `undefined` and LEFT THE CLASS: with `return gainedContent === true` as the
+  // tail, every other non-nullish value still took the FIRE direction — `0`, `""`, `NaN`, and
+  // (most plainly wrong) the STRING `"false"` all scored a cell `renders-empty-with-data` on a
+  // measurement that never happened, which is round 2's own ruling defeated a few values
+  // further out. Caught by the adversarial pass on that attempt and confirmed by execution.
+  //
+  // So the predicate is inverted to state the invariant directly: a MEASURED `false` — and
+  // nothing else — means the render did not move. `true`, `null`, absent, and any malformed
+  // value all mean "do not fire". This is class-complete: no future construction site can
+  // invent a value that fabricates a verdict, because only one value produces one.
+  //
+  // ⚑ DELIBERATE ASYMMETRY WITH `seedWasDelivered`, which reads similarly and means the
+  // opposite. There its nullish case returns `true` = DELIVERED = fire-ENABLING (back-compat:
+  // a missing report must not suppress the pre-S423 check). Here `true` = the render moved =
+  // fire-SUPPRESSING. And `!report` above is a third direction again (`false`, i.e. do not
+  // veto). Three nearby nullish branches, three different intents; they are not a pattern to
+  // copy from one another.
+  //
+  // ⚑ Known and accepted: the `null` path is LOUD (the harness pushes a `[seed-bridge] …
+  // UNMEASURED` notice, so the cell still reddens via D2) while the absent/malformed paths are
+  // silently quiet. Fail-quiet is the better failure here, but it is not free — closing it
+  // needs a shape check where the report is BUILT, since this detector is pure and cannot
+  // raise anything itself.
+  return report.gainedContent === false ? false : true;
 }
 
 /**
