@@ -820,7 +820,16 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   });
 
   test("D6 DOES fire when the seed bridge really wrote and the render is empty", () => {
-    const det = seededDetect("", { writes: [{ name: "tasks", reason: "written", wrote: true }], domChanged: true });
+    // ⛑ S424 — `gainedContent: false` is now STATED rather than left absent. This test exercises
+    // the measured-no-gain path; it previously reached it only because an absent field fell
+    // through to the fire direction, i.e. it depended on the defect fixed at render-detectors.js
+    // :666. Stating the measurement is what the round-2 ruling already requires of every
+    // hand-built report — no synthetic report may *claim* a measurement, and none may hide one.
+    const det = seededDetect("", {
+      writes: [{ name: "tasks", reason: "written", wrote: true }],
+      domChanged: true,
+      gainedContent: false,
+    });
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.detail.emptyWithDataScope).toBe("body");
     expect(det.state).toBe("renders-empty-with-data");
@@ -832,6 +841,32 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     const det = seededDetect("", undefined);
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  // ⛑ S424 — THE BITE for the `== null` widening. Surfaced by the review-floor pass on #993
+  // and filed as item 1 of [[g-d6-seed-gating-has-three-latent-paths-...]]. `null` and an
+  // ABSENT field both mean UNMEASURED and must both veto; only a MEASURED `false` may fire.
+  // The three cases are pinned together because the defect was precisely that two of them
+  // disagreed. ⚑ This is the distinction the back-compat case above does NOT cover: that one
+  // has no report at all (`!report`, :658), whereas this has a report that omits the field.
+  test("S424: a report that OMITS gainedContent vetoes D6, exactly as an explicit null does", () => {
+    const writes = [{ name: "tasks", reason: "written", wrote: true }];
+
+    // (a) MEASURED no-gain -> fires. The control: the widening must not silence a real verdict.
+    const measured = seededDetect("", { writes, domChanged: true, gainedContent: false });
+    expect(measured.smells).toContain("S-EMPTY-WITH-DATA");
+
+    // (b) explicit null (snapshot threw) -> vetoes. Round-2 behaviour, unchanged.
+    const explicitNull = seededDetect("", { writes, domChanged: true, gainedContent: null });
+    expect(explicitNull.smells).not.toContain("S-EMPTY-WITH-DATA");
+
+    // (c) ABSENT field -> vetoes. This is the fix; before S424 it FIRED on an unmeasured value.
+    const absent = seededDetect("", { writes, domChanged: true });
+    expect(absent.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(absent.state).not.toBe("renders-empty-with-data");
+
+    // And the two UNMEASURED forms must be indistinguishable in the verdict they produce.
+    expect(absent.state).toBe(explicitNull.state);
   });
 });
 

@@ -663,7 +663,11 @@ function seedMovedTheRender(obs) {
   // UNMEASURED and vetoes, matching what every other ambiguity in this detector does (no
   // region, no leaf, unterminated fence, hidden region all stay quiet). The harness also
   // raises it as a bridge error, so it is LOUD rather than silently quiet.
-  if (report.gainedContent === null) return true;
+  // ⛑ S424 — LOOSE `== null`, so an ABSENT field vetoes exactly as an explicit `null` does.
+  // Both mean UNMEASURED; the strict form let `undefined` fall through to the FIRE direction,
+  // which is the very thing round 2 ruled against one value short of the class. The sibling
+  // `seedWasDelivered` (:616) already writes the loose form — this makes the two agree.
+  if (report.gainedContent == null) return true;
   return report.gainedContent === true;
 }
 
