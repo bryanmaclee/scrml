@@ -128,6 +128,30 @@ mechanism catching three wrong PA corrections.
 
 ## Gate at close
 
+> ⚑⚑ **POST-WRAP ADDENDUM — THIS BLOCK'S CLOSING STATE WAS WRITTEN BEFORE THE SESSION ENDED, AND TWO
+> MORE PRs LANDED AFTER IT.** Corrected here rather than by editing the lines below, so the cost of the
+> original framing stays legible. **FIVE PRs merged, not three:** #1000 `8cd65505` · #1001 `1f6a8d1a` ·
+> #1002 `7ac7cef3` · **#1003 `6961d66d` (the wrap itself)** · **#1004 `3f4ccb54`**.
+> **The review floor re-opens at 5 OWED, not 3** — all mine; two are code-bearing.
+> **Pickup item 3 is now the session's LEAD item**, scoped by Peter post-wrap (*"take the new HIGH next
+> session"*), and item 4's ordering is BINDING, not advisory — see the pickup block above, which #1004
+> rewrote.
+> ⚑ **And the class this session spent the day filing caught my own wrap one turn later:** the pickup
+> said the HIGH *"wants a decision"* after the decision had been made, which is #997's stale-state-claim
+> shape exactly. A wrap's closing state is a prediction formatted as a record whenever anything lands
+> after it — `[3395]`'s lesson, now witnessed from the authoring side.
+> **Both repos settled at 0/0, trees clean, `state.ts --check` / `facts.ts --check` / `delta-lint` all
+> exit 0 at the final HEAD.**
+> **Pre-commit subset re-run at the settled HEAD `3f4ccb54`: 23,967 pass / 99 skip / 10 todo / 7 fail /
+> 24,083 tests across 1,322 files.** ⚑ **Verified by NAME-SET, not count — six distinct names, zero
+> new**: self-host smoke ×3 · the B5 csrf assertion · its `afterAll` EBUSY teardown (prints as
+> `(fail) (unnamed)`) · `CONF-W5B-IN-PROCESS-DB-LIBRARY`. The 7th is the load-sensitive extra this
+> block documents below; it is why the count moves between runs and the names do not.
+> ⚑ **And my own capture of that run was a TRUNCATED PROBE** — I piped it through `tail -8`, so the
+> failure names were not in the output and the count was all that survived. Caught because the
+> name-set is the thing I require; re-run to measure it. The instrument I spent the session filing
+> against, in my own instrumentation, one turn from the end.
+
 - **Cloud:** `gate` + `windows` GREEN on #1000, #1001, #1002. `tracking` red on each and **re-measured
   PER PR** against main's own run `35471207235` — byte-identical five names every time, never
   inherited. ⚑ #1001's green was verified against the CORRECTED head SHA, not the superseded one.
