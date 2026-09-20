@@ -53,10 +53,20 @@ empty body, `gainedContent:false`), four ways:
 
 Row 1 reproduces the gap. Three findings decide question B:
 
-1. **The veto is a no-op on the VERDICT.** Rows 2 and 3 have the IDENTICAL state, because D2's
-   console-error branch in `runDetectors` **`return`s** — it is terminal and outranks D6's state
-   resolution entirely. Once requirement A exists, `renders-empty-with-data` is already displaced.
-   So vetoing buys nothing the loudness has not already bought.
+1. **The veto is a no-op on the VERDICT.** Rows 2 and 3 have the IDENTICAL state, because
+   `runDetectors`'s **state-resolution** block short-circuits: its `consoleErrors.length > 0` arm
+   `return`s `compiles-but-throws` BEFORE the `smells.includes("S-EMPTY-WITH-DATA")` arm below it
+   is reached. Once requirement A exists, `renders-empty-with-data` is already displaced, so vetoing
+   buys nothing the loudness has not already bought.
+   ⛑ **CORRECTED (PA, post-landing) — my original wording here said "D2's console-error branch
+   RETURNS — it is terminal", and that is WRONG.** The D2 SMELL branch does NOT return: it pushes
+   `D2-CONSOLE-ERROR` and deliberately falls through ("Continue scanning for smells too ... but the
+   state is already the throws tier"). The table and the conclusion are unaffected — rows 2 and 3
+   really are the same state — but the POINTER was wrong, and anyone re-deriving the argument from
+   it would land on a comment saying the opposite and doubt the whole table. Verified in source:
+   the D2 smell branch and the returning state-resolution arm are two different blocks, which is
+   also precisely why the veto is a no-op on the VERDICT while still being lossy on the RECORD —
+   the smell is GATHERED in one place and RESOLVED in another.
 2. **The veto has a real COST.** Its only observable effect (row 2 vs row 3) is deleting
    `S-EMPTY-WITH-DATA` / `detail.emptyWithData` — which is exactly the corroborating evidence you
    would want if the `set-threw` turns out to be a broken emitted accessor (a COMPILER defect).

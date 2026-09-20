@@ -1275,11 +1275,18 @@ describe("S424 item 3 — a set-threw is loud even when a sibling seed key lande
   // ---- QUESTION B, ANSWERED BY MEASUREMENT: loud, and NO veto. ----
   //
   // These cases are the evidence, pinned so the answer cannot silently rot. The decisive
-  // fact is that D2's console-error branch in `runDetectors` RETURNS — it is terminal and
-  // outranks D6's state resolution. So once the notice exists, the `renders-empty-with-data`
-  // verdict is already displaced; a veto adds nothing to the STATE and only deletes the
-  // S-EMPTY-WITH-DATA smell, which is real recorded evidence if the throw turns out to be a
-  // broken emitted accessor (a COMPILER defect).
+  // fact is WHERE the short-circuit happens: in `runDetectors`'s STATE-RESOLUTION block, the
+  // `consoleErrors.length > 0` arm `return`s `compiles-but-throws` BEFORE the
+  // `smells.includes("S-EMPTY-WITH-DATA")` arm below it is ever reached. So once the notice
+  // exists, the `renders-empty-with-data` verdict is already displaced; a veto adds nothing
+  // to the STATE and only deletes the S-EMPTY-WITH-DATA smell, which is real recorded
+  // evidence if the throw turns out to be a broken emitted accessor (a COMPILER defect).
+  //
+  // ⚠ NOT the D2 SMELL branch, which is the natural place to look and says the opposite:
+  // it pushes D2-CONSOLE-ERROR and deliberately FALLS THROUGH ("Continue scanning for smells
+  // too ... but the state is already the throws tier"), so D6's smell is still COMPUTED and
+  // recorded. That is exactly why the veto is a no-op on the verdict yet still lossy on the
+  // record — the smell is gathered in one place and resolved in another.
   const partialObs = (consoleErrors) => ({
     compileErrors: [],
     throwMessage: null,
