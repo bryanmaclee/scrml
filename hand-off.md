@@ -23,7 +23,10 @@
    times**, including a HIGH. Classify with `review-debt.ts`'s `CODE_BEARING_RE` against
    `gh pr view <n> --json files`, **never** from this hand-off. Two of the three are code-bearing.
 
-3. **⚑ THE NEW HIGH IS FILED AND UNSCOPED, AND IT GOES LIVE ON THE NEXT ARC.**
+3. **⚑⚑ THIS IS THE SESSION'S LEAD ITEM — PETER SCOPED IT POST-WRAP, VERBATIM: *"take the new HIGH
+   next session"*.** (Given after #1003 merged, in answer to the close-out report; recorded in
+   `user-voice-pjoliver11.md` S424. **It SUPERSEDES the "wants a decision" framing this item carried
+   when the wrap was written — the decision is made.**)
    `g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render`.
    D6 scores `renders-empty-with-data` — RED, **against the compiler** — on a render that is correct,
    because `nodesHaveRenderedContent` asks only the region's own nodes while `select` is defined as
@@ -31,14 +34,26 @@
    INSIDE that parent. Reproduced by execution both shapes. **Zero cells move today** (no seeded app
    has a `<select>`), **but three corpus files already put an `<each>` inside a `<select>`** — the
    trucking flagship's `assignment-picker.scrml` (3 sites), `status-picker.scrml`, and
-   `pages/dispatch/load-new.scrml`. ⚑ **The seed-fixtures arc is what grows the seeded set, so decide
-   this BEFORE that arc, not after.** Peter scoped S424 to item 1 + item 3 and I did not widen it.
+   `pages/dispatch/load-new.scrml`.
+   ⚑ **ORDERING IS LOAD-BEARING AND NOW RUNS IN THE STATED DIRECTION: fix this BEFORE the
+   seed-fixtures arc (item 4), because growing the seeded set is exactly what makes it live.**
+   **Prep already on the board, so this is a cheap start:** the gap entry carries the fix direction,
+   the named trap (⛔ do NOT close it by adding `option`/`source` to `CONTENT_CANDIDATE_SELECTOR` —
+   that makes a bare `<option value="1"></option>` count as rendered content at BODY scope too and
+   re-opens the S419 class from the other side), the owed sibling check over
+   `elementCarriesContent`'s other delegating definitions, and the pa-base §8 reminder to COUNT what a
+   narrowing stops inspecting before narrowing it.
+   ⚑ **And budget it as real work, not as a one-liner.** Every "cheap" item on this tier this session
+   cost more than its filing implied: item 1 took three forms, and the landed fix for item 3 needed a
+   second round after the pass found its loudness was not terminal.
 
-4. **The seed-fixtures arc is still the natural successor and is still unblocked** —
+4. **The seed-fixtures arc is the successor to item 3, and it now runs BEHIND it** —
    `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED). ⚑ **Item 3's near-term
-   trigger is now CLOSED** (#1002), so the "close item 3 first or keep the fixtures single-key"
-   condition from S423 is discharged. Correcting `25-triage` will flip `#populated` red→green, which is
-   CORRECT and expected.
+   trigger is CLOSED** (#1002), so the "close item 3 first or keep the fixtures single-key" condition
+   from S423 is discharged. Correcting `25-triage` will flip `#populated` red→green, which is CORRECT
+   and expected. ⚑ **But do NOT start here before item 3 above lands** — this arc grows the seeded set,
+   and the seeded set is the only reason that HIGH is latent rather than live. Running this first would
+   turn a filed false-positive into a red board and make the fix look like a regression it caused.
 
 5. **Two residuals deliberately NOT fixed, both recorded with their reasons:**
    - the seed notice can fall outside `detail.consoleErrors`' `slice(0, 4)` on a cell logging 4+ mount

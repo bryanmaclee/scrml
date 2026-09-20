@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `6961d66d` — wrap(s424): the floor convicted my own PR five times, and the same class appeared three times with the third being my fix to the second (#1003) — **pushed**
 - `27a0bb17` — wrap(s423): the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes (#998) — **pushed**
 - `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
 - `c6bf6138` — wrap(s421): correct an inherited worktree claim before it reached main — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `6620771b` — wrap(s419): the floor convicted all three of my own PRs, and every fix re-created its class one level away (#975) — **pushed**
 - `6b138677` — wrap(s417): the floor convicted every code-bearing PR on it, and a drift pin found the bug it was built to detect the absence of (#966) — **pushed**
 - `113f135a` — wrap(s407): a new article series, and the standard that every block must compile found three spec defects — **pushed**
-- `3f7bf3ff` — wrap(s416): five landings, and four instruments that existed, read as done, and were never consulted (#960) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
