@@ -1,3 +1,173 @@
+# scrml — Session 423 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S422-bryan was LIVE at my boot and WRAPPED mid-session (#997).** I registered as
+> SUCCESSOR, stayed off his footprint all session, and the wrap deferral lifted when he closed. **His
+> outbound drop corrects my boot read in three places — all three are folded into the pickup below.**
+> His open PRs (#990, #995, #996, #939, #865, #580, #579) are CLAIMED, not lost.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Drain the review floor first — ten sessions running it has returned something real, and this
+   session it returned the most it ever has.** It will read roughly **4 OWED** (#991, #993, #994 + this
+   wrap PR), plus whatever of bryan's #995/#996 have merged. Classify with `review-debt.ts`'s
+   `CODE_BEARING_RE` against `gh pr view <n> --json files` — **never** from this hand-off.
+   ⚑ #993 already had **four** adversarial passes and three fix rounds; the floor pass on it is still
+   owed (a pre-land pass is not a floor record), but it is the one PR on the board least likely to
+   return anything.
+
+2. **⚑ THE CHEAPEST REAL ITEM ON THE BOARD IS A ONE-LINE FIX WITH A TEST.**
+   `g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed`
+   (MED, filed this session) item 1: `seedMovedTheRender` vetoes on `gainedContent === null` but
+   **fires on `undefined`**, and both mean *unmeasured*. Fix is `if (report.gainedContent == null) return true;`.
+   ⚑ **Item 3 of that entry has a NEAR-TERM TRIGGER and it gates the next arc** — a genuine `set-threw`
+   stays silent whenever any *other* key landed, which reddens the compiler for a seed write the harness
+   itself failed to make. Every fixture is single-key **today**; the fixture arc below makes them
+   multi-key. **Close item 3 first, or keep the fixtures single-key.**
+
+3. **The seed-fixtures arc is now UNBLOCKED and is the natural successor** —
+   `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED). It was held because
+   correcting the fixtures would delete D6's only live subject; **D6 now owns a fixture of its own**
+   (`fixtures/d6-nested-each-empty-with-data.scrml`), so that hold is released. Evidence is now
+   per-name reason codes rather than reading: `06-kanban` seeds a **derived** cell, `16-remote-data`
+   seeds a cell the app **does not have**, `25-triage` writes fine but its `column:` values match no
+   column under §45 strict `==`. ⚑ Correcting 25-triage will flip `#populated` red→green, which is
+   CORRECT and expected — and it is also the experiment that makes the shared-mount-id question
+   testable (three sibling mounts carry one id; only a matching row can show whether the runtime can
+   address them individually).
+
+4. **⚑ BRYAN'S DROP CORRECTS MY BOOT READ — do not reason from the S423 board registration.**
+   - **dpa-047 and dpa-048 are DRAINED**, not UNRUN. Current: **1 UNRUN (dpa-049 — the suppression-taint
+     question, banked S422, unruled) · 10 ADVISORY.**
+   - **Three rulings landed and they change what the ruling builds ARE:** `E-ASSIGN-003` is **NARROWED
+     to expression position** (S418's ruling 1 would have widened past its own governing sentence);
+     `E-ASSIGN-004` is **BUILT at statement position**; **bare naming IS `const`, mutation needs `let`**;
+     unused-binding is a **LINT** across all binding forms, ruled but NOT built, and the sequencing is
+     deliberate — **ship the lint first and let its own false positives find the nested-container walker
+     bugs. Do not fix the walker first.**
+   - ⛔ **DO NOT BUILD ON TOP OF THIS BLIND:** `E-ASSIGN-004`'s remedy misfires at top-level `${}` — it
+     says *"Use `let`"* and `let n = 1 ; n = n + 1` draws `E-CODEGEN-INVALID-LOGIC`, while `n++` and the
+     `<n>`/`@n` forms are clean. **Only the `= expr` form is broken**, it is pre-existing, and bryan has
+     it traced and filed HIGH. An earlier framing of it as *"no valid way to express mutable top-level
+     logic"* is **wrong** — three forms work.
+
+5. **The oldest unactioned inbound work on the board, and bryan explicitly offered it:** the **two
+   scrml-site reports**, `needs: action` since **August** — soft-nav dropping the destination page's
+   stylesheet, and the owed `<outlet/>` repro. He prioritised around them every turn of S422 and never
+   reached them.
+
+6. **Peter-lane, still open and unchanged:** the S420 item-4 list (the e2e-render-map CI job ·
+   baseline regen owed on POSIX · the three non-inert reserves · `g-w-lint-018` probe-then-close ·
+   `g-s320-autoawait-stale-injectpromiseawait-comments`) ·
+   `g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition` (LOW).
+
+7. ⚑ **ENVIRONMENT, AND IT COST A PR THIS SESSION:** the relaxed pre-push rule covers **NEW REFS ONLY**.
+   An **update** push to an existing branch runs the FULL local suite, which this clone fails on five
+   pre-existing tests — so #992 could not be updated and was closed in favour of #993 on a fresh ref.
+   **Land green, then push follow-ups as a NEW branch; never `--no-verify`.** Remote `gh api
+   .../update-branch -X PUT` is the clean way to refresh a PR that has gone BEHIND under `strict:true`.
+
+8. **⚠ A TENSION WORTH RULING, NOT SILENTLY INHERITING.** bryan recommends re-installing pre-commit here
+   — his caught a real `let`-rebinding false positive that 41 passing unit tests missed. **But this
+   clone's subset is 5-red pre-existing (the S254 path-model cluster + a ghost-pattern stress), so
+   re-installing blocks every commit.** The middle path is to run the subset by hand before any
+   compiler-source commit and compare the failure NAME-SET, never the count. Decide it deliberately.
+
+9. **Standing from Peter, exercised again:** merge on green without re-asking, re-measuring `tracking`'s
+   failure NAME-SET against main's own run every time (identical five names on all three PRs this
+   session, re-measured per PR, never inherited). `autoMode` did not fire this session.
+
+## WHAT LANDED
+
+Three PRs, all gate-green, all merged. One code-bearing (#993), two ledger.
+
+- **#991** `review(s423)` — floor **4 → 0**. All four were carve-outs by path, and all four were probed
+  by execution anyway. Everything bryan claimed in #986 holds, including a "not a regression" claim I
+  corroborated structurally: `block-splitter.js` is byte-identical between the two baselines the adopter
+  compared.
+- **#993** `fix(e2e-render-map)` — **limb 2 of the render HIGH. `S-EMPTY-WITH-DATA` fires for the first
+  time.** Four adversarial passes, fourteen findings, three fix rounds, **zero corpus cells moved**.
+- **#994** `gaps(s423)` — the fourth pass's three findings filed as one entry.
+
+**Resolved:** `g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject` (HIGH).
+**Filed:** the region-model residual (MED) + the gating-plumbing residual (MED).
+
+## 🔭 DURABLE
+
+**The adversarial pass found what my own verification structurally could not.** I had independently
+confirmed #993's first revision met its acceptance bar — one state change, nothing red→green, tier
+green, bite re-proven by hand. All of it was true, and none of it asked what the new predicate
+*breaks*. The first pass then returned five findings, three of which I reproduced. **Confirmatory
+verification and adversarial verification are not degrees of the same check; the second is the only one
+that probes the blast radius, and it is the one that gets skipped.**
+
+**I was wrong three times about one predicate, and each correction came from measurement, not argument.**
+The brief asserted a runtime mechanism I had not read the source for ("the mount slot is consumed") —
+false, and it shaped the agent's first build. My mid-flight correction ("fire on any empty mount") reds
+a *correct* board. My fix-round hypothesis ("fire when the render did not move") is wrong in both
+directions, because the subject's render moves by SHRINKING to nothing. **The thing that saved all three
+was the brief licensing the agent to re-derive and push back.** A brief that demanded compliance would
+have shipped every one of them.
+
+**Commit to the stopping rule BEFORE the evidence arrives.** By the fourth pass the findings were
+long-tail in an approximation I had already decided not to enrich. I wrote the bar down first — land
+unless a finding reds a correct corpus cell or makes D6 dark on its subject — and then applied it
+unchanged. **Re-deciding the bar once you can see what it would exclude is how a fix round becomes a
+treadmill**, and the rule is now in the gap entry so the next reader sees the reasoning and not just the
+verdict.
+
+**Two successive rounds finding the SAME class by different routes is a signal about the mechanism.**
+Rounds 2 and 3 both found "a dropped region promotes its children to false leaves" and "an unmeasured
+value is fabricated as measured". The response was not a third patch: it was to apply both rulings to
+**every** site, audit the sibling drop sites rather than assume them, and decline the one finding whose
+fix was enrichment. **Completing a ruling by class is convergence; patching its next instance is not.**
+
+**A probe's error must never render as its negative answer.** My first comment-matrix run `cd`'d into a
+scratchpad, which made the compiler path unresolvable, and my classifier looked for the string `FAILED`
+— so **four cases reported "clean" because the compiler never ran.** Caught only because a later command
+happened to print the module error. Read the exit status separately from the output, and never infer
+"none" from empty text.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I asserted a runtime mechanism in a dispatch brief without reading the runtime.** "The runtime
+   consumes the mount slot when items render" was inferred from two apps' DOM counts. It is false, and
+   it anchored the agent's first build until it checked the emitter itself.
+2. **★★ I sent two predicate corrections as instructions, and both were wrong.** The second one would
+   have made D6 dark on the only cell it exists for. Both were caught because the agent measured instead
+   of complying.
+3. **★★ A probe reported four cases clean because the compiler never ran** (miss 1 of the durable above).
+4. **★ I relayed an unverified reviewer claim into a fix round** — the reachability argument for the
+   nested-fence shape. The agent verified the mechanism, found the adjacency does not follow, and
+   refused to quote it. That is the second time this session a relayed finding needed checking before it
+   entered a record.
+5. **★ A `cd` moved the harness's primary working directory** (S419/S420's miss, repeated), and a
+   heredoc quoting failure cost a round-trip before I went to a file — S416/S417/S419's lesson, also
+   repeated. Both are now three-for-three across my sessions.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on #991, #993, #994. `tracking` red on each and **proven
+  pre-existing by name-set identity against main's own run, re-measured per PR** (the five-name
+  dev-watcher / atomic-save cluster).
+- **Local:** e2e-render-map tier **150 pass / 0 fail** at the landed HEAD. Pre-commit subset
+  **23,969 pass / 5 fail** — the known five, zero new, verified by name-set not count.
+- **Board: HIGH 110 · MED 263 · LOW 99 · Nominal 7** (boot: 111 · 261 · 99 · 7). One HIGH resolved, two
+  MED filed.
+- **Maps NOT regenerated, and the reason is measured.** bryan advanced the watermark to `787d4cb4` at
+  #987 after four stale sessions. This session added **no navigable structure**: the whole delta is the
+  e2e-render-map test tier plus one fixture `.scrml`; no compiler/stdlib source, no new/moved/deleted
+  compiler symbol.
+- **Worktrees:** mine removed (`agent-a3571211340b70c27`, work landed). **Retained, not mine:**
+  `agent-a17aa5322771d6ebc` and the sibling `scrml-pinned`. ⚑ The `onmount-c` worktree the S419/S420
+  hand-offs listed **does not exist on this clone** — verified by execution, and the S421 hand-off
+  already corrected the same inherited claim from the other direction.
+- **Inbox:** 8 remaining; two archived this session (both addressed to me, both discharged). ⚑ The two
+  **scrml-site** reports have been `needs: action` since **August** — see pickup 5.
+- **Cross-machine:** scrml-support pushed (board + voice). scrml at `origin/main...HEAD` 0/0.
+
+---
 # scrml — Session 422 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **THE ONE-LINE PICKUP:** three rulings landed that together redefine what a binding IS in scrml
