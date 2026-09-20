@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
 - `c6bf6138` — wrap(s421): correct an inherited worktree claim before it reached main — **pushed**
 - `923fc144` — wrap(s420): the floor drained 8 to 0, and then convicted my own fix of the class it was fixing (#980) — **pushed**
 - `6620771b` — wrap(s419): the floor convicted all three of my own PRs, and every fix re-created its class one level away (#975) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `113f135a` — wrap(s407): a new article series, and the standard that every block must compile found three spec defects — **pushed**
 - `3f7bf3ff` — wrap(s416): five landings, and four instruments that existed, read as done, and were never consulted (#960) — **pushed**
 - `e13ff10d` — wrap(s415): the floor drained 5 to 0, and a fix shipped the opposite defect twice before the axis split (#953) — **pushed**
-- `7867fca4` — wrap(s409): four rulings, a five-day-old conflict cleared, and fourteen instruments that read clean — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
