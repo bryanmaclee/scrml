@@ -820,7 +820,18 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   });
 
   test("D6 DOES fire when the seed bridge really wrote and the render is empty", () => {
-    const det = seededDetect("", { writes: [{ name: "tasks", reason: "written", wrote: true }], domChanged: true });
+    // ⛑ S424 — `gainedContent: false` is now STATED rather than left absent. This test exercises
+    // the measured-no-gain path; it previously reached it only because an absent field fell
+    // through to the fire direction, i.e. it depended on the defect fixed in
+    // `seedMovedTheRender` (located by SYMBOL on purpose — a line number in a comment rots and
+    // nothing fails, which this file has already been bitten by). Stating the measurement is
+    // what the round-2 ruling requires of every hand-built report: none may *claim* a
+    // measurement, and none may hide one.
+    const det = seededDetect("", {
+      writes: [{ name: "tasks", reason: "written", wrote: true }],
+      domChanged: true,
+      gainedContent: false,
+    });
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.detail.emptyWithDataScope).toBe("body");
     expect(det.state).toBe("renders-empty-with-data");
@@ -832,6 +843,48 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     const det = seededDetect("", undefined);
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-empty-with-data");
+  });
+
+  // ⛑ S424 — THE BITE for `seedMovedTheRender`'s fire-only-on-the-measured-value rule.
+  // Surfaced by the review-floor pass on #993, filed as item 1 of
+  // [[g-d6-seed-gating-has-three-latent-paths-...]], then WIDENED by the adversarial pass on
+  // the first attempt at this very fix: that attempt closed `undefined` and left the class,
+  // so `0` / `""` / `NaN` / the string `"false"` all still fabricated a verdict.
+  // The invariant is now: **only a MEASURED `false` fires; every other value vetoes.**
+  // ⚑ Distinct from the back-compat case above, which has NO report at all (`!report`);
+  // these all have a report whose field is missing or malformed.
+  test("S424: only a MEASURED false fires D6 — null, absent and malformed all veto", () => {
+    const writes = [{ name: "tasks", reason: "written", wrote: true }];
+    const report = (extra) => seededDetect("", { writes, domChanged: true, ...extra });
+
+    // (a) MEASURED no-gain -> FIRES. The control: the veto must not silence a real verdict.
+    const measured = report({ gainedContent: false });
+    expect(measured.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(measured.state).toBe("renders-empty-with-data");
+
+    // (b) MEASURED gain -> vetoes.
+    expect(report({ gainedContent: true }).smells).not.toContain("S-EMPTY-WITH-DATA");
+
+    // (c) explicit null (the snapshot threw) -> vetoes. Round-2 behaviour, unchanged.
+    const explicitNull = report({ gainedContent: null });
+    expect(explicitNull.smells).not.toContain("S-EMPTY-WITH-DATA");
+    // ⚑ Pin the CONCRETE state, not merely "not the red one" — asserting only
+    // `!== "renders-empty-with-data"` would stay green if a future change sent the UNMEASURED
+    // forms to some other wrong state (`renders-clean`, `needs-server`).
+    expect(explicitNull.state).toBe("renders-empty");
+
+    // (d) ABSENT field -> vetoes, and lands in the SAME concrete state as explicit null.
+    const absent = report({});
+    expect(absent.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(absent.state).toBe("renders-empty");
+
+    // (e) MALFORMED values -> veto. This is the class the first attempt missed; `"false"` is
+    // the plainest case, since a truthiness-coerced field would read as "it gained content".
+    for (const bad of ["", 0, NaN, "false", "no", {}, []]) {
+      const det = report({ gainedContent: bad });
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty");
+    }
   });
 });
 
