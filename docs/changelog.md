@@ -2,6 +2,58 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S424 — 2026-09-20 (peter · P-Tech1)
+
+**The review floor drained 6 → 0 and convicted my own PR five times, including a red against a correct
+render.** Six owed at boot, classified with `review-debt.ts`'s own `CODE_BEARING_RE` against
+`gh pr view <n> --json files`: one code-bearing (#993), five carve-outs by path, every carve-out probed
+by execution anyway. The S423 hand-off predicted #993 was *"the one least likely to return anything"*
+after four prior adversarial passes — **the prediction was wrong, and the reason is structural: a
+pre-land pass reviews a fix ROUND against the finding that produced it, while the floor pass reviews
+the LANDED predicate against the language.**
+
+**NEW HIGH — D6 reds a correct render.** `nodesHaveRenderedContent` asks `elementCarriesContent` only
+of a region's own nodes, but `select` is defined as *"has an `<option>"`* and `picture`/`video`/`audio`
+by their `<source>` children, while the each's fence sits INSIDE that parent — so the options are in
+the region and the element that counts them is outside it. Reproduced by execution on both shapes.
+Zero cells move today, but **three corpus files already put an `<each>` inside a `<select>`** (the
+trucking flagship's pickers and `load-new`), so it goes live the moment the seeded set grows.
+
+**`E-ASSIGN-004` is NOT on main, and two consecutive hand-offs said it was.** Verified by two
+independent observables: zero occurrences anywhere in `compiler/src/`, and `const x = 1; x = 2`
+compiling at exit 0 with zero diagnostics — row 1 of bryan's own S422 matrix that the ruling says SHALL
+fire. The build is entirely inside #996, open with a red gate. `[3395]`'s class a second time: a wrap
+drafted before the work it describes finished, so its closing state is a prediction formatted as a
+record.
+
+**Two fixes landed on the D6 seed path, and both took more attempts than they looked like they would.**
+Item 1 (#1001) went through three forms — the gap's own prescribed one-liner would have redded an
+existing test, the reviewer's proposed remedy broke the same test, and my corrected version **closed
+`undefined` and left the class** (`0`, `""`, `NaN` and the string `"false"` all still fired). The
+landed predicate states the invariant instead of enumerating exceptions: a MEASURED `false` and nothing
+else. Item 3 (#1002) was dispatched to a worktree-isolated agent and landed by a real 3-way merge, not
+a wholesale pull, because `detector-validation.test.js` had an intervening write from #1001 since the
+agent's base.
+
+**The same class appeared three times in one session, and the third instance was the fix to the
+second.** The item-3 diff hollowed out a neighbouring source-text gate **with its own comment** — the
+anchor moved into a new JSDoc block, and gutting the function left that test green 1/0. That was the
+class the agent had just fixed for a sibling test. **Then my repair of it did not work either**:
+re-anchoring on the counting filter left the same mutation green, because anchored strings survive a
+gutted body. There is no anchor that makes a source-text assertion detect behaviour — so it is now
+documented as a shape check, with the real gate named (the same mutation reds 13 behavioural tests).
+
+**And item 3's fix did not initially meet its own requirement.** Routing the notice through
+`consoleErrors` does not make it loud for server-dependent cells, where `needs-server` is a GREEN tier
+that strips `detail` — the gate read as closed while open by a different door than the one it shut.
+Confirmed by execution before the fix; now disqualified, deliberately narrowly.
+
+Board **HIGH 110 → 111 · MED 263 → 264**. Review floor re-opens at 3 (all mine). `tracking` was red on
+all three PRs and re-measured **per PR** against main's own run — byte-identical five names every time.
+⛔ The merge was blocked mid-session by the auto-mode classifier (*Merge Without Review*) — the
+S407/S421 class recurring, CONFIGURED-NOT-TO rather than CANNOT. S425-bryan booted mid-session as
+successor and stayed off the footprint.
+
 ## S421 — 2026-09-18 (bryan · XPS-8950)
 
 **A PR-backlog drain: 26 open PRs, every one of them bryan's, oldest 39 days — taken to 6.** The docs
