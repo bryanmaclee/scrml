@@ -870,10 +870,28 @@ export function runDetectors(obs) {
       smells.includes("S-OBJECT-IN-DOM") ||
       smells.includes("S-RAW-INTERP") ||
       smells.includes("S-NULLISH-TEXT");
+    // ⛑ S424 item 3 — A HARNESS-RAISED SEED FAILURE DISQUALIFIES THIS CARVE-OUT.
+    // Item 3 exists to make a `set-threw` LOUD, and routing the notice through
+    // `consoleErrors` did not achieve that here: `needs-server` is a GREEN tier and
+    // `generate-baseline.js` strips `detail` from green cells, so a server-dependent
+    // seeded app swallowed the notice and the throw went silent again — the exact
+    // fail-open F4 exists to close, reached by a different door. The `[seed-bridge]`
+    // prefix matches neither `hasCodegenError` nor `isServerAbsenceMessage`, so
+    // nothing stopped it. Confirmed by execution before the fix: a partial-throw
+    // report plus one server-absence mount error scored `needs-server`.
+    // ⚑ SCOPE, deliberately narrow: this disqualifies only the harness's OWN
+    // seed-failure notice. The wider masking — that ANY console error matching
+    // `isServerAbsenceMessage` admits the carve-out, and that `hasHardSmell` omits
+    // D6's `S-EMPTY-WITH-DATA` — is a separate, already-filed arc (item 2 of
+    // [[g-d6-seed-gating-has-three-latent-paths-...]]) and is NOT closed here.
+    const hasSeedBridgeFailure = consoleErrors.some((m) =>
+      String(m).startsWith("[seed-bridge]"),
+    );
     if (
       obs.serverDependent &&
       !hasCodegenError &&
       !hasHardSmell &&
+      !hasSeedBridgeFailure &&
       consoleErrors.some(isServerAbsenceMessage)
     ) {
       smells.push("NEEDS-SERVER");
