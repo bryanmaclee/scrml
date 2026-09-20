@@ -7386,6 +7386,19 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S422 (2026-09-18/19, bryan · ASUS) — three rulings that redefine what a binding is, and five gates that each caught something real
+
+**Rulings.** `E-ASSIGN-003` NARROWED to expression position — S418 ruling 1, built as ruled, would have been a widening past its own governing sentence (§50.8.4's trigger says *"assignment expression"*; §50 extended ONE code to statement form and pointedly not its sibling). **`E-ASSIGN-004` BUILT** at statement position, where §50.8.5's own closing sentence already mandated it and where it had **zero producers** — so `const x = 1; x = 2` compiled at exit 0 and shipped a guaranteed runtime `TypeError`. **Bare naming IS `const`; mutation needs `let`** — closing a question recorded as needing a spec ruling since S19. **Unused-binding is a LINT** across all binding forms, hard error as the declared destination, `_` token granted, sequencing inverted so the lint's own false positives find the walker bugs. **dpa-049 banked**: should a project-wide lint suppression taint the build?
+
+**Landed.** #987 maps (watermark `e74f5423` → `787d4cb4` after four stale sessions — ⚑ `e74f5423` is a commit whose `SPEC-INDEX.md` carried **three raw git conflict markers**, and every map was stamped there). #988 review floor **23 → 0** (4 findings, 19 carve-outs, **0 clean**; two convict merged work — #983's `.sort()` is inert because `bun test` ignores argv order, and #979 shipped a third truncation while fixing one). #986 adopter filings. #990 dPA drain. #995 `E-AUTH-005` application-scope (closes #770). #996 `E-ASSIGN-004`.
+
+**Adopter work.** Two flogence reports diagnosed by execution — a claimed `E-SYNTAX-050` regression **falsified** on two baselines, and a bare-`_{}` disposition **inverted** against the reporter's own recommendation because §64.2 admits the form with `console.log` as its own example. Return leg delivered. They then **withdrew ask #5** on our evidence, ran both measurements we asked for, and **aggregated our own gap ledger**: 28 open gaps are one bug in four costumes (13 string-masking · 8 interpolation · 6 comment-state · 1 angle-bracket), refuting their own operator's hypothesis. One shared masking pass is pointed at 27 of 28.
+
+**Gaps filed.** The sidecar overwrite (HIGH — `--emit-block-analysis` is basename-flat, 36 sources → 32 sidecars, silently) · the scanner-context-ambiguity aggregate (HIGH) · the top-level reassignment lowering (HIGH) · the MCP auto-flip cross-file leak · the comment-lexing heuristic · two review-floor findings.
+
+**Five gates fired usefully and none was bypassed.** Pre-commit caught a `let`-rebinding false positive that 41 passing unit tests missed; it also produced a load-contention false red that had to be diagnosed rather than worked around; pre-push blocked a stale `FACTS.md`; the review floor convicted two merged PRs; and an adversarial pass convicted this session's own filings — five gap headings invisible to the very probe whose absence they filed a gap about.
+
 ### 2026-09-17 — S420: the floor drained 8 to 0, and it convicted my own fix of the class it was fixing
 
 Review-floor session. Eight PRs owed (#969–#976), classified by `review-debt.ts`'s own `CODE_BEARING_RE`

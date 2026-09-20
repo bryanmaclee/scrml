@@ -1,3 +1,103 @@
+# scrml — Session 422 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **THE ONE-LINE PICKUP:** three rulings landed that together redefine what a binding IS in scrml
+> (bare naming is `const`; mutation needs `let`; unused-binding is a lint) — and the build that
+> implements the first two is landed while the `let` escape is **broken in one position**
+> ([[g-top-level-logic-reassignment-lowers-as-a-fresh-const-so-the-let-escape-fails-there]], HIGH).
+> Fix that before any adopter-facing release.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **`E-ASSIGN-004` is LANDED and its remedy misfires at top level.** The diagnostic says *"Use `let`"*;
+   at top-level `${}` a `let n = 1; n = n + 1` dies with *"This is a compiler defect."* `n++`, compound
+   assignment and state cells all work — **only the `=` reassignment form is broken.** Root is located
+   and traced: `emit-reactive-wiring.ts:358` omits `declaredNames` so the `emit-logic.ts:2097` guard is
+   dead there. Sibling sites at `:1361`, `:1852`, `emit-library.ts:2097/:2109`. **This is the first
+   thing to build.**
+2. **dpa-049 is BANKED and UNRUN** — should a project-wide lint suppression taint the build? bryan
+   raised it, banked it, has not ruled it. It governs every suppression scrml ships.
+3. **dpa-048 is ADVISORY and unruled** and it refutes the PA's own framing of it. One-at-a-time floor
+   says it wants its own pass.
+4. **The call-3 lint is RULED but NOT BUILT.** Unused-binding across all binding forms, lint severity,
+   `_` token granted (ratified S418, **advertised in `E-MU-001`'s own message, never built**), the
+   project-wide flag discouraged. ⚑ Sequencing was ruled deliberately: ship the lint FIRST and let its
+   own false positives identify the nested-container walker bugs (`?{}` interpolation 34, `<each in=>`
+   20, `for`-headers). Do NOT fix the walker first — that was the error-severity plan.
+5. **Two scrml-site reports have sat `needs: action` since August and I never touched them** — soft-nav
+   dropping the destination page's stylesheet, and the owed `<outlet/>` repro. Prioritised around them
+   every single turn of this session. They are the oldest unactioned inbound work on the board.
+6. **#770's residue:** `E-SQL-004` has the identical file-local defect at codegen, so a multi-file page
+   relying purely on the entry's `db=` still fails — with a remedy §40.8 forbids in that file. Two
+   errors became one impossible-to-action error. Separate arc, not taken.
+7. **Findings 1+4 of the #770 review are ONE item, not two** (LSP wiring + cross-application suppression
+   leak): both need a build-root entry resolver, and the LSP cannot be wired correctly until the
+   application boundary exists. Wiring it against the workspace cache trades a false RED for a false
+   GREEN.
+
+## 🔭 DURABLE
+
+**A probe's error must not render as its negative answer — four instances in one session, and I
+committed two of them myself.** `gh run view --log-failed` returned ZERO lines for four main runs whose
+`tracking` job is confirmed `failure` (the API route returns 7127); a `git cat-file -e` probe reported a
+committed file absent on three branches including `main`; a subagent's failure-set `comm` compared test
+names still carrying a `[40.31ms]` timing suffix and flagged all 56 as new; and the S418 795-candidate
+text scan measured a token that mostly is not in the corpus. **A check whose failure looks like its
+benign result is unfalsifiable from its own output.**
+
+**A published reproduction command is a claim with a timestamp.** This session emitted
+`state.ts --check # exit 1` into the review ledger and then fixed the condition two commits later on the
+same branch. Caught only because an adversarial pass EXECUTED every published command instead of reading
+them. Corollary, learned the same way: **a test count without its command is unfalsifiable** — `24,013/0`
+and `31,820/56` were both true, of different file sets, and `906` vs `907` was cases-vs-tests.
+
+**A correction rots exactly as fast as the citation it corrected.** `postRe` now has FOUR published line
+numbers, three of them written as corrections to a stale one. `type-system.ts:26048` has three different
+readings across three watermarks, and `scripts/source-text-regex-census.ts` reprints the dead citation
+with authority on every run. **Locate by symbol or do not locate.**
+
+**The pre-commit gate is load-sensitive and its false red is indistinguishable from a real one.**
+`corpus-emit-differential-exit-codes.test.js` takes 84s unloaded and blew a 300s hook budget under
+concurrent agent compiles — reported as `Bailed out after 1 failure`. **Landing and dispatching want to
+be serialised on one box.** Cousin of the memory-gated-commit rule; different resource, same shape.
+
+**An adopter counted our ledger better than we had.** flogence aggregated `known-gaps.md` and found **28
+open gaps are one bug in four costumes** (13 string-masking · 8 interpolation · 6 comment-state · 1
+angle-bracket). It refuted their OWN operator's `<thing>`-overload hypothesis — it is 1 of 28 — and
+supersedes my "seventh member of a family" framing with the whole denominator attached. **One shared
+masking pass is pointed at 27 of 28.**
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I dispatched a worktree agent from the WRONG REPO.** Committed the voice ledger in
+   `scrml-support`, left the shell there, dispatched. `isolation:worktree` provisions from the Bash CWD —
+   a rule I have written down and broke two commands after being in the sibling repo. The agent caught it
+   at startup check 1 and did zero work.
+2. **★★★ I relayed three agent claims without executing them, and all three were wrong or overstated:**
+   the false LSP docstring (*"`runTS` receives the whole file set from `lsp/handlers.js` alike"* — it is
+   `const files = [tabResult]`), *"there is no valid way to express mutable top-level logic"* (three
+   forms work), and *"the fence introduces a NEW over-fire"* (main fires on that shape too). **My
+   verification holds when I execute and fails when I relay.** Third session this is recorded.
+3. **★★★ All five gaps I filed had headings with no status segment**, so `headingMarkerDrift` returned
+   `inspected=0 noTail=5` over my own section — **while the same branch filed a gap about that exact
+   bucket.**
+4. **★★ I split bryan's ruling on an "unruled" flag he had already answered twice.** His reply: *"I
+   thought we went over this."* He had. What was missing was the RECORD, not his decision.
+5. **★ I surfaced `E-MU-001` as a one-line table row** and he said *"I don't know what I am ruling on."*
+6. **★ Two malformed dpa rows** (2 cells in a 3-column table) silently dropped the authority column —
+   the same class recorded four lines above them in that file.
+
+## Gate at close
+
+- **Review floor: 23 → 0.** 4 findings, 19 carve-outs, 0 clean.
+- **Maps:** watermark `e74f5423` → `787d4cb4` after four stale sessions. ⚑ `e74f5423` is a commit whose
+  `SPEC-INDEX.md` contained **three raw git conflict markers**; every map was stamped there and nothing
+  noticed.
+- **dPA:** 0 UNRUN at drain, dpa-049 banked after → 1 UNRUN · 10 ADVISORY.
+- **Adopter issues: 0 open.** Inbox 13 → 9 unread.
+- **`pa-ruled` count: 3**, unchanged — no PA rulings taken under the S385 class this session.
+
+---
+
 # scrml — Session 421 (bryan · XPS-8950) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
