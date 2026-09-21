@@ -566,8 +566,8 @@ export function applySeed(seed, obs, scopes, doc) {
   const after = readBody();
   const domChanged = after !== before;
   const afterSig = readSig();
-  // ⛑ S423 fix round — did the write make anything NEW render? A pure LOSS (25-triage,
-  // whose seed empties every column) is deliberately NOT a gain.
+  // ⛑ S423 fix round — did the write make anything NEW render? A pure LOSS (e.g. a seed
+  // that empties every column, as 25-triage's did until S427) is deliberately NOT a gain.
   // ⛑ fix round 2 (finding 3) — `null` when either snapshot failed: UNMEASURED, which the
   // detector treats as a veto (fail-quiet) rather than as "nothing gained". Recorded as an
   // error too, so a broken measurement is loud instead of silently wrong.
@@ -594,10 +594,10 @@ export function applySeed(seed, obs, scopes, doc) {
  * production says the opposite, which is precisely how rounds 1 and 2 both shipped). This
  * is the real function the harness calls, so the tests drive production.
  *
- * ⚠ THE CARVE-OUT, UNCHANGED AND LOAD-BEARING: `derived-cell` and `no-such-cell` are the
- * KNOWN, TABLED fixture bugs (see SEED_OBSERVABILITY in e2e-render-map.test.js). They are
- * fixture defects on a scheduled fix, not emit regressions, and must stay QUIET — reddening
- * them here would break the additive bar and pre-empt that arc. They stay quiet by
+ * ⚠ THE CARVE-OUT, UNCHANGED AND LOAD-BEARING: `derived-cell` and `no-such-cell` are
+ * FIXTURE defects, not emit regressions, and must stay QUIET here. (S427: the corpus fixtures
+ * that once resolved this way are corrected; a regression to either reason reds the pinned
+ * SEED_OBSERVABILITY table in e2e-render-map.test.js, which is where it belongs.) They stay quiet by
  * CONSTRUCTION rather than by an exclusion list: neither reason can ever make `threw > 0`.
  *
  * ⚠ HISTORY OF THIS PREDICATE, so a fourth round does not re-derive it:
@@ -813,10 +813,9 @@ export function observeCompiled(app, seed, seedLabel, artifacts) {
       // ⛑ S423 fix round (F4), second half: "same path when every write throws". A
       // per-write `set-threw` is recorded in `seedReport.errors` and nowhere else, so a
       // seed whose every write threw ALSO scored green. Raised only for `set-threw` —
-      // NOT for `derived-cell` / `no-such-cell`, which are the three KNOWN, TABLED
-      // fixture bugs (see SEED_OBSERVABILITY in e2e-render-map.test.js). Those are
-      // fixture defects on a scheduled fix, not emit regressions, and reddening them
-      // here would both break the additive bar and pre-empt that arc.
+      // NOT for `derived-cell` / `no-such-cell`, which are FIXTURE defects, not emit
+      // regressions — the pinned SEED_OBSERVABILITY table in e2e-render-map.test.js is
+      // what reds on them (S427: no corpus fixture resolves to either any more).
       //
       // ⛑ S424 item 3 — the predicate now lives in `seedThrewNotice` (see its header for
       // the full three-round history and the derived-cell / no-such-cell carve-out). It
@@ -865,10 +864,11 @@ export function observeCompiled(app, seed, seedLabel, artifacts) {
     document,
     seeded: seed != null,
     // ⛑ S423 limb 2 — D6 needs to know whether the seed was actually WRITTEN, not
-    // merely registered. Two of the four corpus fixtures resolve to `derived-cell` /
-    // `no-such-cell` and write nothing while still carrying `seeded:true`; scoring
-    // such a cell red for an empty render would blame the compiler for a broken
-    // fixture. The report is already computed above, so this is a pass-through.
+    // merely registered. A fixture that resolves to `derived-cell` / `no-such-cell`
+    // writes nothing while still carrying `seeded:true` (two of the four corpus
+    // fixtures did until S427); scoring such a cell red for an empty render would blame
+    // the compiler for a broken fixture. The report is already computed above, so this
+    // is a pass-through.
     seedReport,
     serverDependent: artifacts.serverDependent,
   });
