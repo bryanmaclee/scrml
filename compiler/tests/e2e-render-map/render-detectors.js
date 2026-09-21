@@ -226,6 +226,98 @@ export function elementCarriesContent(el) {
 }
 
 /**
+ * ⛑ S426 (g-d6-region-content-ignores-the-parent-that-confers-content-…) — THE SELECTOR
+ * EACH CONFERRING ANCESTOR APPLIES TO ITS DESCENDANTS.
+ *
+ * Three arms of `elementCarriesContent` make an element content-bearing because of what
+ * it CONTAINS, not because of its own attributes: `select` (`:querySelector("option")`),
+ * `picture`/`video`/`audio` (a `<source>`/`<img>` with `src`/`srcset`) and `svg` (any
+ * element child). These are copied from there and MUST stay in step with it — this table
+ * is the same definition read from the descendant's side, not a second opinion about what
+ * counts as content.
+ *
+ * `svg` is deliberately absent: its conferring test is "any element child", which is not a
+ * selector but a node-kind, and it is applied separately in
+ * `confersContentToConferringAncestor`.
+ */
+const CONFERRED_CONTENT_SELECTOR = {
+  select: "option",
+  picture: "source[src], source[srcset], img[src], img[srcset]",
+  video: "source[src], source[srcset], img[src], img[srcset]",
+  audio: "source[src], source[srcset], img[src], img[srcset]",
+};
+
+/** Is `el`, or a RENDERED descendant of it, a match for `selector`? */
+function matchesSelfOrRenderedDescendant(el, selector) {
+  if (typeof el.matches === "function" && el.matches(selector)) return true;
+  if (typeof el.querySelectorAll !== "function") return false;
+  const hits = el.querySelectorAll(selector);
+  for (let i = 0; i < hits.length; i++) {
+    if (!isUnrenderedByMarkup(hits[i], el)) return true;
+  }
+  return false;
+}
+
+/**
+ * ⛑ S426 — DOES THIS REGION NODE SUPPLY THE CONTENT THAT MAKES A CONFERRING ANCESTOR
+ * CONTENT-BEARING?
+ *
+ * THE DEFECT: `regionScopedEmptiness` asks `nodesHaveRenderedContent(region.nodes)`, which
+ * decides content from the region's OWN nodes — but `emitEachMountHtml` places the fence at
+ * the each's SOURCE position, so for an `<each>` inside a `<select>` / `<picture>` /
+ * `<video>` / `<audio>` / `<svg>` the rows land INSIDE that parent while the element that
+ * COUNTS them sits OUTSIDE the region. Neither `option` nor `source` is in
+ * `CONTENT_CANDIDATE_SELECTOR`, and a `<circle>` is not either — so the region measured
+ * EMPTY while the page rendered correctly and D6 scored `renders-empty-with-data`: a RED
+ * against the compiler on a CORRECT render. Reproduced on `f8317399` for all three shapes.
+ *
+ * ⚠ THE FIX IS **NOT** TO ADD `option` / `source` TO `CONTENT_CANDIDATE_SELECTOR`. That list
+ * is consumed by `hasRenderedContent` at BODY scope too, so widening it would make a bare
+ * `<option value="1"></option>` count as a whole page's rendered content — re-opening the
+ * S419 one-definition-of-"not rendered" class from the other side. This mirrors the parent's
+ * own definition at REGION scope instead, so body scope is untouched.
+ *
+ * ⚠ AND IT NEVER ASKS `elementCarriesContent(ancestor)`, WHICH IS THE FAIL-OPEN FORM. The
+ * placeholder `<option value="">Choose…</option>` that real corpus selects carry sits
+ * OUTSIDE the region and already makes the `<select>` content-bearing BEFORE any seed — so
+ * "is the ancestor content-bearing?" would score a GENUINELY EMPTY fence inside such a
+ * `<select>` as green. The question is only ever whether the REGION'S OWN NODES confer.
+ *
+ * ⚑ THE WALK IS OVER ANCESTORS, NOT THE PARENT, and that is measured rather than assumed.
+ * The dispatching hypothesis said `node.parentNode`; `select` and `picture`/`video`/`audio`
+ * confer via `querySelector`, which is a DESCENDANT query, so the conferring element can be
+ * any ancestor. Each of these scored RED on a correct render with a parent-only rule, i.e.
+ * the parent-only fix re-creates its own class one wrapper away:
+ *   `<select><optgroup>…each…</optgroup></select>`
+ *   `<svg><g>…each…</g></svg>`
+ *   `<video><div>…each…</div></video>`
+ *
+ * ⚑ `foreignObject` TERMINATES THE WALK. Inside one, HTML content rules apply and the
+ * "any element is drawing content" reading of `svg` must not leak in — otherwise an empty
+ * `<li>` under a foreignObject would count as content. It is a TAG test, not a namespace
+ * test, deliberately: happy-dom reports `namespaceURI === "http://www.w3.org/2000/svg"` for
+ * an `<li>` inside a foreignObject, so a namespace bound would silently not bind (measured).
+ *
+ * ⚑ The `svg` arm generalizes `el.children.length > 0` from direct children to any element
+ * inside the svg. A strict mirror (direct children only) would leave `<svg><g>…each…</g>`
+ * red on a correct render, which is this same defect one level down; the definition's intent
+ * is "a non-empty drawing", and a `<circle>` inside a `<g>` is drawing.
+ */
+function confersContentToConferringAncestor(node) {
+  if (!node || node.nodeType !== ELEMENT_NODE) return false;
+  for (let a = node.parentElement; a; a = a.parentElement) {
+    const tag = String(a.tagName ?? "").toLowerCase();
+    if (tag === "foreignobject") return false;
+    const selector = CONFERRED_CONTENT_SELECTOR[tag];
+    if (selector && matchesSelfOrRenderedDescendant(node, selector)) return true;
+    // `svg`: any element child is a non-empty drawing (elementCarriesContent `case "svg"`).
+    // The node is already known to be an element and already known to be rendered.
+    if (tag === "svg") return true;
+  }
+  return false;
+}
+
+/**
  * Did the render produce ANYTHING content-bearing? True when `body` holds non-
  * whitespace text, OR a CONTENT_CANDIDATE_SELECTOR element that is not hidden by
  * markup and actually carries content (elementCarriesContent).
@@ -359,6 +451,11 @@ function collectCommentNodes(root) {
  * copy the live `.value` PROPERTY of an input, which is exactly the S419
  * "value set by binding (property only)" case, so a clone would score a filled
  * input as empty. One "not rendered" predicate across both halves, as S419 established.
+ *
+ * ⛑ S426 — THERE IS A THIRD HALF, AND IT IS NOT ABOUT THE REGION'S OWN SUBTREE. A region
+ * node can be content by CONFERRING it on an ancestor that lies outside the region — an
+ * `<option>` inside a `<select>`, a `<source>` inside a `<picture>`/`<video>`/`<audio>`, a
+ * shape inside an `<svg>`. See `confersContentToConferringAncestor`.
  */
 function nodesHaveRenderedContent(nodes) {
   if (!Array.isArray(nodes)) return false;
@@ -380,6 +477,11 @@ function nodesHaveRenderedContent(nodes) {
     ) {
       return true;
     }
+    // ⛑ S426 — the node may instead be what CONFERS content on an ancestor that the region
+    // does not contain (an `<option>` inside `<select>`, a `<source>` inside `<video>`, a
+    // shape inside `<svg>`). Asked BEFORE the descendant-candidate loop so it is reached
+    // even for a node with no `querySelectorAll`.
+    if (confersContentToConferringAncestor(n)) return true;
     if (typeof n.querySelectorAll !== "function") continue;
     const els = n.querySelectorAll(CONTENT_CANDIDATE_SELECTOR);
     for (let j = 0; j < els.length; j++) {

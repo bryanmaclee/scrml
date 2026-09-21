@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { observeApp, seedThrewNotice } from "./render-harness.js";
 import {
   runDetectors,
+  hasRenderedContent,
   regionScopedEmptiness,
   collectEachRegions,
   renderedContentSignature,
@@ -886,6 +887,243 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
       expect(det.state).toBe("renders-empty");
     }
   });
+
+  // =========================================================================
+  // ⛑ S426 — THE REGION'S CONTENT TEST AGREES WITH THE ANCESTOR THAT CONFERS CONTENT.
+  // g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render
+  //
+  // `nodesHaveRenderedContent` decided a region's content from the region's OWN nodes,
+  // but three arms of `elementCarriesContent` make an element content-bearing because of
+  // what it CONTAINS: `select` (an `<option>`), `picture`/`video`/`audio` (a `<source>`/
+  // `<img>` with `src`/`srcset`), `svg` (any element child). The fence lands at the each's
+  // SOURCE position, so the rows sit INSIDE that parent while the element that counts them
+  // sits OUTSIDE the region — and neither `option` nor `source` is in
+  // CONTENT_CANDIDATE_SELECTOR, nor is a `<circle>`. So the region measured EMPTY on a
+  // CORRECT render and D6 scored `renders-empty-with-data`: RED against the compiler.
+  //
+  // ⚠ THE FIX IS NOT A WIDER `CONTENT_CANDIDATE_SELECTOR` — that list also answers BODY
+  // scope, so adding `option`/`source` would make a bare `<option value="1">` count as a
+  // whole page's rendered content, re-opening the S419 one-definition-of-"not rendered"
+  // class from the other side. The BODY-SCOPE PINS at the end of this block are what keep
+  // that door shut, and they are the reason this block cannot be satisfied by the easy fix.
+  //
+  // This is a PREVENTATIVE fix: measured over 2,609 corpus `.scrml` files, every real
+  // `<each>`-inside-a-conferring-parent site emits options WITH TEXT (the text half already
+  // saves them) and `picture`/`video`/`audio`/`svg` are corpus-ZERO. Corpus absence is not
+  // design intent — value-only `<option>` rows and `<source>` rows are legitimate scrml,
+  // and a detector that reds a correct render is the cry-wolf shape pa-base §8 names.
+  // =========================================================================
+
+  // Every conferring definition, in BOTH directions. The QUIET direction (the region's
+  // nodes really do confer) is the defect; the FIRES direction is the control that the
+  // fix did not simply green the family.
+  //
+  // ⚑ EVERY `markup` HERE CARRIES CONTENT OUTSIDE THE REGION THAT ALREADY MAKES THE PARENT
+  // CONTENT-BEARING — the `<select>`'s placeholder option, the `<picture>`'s fallback
+  // `<img>`, a fallback `<source>`, a decorative `<circle>`. That is not incidental
+  // realism, it is what makes the FAIL-OPEN control below sharp, and it was MEASURED into
+  // existence: the first version of this table gave `<video>`/`<audio>`/`<svg>` nothing
+  // outside the region, so with an empty region the WHOLE BODY rendered nothing and D6
+  // fired at `body` scope — the control passed while proving nothing about region scope.
+  const CONFERRING_PARENTS = {
+    // `select` — the `<option>` rows carry a value and NO text, so the text half cannot
+    // save them. This is the shape a real `<select>` of ids/codes emits.
+    "an each of value-only <option>s inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>',
+      rows: '<option value="1"></option><option value="2"></option>',
+    },
+    // `picture` — responsive `<source>` rows.
+    "an each of <source srcset> inside a <picture>": {
+      markup: '<picture>{R}<img src="a.jpg" alt="a"></picture>',
+      rows: '<source srcset="a-480.webp"><source srcset="a-960.webp">',
+    },
+    "an each of <source src> inside a <video>": {
+      markup: '<video><source src="fallback.mp4">{R}</video>',
+      rows: '<source src="a.mp4">',
+    },
+    "an each of <source src> inside an <audio>": {
+      markup: '<audio><source src="fallback.mp3">{R}</audio>',
+      rows: '<source src="a.mp3">',
+    },
+    // ⚑ `svg` IS A THIRD INSTANCE THE GAP ENTRY DID NOT NAME — found by sweeping every
+    // arm of `elementCarriesContent` for a delegating definition, not by trusting the
+    // filed list. `case "svg"` is `el.children.length > 0`: any element child.
+    "an each of shapes inside an <svg>": {
+      markup: '<svg viewBox="0 0 10 10"><circle cx="9" cy="9" r="1"></circle>{R}</svg>',
+      rows: '<circle cx="1" cy="1" r="1"></circle><circle cx="5" cy="5" r="1"></circle>',
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(CONFERRING_PARENTS)) {
+    test(`S426: D6 is QUIET when ${label} rendered rows`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      // The page really does render correctly — `hasRenderedContent` says so via the
+      // conferring parent. That is what makes a RED here a false positive and not a miss.
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      const det = seededDetect(filled);
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-clean");
+    });
+
+    // ⚑ THE MANDATORY FAIL-OPEN CONTROL, ONE PER FAMILY. The SAME markup with the SAME
+    // conferring parent and an EMPTY region must still fire. This is what separates the
+    // fix from asking `elementCarriesContent(parent)`: the `<select>`'s placeholder option,
+    // the `<picture>`'s fallback `<img>` and the `<video>`'s own `<source>` all sit OUTSIDE
+    // the region and already make the parent content-bearing BEFORE any seed — so a
+    // parent-is-content-bearing rule would score every one of these GREEN and D6 would go
+    // dark on exactly the render it exists to catch.
+    test(`S426 FAIL-OPEN CONTROL: D6 still FIRES when ${label} rendered nothing`, () => {
+      const empty = markup.replace("{R}", FENCE("a_1", ""));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${empty}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      const det = seededDetect(empty);
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.detail.emptyWithDataScope).toBe("each-regions");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // The BARE parent — nothing outside the region at all, so the region's rows are the only
+  // thing making the page render. These are the three shapes reproduced verbatim on
+  // `f8317399`, where all three printed `page correct: true | allLeavesEmpty: true`.
+  const BARE_CONFERRING_PARENTS = {
+    "<select> whose ONLY options are the each's value-only rows":
+      '<select>{R}</select>|<option value="1"></option>',
+    "<picture> whose ONLY sources are the each's rows":
+      "<picture>{R}</picture>|<source srcset=\"a-480.webp\">",
+    "<svg> whose ONLY shapes are the each's rows":
+      '<svg viewBox="0 0 10 10">{R}</svg>|<circle cx="1" cy="1" r="1"></circle>',
+  };
+  for (const [label, spec] of Object.entries(BARE_CONFERRING_PARENTS)) {
+    test(`S426: D6 is QUIET on the bare repro shape — ${label}`, () => {
+      const [markup, rows] = spec.split("|");
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      // The page renders — the parent is content-bearing ONLY because of these rows.
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      expect(seededDetect(filled).state).toBe("renders-clean");
+    });
+  }
+
+  // ⚑ THE NEAREST SIBLING OF THE FIX, AND THE DISPATCHING HYPOTHESIS WAS WRONG ABOUT IT.
+  // The fix was dispatched as "look at the region's PARENT (`node.parentNode`)". But
+  // `select` and `picture`/`video`/`audio` confer via `querySelector`, which is a
+  // DESCENDANT query — so the conferring element is an ANCESTOR and need not be the parent.
+  // A parent-only rule re-creates this same class one wrapper away, and all three of these
+  // scored RED on a correct render when measured against it. They are the regression pin on
+  // the ancestor walk: revert it to `parentElement`-only and every case here reds.
+  const CONFERRING_ANCESTORS_AT_DEPTH = {
+    "<select><optgroup> (an option group wraps the rows)":
+      '<select><optgroup label="Recent">{R}</optgroup></select>',
+    "<svg><g> (a transform group wraps the shapes)":
+      '<svg viewBox="0 0 10 10"><g transform="translate(1,1)">{R}</g></svg>',
+    "<video><div> (a wrapper element between the video and its sources)":
+      "<video><div>{R}</div></video>",
+  };
+  const DEPTH_ROWS = {
+    "<select><optgroup> (an option group wraps the rows)": '<option value="1"></option>',
+    "<svg><g> (a transform group wraps the shapes)": '<circle cx="1" cy="1" r="1"></circle>',
+    "<video><div> (a wrapper element between the video and its sources)": '<source src="a.mp4">',
+  };
+  for (const [label, markup] of Object.entries(CONFERRING_ANCESTORS_AT_DEPTH)) {
+    test(`S426: the conferring element may be an ANCESTOR, not the parent — ${label}`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", DEPTH_ROWS[label]));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      expect(seededDetect(filled).state).toBe("renders-clean");
+    });
+  }
+
+  // The MOUNT shape too — a nested each inside a `<select>` is a mount div, and its rows
+  // are the div's children. A fix that understands only the fence is half a fix (the same
+  // ruling the REGION_SHAPES table above makes for the base predicate).
+  test("S426: the mount shape confers too — a nested each of options inside a <select>", () => {
+    const markup = `<select><option value="">Choose…</option>${MOUNT("x_1", '<option value="1"></option>')}</select>`;
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+    expect(seededDetect(markup).state).toBe("renders-clean");
+  });
+
+  // The conferring rule mirrors each parent's OWN test and must not become "anything inside
+  // a conferring parent counts". Each of these sits inside a conferring parent and fails
+  // that parent's own conferring test, so each must still FIRE.
+  const CONFERS_NOTHING = {
+    "a <source> with NO src or srcset inside a <video>": {
+      markup: "<video>{R}</video>", rows: "<source>",
+    },
+    "a non-option element inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>', rows: "<span></span>",
+    },
+    // ⛑ S419 parity — the conferring descendant must be RENDERED. A hidden option is not
+    // content anywhere else in this file and must not become content here.
+    // ⚠ MEASURED, AND IT DOES NOT BITE THE S426 PREDICATE: this case stays green even when
+    // `confersContentToConferringAncestor` is gutted to `return true`, because
+    // `nodesHaveRenderedContent` already skips an unrendered region node (via
+    // `isUnrenderedByOwnMarkup`) BEFORE asking the conferring question. So this pins the
+    // UPSTREAM guard, not the new predicate — recorded rather than left to imply a bite it
+    // does not have. It still earns its place: it reds if that skip is ever removed.
+    "an <option> hidden by markup inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>', rows: '<option hidden value="1"></option>',
+    },
+    // ⚑ `foreignObject` BOUNDS THE SVG RULE. Inside one, HTML content rules apply, so an
+    // empty `<li>` must not become content by way of the enclosing `<svg>`. It is bounded
+    // by a TAG test and not by `namespaceURI`, deliberately: happy-dom reports
+    // `http://www.w3.org/2000/svg` for an `<li>` inside a foreignObject (measured), so a
+    // namespace bound would silently not bind.
+    "an empty <li> inside a <foreignObject> inside an <svg>": {
+      markup: '<svg><circle cx="1" cy="1" r="1"></circle><foreignObject><ul>{R}</ul></foreignObject></svg>',
+      rows: "<li></li>",
+    },
+    // The plain control: the same empty row in a plain `<ul>` is the true positive that
+    // the whole detector exists for, and it is unaffected.
+    "an empty <li> in a plain <ul>": {
+      markup: "<h1>App</h1><ul>{R}</ul>", rows: "<li></li>",
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(CONFERS_NOTHING)) {
+    test(`S426: D6 still FIRES — ${label} confers nothing`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      const det = seededDetect(filled);
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // ⚑ THE PINS THAT FORBID THE EASY FIX. Widening `CONTENT_CANDIDATE_SELECTOR` with
+  // `option` / `source` would green every QUIET case above AND make each of these bodies
+  // count as a rendered page, which is the S419 class
+  // (g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not) from the
+  // other side. S426 changes REGION scope only; body scope is byte-for-byte unchanged.
+  const BODY_SCOPE_RENDERS_NOTHING = {
+    "a bare value-only <option>": '<option value="1"></option>',
+    "a bare <source src>": '<source src="a.mp4">',
+    "a bare <source srcset>": '<source srcset="a-480.webp">',
+    "an <option> alone inside an empty-rendering wrapper": '<div><option value="1"></option></div>',
+    "a select with no options (the seeded options loop rendered nothing)": "<select></select>",
+    "a src-less video holding a src-less source": "<video><source></video>",
+  };
+  for (const [label, markup] of Object.entries(BODY_SCOPE_RENDERS_NOTHING)) {
+    test(`S426: BODY scope unchanged — ${label} still renders nothing`, () => {
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      expect(hasRenderedContent(body)).toBe(false);
+      // And therefore a seeded cell with this body is still the RED body-scope verdict.
+      const det = seededDetect(markup);
+      expect(det.detail.emptyWithDataScope).toBe("body");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
 });
 
 // =============================================================================
