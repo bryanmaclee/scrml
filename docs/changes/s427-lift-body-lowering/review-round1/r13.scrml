@@ -1,0 +1,9 @@
+<program>
+<items> = ["a", "b"]
+<count> = 0
+<ul>
+${ for (let it of @items) { lift <li>${it}</li>
+       @count = @count + 1 } }
+</ul>
+<p id="c">${@count}</p>
+</program>

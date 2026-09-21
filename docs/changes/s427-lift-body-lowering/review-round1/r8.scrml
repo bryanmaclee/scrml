@@ -1,0 +1,6 @@
+<program>
+<items> = ["a", "b", "c"]
+<ul>
+${ for (let it of @items.filter(x => x != "q")) { lift <li>${it}</li> } }
+</ul>
+</program>

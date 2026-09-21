@@ -1,0 +1,1 @@
+export async function run(a){ document.querySelector("button.b").click(); console.log("HITS after 1 click:", a.get("hits")); a.set("user","V"); document.querySelector("button.b").click(); console.log("HITS after 2nd click:", a.get("hits")); }

@@ -1,0 +1,5 @@
+<program>
+${ const total = 10 }
+${ total = 5 }
+<p id="p">${total}</p>
+</program>

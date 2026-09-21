@@ -14208,6 +14208,16 @@ lift … }` emits `const n = n + 1;` → `ReferenceError: Cannot access 'n' befo
 suffix } = @cfg; for (…) lift …` → `ReferenceError: prefix is not defined`. A running counter in a lift loop and
 a destructured config are ordinary shapes. The other two items in this entry remain agent-reported, unverified.
 
+⛑ **S427-peter — FIX BUILT AND HELD, NOT MERGED: `origin/hold/s427-lift-body-lowering` @ `089c0414`.** The fix
+found four causes where one was filed (Step 4b passed no declared-name set; every lift-body emitter dropped it;
+`hasFragmentedLiftBody` dropped statements after a complete-markup lift; the mixed keyed-setup hoist stranded
+block declarations) plus a fifth silent defect (`n += 1` in a keyed body shows the final count on every row). Its
+adversarial pass found a **HIGH loud→silent AND newly-accepting** regression — `const x = 1; x = 2` now compiles
+and dies at boot, which §50 rejects (corpus negative fixture `phase3-assign-expr-to-const-081`) — plus a
+scope-blind demotion of a working keyed list, a loud→silent predicate miss and push-staleness on the demoted
+path. **Round 2 is fully specified, with repros, in `docs/changes/s427-lift-body-lowering/review-round1/`.**
+⚑ The const/lin case must fall back to base's LOUD failure: `E-ASSIGN-004` lives in bryan's OPEN #996.
+
 ⛑ **S427-peter — `g-lift-inside-each-row-or-match-arm-silently-dropped` RESOLVED (#1022).** Traced: the each-row
 drop was `emit-each.ts` `renderTemplateChildToJs` (a `for` statement fell to `inner = ""` with the comment
 `// each: empty logic interpolation skipped`); arm bodies never reached Step 4b and `emitArmWireFunction` had no
@@ -14236,6 +14246,15 @@ is not defined` at init; `<main>` renders empty. **Two defects:** the missing ch
 move a non-lift artifact), and a **hollow conformance case**: its `expected.json` passes against a program that
 cannot run (base §8, the gate that cannot fail). Measure how many conformance cases have a runtime half that would
 catch this.
+
+⚑ **S427-peter — MEASURED, AND IT IS THE WHOLE TIER, NOT ONE CASE.** The case HAS a runtime half
+(`domAnchored`: 2 rows, text, attribute). It passes because `conformance/adapters/impl1-ts.ts` runs every
+runtime-half case against the FULL `SCRML_RUNTIME` template (`import … from runtime-template.js` at `:148`,
+concatenated at `:467`/`:924`) — never the tree-shaken runtime the compiler actually emits. **~215 of 898 cases
+carry a runtime half, and every one is structurally blind to chunk-gating defects** (a missing chunk cannot be
+missing from a runtime that ships all of them). The §8 unproven-gate shape at tier scale. Switching the adapter
+to the emitted runtime may turn cases red and is a change to the conformance instrument (bryan's lane):
+surface it, do not switch unilaterally. The one-line `_scrml_reconcile_list(` gate for this case is separate.
 
 ### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
 <!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->

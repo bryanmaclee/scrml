@@ -1,0 +1,6 @@
+<program>
+${ import { limit, fmt } from './util.scrml' }
+<items> = ["a"]
+<ul>${ fmt = 7
+       for (let it of @items) { lift <li>${it}</li> } }</ul>
+</program>

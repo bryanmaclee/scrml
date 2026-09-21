@@ -1,0 +1,4 @@
+${
+    export const limit = 3
+    export function fmt(x) { return "<" + x + ">" }
+}

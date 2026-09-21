@@ -1,0 +1,15 @@
+<program>
+<items> = ["a", "b"]
+<ul>
+${
+    let n = 100
+    if (@items.length > 0) {
+        const n = 1
+        lift <li class="inner">${n}</li>
+    }
+    for (let it of @items) { let n = 7
+        lift <li class="loop">${n}:${it}</li> }
+    lift <li class="outer">${n}</li>
+}
+</ul>
+</program>
