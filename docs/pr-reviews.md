@@ -1553,3 +1553,256 @@ append-only, so this serializes by union)
 <!-- @review pr=988 verdict=carve-out by=S423-peter date=2026-09-19 probe=CARVE-OUT-BY-PATH-checked-against-gh-pr-view-988-json-files-two-paths-docs-changes-progress-md-and-docs-pr-reviews-md-and-neither-matches-CODE-BEARING-RE-BUT-PROBED-THE-RECORD-ITSELF-all-23-markers-parse-4-finding-19-carve-out-review-debt-ts-reads-574-recorded-and-none-of-the-23-appears-in-todays-OWED-list-so-nothing-failed-toward-debt-AND-EXECUTED-ITS-SURVIVING-PUBLISHED-CLAIM-rather-than-reading-it-examples-09-error-handling-scrml-still-draws-four-E-ERROR-009-one-at-95-34-whose-own-message-lists-SubmitFailed-among-the-valid-variants-so-the-self-correction-on-the-invalidated-repro-stands note=S422-floor-drain-record-23-to-0 -->
 
 <!-- @review pr=989 verdict=carve-out by=S423-peter date=2026-09-19 probe=CARVE-OUT-BY-PATH-checked-against-gh-pr-view-989-json-files-a-single-path-master-list-md-and-the-diff-is-the-generated-recent-sessions-anchor-only-and-no-file-matches-CODE-BEARING-RE-so-the-reviewable-surface-is-the-generator-not-the-diff-AND-THE-STALENESS-981s-OWN-MARKER-RECORDED-IS-NOW-DISCHARGED-bun-scripts-state-ts-check-EXITS-0-at-HEAD-3b66030a-and-the-live-gap-counts-HIGH-111-MED-261-LOW-99-NOMINAL-7-agree-between-the-generated-table-in-known-gaps-md-and-a-fresh-state-ts-run note=scheduled-regen-artifact-current-at-HEAD -->
+
+---
+
+## S424-peter — floor drain, 6 OWED (#991 #993 #994 #997 #998 #999)
+
+**One code-bearing PR (#993); five carve-outs by path — every one probed by execution anyway.**
+Classified with `review-debt.ts`'s own `CODE_BEARING_RE` against `gh pr view <n> --json files`, never
+from the hand-off.
+
+### ⚑ FINDING — #997's pickup states `E-ASSIGN-004` is LANDED. It is not on main.
+
+The S422 wrap block reads *"`E-ASSIGN-004` is **LANDED** and its remedy misfires at top level"*, and
+the S423 hand-off inherited it as *"`E-ASSIGN-004` is **BUILT** at statement position."* **Both are
+false about `main`, and I verified it twice by different observables:**
+
+- `grep -rc 'E-ASSIGN-004' compiler/src/` returns **zero occurrences in any file**.
+- A compile of `const x = 1` · `x = 2` inside a `function` body exits **0 with zero diagnostics** —
+  row 1 of bryan's own six-row S422 matrix, which that ruling says SHALL fire.
+
+The build exists only in **PR #996, which is OPEN with `gate=FAILURE`.** So the diagnostic the next
+session was told to build on top of does not exist, and the *"remedy misfires at top level"* caveat
+describes a remedy that never ships a diagnostic to misfire.
+
+**This is `[3395]`'s class committed a second time: a wrap drafted before the work it describes
+finished, so its closing state is a prediction formatted as a record.** The S422 wrap was written
+while #996 was still open, and nothing re-read it after. The lesson the delta-log already carries —
+*delivery is the merge, not the push* — applies to a wrap's own state claims, not only to PRs.
+
+### ⚑ RELATED, off the floor but found by the same sweep — the dPA drain is unmerged
+
+The S423 pickup says dpa-047 and dpa-048 are **DRAINED, not UNRUN**. `handOffs/dpa-queue.md` on main
+reads `BANKED — UNRUN` for both, and the local `dpa-debt` probe agrees with main. **The drain is real
+but it lives in PR #990, which is OPEN and `CONFLICTING`/`DIRTY`.** So main's queue would have re-fired
+two completed deliberations at the next boot — `[3394]`'s class exactly. #990 is also the sole carrier
+of three flogence adopter reports (`2026-09-19` x3) that exist nowhere else on main. It needs a rebase,
+not a merge; it is bryan's.
+
+### ⚑ The pre-commit baseline is SIX on this clone, not five — and the sixth is a filed class
+
+`#998`'s gate-at-close records *"23,969 pass / 5 fail — the known five, verified by name-set not
+count."* The method is right and the five are right:
+`g-endpoint-conformance-node-check-tests-time-out-under-full-suite-load` names them precisely — three
+in `self-host-smoke.test.js` and **two** in `session-secure-b4b5-roundtrip.test.js` (the B5 assertion,
+plus its `afterAll` EBUSY teardown, which bun prints as `(fail) (unnamed)`).
+
+**A sixth is reproducible here and is not in that set:** `CONF-W5B-IN-PROCESS-DB-LIBRARY > POS:
+tool-dep <base>.js = real in-process db callable + tool RUNS the SQL`. It is the **same mechanism as
+that gap and a third instance of it, in a file the gap's locus does not name** — the test calls
+`Bun.spawnSync({ cmd: ["bun", "tool.js"] })` on the default 5000 ms budget, and it measures **410 ms
+green in isolation** against **5050 ms red under the full parallel suite**. Not a regression, not in
+#993's footprint, and NOT a flake to wave off: it is a wall-clock budget the runner cannot meet under
+contention. Per §2's no-fork discipline this widens the existing entry rather than opening a second —
+the gap's title and locus say *"the two `node --check` subprocess tests"*, and the class is **any**
+subprocess-spawning test under a fixed budget. Counts also moved with load within one session (7 then
+6), which is the same signal.
+
+### #994's item 1 reproduces exactly
+
+`render-detectors.js:666` is `if (report.gainedContent === null) return true;`. `null` vetoes; an
+`undefined` falls through to `=== true`, returns false, and **D6 fires on a value that was never
+measured**. ⚑ And the discriminator is in the same file: `seedWasDelivered` at `:619` already writes
+the loose `report == null`. Two functions apart, one idiom each — the entry is correct and the fix is
+to make `:666` match `:619`.
+
+— S424-peter, SOLO session (S422-bryan and S423-peter both WRAPPED at boot)
+
+<!-- @review pr=999 verdict=carve-out by=S424-peter date=2026-09-20 probe=CARVE-OUT-BY-PATH-gh-pr-view-999-json-files-is-a-SINGLE-path-master-list-md-which-does-not-match-CODE-BEARING-RE-AND-VERIFIED-THE-GENERATED-DIFF-BY-INSPECTION-the-whole-change-is-one-line-in-the-generated-recent-sessions-anchor-adding-27a0bb17-wrap-s423-at-the-top-and-dropping-e13ff10d-wrap-s415-off-the-bottom-which-is-exactly-the-last-8-window-advancing-by-one-and-state-ts-at-HEAD-agrees-with-the-committed-block note=scheduled-regen-correct-no-nav-map-delta-because-the-session-added-no-navigable-structure -->
+
+<!-- @review pr=998 verdict=carve-out by=S424-peter date=2026-09-20 probe=CARVE-OUT-BY-PATH-gh-pr-view-998-json-files-six-paths-changelog-hand-off-delta-log-master-list-and-two-handOffs-incoming-read-renames-none-matching-CODE-BEARING-RE-BUT-RE-MEASURED-ITS-GATE-AT-CLOSE-CLAIMS-BY-EXECUTION-the-board-claim-HIGH-110-MED-263-LOW-99-Nominal-7-is-CONFIRMED-live-by-bun-scripts-state-ts-at-6f213495-and-agrees-with-the-generated-table-in-known-gaps-md-AND-THE-KNOWN-FIVE-CLAIM-IS-CORRECT-AS-TO-THE-FIVE-self-host-smoke-x3-plus-TWO-in-session-secure-b4b5-roundtrip-the-B5-assertion-and-its-afterAll-EBUSY-teardown-which-prints-as-fail-unnamed-BUT-A-SIXTH-REPRODUCES-HERE-CONF-W5B-IN-PROCESS-DB-LIBRARY-410ms-green-isolated-vs-5050ms-red-under-the-parallel-suite-spawning-bun-tool-js-via-Bun-spawnSync-on-the-default-5000ms-budget-which-is-a-THIRD-instance-of-g-endpoint-conformance-node-check-tests-time-out-under-full-suite-load-in-a-file-that-gaps-locus-does-not-name-so-it-widens-that-entry-and-does-not-fork-it note=board-and-baseline-claims-hold-sixth-standing-failure-identified-and-attributed-to-a-filed-class -->
+
+<!-- @review pr=997 verdict=finding by=S424-peter date=2026-09-20 probe=CARVE-OUT-BY-PATH-gh-pr-view-997-json-files-three-paths-changelog-hand-off-and-one-handOffs-incoming-drop-none-matching-CODE-BEARING-RE-BUT-THE-DOCS-ARE-THE-DEFECT-its-pickup-item-1-asserts-E-ASSIGN-004-is-LANDED-and-the-S423-hand-off-inherited-that-as-BUILT-and-BOTH-ARE-FALSE-ABOUT-MAIN-verified-by-two-independent-observables-grep-rc-E-ASSIGN-004-compiler-src-returns-ZERO-occurrences-in-any-file-and-a-compile-of-const-x-1-then-x-2-in-a-function-body-EXITS-0-WITH-ZERO-DIAGNOSTICS-which-is-row-1-of-bryans-own-six-row-S422-matrix-that-the-ruling-says-SHALL-fire-and-the-build-exists-only-in-PR-996-which-is-OPEN-with-gate-FAILURE-so-the-caveat-about-the-remedy-misfiring-at-top-level-describes-a-remedy-that-never-ships-a-diagnostic-to-misfire-and-this-is-the-3395-class-a-wrap-drafted-before-the-work-it-describes-finished note=FINDING-state-claim-false-about-main-do-not-build-on-E-ASSIGN-004-until-996-lands -->
+
+<!-- @review pr=994 verdict=carve-out by=S424-peter date=2026-09-20 probe=CARVE-OUT-BY-PATH-gh-pr-view-994-json-files-a-SINGLE-path-docs-known-gaps-md-which-does-not-match-CODE-BEARING-RE-BUT-REPRODUCED-THE-ENTRYS-OWN-CLAIMS-AGAINST-THE-SOURCE-item-1-is-EXACT-render-detectors-js-666-reads-if-report-gainedContent-triple-equals-null-return-true-so-an-undefined-falls-through-to-triple-equals-true-returns-false-and-D6-FIRES-on-a-value-that-was-never-measured-and-the-discriminator-is-in-the-same-file-because-seedWasDelivered-at-619-already-writes-the-loose-report-double-equals-null-AND-item-3-is-EXACT-TOO-render-harness-js-741-gates-the-set-threw-notice-on-NOT-writes-some-w-wrote-so-a-genuine-accessor-throw-stays-silent-whenever-any-OTHER-key-landed-latent-today-because-every-fixture-is-single-key-and-live-the-moment-the-fixture-arc-makes-them-multi-key note=both-probed-items-reproduce-entry-is-accurate-as-filed -->
+
+<!-- @review pr=991 verdict=carve-out by=S424-peter date=2026-09-20 probe=CARVE-OUT-BY-PATH-gh-pr-view-991-json-files-a-SINGLE-path-docs-pr-reviews-md-which-does-not-match-CODE-BEARING-RE-BUT-PROBED-THE-RECORD-ITSELF-all-four-S423-markers-parse-and-review-debt-ts-at-6f213495-reports-578-recorded-with-none-of-986-987-988-989-appearing-in-todays-OWED-list-so-none-failed-toward-debt-AND-RE-EXECUTED-ITS-LOAD-BEARING-STRUCTURAL-CLAIM-rather-than-reading-it-git-diff-5e6842ee-787d4cb4-compiler-src-block-splitter-js-is-EMPTY-confirming-the-not-a-regression-corroboration-still-holds-at-this-HEAD note=S423-floor-drain-record-4-to-0-markers-well-formed-claims-hold -->
+
+### ⚑ #993 — FINDING ×5, and it is my own PR from the session before this one
+
+`gh pr view 993 --json files` returns eight paths, five under `compiler/tests/e2e-render-map/` —
+**code-bearing under `CODE_BEARING_RE`**, and the only one of the six owed that is. The S423 hand-off
+predicted this PR was *"the one on the board least likely to return anything"* on the strength of four
+adversarial passes and three fix rounds already spent on it. **That prediction was wrong, and the floor
+has now convicted my own work in three consecutive sessions.** A pre-land pass is not a floor record,
+and the reason is visible here: every earlier pass reviewed a fix ROUND against the finding that
+produced it, while the floor pass reviews the LANDED predicate against the language.
+
+The pass reports five. **I reproduced three by execution** (pa-base §8 — a review's findings are claims,
+not results); the two I did not are argued from source and marked as such.
+
+**⚑ FINDING 1 (HIGH, REPRODUCED) — D6 REDS A CORRECT RENDER when an `<each>` sits inside a
+parent that carries its content THROUGH its children.** `nodesHaveRenderedContent`
+(`render-detectors.js:363`) asks `elementCarriesContent` only of the region's own nodes and their
+descendants. But `elementCarriesContent` defines `select` as *"has an `<option>`"* (`:199`) and
+`picture`/`video`/`audio` by their `<source>` children — and `emitEachMountHtml` places the fence at
+the each's source position, so the region CONTAINS the `<option>`/`<source>` nodes while the element
+that makes them count sits OUTSIDE it. `option` and `source` are not in `CONTENT_CANDIDATE_SELECTOR`
+and carry no text when value-only, so every leaf reads empty.
+
+Executed, happy-dom, against the landed predicate:
+
+| markup | `hasRenderedContent(body)` | D6 |
+|---|---|---|
+| `<select><option value="">Select…</option>` + fence of `<option value="1">`/`<option value="2">` | **true** | **`renders-empty-with-data`** |
+| `<picture><img src="fallback.png">` + fence of two `<source srcset=…>` | **true** | **`renders-empty-with-data`** |
+
+The gain conjunct does not save the realistic shape: a static placeholder `<option value="">Select…</option>`
+— the exact pattern `emitEachMountHtml`'s own comment cites — already makes the `<select>` content-bearing
+BEFORE the seed, so `elements` does not rise and text-free options add no counts.
+
+⚑ **Zero cells move on today's tier and the corpus already holds the shape.** None of the four seeded
+apps (`03-contact-book`, `06-kanban-board`, `16-remote-data`, `25-triage-board`) contains a
+`<select>`/`<picture>`. But **three corpus files put an `<each>` inside a `<select>`** — the
+trucking-dispatch flagship's `assignment-picker.scrml` (3), `status-picker.scrml` (1) and
+`pages/dispatch/load-new.scrml` (1). It is latent only because the seeded set is four apps that happen
+not to use it, **and the seed-fixtures arc is what grows that set.**
+
+This is the S419 *"one definition of not-rendered"* invariant — which this diff's own F3 comment
+invokes — broken in the other direction.
+
+**⚑ FINDING 5 (REPRODUCED) — and it FALSIFIES THE FIX `#994` PRESCRIBES.** The tri-state veto at
+`:666` is keyed on `=== null`, so an ABSENT `gainedContent` falls through to `=== true` → `false` and
+D6 fires on a value nobody measured. I filed that as `#994` item 1 this morning and recorded its fix as
+`if (report.gainedContent == null) return true;`. **That fix is wrong and would red an existing test:**
+`detector-validation.test.js:823` builds `{writes:[{reason:"written",wrote:true}], domChanged:true}`
+with no `gainedContent` field and asserts D6 **DOES** fire. The reviewer flagged that dependency and
+then proposed `!("gainedContent" in report) || … == null`, which breaks the same test — so neither the
+entry's fix nor the reviewer's is correct as written. The real change is two lines, not one: veto on
+absent-or-null at `:666`, **and** make `:823` state `gainedContent: false` explicitly, which is what
+that test actually means. Blast radius measured: of nine `seededDetect` call sites, `:823` is the only
+one that passes a report while omitting the field.
+
+**FINDING 2 (MED, from source) — `needs-server` swallows the F4 loudness this round was landed to
+guarantee.** `needs-server` is in `GREEN_STATES` and green cells have `detail` stripped, while
+`hasHardSmell` covers only S-OBJECT-IN-DOM / S-RAW-INTERP / S-NULLISH-TEXT — so on a server-dependent
+seeded app the new `[seed-bridge]` pushes land in the same `consoleErrors` array that
+`isServerAbsenceMessage` matches, and the cell returns green with the explanation stripped. D6 is
+likewise absent from `hasHardSmell`, so a genuine `S-EMPTY-WITH-DATA` is masked the same way. Not live
+— none of the four seeded apps is `needs-server`.
+
+**FINDING 3 (MED, from source) — tightening to "a seed was actually WRITTEN" made the BODY-GLOBAL half
+of D6 fail-open.** `seedWasDelivered` now requires `writes.some(w => w.wrote === true)` for BOTH
+scopes, and the loudness guard deliberately raises nothing for `no-such-cell`/`derived-cell`. The
+fixture-bug justification covers the region scope; for the original body-global check it is a
+regression. Concretely: a codegen change that reshapes the cell accessor so every seed key resolves to
+`no-such-cell` takes no prologue throw, so the loud path never fires — every populated cell then scores
+green however empty it renders.
+
+**FINDING 4 (MED, from source) — `signatureGained` compares AGGREGATE counts, so a content swap under a
+net element loss reads as "no gain."** `after.elements > before.elements` is a total, not a per-element
+identity, so a seeded gallery replacing three placeholder `<img>` rows with one seeded `<img>` goes
+3 → 1 → `gainedContent:false`, and any empty leaf on the page then reds a correct render. The commit
+message's filed residual claims *"only the attribute-carried swap falls through"*; that holds only when
+the total rises, so **the filed blindness is narrower than the real one.**
+
+⚑ **What the five have in common, and it is the reason NOT to patch them one at a time.** Findings 1, 4
+and 5 are all the same defect at three granularities: **the content/gain signal is computed at the
+wrong scope** — per-region while ignoring the parent that confers content (1), page-global aggregate
+rather than per-element identity (4), and conflating unmeasured with measured-zero (5). Findings 2 and
+3 are both fail-open paths around the same predicate. Patching the one-liner alone is exactly the
+treadmill the S423 durable named — *completing a ruling by class is convergence; patching its next
+instance is not.*
+
+<!-- @review pr=993 verdict=finding by=S424-peter date=2026-09-20 probe=CODE-BEARING-gh-pr-view-993-json-files-eight-paths-five-under-compiler-tests-e2e-render-map-matching-CODE-BEARING-RE-so-this-got-a-FULL-S239-ADVERSARIAL-PASS-at-high-effort-over-the-1369-line-diff-which-returned-FIVE-findings-on-my-own-PR-and-I-REPRODUCED-THREE-BY-EXECUTION-under-happy-dom-against-the-landed-predicate-rather-than-accepting-them-FINDING-1-HIGH-nodesHaveRenderedContent-drops-the-parent-carried-content-signal-so-an-each-inside-a-select-or-picture-puts-option-or-source-nodes-in-the-region-while-the-element-that-makes-them-count-sits-outside-it-and-neither-option-nor-source-is-in-CONTENT-CANDIDATE-SELECTOR-so-a-select-with-a-static-placeholder-option-plus-a-fence-of-two-value-only-options-measures-hasRenderedContent-body-TRUE-and-still-scores-renders-empty-with-data-and-picture-with-an-img-fallback-reproduces-identically-and-the-gain-conjunct-does-not-save-it-because-the-static-placeholder-already-makes-the-select-content-bearing-before-the-seed-ZERO-cells-move-on-todays-tier-because-none-of-the-four-seeded-apps-has-a-select-or-picture-BUT-THREE-CORPUS-FILES-ALREADY-PUT-AN-EACH-INSIDE-A-SELECT-assignment-picker-status-picker-and-pages-dispatch-load-new-so-it-goes-live-when-the-seeded-set-grows-which-is-the-very-next-arc-FINDING-5-REPRODUCED-the-tri-state-veto-at-666-keys-on-triple-equals-null-so-an-ABSENT-gainedContent-fires-D6-on-an-unmeasured-value-AND-THIS-FALSIFIES-THE-FIX-994-PRESCRIBES-because-detector-validation-test-js-823-builds-a-report-with-no-gainedContent-and-asserts-D6-DOES-fire-so-the-entrys-double-equals-null-one-liner-would-RED-it-and-the-reviewers-own-proposed-in-operator-remedy-breaks-the-same-test-the-real-change-is-two-lines-veto-on-absent-or-null-at-666-plus-make-823-state-gainedContent-false-explicitly-and-of-nine-seededDetect-call-sites-823-is-the-ONLY-one-passing-a-report-while-omitting-the-field-FINDING-2-MED-needs-server-is-in-GREEN-STATES-and-green-cells-have-detail-stripped-while-hasHardSmell-omits-D6-so-the-F4-loudness-and-a-genuine-S-EMPTY-WITH-DATA-are-both-swallowed-on-a-server-dependent-seeded-app-FINDING-3-MED-seedWasDelivered-now-requires-a-real-write-for-BOTH-scopes-so-the-body-global-half-fail-opens-if-a-codegen-change-makes-every-seed-key-resolve-to-no-such-cell-FINDING-4-MED-signatureGained-compares-AGGREGATE-element-counts-so-a-content-swap-under-a-net-element-loss-reads-as-no-gain-and-the-commit-messages-filed-residual-is-narrower-than-the-real-blindness note=FIVE-FINDINGS-ON-MY-OWN-PR-THREE-REPRODUCED-BY-EXECUTION-one-HIGH-false-positive-against-correct-renders-and-a-correction-owed-to-994s-prescribed-fix -->
+
+---
+
+## S426-peter — the floor at 7 OWED, and the pass found a THIRD door on the requirement #1002 existed to meet
+
+**Classified with `review-debt.ts`'s own `CODE_BEARING_RE` against `gh pr view <n> --json files`, never
+from the hand-off.** 7 owed (#1000–#1006), **2 code-bearing** (#1001, #1002 — both under
+`compiler/tests/e2e-render-map/`), **5 carve-outs by path** (#1000 `docs/**`; #1003/#1005 wrap
+narrative; #1004 `hand-off.md`+`master-list.md`; #1006 `master-list.md`). ⚑ The inherited count was
+**5**; the probe measures **7**, because the two post-wrap PRs (#1005, #1006) are themselves owed. The
+count comes from the probe, not from the wrap that predicted it.
+
+**The five carve-outs were PROBED BY EXECUTION, not stamped** — each ran the gate that governs the
+artifact it changed: `bun scripts/state.ts --check` (exit 0, all `@generated` sections current — this
+is the gate #1006 existed to clear and #1004 could have staled), `bun scripts/facts.ts --check`
+(exit 0), `bun scripts/delta-lint.ts` (exit 0; 2,158 entries, 2,149 distinct, max `[3421]`, 9
+baselined duplicates carried as known debt). One WARN surfaced and was **run to ground rather than
+filed**: `known-gaps heading/marker status: 45 DRIFT`, which is the already-`resolved`
+`g-known-gaps-heading-and-marker-status-can-disagree-silently` — a detector added at S334, WARN-only by
+design, `marker=` authoritative and already counted; 45 today against its own 46 baseline. Not new.
+
+**FINDING (CONFIRMED BY PA EXECUTION, #1002) — there is a THIRD green door where a seed-bridge failure
+is silent, and it is the same narrow notice at a different `return`.** #1002 added
+`hasSeedBridgeFailure` to the state-resolution `needs-server` return (`render-detectors.js:887`). The
+**D1 mount-throw** `needs-server` return at **`:757`** has no such disqualifier: it fires on
+`obs.serverDependent && isServerAbsenceMessage(msg)` and returns before D2 ever runs. PA-measured — a
+seeded, server-dependent app whose mount throws a server-absence-shaped `TypeError`, with
+`seed:{threw:1}` and the `[seed-bridge]` notice on the observation, scores **`needs-server` (GREEN)`**
+with `detail` = `["throwMessage","needsServer"]`: the seed failure appears **nowhere** in `detail`, and
+`generate-baseline.js` strips `detail` from green cells anyway. Two controls pinned the diagnosis: the
+door #1002 closed still closes (same input without the mount throw → `compiles-but-throws`,
+`S-EMPTY-WITH-DATA`, seed failure recorded), and the same mount throw with no seed failure stays
+correctly green.
+
+⚑ **This is NOT the residual #1002 deferred, and the distinction is the point.** That PR's own scope
+comment defers *"ANY console error matching `isServerAbsenceMessage`"* breadth and *"`hasHardSmell`
+omits D6"* — both **inside** the `consoleErrors` block. This door never reaches that block. So the
+S424 durable — *"a fix that does not meet its own requirement still reads as done"* — holds one level
+further out than the session that wrote it knew: #1002 shut door 2 after the pass found door 1 was not
+terminal, and door 3 was open the whole time. **Fifth consecutive session in which a fix re-created its
+class one level away.** Filed as its own gap with the fail-open direction stated; not folded into the
+scoped lead item.
+
+**FINDING (#1001, MED, verified by reading) — the shipped BRIEF documents the predicate the PR
+convicts.** `docs/changes/s424-d6-set-threw-partial-seed/BRIEF.md:53` tells the then-live item-3 agent
+that the sibling branch changes `=== null` → `== null`. That is the **first attempt** #1001's own body
+convicts as incomplete; what landed is `report.gainedContent === false ? false : true`. The brief ships
+in the same commit that falsifies it, and cites a bare line number the same PR body calls a rot hazard
+— already rotted by 26 lines. The blast radius has since closed (item 3 landed as #1002), so this is a
+**stale-record defect, not a live mislead** — but it is the third instance this month of a citation
+rotting inside the artifact that warns about rotting citations.
+
+**Three LOW findings on #1001, all record-level, none reproduced as behaviour:** the JSDoc at `:654`
+still states *"Only an explicit `true` blocks"*, the rule the change repeals, directly above the
+repealing code; the absent/malformed veto is traceless where the harness's own precedent 120 lines away
+deliberately pushes a `consoleError` instead of going quiet; and `detector-validation.test.js:866`
+case (b) asserts only `.not.toContain(...)` where case (c), three lines later, carries a comment
+explaining why the negative-only assertion is insufficient. **One LOW on #1002:** `:1313` re-types the
+green-state list by hand instead of deriving it from `GREEN_STATES` in `e2e-render-map.test.js` — the
+mirror-is-not-a-gate class that same PR removed from `shouldBeLoud`, reintroduced in its test.
+
+⚑ **What the two passes have in common, and it is the same sentence three sessions running:** a
+pre-land pass reviews a fix ROUND against the finding that produced it; the floor pass reviews the
+LANDED predicate against the language. Both of my code-bearing PRs had already passed a pre-land
+adversarial round, and the floor still convicted both.
+
+<!-- @review pr=1006 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1006-json-files-returns-exactly-one-path-master-list-md-which-matches-neither-the-compiler-stdlib-scripts-lsp-editors-e2e-dashboard-alternation-nor-conformance-so-there-is-no-code-path-to-review-by-construction-and-the-carve-out-is-the-CORRECT-classification-not-an-escape-per-the-S319-denominator-note-PROBED-BY-EXECUTION-ANYWAY-rather-than-stamped-because-this-PR-exists-solely-to-regenerate-the-generated-recent-sessions-index-so-the-gate-that-governs-it-is-bun-scripts-state-ts-check-which-exits-0-with-PASS-all-generated-sections-current-at-HEAD-f8317399-confirming-the-regen-this-PR-performed-is-correct-and-still-current-one-WARN-surfaced-known-gaps-heading-marker-status-45-DRIFT-and-was-RUN-TO-GROUND-NOT-FILED-it-is-the-already-resolved-g-known-gaps-heading-and-marker-status-can-disagree-silently-detector-added-S334-WARN-only-by-deliberate-design-with-marker-authoritative-and-already-counted-45-today-against-its-own-46-baseline note=carve-out-probed-by-running-the-very-gate-this-PR-existed-to-clear -->
+<!-- @review pr=1005 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1005-json-files-returns-docs-changelog-md-and-hand-off-md-and-handOffs-delta-log-md-none-matching-the-regex-so-no-code-path-exists-to-review-PROBED-BY-EXECUTION-bun-scripts-delta-lint-ts-exits-0-over-the-delta-log-half-of-this-PR-reporting-2158-entries-in-live-scope-2149-distinct-sequence-numbers-max-3421-and-9-baselined-duplicates-carried-as-known-debt-so-the-delta-entries-this-wrap-addendum-appended-are-well-formed-and-non-colliding-CONTENT-NOTE-this-PR-is-itself-the-correction-of-a-wrap-whose-closing-state-was-written-before-the-session-ended-and-its-own-review-obligation-is-part-of-what-it-corrected-the-floor-re-opened-at-5-not-3-and-the-probe-now-measures-7-because-this-PR-and-1006-are-themselves-owed note=the-addendum-that-corrected-a-premature-closing-state-now-carries-its-own-floor-obligation -->
+<!-- @review pr=1004 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1004-json-files-returns-hand-off-md-and-master-list-md-neither-matching-the-regex-PROBED-BY-EXECUTION-bun-scripts-state-ts-check-exits-0-PASS-all-generated-sections-current-which-is-the-load-bearing-probe-for-this-PR-specifically-because-it-touched-master-list-md-where-the-generated-recent-sessions-block-lives-and-a-hand-edit-there-would-have-redded-that-gate-CONTENT-VERIFIED-the-pickup-rewrite-this-PR-landed-is-the-instruction-the-S426-boot-acted-on-and-its-ordering-claim-that-the-seed-fixtures-arc-must-run-BEHIND-the-D6-HIGH-because-growing-the-seeded-set-is-what-makes-the-false-positive-live-was-FALSIFIED-BY-PA-MEASUREMENT-this-session-every-corpus-each-inside-a-select-emits-options-WITH-TEXT-so-the-text-half-of-nodesHaveRenderedContent-already-saves-them-and-growing-the-seeded-set-does-NOT-make-it-live-the-two-arcs-are-independent note=carve-out-by-path-but-its-CONTENT-claim-about-arc-ordering-was-falsified-by-measurement-this-session -->
+<!-- @review pr=1003 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1003-json-files-returns-docs-changelog-md-and-hand-off-md-and-handOffs-delta-log-md-no-code-path-PROBED-BY-EXECUTION-delta-lint-exits-0-and-state-ts-check-exits-0-at-HEAD-noting-that-this-wrap-commit-is-precisely-what-staled-the-generated-recent-sessions-index-a-STRUCTURAL-property-recorded-at-delta-3420-every-wrap-leaves-that-gate-red-the-moment-it-merges-because-the-index-derives-from-wrap-commits-that-cannot-exist-when-the-wrap-runs-write-and-1006-is-the-landing-that-cleared-it note=carve-out-and-the-gate-it-staled-was-cleared-by-1006-which-is-also-on-this-floor -->
+<!-- @review pr=1002 verdict=finding by=S426-peter date=2026-09-20 probe=CODE-BEARING-gh-pr-view-1002-json-files-returns-five-paths-THREE-under-compiler-tests-e2e-render-map-detector-validation-test-js-and-render-detectors-js-and-render-harness-js-matching-CODE-BEARING-RE-so-this-got-a-FULL-S239-ADVERSARIAL-PASS-at-high-effort-which-CLEARED-the-core-the-extracted-seedThrewNotice-is-the-old-predicate-widened-only-in-the-intended-direction-with-all-threw-wording-byte-identical-no-consumer-parses-the-message-strings-the-quiet-by-construction-claim-for-derived-cell-and-no-such-cell-HOLDS-because-the-runtimes-subscriber-fan-out-swallows-re-render-throws-in-its-own-try-catch-and-the-tier-is-green-at-148-0-and-all-9-needs-server-baseline-cells-are-unseeded-so-the-zero-cell-movement-claim-holds-BUT-RETURNED-A-CONFIRMED-FAIL-OPEN-FINDING-I-REPRODUCED-BY-EXECUTION-MYSELF-the-hasSeedBridgeFailure-disqualifier-guards-ONLY-the-state-resolution-needs-server-return-at-887-while-the-D1-mount-throw-needs-server-return-at-757-fires-on-serverDependent-and-isServerAbsenceMessage-and-returns-BEFORE-D2-ever-runs-so-a-seeded-server-dependent-app-whose-mount-throws-a-server-absence-shaped-TypeError-with-seed-threw-1-and-the-seed-bridge-notice-present-scores-needs-server-GREEN-with-detail-equal-to-throwMessage-and-needsServer-only-the-seed-failure-appearing-NOWHERE-in-detail-which-generate-baseline-js-strips-from-green-cells-regardless-TWO-CONTROLS-PINNED-IT-the-door-1002-closed-still-closes-same-input-minus-the-mount-throw-yields-compiles-but-throws-with-S-EMPTY-WITH-DATA-and-the-seed-failure-recorded-and-the-same-mount-throw-without-a-seed-failure-stays-correctly-green-CRUCIALLY-this-is-NOT-the-residual-1002-deferred-whose-scope-comment-names-isServerAbsenceMessage-breadth-and-hasHardSmell-omitting-D6-both-INSIDE-the-consoleErrors-block-that-this-door-never-reaches-PLUS-ONE-LOW-detector-validation-test-js-1313-re-types-the-green-state-list-by-hand-instead-of-deriving-it-from-GREEN-STATES-in-e2e-render-map-test-js-the-mirror-is-not-a-gate-class-this-same-PR-removed-from-shouldBeLoud note=THIRD-DOOR-on-the-requirement-this-PR-existed-to-meet-fail-open-CONFIRMED-BY-PA-EXECUTION-and-filed-as-its-own-gap-fifth-consecutive-session-of-a-fix-re-creating-its-class-one-level-away -->
+<!-- @review pr=1001 verdict=finding by=S426-peter date=2026-09-20 probe=CODE-BEARING-gh-pr-view-1001-json-files-returns-three-paths-TWO-under-compiler-tests-e2e-render-map-render-detectors-js-and-detector-validation-test-js-matching-CODE-BEARING-RE-so-this-got-a-FULL-S239-ADVERSARIAL-PASS-at-high-effort-and-the-CORRECTNESS-CORE-IS-SOUND-VERIFIED-BY-MUTATION-NOT-BY-READING-the-reviewer-patched-line-692-back-to-the-pre-fix-pair-and-the-new-test-REDS-at-case-d-absent-yields-S-EMPTY-WITH-DATA-then-restored-with-git-checkout-leaving-a-clean-tree-and-the-class-completeness-argument-holds-because-the-intermediate-double-equals-null-form-also-dies-on-case-e-since-empty-string-triple-equals-true-is-false-and-the-change-is-behaviour-neutral-in-production-today-because-applySeed-always-sets-gainedContent-and-both-null-stubs-carry-writes-empty-so-seedWasDelivered-is-already-false-there-FIVE-FINDINGS-ALL-RECORD-OR-GATE-COMPLETENESS-NONE-A-LIVE-BEHAVIOUR-DEFECT-MED-the-shipped-docs-changes-s424-d6-set-threw-partial-seed-BRIEF-md-53-tells-the-then-live-item-3-agent-that-the-sibling-branch-changes-triple-equals-null-to-double-equals-null-which-is-the-FIRST-ATTEMPT-this-PRs-own-body-convicts-as-incomplete-while-what-landed-is-gainedContent-triple-equals-false-ternary-so-the-brief-ships-in-the-same-commit-that-falsifies-it-and-cites-a-bare-line-number-the-same-body-calls-a-rot-hazard-already-rotted-by-26-lines-though-the-blast-radius-has-CLOSED-since-item-3-landed-as-1002-making-this-a-stale-record-defect-not-a-live-mislead-LOW-the-JSDoc-at-654-still-states-Only-an-explicit-true-blocks-the-exact-rule-this-change-repeals-directly-above-the-repealing-code-LOW-the-absent-or-malformed-veto-is-traceless-where-the-harnesss-own-precedent-120-lines-away-deliberately-pushes-a-consoleError-rather-than-going-quiet-LOW-detector-validation-test-js-866-case-b-asserts-only-not-toContain-where-case-c-three-lines-later-carries-a-comment-explaining-why-a-negative-only-assertion-is-insufficient-LOW-the-brief-miscounts-the-tabled-fixture-bugs-as-three-where-SEED-OBSERVABILITY-holds-exactly-two-non-written-rows-06-kanban-board-derived-cell-and-16-remote-data-no-such-cell note=five-findings-on-my-own-already-pre-land-reviewed-PR-core-sound-by-mutation-proof-all-five-record-or-gate-completeness -->
+<!-- @review pr=1000 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1000-json-files-returns-docs-known-gaps-md-and-docs-pr-reviews-md-neither-matching-the-regex-so-no-code-path-exists-to-review-by-construction-CONTENT-PROBED-BY-EXECUTION-RATHER-THAN-STAMPED-because-this-PR-is-the-S424-floor-record-itself-and-its-central-claim-is-a-HIGH-false-positive-against-correct-renders-which-I-INDEPENDENTLY-RE-REPRODUCED-on-HEAD-f8317399-under-happy-dom-confirming-both-recorded-shapes-select-with-value-only-option-rows-and-picture-with-source-rows-each-measuring-hasRenderedContent-body-true-while-regionScopedEmptiness-reports-allLeavesEmpty-true-with-two-controls-behaving-correctly-text-bearing-option-rows-green-and-a-genuinely-empty-ul-fence-red-SO-THE-FINDING-STANDS-BUT-ITS-POPULATION-CLAIM-DOES-NOT-the-record-asserts-THREE-corpus-files-already-put-an-each-inside-a-select-naming-assignment-picker-and-status-picker-and-pages-dispatch-load-new-and-status-picker-scrml-HAS-NO-SELECT-ELEMENT-AT-ALL-its-single-select-occurrence-is-inside-a-double-slash-comment-on-line-3-and-its-each-emits-button-rows-a-text-level-grep-produced-that-citation-which-is-overlay-Rule-7s-own-class-AND-FURTHER-every-REAL-corpus-site-emits-options-WITH-TEXT-assignment-picker-three-sites-interpolating-d-name-and-d-current-status-load-new-interpolating-c-name-and-the-conformance-case-each-shorthand-option-label-preserved-two-sites-via-colon-shorthand-and-interpolation-so-the-text-half-already-saves-all-of-them-and-the-real-world-trigger-population-is-ZERO-not-three-files-waiting-which-DISSOLVES-the-arc-ordering-constraint-1004-later-made-binding-AND-THE-SWEEP-THIS-RECORD-OWED-FOUND-A-THIRD-CONFERRING-DEFINITION-IT-NEVER-NAMED-svg-counts-ANY-element-child-so-an-each-producing-circle-rows-inside-an-svg-reds-identically-PA-verified-by-execution note=finding-re-reproduced-and-STANDS-but-its-population-claim-falsified-in-two-ways-and-its-owed-sibling-sweep-found-a-third-instance-svg -->
+
+**S426 addendum — #1007's own floor obligation, discharged in the wrap that follows it.** Merging the
+floor-drain PR immediately re-opened the floor at 1 OWED, namely itself: the same structural
+self-reference the `@generated:recent-sessions` index has, where the artifact cannot record the landing
+that creates it. Recorded here rather than deferred to the next session, because a floor entry that
+waits one session is indistinguishable from one that was missed.
+
+<!-- @review pr=1007 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1007-json-files-returns-exactly-two-paths-docs-known-gaps-md-and-docs-pr-reviews-md-neither-matching-the-compiler-stdlib-scripts-lsp-editors-e2e-dashboard-alternation-nor-conformance-so-there-is-no-code-path-to-review-by-construction-PROBED-BY-EXECUTION-rather-than-stamped-state-ts-check-and-facts-ts-check-and-delta-lint-all-exit-0-at-the-merged-HEAD-2cb502d5-and-the-gap-ledger-half-of-this-PR-was-verified-by-re-running-the-gap-count-which-is-UNCHANGED-at-HIGH-111-MED-264-LOW-99-Nominal-7-because-the-fifth-seed-gating-path-WIDENED-an-existing-entry-rather-than-forking-it-and-the-three-D6-corrections-AMENDED-an-existing-one-so-a-static-count-is-the-CORRECT-outcome-here-not-a-sign-nothing-was-filed-CONTENT-SELF-CHECK-this-PR-records-three-corrections-to-my-own-S424-gap-entry-and-each-was-re-verified-by-execution-before-being-written-the-svg-third-conferring-definition-by-measuring-elementCarriesContent-directly-the-status-picker-citation-by-grepping-the-file-and-finding-its-only-select-occurrence-inside-a-line-comment-and-the-zero-trigger-population-by-scanning-2609-corpus-scrml-files-and-reading-the-option-row-bodies-at-every-surviving-site note=the-floor-drain-PR-carrying-its-own-floor-obligation-docs-only-carve-out-with-the-gap-count-verified-static-for-a-stated-reason -->
+
+<!-- @review pr=1010 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1010-json-files-returns-four-paths-docs-changelog-md-and-docs-pr-reviews-md-and-hand-off-md-and-handOffs-delta-log-md-none-matching-the-regex-so-no-code-path-exists-to-review-by-construction-PROBED-BY-EXECUTION-delta-lint-exits-0-over-the-fourteen-new-entries-3422-through-3435-reporting-2172-entries-2163-distinct-sequence-numbers-max-3435-and-facts-ts-check-exits-0-while-state-ts-check-went-RED-at-the-merged-HEAD-on-generated-recent-sessions-which-is-the-KNOWN-STRUCTURAL-property-recorded-at-delta-3420-every-wrap-stales-the-last-8-index-the-moment-it-merges-because-that-index-derives-from-wrap-commits-that-cannot-exist-when-the-wrap-runs-write-and-this-very-PR-is-the-landing-that-clears-it-exactly-as-1006-cleared-S424s note=the-wrap-PR-carve-out-with-its-own-gate-red-explained-as-structural-and-cleared-by-this-landing -->
+
+<!-- @review pr=1011 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1011-json-files-returns-master-list-md-and-docs-pr-reviews-md-neither-matching-the-regex-PROBED-BY-EXECUTION-state-ts-check-exits-0-PASS-at-the-merged-HEAD-which-is-the-precise-red-this-PR-existed-to-clear-the-generated-recent-sessions-index-derives-from-wrap-commits-and-therefore-CANNOT-be-current-when-the-wrap-itself-runs-write-so-every-wrap-stales-it-the-moment-it-merges-a-STRUCTURAL-property-recorded-at-delta-3420-and-cleared-identically-by-1006-for-S424 note=the-regen-that-clears-the-red-every-wrap-leaves-behind -->
+<!-- @review pr=1012 verdict=finding by=S426-peter date=2026-09-20 probe=CODE-BEARING-gh-pr-view-1012-json-files-returns-four-paths-TWO-under-compiler-tests-e2e-render-map-render-detectors-js-and-detector-validation-test-js-matching-CODE-BEARING-RE-and-this-PR-received-not-one-but-THREE-adversarial-passes-before-landing-a-pre-land-pass-on-its-predecessor-1008-a-re-review-of-the-fix-round-on-1009-and-PA-verification-by-execution-at-every-stage-THE-DECISIVE-EVENT-IS-THAT-THE-RE-REVIEWS-TWO-MEDIUM-FINDINGS-WERE-BOTH-REJECTED-ON-MEASUREMENT-RATHER-THAN-ACTED-ON-finding-A-alleged-the-fix-greened-a-broken-render-select-containing-a-nested-each-mount-div-containing-options-on-the-reasoning-that-HTMLSelectElement-options-excludes-non-direct-children-and-that-claim-is-EMPIRICALLY-FALSIFIED-by-this-repos-own-S298-witness-recorded-in-g-nested-each-div-mount-in-restricted-parent-which-drove-real-headless-Chrome-AND-Firefox-under-puppeteer-and-measured-options-length-3-with-correct-visual-render-and-an-accessibility-subtree-structurally-identical-to-the-non-nested-control-which-is-why-that-gap-was-DOWNGRADED-MED-to-LOW-so-D6-reddening-that-shape-was-itself-a-false-positive-of-the-very-class-this-PR-closes-and-finding-B-alleged-the-svg-arm-greens-an-empty-g-but-elementCarriesContent-case-svg-IS-children-length-greater-than-zero-so-an-empty-g-ALREADY-counts-at-BODY-scope-and-the-region-rule-merely-AGREES-with-it-meaning-the-looseness-is-PRE-EXISTING-at-a-different-locus-and-tightening-only-the-region-side-would-re-create-the-exact-asymmetry-that-caused-the-original-bug-BOTH-DISPOSITIONS-ARE-RECORDED-on-the-closed-1009-and-in-this-PRs-commit-message-and-both-residuals-are-FILED-rather-than-dropped-PA-VERIFICATION-ON-THE-MERGED-HEAD-tier-216-pass-0-fail-against-164-before-all-7-conferring-instances-green-3-true-positives-still-red-6-body-scope-pins-still-false-hostile-tag-shapes-classify-instead-of-throwing-gutting-the-predicate-reds-17-with-183-still-passing-and-ZERO-baseline-cells-move-measured-fix-vs-pre-fix note=THREE-adversarial-passes-and-the-decisive-act-was-REJECTING-two-of-them-on-a-real-browser-measurement-the-repo-had-recorded-two-sessions-earlier -->
+
+<!-- @review pr=1013 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1013-json-files-returns-four-paths-docs-known-gaps-md-and-docs-pr-reviews-md-and-hand-off-md-and-handOffs-delta-log-md-none-matching-the-regex-PROBED-BY-EXECUTION-state-ts-check-and-facts-ts-check-and-delta-lint-all-exit-0-at-the-merged-HEAD-and-the-gap-count-moved-exactly-as-the-PR-claims-HIGH-111-to-110-on-the-D6-flip-and-LOW-99-to-101-on-the-two-residuals-CONTENT-SELF-CHECK-this-PR-records-the-REJECTION-of-two-re-review-MEDIUMs-and-both-rejections-rest-on-evidence-not-argument-finding-A-on-this-repos-own-S298-real-browser-witness-recorded-in-g-nested-each-div-mount-in-restricted-parent-and-finding-B-on-elementCarriesContent-case-svg-being-children-length-greater-than-zero-which-I-read-directly-in-source-so-an-empty-g-already-counts-at-BODY-scope-and-the-region-rule-merely-agrees note=the-addendum-that-corrected-a-wrap-closing-state-and-recorded-two-review-findings-rejected-on-measurement -->
+
+<!-- @review pr=1015 verdict=carve-out by=S426-peter date=2026-09-20 probe=DOCS-ONLY-by-CODE-BEARING-RE-gh-pr-view-1015-json-files-returns-four-paths-docs-known-gaps-md-and-docs-pr-reviews-md-and-hand-off-md-and-handOffs-delta-log-md-none-matching-the-regex-PROBED-BY-EXECUTION-delta-lint-exits-0-over-entries-3441-through-3448-reporting-2185-entries-2176-distinct-max-3448-and-facts-ts-check-exits-0-while-state-ts-check-went-RED-on-generated-recent-sessions-at-the-merged-HEAD-which-is-the-KNOWN-STRUCTURAL-property-at-delta-3420-recurring-for-the-SECOND-time-in-one-session-because-this-session-produced-TWO-wrap-commits-CONTENT-SELF-CHECK-the-two-MEDIUM-findings-this-PR-records-against-the-HELD-1014-were-both-reproduced-by-PA-execution-not-relayed-a-seeded-server-dependent-app-with-a-server-absence-throw-scoring-compiles-but-throws-and-a-seeded-app-throwing-loadContacts-is-not-defined-carrying-the-NO-verdict-note-alongside-S-UNBOUND-REF-in-its-own-smell-set note=the-second-wrap-addendum-recording-a-held-PR-and-three-instances-of-one-blind-spot-of-mine -->

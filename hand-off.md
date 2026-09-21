@@ -1,3 +1,771 @@
+# scrml — Session 426 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S425-bryan registered LIVE ~7h before my boot and produced no landing evidence all
+> session** — no `board(s425)` progress commit beyond its registration, and the newest scrml-support
+> commits were my own. His declared footprint (#990 dPA drain · #995/#996 · the two August scrml-site
+> reports) is bryan-lane and disjoint from mine; I stayed entirely inside
+> `compiler/tests/e2e-render-map/**` + the ledger. His open PRs are CLAIMED, not lost.
+>
+> ⚑⚑ **THE ONE THING THIS WRAP IS ABOUT: #1009 IS GREEN AND DELIBERATELY NOT MERGED.** Merge permission
+> was granted, gate + windows pass, `tracking` carries the same byte-identical five pre-existing names —
+> and it is HELD, because its own re-review found it turning two TRUE POSITIVES into FALSE GREENS. Do not
+> read "green" as "ready" on this PR.
+
+> ⚑⚑ **POST-WRAP ADDENDUM — THE HELD PR LANDED, AND PICKUP ITEM 1 BELOW IS SUPERSEDED. READ THIS
+> FIRST.** Peter said *"keep going"* after the wrap; the work continued and **two more PRs merged after
+> the closing state below was written** — the same prediction-formatted-as-a-record class this session
+> spent the day filing, now committed by my own wrap for the second session running. Corrected here
+> rather than by editing the block below, so the cost of the original framing stays legible.
+>
+> **#1012 `f8d263de` MERGED — the D6 HIGH is RESOLVED**, PA-verified on the merged HEAD (216 pass / 0
+> fail; all 7 instances green, 3 true positives still red, 6 body-scope pins false, hostile tags
+> classify; zero baseline cells move). **#1011 `adf04b7a`** cleared the index the wrap staled.
+> **#1009 CLOSED, superseded by #1012** (main had moved; force-push is blocked, so a fresh ref —
+> third time this session, and the reason is recorded on each closed PR).
+>
+> ⚑⚑ **ROUND 3 IS NOT OWED. BOTH MEDIUM RE-REVIEW FINDINGS WERE REJECTED ON MEASUREMENT** — do not
+> start pickup item 1 below; it is written against findings that did not survive verification.
+> - **Finding A is falsified by this repo's own S298 real-browser witness.** It alleged the fix greened
+>   a broken render (`<select>` > mount `<div>` > `<option>`), reasoning that `.options` excludes
+>   non-direct children. [[g-nested-each-div-mount-in-restricted-parent]] records puppeteer driving real
+>   headless Chrome AND Firefox: *"HTMLSelectElement.options — CORRECT (returns 3; that collection is
+>   descendant-lenient…). The original … is FALSE, and `<select>` has NO analogous defect."* Visual
+>   render and the a11y tree correct in both engines; that gap was DOWNGRADED MED→LOW on the
+>   falsification. **So D6 reddening that shape was itself a false positive of the class the fix
+>   closes, and the first round's ancestor walk was right.**
+> - **Finding B's target is pre-existing and at the wrong locus.** `elementCarriesContent`'s svg arm
+>   is `children.length > 0`, so an empty `<g>` already counts at BODY scope; the region rule now
+>   AGREES with it. Tightening only the region side re-creates the asymmetry that caused the original
+>   bug. Filed at its real locus instead.
+>
+> ⚑ **THE LESSON, and it is mine:** I reproduced the BEHAVIOUR both findings described and then nearly
+> acted on their NORMATIVE claim about what the correct answer is. That is the empirical-sufficiency
+> illusion (`pa-base` §0) — *a reproducer proves a symptom is real and says nothing about what the
+> system is SUPPOSED to do* — and the thing that caught it was reading the ledger for prior art before
+> writing the round-3 brief. **The corpus had already measured the answer two sessions before the
+> question was asked.**
+>
+> **Board now: HIGH 110 · MED 264 · LOW 101 · Nominal 7** (D6 resolved −1 HIGH; two residuals filed +2
+> LOW). **Review floor re-opens at 3** — #1011, #1012 and this addendum's own PR.
+> **The real next items are pickup 4 (seed-fixtures, unblocked), pickup 5 (door 3, filed and
+> confirmed) and pickup 6 (no gate runs this tier).**
+
+> ⚑⚑ **SECOND POST-WRAP ADDENDUM — THE SESSION CONTINUED PAST BOTH PRIOR ADDENDA. THIS BLOCK IS THE
+> CURRENT STATE; the pickup below and the first addendum are both superseded on their lead item.**
+>
+> **The D6 HIGH is RESOLVED (#1012).** Then door 3 / the fifth seed-gating path was taken and **built**,
+> and it is **HELD in #1014, not merged** — gate + windows green, `tracking` the same five pre-existing
+> names, and two PA-confirmed MEDIUMs from its pre-land pass that would write misleading records into a
+> committed baseline. **Do not merge it as-is, and do not rebuild it.**
+>
+> ⚑ **LEAD ITEM IS NOW ROUND 4 OF #1014, and it is TWO SPECIFIC CHOICES, not an arc.** Both defects are
+> PA-reproduced:
+> 1. **At the D1 door, demote to `seed-bridge-failed`, not `compiles-but-throws`.** `mountAndObserve`
+>    assigns `setFn` only AFTER `exec()` returns, so a mount throw always kills the side channel and the
+>    guard is always true there — it removes the `needs-server` carve-out unconditionally for every SEEDED
+>    server-dependent app. Measured: such a cell scores `compiles-but-throws`, **a compiler-blaming state
+>    for a harness artifact — which is exactly what the fix's own rationale for minting
+>    `seed-bridge-failed` rejects.** It bites the moment the coverage ratchet seeds a `needs-server` app:
+>    permanently red, and no compiler fix can clear it.
+> 2. **Make the "NO verdict about the compiler" note conditional.** It is written unconditionally at both
+>    self-demoting doors. Measured: a seeded app throwing `loadContacts is not defined` — genuine codegen,
+>    `S-UNBOUND-REF` in the same smell set — carries that note into the baseline, **telling the next
+>    triager to disregard a real bug.** Also false for a `[seed-signature]`-only error.
+>
+> **Two findings ride along, filed on the gap:** the invariant is class-complete over `runDetectors`
+> returns but **NOT over CELLS** (`observeCompiled` returns `renders-empty` directly, before the seed is
+> applied — *the class one level out, again*), and doors 3/4 are **unit-only reachable** today, so the
+> in-source "by construction" claim overstates.
+>
+> ⚑ **WHAT MUST NOT BE REBUILT — #1014's core is right:** the two-carrier predicate (the failure has a
+> NOTICE carrier and a FACT carrier, and #1002 guarded only the notice — **all four green returns were
+> fail-open, not three**), the choke-point demotion, `GREEN_STATES` single-sourced from three hand-kept
+> copies, and two EXISTING assertions corrected — one of which **pinned the third door green while its own
+> comment called it hazardous.** Tier 216 → **237 pass / 0 fail**, no baseline cell moves.
+>
+> ⚑⚑ **THE SESSION'S REAL LESSON, and it is mine three times over: every check I ran asked "did it
+> MOVE?" and none asked "is where it moved CORRECT?"** (a) my pre/post labeller could not tell an intended
+> fix from a regression; (b) I passed `obs.seed` where the detector reads `obs.seedReport`, so a true
+> finding sat on evidence testing a different carrier; (c) I printed `needs-server → compiles-but-throws`
+> and called it "FAIL-OPEN → CLOSED" when it is mis-attributed. **The evidence for the reviewer's best
+> finding was already in my own output.** Twice today a review finding was REJECTED for being normatively
+> wrong while behaviourally reproducible, and here one was CONFIRMED the same way — the discriminator is
+> never the reproduction, it is whether you established what the correct answer IS.
+>
+> **State: 5 PRs merged this session** (#1007 `2cb502d5` · #1010 `1cf94d32` · #1011 `adf04b7a` ·
+> #1012 `f8d263de` · #1013 `021323b9`) **· 2 closed-superseded** (#1008, #1009, force-push blocked)
+> **· 1 HELD** (#1014). Board **HIGH 110 · MED 264 · LOW 101 · Nominal 7**. Floor re-opens at 2 (#1013,
+> and this addendum's PR). Both repos 0/0, clean, all gates exit 0.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **⚑⚑ THE LEAD ITEM IS ROUND 3 OF #1009, AND IT IS BOUNDED AND SPECIFIED.** The D6 conferring/consuming
+   fix is 95% right and holds a fail-open hole in the last 5%. **Both defects PA-REPRODUCED against the
+   pre-fix detector, so this is measurement, not a reviewer's claim:**
+   - **(A) The wrapper bound is missing.** `matchesSelfOrRenderedDescendant` runs a full subtree
+     `querySelectorAll`, so ANY element between the consuming ancestor and the row is accepted. **The
+     compiler's own nested-each emits exactly such a wrapper** (`emit-each.ts:1670`/`:3532` create a
+     `<div data-scrml-each-mount>`), so `<select><optgroup><div data-scrml-each-mount><option>` now scores
+     `renders-clean` where it correctly scored `renders-empty-with-data` before — **and the red was
+     right**: options inside a `div` are not in `select.options`, so the dropdown really renders empty.
+     Also measured for `<select><ul><li>…options` and `<picture><div><source>`.
+     ⚑ **The first round's justification for the ancestor walk WAS this mistake** — it argued parent-only
+     "would miss the plain mount shape", but a mount `div` inside a `<select>` is invalid markup the
+     compiler should not emit; the corpus already carries a repro for that class at
+     `docs/changes/each-table-foster/repro-each-option-select.scrml`. **So the round-3 question is partly
+     a compiler question: is the nested-each-inside-select emit itself a filed defect?** Check before
+     designing around it.
+   - **(B) `svg` kept the "any element" half and dropped the "non-emptiness" half.**
+     `if (tag === "svg") return true` tests the node not at all, so rows of empty `<g>` (the wrapper
+     emitted, its `<circle>` children dropped — precisely the chrome-present/data-absent class D6 exists
+     for) and `<metadata>` score green where they correctly reddened before.
+   - **Fix direction: bound by the CONTENT MODEL, not by a subtree query.** Permit only wrappers the
+     model allows (`optgroup` under `select`/`datalist`; `g`/`a`/`switch` under `svg`) or require the
+     consumed child to be a DIRECT child of the consuming ancestor; and for `svg`, restore non-emptiness
+     so an empty `<g>` and the metadata elements (`defs`/`metadata`/`desc`/`title`) confer nothing.
+   - ⛔ **The PR's own test at `detector-validation.test.js:1074` ("the mount shape confers too") PINS THE
+     WRONG BEHAVIOUR.** It must be inverted, not deleted — it is the regression pin for (A).
+   - Two LOW items ride along: the table filters `source`/`track` by attribute but not `option`/`area`/
+     `col` (so an attribute-drop on `<area>` rows goes green while the identical drop on `<source>` reds),
+     and a JSDoc paragraph is duplicated verbatim at `:366-370` and `:372-376`. Plus a comment at
+     `detector-validation.test.js:1095` names `confersContentToConferringAncestor`, which no longer exists
+     (renamed to `…ConsumingAncestor`), making a recorded mutation result un-greppable.
+
+2. **⚑ WHAT IS ALREADY BANKED AND MUST NOT BE REDONE — the round is a TIGHTENING, not a rewrite.** #1009
+   carries real work that survived two reviews: the consuming-ancestor reframing (with the datalist
+   measurements that forced it), a population **enumerated once** (22 shapes, 7 covered incl. the
+   `video`/`audio` > `track` instance nobody had named, 15 disposed with reasons and pinned), the `Map`
+   that closes the `<constructor>`/`<__proto__>` throw class, the hoisted shared selectors, and 6
+   body-scope pins. Tier 216 pass / 0 fail. **Start from that branch; do not restart the arc.**
+
+3. **Review floor: 2 OWED at boot** — #1007 (this session's floor drain, docs-only → carve-out by path)
+   and the wrap PR. Classify with `review-debt.ts`'s `CODE_BEARING_RE` against `gh pr view <n> --json
+   files`, never from this hand-off.
+
+4. **The seed-fixtures arc is UNBLOCKED, and that is a correction to #1004.**
+   `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED) was made to run BEHIND the
+   D6 HIGH on the reasoning that growing the seeded set makes the false positive live. **Measured false**
+   — every corpus `<each>`-inside-`<select>` emits options carrying text, which the text half already
+   saves, and the trigger population is ZERO. **The two arcs are independent; pick either.**
+
+5. **Door 3 / the fifth seed-gating path is filed, confirmed, and cleanly peter-drainable.** The D1
+   mount-throw `needs-server` return (`render-detectors.js:757`) has no `hasSeedBridgeFailure`
+   disqualifier and returns before D2 runs, so a seeded server-dependent app with a thrown seed write
+   scores GREEN with the failure recorded nowhere. Widened onto
+   `g-d6-seed-gating-has-three-latent-paths-…` as a fifth path. **The convergent fix enumerates every
+   `return` that yields a GREEN state — there are two in `runDetectors`; count them at fix time.**
+
+6. **⚑ NO GATE RUNS THE e2e-render-map TIER, and the nav-map says otherwise.**
+   `.claude/maps/test.map.md:450` claims the tier's gate is `tracking` (non-blocking). **Wrong, not
+   stale:** `grep -rn e2e-render-map .github/workflows/` returns nothing, and the source-controlled
+   pre-commit globs `compiler/tests/*.test.js`, which does not descend into the subdirectory. So the
+   tier's 216 tests (192 before this session) pin **nothing** until someone runs them by hand. This is the
+   same standing item as the S420 carry-forward "e2e-render-map CI job"; the map correction is owed and
+   was NOT taken this session (maps are a repo-wide shared surface and a refresh was not run — see Gate).
+
+7. **Unchanged and still bryan's:** `E-ASSIGN-004` is still absent from `compiler/src/` and lives in
+   **#996, OPEN**. **The two August scrml-site reports remain the oldest unactioned inbound work**
+   (`needs: action` since August — soft-nav dropping the destination page's stylesheet, and the owed
+   `<outlet/>` repro). Inbox 8 unread, 0 untracked.
+
+8. **Peter-lane carry-forward, unchanged:** the S420 item-4 list (baseline regen owed on POSIX · the three
+   non-inert reserves · `g-w-lint-018` probe-then-close ·
+   `g-s320-autoawait-stale-injectpromiseawait-comments`) · `g-heading-drift-tail-…` (LOW).
+
+## 🔭 DURABLE
+
+**An entry's own "re-derive this rather than trust it" instruction is worth more than the sentence it
+guards.** The S424 gap entry ended its sibling-check paragraph with *"`select` and the three media
+parents are the complete set of delegating definitions at the time of filing; re-derive that set rather
+than trusting this sentence."* The set was re-derived and the sentence was wrong — `svg` was a third
+instance, then `datalist` a sixth, then `track` a seventh. **Three of the seven instances were found by
+someone acting on that one clause.** The lesson is not "be more complete when filing": a filer cannot
+be complete, and the useful thing to write down is the instruction to re-check, with the search that was
+actually run.
+
+**A population enumerated once beats a class patched six times, and the difference is measurable in
+rounds.** select → svg → datalist → track were each found one at a time, across three separate review
+passes, by three different readers. The round that finally asked *"what is the complete set of HTML
+parents whose content is conferred by text-free children?"* — and stated the discriminator — closed all
+seven plus 15 disposals in one pass. ⚑ **The discriminator is what made it possible**, and the first
+attempt at it FAILED: a probe asking only *"is the region reported empty?"* flagged six shapes that are
+not instances, because an each of empty `<span>`s in a `<slot>` genuinely IS an empty render. **A
+mis-specified measurement is not evidence** — the reframed question is a semantic judgement about a
+content model that no probe computes, and the honest move was to record that rather than ship the probe's
+list.
+
+**"Wrong, not incomplete" is a distinct review finding and the more valuable one.** The pre-land pass
+reported `<datalist>` as a missing case. Measuring it showed something better: `elementCarriesContent`
+has no datalist arm and a datalist-only body correctly renders nothing, so the fix's stated invariant —
+*mirror the definition that makes the ancestor content-bearing* — could not express datalist **at all**.
+It had been read off a sample of five in which two different questions coincide. **Body scope asks "did
+the page show anything?"; region scope asks "did this each produce its rows?"** Both answers are right,
+and the apparent contradiction was an artifact of one rule being asked to serve both.
+
+**A verification stamp is never inherited, and this session is the second consecutive proof.** The gap
+said "reproduced by execution". Re-reproducing it on HEAD cost one script and returned three things the
+original record did not have: a third conferring definition, a falsified citation, and a trigger
+population of zero. **The re-run is not ceremony — it is where the corrections come from.**
+
+**A fix's JUSTIFICATION can be falsified without the fix becoming wrong, and the two must be reported
+separately.** The D6 false positive is real, reproduced, and worth closing. Its recorded reason for
+urgency — *three corpus files already hold the shape, so it goes live when the seeded set grows* — is
+false: one of the three has no `<select>` at all, and the other two emit text-bearing options the text
+half already saves. **The verdict held; the claim did not; and the arc-ordering constraint that had been
+made BINDING on that claim dissolved with it.** Report those as three separate facts, because collapsing
+them either kills a good fix or preserves a false premise.
+
+**A detector that can throw is worse than one that is wrong, and a plain object literal is enough to do
+it.** Reading a lookup table through `Object.prototype` turned two hostile tag names into uncaught
+exceptions from two *different* call sites — and only the all-lowercase members of `Object.prototype`
+are reachable, because the lookup lowercases first. The fix that survives review is the one that is
+immune **by construction** (a `Map`) rather than by enumerating the hostile names, because the
+enumeration is exactly what was wrong the first time.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ The gap entry I filed last session was wrong in three places, and I had marked it "reproduced
+   by execution".** The reproduction was real; the population claim, one of three citations, and the
+   completeness of the conferring set were not. **The citation error is the worst of the three**: I
+   grepped for `<select` and counted a hit inside a `//` comment — Rule 7's own class ("don't ask the
+   text what the tree already knows"), committed inside a gap entry, in the session where I was filing
+   other people's instances of it.
+2. **★★★ My #1002 fix from last session left a sibling door open, and the pre-land pass I ran on it did
+   not look for one.** Third round in a row on the same requirement. The class is not "be careful": the
+   requirement is enforced at *every* `return` that yields a green state, and nothing enumerated them.
+3. **★★ The fix direction in my own brief was wrong** — `node.parentNode` where the conferring element
+   is an ancestor. It would have fixed the fence shape and left the plain mount shape red, passing its
+   own new tests. Caught only because the brief licensed the agent to overturn me; the fourth session
+   running that this licence has paid.
+4. **★★ I wrote the ordering constraint into the pickup as BINDING last session on a premise I had not
+   measured.** #1004's whole point was to stop the next boot re-asking an answered question, and it
+   encoded an unmeasured causal claim while doing it.
+5. **★ A shell-quoting failure inside a heredoc collapsed an escaped backslash** and broke a scanner
+   script — the same class recorded in my own misses list three sessions running, with the same fix
+   (write the file with a tool instead). I caught it on the first run and switched.
+6. **★ My own bounded wait-loop guard fired on `grep -c`'s no-match exit code**, reading "settled" as
+   "probe error". It failed in the safe direction (report, don't loop), but it is the exact
+   separate-the-exit-status-from-the-output nuance the rule it implements is about.
+
+## Gate at close
+
+- **PRs: one merged, one closed-superseded, one HELD GREEN.**
+  - **#1007 `2cb502d5`** — the floor drain (7 → 0) + three corrections to my own S424 gap entry. Merged.
+  - **#1008 CLOSED, superseded by #1009**, reason recorded on the PR: the fix round needed a rebase onto
+    the new main and the resulting **force-push is blocked by this session's auto-mode classifier**. Per
+    the S424 precedent (`[3403]`) a branch that cannot be updated is closed in favour of a fresh ref
+    rather than worked around. No history rewritten.
+  - **#1009 OPEN and DELIBERATELY HELD.** `gate` **pass** · `windows` **pass** · `tracking` red with the
+    **byte-identical five pre-existing names**, re-measured per PR against main's own run `35530326211`
+    and never inherited. Merge permission WAS granted. It is held because its own re-review found two
+    fail-open regressions — see pickup item 1.
+- **Cloud:** `gate` + `windows` green on #1007 and #1009. `tracking` red on both, five names, identical to
+  main's own run. Root-caused already, not waved: `g-tracking-job-red-on-main-and-nobody-reads-it` records
+  the S391 audit measuring those five passing locally in under four seconds against ~10.4 s each in CI.
+- **Local:** e2e-render-map tier **216 pass / 0 fail** on the held branch (192 before the fix round, 164 on
+  main). My own mutation of the predicate reds **17** with **183 still passing** — no pre-existing test
+  flips. Verified independently of the agent's report: all 7 conferring instances green, 3 true positives
+  still red, both hostile-tag shapes classify instead of throwing, all 5 body-scope pins still `false`.
+  `state.ts --check` · `facts.ts --check` · `delta-lint` all exit 0.
+- **⚑ ZERO baseline cells move, and the four live-vs-committed warnings are PRE-EXISTING — measured
+  fix-vs-pre-fix, not assumed.** I ran the tier with main's own detector files checked out and it prints
+  the identical 1 ORPHAN / 3 NEW / 2 GREEN→RED at 164 pass / 0 fail. This is the check I skipped and got
+  wrong at S424.
+- **Board: HIGH 111 · MED 264 · LOW 99 · Nominal 7 — unchanged.** No new `@gap` marker was minted: the
+  fifth seed-gating path WIDENED an existing entry rather than forking it, and the three D6 corrections
+  amended an existing one. A count that does not move is the correct outcome when the session's findings
+  belong to filed classes.
+- **Review floor: 1 → 0 → re-opens at 2** (#1007 + the wrap PR). Code-bearing carve-out rate held at
+  **4/229 (2%)** — both code-bearing PRs got full passes, neither was carved.
+- **Maps: NOT refreshed, and the reason is a live correction rather than laziness.** `test.map.md:450` is
+  **wrong** about this tier's gate (it claims `tracking`; nothing runs the tier). A `project-mapper`
+  refresh would rewrite the file wholesale and might restate the same wrong cell, so the correction is
+  owed as a deliberate edit, not a regen. The map is also 17 commits stale (stamp `787d4cb4`) and maps are
+  a repo-wide shared surface with a sibling registered LIVE. Deferred, named here, and in pickup item 6.
+- **Worktrees:** mine removed (`agent-ae898a0814b0977e9`, work carried onto the held branch).
+  **Retained, not mine:** `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c`, and the
+  sibling `scrml-pinned`.
+- **Branches left deliberately:** `fix/s426-d6-consuming-ancestor` (#1009, held — do not delete),
+  `fix/s426-d6-region-content-conferring-ancestor` (the agent's ref @ `ad2d8b86`, the round-2 source), and
+  `brief/s426-d6-parent-content` (the dispatch brief's own ref; the brief itself rides #1009). Clean these
+  when #1009 lands, not before.
+- **Inbox:** 8 unread, **0 untracked** (checked from the VCS's view, not the filesystem's). Kept unread
+  deliberately — moving an unactioned `needs: action` item to `read/` discards the obligation.
+- **Cross-machine:** scrml `origin/main...HEAD` 0/0 after the #1007 merge and re-sync; scrml-support
+  pushed (board registration + this wrap's meta).
+- **⛔ Environment, two items, both recorded rather than papered over:**
+  - `gh pr merge` was refused by the auto-mode classifier (*Merge Without Review*) — **third session
+    running**; CONFIGURED-NOT-TO, not CANNOT. Cleared in one line once flagged. A **force-push** is also
+    blocked, which is what cost #1008. And a compound read-only command containing `gh pr list` was caught
+    by the same classifier while the bare `gh pr checks <n>` works.
+  - **`bun install` fails in a fresh worktree on this clone:** the puppeteer postinstall finds
+    `C:\Users\pjoli\.cache\puppeteer\chrome\win64-146.0.7680.153` present but `chrome.exe` missing.
+    Environment breakage, not repo breakage; `PUPPETEER_SKIP_DOWNLOAD=1` works. Anything on this clone
+    that shells out to puppeteer/Chrome hits the same broken cache until that folder is deleted and
+    re-downloaded.
+
+---
+# scrml — Session 424 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S425-bryan booted MID-SESSION and registered as SUCCESSOR to my live S424.** He
+> read my footprint correctly and stayed off `compiler/tests/e2e-render-map/**` all session. **The wrap
+> is therefore MINE, not his** (the successor defers the wrap). He also independently resolved the
+> dpa-047/048 contradiction I flagged at boot. His open PRs are CLAIMED, not lost.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **⚑ THE ONE THING THAT MUST NOT BE BUILT ON: `E-ASSIGN-004` IS NOT ON MAIN.** Two consecutive
+   hand-offs say otherwise — S422's wrap says *"LANDED"*, S423 inherited it as *"BUILT at statement
+   position"*. **Both are false**, verified by two independent observables: `grep -rc 'E-ASSIGN-004'
+   compiler/src/` returns **zero occurrences in any file**, and `const x = 1` · `x = 2` inside a
+   `function` body compiles at **exit 0 with zero diagnostics** — row 1 of bryan's own six-row S422
+   matrix that the ruling says SHALL fire. The build is entirely inside **#996, OPEN with
+   `gate=FAILURE`**. So the *"its remedy misfires at top level"* caveat describes a remedy that never
+   ships a diagnostic to misfire. **Land #996 before touching anything downstream of that ruling.**
+
+2. **The review floor re-opens at 3 OWED — #1000, #1001, #1002, all mine.** Ten sessions running it has
+   returned something real and this session was the most it ever has: it convicted my own PR **five
+   times**, including a HIGH. Classify with `review-debt.ts`'s `CODE_BEARING_RE` against
+   `gh pr view <n> --json files`, **never** from this hand-off. Two of the three are code-bearing.
+
+3. **⚑⚑ THIS IS THE SESSION'S LEAD ITEM — PETER SCOPED IT POST-WRAP, VERBATIM: *"take the new HIGH
+   next session"*.** (Given after #1003 merged, in answer to the close-out report; recorded in
+   `user-voice-pjoliver11.md` S424. **It SUPERSEDES the "wants a decision" framing this item carried
+   when the wrap was written — the decision is made.**)
+   `g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render`.
+   D6 scores `renders-empty-with-data` — RED, **against the compiler** — on a render that is correct,
+   because `nodesHaveRenderedContent` asks only the region's own nodes while `select` is defined as
+   *"has an `<option>"`* and `picture`/`video`/`audio` by their `<source>` children, and the fence sits
+   INSIDE that parent. Reproduced by execution both shapes. **Zero cells move today** (no seeded app
+   has a `<select>`), **but three corpus files already put an `<each>` inside a `<select>`** — the
+   trucking flagship's `assignment-picker.scrml` (3 sites), `status-picker.scrml`, and
+   `pages/dispatch/load-new.scrml`.
+   ⚑ **ORDERING IS LOAD-BEARING AND NOW RUNS IN THE STATED DIRECTION: fix this BEFORE the
+   seed-fixtures arc (item 4), because growing the seeded set is exactly what makes it live.**
+   **Prep already on the board, so this is a cheap start:** the gap entry carries the fix direction,
+   the named trap (⛔ do NOT close it by adding `option`/`source` to `CONTENT_CANDIDATE_SELECTOR` —
+   that makes a bare `<option value="1"></option>` count as rendered content at BODY scope too and
+   re-opens the S419 class from the other side), the owed sibling check over
+   `elementCarriesContent`'s other delegating definitions, and the pa-base §8 reminder to COUNT what a
+   narrowing stops inspecting before narrowing it.
+   ⚑ **And budget it as real work, not as a one-liner.** Every "cheap" item on this tier this session
+   cost more than its filing implied: item 1 took three forms, and the landed fix for item 3 needed a
+   second round after the pass found its loudness was not terminal.
+
+4. **The seed-fixtures arc is the successor to item 3, and it now runs BEHIND it** —
+   `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED). ⚑ **Item 3's near-term
+   trigger is CLOSED** (#1002), so the "close item 3 first or keep the fixtures single-key" condition
+   from S423 is discharged. Correcting `25-triage` will flip `#populated` red→green, which is CORRECT
+   and expected. ⚑ **But do NOT start here before item 3 above lands** — this arc grows the seeded set,
+   and the seeded set is the only reason that HIGH is latent rather than live. Running this first would
+   turn a filed false-positive into a red board and make the fix look like a regression it caused.
+
+5. **Two residuals deliberately NOT fixed, both recorded with their reasons:**
+   - the seed notice can fall outside `detail.consoleErrors`' `slice(0, 4)` on a cell logging 4+ mount
+     errors — state is unaffected, only the recorded REASON; belongs with the truncation arc.
+   - the WIDER `needs-server` masking (ANY console error matching `isServerAbsenceMessage` admits the
+     green carve-out, and `hasHardSmell` omits D6's `S-EMPTY-WITH-DATA`) — item 2 of
+     `g-d6-seed-gating-has-three-latent-paths-…`. #1002 closed only the harness's OWN seed-failure
+     notice, deliberately narrowly.
+
+6. **The oldest unactioned inbound work is unchanged and untouched by me:** the **two scrml-site
+   reports**, `needs: action` since **August** — soft-nav dropping the destination page's stylesheet,
+   and the owed `<outlet/>` repro. Inbox 8 unread, 0 untracked.
+
+7. **Peter-lane carry-forward, unchanged:** the S420 item-4 list (e2e-render-map CI job · baseline regen
+   owed on POSIX · the three non-inert reserves · `g-w-lint-018` probe-then-close ·
+   `g-s320-autoawait-stale-injectpromiseawait-comments`) · `g-heading-drift-tail-…` (LOW).
+
+## 🔭 DURABLE
+
+**The same class three times in one session, and the third instance was my fix to the second.** (1) My
+item-1 fix closed `undefined` and left the value class — `0`, `""`, `NaN`, `"false"` all still fired.
+(2) The item-3 diff **hollowed out a neighbouring source-text gate with its own comment**: the anchor
+moved into a new JSDoc history block, and gutting the function left that test green 1/0. That was the
+very class the agent had just fixed for the sibling test, re-created by the comment that fixed it. (3)
+**My repair of that did not work either** — stripping comments and re-anchoring on the counting filter
+left the same mutation green, because the anchored strings survive a gutted body. **The lesson is not
+"anchor better": there is no anchor that makes a source-text assertion detect behaviour.** The
+resolution was to stop tightening it, document it as a shape check, and name the real gate — the same
+mutation reds **13 behavioural tests**. Measured.
+
+**A pre-land pass and a floor pass are different instruments, and the difference is structural.** The
+S423 hand-off predicted #993 would return nothing after four adversarial passes; the floor pass returned
+five findings including a HIGH false-positive against correct renders. **A pre-land pass reviews a fix
+ROUND against the finding that produced it; the floor pass reviews the LANDED predicate against the
+language.** That is why the floor keeps convicting work that was already verified — three consecutive
+sessions now.
+
+**A correct conclusion can sit on a wrong mechanism indefinitely, because nothing fails.** The agent's
+question-B verdict was right and its stated cause was wrong (it named a branch that explicitly does NOT
+return). On re-verifying, it found the sharper form itself: **under its own stated mechanism, row 2 of
+its own table could not have existed** — the data and the story disagreed and neither of us noticed.
+The verdict never moved; the pointer would have sent the next reader to a comment asserting the
+opposite.
+
+**A fix that does not meet its own requirement still reads as done.** Item 3's whole purpose was to make
+a `set-threw` LOUD. Routing the notice through `consoleErrors` did not achieve that for
+server-dependent cells, where `needs-server` is a GREEN tier that strips `detail` — so the gate read as
+closed while open by a different door than the one it shut. Only the adversarial pass asked whether the
+loudness was TERMINAL, which is a different question from whether it fires.
+
+**Licensing an agent to overturn you is what produces the better answer.** I gave item 3's open question
+with my lean and an instruction to overturn it by measurement. It confirmed the lean and **replaced my
+reasoning**: I had a reversibility argument; it returned a four-way measurement showing the veto is a
+no-op on the verdict, lossy on the record, and fail-open green on its own. S423 recorded the same
+mechanism catching three wrong PA corrections.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ My "one-line fix" was wrong twice before it was right**, and my own first test would have
+   PASSED the incomplete version. Only the mandatory pass on a change I was confident about caught it.
+2. **★★★ I fixed a hollow gate with another hollow gate** and only found out by re-running the same
+   mutation against my own repair. I nearly shipped a tightening that measured nothing.
+3. **★★ Four shell-quoting failures** (heredoc EOF ×2, backticks evaluated in a commit message,
+   `$?`-after-a-pipe read as a push's exit status). Every one had the same fix — write to a file — and
+   it is recorded in my own hand-offs three sessions running. The `$?` one is the worse instance: it
+   is the indistinguishable-failure shape I filed against other people's probes this same session.
+4. **★★ I claimed `render-detectors.js:666` in a comment I had just written**, and the line had
+   already rotted by four lines before the commit landed. Located by symbol now. S422's durable —
+   *a correction rots exactly as fast as the citation it corrected* — caught me one session later.
+5. **★ I reported the tier's two GREEN→RED cells as a finding before checking they were pre-existing.**
+   They were; I verified fix-vs-pre-fix on clean `origin/main` before it reached any record.
+
+## Gate at close
+
+> ⚑⚑ **POST-WRAP ADDENDUM — THIS BLOCK'S CLOSING STATE WAS WRITTEN BEFORE THE SESSION ENDED, AND TWO
+> MORE PRs LANDED AFTER IT.** Corrected here rather than by editing the lines below, so the cost of the
+> original framing stays legible. **FIVE PRs merged, not three:** #1000 `8cd65505` · #1001 `1f6a8d1a` ·
+> #1002 `7ac7cef3` · **#1003 `6961d66d` (the wrap itself)** · **#1004 `3f4ccb54`**.
+> **The review floor re-opens at 5 OWED, not 3** — all mine; two are code-bearing.
+> **Pickup item 3 is now the session's LEAD item**, scoped by Peter post-wrap (*"take the new HIGH next
+> session"*), and item 4's ordering is BINDING, not advisory — see the pickup block above, which #1004
+> rewrote.
+> ⚑ **And the class this session spent the day filing caught my own wrap one turn later:** the pickup
+> said the HIGH *"wants a decision"* after the decision had been made, which is #997's stale-state-claim
+> shape exactly. A wrap's closing state is a prediction formatted as a record whenever anything lands
+> after it — `[3395]`'s lesson, now witnessed from the authoring side.
+> **Both repos settled at 0/0, trees clean, `state.ts --check` / `facts.ts --check` / `delta-lint` all
+> exit 0 at the final HEAD.**
+> **Pre-commit subset re-run at the settled HEAD `3f4ccb54`: 23,967 pass / 99 skip / 10 todo / 7 fail /
+> 24,083 tests across 1,322 files.** ⚑ **Verified by NAME-SET, not count — six distinct names, zero
+> new**: self-host smoke ×3 · the B5 csrf assertion · its `afterAll` EBUSY teardown (prints as
+> `(fail) (unnamed)`) · `CONF-W5B-IN-PROCESS-DB-LIBRARY`. The 7th is the load-sensitive extra this
+> block documents below; it is why the count moves between runs and the names do not.
+> ⚑ **And my own capture of that run was a TRUNCATED PROBE** — I piped it through `tail -8`, so the
+> failure names were not in the output and the count was all that survived. Caught because the
+> name-set is the thing I require; re-run to measure it. The instrument I spent the session filing
+> against, in my own instrumentation, one turn from the end.
+
+- **Cloud:** `gate` + `windows` GREEN on #1000, #1001, #1002. `tracking` red on each and **re-measured
+  PER PR** against main's own run `35471207235` — byte-identical five names every time, never
+  inherited. ⚑ #1001's green was verified against the CORRECTED head SHA, not the superseded one.
+- **Local:** e2e-render-map tier **164 pass / 0 fail**; detector-validation **148 / 0**. Both new gates
+  bite-proven by mutation. `state.ts --check`, `facts.ts --check`, `delta-lint` all exit 0.
+- **⚑ This clone's pre-commit baseline is SIX, not five.** The recorded five are right (self-host ×3 +
+  **two** in `session-secure-b4b5-roundtrip.test.js` — the B5 assertion and its `afterAll` EBUSY
+  teardown, which bun prints as `(fail) (unnamed)`). The sixth, `CONF-W5B-IN-PROCESS-DB-LIBRARY`, is
+  **410 ms green isolated vs 5050 ms red under the parallel suite** — a third instance of
+  `g-endpoint-conformance-node-check-tests-time-out-under-full-suite-load` in a file its locus does not
+  name. Counts moved with load inside one session (7 then 6). **Compare the NAME-SET, never the count.**
+- **Board: HIGH 110 → 111 · MED 263 → 264 · LOW 99 · Nominal 7.** One HIGH filed, two MED filed
+  (one new, one via amendment).
+- **Review floor: 6 → 0, then re-opens at 3** (#1000 #1001 #1002, mine). Code-bearing carve-out rate
+  held at 4/227 — the code-bearing PR was reviewed, not carved.
+- **Maps: NOT regenerated, and the reason is measured.** No `compiler/src` file changed this session —
+  the whole delta is the e2e-render-map test tier plus docs. The only new symbol is `seedThrewNotice`
+  in that tier, and the nav-maps carry exactly two rows for it, both test-file COUNTS. ⚑ Also a
+  shared-surface call: S425-bryan is LIVE and maps are repo-wide. No-op with note.
+- **Worktrees:** mine removed (`agent-a71015035753d3d7b`, work landed). **Retained, not mine:**
+  `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c`, and the sibling `scrml-pinned`.
+  ⚑ **CORRECTION TO S423:** that hand-off states the `onmount-c` worktree *"does not exist on this
+  clone — verified by execution."* **It does exist** — `git worktree list` shows it at `ba72eaa0`. Same
+  inherited-claim class S423 itself caught in S421's wrap, one direction over.
+- **Inbox:** 8 unread, **0 untracked** (checked from the VCS's view, not the filesystem's).
+- **Cross-machine:** scrml `origin/main...HEAD` 0/0. scrml-support pushed (board + this wrap's meta).
+- **⛔ Environment, and it cost a round-trip:** `gh pr merge` was refused mid-session by the auto-mode
+  classifier (*Merge Without Review*) — the S407/S421 class recurring. **CONFIGURED-NOT-TO, not
+  CANNOT** (pa-base §5); the repo requires 0 approving reviews. Saying "go ahead" does not clear it;
+  Peter added `Bash(gh pr merge:*)` and all three landed. ⚑ **Contradicting S423 pickup item 7: there
+  is NO pre-push hook on this clone** — `core.hooksPath` is unset and the hooks dir holds only
+  samples, so an UPDATE push to an existing branch runs nothing locally. #1001 took a second commit on
+  the same ref without incident.
+
+---
+# scrml — Session 423 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S422-bryan was LIVE at my boot and WRAPPED mid-session (#997).** I registered as
+> SUCCESSOR, stayed off his footprint all session, and the wrap deferral lifted when he closed. **His
+> outbound drop corrects my boot read in three places — all three are folded into the pickup below.**
+> His open PRs (#990, #995, #996, #939, #865, #580, #579) are CLAIMED, not lost.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **Drain the review floor first — ten sessions running it has returned something real, and this
+   session it returned the most it ever has.** It will read roughly **4 OWED** (#991, #993, #994 + this
+   wrap PR), plus whatever of bryan's #995/#996 have merged. Classify with `review-debt.ts`'s
+   `CODE_BEARING_RE` against `gh pr view <n> --json files` — **never** from this hand-off.
+   ⚑ #993 already had **four** adversarial passes and three fix rounds; the floor pass on it is still
+   owed (a pre-land pass is not a floor record), but it is the one PR on the board least likely to
+   return anything.
+
+2. **⚑ THE CHEAPEST REAL ITEM ON THE BOARD IS A ONE-LINE FIX WITH A TEST.**
+   `g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed`
+   (MED, filed this session) item 1: `seedMovedTheRender` vetoes on `gainedContent === null` but
+   **fires on `undefined`**, and both mean *unmeasured*. Fix is `if (report.gainedContent == null) return true;`.
+   ⚑ **Item 3 of that entry has a NEAR-TERM TRIGGER and it gates the next arc** — a genuine `set-threw`
+   stays silent whenever any *other* key landed, which reddens the compiler for a seed write the harness
+   itself failed to make. Every fixture is single-key **today**; the fixture arc below makes them
+   multi-key. **Close item 3 first, or keep the fixtures single-key.**
+
+3. **The seed-fixtures arc is now UNBLOCKED and is the natural successor** —
+   `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED). It was held because
+   correcting the fixtures would delete D6's only live subject; **D6 now owns a fixture of its own**
+   (`fixtures/d6-nested-each-empty-with-data.scrml`), so that hold is released. Evidence is now
+   per-name reason codes rather than reading: `06-kanban` seeds a **derived** cell, `16-remote-data`
+   seeds a cell the app **does not have**, `25-triage` writes fine but its `column:` values match no
+   column under §45 strict `==`. ⚑ Correcting 25-triage will flip `#populated` red→green, which is
+   CORRECT and expected — and it is also the experiment that makes the shared-mount-id question
+   testable (three sibling mounts carry one id; only a matching row can show whether the runtime can
+   address them individually).
+
+4. **⚑ BRYAN'S DROP CORRECTS MY BOOT READ — do not reason from the S423 board registration.**
+   - **dpa-047 and dpa-048 are DRAINED**, not UNRUN. Current: **1 UNRUN (dpa-049 — the suppression-taint
+     question, banked S422, unruled) · 10 ADVISORY.**
+   - **Three rulings landed and they change what the ruling builds ARE:** `E-ASSIGN-003` is **NARROWED
+     to expression position** (S418's ruling 1 would have widened past its own governing sentence);
+     `E-ASSIGN-004` is **BUILT at statement position**; **bare naming IS `const`, mutation needs `let`**;
+     unused-binding is a **LINT** across all binding forms, ruled but NOT built, and the sequencing is
+     deliberate — **ship the lint first and let its own false positives find the nested-container walker
+     bugs. Do not fix the walker first.**
+   - ⛔ **DO NOT BUILD ON TOP OF THIS BLIND:** `E-ASSIGN-004`'s remedy misfires at top-level `${}` — it
+     says *"Use `let`"* and `let n = 1 ; n = n + 1` draws `E-CODEGEN-INVALID-LOGIC`, while `n++` and the
+     `<n>`/`@n` forms are clean. **Only the `= expr` form is broken**, it is pre-existing, and bryan has
+     it traced and filed HIGH. An earlier framing of it as *"no valid way to express mutable top-level
+     logic"* is **wrong** — three forms work.
+
+5. **The oldest unactioned inbound work on the board, and bryan explicitly offered it:** the **two
+   scrml-site reports**, `needs: action` since **August** — soft-nav dropping the destination page's
+   stylesheet, and the owed `<outlet/>` repro. He prioritised around them every turn of S422 and never
+   reached them.
+
+6. **Peter-lane, still open and unchanged:** the S420 item-4 list (the e2e-render-map CI job ·
+   baseline regen owed on POSIX · the three non-inert reserves · `g-w-lint-018` probe-then-close ·
+   `g-s320-autoawait-stale-injectpromiseawait-comments`) ·
+   `g-heading-drift-tail-reads-a-superseded-status-when-the-tail-narrates-a-transition` (LOW).
+
+7. ⚑ **ENVIRONMENT, AND IT COST A PR THIS SESSION:** the relaxed pre-push rule covers **NEW REFS ONLY**.
+   An **update** push to an existing branch runs the FULL local suite, which this clone fails on five
+   pre-existing tests — so #992 could not be updated and was closed in favour of #993 on a fresh ref.
+   **Land green, then push follow-ups as a NEW branch; never `--no-verify`.** Remote `gh api
+   .../update-branch -X PUT` is the clean way to refresh a PR that has gone BEHIND under `strict:true`.
+
+8. **⚠ A TENSION WORTH RULING, NOT SILENTLY INHERITING.** bryan recommends re-installing pre-commit here
+   — his caught a real `let`-rebinding false positive that 41 passing unit tests missed. **But this
+   clone's subset is 5-red pre-existing (the S254 path-model cluster + a ghost-pattern stress), so
+   re-installing blocks every commit.** The middle path is to run the subset by hand before any
+   compiler-source commit and compare the failure NAME-SET, never the count. Decide it deliberately.
+
+9. **Standing from Peter, exercised again:** merge on green without re-asking, re-measuring `tracking`'s
+   failure NAME-SET against main's own run every time (identical five names on all three PRs this
+   session, re-measured per PR, never inherited). `autoMode` did not fire this session.
+
+## WHAT LANDED
+
+Three PRs, all gate-green, all merged. One code-bearing (#993), two ledger.
+
+- **#991** `review(s423)` — floor **4 → 0**. All four were carve-outs by path, and all four were probed
+  by execution anyway. Everything bryan claimed in #986 holds, including a "not a regression" claim I
+  corroborated structurally: `block-splitter.js` is byte-identical between the two baselines the adopter
+  compared.
+- **#993** `fix(e2e-render-map)` — **limb 2 of the render HIGH. `S-EMPTY-WITH-DATA` fires for the first
+  time.** Four adversarial passes, fourteen findings, three fix rounds, **zero corpus cells moved**.
+- **#994** `gaps(s423)` — the fourth pass's three findings filed as one entry.
+
+**Resolved:** `g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject` (HIGH).
+**Filed:** the region-model residual (MED) + the gating-plumbing residual (MED).
+
+## 🔭 DURABLE
+
+**The adversarial pass found what my own verification structurally could not.** I had independently
+confirmed #993's first revision met its acceptance bar — one state change, nothing red→green, tier
+green, bite re-proven by hand. All of it was true, and none of it asked what the new predicate
+*breaks*. The first pass then returned five findings, three of which I reproduced. **Confirmatory
+verification and adversarial verification are not degrees of the same check; the second is the only one
+that probes the blast radius, and it is the one that gets skipped.**
+
+**I was wrong three times about one predicate, and each correction came from measurement, not argument.**
+The brief asserted a runtime mechanism I had not read the source for ("the mount slot is consumed") —
+false, and it shaped the agent's first build. My mid-flight correction ("fire on any empty mount") reds
+a *correct* board. My fix-round hypothesis ("fire when the render did not move") is wrong in both
+directions, because the subject's render moves by SHRINKING to nothing. **The thing that saved all three
+was the brief licensing the agent to re-derive and push back.** A brief that demanded compliance would
+have shipped every one of them.
+
+**Commit to the stopping rule BEFORE the evidence arrives.** By the fourth pass the findings were
+long-tail in an approximation I had already decided not to enrich. I wrote the bar down first — land
+unless a finding reds a correct corpus cell or makes D6 dark on its subject — and then applied it
+unchanged. **Re-deciding the bar once you can see what it would exclude is how a fix round becomes a
+treadmill**, and the rule is now in the gap entry so the next reader sees the reasoning and not just the
+verdict.
+
+**Two successive rounds finding the SAME class by different routes is a signal about the mechanism.**
+Rounds 2 and 3 both found "a dropped region promotes its children to false leaves" and "an unmeasured
+value is fabricated as measured". The response was not a third patch: it was to apply both rulings to
+**every** site, audit the sibling drop sites rather than assume them, and decline the one finding whose
+fix was enrichment. **Completing a ruling by class is convergence; patching its next instance is not.**
+
+**A probe's error must never render as its negative answer.** My first comment-matrix run `cd`'d into a
+scratchpad, which made the compiler path unresolvable, and my classifier looked for the string `FAILED`
+— so **four cases reported "clean" because the compiler never ran.** Caught only because a later command
+happened to print the module error. Read the exit status separately from the output, and never infer
+"none" from empty text.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I asserted a runtime mechanism in a dispatch brief without reading the runtime.** "The runtime
+   consumes the mount slot when items render" was inferred from two apps' DOM counts. It is false, and
+   it anchored the agent's first build until it checked the emitter itself.
+2. **★★ I sent two predicate corrections as instructions, and both were wrong.** The second one would
+   have made D6 dark on the only cell it exists for. Both were caught because the agent measured instead
+   of complying.
+3. **★★ A probe reported four cases clean because the compiler never ran** (miss 1 of the durable above).
+4. **★ I relayed an unverified reviewer claim into a fix round** — the reachability argument for the
+   nested-fence shape. The agent verified the mechanism, found the adjacency does not follow, and
+   refused to quote it. That is the second time this session a relayed finding needed checking before it
+   entered a record.
+5. **★ A `cd` moved the harness's primary working directory** (S419/S420's miss, repeated), and a
+   heredoc quoting failure cost a round-trip before I went to a file — S416/S417/S419's lesson, also
+   repeated. Both are now three-for-three across my sessions.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on #991, #993, #994. `tracking` red on each and **proven
+  pre-existing by name-set identity against main's own run, re-measured per PR** (the five-name
+  dev-watcher / atomic-save cluster).
+- **Local:** e2e-render-map tier **150 pass / 0 fail** at the landed HEAD. Pre-commit subset
+  **23,969 pass / 5 fail** — the known five, zero new, verified by name-set not count.
+- **Board: HIGH 110 · MED 263 · LOW 99 · Nominal 7** (boot: 111 · 261 · 99 · 7). One HIGH resolved, two
+  MED filed.
+- **Maps NOT regenerated, and the reason is measured.** bryan advanced the watermark to `787d4cb4` at
+  #987 after four stale sessions. This session added **no navigable structure**: the whole delta is the
+  e2e-render-map test tier plus one fixture `.scrml`; no compiler/stdlib source, no new/moved/deleted
+  compiler symbol.
+- **Worktrees:** mine removed (`agent-a3571211340b70c27`, work landed). **Retained, not mine:**
+  `agent-a17aa5322771d6ebc` and the sibling `scrml-pinned`. ⚑ The `onmount-c` worktree the S419/S420
+  hand-offs listed **does not exist on this clone** — verified by execution, and the S421 hand-off
+  already corrected the same inherited claim from the other direction.
+- **Inbox:** 8 remaining; two archived this session (both addressed to me, both discharged). ⚑ The two
+  **scrml-site** reports have been `needs: action` since **August** — see pickup 5.
+- **Cross-machine:** scrml-support pushed (board + voice). scrml at `origin/main...HEAD` 0/0.
+
+---
+# scrml — Session 422 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **THE ONE-LINE PICKUP:** three rulings landed that together redefine what a binding IS in scrml
+> (bare naming is `const`; mutation needs `let`; unused-binding is a lint) — and the build that
+> implements the first two is landed while the `let` escape is **broken in one position**
+> ([[g-top-level-logic-reassignment-lowers-as-a-fresh-const-so-the-let-escape-fails-there]], HIGH).
+> Fix that before any adopter-facing release.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **`E-ASSIGN-004` is LANDED and its remedy misfires at top level.** The diagnostic says *"Use `let`"*;
+   at top-level `${}` a `let n = 1; n = n + 1` dies with *"This is a compiler defect."* `n++`, compound
+   assignment and state cells all work — **only the `=` reassignment form is broken.** Root is located
+   and traced: `emit-reactive-wiring.ts:358` omits `declaredNames` so the `emit-logic.ts:2097` guard is
+   dead there. Sibling sites at `:1361`, `:1852`, `emit-library.ts:2097/:2109`. **This is the first
+   thing to build.**
+2. **dpa-049 is BANKED and UNRUN** — should a project-wide lint suppression taint the build? bryan
+   raised it, banked it, has not ruled it. It governs every suppression scrml ships.
+3. **dpa-048 is ADVISORY and unruled** and it refutes the PA's own framing of it. One-at-a-time floor
+   says it wants its own pass.
+4. **The call-3 lint is RULED but NOT BUILT.** Unused-binding across all binding forms, lint severity,
+   `_` token granted (ratified S418, **advertised in `E-MU-001`'s own message, never built**), the
+   project-wide flag discouraged. ⚑ Sequencing was ruled deliberately: ship the lint FIRST and let its
+   own false positives identify the nested-container walker bugs (`?{}` interpolation 34, `<each in=>`
+   20, `for`-headers). Do NOT fix the walker first — that was the error-severity plan.
+5. **Two scrml-site reports have sat `needs: action` since August and I never touched them** — soft-nav
+   dropping the destination page's stylesheet, and the owed `<outlet/>` repro. Prioritised around them
+   every single turn of this session. They are the oldest unactioned inbound work on the board.
+6. **#770's residue:** `E-SQL-004` has the identical file-local defect at codegen, so a multi-file page
+   relying purely on the entry's `db=` still fails — with a remedy §40.8 forbids in that file. Two
+   errors became one impossible-to-action error. Separate arc, not taken.
+7. **Findings 1+4 of the #770 review are ONE item, not two** (LSP wiring + cross-application suppression
+   leak): both need a build-root entry resolver, and the LSP cannot be wired correctly until the
+   application boundary exists. Wiring it against the workspace cache trades a false RED for a false
+   GREEN.
+
+## 🔭 DURABLE
+
+**A probe's error must not render as its negative answer — four instances in one session, and I
+committed two of them myself.** `gh run view --log-failed` returned ZERO lines for four main runs whose
+`tracking` job is confirmed `failure` (the API route returns 7127); a `git cat-file -e` probe reported a
+committed file absent on three branches including `main`; a subagent's failure-set `comm` compared test
+names still carrying a `[40.31ms]` timing suffix and flagged all 56 as new; and the S418 795-candidate
+text scan measured a token that mostly is not in the corpus. **A check whose failure looks like its
+benign result is unfalsifiable from its own output.**
+
+**A published reproduction command is a claim with a timestamp.** This session emitted
+`state.ts --check # exit 1` into the review ledger and then fixed the condition two commits later on the
+same branch. Caught only because an adversarial pass EXECUTED every published command instead of reading
+them. Corollary, learned the same way: **a test count without its command is unfalsifiable** — `24,013/0`
+and `31,820/56` were both true, of different file sets, and `906` vs `907` was cases-vs-tests.
+
+**A correction rots exactly as fast as the citation it corrected.** `postRe` now has FOUR published line
+numbers, three of them written as corrections to a stale one. `type-system.ts:26048` has three different
+readings across three watermarks, and `scripts/source-text-regex-census.ts` reprints the dead citation
+with authority on every run. **Locate by symbol or do not locate.**
+
+**The pre-commit gate is load-sensitive and its false red is indistinguishable from a real one.**
+`corpus-emit-differential-exit-codes.test.js` takes 84s unloaded and blew a 300s hook budget under
+concurrent agent compiles — reported as `Bailed out after 1 failure`. **Landing and dispatching want to
+be serialised on one box.** Cousin of the memory-gated-commit rule; different resource, same shape.
+
+**An adopter counted our ledger better than we had.** flogence aggregated `known-gaps.md` and found **28
+open gaps are one bug in four costumes** (13 string-masking · 8 interpolation · 6 comment-state · 1
+angle-bracket). It refuted their OWN operator's `<thing>`-overload hypothesis — it is 1 of 28 — and
+supersedes my "seventh member of a family" framing with the whole denominator attached. **One shared
+masking pass is pointed at 27 of 28.**
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I dispatched a worktree agent from the WRONG REPO.** Committed the voice ledger in
+   `scrml-support`, left the shell there, dispatched. `isolation:worktree` provisions from the Bash CWD —
+   a rule I have written down and broke two commands after being in the sibling repo. The agent caught it
+   at startup check 1 and did zero work.
+2. **★★★ I relayed three agent claims without executing them, and all three were wrong or overstated:**
+   the false LSP docstring (*"`runTS` receives the whole file set from `lsp/handlers.js` alike"* — it is
+   `const files = [tabResult]`), *"there is no valid way to express mutable top-level logic"* (three
+   forms work), and *"the fence introduces a NEW over-fire"* (main fires on that shape too). **My
+   verification holds when I execute and fails when I relay.** Third session this is recorded.
+3. **★★★ All five gaps I filed had headings with no status segment**, so `headingMarkerDrift` returned
+   `inspected=0 noTail=5` over my own section — **while the same branch filed a gap about that exact
+   bucket.**
+4. **★★ I split bryan's ruling on an "unruled" flag he had already answered twice.** His reply: *"I
+   thought we went over this."* He had. What was missing was the RECORD, not his decision.
+5. **★ I surfaced `E-MU-001` as a one-line table row** and he said *"I don't know what I am ruling on."*
+6. **★ Two malformed dpa rows** (2 cells in a 3-column table) silently dropped the authority column —
+   the same class recorded four lines above them in that file.
+
+## Gate at close
+
+- **Review floor: 23 → 0.** 4 findings, 19 carve-outs, 0 clean.
+- **Maps:** watermark `e74f5423` → `787d4cb4` after four stale sessions. ⚑ `e74f5423` is a commit whose
+  `SPEC-INDEX.md` contained **three raw git conflict markers**; every map was stamped there and nothing
+  noticed.
+- **dPA:** 0 UNRUN at drain, dpa-049 banked after → 1 UNRUN · 10 ADVISORY.
+- **Adopter issues: 0 open.** Inbox 13 → 9 unread.
+- **`pa-ruled` count: 3**, unchanged — no PA rulings taken under the S385 class this session.
+
+---
+
 # scrml — Session 421 (bryan · XPS-8950) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.

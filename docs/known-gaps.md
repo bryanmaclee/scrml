@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 262 |
-| LOW | 99 |
+| MED | 264 |
+| LOW | 101 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -16136,3 +16136,380 @@ to emit a client lacking that side-channel, so the mutation proof reds only the 
 that pin as weaker evidence than the rest of the tier's.
 
 — NEW S423-peter (the dispatched agent stated this residual against its own landing rather than reporting the class closed; PA-verified by execution — `GAINED=1` silences the true subject's own shape, `GAINED=0` keeps it firing)
+
+⚑ **S424-peter AMENDMENT — the "only the attribute-carried swap falls through" precision above is
+itself too narrow.** Found by the S424 review-floor pass on #993 (`docs/pr-reviews.md` S424). The
+caught-list is correct as far as it goes, but it was measured on swaps that hold the element count
+constant, and `signatureGained` compares **aggregate** counts (`after.elements > before.elements`), not
+per-element identity. **So a content swap under a NET ELEMENT LOSS also reads as no-gain** — a seeded
+gallery replacing three placeholder `<img src="ph.png">` rows with one seeded `<img src="ada.png">`
+goes 3 → 1, `gainedContent:false`, and any empty leaf region on the page then reds a correct render.
+The same holds for any seed that renders FEWER, richer nodes than the placeholder state — a filtered
+list, a collapsed summary, a "show top 1 of N" view. **This strengthens the entry's own conclusion
+rather than changing it:** it is a third instance of the signature being the wrong instrument, and it
+is further evidence for the standing ⛔ above — do not enrich the signature, close it with per-region
+attribution, which subsumes this too. Argued from source, not executed.
+
+---
+
+### g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed — the F4 loudness guard can be downgraded to green by an unrelated console error, a partial seed failure reddens the compiler for the harness's own miss, and `undefined` takes the fire direction where `null` vetoes — `NEW S423-peter (fourth adversarial pass on the limb-2 landing, #993; all three verified by the reviewer by execution, all three LATENT on today's corpus); MED; open`
+<!-- @gap id=g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js:742,772(the two F4 loudness guards) and compiler/tests/e2e-render-map/render-detectors.js:666(seedMovedTheRender's === null) and compiler/tests/e2e-render-map/render-detectors.js:757(the D1 mount-throw needs-server return — the S426 FIFTH path, no seed-bridge disqualifier, returns before D2 runs) prov=review:the-fourth-S423-adversarial-pass-which-found-no-correctness-bug-in-the-leaf-ownership-core-and-these-three-in-the-gating-plumbing-around-it -->
+
+**Three paths where D6 produces a verdict from a seed that failed or was never measured.** Filed
+together because they are one class — the gating PLUMBING around the detector, not the region model
+(that residual is [[g-d6-region-emptiness-is-fail-quiet-and-its-gain-conjunct-is-page-global]]) — and
+because #993's own history is that fixing one site of a class and not the others is what re-opened it
+twice.
+
+⚑ **ALL THREE ARE LATENT ON TODAY'S CORPUS, and that is why they were FILED rather than fixed.** The
+landing PA had committed to a stopping rule BEFORE seeing this pass — land unless a finding reds a
+correct corpus cell or makes D6 dark on its subject — and none of them does. Recording the rule here
+because the alternative (re-deciding the bar once the evidence is in) is how a fix round becomes a
+treadmill. The fourth pass also fuzzed **3000 random nestings** against the brute-force oracle with
+**zero mismatches** and found no correctness bug in the leaf/ownership/emptiness core.
+
+1. **`seedMovedTheRender` vetoes on `gainedContent === null` but FIRES on `undefined`** — and both mean
+   *unmeasured*. The "never fabricate a measurement" ruling was applied as a `=== null` check, so any
+   seed report built without the field takes the fire direction: D6 reddens a cell on a measurement
+   that never happened, and `generate-baseline.js` commits the fabricated verdict. Live today only in
+   `detector-validation.test.js`'s own back-compat helper, so it is one forgotten field away in any
+   fourth construction site. **The cheapest pickup on this board: `if (report.gainedContent == null) return true;`.**
+
+2. **The F4 loud push can be silently downgraded back to green.** The no-side-channel branch pushes a
+   `[seed-bridge]` message into `consoleErrors` on the stated premise that a D2 console error reddens
+   the cell. It does not, unconditionally: the `needs-server` arm returns a NON-red state whenever the
+   app is `serverDependent`, no codegen error or hard smell fired, and **any** console error matches
+   `isServerAbsenceMessage` (`.some()`, not all). A server-dependent seeded app that both console-errors
+   on server absence and loses `_scrml_reactive_set` scores `needs-server` — green — and the bridge
+   failure is invisible again, which is the exact fail-open F4 was written to close.
+
+3. **A genuine `set-threw` stays silent whenever any OTHER key landed.** The guard is
+   `!writes.some(w => w.wrote) && writes.some(w => w.reason === "set-threw")`. With a ≥2-key fixture
+   where the key driving the list throws and an unrelated key lands, `seedWasDelivered` is true, no
+   console error is raised, the list renders nothing, and the cell reddens as `renders-empty-with-data`
+   — **blaming the compiler for a seed write the harness itself failed to make.**
+   ⚑ **This one has a NEAR-TERM TRIGGER:** every corpus fixture is single-key *today*, and the next arc
+   on this tier is [[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]], which rewrites
+   those fixtures. Whoever takes that arc should close this first, or keep the fixtures single-key.
+
+— NEW S423-peter (fourth adversarial pass on #993; the pass found NO correctness bug in the leaf/ownership core it was aimed at, and these three in the plumbing around it — recorded with that framing because "the review found three things" reads very differently from "the core held and the edges did not")
+
+⚑⚑ **S424-peter AMENDMENT — ITEM 1's PRESCRIBED FIX IS WRONG, and there is a FOURTH path.** Found by
+the S424 review-floor pass on #993 (`docs/pr-reviews.md` S424), which re-derived the same defect
+independently. The id is left unrenamed on purpose — `three-latent-paths` is referenced by `[[...]]`
+elsewhere, and renaming a slug forks every citation.
+
+- **Item 1's one-liner would RED an existing test, so do NOT land it as written.**
+  `if (report.gainedContent == null) return true;` is the fix this entry recommends and it is
+  incomplete. `detector-validation.test.js:823` ("D6 DOES fire when the seed bridge really wrote and
+  the render is empty") builds `{writes:[{name:"tasks",reason:"written",wrote:true}], domChanged:true}`
+  with **no `gainedContent` field**, and asserts D6 fires — so vetoing on absent-or-null turns that
+  test red. ⚑ The reviewer noticed the dependency and proposed
+  `!("gainedContent" in report) || report.gainedContent == null`, which **breaks the same test for the
+  same reason**; neither form works alone. **The correct change is two lines:** veto on absent-or-null
+  at `render-detectors.js:666`, AND make `:823` pass `gainedContent: false` explicitly, which is what
+  that test actually means (it is exercising measured-no-gain, and today it relies on the bug to get
+  there). **Blast radius MEASURED, not assumed:** of nine `seededDetect` call sites, `:823` is the only
+  one that passes a report while omitting the field — `:817` omits it too but is gated off earlier by
+  `seedWasDelivered`, and the bare-markup sites pass no report at all and take the `!report` back-compat
+  path. Reproduced by execution under happy-dom against the landed predicate.
+
+- **FOURTH PATH — tightening to "a seed was actually WRITTEN" made the BODY-GLOBAL half of D6
+  fail-open.** `seedWasDelivered` (`render-detectors.js:616`) now requires
+  `writes.some(w => w.wrote === true)` for **both** scopes, while the loudness guard deliberately raises
+  nothing for `no-such-cell` / `derived-cell`. That justification covers the REGION scope; for the
+  original body-global check it is a regression. Pre-S423 a registered seed plus a completely empty body
+  was red. Now: a codegen change that renames or reshapes the cell accessor so `parseChunkCellScopes`
+  resolves every seed key to `no-such-cell` takes no prologue throw, so the loud path never fires —
+  **every populated cell scores green however empty it renders, D6 off entirely, `consoleErrors` empty
+  and `detail` stripped.** That is the detector going dark on exactly the regression class it exists to
+  catch. Argued from source, not executed.
+
+⚑⚑ **S426-peter AMENDMENT — ITEM 3 IS CLOSED (#1002), AND THE REQUIREMENT IT SERVED HAS A FIFTH PATH
+THAT #1002 NEVER REACHED.** Found by the S426 review-floor pass on #1002 and **REPRODUCED BY PA
+EXECUTION**, not relayed. The id stays unrenamed for the same reason as the S424 amendment.
+
+- **FIFTH PATH — the D1 mount-throw `needs-server` return has no seed-bridge disqualifier.**
+  #1002 added `hasSeedBridgeFailure` to the state-resolution `needs-server` return
+  (`render-detectors.js:887`). The **other** `needs-server` return, at **`:757`** in the D1 + D7
+  mount-throw block, fires on `obs.serverDependent && isServerAbsenceMessage(msg)` and **returns before
+  D2 ever runs**, so no `consoleErrors` inspection happens at all. PA-measured: a seeded,
+  server-dependent app whose mount throws a server-absence-shaped `TypeError`, carrying
+  `seed:{threw:1,...}` and the `[seed-bridge]` notice, scores **`needs-server` — GREEN** with
+  `detail` = `["throwMessage","needsServer"]`. The seed failure appears **nowhere** in `detail`, and
+  `generate-baseline.js` strips `detail` from green cells regardless. **Two controls pinned it:** the
+  same input minus the mount throw still scores `compiles-but-throws` with `S-EMPTY-WITH-DATA` and the
+  seed failure recorded (so #1002's door stays shut), and the same mount throw with no seed failure
+  stays correctly green (so the fix must not blanket-red the tier).
+  ⚑ **This is NOT item 2, and the distinction is load-bearing for whoever fixes it.** Item 2 and
+  #1002's own deferred-scope note both live **inside** the `consoleErrors` block — `isServerAbsenceMessage`
+  breadth, and `hasHardSmell` omitting D6. This path never reaches that block; it is keyed on
+  `obs.throwMessage`. A fix aimed at item 2 will not close it.
+  **Latent, like the rest:** all nine `needs-server` baseline cells are unseeded today, so no cell moves.
+
+⚑⚑ **S426 ROUND 3 — THE FIX IS BUILT AND HELD IN #1014 (NOT MERGED), AND ITS OWN PRE-LAND PASS FOUND
+TWO MIS-ATTRIBUTIONS, BOTH PA-CONFIRMED BY EXECUTION.** The requirement is now enforced at a CHOKE POINT
+rather than door by door: `runDetectors` wraps the classifier and demotes any surviving green state to a
+new red state `seed-bridge-failed`, which is class-complete over green returns **that do not exist yet**.
+⚑ **And the population was larger than this entry said: ALL FOUR green-state returns were fail-open, not
+three — including the one #1002 "closed",** because that guard keyed on the `[seed-bridge]` NOTICE while
+the failure has a second carrier, the report's own `errors[]`/`set-threw` write. A notice-keyed guard is
+**provably dead code** at the last two returns, since any notice makes `consoleErrors` non-empty and the
+state-resolution block returns first.
+
+**What is HELD and why — two defects that would write misleading records into the committed baseline:**
+
+1. **The `needs-server` carve-out became structurally unreachable for any SEEDED server-dependent app.**
+   `mountAndObserve` assigns `setFn` only AFTER `exec()` returns, so a mount throw always kills the side
+   channel and the guard is always true at the D1 door — the term does not discriminate. Measured: such a
+   cell scores **`compiles-but-throws`**, a COMPILER-blaming state for a HARNESS artifact, which is
+   exactly what the fix's own rationale for minting `seed-bridge-failed` rejects. It bites the moment the
+   coverage ratchet seeds a `needs-server` app: the cell reds permanently and **no compiler fix clears
+   it.** Round-4 direction: demote to `seed-bridge-failed` there, which is what the state is FOR.
+2. **The "this cell carries NO verdict about the compiler" note is stamped unconditionally at both
+   self-demoting doors.** Measured: a seeded app throwing `loadContacts is not defined` — a genuine
+   codegen defect, `S-UNBOUND-REF` in the same smell set — carries that note into the baseline, telling
+   the next triager to disregard a real bug. Also false for a `[seed-signature]`-only error, where the
+   snapshot helper threw and every seed write landed. Round-4 direction: make the note conditional on the
+   cell having no independent red reason.
+
+**Two further findings, filed here rather than dropped:** the invariant is class-complete over
+`runDetectors` returns but **NOT over CELLS** — `observeCompiled` returns `renders-empty` directly, before
+the seed is ever applied, so an emit regression that stops locating the entry HTML goes green→green with
+the undelivered seed recorded nowhere (**the class one level out, again**); and doors 3/4 are **unit-only
+reachable** today, because every harness path that fills `seedReport.errors` also pushes a console notice,
+so the in-source *"by construction"* claim overstates what was established.
+
+⚑ **The core of #1014 is right and must not be rebuilt:** the two-carrier predicate, the choke-point
+demotion, `GREEN_STATES` single-sourced (it was THREE hand-kept copies), and two EXISTING assertions
+corrected — one of which **pinned the third door green while its own comment called that hazardous**, i.e.
+a test asserting the bug. Tier 216 → 237 pass / 0 fail, no baseline cell moves.
+
+⚑ **The pattern this entry is now the record of:** three consecutive rounds have each fixed one door of
+*"a seed-bridge failure must be LOUD"* and left a sibling door open — S423 filed it, #1002 found the
+first fix's loudness was not terminal and shut the second door, and this pass found the third. **Fifth
+consecutive session in which a fix re-created its class one level away.** The lesson is not "be more
+careful": it is that this requirement is enforced at **every `return` that yields a GREEN state**, and
+the only convergent fix enumerates those returns rather than patching the one in front of you. There
+are currently two green-tier returns in `runDetectors`; count them at fix time rather than trusting
+this sentence.
+
+---
+
+### g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render — D6's per-region content test asks only the region's OWN nodes, but `select`/`picture`/`video`/`audio` carry content THROUGH children the region contains while the element that counts them sits outside it — `NEW S424-peter (review-floor pass on #993, reproduced by execution under happy-dom); HIGH; open`
+<!-- @gap id=g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render sev=HIGH status=resolved locus=compiler/tests/e2e-render-map/render-detectors.js:363(nodesHaveRenderedContent — it maps elementCarriesContent over the region's own nodes and their descendants only) with the conferring definitions at :199(select -> querySelector("option")) and :205(picture/video/audio -> their source children) and :216(svg -> el.children.length > 0, ANY element child — the THIRD delegating definition, added S426 by the owed sibling sweep, reproduced by execution with circle rows) and the candidate list at :97(CONTENT_CANDIDATE_SELECTOR, which contains neither "option" nor "source" nor any svg shape element) prov=review:S424-floor-pass-on-993-finding-1-reproduced-by-execution-two-shapes-plus-S426-PA-sibling-sweep-finding-a-third -->
+
+**D6 scores `renders-empty-with-data` — RED, against the compiler — on a render that is correct.**
+This is a FALSE POSITIVE in the direction that matters: the tier's whole purpose is to catch the
+compiler silently rendering nothing, so a red cell here is read as a codegen regression.
+
+**The mechanism, and it is a scope mismatch rather than a missing case.** `nodesHaveRenderedContent`
+asks `elementCarriesContent` of the region's own nodes and their descendants. But two entries in
+`elementCarriesContent` define content by looking UPWARD-OUT rather than at the element itself:
+
+- `case "select"` → `el.querySelector("option") != null` (`:199`)
+- `case "picture" / "video" / "audio"` → their `src`/`srcset`-bearing `<source>` children (`:205`)
+
+`emitEachMountHtml` places the each's fence at the each's SOURCE position, so an `<each>` written
+inside a `<select>` puts the `<option>` nodes INSIDE the region while the `<select>` that makes them
+count sits OUTSIDE it. Neither `option` nor `source` is in `CONTENT_CANDIDATE_SELECTOR`, and both are
+text-free in the common value-only form — so every leaf in the region reads empty, `allLeavesEmpty` is
+true, and D6 fires.
+
+**Reproduced by execution** (happy-dom, against the landed predicate, seed report
+`{writes:[{reason:"written",wrote:true}], domChanged:true, gainedContent:false}`):
+
+| markup | `hasRenderedContent(body)` | D6 verdict |
+|---|---|---|
+| `<select><option value="">Select…</option>` + fence of `<option value="1">` / `<option value="2">` | **true** | **`renders-empty-with-data`** |
+| `<picture><img src="fallback.png">` + fence of two `<source srcset=…>` | **true** | **`renders-empty-with-data`** |
+
+⚑ **The gain conjunct does NOT save the realistic shape.** A static placeholder
+`<option value="">Select…</option>` before the each — the exact pattern `emitEachMountHtml`'s own
+comment cites — already makes the `<select>` content-bearing BEFORE the seed, so `elements` does not
+rise across the write and text-free options contribute no text counts. `gainedContent:false`, veto
+unavailable, cell red.
+
+⚑ **LATENT on today's tier, and the corpus already holds the shape — those are both true and the
+second one is why this is HIGH.** None of the four seeded apps (`03-contact-book`, `06-kanban-board`,
+`16-remote-data`, `25-triage-board`) contains a `<select>` or `<picture>`, so **zero cells move today.**
+But three corpus files already put an `<each>` inside a `<select>` — the trucking-dispatch flagship's
+`components/assignment-picker.scrml` (3 sites), `components/status-picker.scrml` (1) and
+`pages/dispatch/load-new.scrml` (1). **It goes live the moment the seeded set grows, and growing the
+seeded set is precisely the next arc on this tier**
+([[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]]).
+
+**This is the S419 "one definition of not-rendered" invariant broken in the other direction** — the
+invariant this diff's own F3 comment invokes. S419 fixed D6 keying on `textContent` alone, which reds a
+text-free render; this is the same error re-created one level down, at the REGION scope instead of the
+BODY scope, by a predicate written to honour it.
+
+**Fix direction (not taken here).** The region test needs to consult the conferring ANCESTOR, not only
+the region's own nodes: when a region's nodes are `option`/`source` (or, generally, when their parent is
+a `CONTENT_CANDIDATE_SELECTOR` element whose content definition delegates to children), the question
+"did this region render content" is answered by asking the parent. ⚑ **Do not fix it by adding `option`
+and `source` to `CONTENT_CANDIDATE_SELECTOR`** — that would make a bare `<option value="1"></option>`
+count as rendered content everywhere, including at body scope, which re-opens the S419 class from the
+other side. **And count what the change stops inspecting before narrowing anything** (pa-base §8,
+coverage-removal blind spot).
+
+⚑ **Sibling check owed with the fix, because this entry's own class is "one site of a class was fixed
+and the others were not":** `elementCarriesContent`'s `textarea` case reads `el.value || el.textContent`
+and `input` reads `.value`/`checked` — both self-contained, so they do not share the defect. `select`
+and the three media parents are the complete set of delegating definitions at the time of filing;
+re-derive that set rather than trusting this sentence.
+
+— `NEW S424-peter (review-floor pass on #993 — the PR the S423 hand-off predicted was "least likely to return anything"; reproduced by execution rather than relayed, per pa-base §8)`; **HIGH**; open
+
+⚑⚑ **S426-peter AMENDMENT — THE DEFECT STANDS AND IS RE-REPRODUCED, BUT THIS ENTRY IS WRONG IN THREE
+PLACES AND ALL THREE ARE MINE.** Re-reproduced on `f8317399` before touching anything (a verification
+stamp is never inherited, pa-base §1): both tabled shapes print `hasRenderedContent(body): true` with
+`allLeavesEmpty: true`, and two controls behave correctly — text-bearing option rows score
+`allLeavesEmpty:false`, a genuinely empty `<ul>` fence stays red.
+
+1. ⚑ **THERE IS A THIRD DELEGATING DEFINITION: `svg`** (`render-detectors.js:216`), which counts **any
+   element child** (`el.children.length > 0`). An `<each>` inside an `<svg>` emitting `<circle>` rows
+   reproduces identically — PA-verified by execution, plus a direct measurement of the delegation
+   itself (`elementCarriesContent(<svg><circle/></svg>)` → `true`, `(<svg></svg>)` → `false`).
+   **The sibling-check paragraph above did its job**: it told the next reader to *"re-derive that set
+   rather than trusting this sentence,"* the set was re-derived, and the sentence was incomplete.
+   That is the instruction working, not failing — but the entry text said "complete set" and it was not.
+
+2. ⚑ **`components/status-picker.scrml` IS NOT A SITE. It has no `<select>` element at all** — its one
+   `<select` occurrence is inside a `//` comment on line 3 describing what the component renders, and
+   its `<each>` emits `<button>` rows. The citation came from a text-level grep, which is
+   `pa-scrml-overlay` **Rule 7's own class** (*don't ask the text what the tree already knows*) committed
+   inside a gap entry. So the corpus holds **two** files with a real `<each>`-inside-`<select>`, not three.
+
+3. ⚑⚑ **THE REAL-WORLD TRIGGER POPULATION IS ZERO, AND THAT DISSOLVES THE ARC-ORDERING CONSTRAINT.**
+   Measured over 2,609 corpus `.scrml` files: `picture`/`video`/`audio`/`svg` have **zero** `<each>`
+   sites, and **every** real `<each>`-inside-`<select>` site emits options carrying TEXT —
+   `assignment-picker.scrml` (3 sites, `${d.name} (${d.current_status})`), `pages/dispatch/load-new.scrml`
+   (`${c.name}`), and `conformance/cases/each/shorthand-option-label-preserved/case.scrml` (2 sites,
+   via `:`-shorthand and `${}`). The **text half** of `nodesHaveRenderedContent` already saves all of
+   them. So the claim above — *"it goes live the moment the seeded set grows, and growing the seeded set
+   is precisely the next arc"* — **is FALSE**: growing the seeded set does not make it live, because the
+   shape that trips it (a value-only `<option>` row) exists nowhere in the corpus.
+   **Consequence for sequencing:** the ordering `#1004` made BINDING — seed-fixtures runs behind this —
+   **is dissolved. The two arcs are independent**, and the seed-fixtures arc is no longer blocked.
+
+⚑ **This is still worth fixing, and NOT on corpus-zero grounds either way.** A detector that reds a
+correct render is the cry-wolf shape (`pa-base` §8: a gate that cries wolf gets bypassed, then deleted),
+value-only `<option>` and `<source>` rows are legitimate scrml, and **the corpus is the artifact of what
+has been written, not evidence of design intent** (the corpus-is-artifact kernel — the same reasoning
+that made the S66 `==` drop wrong). What changes is the CLAIM: the fix is **preventative**, not
+unblocking, and the severity rests on the false-positive direction rather than on imminent cell movement.
+⚑ Recorded because *a fix built before the problem is measured is a fix whose value is unmeasured*
+(`pa-base` §8) — and the measurement was owed **before** the fix, not after.
+
+— `AMENDED S426-peter (re-reproduced on f8317399; owed sibling sweep found a third definition; population counted, two citations falsified)`
+
+**⚑ RESOLVED S426-peter — landed #1012 `f8d263de`, PA-verified on the merged HEAD, not on report.**
+The region test now asks whether a node is **the kind of child its ancestor CONSUMES** — *did the each
+produce the rows that parent exists to hold?* — rather than mirroring what makes the ancestor
+content-bearing at body scope. That reframing was forced by `<datalist>`, which has no
+`elementCarriesContent` arm to mirror and whose body-scope answer must stay "renders nothing"; body
+scope and region scope ask different questions and both answers are right.
+**The population was ENUMERATED ONCE** against a stated search (every HTML parent whose content model
+is wholly element children carrying no text of their own and not in `CONTENT_CANDIDATE_SELECTOR`):
+**7 covered** — `select`>`option` · `datalist`>`option` · `picture`/`video`/`audio`>`source`|`img` ·
+`video`/`audio`>`track[src]` · `svg`>any element · `map`>`area` · `colgroup`>`col` — and 15 further
+shapes disposed with reasons and pinned by tests. `track` was a seventh instance neither the brief nor
+either review had named.
+**Verified by execution on `f8d263de`:** all 7 instances green, 3 true positives still red (empty fence
+in a `<ul>`, a non-`option` node in a `<select>`, a src-less `<source>`), 6 body-scope pins still
+`false`, and the hostile-tag shapes classify instead of throwing. Tier **216 pass / 0 fail** (164
+before). Mutation: gutting the predicate reds **17** with **183** still passing — no pre-existing test
+flips. **ZERO baseline cells move**, measured fix-vs-pre-fix.
+⚑ **Its re-review raised two MEDIUM findings and BOTH WERE REJECTED on measurement** — recorded on the
+closed #1009 and in #1012's commit message. Finding A alleged the fix greened a broken render
+(`<select>` > mount `<div>` > `<option>`); **that claim is falsified by this repo's own S298
+real-browser witness** in [[g-nested-each-div-mount-in-restricted-parent]] — `.options` is
+descendant-lenient, visual render and the a11y tree are correct in Chrome and Firefox, which is why
+that gap was downgraded MED→LOW. Finding B's target (`svg` counting an empty `<g>`) is **pre-existing
+in `elementCarriesContent`**, not introduced here — filed as
+[[g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing]].
+
+---
+
+### g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing — `case "svg"` is `children.length > 0`, so an `<svg>` whose only child is an empty `<g>` or a `<metadata>`/`<defs>`/`<desc>`/`<title>` counts as rendered content at BODY scope — `NEW S426-peter (raised by the #1009 re-review against the region rule; PA-relocated to its real locus, which is pre-existing and body-scope); LOW; open`
+<!-- @gap id=g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(elementCarriesContent case "svg" — el.children != null && el.children.length > 0, which asks only that a child EXISTS and never whether it draws) prov=review:S426-re-review-of-1009-finding-B-relocated-after-PA-measurement-showed-the-region-rule-merely-mirrors-this -->
+
+`elementCarriesContent`'s `svg` arm asks only that a child element EXISTS: `el.children.length > 0`.
+So `<svg><g></g></svg>` and `<svg><metadata></metadata></svg>` are content-bearing, although neither
+draws anything. The **chrome-present/data-absent** shape — an `<each>` emitting `<g>` wrappers whose
+`<circle>` children were dropped — is precisely the class D6 exists to catch.
+
+⚑ **Filed HERE rather than against the region rule, and the relocation is the finding.** The #1009
+re-review raised this against `confersContentToConsumingAncestor`'s `svg` branch, as a regression that
+PR introduced. It is not: the region rule **agrees** with this arm, which is the invariant that fix
+exists to restore. Tightening only the region side would re-create the exact asymmetry — region scope
+stricter than the definition that makes the ancestor count — that produced the original false positive.
+**So the fix belongs at the shared definition, where it moves BOTH scopes at once**, and that is a
+different change with a different blast radius: every body-scope cell holding a decorative `<svg>` is in
+range.
+
+**Fix direction (not taken):** require a child that draws — exclude the metadata elements
+(`defs`/`metadata`/`desc`/`title`) and require a non-metadata descendant rather than a direct child, so
+`<svg><g><circle/></g></svg>` still counts. **Count what it stops inspecting before narrowing** (pa-base
+§8) — the corpus population of decorative-`<svg>` cells is unmeasured.
+
+---
+
+### g-consumed-child-table-filters-source-and-track-by-attribute-but-not-option-area-col — a compiler bug that drops the attribute bindings on `<area>` or `<col>` rows scores GREEN, while the identical drop on `<source>` rows correctly reds — `NEW S426-peter (#1009 re-review, LOW; the asymmetry is real and its resolution is a judgement, not a typo); LOW; open`
+<!-- @gap id=g-consumed-child-table-filters-source-and-track-by-attribute-but-not-option-area-col sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(CONSUMED_CHILD_SELECTOR — the picture/video/audio entries carry [src]/[srcset] filters and track carries [src], while the select/datalist/map/colgroup entries are bare tag selectors) prov=review:S426-re-review-of-1009-finding-3 -->
+
+The consumed-child table filters some entries by attribute and not others. `source[src], source[srcset]`
+and `track[src]` require the attribute that makes the child functional; `option`, `area` and `col` match
+bare. **Concretely:** a codegen defect that drops the bindings on `<area>` rows emits
+`<map><area><area></map>` — an entirely non-functional image map — and D6 goes green, while the identical
+attribute-drop on `<source>` rows still reds (pinned by the existing `CONFERS_NOTHING` case).
+
+⚑ **This is a judgement, not a typo, and it sits on the same axis as
+[[g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing]]:** is the region question *"did
+the each produce its rows?"* or *"is each row individually useful?"* The current table answers the first
+for `option`/`area`/`col` and the second for `source`/`track`, and the in-source comment states the
+first as the rule — so `track[src]`, two lines above, contradicts the stated rationale. **Resolve the
+two entries together or the next reader will re-derive the same inconsistency.** Whichever answer is
+taken, it must hold at BOTH scopes, per the invariant the D6 fix restored.
+
+### g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible — `mountAndObserve` restores the real `console.error` in its own `finally`, and `applySeed` runs after it returns, so nothing the seed-driven re-render logs ever reaches D2 — `NEW S424-peter (surfaced by the item-3 dispatch as a deferred observation, PA-verified by reading the call ordering); MED; open`
+<!-- @gap id=g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js(mountAndObserve — the console.error shim is installed just before the mount and restored in that function's own `finally`; applySeed is invoked from observeCompiled AFTER mountAndObserve has returned, so the seed write and every re-render it drives run with the REAL console.error installed) prov=review:S424-item3-dispatch-deferred-observation-PA-verified-by-reading-the-call-ordering-not-by-executing-a-repro -->
+
+**The `e2e-render-map` tier captures `console.error` only during MOUNT, never during the SEED WRITE.**
+`mountAndObserve` shims `console.error` immediately before mounting and restores the real one in its
+own `finally`. `applySeed` is called later, from `observeCompiled`, once `mountAndObserve` has already
+returned. So every console error raised by the seed write — and by the reactive re-render the seed
+triggers, which is the whole point of seeding — goes to the real console, never lands in
+`obs.consoleErrors`, and is therefore invisible to **D2**, to the cell state, and to the committed
+baseline.
+
+⚑ **Why this matters more after S424's item-3 landing, not less.** Item 3 made a seed accessor THROW
+loud on its own terms, and the question it forced was *"is a `set-threw` the harness's fault or the
+compiler's?"* — the answer being that it can be either, which is precisely why the notice must stay
+loud rather than veto. **This entry is the other half of that same question and it is still open:** a
+compiler defect that `console.error`s instead of throwing during the seed-driven render is silent. The
+throwing case is now covered; the logging case is not, and the logging case is the more common shape
+for a reactive runtime.
+
+**Not a fork of [[g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed]],
+and here is the discriminator.** Those items are all GATING conditions — predicates in the harness and
+the detector deciding whether to fire on a seed that was delivered, partially delivered, or never
+measured. This one is an OBSERVATION WINDOW defect: the signal is never captured in the first place, so
+no gating change can reach it. Different machinery, different fix — the shim's lifetime has to span
+`applySeed`, which means hoisting it out of `mountAndObserve` or re-installing it around the seed — and
+a fix to either entry leaves the other exactly as it was. Cross-linked rather than merged.
+
+**NOT reproduced by execution.** Verified by reading the call ordering (shim install → mount → restore
+in `finally`; `applySeed` invoked afterwards) and by the S424 item-3 agent independently reporting the
+same ordering from its own reading. A repro needs a fixture whose seed write drives a render that
+`console.error`s without throwing — no corpus fixture does that today, which is also why nothing has
+noticed. **Treat the mechanism as located-not-executed** until someone builds that fixture.
+
+⚑ **Sibling check owed with the fix.** If the shim is hoisted to span the seed, confirm it is still
+restored on every exit path (the file's own header comment at `:52` notes three separate `finally`
+owners already), and confirm the widened window does not start capturing the harness's OWN
+`[seed-bridge]` pushes as if they were app errors — those are pushed directly into `obs.consoleErrors`
+and would double-count.
+
+— `NEW S424-peter (deferred observation from the item-3 dispatch, kept rather than dropped because it is the unclosed half of the question that dispatch answered)`; **MED**; open

@@ -30,9 +30,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { observeApp } from "./render-harness.js";
+import { observeApp, seedThrewNotice } from "./render-harness.js";
 import {
   runDetectors,
+  hasRenderedContent,
   regionScopedEmptiness,
   collectEachRegions,
   renderedContentSignature,
@@ -820,7 +821,18 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   });
 
   test("D6 DOES fire when the seed bridge really wrote and the render is empty", () => {
-    const det = seededDetect("", { writes: [{ name: "tasks", reason: "written", wrote: true }], domChanged: true });
+    // ⛑ S424 — `gainedContent: false` is now STATED rather than left absent. This test exercises
+    // the measured-no-gain path; it previously reached it only because an absent field fell
+    // through to the fire direction, i.e. it depended on the defect fixed in
+    // `seedMovedTheRender` (located by SYMBOL on purpose — a line number in a comment rots and
+    // nothing fails, which this file has already been bitten by). Stating the measurement is
+    // what the round-2 ruling requires of every hand-built report: none may *claim* a
+    // measurement, and none may hide one.
+    const det = seededDetect("", {
+      writes: [{ name: "tasks", reason: "written", wrote: true }],
+      domChanged: true,
+      gainedContent: false,
+    });
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.detail.emptyWithDataScope).toBe("body");
     expect(det.state).toBe("renders-empty-with-data");
@@ -833,6 +845,419 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-empty-with-data");
   });
+
+  // ⛑ S424 — THE BITE for `seedMovedTheRender`'s fire-only-on-the-measured-value rule.
+  // Surfaced by the review-floor pass on #993, filed as item 1 of
+  // [[g-d6-seed-gating-has-three-latent-paths-...]], then WIDENED by the adversarial pass on
+  // the first attempt at this very fix: that attempt closed `undefined` and left the class,
+  // so `0` / `""` / `NaN` / the string `"false"` all still fabricated a verdict.
+  // The invariant is now: **only a MEASURED `false` fires; every other value vetoes.**
+  // ⚑ Distinct from the back-compat case above, which has NO report at all (`!report`);
+  // these all have a report whose field is missing or malformed.
+  test("S424: only a MEASURED false fires D6 — null, absent and malformed all veto", () => {
+    const writes = [{ name: "tasks", reason: "written", wrote: true }];
+    const report = (extra) => seededDetect("", { writes, domChanged: true, ...extra });
+
+    // (a) MEASURED no-gain -> FIRES. The control: the veto must not silence a real verdict.
+    const measured = report({ gainedContent: false });
+    expect(measured.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(measured.state).toBe("renders-empty-with-data");
+
+    // (b) MEASURED gain -> vetoes.
+    expect(report({ gainedContent: true }).smells).not.toContain("S-EMPTY-WITH-DATA");
+
+    // (c) explicit null (the snapshot threw) -> vetoes. Round-2 behaviour, unchanged.
+    const explicitNull = report({ gainedContent: null });
+    expect(explicitNull.smells).not.toContain("S-EMPTY-WITH-DATA");
+    // ⚑ Pin the CONCRETE state, not merely "not the red one" — asserting only
+    // `!== "renders-empty-with-data"` would stay green if a future change sent the UNMEASURED
+    // forms to some other wrong state (`renders-clean`, `needs-server`).
+    expect(explicitNull.state).toBe("renders-empty");
+
+    // (d) ABSENT field -> vetoes, and lands in the SAME concrete state as explicit null.
+    const absent = report({});
+    expect(absent.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(absent.state).toBe("renders-empty");
+
+    // (e) MALFORMED values -> veto. This is the class the first attempt missed; `"false"` is
+    // the plainest case, since a truthiness-coerced field would read as "it gained content".
+    for (const bad of ["", 0, NaN, "false", "no", {}, []]) {
+      const det = report({ gainedContent: bad });
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty");
+    }
+  });
+
+  // =========================================================================
+  // ⛑ S426 — THE REGION'S CONTENT TEST AGREES WITH THE ANCESTOR THAT CONFERS CONTENT.
+  // g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render
+  //
+  // `nodesHaveRenderedContent` decided a region's content from the region's OWN nodes,
+  // but three arms of `elementCarriesContent` make an element content-bearing because of
+  // what it CONTAINS: `select` (an `<option>`), `picture`/`video`/`audio` (a `<source>`/
+  // `<img>` with `src`/`srcset`), `svg` (any element child). The fence lands at the each's
+  // SOURCE position, so the rows sit INSIDE that parent while the element that counts them
+  // sits OUTSIDE the region — and neither `option` nor `source` is in
+  // CONTENT_CANDIDATE_SELECTOR, nor is a `<circle>`. So the region measured EMPTY on a
+  // CORRECT render and D6 scored `renders-empty-with-data`: RED against the compiler.
+  //
+  // ⚠ THE FIX IS NOT A WIDER `CONTENT_CANDIDATE_SELECTOR` — that list also answers BODY
+  // scope, so adding `option`/`source` would make a bare `<option value="1">` count as a
+  // whole page's rendered content, re-opening the S419 one-definition-of-"not rendered"
+  // class from the other side. The BODY-SCOPE PINS at the end of this block are what keep
+  // that door shut, and they are the reason this block cannot be satisfied by the easy fix.
+  //
+  // This is a PREVENTATIVE fix: measured over 2,609 corpus `.scrml` files, every real
+  // `<each>`-inside-a-conferring-parent site emits options WITH TEXT (the text half already
+  // saves them) and `picture`/`video`/`audio`/`svg` are corpus-ZERO. Corpus absence is not
+  // design intent — value-only `<option>` rows and `<source>` rows are legitimate scrml,
+  // and a detector that reds a correct render is the cry-wolf shape pa-base §8 names.
+  // =========================================================================
+
+  // Every conferring definition, in BOTH directions. The QUIET direction (the region's
+  // nodes really do confer) is the defect; the FIRES direction is the control that the
+  // fix did not simply green the family.
+  //
+  // ⚑ EVERY `markup` HERE CARRIES CONTENT OUTSIDE THE REGION THAT ALREADY MAKES THE PARENT
+  // CONTENT-BEARING — the `<select>`'s placeholder option, the `<picture>`'s fallback
+  // `<img>`, a fallback `<source>`, a decorative `<circle>`. That is not incidental
+  // realism, it is what makes the FAIL-OPEN control below sharp, and it was MEASURED into
+  // existence: the first version of this table gave `<video>`/`<audio>`/`<svg>` nothing
+  // outside the region, so with an empty region the WHOLE BODY rendered nothing and D6
+  // fired at `body` scope — the control passed while proving nothing about region scope.
+  const CONFERRING_PARENTS = {
+    // `select` — the `<option>` rows carry a value and NO text, so the text half cannot
+    // save them. This is the shape a real `<select>` of ids/codes emits.
+    "an each of value-only <option>s inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>',
+      rows: '<option value="1"></option><option value="2"></option>',
+    },
+    // `picture` — responsive `<source>` rows.
+    "an each of <source srcset> inside a <picture>": {
+      markup: '<picture>{R}<img src="a.jpg" alt="a"></picture>',
+      rows: '<source srcset="a-480.webp"><source srcset="a-960.webp">',
+    },
+    "an each of <source src> inside a <video>": {
+      markup: '<video><source src="fallback.mp4">{R}</video>',
+      rows: '<source src="a.mp4">',
+    },
+    "an each of <source src> inside an <audio>": {
+      markup: '<audio><source src="fallback.mp3">{R}</audio>',
+      rows: '<source src="a.mp3">',
+    },
+    // ⚑ `svg` IS A THIRD INSTANCE THE GAP ENTRY DID NOT NAME — found by sweeping every
+    // arm of `elementCarriesContent` for a delegating definition, not by trusting the
+    // filed list. `case "svg"` is `el.children.length > 0`: any element child.
+    "an each of shapes inside an <svg>": {
+      markup: '<svg viewBox="0 0 10 10"><circle cx="9" cy="9" r="1"></circle>{R}</svg>',
+      rows: '<circle cx="1" cy="1" r="1"></circle><circle cx="5" cy="5" r="1"></circle>',
+    },
+
+    // ===== FIX ROUND — the parents with NO body-scope counterpart, deliberately. =====
+    // These four are why the table's invariant had to be restated (see
+    // CONSUMED_CHILD_SELECTOR): `elementCarriesContent` has no arm for `datalist`, `map` or
+    // `colgroup`, and counts no `<track>` for a `<video>` — and it MUST NOT, which the
+    // BODY-SCOPE pins at the end of this block enforce. The each still did its job.
+    //
+    // ⚑ Each of these markups carries its own CHROME, because the parent is not itself
+    // content-bearing: without chrome the body renders nothing, D6 answers at `body` scope
+    // and the fail-open control below would prove nothing about region scope. That is the
+    // same mistake this block already made once, recorded above.
+    "an each of <option>s inside a <datalist>": {
+      markup: '<h1>Search</h1><input list="cities"><datalist id="cities">{R}</datalist>',
+      rows: '<option value="Paris"></option><option value="Rome"></option>',
+    },
+    "an each of <area>s inside a <map>": {
+      markup: '<img src="a.png" usemap="#m"><map name="m">{R}</map>',
+      rows: '<area shape="rect" coords="0,0,1,1" href="/a">',
+    },
+    "an each of <col>s inside a <colgroup>": {
+      markup: "<table><colgroup>{R}</colgroup><tbody><tr><td>x</td></tr></tbody></table>",
+      rows: '<col span="2">',
+    },
+    "an each of <track>s inside a <video>": {
+      markup: '<video><source src="fallback.mp4">{R}</video>',
+      rows: '<track src="en.vtt" kind="captions"><track src="fr.vtt" kind="captions">',
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(CONFERRING_PARENTS)) {
+    test(`S426: D6 is QUIET when ${label} rendered rows`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      // The page really does render correctly — `hasRenderedContent` says so via the
+      // conferring parent. That is what makes a RED here a false positive and not a miss.
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      const det = seededDetect(filled);
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-clean");
+    });
+
+    // ⚑ THE MANDATORY FAIL-OPEN CONTROL, ONE PER FAMILY. The SAME markup with the SAME
+    // conferring parent and an EMPTY region must still fire. This is what separates the
+    // fix from asking `elementCarriesContent(parent)`: the `<select>`'s placeholder option,
+    // the `<picture>`'s fallback `<img>` and the `<video>`'s own `<source>` all sit OUTSIDE
+    // the region and already make the parent content-bearing BEFORE any seed — so a
+    // parent-is-content-bearing rule would score every one of these GREEN and D6 would go
+    // dark on exactly the render it exists to catch.
+    test(`S426 FAIL-OPEN CONTROL: D6 still FIRES when ${label} rendered nothing`, () => {
+      const empty = markup.replace("{R}", FENCE("a_1", ""));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${empty}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      const det = seededDetect(empty);
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.detail.emptyWithDataScope).toBe("each-regions");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // The BARE parent — nothing outside the region at all, so the region's rows are the only
+  // thing making the page render. These are the three shapes reproduced verbatim on
+  // `f8317399`, where all three printed `page correct: true | allLeavesEmpty: true`.
+  const BARE_CONFERRING_PARENTS = {
+    "<select> whose ONLY options are the each's value-only rows":
+      '<select>{R}</select>|<option value="1"></option>',
+    "<picture> whose ONLY sources are the each's rows":
+      "<picture>{R}</picture>|<source srcset=\"a-480.webp\">",
+    "<svg> whose ONLY shapes are the each's rows":
+      '<svg viewBox="0 0 10 10">{R}</svg>|<circle cx="1" cy="1" r="1"></circle>',
+  };
+  for (const [label, spec] of Object.entries(BARE_CONFERRING_PARENTS)) {
+    test(`S426: D6 is QUIET on the bare repro shape — ${label}`, () => {
+      const [markup, rows] = spec.split("|");
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      // The page renders — the parent is content-bearing ONLY because of these rows.
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      expect(seededDetect(filled).state).toBe("renders-clean");
+    });
+  }
+
+  // ⚑ THE NEAREST SIBLING OF THE FIX, AND THE DISPATCHING HYPOTHESIS WAS WRONG ABOUT IT.
+  // The fix was dispatched as "look at the region's PARENT (`node.parentNode`)". But
+  // `select` and `picture`/`video`/`audio` confer via `querySelector`, which is a
+  // DESCENDANT query — so the conferring element is an ANCESTOR and need not be the parent.
+  // A parent-only rule re-creates this same class one wrapper away, and all three of these
+  // scored RED on a correct render when measured against it. They are the regression pin on
+  // the ancestor walk: revert it to `parentElement`-only and every case here reds.
+  const CONFERRING_ANCESTORS_AT_DEPTH = {
+    "<select><optgroup> (an option group wraps the rows)":
+      '<select><optgroup label="Recent">{R}</optgroup></select>',
+    "<svg><g> (a transform group wraps the shapes)":
+      '<svg viewBox="0 0 10 10"><g transform="translate(1,1)">{R}</g></svg>',
+    "<video><div> (a wrapper element between the video and its sources)":
+      "<video><div>{R}</div></video>",
+  };
+  const DEPTH_ROWS = {
+    "<select><optgroup> (an option group wraps the rows)": '<option value="1"></option>',
+    "<svg><g> (a transform group wraps the shapes)": '<circle cx="1" cy="1" r="1"></circle>',
+    "<video><div> (a wrapper element between the video and its sources)": '<source src="a.mp4">',
+  };
+  for (const [label, markup] of Object.entries(CONFERRING_ANCESTORS_AT_DEPTH)) {
+    test(`S426: the conferring element may be an ANCESTOR, not the parent — ${label}`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", DEPTH_ROWS[label]));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      expect(seededDetect(filled).state).toBe("renders-clean");
+    });
+  }
+
+  // The MOUNT shape too — a nested each inside a `<select>` is a mount div, and its rows
+  // are the div's children. A fix that understands only the fence is half a fix (the same
+  // ruling the REGION_SHAPES table above makes for the base predicate).
+  test("S426: the mount shape confers too — a nested each of options inside a <select>", () => {
+    const markup = `<select><option value="">Choose…</option>${MOUNT("x_1", '<option value="1"></option>')}</select>`;
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+    expect(seededDetect(markup).state).toBe("renders-clean");
+  });
+
+  // The conferring rule mirrors each parent's OWN test and must not become "anything inside
+  // a conferring parent counts". Each of these sits inside a conferring parent and fails
+  // that parent's own conferring test, so each must still FIRE.
+  const CONFERS_NOTHING = {
+    "a <source> with NO src or srcset inside a <video>": {
+      markup: "<video>{R}</video>", rows: "<source>",
+    },
+    "a non-option element inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>', rows: "<span></span>",
+    },
+    // ⛑ S419 parity — the conferring descendant must be RENDERED. A hidden option is not
+    // content anywhere else in this file and must not become content here.
+    // ⚠ MEASURED, AND IT DOES NOT BITE THE S426 PREDICATE: this case stays green even when
+    // `confersContentToConsumingAncestor` is gutted to `return true`, because
+    // `nodesHaveRenderedContent` already skips an unrendered region node (via
+    // `isUnrenderedByOwnMarkup`) BEFORE asking the conferring question. So this pins the
+    // UPSTREAM guard, not the new predicate — recorded rather than left to imply a bite it
+    // does not have. It still earns its place: it reds if that skip is ever removed.
+    "an <option> hidden by markup inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>', rows: '<option hidden value="1"></option>',
+    },
+    // ⚑ `foreignObject` BOUNDS THE SVG RULE. Inside one, HTML content rules apply, so an
+    // empty `<li>` must not become content by way of the enclosing `<svg>`. It is bounded
+    // by a TAG test and not by `namespaceURI`, deliberately: happy-dom reports
+    // `http://www.w3.org/2000/svg` for an `<li>` inside a foreignObject (measured), so a
+    // namespace bound would silently not bind.
+    "an empty <li> inside a <foreignObject> inside an <svg>": {
+      markup: '<svg><circle cx="1" cy="1" r="1"></circle><foreignObject><ul>{R}</ul></foreignObject></svg>',
+      rows: "<li></li>",
+    },
+    // The plain control: the same empty row in a plain `<ul>` is the true positive that
+    // the whole detector exists for, and it is unaffected.
+    "an empty <li> in a plain <ul>": {
+      markup: "<h1>App</h1><ul>{R}</ul>", rows: "<li></li>",
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(CONFERS_NOTHING)) {
+    test(`S426: D6 still FIRES — ${label} confers nothing`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      const det = seededDetect(filled);
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // ⚑ THE ENUMERATION'S DISPOSALS, PINNED. The population was enumerated once by execution
+  // rather than discovered one instance at a time (six were found that way). Every shape
+  // below was measured, judged OUT of scope, and must therefore STILL FIRE — so the
+  // enumeration is a gate and not a paragraph. If a later round decides one of these really
+  // is a consumed row, the test that reds names it precisely.
+  const ENUMERATED_AND_DISPOSED = {
+    // Element children of a `<slot>` are shadow-DOM fallback content, and scrml emits no
+    // shadow roots. An each of empty `<span>`s is an empty render.
+    "empty <span>s inside a <slot>": { markup: "<h1>App</h1><slot>{R}</slot>", rows: "<span></span>" },
+    // `<iframe>`/`<embed>` element children are FALLBACK content, never rendered when the
+    // resource loads. Not consumed rows.
+    "fallback content inside an <iframe>": { markup: "<h1>App</h1><iframe>{R}</iframe>", rows: "<span></span>" },
+    // `<param>` is obsolete — removed from the HTML Living Standard.
+    "<param>s inside an <object>": {
+      markup: '<h1>App</h1><object data="a.swf">{R}</object>', rows: '<param name="q" value="1">',
+    },
+    // Head metadata is not page content in any sense. (`regionScopedEmptiness` only ever
+    // walks the BODY, so a real `<head>` each is out of reach regardless.)
+    "<link>/<meta> in the body": {
+      markup: "<h1>App</h1>{R}", rows: '<link rel="stylesheet" href="a.css"><meta name="x" content="1">',
+    },
+    // ⚠ THE ONE CONTESTABLE DISPOSAL, recorded as such. MathML that carries meaning carries
+    // TEXT (`<math><mn>2</mn>` measures green already, via the text half); an each producing
+    // only spacers renders nothing a reader could see. Revisit if a corpus app emits one.
+    "text-free <mspace> inside <math>": {
+      markup: "<h1>App</h1><math>{R}</math>", rows: '<mspace width="1em"></mspace>',
+    },
+    // MEASURED UNREACHABLE, and this one is a parser fact, not a judgement: a `<col>` with no
+    // `<colgroup>` is HOISTED OUT of the table by the HTML parser, leaving the fence genuinely
+    // empty — so the red is CORRECT. `<colgroup><col>` is covered above; this is not.
+    "a <col> inside a <table> with NO <colgroup>": {
+      markup: "<table>{R}<tbody><tr><td>x</td></tr></tbody></table>", rows: '<col span="2">',
+    },
+    // A standalone `<optgroup>` is invalid HTML no browser renders. Inside a `<select>` or
+    // `<datalist>` it is covered TRANSITIVELY by the ancestor walk (pinned separately).
+    "an <option> inside a standalone <optgroup>": {
+      markup: '<h1>App</h1><optgroup label="g">{R}</optgroup>', rows: '<option value="1"></option>',
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(ENUMERATED_AND_DISPOSED)) {
+    test(`S426 enumeration: OUT of scope, still FIRES — ${label}`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      expect(seededDetect(filled).state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // `<optgroup>` inside a `<datalist>`, the transitive case the disposal above relies on.
+  test("S426 enumeration: <optgroup> is covered TRANSITIVELY inside a <datalist>", () => {
+    const markup = `<h1>Search</h1><datalist id="c"><optgroup label="g">${FENCE("a_1", '<option value="1"></option>')}</optgroup></datalist>`;
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+    expect(seededDetect(markup).state).toBe("renders-clean");
+  });
+
+  // ⛑ FIX ROUND (finding 2) — A HOSTILE TAG NAME MADE THE DETECTOR **THROW** INSTEAD OF
+  // CLASSIFY, which this file's header forbids outright ("these detectors CLASSIFY a failure;
+  // they NEVER hide one"). The table was an object literal, so the tag lookup read through
+  // `Object.prototype` and handed a truthy NON-selector to `matches()`/`querySelectorAll()`.
+  // MEASURED before the fix: `<constructor>` threw `'function Object() { [native code] }' is
+  // not a valid selector` from `matches`, and `<__proto__>` threw `'[object Object]'` from
+  // `querySelectorAll` — a SECOND instance the review did not name, and from a different call
+  // site. Exactly those two of the eight below, because the lookup lowercases the tag first,
+  // so only the all-lowercase members of `Object.prototype` survive as keys.
+  // The table is a `Map` now, which has no prototype chain to fall through: immune by
+  // construction rather than by enumerating the hostile names. This test proves the class is
+  // closed, and it is the one assertion here that a `Object.hasOwn` patch would also pass —
+  // which is fine; what must never regress is that NONE of these throws.
+  test("S426 finding 2: a prototype-colliding tag name CLASSIFIES, never throws", () => {
+    for (const tag of [
+      "constructor", "__proto__", "toString", "valueOf",
+      "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "prototype",
+    ]) {
+      const markup = `<h1>App</h1><${tag}>${FENCE("a_1", "<b></b>")}</${tag}>`;
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      // The assertion is that this RETURNS rather than throwing...
+      const verdict = regionScopedEmptiness(body);
+      // ...and that it returns the CORRECT answer: `<b></b>` is an empty row under a tag that
+      // consumes nothing, so the region is empty and D6 fires. A `return false` guard that
+      // accidentally suppressed the whole region would pass a throws-check and fail this.
+      expect(verdict.allLeavesEmpty).toBe(true);
+      expect(seededDetect(markup).state).toBe("renders-empty-with-data");
+    }
+  });
+
+  // ⚑ THE PINS THAT FORBID THE EASY FIX. Widening `CONTENT_CANDIDATE_SELECTOR` with
+  // `option` / `source` would green every QUIET case above AND make each of these bodies
+  // count as a rendered page, which is the S419 class
+  // (g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not) from the
+  // other side. S426 changes REGION scope only; body scope is byte-for-byte unchanged.
+  const BODY_SCOPE_RENDERS_NOTHING = {
+    "a bare value-only <option>": '<option value="1"></option>',
+    "a bare <source src>": '<source src="a.mp4">',
+    "a bare <source srcset>": '<source srcset="a-480.webp">',
+    "an <option> alone inside an empty-rendering wrapper": '<div><option value="1"></option></div>',
+    "a select with no options (the seeded options loop rendered nothing)": "<select></select>",
+    "a src-less video holding a src-less source": "<video><source></video>",
+    // ⚑ FIX ROUND — THE PIN THAT STOPS THE NEXT PERSON "FIXING" DATALIST THE WRONG WAY.
+    // A `<datalist>` is an autocomplete SOURCE, not page content: a page whose entire output
+    // is a datalist of options shows the reader nothing, so this MUST stay false. That is
+    // precisely why datalist gets no `CONTENT_CANDIDATE_SELECTOR` entry and no
+    // `elementCarriesContent` arm, and why the region-scope question had to be restated as
+    // "did the each produce the rows this parent consumes?" rather than "does this node make
+    // its parent content-bearing?". Both answers are right at their own scope.
+    "a datalist holding options (an autocomplete source, not page content)":
+      '<datalist id="cities"><option value="Paris"></option><option value="Rome"></option></datalist>',
+    "a map holding areas (referenced by usemap, renders nothing itself)":
+      '<map name="m"><area shape="rect" coords="0,0,1,1" href="/a"></map>',
+    "a colgroup holding cols (layout only, no content of its own)":
+      '<table><colgroup><col span="2"></colgroup></table>',
+    "a video whose only child is a track (a subtitle file is not media)":
+      '<video><track src="en.vtt" kind="captions"></video>',
+    "a bare area": '<area shape="rect" coords="0,0,1,1" href="/a">',
+    "a bare col": '<col span="2">',
+    "a bare track": '<track src="en.vtt" kind="captions">',
+  };
+  for (const [label, markup] of Object.entries(BODY_SCOPE_RENDERS_NOTHING)) {
+    test(`S426: BODY scope unchanged — ${label} still renders nothing`, () => {
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      expect(hasRenderedContent(body)).toBe(false);
+      // And therefore a seeded cell with this body is still the RED body-scope verdict.
+      const det = seededDetect(markup);
+      expect(det.detail.emptyWithDataScope).toBe("body");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
 });
 
 // =============================================================================
@@ -969,15 +1394,49 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
   // three KNOWN fixture bugs (derived-cell / no-such-cell), which are tabled in
   // e2e-render-map.test.js and belong to a different arc.
   test("the harness pushes a consoleError for a missing side-channel, but not for a fixture-bug reason", () => {
-    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    const raw = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // ⛑⛑ S424 — READ THIS BEFORE TRUSTING THIS TEST. IT IS A SHAPE CHECK, NOT A BEHAVIOUR
+    // GATE, AND IT CANNOT BECOME ONE.
+    //
+    // History, because it took three attempts to state honestly. The anchor
+    // `w.reason === "set-threw"` used to resolve to the inlined guard; when the harness
+    // DOCUMENTED both broken rounds in a JSDoc block, the first occurrence moved into PROSE,
+    // and the ±1400/+400 window around it is comment text that mentions `derived-cell` /
+    // `no-such-cell` because the carve-out doc names them. So all three assertions passed on
+    // the explanation of the code rather than the code — the same hollow-gate class the
+    // sibling test below had just fixed, re-created one level away by the comment that fixed
+    // it.
+    //
+    // ⚑ The first repair — stripping comments and re-anchoring on `const threw =
+    // writes.filter(` — DID NOT FIX IT EITHER, and the mutation proof is why: gutting
+    // `seedThrewNotice` to `return null` leaves every anchored string intact, so this test
+    // stayed green 1/0 against a function that can never push a notice. **A source-text
+    // assertion cannot detect a gutted function; there is no anchor that makes it able to.**
+    //
+    // ⚑ THE REAL GATE IS BEHAVIOURAL AND IT IS STRONG: the same mutation reds **13** tests —
+    // the `LOUDNESS_CASES` rows and the whole `S424 item 3` describe, all of which call the
+    // real exported `seedThrewNotice` / `runDetectors`. Measured, not assumed. This test is
+    // retained only for what it can honestly assert: that the carve-out is achieved BY
+    // CONSTRUCTION rather than by special-casing the two fixture-bug reasons in code. If it
+    // ever disagrees with the behavioural tests, believe them.
+    //
+    // Comments are stripped first regardless, so a future doc edit cannot silently move the
+    // anchors again.
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
     const noChannel = src.slice(src.indexOf("no _scrml_reactive_set side-channel"));
     expect(noChannel.slice(0, 400)).toContain("obs.consoleErrors.push");
-    // set-threw is an emit/harness failure and IS raised...
+    // set-threw is an emit/harness failure and IS raised — anchored on the EXECUTABLE site
+    // (the counting filter), not on a string any comment could also contain.
+    expect(src).toContain('const threw = writes.filter(');
     expect(src).toContain('w.reason === "set-threw"');
-    // ... while the fixture-bug reasons are deliberately not.
-    const guard = src.slice(src.indexOf('w.reason === "set-threw"') - 1400, src.indexOf('w.reason === "set-threw"') + 400);
-    expect(guard).toContain("derived-cell");
-    expect(guard).toContain("no-such-cell");
+    // ... while the fixture-bug reasons are deliberately not raised. The carve-out now holds
+    // BY CONSTRUCTION (neither reason can make `threw > 0`), so assert that the counting site
+    // is the only gate and that the two reasons are not being special-cased in code.
+    const guard = src.slice(src.indexOf('const threw = writes.filter(') - 600, src.indexOf('const threw = writes.filter(') + 600);
+    expect(guard).not.toContain('reason === "derived-cell"');
+    expect(guard).not.toContain('reason === "no-such-cell"');
   });
 
   // ⛑ S423 fix round 2 (finding 2) — the guard required EVERY write to be `set-threw`,
@@ -990,28 +1449,67 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     "MIXED: one threw, one names no such cell": [{ reason: "set-threw", wrote: false }, { reason: "no-such-cell", wrote: false }],
     "MIXED: one threw, one is a derived cell": [{ reason: "derived-cell", wrote: false }, { reason: "set-threw", wrote: false }],
     "a single throwing write": [{ reason: "set-threw", wrote: false }],
+    // ⛑ S424 item 3 — MOVED UP FROM QUIET_CASES, and this row IS the gap. A throw is a
+    // harness/emit failure on its own terms; a sibling key landing says nothing about it.
+    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
+    "the list key throws, TWO unrelated keys land": [
+      { reason: "set-threw", wrote: false },
+      { reason: "written", wrote: true },
+      { reason: "written", wrote: true },
+    ],
+    "a throw, a landed write AND a tabled fixture bug together": [
+      { reason: "set-threw", wrote: false },
+      { reason: "written", wrote: true },
+      { reason: "derived-cell", wrote: false },
+    ],
   };
   const QUIET_CASES = {
     "the known fixture bugs alone": [{ reason: "derived-cell", wrote: false }, { reason: "no-such-cell", wrote: false }],
-    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
     "everything written": [{ reason: "written", wrote: true }],
+    // The carve-out must survive a landed sibling too — it is not conditional on delivery.
+    "a tabled fixture bug alongside a write that LANDED": [
+      { reason: "derived-cell", wrote: false },
+      { reason: "written", wrote: true },
+    ],
+    "no writes at all": [],
   };
-  // The production condition, mirrored from render-harness.js. The tests below pin its
-  // MEANING; the source assertion above pins that the harness still carries it.
-  const shouldBeLoud = (writes) =>
-    writes.length > 0 && !writes.some((w) => w.wrote) && writes.some((w) => w.reason === "set-threw");
+  // ⛑ S424 item 3 — THIS USED TO BE A MIRROR of the production condition, re-typed into
+  // the test file. A mirror is not a gate: it can be green while the harness says the
+  // opposite, which is how rounds 1 and 2 of this predicate both shipped wrong. It now
+  // calls the REAL exported `seedThrewNotice`, so every case below is a bite on production.
+  const shouldBeLoud = (writes) => seedThrewNotice({ writes }) !== null;
   for (const [label, writes] of Object.entries(LOUDNESS_CASES)) {
     test(`F4 loudness FIRES: ${label}`, () => expect(shouldBeLoud(writes)).toBe(true));
   }
   for (const [label, writes] of Object.entries(QUIET_CASES)) {
     test(`F4 loudness stays quiet: ${label}`, () => expect(shouldBeLoud(writes)).toBe(false));
   }
-  test("finding 2: the harness's own condition is the not-delivered AND some-threw shape", () => {
-    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
-    // The `every(...)` form is the bug; it must be gone.
+  test("the harness's loudness condition is neither of the two forms that shipped wrong", () => {
+    const raw = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // ⛑ S424 item 3 — ASSERT OVER CODE, NOT PROSE. This read the whole file, so the moment
+    // the harness DOCUMENTED the two broken forms in a comment (so a fourth round would not
+    // re-derive them), the "must be gone" assertions fired on the explanation of the bug
+    // rather than the bug. A gate that forbids naming a defect in a comment is not
+    // measuring the code. Comments are stripped first; the assertions below are unchanged.
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    // Round 1's `every(...)` form is a bug; it must stay gone.
     expect(src).not.toContain('writes.every((w) => w.reason === "set-threw")');
-    expect(src).toContain("!seedReport.writes.some((w) => w.wrote)");
-    expect(src).toContain('seedReport.writes.some((w) => w.reason === "set-threw")');
+    // Round 2's "NOTHING was delivered" conjunct is ALSO a bug (it silenced a genuine throw
+    // whenever a sibling key landed) and must likewise stay gone.
+    // ⛑ S424 — pinned to the spelling that can actually EXIST. This named
+    // `seedReport.writes`, but the extraction moved the predicate onto a local `const
+    // writes`, so the assertion guarded a form the code can no longer be written in: a
+    // round-4 regression re-adding the conjunct in its natural shape
+    // (`!writes.some((w) => w.wrote) &&`) would have passed it unchanged. Asserting on the
+    // prefix-free form makes the string gate match the code that exists.
+    expect(src).not.toContain("!writes.some((w) => w.wrote)");
+    expect(src).not.toContain("!seedReport.writes.some((w) => w.wrote)");
+    // ...and the guard must still be WIRED, not merely deleted: the call site pushes
+    // whatever the predicate returns into consoleErrors, which is what D2 reddens on.
+    expect(src).toContain("const threwNotice = seedThrewNotice(seedReport);");
+    expect(src).toContain("if (threwNotice) obs.consoleErrors.push(threwNotice);");
   });
 
   // ⛑ S423 fix round 2 (finding 3) — an UNMEASURED gain signal must not resolve to the
@@ -1088,5 +1586,162 @@ describe("D6 — trailing body-scope cases", () => {
     });
     expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-clean");
+  });
+});
+
+/**
+ * ⛑ S424 item 3 — a genuine `set-threw` was SILENT whenever any OTHER seed key landed.
+ *
+ * Own describe block on purpose (merge hygiene: a sibling branch is appending to the D6
+ * block above). Every test here drives the REAL exported `seedThrewNotice` / `runDetectors`,
+ * never a re-typed mirror of either.
+ */
+describe("S424 item 3 — a set-threw is loud even when a sibling seed key landed", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  // The partial-delivery shape: the key DRIVING the list threw, an unrelated key landed.
+  const PARTIAL = [
+    { name: "items", reason: "set-threw", namespaced: true, wrote: false },
+    { name: "title", reason: "written", namespaced: true, wrote: true },
+  ];
+
+  test("the notice FIRES on a partial delivery (the round-2 bug: it used to be null)", () => {
+    expect(seedThrewNotice({ writes: PARTIAL })).not.toBeNull();
+  });
+
+  test("the notice states the REAL counts and never claims 'none landed' when some did", () => {
+    const msg = seedThrewNotice({ writes: PARTIAL });
+    expect(msg).toContain("1 of 2 seed write(s) threw");
+    expect(msg).toContain("1 landed");
+    // The round-2 wording was only ever true in the all-threw case. Asserting its ABSENCE
+    // is the half that stops a "fix" that fires but still lies about what happened.
+    expect(msg).not.toContain("none landed");
+  });
+
+  test("the all-threw wording is PRESERVED verbatim — this fix widens the gate, it does not move it", () => {
+    const msg = seedThrewNotice({
+      writes: [
+        { reason: "set-threw", wrote: false },
+        { reason: "set-threw", wrote: false },
+      ],
+    });
+    expect(msg).toBe(
+      "[seed-bridge] 2 of 2 seed write(s) threw and none landed — the seed cannot be live",
+    );
+  });
+
+  test("a malformed or absent report is tolerated, not thrown on", () => {
+    expect(seedThrewNotice(null)).toBeNull();
+    expect(seedThrewNotice(undefined)).toBeNull();
+    expect(seedThrewNotice({})).toBeNull();
+    expect(seedThrewNotice({ writes: null })).toBeNull();
+    expect(seedThrewNotice({ writes: [null, undefined] })).toBeNull();
+  });
+
+  // ---- QUESTION B, ANSWERED BY MEASUREMENT: loud, and NO veto. ----
+  //
+  // These cases are the evidence, pinned so the answer cannot silently rot. The decisive
+  // fact is WHERE the short-circuit happens: in `runDetectors`'s STATE-RESOLUTION block, the
+  // `consoleErrors.length > 0` arm `return`s `compiles-but-throws` BEFORE the
+  // `smells.includes("S-EMPTY-WITH-DATA")` arm below it is ever reached. So once the notice
+  // exists, the `renders-empty-with-data` verdict is already displaced; a veto adds nothing
+  // to the STATE and only deletes the S-EMPTY-WITH-DATA smell, which is real recorded
+  // evidence if the throw turns out to be a broken emitted accessor (a COMPILER defect).
+  //
+  // ⚠ NOT the D2 SMELL branch, which is the natural place to look and says the opposite:
+  // it pushes D2-CONSOLE-ERROR and deliberately FALLS THROUGH ("Continue scanning for smells
+  // too ... but the state is already the throws tier"), so D6's smell is still COMPUTED and
+  // recorded. That is exactly why the veto is a no-op on the verdict yet still lossy on the
+  // record — the smell is gathered in one place and resolved in another.
+  const partialObs = (consoleErrors) => ({
+    compileErrors: [],
+    throwMessage: null,
+    consoleErrors,
+    document: { body: (() => { const b = document.createElement("body"); b.innerHTML = ""; return b; })() },
+    seeded: true,
+    seedReport: {
+      chunks: 1, writes: PARTIAL, domChanged: false,
+      gainedContent: false, observable: false, errors: ["[seed-set items] boom"],
+    },
+    serverDependent: false,
+  });
+
+  test("BEFORE (the gap): silent + a landed sibling => renders-empty-with-data, blaming the compiler", () => {
+    const det = runDetectors(partialObs([]));
+    expect(det.state).toBe("renders-empty-with-data");
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+  });
+
+  test("AFTER: the notice displaces that verdict with compiles-but-throws, which is RED and truthful", () => {
+    const det = runDetectors(partialObs([seedThrewNotice({ writes: PARTIAL })]));
+    expect(det.state).toBe("compiles-but-throws");
+    expect(det.smells).toContain("D2-CONSOLE-ERROR");
+    expect(["renders-clean", "renders-empty", "needs-server"]).not.toContain(det.state);
+    // The reason travels WITH the cell, so the baseline records why (detail is kept for RED).
+    expect(JSON.stringify(det.detail)).toContain("seed write(s) threw");
+  });
+
+  test("question B: the D6 smell SURVIVES as corroborating evidence — a veto would delete it", () => {
+    const notice = seedThrewNotice({ writes: PARTIAL });
+    // Guard the premise: a null notice would still make `consoleErrors` length-1 and fire
+    // D2, so this test would pass for the WRONG reason on the unfixed harness.
+    expect(notice).not.toBeNull();
+    const det = runDetectors(partialObs([notice]));
+    // Both facts recorded at once: the seed write threw AND the render came back empty.
+    // If the throw is a compiler defect, this second fact is the corroboration; vetoing
+    // D6 would hide exactly that. Loud-without-veto keeps both.
+    expect(det.smells).toEqual(expect.arrayContaining(["D2-CONSOLE-ERROR", "S-EMPTY-WITH-DATA"]));
+  });
+
+  test("question B: a VETO WITHOUT the notice would be FAIL-OPEN — it scores the cell GREEN", () => {
+    // Simulating the veto as any implementation must amount to: seedWasDelivered() false.
+    const vetoed = partialObs([]);
+    vetoed.seedReport = { ...vetoed.seedReport, writes: PARTIAL.map((w) => ({ ...w, wrote: false })) };
+    const det = runDetectors(vetoed);
+    expect(det.state).toBe("renders-empty");
+    expect(["renders-clean", "renders-empty", "needs-server"]).toContain(det.state);
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    // ^ This is why the loudness is the load-bearing half and the veto is not merely
+    //   unnecessary but hazardous: the two are separable in code, and the veto alone
+    //   turns a throwing seed into a green cell.
+  });
+
+  // ⛑ S424 — THE LOUDNESS WAS NOT ACTUALLY TERMINAL, and this is the case that proved it.
+  // Routing the notice through `consoleErrors` does not make it loud everywhere: the
+  // `needs-server` arm is a GREEN tier, `generate-baseline.js` strips `detail` from green
+  // cells, and the `[seed-bridge]` prefix matches neither `hasCodegenError` nor
+  // `isServerAbsenceMessage` — so a server-dependent seeded app swallowed the notice and
+  // the throw went silent again, by a different door than the one item 3 closed. Surfaced
+  // by the adversarial pass on this very branch and CONFIRMED BY EXECUTION before the fix
+  // (state `needs-server`, smells D2 + S-EMPTY-WITH-DATA + NEEDS-SERVER — green).
+  test("a seed-bridge failure disqualifies the needs-server GREEN carve-out", () => {
+    const notice = seedThrewNotice({ writes: PARTIAL });
+    expect(notice).not.toBeNull(); // guard the premise, as the sibling case does
+
+    const serverAbsence = "Cannot read properties of null (reading 'rows')";
+    const obs = partialObs([serverAbsence, notice]);
+    obs.serverDependent = true;
+
+    const det = runDetectors(obs);
+    // It must NOT reach the green tier while a harness seed failure is on the record.
+    expect(det.state).not.toBe("needs-server");
+    expect(det.smells).not.toContain("NEEDS-SERVER");
+    expect(det.state).toBe("compiles-but-throws");
+    // And the reason still travels with the now-RED cell.
+    expect(JSON.stringify(det.detail)).toContain("seed write(s) threw");
+
+    // CONTROL — without the seed failure the carve-out still works. This is the half that
+    // makes the fix narrow: `needs-server` exists for a real harness-realism reason (S203
+    // b+c) and must keep working; only the seed-failure case is disqualified.
+    const clean = partialObs([serverAbsence]);
+    clean.serverDependent = true;
+    clean.seedReport = { ...clean.seedReport, writes: [{ name: "b", reason: "written", wrote: true }] };
+    expect(runDetectors(clean).state).toBe("needs-server");
   });
 });

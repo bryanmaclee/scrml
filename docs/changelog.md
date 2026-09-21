@@ -2,6 +2,151 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S426 — 2026-09-20 (peter · P-Tech1)
+
+**The floor drained 7 → 0, the lead item's own gap entry turned out to be wrong in three places, and
+the fix's stated invariant was wrong rather than incomplete.** Boot inherited a count of 5 OWED; the
+probe measured **7**, because the two post-wrap PRs of the previous session (#1005, #1006) are
+themselves owed — a wrap cannot count the landings that come after it. Two code-bearing (#1001,
+#1002), five carve-outs by path, and every carve-out **probed by running the gate that governs the
+artifact it changed** rather than stamped.
+
+**The floor pass found a THIRD door on "a seed-bridge failure must be LOUD", and the second door was
+my own fix from the previous session.** #1002 added the `hasSeedBridgeFailure` disqualifier to the
+state-resolution `needs-server` return; the **D1 mount-throw** `needs-server` return has none and
+returns *before* D2 ever runs. PA-reproduced: a seeded, server-dependent app whose mount throws a
+server-absence-shaped `TypeError`, carrying a thrown seed write and the `[seed-bridge]` notice, scores
+**green** with the seed failure recorded nowhere — and green cells have `detail` stripped anyway. Two
+controls pinned it. This is **not** the residual #1002 deferred, which lives inside a block this path
+never reaches. Widened the existing entry as a fifth path rather than forking it, because that entry
+exists precisely because *"fixing one site of a class and not the others is what re-opened it twice"*.
+**The convergent fix enumerates every `return` that yields a GREEN state.**
+
+**Three corrections to my own S424 gap entry, all by measurement.** (1) A **third** delegating
+definition it never named — `svg` counts any element child — found because the entry's own
+sibling-check paragraph told the next reader to *re-derive the set rather than trust this sentence*,
+which is that instruction working rather than failing. (2) **`status-picker.scrml` is not a site at
+all**: no `<select>` element, its one occurrence is inside a `//` comment, and its `<each>` emits
+`<button>` rows — a text-level grep produced that citation, which is **Rule 7's own class committed
+inside a gap entry**. (3) **The real-world trigger population is ZERO** — across 2,609 corpus files,
+`picture`/`video`/`audio`/`svg` have no `<each>` sites and every real `<each>`-inside-`<select>` emits
+options carrying text, which the text half already saves. **So the arc-ordering constraint #1004 made
+binding is dissolved**: growing the seeded set does not make the false positive live, the two arcs are
+independent, and the D6 fix is **preventative** — worth landing on cry-wolf and corpus-is-artifact
+grounds, never on corpus-zero grounds in either direction.
+
+**The dispatch overturned the brief's mechanism, and then the pre-land pass overturned the fix's
+invariant.** The brief specified `node.parentNode`; `select` and the media parents confer via
+`querySelector`, a *descendant* query, so the conferring element is an **ancestor** — and a
+parent-only rule would have **missed the plain mount shape entirely**, since a nested each's rows are
+the mount div's children and the `<select>` is their grandparent. It would have fixed the fence shape,
+left the mount shape red, and looked done. Then the mandatory pre-land pass found **`<datalist>`** as a
+sixth instance that *could not be fixed by the rule the first round stated*: `elementCarriesContent`
+has no datalist arm, and a datalist-only body correctly renders nothing. The invariant had been read
+off a sample of five in which two different questions coincide. It is now **"is this node the kind of
+child its ancestor CONSUMES — did the each produce the rows that parent exists to hold?"**, with six
+body-scope pins forbidding the wrong fix.
+
+**The convergent move: the population was enumerated ONCE instead of patched a seventh time.** 22
+shapes measured against a stated search — every HTML parent whose content model is wholly element
+children that carry no text of their own and are not content candidates, because a text-bearing child
+is already saved by the text half and a candidate child by the candidate half. **Seven covered**,
+including `video`/`audio` > `track`, which neither the brief nor the review had named and which is the
+cleanest evidence the reframing generalizes: a subtitle track must not make a src-less video
+"content", yet an each over subtitle languages did produce its rows. The rest disposed with reasons and
+pinned by tests, including one flagged contestable (`math > mspace`) and one that is a parser fact
+rather than a judgement (`table > col` without `colgroup` is measured **unreachable** — the parser
+hoists the `col` out, so the red is correct). Recorded because **a mis-specified measurement is not
+evidence**: the first enumeration pass used a probe asking only *"is the region reported empty?"* and
+flagged six shapes that are not instances at all, since an each of empty `<span>`s in a `<slot>` **is**
+an empty render.
+
+**A detector that crashed instead of classifying, twice.** Reading the selector table through
+`Object.prototype` meant `<constructor>` threw from `matches()` and `<__proto__>` threw from
+`querySelectorAll()` — exactly those two of eight probed, because the lookup lowercases the tag first,
+so only the all-lowercase members of `Object.prototype` survive as keys. Fixed with a `Map`, immune by
+construction rather than by enumerating hostile names.
+
+**The efficiency finding was declined with numbers.** Cost is linear in rows and essentially flat in
+depth (500 rows at depth 5 = 18.1 ms, at depth 30 = 19.8 ms), so the ancestor walk is not the cost and
+hoisting it would not remove the per-row `querySelectorAll`.
+
+**Also established, and it outlives this arc:** `.claude/maps/test.map.md` says this tier's gate is
+`tracking` (non-blocking). That is **wrong, not stale** — no workflow mentions the tier and the
+source-controlled pre-commit globs `compiler/tests/*.test.js`, which does not descend into the
+subdirectory. **No gate runs this tier at all**, so its now-216 tests pin nothing until someone runs
+them by hand; this is the same standing item as the S420 carry-forward "e2e-render-map CI job".
+Separately, `tracking`'s five red names were re-measured per PR against main's own run (byte-identical)
+and are **already root-caused** by `g-tracking-job-red-on-main-and-nobody-reads-it`, whose S391 audit
+measured them passing locally in under four seconds against ~10.4 s each in CI.
+
+## S424 — 2026-09-20 (peter · P-Tech1)
+
+**The review floor drained 6 → 0 and convicted my own PR five times, including a red against a correct
+render.** Six owed at boot, classified with `review-debt.ts`'s own `CODE_BEARING_RE` against
+`gh pr view <n> --json files`: one code-bearing (#993), five carve-outs by path, every carve-out probed
+by execution anyway. The S423 hand-off predicted #993 was *"the one least likely to return anything"*
+after four prior adversarial passes — **the prediction was wrong, and the reason is structural: a
+pre-land pass reviews a fix ROUND against the finding that produced it, while the floor pass reviews
+the LANDED predicate against the language.**
+
+**NEW HIGH — D6 reds a correct render.** `nodesHaveRenderedContent` asks `elementCarriesContent` only
+of a region's own nodes, but `select` is defined as *"has an `<option>"`* and `picture`/`video`/`audio`
+by their `<source>` children, while the each's fence sits INSIDE that parent — so the options are in
+the region and the element that counts them is outside it. Reproduced by execution on both shapes.
+Zero cells move today, but **three corpus files already put an `<each>` inside a `<select>`** (the
+trucking flagship's pickers and `load-new`), so it goes live the moment the seeded set grows.
+
+**`E-ASSIGN-004` is NOT on main, and two consecutive hand-offs said it was.** Verified by two
+independent observables: zero occurrences anywhere in `compiler/src/`, and `const x = 1; x = 2`
+compiling at exit 0 with zero diagnostics — row 1 of bryan's own S422 matrix that the ruling says SHALL
+fire. The build is entirely inside #996, open with a red gate. `[3395]`'s class a second time: a wrap
+drafted before the work it describes finished, so its closing state is a prediction formatted as a
+record.
+
+**Two fixes landed on the D6 seed path, and both took more attempts than they looked like they would.**
+Item 1 (#1001) went through three forms — the gap's own prescribed one-liner would have redded an
+existing test, the reviewer's proposed remedy broke the same test, and my corrected version **closed
+`undefined` and left the class** (`0`, `""`, `NaN` and the string `"false"` all still fired). The
+landed predicate states the invariant instead of enumerating exceptions: a MEASURED `false` and nothing
+else. Item 3 (#1002) was dispatched to a worktree-isolated agent and landed by a real 3-way merge, not
+a wholesale pull, because `detector-validation.test.js` had an intervening write from #1001 since the
+agent's base.
+
+**The same class appeared three times in one session, and the third instance was the fix to the
+second.** The item-3 diff hollowed out a neighbouring source-text gate **with its own comment** — the
+anchor moved into a new JSDoc block, and gutting the function left that test green 1/0. That was the
+class the agent had just fixed for a sibling test. **Then my repair of it did not work either**:
+re-anchoring on the counting filter left the same mutation green, because anchored strings survive a
+gutted body. There is no anchor that makes a source-text assertion detect behaviour — so it is now
+documented as a shape check, with the real gate named (the same mutation reds 13 behavioural tests).
+
+**And item 3's fix did not initially meet its own requirement.** Routing the notice through
+`consoleErrors` does not make it loud for server-dependent cells, where `needs-server` is a GREEN tier
+that strips `detail` — the gate read as closed while open by a different door than the one it shut.
+Confirmed by execution before the fix; now disqualified, deliberately narrowly.
+
+Board **HIGH 110 → 111 · MED 263 → 264**. `tracking` was red on every PR and re-measured **per PR**
+against main's own run — byte-identical five names every time. ⛔ The merge was blocked mid-session by
+the auto-mode classifier (*Merge Without Review*) — the S407/S421 class recurring, CONFIGURED-NOT-TO
+rather than CANNOT. S425-bryan booted mid-session as successor and stayed off the footprint.
+
+**Post-wrap addendum — five PRs, not three, and two landed after the wrap.** #1003 was the wrap itself;
+**#1004** then promoted the D6 parent-content HIGH to the session's lead pickup item after Peter scoped
+it post-wrap (*"take the new HIGH next session"*), and flipped the ordering between the two D6 arcs from
+advisory to binding: the seed-fixtures arc must run **behind** the HIGH, because growing the seeded set
+is the only reason that false positive is latent rather than live. ⚑ **The stale-state-claim class this
+session spent the day filing against #997 then caught the session's own wrap one turn later** — the
+pickup said the HIGH *"wants a decision"* after the decision had been made. A wrap's closing state is a
+prediction formatted as a record whenever anything lands after it. Review floor re-opens at **5 OWED**,
+all mine.
+
+⚑ **A structural wrinkle worth knowing, not a bug:** `state.ts --check` goes red the instant a wrap PR
+merges, because the `@generated:recent-sessions` index derives from `wrap(s…)` commits — so the wrap
+commit cannot exist when the wrap itself runs `--write`. It is cleared by the next landing (historically
+the scheduled maps regen). Not filed as a gap: it self-heals, and a standing entry would read as
+permanently open for a condition that resolves itself.
+
 ## S421 — 2026-09-18 (bryan · XPS-8950)
 
 **A PR-backlog drain: 26 open PRs, every one of them bryan's, oldest 39 days — taken to 6.** The docs
@@ -7386,6 +7531,36 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S423 (2026-09-19, peter · Windows) — the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes
+
+**The arc.** `S-EMPTY-WITH-DATA` (D6) answers *"data was seeded and the render showed nothing"* — the board-bug class the whole e2e-render-map tier was built for — and **it had never fired on any corpus cell**. Limb 1 (#978, S420) made the seed reach the app's chunk-scoped cell; D6 stayed dark anyway because it asked its emptiness question of the whole `<body>`, and page chrome answers it. It now also asks the question of the `<each>` render regions, in both emission shapes, and fires when every **leaf** region rendered nothing **and** the render **gained** no content across the seed write. `examples/25-triage-board.scrml#populated` — seed written, DOM moved, three task lists at zero rows — now scores `renders-empty-with-data` instead of `renders-clean` off 52 characters of column headings. The HIGH resolves.
+
+**Four fix directions were wrong, and every one was falsified by measurement rather than by argument** — the gap's own stated direction, the dispatch brief's sharpening of it, and two PA corrections sent as instructions. The brief asserted the runtime *"consumes"* the mount slot when rows render: false, it is the nested each's container, and `03-contact-book` shows zero slots because its each is top-level (a comment fence — a different emission shape entirely). "Fire on any empty mount" reds a **correct** board once the fixture arc lands. "Fire when the render did not move" is wrong in both directions, because the subject's render moves by *shrinking to nothing*. Three of the four were caught by the dispatched agent pushing back with numbers — which the brief explicitly licensed it to do.
+
+**Four adversarial passes, fourteen findings, three fix rounds, and zero corpus cells moved at any round.** Round 1 returned five (two false-positive classes, a broken S419 invariant, a fail-open path, a quadratic scan), three of them reproduced PA-side before being routed. Round 2 found a lossy `Map<node, region>` misreporting containers as leaves — **D6 went dark, the class re-opened one level deeper**. Round 3 found the *same two classes* by different routes, which is the signal that a fix is generating positions rather than closing a class: both were then applied to **every** site, with the sibling drop sites audited rather than assumed. Round 4 fuzzed **3000 random nestings** against a brute-force oracle written from the definition, found **no correctness bug in the leaf/ownership core**, and returned three latent plumbing paths. Every defect found across all four rounds lived in the new machinery, never in what it reports.
+
+**The stopping rule was committed before the fourth pass reported** — land unless a finding reds a correct corpus cell or makes D6 dark on its subject — and applied unchanged. Round 3's signature-precision finding and round 4's three were **filed, not patched**: enriching the page-global content signature is the path that had produced findings in three consecutive rounds, and per-region attribution across the seed write subsumes all of them. The rule is recorded in the gap entry alongside the findings, so the next reader sees the reasoning and not only the verdict.
+
+**Landed.** #991 review floor **4 → 0** (four carve-outs by path, every one probed by execution anyway — #986's two adopter diagnoses both reproduce, and its "not a regression" claim is corroborated structurally by `block-splitter.js` being byte-identical across the two baselines the adopter compared). #993 the D6 limb-2 build. #994 the gating-plumbing residual filed as one entry.
+
+**Board.** HIGH 111 → **110** · MED 261 → **263** · LOW 99 · Nominal 7. One HIGH resolved, two MED filed: the region-model residual (fail-quiet on partial emptiness; the gain conjunct is page-global) and the gating-plumbing residual (three latent paths that produce a verdict from a failed or unmeasured seed). Both name **per-region attribution across the seed write** as the closure.
+
+⚑ **Process, and it cost a PR.** The relaxed pre-push rule covers **new refs only** — an update push to an existing branch runs the full local suite, which this clone fails on five pre-existing tests. #992 could not be updated and was closed in favour of #993 on a fresh ref, with the reason recorded on the closed PR; `--no-verify` was never reached for.
+
+
+### S422 (2026-09-18/19, bryan · ASUS) — three rulings that redefine what a binding is, and five gates that each caught something real
+
+**Rulings.** `E-ASSIGN-003` NARROWED to expression position — S418 ruling 1, built as ruled, would have been a widening past its own governing sentence (§50.8.4's trigger says *"assignment expression"*; §50 extended ONE code to statement form and pointedly not its sibling). **`E-ASSIGN-004` BUILT** at statement position, where §50.8.5's own closing sentence already mandated it and where it had **zero producers** — so `const x = 1; x = 2` compiled at exit 0 and shipped a guaranteed runtime `TypeError`. **Bare naming IS `const`; mutation needs `let`** — closing a question recorded as needing a spec ruling since S19. **Unused-binding is a LINT** across all binding forms, hard error as the declared destination, `_` token granted, sequencing inverted so the lint's own false positives find the walker bugs. **dpa-049 banked**: should a project-wide lint suppression taint the build?
+
+**Landed.** #987 maps (watermark `e74f5423` → `787d4cb4` after four stale sessions — ⚑ `e74f5423` is a commit whose `SPEC-INDEX.md` carried **three raw git conflict markers**, and every map was stamped there). #988 review floor **23 → 0** (4 findings, 19 carve-outs, **0 clean**; two convict merged work — #983's `.sort()` is inert because `bun test` ignores argv order, and #979 shipped a third truncation while fixing one). #986 adopter filings. #990 dPA drain. #995 `E-AUTH-005` application-scope (closes #770). #996 `E-ASSIGN-004`.
+
+**Adopter work.** Two flogence reports diagnosed by execution — a claimed `E-SYNTAX-050` regression **falsified** on two baselines, and a bare-`_{}` disposition **inverted** against the reporter's own recommendation because §64.2 admits the form with `console.log` as its own example. Return leg delivered. They then **withdrew ask #5** on our evidence, ran both measurements we asked for, and **aggregated our own gap ledger**: 28 open gaps are one bug in four costumes (13 string-masking · 8 interpolation · 6 comment-state · 1 angle-bracket), refuting their own operator's hypothesis. One shared masking pass is pointed at 27 of 28.
+
+**Gaps filed.** The sidecar overwrite (HIGH — `--emit-block-analysis` is basename-flat, 36 sources → 32 sidecars, silently) · the scanner-context-ambiguity aggregate (HIGH) · the top-level reassignment lowering (HIGH) · the MCP auto-flip cross-file leak · the comment-lexing heuristic · two review-floor findings.
+
+**Five gates fired usefully and none was bypassed.** Pre-commit caught a `let`-rebinding false positive that 41 passing unit tests missed; it also produced a load-contention false red that had to be diagnosed rather than worked around; pre-push blocked a stale `FACTS.md`; the review floor convicted two merged PRs; and an adversarial pass convicted this session's own filings — five gap headings invisible to the very probe whose absence they filed a gap about.
+
 ### 2026-09-17 — S420: the floor drained 8 to 0, and it convicted my own fix of the class it was fixing
 
 Review-floor session. Eight PRs owed (#969–#976), classified by `review-debt.ts`'s own `CODE_BEARING_RE`
