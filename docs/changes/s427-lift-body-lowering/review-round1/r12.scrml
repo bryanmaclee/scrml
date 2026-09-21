@@ -1,0 +1,10 @@
+<program>
+${ let total = 0 }
+${ function f() { total = 5
+     return total } }
+<button id="b" onclick=${@r = f()}>go</button>
+<p id="r">${@r}</p>
+<p id="t">${total}</p>
+<button id="c" onclick=${@t2 = total}>read</button>
+<p id="t2">${@t2}</p>
+</program>

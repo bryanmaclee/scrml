@@ -1,3 +1,123 @@
+# scrml — Session 427 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S425-bryan is LIVE and landing** (#995 merged; #1017 OPEN — gap triage + inbox moves +
+> delta-log [3449]–[3457] + review markers for #995/#1016). My footprint never touched his; this wrap's
+> delta-log entries start at [3458] to avoid a duplicate if #1017 lands after it. His open PRs are CLAIMED.
+>
+> ⚑ **THE DIGEST PRINTS A SUPERSEDED PICKUP AT BOOT — read the newest wrap commit's block (this one).**
+
+## ⏭ NEXT-SESSION PICKUP
+
+0. **⚑⚑ LEAD: ROUND 2 OF THE LIFT-BODY LOWERING FIX — BUILT, REVIEWED, HELD.** `origin/hold/s427-lift-body-lowering`
+   @ `089c0414` (base `b497b892`). It fixes a counter (`n = n + 1` → was `const n = n + 1`, page dead at boot) and
+   destructured/plain block consts invisible to the keyed setup (page dead at boot) — four causes plus a fifth silent
+   one. **Held because its adversarial pass found:** H1 HIGH (a `const`/`lin` reassignment now compiles and dies at
+   boot — loud→silent AND newly-accepting; negative corpus fixture `phase3-assign-expr-to-const-081`), M1 (scope-blind
+   acorn guard demotes a WORKING keyed list on a name collision), M2 (impurity predicate misses a write when a nested
+   block re-declares the name → silently wrong), M3 (a demoted plain loop goes stale on `push`). **Full spec + every
+   repro + the harness: `docs/changes/s427-lift-body-lowering/review-round1/README.md`.** Start from the hold ref; do
+   not rebuild. ⚑ For H1, fall back to base's LOUD failure for a const/lin-declared name — `E-ASSIGN-004` is bryan's,
+   in OPEN #996; do not mint or wire it. Cut the landing branch fresh off main (force-push stays blocked).
+
+1. **⚑ A RULING IS OWED BY BRYAN, AND TWO PINNED TESTS WAIT ON IT.** When a `${…lift…}` block sits inside
+   an `if=`, do its lift-free statements run once at file init (§7.6 file scope — what ships) or per mount in
+   source order (§6.7.2.1 memoryless remount)? Question: `handOffs/incoming/2026-09-21-from-S427-peter-to-bryan-if-mount-lift-block-timing.md`.
+   Gap `g-if-mount-lift-block-statement-timing-ruling-pending` (ruling-gated). The two order consequences are
+   pinned in `browser-lift-target-mount-template.test.js` with "RULING PENDING" in their names — **flip them to
+   the ruled behaviour, do not delete them.** A third consequence surfaced later (a counter in an `if=`-mounted
+   block over a static iterable does not reset on remount) belongs to the same ruling.
+
+2. **The PA-verified HIGHs this session made concrete, all peter-lane codegen, all repro-ready:**
+   - `g-match-inside-each-row-cannot-see-the-row-variable` — `<match>` in an `<each>` row reading the row alias →
+     `g is not defined`, whole list dead at boot. Arm wire functions are module-scope; the #1022 nested-lift
+     mechanism (instance scope passed as parameters) is the nearest precedent.
+   - `g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime` — AND the finding widened after filing:
+     **the conformance adapter runs every runtime-half case against the FULL `SCRML_RUNTIME` template**
+     (`conformance/adapters/impl1-ts.ts:148/467`), not the tree-shaken runtime the compiler emits. **~215 of 898
+     cases are structurally blind to every chunk-gating defect.** Switching the adapter to the emitted runtime may
+     turn cases red; that is its own arc and the conformance instrument is bryan's lane — surface, don't
+     unilaterally switch. The one-line `_scrml_reconcile_list(` gate for giti033 itself is peter-drainable.
+
+3. **Filed this session and not yet PA-verified** (re-reproduce before dispatching): the four each/arm defects in
+   `g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings` (split them when taken); the
+   `#` before `${` in lifted text dropped; method-call mutation of an outer object in a keyed body stays stale.
+
+4. **Carry-forward unchanged:** the S420 item-4 list (POSIX baseline regen · the three non-inert reserves ·
+   `g-w-lint-018` · `g-s320-autoawait-stale-injectpromiseawait-comments`); `g-heading-drift-tail-…` (LOW); the
+   two August scrml-site reports stay bryan's (#1017 is moving them).
+
+## WHAT LANDED — six PRs, every code-bearing one through a full adversarial pass on a FROZEN ref
+
+| PR | SHA | what |
+|---|---|---|
+| #1018 | `94c6fc34` | seed round 4 (supersedes #1014): no GREEN with a seed failure, no compiler blame for a harness failure, the note true for its cell |
+| #1019 | `48dd05c3` | the e2e-render-map tier now runs in the blocking `gate` + `windows`; bite proven; `gate` green twice |
+| #1020 | `ccd94817` | all four POPULATED seeds drive their apps — with-data reach 1 app → 4 |
+| #1021 | `b016352d` | a lift inside an `if=` mount template renders into the mounted node — TodoMVC HIGH resolved |
+| #1022 | `b497b892` | a lift inside an `<each>` row / engine / match arm renders — was silently dropped at exit 0 |
+| — | HELD `089c0414` | lift-body lowering — built and reviewed; held on its own review's HIGH (pickup 0) |
+
+**Five merged, one held.** Merge permission was granted twice ("merge when green" · "merge it when green and wrap");
+the held one is the condition saying no — "green" is the whole discipline, not the CI badge.
+
+## 🔭 DURABLE
+
+**A fix that makes a broken program work can still be fail-open.** #1021 round 2 added a per-render file-scope
+hoist that made a previously-dead onclick work — and converted three LOUD twin failures into SILENT wrong output.
+It was removed. The discriminator is not "did more programs start working" but "did any program move from loud to
+quiet", and only an adversarial pass comparing against the SSR-body twin measured it.
+
+**A note is part of a verdict.** #1018's reviewers found nothing reachable scoring green and still found two MEDs —
+both in the recorded TEXT, one telling a triager to disregard a real compiler defect. The fix was a new verdict
+value (`undecidable`), not a rewording.
+
+**Gate the tier before trusting its pins.** The e2e-render-map tier's 237→259 pins ran in no CI job until #1019;
+every seed fix before it was protected only by whoever remembered to run it.
+
+**A harness that loads the full runtime cannot see tree-shaking bugs.** The conformance runtime tier (~215 cases)
+is blind to the missing-chunk class by construction — found by asking why a case passed against a dead program,
+not by any gate going red.
+
+**"Newly compiles" in a differential is a one-way-door alarm.** The lowering fix reported three samples moving
+fail → compile as improvements; one was a negative fixture whose own header names the error it should raise.
+Check each newly-accepting artifact's governing sentence individually.
+
+**Inherited "not PA-verified" findings deserve the one command.** The lift-body lowering entry was filed MED on an
+agent's word; running it showed a whole-page boot death on ordinary shapes (HIGH) — and fixing it found a fifth,
+silent defect nobody had reported.
+
+## ⚑ MISSES (mine)
+
+1. **★★ Heredoc quoting broke two scripts again** (the same class recorded three sessions running). Switched to
+   the Write tool each time; the rule is simply to never inline a script with backticks/quotes into a heredoc.
+2. **★ I wrote the round-2 brief for #1021 with "declarations stay at chunk scope" and did not foresee that the
+   agent would extend that to outer-effect groups via a hoist** — the fail-open it produced was caught by review,
+   not by the brief. A brief that asks for a scope property should also forbid the loud→silent direction by name.
+3. **★ #1019's brief text said "no CI job runs this tier" was true "until S427" before the PR merged** — the
+   prediction-formatted-as-record class; harmless because it merged, but it is the same shape I keep filing.
+
+## Gate at close
+
+- Board at close: **HIGH 112 · MED 268 · LOW 103** (from HIGH 110 · MED 264 · LOW 101 at boot: 3 HIGH resolved/
+  filed-and-resolved in-session, 5 HIGH-class items filed or raised by measurement — the count rose because the
+  session's verification made defects visible, not because work was lost).
+- Review floor: markers for #1018–#1022 appended (all five code-bearing PRs had full adversarial passes on frozen
+  refs). Remaining OWED #995/#1016 are recorded in bryan's OPEN #1017 — they clear when it lands.
+- Delta-log: [3458]–[3470] (bryan's #1017 holds [3449]–[3457]; delta-lint PASS).
+- Cloud: every PR's `gate` + `windows` green; `tracking` byte-identical to main's five dev-watcher names on
+  every PR, re-measured each time, never inherited.
+- Environment: `gh pr merge` worked all session; no force-push was needed (every PR cut fresh off main).
+  `bun install` in worktrees needs `PUPPETEER_SKIP_DOWNLOAD=1`. Browser-baseline shows a Windows-only
+  `C:\C:\` ENOENT name locally (pre-existing; Linux `gate` green). The types gate cannot run locally (no
+  `node_modules/.bin/tsc` on this clone).
+- Worktrees: all S427 agent worktrees removed; pre-existing `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`,
+  `onmount-c`, `scrml-pinned` retained (not mine).
+- Maps: NOT refreshed (repo-wide shared surface, sibling live); `test.map.md`'s wrong e2e-render-map row WAS
+  corrected in #1019.
+
+---
 # scrml — Session 426 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.

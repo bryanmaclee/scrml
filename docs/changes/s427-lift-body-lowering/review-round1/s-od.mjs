@@ -1,0 +1,1 @@
+export async function run(a){ const c=()=>JSON.stringify([...document.querySelectorAll(".fb-breadcrumb .crumb")].map(x=>x.textContent.trim())); console.log("OD", c()); a.set("breadcrumb",["root","a","b"]); console.log("OD", c()); a.get("breadcrumb").push("c"); console.log("OD push", c()); }

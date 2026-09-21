@@ -2,6 +2,35 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S427 — 2026-09-21 (peter · P-Tech1)
+
+**Five PRs merged, one held on its own review, and the e2e-render-map tier finally gates anything.**
+Every code-bearing change went through an adversarial pass on a frozen ref; three of them needed more than
+one round, and the rounds caught a page-killing HIGH twice.
+
+- **#1018 `94c6fc34` — seed round 4 (supersedes #1014).** A failed seed never scores GREEN and never blames
+  the compiler: `needs-server` is no longer special-cased at either door, D2 reads only the app's console
+  errors, and the seed note has one writer (kind × verdict — `undecidable` added after review found the note
+  telling a triager to disregard a real defect). Tier 237 → 259; zero corpus cells move.
+- **#1019 `48dd05c3` — the e2e-render-map tier runs in the blocking `gate` and on Windows.** It had run in NO
+  job and NO hook. Bite proven; `gate` required green twice. `test.map.md`'s "`tracking` only" was wrong.
+- **#1020 `ccd94817` — the four POPULATED seeds drive their apps** (with-data reach 1 app → 4); a `rendered`
+  text pin catches what the reason-code pin could not.
+- **#1021 `b016352d` — a lift inside an `if=` mount template renders into the mounted node.** TodoMVC was dead
+  on arrival (`g-todomvc-…` HIGH resolved); five more anchor sites of the same class fixed. Three review rounds:
+  a HIGH (block consts lost file scope) and a fail-open hoist removed. Statement timing inside such a block is
+  a §7.6 vs §6.7.2.1 question routed to bryan (`handOffs/incoming/2026-09-21-from-S427-peter-to-bryan-…`).
+- **#1022 `b497b892` — a lift inside an `<each>` row or engine/match arm renders** (it emitted no lift code at
+  exit 0). 18 loci enumerated; 0 of 7471 corpus artifacts change.
+- **HELD — lift-body lowering** (`origin/hold/s427-lift-body-lowering` @ `089c0414`): fixes a counter and block
+  consts that kill the page at boot, but its review found a `const` reassignment now compiling to a dead page
+  (loud→silent, newly-accepting). Round 2 spec + repros: `docs/changes/s427-lift-body-lowering/review-round1/`.
+- **Found:** the conformance runtime tier runs every case against the FULL runtime, so ~215 of 898 cases are
+  blind to chunk-gating defects (`ternary-markup-giti033` passes against a dead program). Filed; instrument
+  change routed as bryan's lane.
+- Board: HIGH 110 → 112 · MED 264 → 268 · LOW 101 → 103 — rose by measurement (defects made visible), with
+  three HIGH-class entries resolved.
+
 ## S426 — 2026-09-20 (peter · P-Tech1)
 
 **The floor drained 7 → 0, the lead item's own gap entry turned out to be wrong in three places, and
