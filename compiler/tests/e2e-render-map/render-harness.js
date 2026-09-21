@@ -41,7 +41,12 @@ import {
   statSync,
 } from "node:fs";
 import { compileScrml } from "../../src/api.js";
-import { runDetectors, renderedContentSignature, signatureGained } from "./render-detectors.js";
+import {
+  runDetectors,
+  renderedContentSignature,
+  signatureGained,
+  SEED_SNAPSHOT_NOTICE,
+} from "./render-detectors.js";
 import { REPO_ROOT } from "./render-corpus-enumerator.js";
 
 // ⛑ S419 residuals (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged)
@@ -720,8 +725,12 @@ export function observeApp(app, seed, seedLabel, hooks = {}) {
   }
 }
 
-/** The body of observeApp, given compiled artifacts. The caller owns cleanup. */
-function observeCompiled(app, seed, seedLabel, artifacts) {
+/**
+ * The body of observeApp, given compiled artifacts. The caller owns cleanup.
+ * Exported (S427) so a test can drive the returns that precede the mount — e.g. the seeded
+ * no-html branch — with hand-built artifacts, instead of registering a corpus seed to reach it.
+ */
+export function observeCompiled(app, seed, seedLabel, artifacts) {
   const cellKey = `${app.relpath}#${seedLabel}`;
 
   // D0: compile failed (or threw) — record without mounting.
@@ -742,6 +751,37 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
     // Compiled clean but produced no html to mount (e.g. a library-mode file
     // that slipped the <program filter, or a per-route app with no entry html
     // located). Record as renders-empty (no UI to assert) — NOT suppressed.
+    //
+    // ⛑ S427 — A SEEDED cell used to take this return too, scoring GREEN `renders-empty`
+    // straight out of `observeCompiled` — BEFORE any seed was attempted and without passing
+    // through `runDetectors`, so the "no green while a seed failure is on the record" guard
+    // never saw it. Not reached today (measured: all four registered seeds emit html), but the
+    // coverage ratchet registers seeds for more apps, and one that emits no html would have
+    // recorded a populated cell as a clean pass for a render that never happened. The seeded
+    // case now records the fact and goes through the choke point; the UNSEEDED return below is
+    // byte-for-byte what it was.
+    if (seed != null) {
+      const seedReport = {
+        chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
+        errors: ["no entry html emitted — nothing was mounted, so the seed could not be applied"],
+      };
+      const det = runDetectors({
+        compileErrors: [],
+        throwMessage: null,
+        consoleErrors: [],
+        document: null,
+        seeded: true,
+        seedReport,
+        serverDependent: artifacts.serverDependent,
+      });
+      return {
+        cellKey,
+        state: det.state,
+        smells: ["NO-HTML-EMITTED", ...det.smells],
+        detail: { note: "compiled clean but no entry html located", ...det.detail, seed: seedReport },
+        seeded: true,
+      };
+    }
     return {
       cellKey,
       state: "renders-empty",
@@ -791,9 +831,9 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // and it has already pushed its own accurate message. Keying on null would add a
       // second, untrue "the snapshot failed" line on top of it.
       if (seedReport && seedReport.errors.some((e) => String(e).startsWith("[seed-signature]"))) {
-        obs.consoleErrors.push(
-          "[seed-bridge] the render-content snapshot failed — gainedContent is UNMEASURED, D6 suppressed",
-        );
+        // ⛑ S427 — the shared constant, so `seedFailureKind` recognises exactly this text as
+        // "snapshot only" (writes landed) rather than as a non-delivery.
+        obs.consoleErrors.push(SEED_SNAPSHOT_NOTICE);
       }
     } else {
       // Loud, not silent: no reactive side-channel at all means the seed CANNOT be live.
@@ -805,8 +845,10 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // emit regression drops `_scrml_reactive_set`, every write is skipped,
       // `seedWasDelivered` is false, and EVERY populated cell scores green however empty
       // it renders — D6 blind, with `generate-baseline.js` stripping `detail` from green
-      // cells so the explanation never reaches the baseline either. A D2 console error
-      // makes the cell red and keeps the reason attached.
+      // cells so the explanation never reaches the baseline either. The report error below
+      // (plus the notice) makes the cell red and keeps the reason attached — ⛑ S427 round
+      // 4b: via `runDetectors`'s terminal guard (`seed-bridge-failed`), no longer by the
+      // notice posing as an app console error under D2.
       const msg = "no _scrml_reactive_set side-channel exposed by this emit";
       seedReport = {
         chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
