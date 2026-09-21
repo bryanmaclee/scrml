@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 111 |
+| HIGH | 110 |
 | MED | 264 |
-| LOW | 99 |
+| LOW | 101 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -16259,7 +16259,7 @@ this sentence.
 ---
 
 ### g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render — D6's per-region content test asks only the region's OWN nodes, but `select`/`picture`/`video`/`audio` carry content THROUGH children the region contains while the element that counts them sits outside it — `NEW S424-peter (review-floor pass on #993, reproduced by execution under happy-dom); HIGH; open`
-<!-- @gap id=g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render sev=HIGH status=open locus=compiler/tests/e2e-render-map/render-detectors.js:363(nodesHaveRenderedContent — it maps elementCarriesContent over the region's own nodes and their descendants only) with the conferring definitions at :199(select -> querySelector("option")) and :205(picture/video/audio -> their source children) and :216(svg -> el.children.length > 0, ANY element child — the THIRD delegating definition, added S426 by the owed sibling sweep, reproduced by execution with circle rows) and the candidate list at :97(CONTENT_CANDIDATE_SELECTOR, which contains neither "option" nor "source" nor any svg shape element) prov=review:S424-floor-pass-on-993-finding-1-reproduced-by-execution-two-shapes-plus-S426-PA-sibling-sweep-finding-a-third -->
+<!-- @gap id=g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render sev=HIGH status=resolved locus=compiler/tests/e2e-render-map/render-detectors.js:363(nodesHaveRenderedContent — it maps elementCarriesContent over the region's own nodes and their descendants only) with the conferring definitions at :199(select -> querySelector("option")) and :205(picture/video/audio -> their source children) and :216(svg -> el.children.length > 0, ANY element child — the THIRD delegating definition, added S426 by the owed sibling sweep, reproduced by execution with circle rows) and the candidate list at :97(CONTENT_CANDIDATE_SELECTOR, which contains neither "option" nor "source" nor any svg shape element) prov=review:S424-floor-pass-on-993-finding-1-reproduced-by-execution-two-shapes-plus-S426-PA-sibling-sweep-finding-a-third -->
 
 **D6 scores `renders-empty-with-data` — RED, against the compiler — on a render that is correct.**
 This is a FALSE POSITIVE in the direction that matters: the tier's whole purpose is to catch the
@@ -16366,7 +16366,74 @@ unblocking, and the severity rests on the false-positive direction rather than o
 
 — `AMENDED S426-peter (re-reproduced on f8317399; owed sibling sweep found a third definition; population counted, two citations falsified)`
 
+**⚑ RESOLVED S426-peter — landed #1012 `f8d263de`, PA-verified on the merged HEAD, not on report.**
+The region test now asks whether a node is **the kind of child its ancestor CONSUMES** — *did the each
+produce the rows that parent exists to hold?* — rather than mirroring what makes the ancestor
+content-bearing at body scope. That reframing was forced by `<datalist>`, which has no
+`elementCarriesContent` arm to mirror and whose body-scope answer must stay "renders nothing"; body
+scope and region scope ask different questions and both answers are right.
+**The population was ENUMERATED ONCE** against a stated search (every HTML parent whose content model
+is wholly element children carrying no text of their own and not in `CONTENT_CANDIDATE_SELECTOR`):
+**7 covered** — `select`>`option` · `datalist`>`option` · `picture`/`video`/`audio`>`source`|`img` ·
+`video`/`audio`>`track[src]` · `svg`>any element · `map`>`area` · `colgroup`>`col` — and 15 further
+shapes disposed with reasons and pinned by tests. `track` was a seventh instance neither the brief nor
+either review had named.
+**Verified by execution on `f8d263de`:** all 7 instances green, 3 true positives still red (empty fence
+in a `<ul>`, a non-`option` node in a `<select>`, a src-less `<source>`), 6 body-scope pins still
+`false`, and the hostile-tag shapes classify instead of throwing. Tier **216 pass / 0 fail** (164
+before). Mutation: gutting the predicate reds **17** with **183** still passing — no pre-existing test
+flips. **ZERO baseline cells move**, measured fix-vs-pre-fix.
+⚑ **Its re-review raised two MEDIUM findings and BOTH WERE REJECTED on measurement** — recorded on the
+closed #1009 and in #1012's commit message. Finding A alleged the fix greened a broken render
+(`<select>` > mount `<div>` > `<option>`); **that claim is falsified by this repo's own S298
+real-browser witness** in [[g-nested-each-div-mount-in-restricted-parent]] — `.options` is
+descendant-lenient, visual render and the a11y tree are correct in Chrome and Firefox, which is why
+that gap was downgraded MED→LOW. Finding B's target (`svg` counting an empty `<g>`) is **pre-existing
+in `elementCarriesContent`**, not introduced here — filed as
+[[g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing]].
+
 ---
+
+### g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing — `case "svg"` is `children.length > 0`, so an `<svg>` whose only child is an empty `<g>` or a `<metadata>`/`<defs>`/`<desc>`/`<title>` counts as rendered content at BODY scope — `NEW S426-peter (raised by the #1009 re-review against the region rule; PA-relocated to its real locus, which is pre-existing and body-scope); LOW; open`
+<!-- @gap id=g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(elementCarriesContent case "svg" — el.children != null && el.children.length > 0, which asks only that a child EXISTS and never whether it draws) prov=review:S426-re-review-of-1009-finding-B-relocated-after-PA-measurement-showed-the-region-rule-merely-mirrors-this -->
+
+`elementCarriesContent`'s `svg` arm asks only that a child element EXISTS: `el.children.length > 0`.
+So `<svg><g></g></svg>` and `<svg><metadata></metadata></svg>` are content-bearing, although neither
+draws anything. The **chrome-present/data-absent** shape — an `<each>` emitting `<g>` wrappers whose
+`<circle>` children were dropped — is precisely the class D6 exists to catch.
+
+⚑ **Filed HERE rather than against the region rule, and the relocation is the finding.** The #1009
+re-review raised this against `confersContentToConsumingAncestor`'s `svg` branch, as a regression that
+PR introduced. It is not: the region rule **agrees** with this arm, which is the invariant that fix
+exists to restore. Tightening only the region side would re-create the exact asymmetry — region scope
+stricter than the definition that makes the ancestor count — that produced the original false positive.
+**So the fix belongs at the shared definition, where it moves BOTH scopes at once**, and that is a
+different change with a different blast radius: every body-scope cell holding a decorative `<svg>` is in
+range.
+
+**Fix direction (not taken):** require a child that draws — exclude the metadata elements
+(`defs`/`metadata`/`desc`/`title`) and require a non-metadata descendant rather than a direct child, so
+`<svg><g><circle/></g></svg>` still counts. **Count what it stops inspecting before narrowing** (pa-base
+§8) — the corpus population of decorative-`<svg>` cells is unmeasured.
+
+---
+
+### g-consumed-child-table-filters-source-and-track-by-attribute-but-not-option-area-col — a compiler bug that drops the attribute bindings on `<area>` or `<col>` rows scores GREEN, while the identical drop on `<source>` rows correctly reds — `NEW S426-peter (#1009 re-review, LOW; the asymmetry is real and its resolution is a judgement, not a typo); LOW; open`
+<!-- @gap id=g-consumed-child-table-filters-source-and-track-by-attribute-but-not-option-area-col sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(CONSUMED_CHILD_SELECTOR — the picture/video/audio entries carry [src]/[srcset] filters and track carries [src], while the select/datalist/map/colgroup entries are bare tag selectors) prov=review:S426-re-review-of-1009-finding-3 -->
+
+The consumed-child table filters some entries by attribute and not others. `source[src], source[srcset]`
+and `track[src]` require the attribute that makes the child functional; `option`, `area` and `col` match
+bare. **Concretely:** a codegen defect that drops the bindings on `<area>` rows emits
+`<map><area><area></map>` — an entirely non-functional image map — and D6 goes green, while the identical
+attribute-drop on `<source>` rows still reds (pinned by the existing `CONFERS_NOTHING` case).
+
+⚑ **This is a judgement, not a typo, and it sits on the same axis as
+[[g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing]]:** is the region question *"did
+the each produce its rows?"* or *"is each row individually useful?"* The current table answers the first
+for `option`/`area`/`col` and the second for `source`/`track`, and the in-source comment states the
+first as the rule — so `track[src]`, two lines above, contradicts the stated rationale. **Resolve the
+two entries together or the next reader will re-derive the same inconsistency.** Whichever answer is
+taken, it must hold at BOTH scopes, per the invariant the D6 fix restored.
 
 ### g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible — `mountAndObserve` restores the real `console.error` in its own `finally`, and `applySeed` runs after it returns, so nothing the seed-driven re-render logs ever reaches D2 — `NEW S424-peter (surfaced by the item-3 dispatch as a deferred observation, PA-verified by reading the call ordering); MED; open`
 <!-- @gap id=g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js(mountAndObserve — the console.error shim is installed just before the mount and restored in that function's own `finally`; applySeed is invoked from observeCompiled AFTER mountAndObserve has returned, so the seed write and every re-render it drives run with the REAL console.error installed) prov=review:S424-item3-dispatch-deferred-observation-PA-verified-by-reading-the-call-ordering-not-by-executing-a-repro -->
