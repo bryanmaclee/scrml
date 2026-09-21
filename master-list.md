@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `1cf94d32` — wrap(s426): the fix is green, permitted to merge, and held — because its own re-review caught it greening a real compiler bug (#1010) — **pushed**
+- `8fbeaf00` — wrap(s426-addendum2): door 3 is built and HELD, and the reviewer's best finding was already in my own output (#1015) — **pushed**
 - `60f8b1fc` — wrap(s424-addendum): correct the wrap's own closing state — five PRs, not three, and two landed after it (#1005) — **pushed**
 - `27a0bb17` — wrap(s423): the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes (#998) — **pushed**
 - `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
