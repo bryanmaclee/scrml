@@ -13,6 +13,45 @@
 > and it is HELD, because its own re-review found it turning two TRUE POSITIVES into FALSE GREENS. Do not
 > read "green" as "ready" on this PR.
 
+> ⚑⚑ **POST-WRAP ADDENDUM — THE HELD PR LANDED, AND PICKUP ITEM 1 BELOW IS SUPERSEDED. READ THIS
+> FIRST.** Peter said *"keep going"* after the wrap; the work continued and **two more PRs merged after
+> the closing state below was written** — the same prediction-formatted-as-a-record class this session
+> spent the day filing, now committed by my own wrap for the second session running. Corrected here
+> rather than by editing the block below, so the cost of the original framing stays legible.
+>
+> **#1012 `f8d263de` MERGED — the D6 HIGH is RESOLVED**, PA-verified on the merged HEAD (216 pass / 0
+> fail; all 7 instances green, 3 true positives still red, 6 body-scope pins false, hostile tags
+> classify; zero baseline cells move). **#1011 `adf04b7a`** cleared the index the wrap staled.
+> **#1009 CLOSED, superseded by #1012** (main had moved; force-push is blocked, so a fresh ref —
+> third time this session, and the reason is recorded on each closed PR).
+>
+> ⚑⚑ **ROUND 3 IS NOT OWED. BOTH MEDIUM RE-REVIEW FINDINGS WERE REJECTED ON MEASUREMENT** — do not
+> start pickup item 1 below; it is written against findings that did not survive verification.
+> - **Finding A is falsified by this repo's own S298 real-browser witness.** It alleged the fix greened
+>   a broken render (`<select>` > mount `<div>` > `<option>`), reasoning that `.options` excludes
+>   non-direct children. [[g-nested-each-div-mount-in-restricted-parent]] records puppeteer driving real
+>   headless Chrome AND Firefox: *"HTMLSelectElement.options — CORRECT (returns 3; that collection is
+>   descendant-lenient…). The original … is FALSE, and `<select>` has NO analogous defect."* Visual
+>   render and the a11y tree correct in both engines; that gap was DOWNGRADED MED→LOW on the
+>   falsification. **So D6 reddening that shape was itself a false positive of the class the fix
+>   closes, and the first round's ancestor walk was right.**
+> - **Finding B's target is pre-existing and at the wrong locus.** `elementCarriesContent`'s svg arm
+>   is `children.length > 0`, so an empty `<g>` already counts at BODY scope; the region rule now
+>   AGREES with it. Tightening only the region side re-creates the asymmetry that caused the original
+>   bug. Filed at its real locus instead.
+>
+> ⚑ **THE LESSON, and it is mine:** I reproduced the BEHAVIOUR both findings described and then nearly
+> acted on their NORMATIVE claim about what the correct answer is. That is the empirical-sufficiency
+> illusion (`pa-base` §0) — *a reproducer proves a symptom is real and says nothing about what the
+> system is SUPPOSED to do* — and the thing that caught it was reading the ledger for prior art before
+> writing the round-3 brief. **The corpus had already measured the answer two sessions before the
+> question was asked.**
+>
+> **Board now: HIGH 110 · MED 264 · LOW 101 · Nominal 7** (D6 resolved −1 HIGH; two residuals filed +2
+> LOW). **Review floor re-opens at 3** — #1011, #1012 and this addendum's own PR.
+> **The real next items are pickup 4 (seed-fixtures, unblocked), pickup 5 (door 3, filed and
+> confirmed) and pickup 6 (no gate runs this tier).**
+
 ## ⏭ NEXT-SESSION PICKUP
 
 1. **⚑⚑ THE LEAD ITEM IS ROUND 3 OF #1009, AND IT IS BOUNDED AND SPECIFIED.** The D6 conferring/consuming
