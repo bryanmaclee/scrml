@@ -876,7 +876,8 @@ function seedMovedTheRender(obs) {
   // copy from one another.
   //
   // ⚑ Known and accepted: the `null` path is LOUD (the harness pushes a `[seed-bridge] …
-  // UNMEASURED` notice, so the cell still reddens via D2) while the absent/malformed paths are
+  // UNMEASURED` notice and records a `[seed-signature]` error, so the cell still reddens —
+  // since S427 round 4b as `seed-bridge-failed` via the terminal guard, not via D2) while the absent/malformed paths are
   // silently quiet. Fail-quiet is the better failure here, but it is not free — closing it
   // needs a shape check where the report is BUILT, since this detector is pure and cannot
   // raise anything itself.
@@ -904,7 +905,288 @@ export function isServerAbsenceMessage(msg) {
 }
 
 /**
+ * Did the HARNESS fail to deliver the seed it was asked to deliver?
+ *
+ * ⛑ S426 — THE ONE NAMED PREDICATE FOR "A SEED-BRIDGE FAILURE IS ON THE RECORD", consulted
+ * at every green-state return (see `runDetectors`'s terminal guard). It replaces the inlined
+ * `hasSeedBridgeFailure` that #1002 put at ONE of those returns, because a condition that
+ * lives at one door is a condition that the next door does not have: this entry's whole
+ * history is three rounds each shutting one door and leaving a sibling open (S423 filed the
+ * class · #1002 shut the state-resolution `needs-server` door · S426 found the D1 mount-throw
+ * `needs-server` door, which `return`s BEFORE D2 ever runs, so no `consoleErrors` inspection
+ * happens there at all).
+ *
+ * ⚑ TWO CARRIERS, AND THE SECOND ONE IS THE LOAD-BEARING HALF:
+ *   1. THE NOTICE — a `[seed-bridge]`-prefixed entry in `consoleErrors`. This is what the
+ *      harness pushes (three sites in `observeCompiled`: the `applySeed` throw, the
+ *      `seedThrewNotice` per-write throw, the missing side-channel) and it is the only
+ *      carrier #1002 checked.
+ *   2. THE FACT — the seed report's OWN `errors[]`, and a `set-threw` write. Keying only on
+ *      the notice makes the invariant depend on the harness REMEMBERING TO PUSH, which is
+ *      exactly the defect S423 filed ("this comment said LOUD and the branch was silent").
+ *      (History: before S427 round 4b, D2 counted the notice as a console error, so the
+ *      state-resolution block returned `compiles-but-throws` first and the `renders-empty` /
+ *      `renders-clean` returns were reached with a failed seed only by a direct
+ *      `runDetectors` caller passing the fact without the notice.)
+ *      ⚑ S427 round 4b — THE GREEN RETURNS ARE NOW THE HARNESS PATH. D2 and the
+ *      state-resolution block read APP console errors only (notices excluded), so every
+ *      harness-built failed seed on a mount that did not throw and produced no app error or
+ *      hard smell — the `applySeed` catch, a `set-threw`, a `[seed-signature]`, no side
+ *      channel, and the seeded NO-HTML branch — walks to `renders-empty` / `renders-clean`,
+ *      and the terminal guard in `runDetectors` is what makes it `seed-bridge-failed`. That
+ *      guard now carries F4's loudness on the mount path; it is not a backstop any more.
+ *
+ * ⚠ THE CARVE-OUT IS PRESERVED BY CONSTRUCTION, and it is why this reads `errors` rather
+ * than "any write that did not land": `derived-cell` and `no-such-cell` are the KNOWN, TABLED
+ * fixture bugs (SEED_OBSERVABILITY in e2e-render-map.test.js). `applySeed` pushes NOTHING into
+ * `errors` for either of them — only `[seed-set …]` (a write threw), `[seed-signature] …` (the
+ * render snapshot failed) and the two `[seed-bridge] …` reports do — so those two reasons stay
+ * quiet here without an exclusion list, exactly as in `seedThrewNotice`.
+ *
+ * ⚠ DELIBERATELY NOT A FAILURE SIGNAL: `gainedContent === null` (UNMEASURED). Every harness
+ * path that produces it also records a `[seed-signature]`/`[seed-bridge]` error, so it is
+ * already covered by the carriers above, while direct `runDetectors` callers pass a bare
+ * `null` to exercise D6's veto and must not be reclassified as harness failures.
+ *
+ * BACK-COMPATIBLE: an observation with no `[seed-bridge]` console entry and no seed report
+ * (every pre-S423-shaped call) returns false.
+ *
+ * @param {object} obs — a `runDetectors` observation.
+ * @returns {boolean}
+ */
+export function seedBridgeFailed(obs) {
+  // ⛑ S427 round 4c — AN UNSEEDED CELL HAS NO SEED TO FAIL. Without this, an app that itself
+  // logs a line starting "[seed-bridge]" would be reclassified on an UNSEEDED cell.
+  // ⚑ round 4d — ONE DELIBERATE DIVERGENCE FROM THE PRE-S427 BASE (c59367bb), measured by
+  // running base's `runDetectors`: an UNSEEDED, server-dependent cell whose app logs a
+  // "[seed-bridge]"-prefixed line that reads like server absence. Base scored it
+  // `compiles-but-throws`, because its S424 `!consoleErrors.some(m => m.startsWith(
+  // "[seed-bridge]"))` term ignored `seeded` and took the app's own line for a seed failure.
+  // Here it is `needs-server`: the cell has no seed, so an app-logged string cannot be a seed
+  // failure, and the line is judged as the app output it is. Every other unseeded
+  // observation is classified as base classified it (and no corpus cell moves — measured).
+  if (!obs.seeded) return false;
+  const consoleErrors = obs.consoleErrors ?? [];
+  // 1 — the notice the harness pushes.
+  if (consoleErrors.some(isSeedBridgeNotice)) return true;
+  // 2 — the fact the harness recorded, whether or not anything pushed a notice.
+  const report = obs.seedReport;
+  if (report == null) return false;
+  const errors = Array.isArray(report.errors) ? report.errors : [];
+  if (errors.length > 0) return true;
+  const writes = Array.isArray(report.writes) ? report.writes : [];
+  return writes.some((w) => w && w.reason === "set-threw");
+}
+
+/** The smell recorded on every cell carrying a seed-bridge failure — the ONE greppable mark. */
+export const SEED_BRIDGE_SMELL = "S-SEED-BRIDGE-FAILED";
+
+/** The prefix of every notice the HARNESS (not the app) pushes into `consoleErrors`. */
+export const SEED_BRIDGE_PREFIX = "[seed-bridge]";
+
+/**
+ * The exact notice `observeCompiled` pushes when the ONLY thing that failed was the
+ * render-content snapshot (`applySeed` recorded a `[seed-signature]` error). Defined here and
+ * imported by the harness so the text that is pushed and the text that is recognised cannot
+ * drift apart.
+ */
+export const SEED_SNAPSHOT_NOTICE =
+  "[seed-bridge] the render-content snapshot failed — gainedContent is UNMEASURED, D6 suppressed";
+
+/** Is this console entry the harness's own seed notice rather than something the APP logged? */
+export function isSeedBridgeNotice(msg) {
+  return String(msg).startsWith(SEED_BRIDGE_PREFIX);
+}
+
+/**
+ * WHAT failed, for a cell on which `seedBridgeFailed` is true — or `null` when it is not.
+ *
+ * ⛑ S427 — the note used to say "the harness could not deliver the seed" for every failure,
+ * which is FALSE for a `[seed-signature]`-only report: there every write landed and only the
+ * DOM snapshot helper threw. Round 4c split it three ways, each TRUE of what it names:
+ *   "not-attempted" — the report records NO write at all: the harness never reached the write
+ *                     step (the seeded no-html branch — which pushes no notice — no side
+ *                     channel, an `applySeed` throw). Why is in `detail.seed.errors`.
+ *   "not-delivered" — writes were attempted and not every one landed (a `set-threw`, any
+ *                     non-snapshot error or notice), OR delivery cannot be confirmed (a notice
+ *                     with no report, or no write landed at all). Fail-closed.
+ *   "unmeasured"    — AT LEAST ONE write landed, none threw, and the ONLY failure on record is
+ *                     the render-content snapshot. ⛑ 4c: the ≥1-landed requirement is new — a
+ *                     report whose writes were all `no-such-cell` / `derived-cell` delivered
+ *                     nothing, and "every attempted write landed" would have been false of it.
+ *
+ * @param {object} obs
+ * @returns {"not-attempted"|"not-delivered"|"unmeasured"|null}
+ */
+export function seedFailureKind(obs) {
+  if (!seedBridgeFailed(obs)) return null;
+  const report = obs.seedReport;
+  const writes = report != null && Array.isArray(report.writes) ? report.writes : [];
+  const errors = report != null && Array.isArray(report.errors) ? report.errors : [];
+  // ⛑ round 4d — "not-attempted" needs a reason the write step was not reached, i.e. an error
+  // other than the snapshot's. A report with NO writes and ONLY a `[seed-signature]` error DID
+  // reach the loop — the fixture simply had zero keys — so it falls through and ends
+  // "not-delivered" (nothing landed). Every harness path that skips the loop records its own
+  // non-snapshot reason (no html, no side channel, an `applySeed` throw).
+  if (
+    report != null &&
+    writes.length === 0 &&
+    errors.some((e) => !String(e).startsWith("[seed-signature]"))
+  ) {
+    return "not-attempted";
+  }
+  const notices = (obs.consoleErrors ?? []).filter(isSeedBridgeNotice).map(String);
+  if (notices.some((n) => n !== SEED_SNAPSHOT_NOTICE)) return "not-delivered";
+  if (errors.some((e) => !String(e).startsWith("[seed-signature]"))) return "not-delivered";
+  if (writes.some((w) => w && w.reason === "set-threw")) return "not-delivered";
+  if (!writes.some((w) => w && w.wrote === true)) return "not-delivered";
+  return "unmeasured";
+}
+
+/** What failed — the first half of the recorded note, keyed by `seedFailureKind`. */
+const SEED_FAILURE_WHAT = {
+  "not-attempted":
+    "no seed write was attempted — the harness never reached the write step (why: detail.seed.errors)",
+  "not-delivered":
+    "the seed was not fully delivered, or its delivery cannot be confirmed (which writes failed: detail.seed)",
+  unmeasured:
+    "at least one seed write landed and none threw, but the render-content snapshot failed, so D6 (seeded-and-empty) was never measured",
+};
+
+/**
+ * What the failure means for THIS cell's verdict — the second half of the note.
+ *
+ * ⛑ S427 — the note used to end "this cell carries NO verdict about the compiler" on EVERY
+ * cell, including a mount throw of `loadContacts is not defined` carrying `S-UNBOUND-REF`: a
+ * genuine codegen bug, recorded in the committed baseline with a sentence telling the next
+ * triager to disregard it.
+ *
+ * ⛑ S427 round 4c — and "NO verdict about the compiler" was ALSO false on most guard
+ * demotions. It is true only where the seed failure's CAUSE is established as not-the-compiler.
+ * A `set-threw` is a throw out of the emitted runtime's `_scrml_reactive_set` (which already
+ * catches subscriber/effect throws, so what escapes is runtime internals OR a malformed
+ * fixture); a missing side channel on a mount that did not throw may be an emit regression
+ * (the harness's own comment says so); no html emitted may be the compiler. Four verdicts:
+ *   independent  — the cell is red on its own evidence (mount throw, app console error, DOM
+ *                  smell); the seed failure does not explain it.
+ *   none         — ONLY a guard demotion from `needs-server` reached by the D1 MOUNT-THROW
+ *                  door: the throw is server-absence, and the undelivered seed is its
+ *                  consequence (no side channel is captured once `exec()` throws). Cause
+ *                  established; this cell really says nothing about the compiler.
+ *                  (Refinement of the PA decision, stated: a `needs-server` reached by the
+ *                  CONSOLE door has no such causal link — the seed failed on a mount that did
+ *                  not throw — so it is `undecidable`.)
+ *   undecidable  — every other guard demotion: the failure may be the fixture/harness OR
+ *                  compiler-emitted code, and this cell claims neither.
+ *   undecidableD6 — as undecidable, but D6 FIRED on the write(s) that DID land; the
+ *                  board-bug-class verdict is withheld only because a sibling write failed.
+ */
+const UNDECIDABLE_CAUSES = {
+  "not-attempted":
+    "the failure may originate in the fixture/harness OR in compiler-emitted code (e.g. a dropped _scrml_reactive_set side channel, a missing entry html)",
+  "not-delivered":
+    "the failure may originate in the fixture/harness OR in compiler-emitted code (e.g. a throw out of the emitted _scrml_reactive_set, or a malformed fixture)",
+  unmeasured:
+    "the failure may originate in the harness's render-snapshot helper OR in compiler-emitted DOM it could not read",
+};
+
+const SEED_FAILURE_VERDICT = {
+  independent:
+    "the seed failure does NOT explain this cell: its red state stands on its own evidence (a mount throw, an app console error or a DOM smell) and IS a verdict",
+  none:
+    "this cell carries NO verdict about the compiler — the mount threw for server absence, and the undelivered seed is that throw's consequence",
+  // ⛑ round 4d — the cause clause is KIND-SPECIFIC (see UNDECIDABLE_CAUSES): the examples that
+  // are true of a failed write are false of a failed snapshot, where every write landed.
+  undecidable: (kind) =>
+    `UNDECIDABLE: ${UNDECIDABLE_CAUSES[kind]}; this cell makes NO claim either way — see detail.seed`,
+  undecidableD6:
+    "UNDECIDABLE, WITH A SUSPECT: D6 FIRED on the seed write(s) that DID land — the populated render came back empty, a possible board-bug-class compiler defect — but a sibling seed write failed, so the empty render cannot be attributed from this cell; see detail.seed and detail.emptyRegions",
+};
+
+/**
+ * Record a seed-bridge failure on a cell. THE ONE WRITER of the note text, so the FOUR sites
+ * that record it — three in `classifyObservation` (the D1 `compiles-but-throws` return, the
+ * console-error `compiles-but-throws` return, the `smell-detected-wrong` return) plus the
+ * terminal guard in `runDetectors` — cannot drift into different records of the same fact.
+ * The caller states which verdict relation holds; the kind is derived.
+ *
+ * @param {object} obs
+ * @param {string[]} smells — mutated.
+ * @param {object} detail — mutated.
+ * @param {"independent"|"none"|"undecidable"|"undecidableD6"} verdict
+ */
+function noteSeedBridgeFailure(obs, smells, detail, verdict) {
+  if (!smells.includes(SEED_BRIDGE_SMELL)) smells.push(SEED_BRIDGE_SMELL);
+  const kind = seedFailureKind(obs) ?? "not-delivered";
+  detail.seedBridgeFailureKind = kind;
+  const v = SEED_FAILURE_VERDICT[verdict];
+  detail.seedBridgeFailure = `${SEED_FAILURE_WHAT[kind]} — ${typeof v === "function" ? v(kind) : v}`;
+}
+
+/**
  * Run the D0–D7 detectors against one mounted observation.
+ *
+ * ⛑ S426 — THE TERMINAL SEED GUARD LIVES HERE, WRAPPING THE CLASSIFIER, and that placement
+ * is the point. The requirement is not "the D1 door must check the seed"; it is **no cell
+ * may score a GREEN state while a seed-bridge failure is on the record** — green cells have
+ * their `detail` stripped by `generate-baseline.js`, so a green verdict deletes the only
+ * copy of the explanation. Enforcing it at one choke point makes it class-complete over
+ * returns that do not exist yet, which is precisely what the previous two rounds could not
+ * do by patching the door in front of them.
+ *
+ * The classifier's own RED returns (a mount throw, an APP console error, a hard DOM smell) keep
+ * their state and only RECORD the seed failure — they already carry a red verdict, so there is nothing to demote.
+ * Every GREEN return, `needs-server` included, is demoted HERE and nowhere else.
+ *
+ * ⛑ S427 — `needs-server` IS NOT SPECIAL-CASED ANY MORE. Both of its doors (the D1 mount-throw
+ * one and the console-error one) used to carry a door-local `&& !seedBridgeFailed(obs)`, which
+ * sent a seeded server-dependent app straight to `compiles-but-throws` — a COMPILER-blaming
+ * state for a server-absence throw plus a consequential seed failure. At the D1 door that was
+ * unconditional for every seeded cell: `mountAndObserve` captures the side channel only after
+ * `exec()` returns, so a mount throw always leaves the seed undelivered. The door-local terms
+ * dated from before this guard existed (S424 added the console one because green cells lose
+ * `detail`); the guard now preserves `detail` itself, so the doors return the true tier and
+ * this demotes it to `seed-bridge-failed` with `seedBridgeDemotedFrom: "needs-server"` and the
+ * `needsServer` explanation intact.
+ *
+ * ⛑ S427 — A `[seed-signature]`-ONLY FAILURE STILL DEMOTES, deliberately. Every write landed,
+ * so the seed is live — but the snapshot that feeds D6 failed, `gainedContent` is null, and D6
+ * is VETOED. A green verdict here was reached without the one detector the populated cell
+ * exists to run (D6's each-regions scope can fire on a content-bearing body, so this holds for
+ * `renders-clean` as much as for `renders-empty`). An unverified green is not a green. The note
+ * says what actually failed (`seedFailureKind` = "unmeasured"), never "could not deliver".
+ *
+ * @param {object} obs
+ * @returns {{ state: string, smells: string[], detail: object }}
+ */
+export function runDetectors(obs) {
+  const det = classifyObservation(obs);
+  if (!GREEN_STATES.has(det.state)) return det;
+  if (!seedBridgeFailed(obs)) return det;
+  const smells = [...det.smells];
+  const detail = { ...det.detail };
+  // ⛑ S427 round 4c/4d — `seedBridgeDemotedFrom` records THE CLASSIFIER'S VERDICT WITH THE
+  // SEED-FAILURE GATE IGNORED — what these same observed facts score if the failure is not
+  // allowed to withhold anything. It is NOT a counterfactual "had the seed not failed": for a
+  // partial delivery the render with every write landed was never observed and is unknowable.
+  // For most cells it is the green return the classifier took. When D6 fired
+  // (S-EMPTY-WITH-DATA) and only the `renders-empty-with-data` return declined because the seed
+  // failed, the classifier fell through to `renders-empty`/`renders-clean` — recording THAT
+  // would claim a green verdict the smell on the same cell contradicts. So it records
+  // `renders-empty-with-data`, and the note says D6 fired. `needs-server` keeps precedence
+  // exactly as in the classifier (item 2's masking is out of scope and unchanged).
+  const d6Withheld = det.state !== "needs-server" && det.smells.includes("S-EMPTY-WITH-DATA");
+  const wouldHaveScored = d6Withheld ? "renders-empty-with-data" : det.state;
+  const causeEstablished = det.state === "needs-server" && obs.throwMessage != null;
+  const verdict = causeEstablished ? "none" : d6Withheld ? "undecidableD6" : "undecidable";
+  noteSeedBridgeFailure(obs, smells, detail, verdict);
+  detail.seedBridgeDemotedFrom = wouldHaveScored;
+  return { state: "seed-bridge-failed", smells, detail };
+}
+
+/**
+ * The D0–D7 classification itself. Not exported: `runDetectors` is the entry point, because
+ * the seed guard above must not be bypassable by reaching past it.
  *
  * @param {object} obs
  * @param {Array} obs.compileErrors  — result.errors from compileScrml (D0).
@@ -921,7 +1203,7 @@ export function isServerAbsenceMessage(msg) {
  *   serverJs / uses a `?{}` SQL block)? Gates the needs-server classification.
  * @returns {{ state: string, smells: string[], detail: object }}
  */
-export function runDetectors(obs) {
+function classifyObservation(obs) {
   const smells = [];
   const detail = {};
 
@@ -945,6 +1227,18 @@ export function runDetectors(obs) {
     // null/undefined-ACCESS because a server-only binding/data source is null.
     // Harness-realism non-gap (S203 b+c — NOT a compiler bug). EXCLUDES
     // ReferenceError/TDZ (genuine codegen, stays red) via isServerAbsenceMessage.
+    // ⛑ S426 — THE FIFTH PATH. This return is a GREEN one and it fires BEFORE D2 runs, so
+    // #1002's `hasSeedBridgeFailure` — which lives in the state-resolution block below and
+    // reads `consoleErrors` — could never be reached from here. A seeded server-dependent app
+    // whose mount throws is the ONE shape where this is harness-reachable, and it is not
+    // exotic: a mount throw means `_scrml_reactive_set` was never captured, so `observeCompiled`
+    // takes its no-side-channel branch on EVERY seeded cell whose mount throws. Verified by
+    // execution before the fix: state `needs-server`, GREEN, seed failure recorded nowhere.
+    // ⛑ S427 — and S426's fix (a `&& !seedBridgeFailed(obs)` term here) over-corrected: since
+    // a mount throw ALWAYS leaves a seeded cell's seed undelivered, the term removed this
+    // carve-out for EVERY seeded server-dependent app and scored it `compiles-but-throws`,
+    // blaming the compiler for a server-absence throw. The door now returns its true tier and
+    // `runDetectors`'s terminal guard demotes it to `seed-bridge-failed`.
     if (obs.serverDependent && isServerAbsenceMessage(msg)) {
       smells.push("NEEDS-SERVER");
       detail.needsServer =
@@ -956,6 +1250,12 @@ export function runDetectors(obs) {
     if (/is not defined/.test(msg)) {
       smells.push("S-UNBOUND-REF");
     }
+    if (seedBridgeFailed(obs)) {
+      // The mount really did throw, and not for server-absence — that is a verdict of its own,
+      // and the seed failure is its CONSEQUENCE (no side channel is captured once `exec()`
+      // throws). Record the failure; do not let it disown the throw.
+      noteSeedBridgeFailure(obs, smells, detail, "independent");
+    }
     return { state: "compiles-but-throws", smells, detail };
   }
 
@@ -964,9 +1264,24 @@ export function runDetectors(obs) {
 
   // ---- D2: console.error / uncaught during mount+settle (soft throw) ----
   const consoleErrors = obs.consoleErrors ?? [];
+  // ⛑ S427 (round 4b) — D2 IS A DETECTOR OF THE APP, SO IT READS THE APP'S CONSOLE ERRORS.
+  // `consoleErrors` also carries the harness's own `[seed-bridge]` notices. Counting them here
+  // made every notice-only failed seed score `compiles-but-throws` — a COMPILER-blaming state
+  // for a HARNESS failure, the exact mis-attribution `seed-bridge-failed` exists to prevent.
+  // Only APP errors make the soft-throw; the notices are still RECORDED in
+  // `detail.consoleErrors` (kept on every red cell), and the failed seed stays loud because
+  // `runDetectors`'s terminal guard demotes whatever green return it reaches.
+  // ⛑ round 4c — only on a SEEDED cell: the harness pushes notices only when it has a seed,
+  // so on an unseeded cell every console line is the app's (even one that happens to start
+  // "[seed-bridge]"), and the unseeded path stays identical to the pre-S427 base.
+  const appConsoleErrors = obs.seeded
+    ? consoleErrors.filter((m) => !isSeedBridgeNotice(m))
+    : consoleErrors;
   if (consoleErrors.length > 0) {
-    smells.push("D2-CONSOLE-ERROR");
     detail.consoleErrors = consoleErrors.slice(0, 4).map((m) => String(m).slice(0, 300));
+  }
+  if (appConsoleErrors.length > 0) {
+    smells.push("D2-CONSOLE-ERROR");
     // A console error during mount is a soft-throw: classify as throws.
     // Continue scanning for smells too (a console error + an [object in DOM is
     // worth recording both), but the state is already the throws tier.
@@ -1035,6 +1350,10 @@ export function runDetectors(obs) {
   //   each-regions — the body showed SOMETHING, but every identifiable leaf
   //                  `<each>` region rendered nothing. This is the board bug: the
   //                  chrome is there and the DATA is not.
+  //
+  // ⚑ S427 (round 4b) — D6 is still COMPUTED when the seed failed (S424 question B: the smell
+  // is corroborating evidence if the throw was a broken emitted accessor). What changed is
+  // whether it may DECIDE the state — see the `renders-empty-with-data` return below.
   if (seedWasDelivered(obs) && !seedMovedTheRender(obs)) {
     const bodyEmpty = !hasRenderedContent(body);
     const regionVerdict = bodyEmpty ? null : regionScopedEmptiness(body);
@@ -1048,47 +1367,63 @@ export function runDetectors(obs) {
   }
 
   // ---- Resolve the cell state from the accumulated smells (worst-wins) ----
-  if (consoleErrors.length > 0) {
+  if (appConsoleErrors.length > 0) {
     // needs-server: a server-dependent app whose ONLY mount error is a server-
     // absence null/undefined-access console error — no genuine codegen error
     // (ReferenceError/TDZ) and no hard render smell. Harness-realism non-gap
     // (S203 b+c). The guards ensure a real bug is never masked: a codegen error
     // or a smell keeps the cell red (compiles-but-throws).
-    const hasCodegenError = consoleErrors.some((m) =>
+    // ⛑ S427 — the two APP-evidence questions below read the APP's console errors only. The
+    // harness's own `[seed-bridge]` notices are not app output, and one of them is not fixed
+    // text: `observeCompiled`'s `applySeed` catch pushes `[seed-bridge] ${e.message}`, which
+    // can itself contain "is not defined" or "Cannot read properties of null" and would then
+    // answer a question about the app. (The four fixed-text notices match neither — measured.)
+    // ⛑ round 4b — this block is now ENTERED only on an app console error too (see D2), so a
+    // notice-only failed seed never reaches it: it falls to the smell / green returns below,
+    // and the terminal guard makes it `seed-bridge-failed`. F4's loudness now rests on that
+    // guard rather than on the notice being counted as an app error.
+    const hasCodegenError = appConsoleErrors.some((m) =>
       /is not defined|before initialization/.test(String(m)),
     );
     const hasHardSmell =
       smells.includes("S-OBJECT-IN-DOM") ||
       smells.includes("S-RAW-INTERP") ||
       smells.includes("S-NULLISH-TEXT");
-    // ⛑ S424 item 3 — A HARNESS-RAISED SEED FAILURE DISQUALIFIES THIS CARVE-OUT.
-    // Item 3 exists to make a `set-threw` LOUD, and routing the notice through
-    // `consoleErrors` did not achieve that here: `needs-server` is a GREEN tier and
-    // `generate-baseline.js` strips `detail` from green cells, so a server-dependent
-    // seeded app swallowed the notice and the throw went silent again — the exact
-    // fail-open F4 exists to close, reached by a different door. The `[seed-bridge]`
-    // prefix matches neither `hasCodegenError` nor `isServerAbsenceMessage`, so
-    // nothing stopped it. Confirmed by execution before the fix: a partial-throw
-    // report plus one server-absence mount error scored `needs-server`.
-    // ⚑ SCOPE, deliberately narrow: this disqualifies only the harness's OWN
-    // seed-failure notice. The wider masking — that ANY console error matching
+    // ⛑ S424 item 3 → S426 → S427 — HOW A HARNESS-RAISED SEED FAILURE MEETS THIS CARVE-OUT.
+    // S424 found a server-dependent seeded app whose `set-threw` notice was swallowed here:
+    // `needs-server` is GREEN and `generate-baseline.js` strips `detail` from green cells, so
+    // the throw went silent. It fixed that with a `!seedBridgeFailed(obs)` term (S426 moved it
+    // onto the shared predicate), which scored such a cell `compiles-but-throws` — loud, but a
+    // COMPILER-blaming state for a server-absence error plus a harness seed failure.
+    // S427 removed the term: this carve-out now answers only its own question (is the APP's
+    // only error server-absence?) and `runDetectors`'s terminal guard demotes the green result
+    // to `seed-bridge-failed`, keeping `detail`. Still loud (a red state), now truthful.
+    // Measured before the change: [server-absence error, no-channel notice] on a seeded
+    // server-dependent app scored `compiles-but-throws`; it now scores `seed-bridge-failed`,
+    // `seedBridgeDemotedFrom: "needs-server"`. A REAL server-absence app error is still
+    // required — `appConsoleErrors` excludes the notices, so a notice alone cannot admit it.
+    // ⚑ SCOPE, deliberately narrow: the wider masking — that ANY console error matching
     // `isServerAbsenceMessage` admits the carve-out, and that `hasHardSmell` omits
     // D6's `S-EMPTY-WITH-DATA` — is a separate, already-filed arc (item 2 of
     // [[g-d6-seed-gating-has-three-latent-paths-...]]) and is NOT closed here.
-    const hasSeedBridgeFailure = consoleErrors.some((m) =>
-      String(m).startsWith("[seed-bridge]"),
-    );
     if (
       obs.serverDependent &&
       !hasCodegenError &&
       !hasHardSmell &&
-      !hasSeedBridgeFailure &&
-      consoleErrors.some(isServerAbsenceMessage)
+      appConsoleErrors.some(isServerAbsenceMessage)
     ) {
       smells.push("NEEDS-SERVER");
       detail.needsServer =
         "server-dependent app mounted with no server — console error from a null server-only data source";
       return { state: "needs-server", smells, detail };
+    }
+    if (seedBridgeFailed(obs)) {
+      // #1002's door. The state is unchanged (a console error is already
+      // `compiles-but-throws`); the failure is recorded in the SAME shape as everywhere else.
+      // ⛑ S427 — and the note must be TRUE for this cell. This block is entered only on an
+      // APP console error (round 4b), so the red state always has evidence of its own here:
+      // the verdict is "independent" by construction. The notice-only case no longer arrives.
+      noteSeedBridgeFailure(obs, smells, detail, "independent");
     }
     return { state: "compiles-but-throws", smells, detail };
   }
@@ -1097,9 +1432,26 @@ export function runDetectors(obs) {
     smells.includes("S-RAW-INTERP") ||
     smells.includes("S-NULLISH-TEXT")
   ) {
+    // ⛑ S427 (round 4b) — a notice-only failed seed can now reach this RED return (before 4b
+    // the notice sent it to `compiles-but-throws` first). The smell is a DOM value codegen
+    // wrote — `[object Object]`, a raw `${`, a bare `undefined` — which is its own evidence,
+    // so the state stands; the failure is recorded here because the terminal guard only
+    // touches GREEN returns, and without this the cell would lose its greppable mark.
+    if (seedBridgeFailed(obs)) noteSeedBridgeFailure(obs, smells, detail, "independent");
     return { state: "smell-detected-wrong", smells, detail };
   }
-  if (smells.includes("S-EMPTY-WITH-DATA")) {
+  // ⛑ S427 (round 4b) — NOT WHILE THE SEED IS ON THE RECORD AS FAILED. `seedWasDelivered` asks
+  // "did ANY write land", so a PARTIAL `set-threw` (the key driving the list threw, a sibling
+  // landed) passes it and, with `gainedContent: false`, D6 fires. Before 4b the notice sent
+  // that cell to `compiles-but-throws` first (S424 question B: "a veto adds nothing to the
+  // STATE"). Once D2 stopped counting notices, it reached THIS return — blaming the COMPILER
+  // for a write the HARNESS failed to make, S424 item 3's round-2 bug through another door.
+  // Measured by execution. An empty render cannot be pinned on the compiler while the seed
+  // failed, so the cell falls through to the green return, the terminal guard makes it
+  // `seed-bridge-failed`, and the S-EMPTY-WITH-DATA smell SURVIVES on it as corroboration —
+  // question B's reason for keeping the smell still holds; only its right to set the state
+  // is withdrawn.
+  if (smells.includes("S-EMPTY-WITH-DATA") && !seedBridgeFailed(obs)) {
     // ⛑ S416 — SEEDED-AND-EMPTY IS NOT THE SAME ANSWER AS EMPTY, AND IT USED TO
     // COLLAPSE INTO IT. Both branches returned `renders-empty`, which
     // `e2e-render-map.test.js` counts as GREEN — so D6, the detector written to
@@ -1148,7 +1500,40 @@ export const RENDER_STATES = [
   "renders-empty",
   "renders-empty-with-data",
   "renders-clean",
+  // ⛑ S426 — the seed was not (verifiably) delivered, so the cell's populated render was never
+  // judged. ⛑ S427 round 4c: that makes the cell UNDECIDABLE about the compiler, not cleared of
+  // it — the failure may be the fixture/harness or compiler-emitted code, and `detail.
+  // seedBridgeFailure` says which of the two is established, if either. Deliberately its own
+  // state rather than a reuse: `compiles-but-throws` would
+  // claim a throw that did not happen, `smell-detected-wrong` and `renders-empty-with-data`
+  // both blame the COMPILER for a write the HARNESS failed to make (the exact
+  // mis-attribution round 2 of `seedThrewNotice` shipped), and any GREEN state deletes the
+  // explanation, because `generate-baseline.js` strips `detail` from green cells.
+  "seed-bridge-failed",
 ];
+
+/**
+ * States that are NOT a gap (green) — the delta-gate's definition of "a closed cell".
+ * `needs-server` is non-gap: a server-dependent app mounted with NO server is NOT broken
+ * (harness-realism, S203 b+c), so the gate treats throw->needs-server as an improvement and
+ * needs-server->throw (a real codegen bug surfacing) as a green->red regression.
+ *
+ * ⛑ S416 — `renders-empty-with-data` IS DELIBERATELY ABSENT. An empty render with NO seed is
+ * a valid `<empty>` fallback and stays green; an empty render WITH data seeded is the
+ * board-bug class D6 exists to catch, and it used to land in `renders-empty` and score green.
+ *
+ * ⛑ S426 — CANONICAL HERE, AND IT WAS THREE COPIES. `generate-baseline.js:53` and
+ * `e2e-render-map.test.js:80` each carried their own literal Set, and this module — which
+ * PRODUCES the states and now has to enforce "no green cell may carry a seed-bridge failure"
+ * — would have made a fourth. Both consumers import this one now: a green state added in one
+ * place and forgotten in another is the same "must stay in step" documentary invariant the
+ * #1012 round replaced with hoisted constants.
+ */
+export const GREEN_STATES = new Set([
+  "renders-clean",
+  "renders-empty",
+  "needs-server",
+]);
 
 /**
  * States the HARNESS records when it could not obtain a render at all. These are

@@ -50,7 +50,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { enumerateRenderCorpus, REPO_ROOT } from "./render-corpus-enumerator.js";
 import { seedFor, POPULATED_SEEDS } from "./seed-fixtures.js";
-import { ALL_BASELINE_STATES } from "./render-detectors.js";
+import { ALL_BASELINE_STATES, GREEN_STATES } from "./render-detectors.js";
 import {
   observeCellSubprocess,
   seedLabelsFor,
@@ -71,13 +71,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const BASELINE_PATH = join(__dirname, "e2e-render-map-baseline.json");
 
-// `needs-server` is non-gap (server-dependent app, no server at mount — S203 b+c).
-//
-// ⛑ S416 — `renders-empty-with-data` IS DELIBERATELY ABSENT. An empty render with
-// NO seed is a valid `<empty>` fallback and stays green; an empty render WITH data
-// seeded is the board-bug class D6 exists to catch, and it used to land in
-// `renders-empty` and be scored green. Keep these two apart.
-const GREEN_STATES = new Set(["renders-clean", "renders-empty", "needs-server"]);
+// ⛑ S426 — GREEN_STATES IS IMPORTED (see the import block above), not re-declared. The
+// literal Set that used to sit here was the third hand-kept copy of the same list
+// (`generate-baseline.js:53` held the second), and S426 added an enforcement that has to
+// agree with it: `runDetectors` refuses to return ANY green state while a seed-bridge
+// failure is on the record. Three copies of the definition of "green" is three chances for
+// that enforcement to be silently narrower than this gate. The reasons `needs-server` is in
+// it and `renders-empty-with-data` is not now live with the definition, in
+// `render-detectors.js`.
 
 // The fast in-process slice: examples + benchmarks (no samples — samples incl.
 // the meta-heavy hangers belong to the subprocess-isolated standing run).
